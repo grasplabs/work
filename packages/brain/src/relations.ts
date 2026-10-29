@@ -1,11 +1,10 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { z } from "zod";
 
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
-import { brainErrors } from "./contract.ts";
-import type { BrainSourceRef } from "./contract.ts";
+import { brainErrors, relationsGetInputSchema } from "./contract.ts";
+import type { RelationsAnswer, RelationView } from "./contract.ts";
 import {
   brainAssertions,
   brainLinkJobs,
@@ -13,7 +12,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
-import { kindOf } from "./entities.ts";
+import { kindOf, requireBrainRead } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -46,53 +45,14 @@ import { citesReadable } from "./memory-cites.ts";
 /** The most relations one read returns, and reads of each kind of source. */
 const readRowsMax = 200;
 
-const isoDate = /^\d{4}-\d{2}-\d{2}$/u;
+/**
+ * The most claims of an entity, of each kind of source, a read weighs for
+ * conflicts: past the answer's cap, so an older readable source that
+ * disagrees still marks the newer ones it disagrees with.
+ */
+const claimRowsMax = 5000;
 
-const relationsInputSchema = z.strictObject({
-  /** The entity whose relations, as subject or object. */
-  entityId: z.string().min(1).max(256),
-  /**
-   * Only this relation (`owns`), folded as the Brain keeps relations
-   * (`kindOf`): `Reports to` asks for `reports_to`.
-   */
-  predicate: z
-    .string()
-    .min(1)
-    .max(40)
-    .transform(kindOf)
-    .pipe(z.string().min(1))
-    .optional(),
-  /** Those that hold on this date (ISO); every one without it. */
-  at: z.string().regex(isoDate).optional(),
-  /** What the Brain had read by this moment (ISO); now without it. */
-  knownAt: z.iso.datetime({ offset: true }).optional(),
-});
-
-/** One end of a relation: its entity, and the name its source gives it. */
-export interface RelationEnd {
-  entityId: string;
-  name: string;
-}
-
-/** A relation as a reader sees it, with the passage that states it. */
-export interface RelationView {
-  subject: RelationEnd;
-  predicate: string;
-  object: RelationEnd;
-  validFrom: string | null;
-  validTo: string | null;
-  state: "observed";
-  /**
-   * Another readable source relates the entity asked about the same way to
-   * a different entity, for an overlapping time.
-   */
-  conflicting: boolean;
-  /** When the Brain read it, and when a later version replaced it. */
-  recordedAt: string;
-  supersededAt: string | null;
-  evidence: string;
-  sourceRef: BrainSourceRef;
-}
+export type { RelationsAnswer, RelationView } from "./contract.ts";
 
 /** Whether two validity intervals share a day; open ends reach forever. */
 const overlaps = (
@@ -101,6 +61,17 @@ const overlaps = (
 ): boolean =>
   (a.validFrom === null || b.validTo === null || a.validFrom <= b.validTo) &&
   (b.validFrom === null || a.validTo === null || b.validFrom <= a.validTo);
+
+/** What a claim weighed for conflicts takes of a row: no passage. */
+const claimColumns = {
+  source: brainAssertions.source,
+  documentId: brainAssertions.documentId,
+  subjectEntityId: brainAssertions.subjectEntityId,
+  predicate: brainAssertions.predicate,
+  objectEntityId: brainAssertions.objectEntityId,
+  validFrom: brainAssertions.validFrom,
+  validTo: brainAssertions.validTo,
+};
 
 /** A relation row's columns, as every read takes them. */
 const columns = {
@@ -122,22 +93,32 @@ const columns = {
 };
 
 /**
- * The relations of `entityId` that `reader` may read now, that hold on
- * `at` (all, without it) and that the Brain knew at `knownAt` (now,
- * without it), conflicts among them marked: answers to "who owns it now",
- * "who owned it then", and "what did we know then", each with the passage
- * of the source version that says so.
+ * The relations a read answers (`relationsFor`), with where every claim
+ * it weighed came from (`considered`): the answered relations' sources,
+ * and those past the cap that still decided whether one is
+ * `conflicting`. A caller that labels what it was handed (a chat) labels
+ * it with all of them.
  */
-export const relationsFor = async <C>(
+export const relationsRead = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<RelationView[]> => {
+): Promise<{
+  answer: RelationsAnswer;
+  considered: { collectionIds: string[]; documentIds: string[] };
+}> => {
   const { entityId, predicate, at, knownAt } = brainErrors.parse(
     "brain.invalid",
-    relationsInputSchema,
+    relationsGetInputSchema,
     input
   );
+  // Folded as the Brain keeps relations (`kindOf`): `Reports to` asks for
+  // `reports_to`.
+  const relation = predicate === undefined ? undefined : kindOf(predicate);
+  if (relation === "") {
+    throw brainErrors.create("brain.invalid");
+  }
+  await requireBrainRead(brain, reader);
   const { db } = brain;
   const allowed = await allowedFor(brain.ports, reader);
   let owner: string | undefined;
@@ -154,9 +135,9 @@ export const relationsFor = async <C>(
       eq(brainAssertions.subjectEntityId, entityId),
       eq(brainAssertions.objectEntityId, entityId)
     ),
-    predicate === undefined
+    relation === undefined
       ? undefined
-      : eq(brainAssertions.predicate, predicate),
+      : eq(brainAssertions.predicate, relation),
     at === undefined
       ? undefined
       : sql`(${brainAssertions.validFrom} IS NULL OR ${brainAssertions.validFrom} <= ${at}) AND (${brainAssertions.validTo} IS NULL OR ${brainAssertions.validTo} >= ${at})`,
@@ -166,16 +147,36 @@ export const relationsFor = async <C>(
       ? sql`${brainAssertions.supersededAt} IS NULL AND EXISTS (SELECT 1 FROM ${brainLinkJobs} WHERE ${brainLinkJobs.source} = ${brainAssertions.source} AND ${brainLinkJobs.version} = ${brainAssertions.version})`
       : sql`${brainAssertions.recordedAt} <= ${known.getTime()} AND (${brainAssertions.supersededAt} IS NULL OR ${brainAssertions.supersededAt} > ${known.getTime()})`
   );
-  const [fromDocuments, fromMemories] = await Promise.all([
+  const ownerReads =
+    owner === undefined
+      ? []
+      : await brain.ports.memories.readableBy(reader, [owner]);
+  // What each kind of source may give: documents in collections that
+  // aren't sensitive, and the reader's own memory records resting only on
+  // what they may read now (a record follows its sources' restrictions,
+  // the owner's own too).
+  const fromReadable = and(
+    allowed.documents(),
+    eq(collections.sensitive, false),
+    where
+  );
+  const fromOwn =
+    owner === undefined
+      ? undefined
+      : and(eq(brainMemories.ownerId, owner), citesReadable(ownerReads), where);
+  const newest = desc(brainAssertions.recordedAt);
+  // One more than each cap, to tell whether it left any out: the rows the
+  // answer is made of, and the lighter claims weighed for conflicts.
+  const [docRows, ownRows, docClaims, ownClaims] = await Promise.all([
     db
       .select({ ...columns, collectionId: collections.id })
       .from(brainAssertions)
       .innerJoin(documents, eq(documents.id, brainAssertions.documentId))
       .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .where(and(allowed.documents(), eq(collections.sensitive, false), where))
-      .orderBy(desc(brainAssertions.recordedAt))
-      .limit(readRowsMax),
-    owner === undefined
+      .where(fromReadable)
+      .orderBy(newest)
+      .limit(readRowsMax + 1),
+    fromOwn === undefined
       ? []
       : db
           .select(columns)
@@ -184,94 +185,144 @@ export const relationsFor = async <C>(
             brainMemories,
             eq(brainMemories.id, brainAssertions.memoryId)
           )
-          .where(
-            and(
-              eq(brainMemories.ownerId, owner),
-              // A record follows its sources' restrictions, the owner's
-              // own too: only those resting on what they may read now.
-              citesReadable(
-                await brain.ports.memories.readableBy(reader, [owner])
-              ),
-              where
-            )
+          .where(fromOwn)
+          .orderBy(newest)
+          .limit(readRowsMax + 1),
+    db
+      .select({ ...claimColumns, collectionId: collections.id })
+      .from(brainAssertions)
+      .innerJoin(documents, eq(documents.id, brainAssertions.documentId))
+      .innerJoin(collections, eq(collections.id, documents.collectionId))
+      .where(fromReadable)
+      .orderBy(newest)
+      .limit(claimRowsMax + 1),
+    fromOwn === undefined
+      ? []
+      : db
+          .select(claimColumns)
+          .from(brainAssertions)
+          .innerJoin(
+            brainMemories,
+            eq(brainMemories.id, brainAssertions.memoryId)
           )
-          .orderBy(desc(brainAssertions.recordedAt))
-          .limit(readRowsMax),
+          .where(fromOwn)
+          .orderBy(newest)
+          .limit(claimRowsMax + 1),
   ]);
-  // Both kinds of source together, newest first: conflicts are found among
-  // all of them, then the answer is the newest `readRowsMax`.
+  const read = {
+    documents: docRows,
+    memories: ownRows,
+    cut: docRows.length > readRowsMax || ownRows.length > readRowsMax,
+  };
+  const claims = {
+    documents: docClaims,
+    memories: ownClaims,
+    cut: docClaims.length > claimRowsMax || ownClaims.length > claimRowsMax,
+  };
+  // Both kinds of source together, newest first: the answer is the newest
+  // `readRowsMax`.
   const rows = [
-    ...fromDocuments,
-    ...fromMemories.map((row) => ({ ...row, collectionId: null })),
-  ].toSorted((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime());
-  const views: RelationView[] = rows.map((row) => ({
-    subject: { entityId: row.subjectEntityId, name: row.subjectName },
-    predicate: row.predicate,
-    object: { entityId: row.objectEntityId, name: row.objectName },
-    validFrom: row.validFrom,
-    validTo: row.validTo,
-    state: row.state,
-    conflicting: false,
-    recordedAt: row.recordedAt.toISOString(),
-    supersededAt: row.supersededAt?.toISOString() ?? null,
-    evidence: row.evidence,
-    sourceRef:
-      row.memoryId === null
-        ? {
-            kind: "document",
-            documentId: documentIdSchema.parse(row.documentId),
-            collectionId: collectionIdSchema.parse(row.collectionId),
-            version: row.version,
-          }
-        : {
-            kind: "memory",
-            memoryId: memoryIdSchema.parse(row.memoryId),
-            revision: row.version,
-          },
-  }));
+    ...read.documents.slice(0, readRowsMax),
+    ...read.memories
+      .slice(0, readRowsMax)
+      .map((row) => ({ ...row, collectionId: null })),
+  ]
+    .toSorted((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime())
+    .slice(0, readRowsMax);
+  const weighed = [
+    ...claims.documents.slice(0, claimRowsMax),
+    ...claims.memories
+      .slice(0, claimRowsMax)
+      .map((row) => ({ ...row, collectionId: null })),
+  ];
   // Relative to the entity asked about: two readable sources that relate
   // it the same way, in the same place (who owns it, or what it owns), to
   // different entities over a shared time. The Brain can't tell whether
-  // they disagree or add up, so it marks both and picks neither.
-  const placed = views.map((view, index) => {
-    const asSubject = view.subject.entityId === entityId;
+  // they disagree or add up, so it marks both and picks neither. Weighed
+  // against every claim read, past the answer's cap too.
+  const placed = (row: { subjectEntityId: string; objectEntityId: string }) => {
+    const asSubject = row.subjectEntityId === entityId;
     return {
-      view,
-      source: rows[index]?.source ?? "",
       asSubject,
-      other: asSubject ? view.object.entityId : view.subject.entityId,
+      other: asSubject ? row.objectEntityId : row.subjectEntityId,
+    };
+  };
+  const others = weighed.map((claim) => ({ claim, ...placed(claim) }));
+  const answered: RelationView[] = rows.map((row) => {
+    const here = placed(row);
+    return {
+      subject: { entityId: row.subjectEntityId, name: row.subjectName },
+      predicate: row.predicate,
+      object: { entityId: row.objectEntityId, name: row.objectName },
+      validFrom: row.validFrom,
+      validTo: row.validTo,
+      state: row.state,
+      conflicting: others.some(
+        ({ claim, asSubject, other }) =>
+          claim.source !== row.source &&
+          asSubject === here.asSubject &&
+          claim.predicate === row.predicate &&
+          other !== here.other &&
+          overlaps(row, claim)
+      ),
+      recordedAt: row.recordedAt.toISOString(),
+      supersededAt: row.supersededAt?.toISOString() ?? null,
+      evidence: row.evidence,
+      sourceRef:
+        row.memoryId === null
+          ? {
+              kind: "document",
+              documentId: documentIdSchema.parse(row.documentId),
+              collectionId: collectionIdSchema.parse(row.collectionId),
+              version: row.version,
+            }
+          : {
+              kind: "memory",
+              memoryId: memoryIdSchema.parse(row.memoryId),
+              revision: row.version,
+            },
     };
   });
-  for (const one of placed) {
-    one.view.conflicting = placed.some(
-      (other) =>
-        other.source !== one.source &&
-        other.asSubject === one.asSubject &&
-        other.view.predicate === one.view.predicate &&
-        other.other !== one.other &&
-        overlaps(one.view, other.view)
-    );
-  }
-  const answered = views.slice(0, readRowsMax);
-  // Every row read is reported, not only those answered: one past the
+  // Every claim weighed is reported, not only those answered: one past the
   // answer's end still decided whether another is `conflicting`.
   const collectionIds = [
-    ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
+    ...new Set(weighed.flatMap(({ collectionId }) => collectionId ?? [])),
+  ];
+  const documentIds = [
+    ...new Set(weighed.flatMap(({ documentId }) => documentId ?? [])),
   ];
   await brain.ports.onRead(
     reader,
     {
       action: "knowledge.read",
-      documentIds: [
-        ...new Set(rows.flatMap(({ documentId }) => documentId ?? [])),
-      ].slice(0, 20),
+      documentIds: documentIds.slice(0, 20),
       detail: {
         read: "relations",
         relations: answered.length,
-        considered: rows.length,
+        considered: weighed.length,
+        documents: documentIds.length,
       },
     },
     ...collectionIds.map((id) => ({ id, sensitive: false }))
   );
-  return answered;
+  return {
+    answer: { relations: answered, truncated: read.cut || claims.cut },
+    considered: { collectionIds, documentIds },
+  };
+};
+
+/**
+ * The relations of `entityId` that `reader` may read now, that hold on
+ * `at` (all, without it) and that the Brain knew at `knownAt` (now,
+ * without it), conflicts among them marked: answers to "who owns it now",
+ * "who owned it then", and "what did we know then", each with the passage
+ * of the source version that says so.
+ */
+export const relationsFor = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<RelationsAnswer> => {
+  const { answer } = await relationsRead(brain, reader, input);
+  return answer;
 };

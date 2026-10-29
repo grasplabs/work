@@ -340,13 +340,20 @@ const isMethodCalled = (ancestors: Ancestor[]): boolean => {
   );
 };
 
-/** The Brain's skill calls a run makes: `brain(env.NAME).skills.<name>(…)`. */
-const brainSkillCalls: ReadonlySet<string> = new Set(["select", "read"]);
+/**
+ * The Brain's grouped calls a run makes, `brain(env.NAME).<group>.<name>(…)`:
+ * a skill's selection and read, and its entity and relation reads.
+ */
+const brainGroupCalls: Readonly<Record<string, ReadonlySet<string>>> = {
+  skills: new Set(["select", "read"]),
+  entities: new Set(["list", "sources"]),
+  relations: new Set(["get"]),
+};
 
 /**
  * Whether `ancestors`, ending at `brain(env.NAME)`, call one of the Brain
- * facade's methods a run has where it is written: `.recall(…)`, or
- * `.skills.select(…)` or `.skills.read(…)`.
+ * facade's methods a run has where it is written: `.recall(…)`, or one of
+ * its grouped calls (`brainGroupCalls`), such as `.skills.select(…)`.
  */
 const isBrainCall = (ancestors: Ancestor[]): boolean => {
   const member = ancestors.at(-1)?.node;
@@ -356,13 +363,17 @@ const isBrainCall = (ancestors: Ancestor[]): boolean => {
   if (nameOf(member.property) === "recall") {
     return isMethodCalled(ancestors);
   }
+  const group = nameOf(member.property) ?? "";
+  const calls = Object.hasOwn(brainGroupCalls, group)
+    ? brainGroupCalls[group]
+    : undefined;
   const method = ancestors.at(-2)?.node;
   return (
-    nameOf(member.property) === "skills" &&
+    calls !== undefined &&
     isObjectOfMember(ancestors.at(-1)) &&
     method?.type === "MemberExpression" &&
     !method.computed &&
-    brainSkillCalls.has(nameOf(method.property) ?? "") &&
+    calls.has(nameOf(method.property) ?? "") &&
     isMethodCalled(ancestors.slice(0, -1))
   );
 };
@@ -394,9 +405,9 @@ const envCallOf = (
     return undefined;
   }
   if (isStubArgument(bindings, ancestors.at(-2), "brain")) {
-    // `brain(env.NAME).recall(…)`, `.skills.select(…)` or
-    // `.skills.read(…)`: the Brain's binding by its name, those its only
-    // calls.
+    // `brain(env.NAME).recall(…)`, or one of its grouped calls such as
+    // `.skills.select(…)` or `.relations.get(…)`: the Brain's binding by
+    // its name, those its only calls.
     return !parent.node.computed && isBrainCall(ancestors.slice(0, -2))
       ? nameOf(parent.node.property)
       : undefined;
