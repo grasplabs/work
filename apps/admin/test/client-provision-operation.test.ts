@@ -1,5 +1,8 @@
 import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
-import { provisionProbePath } from "@grasp-os/shared/provision-probe";
+import {
+  connectVersionPath,
+  provisionProbePath,
+} from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
 import {
@@ -7,7 +10,6 @@ import {
   deriveRouterSecret,
   routerHostKey,
 } from "@grasp-os/shared/router";
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -52,12 +54,23 @@ import {
 } from "../src/hosting/workflow.ts";
 import { claimRun, currentRun, startingMs } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
 import { buildRelease, evidenceFor, putBlobs, testLimits } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
+import {
+  deliverAlarm,
+  ended,
+  holdBatchOf,
+  holdFirstBatchOf,
+  journalOf,
+  startsOf,
+  timeOutAttempt,
+} from "./runs.ts";
+import type { LostWrite } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-0123456789";
@@ -363,6 +376,16 @@ const zonesOf = (account: AccountState) =>
       enabled: entry.enabled,
     })),
   }));
+
+/** A migration sent, with its record (`applyD1Migrations`). */
+const isMigration = (call: ApiCall): boolean =>
+  call.path.endsWith("/query") &&
+  JSON.stringify(call.body).includes("INSERT INTO d1_migrations");
+
+/** A read of which migrations a database has had (`applyD1Migrations`). */
+const readMigrations = (call: ApiCall): boolean =>
+  call.path.endsWith("/query") &&
+  JSON.stringify(call.body).includes("SELECT name FROM d1_migrations");
 
 /** A call that creates a zone or turns Email Sending on for a domain. */
 const isMailCreate = ({ method, path }: ApiCall): boolean =>
@@ -754,6 +777,44 @@ const offboardedDaysAgo = async (clientId: string, days: number) => {
     .update(clients)
     .set({ offboardedAt: new Date(Date.now() - days * 86_400_000) })
     .where(eq(clients.id, clientId));
+};
+
+/**
+ * Holds the next call `matches` picks out once it has been answered, until
+ * released: its caller has read the answer, and does nothing with it yet.
+ */
+const heldAfter = (matches: (call: ApiCall) => boolean) => {
+  let answered = false;
+  const released = Promise.withResolvers<unknown>();
+  cloudflare.afterAnswering(matches, async () => {
+    answered = true;
+    await released.promise;
+  });
+  return {
+    read: async () => {
+      await vi.waitFor(() => {
+        if (!answered) {
+          throw new Error("The call hasn't been answered yet");
+        }
+      });
+    },
+    release: () => {
+      released.resolve(true);
+    },
+  };
+};
+
+/** Waits until attempt `id` ended, and checks it ended `status`. */
+const attemptEnded = async (
+  id: string | undefined,
+  status: string
+): Promise<void> => {
+  if (id === undefined) {
+    throw new Error("No such attempt was started");
+  }
+  await expect(
+    ended(adminWorkflows.provisionPlacedClient, id)
+  ).resolves.toMatchObject({ status });
 };
 
 describe("provisioning a placed client", () => {
@@ -1163,6 +1224,19 @@ describe("provisioning a placed client", () => {
           ?.get(core)
           ?.versions.at(-1)?.metadata.bindings ?? []
       );
+    // The version each runs, as the namespace has it live: connect's
+    // after its secrets were delivered.
+    const liveIn = (script: string) =>
+      account.namespaces.get(clientDispatchNamespace)?.get(script)
+        ?.deployments[0]?.versions[0]?.version_id;
+    const recorded = await db
+      .select({
+        worker: clientWorkers.worker,
+        versionId: clientWorkers.versionId,
+      })
+      .from(clientWorkers)
+      .where(eq(clientWorkers.clientId, clientId))
+      .orderBy(clientWorkers.worker);
     const [probed] = await db
       .select({ detail: auditEvents.detail })
       .from(auditEvents)
@@ -1174,10 +1248,13 @@ describe("provisioning a placed client", () => {
       );
     expect({
       operation: await operationOf(clientId),
-      // On record: the version it answered wasn't checked against its upload.
-      versionUnchecked: z
-        .object({ versionUnchecked: z.number().optional() })
-        .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
+      // Nothing left unrecorded: connect's settled.
+      unrecorded: z
+        .object({ connectUnrecorded: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).connectUnrecorded,
+      // What drift compares against: core's as it answered, and its
+      // connect's as connect named it to core in the probe.
+      recorded,
       entry: await env.ROUTER_HOSTS.get(`${clientId}.${domain}`, "json"),
       // Its connect, as core binds it: the gateway, naming its own script.
       connectBinding: bindings.find(({ name }) => name === "CONNECT"),
@@ -1193,7 +1270,11 @@ describe("provisioning a placed client", () => {
         .filter(({ path }) => path.includes("workers.dev")).length,
     }).toMatchObject({
       operation: { status: "done" },
-      versionUnchecked: 1,
+      unrecorded: undefined,
+      recorded: [
+        { worker: "connect", versionId: liveIn(connect) ?? "none" },
+        { worker: "core", versionId: liveIn(core) ?? "none" },
+      ],
       entry: { clientId, script: core, generation: 1 },
       connectBinding: {
         type: "service",
@@ -1208,8 +1289,381 @@ describe("provisioning a placed client", () => {
           path: provisionProbePath,
           host: `${clientId}.${domain}`,
         },
+        // Connect's version read again, signed: the same twice apart.
+        {
+          script: core,
+          path: connectVersionPath,
+          host: `${clientId}.${domain}`,
+        },
       ],
       workersDev: 0,
+    });
+  });
+
+  it.each(
+    (["release", "secrets"] as const).flatMap((change) => [
+      {
+        change,
+        isolates:
+          "answer as the version recorded before it twice, then the new one",
+        stale: 2,
+        recordsNew: true,
+      },
+      {
+        change,
+        isolates: "never answer as anything but the version recorded before it",
+        stale: "always" as const,
+        recordsNew: false,
+      },
+    ])
+  )(
+    "never records a namespace connect as the version it ran before a $change change when its old isolates $isolates",
+    async ({ change, stale, recordsNew }) => {
+      const manifest = await importRelease(
+        "workers_for_platforms",
+        {},
+        bindsConnect
+      );
+      const { account, clientId, held } = await setUp(
+        "workers_for_platforms",
+        manifest,
+        clientDispatchNamespace
+      );
+      const namespaced = {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      };
+      await runClientProvision(namespaced, held);
+      const recordedConnect = async (): Promise<string | null> => {
+        const row = await db
+          .select({ versionId: clientWorkers.versionId })
+          .from(clientWorkers)
+          .where(
+            and(
+              eq(clientWorkers.clientId, clientId),
+              eq(clientWorkers.worker, "connect")
+            )
+          )
+          .get();
+        return row?.versionId ?? null;
+      };
+      const before = await recordedConnect();
+      // A second release (connect uploaded again, its secrets delivered
+      // again), or the same release run again with its secrets rotated
+      // (only its secrets delivered again): each write a new version;
+      // isolates of the one before still answering core for a moment.
+      if (change === "release") {
+        const second = await importRelease(
+          "workers_for_platforms",
+          { notes: "feat(core): second" },
+          bindsConnect
+        );
+        await startClientRelease(db, staff, await attempt(clientId), {
+          releaseId: second.releaseId,
+        });
+      } else {
+        await db
+          .update(clients)
+          .set({ generation: 2, rotatedAt: new Date() })
+          .where(eq(clients.id, clientId));
+        await startClientRelease(db, staff, await attempt(clientId), {
+          again: true,
+          what: "secrets",
+        });
+      }
+      if (stale === "always") {
+        account.connectAnswering = before;
+      } else {
+        account.connectAnswersFirst = Array.from(
+          { length: stale },
+          () => before
+        );
+      }
+      const rerun = await attempt(clientId);
+      await runClientProvision(namespaced, rerun);
+      const { connect } = await scriptsOf(clientId);
+      const live = account.namespaces.get(clientDispatchNamespace)?.get(connect)
+        ?.deployments[0]?.versions[0]?.version_id;
+      const probes = await db
+        .select({ detail: auditEvents.detail })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.clientId, clientId),
+            eq(auditEvents.action, "provision.probe")
+          )
+        );
+
+      const operation = await operationOf(clientId);
+      expect({
+        before: typeof before,
+        changed: live !== before,
+        status: operation?.status,
+        recorded: await recordedConnect(),
+        unrecorded: probes
+          .map(({ detail }) =>
+            z
+              .object({
+                run: z.string(),
+                connectUnrecorded: z.number().optional(),
+              })
+              .parse(JSON.parse(detail ?? "{}"))
+          )
+          .find(({ run }) => run === rerun.runId)?.connectUnrecorded,
+      }).toStrictEqual({
+        before: "string",
+        changed: true,
+        status: "done",
+        recorded: recordsNew ? (live ?? "none") : null,
+        unrecorded: recordsNew ? undefined : 1,
+      });
+    }
+  );
+
+  it.each([
+    {
+      worker: "connect" as const,
+      answers: "a version made earlier in the run once",
+    },
+    {
+      worker: "core" as const,
+      answers: "the version recorded before the run, until they stop",
+    },
+  ])(
+    "records a namespace $worker only as its latest version when its isolates answer $answers",
+    async ({ worker }) => {
+      const manifest = await importRelease(
+        "workers_for_platforms",
+        {},
+        bindsConnect
+      );
+      const { account, clientId, held } = await setUp(
+        "workers_for_platforms",
+        manifest,
+        clientDispatchNamespace
+      );
+      const namespaced = {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      };
+      await runClientProvision(namespaced, held);
+      const recordedOf = async (): Promise<Record<string, string | null>> => {
+        const rows = await db
+          .select({
+            worker: clientWorkers.worker,
+            versionId: clientWorkers.versionId,
+          })
+          .from(clientWorkers)
+          .where(eq(clientWorkers.clientId, clientId));
+        return Object.fromEntries(
+          rows.map(({ worker: name, versionId }) => [name, versionId])
+        );
+      };
+      const before = await recordedOf();
+      const second = await importRelease(
+        "workers_for_platforms",
+        { notes: "feat(core): second" },
+        bindsConnect
+      );
+      await startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: second.releaseId,
+      });
+      const rerun = await attempt(clientId);
+      let stopped: unknown = null;
+      let whileOld: string | null = null;
+      if (worker === "connect") {
+        // Its upload's version, made before its secrets': not the latest.
+        account.connectAnswersFirst = ["made-earlier-in-this-run"];
+      } else {
+        // Its old isolates answer its health and its probe alike: the run
+        // stops rather than record what it superseded, and goes on once
+        // they're gone.
+        account.answeringVersion = before.core ?? "none";
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        stopped = await runClientProvision(namespaced, rerun).then(
+          () => null,
+          (error: unknown) => error
+        );
+        errors.mockRestore();
+        const meanwhile = await recordedOf();
+        whileOld = meanwhile.core ?? null;
+        delete account.answeringVersion;
+      }
+      await runClientProvision(namespaced, rerun);
+      const scripts = await scriptsOf(clientId);
+      const live = account.namespaces
+        .get(clientDispatchNamespace)
+        ?.get(scripts[worker])?.deployments[0]?.versions[0]?.version_id;
+      const operation = await operationOf(clientId);
+      const recorded = await recordedOf();
+
+      expect({
+        stopped: worker === "core" ? stopped instanceof Error : null,
+        whileOld,
+        status: operation?.status,
+        changed: live !== before[worker],
+        recorded: recorded[worker],
+      }).toStrictEqual({
+        stopped: worker === "core" ? true : null,
+        whileOld: null,
+        status: "done",
+        changed: true,
+        recorded: live ?? "none",
+      });
+    }
+  );
+
+  it("still refuses what a run superseded on its retry, after its probe recorded none of connect's and a later step failed", async () => {
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    const namespaced = {
+      ...context,
+      router: {
+        ...context.router,
+        dispatcher: cloudflare.dispatcher(account.id, clientDispatchNamespace),
+      },
+    };
+    await runClientProvision(namespaced, held);
+    const recordedConnect = async (): Promise<string | null> => {
+      const row = await db
+        .select({ versionId: clientWorkers.versionId })
+        .from(clientWorkers)
+        .where(
+          and(
+            eq(clientWorkers.clientId, clientId),
+            eq(clientWorkers.worker, "connect")
+          )
+        )
+        .get();
+      return row?.versionId ?? null;
+    };
+    const before = await recordedConnect();
+    const second = await importRelease(
+      "workers_for_platforms",
+      { notes: "feat(core): second" },
+      bindsConnect
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const rerun = await attempt(clientId);
+    // Its probe: only the old isolates answer, so none is recorded; then
+    // publishing its hostname fails.
+    account.connectAnswering = before;
+    const put = vi
+      .spyOn(env.ROUTER_HOSTS, "put")
+      .mockRejectedValueOnce(new Error("the router's map is down"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = await runClientProvision(namespaced, rerun).then(
+      () => null,
+      (error: unknown) => error
+    );
+    errors.mockRestore();
+    put.mockRestore();
+    const afterFailure = await recordedConnect();
+    // Retried: nothing uploaded or delivered again, and an old isolate
+    // answers first, twice.
+    delete account.connectAnswering;
+    account.connectAnswersFirst = [before, before];
+    await runClientProvision(namespaced, rerun);
+    const { connect } = await scriptsOf(clientId);
+    const live = account.namespaces.get(clientDispatchNamespace)?.get(connect)
+      ?.deployments[0]?.versions[0]?.version_id;
+    const operation = await operationOf(clientId);
+
+    expect({
+      failed: failed instanceof Error,
+      afterFailure,
+      changed: live !== before,
+      status: operation?.status,
+      recorded: await recordedConnect(),
+    }).toStrictEqual({
+      failed: true,
+      afterFailure: null,
+      changed: true,
+      status: "done",
+      recorded: live ?? "none",
+    });
+  });
+
+  it("goes live on a core of a release from before connect's version, recording none of connect's", async () => {
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    // Its core names no version of connect's: not in its probe, nor asked.
+    account.coreProbe = { noConnectVersion: true };
+
+    await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+    const recorded = await db
+      .select({
+        worker: clientWorkers.worker,
+        versionId: clientWorkers.versionId,
+      })
+      .from(clientWorkers)
+      .where(eq(clientWorkers.clientId, clientId))
+      .orderBy(clientWorkers.worker);
+    const [probed] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.probe")
+        )
+      );
+    const operation = await operationOf(clientId);
+
+    expect({
+      status: operation?.status,
+      connect: recorded.find(({ worker }) => worker === "connect")?.versionId,
+      core: typeof recorded.find(({ worker }) => worker === "core")?.versionId,
+      unrecorded: z
+        .object({ connectUnrecorded: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).connectUnrecorded,
+    }).toStrictEqual({
+      status: "done",
+      connect: null,
+      core: "string",
+      unrecorded: 1,
     });
   });
 
@@ -1871,37 +2325,237 @@ describe("provisioning a placed client", () => {
       namespace: null,
     });
     const { clientId } = await placedClient(destinationId);
-    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-    try {
-      await attempts.modifyAll(async (modifier) => {
-        await modifier.disableRetryDelays();
-      });
-      // The first attempt is refused connect's upload, and stops.
-      cloudflare.failNext(
-        (call) =>
-          call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
-        400
-      );
-      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-      const [first] = await attempts.get();
-      await first?.waitForStatus("errored");
-      errors.mockRestore();
-      await expect(operationOf(clientId)).resolves.toMatchObject({
-        status: "failed",
-        step: "migrations",
-        error: "cloudflare_400_10000",
-      });
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    // The first attempt is refused connect's upload, and stops.
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      400
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[0], "errored");
+    errors.mockRestore();
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "failed",
+      step: "migrations",
+      error: "cloudflare_400_10000",
+    });
 
-      // Started again, a new attempt resumes it.
+    // Started again, a new attempt resumes it.
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[1], "complete");
+    await expect(provisioned(account, clientId)).resolves.toMatchObject(
+      once(clientId)
+    );
+  });
+
+  it("migrates a client once when its attempt times out mid-migration and its retry runs", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    // Each attempt is held once it read which migrations a database still
+    // needs: the first times out there, and its retry starts.
+    const first = heldAfter(readMigrations);
+    const retry = heldAfter(readMigrations);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Both released however the checks go: a held caller left behind
+    // would block the run's object for the rest of the file.
+    try {
       await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
-      const [, second] = await attempts.get();
-      await second?.waitForStatus("complete");
+      const [timingOut] = attempts.started;
+      if (timingOut === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await first.read();
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.provisionPlacedClient,
+        timingOut
+      );
+      await retry.read();
+      // Both read the same migrations as still needed. The one that timed
+      // out goes on first, while its retry still holds the client.
+      first.release();
+      await vi.waitFor(() => {
+        const stopped = errors.mock.calls.some((logged) =>
+          JSON.stringify(logged).includes("runner_replaced")
+        );
+        if (!stopped) {
+          throw new Error("The attempt that timed out hasn't stopped yet");
+        }
+      });
+      retry.release();
+      await retried;
+      await attemptEnded(timingOut, "complete");
+
+      const applies = cloudflare.calls.filter(
+        (call) =>
+          call.path.endsWith("/query") &&
+          JSON.stringify(call.body).includes("INSERT INTO d1_migrations")
+      );
+      expect({
+        applies: applies.length,
+        provisioned: await provisioned(account, clientId),
+      }).toMatchObject({
+        applies: 3,
+        provisioned: once(clientId),
+      });
+    } finally {
+      first.release();
+      retry.release();
+      errors.mockRestore();
+    }
+  });
+
+  it("reports a provision done when its attempt loses the step's result after the operation completed", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    let held: LostWrite | undefined;
+    // Held once the operation is done: its last write, which also gave the
+    // client's claim back.
+    using attempts = startsOf(
+      adminWorkflows.provisionPlacedClient,
+      async (stub) => {
+        held = await holdBatchOf(stub, async (database) => {
+          const status = await database
+            .prepare("SELECT status FROM client_provisions WHERE client_id = ?")
+            .bind(clientId)
+            .first<string>("status");
+          return status === "done";
+        });
+      }
+    );
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      const [finished] = attempts.started;
+      if (finished === undefined || held === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await held.committed;
+      // The activation is lost before the step's result is kept: the step
+      // runs again, finds the operation done, and the run succeeds.
+      await deliverAlarm(adminWorkflows.provisionPlacedClient, finished);
+      await attemptEnded(finished, "complete");
+
       await expect(provisioned(account, clientId)).resolves.toMatchObject(
         once(clientId)
       );
     } finally {
-      await attempts.dispose();
+      held?.lose();
+    }
+  });
+
+  it("sends no migration again from an attempt that timed out while it waited out a 429", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    // The first attempt's first migration is refused with a 429, and the
+    // attempt is held as it gets it back: its step times out meanwhile,
+    // and the retry migrates the client.
+    cloudflare.failNext(isMigration, { retryAfter: "0" });
+    const refused = heldAfter(isMigration);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      const [timingOut] = attempts.started;
+      if (timingOut === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await refused.read();
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.provisionPlacedClient,
+        timingOut
+      );
+      await retried;
+      await attemptEnded(timingOut, "complete");
+      // The attempt that timed out waits out the 429, and would send the
+      // migration again.
+      refused.release();
+      await vi.waitFor(() => {
+        const stopped = errors.mock.calls.some((logged) =>
+          JSON.stringify(logged).includes("runner_replaced")
+        );
+        if (!stopped) {
+          throw new Error("The attempt that timed out hasn't stopped yet");
+        }
+      });
+
+      expect({
+        // The refused one, then the retry's three.
+        sent: cloudflare.calls.filter(isMigration).length,
+        provisioned: await provisioned(account, clientId),
+      }).toMatchObject({ sent: 4, provisioned: once(clientId) });
+    } finally {
+      refused.release();
+      errors.mockRestore();
+    }
+  });
+
+  it("provisions a client once when its attempt loses its step's result after the step's first write", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    let held: LostWrite | undefined;
+    using attempts = startsOf(
+      adminWorkflows.provisionPlacedClient,
+      async (stub) => {
+        held = await holdFirstBatchOf(stub);
+      }
+    );
+
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      const [lostOne] = attempts.started;
+      if (lostOne === undefined || held === undefined) {
+        throw new Error("No attempt was started");
+      }
+      // The step wrote, and its activation is lost before it hears back: a
+      // duplicate delivery takes the attempt over, and the step runs again,
+      // resuming the operation.
+      await held.committed;
+      await deliverAlarm(adminWorkflows.provisionPlacedClient, lostOne);
+      await attemptEnded(lostOne, "complete");
+
+      const journal = await journalOf(
+        adminWorkflows.provisionPlacedClient,
+        lostOne
+      );
+      expect({
+        provision: journal.steps.map(({ name, state, attempt: tried }) => ({
+          name,
+          state,
+          tried,
+        })),
+        provisioned: await provisioned(account, clientId),
+      }).toMatchObject({
+        provision: [{ name: "provision", state: "succeeded", tried: 2 }],
+        provisioned: once(clientId),
+      });
+    } finally {
+      held?.lose();
     }
   });
 
@@ -2327,47 +2981,39 @@ describe("provisioning a placed client", () => {
     const later = await importRelease("dedicated", {
       notes: "feat(core): later",
     });
-    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-    try {
-      await attempts.modifyAll(async (modifier) => {
-        await modifier.disableRetryDelays();
-      });
-      // Another release asked for at once: it claims nothing, so it never
-      // changes the operation the winning attempt runs.
-      const other = await importRelease("dedicated", {
-        notes: "feat(core): other",
-      });
-      const [won, lost] = await Promise.all([
-        codeOf(
-          releasePlacedClient(env, staff, clientId, {
-            releaseId: later.releaseId,
-          })
-        ),
-        codeOf(
-          releasePlacedClient(env, staff, clientId, {
-            releaseId: other.releaseId,
-          })
-        ),
-      ]);
-      const [only] = await attempts.get();
-      await only?.waitForStatus("complete");
-      const operation = await operationOf(clientId);
-      const answers = [won, lost].toSorted();
-      const started = await attempts.get();
-      expect({
-        answers,
-        attempts: started.length,
-        runs: await runs(clientId),
-        operation,
-      }).toMatchObject({
-        answers: ["already_running", "started"],
-        attempts: 1,
-        runs: { core: operation?.releaseId, connect: operation?.releaseId },
-        operation: { status: "done" },
-      });
-    } finally {
-      await attempts.dispose();
-    }
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    // Another release asked for at once: it claims nothing, so it never
+    // changes the operation the winning attempt runs.
+    const other = await importRelease("dedicated", {
+      notes: "feat(core): other",
+    });
+    const [won, lost] = await Promise.all([
+      codeOf(
+        releasePlacedClient(env, staff, clientId, {
+          releaseId: later.releaseId,
+        })
+      ),
+      codeOf(
+        releasePlacedClient(env, staff, clientId, {
+          releaseId: other.releaseId,
+        })
+      ),
+    ]);
+    await attemptEnded(attempts.started[0], "complete");
+    const operation = await operationOf(clientId);
+    const answers = [won, lost].toSorted();
+    const { started } = attempts;
+    expect({
+      answers,
+      attempts: started.length,
+      runs: await runs(clientId),
+      operation,
+    }).toMatchObject({
+      answers: ["already_running", "started"],
+      attempts: 1,
+      runs: { core: operation?.releaseId, connect: operation?.releaseId },
+      operation: { status: "done" },
+    });
   });
 
   // Offboarding, then deleting its resources (src/hosting/offboarding.ts):
@@ -2994,48 +3640,40 @@ describe("a release's runner crashing, and another action on the client after", 
       notes: "feat(core): later",
     });
     const hostname = `${clientId}.${domain}`;
-    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-    try {
-      await attempts.modifyAll(async (modifier) => {
-        await modifier.disableRetryDelays();
-      });
-      const [offboarded, released] = await Promise.all([
-        codeOf(offboardPlacedClient(env, staff, clientId)),
-        codeOf(
-          releasePlacedClient(env, staff, clientId, {
-            releaseId: later.releaseId,
-          })
-        ),
-      ]);
-      const started = await attempts.get();
-      await Promise.all(
-        started.map(async (instance) => {
-          await instance.waitForStatus("complete").catch(() => {
-            /* a run the offboarding refused ends errored */
-          });
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    const [offboarded, released] = await Promise.all([
+      codeOf(offboardPlacedClient(env, staff, clientId)),
+      codeOf(
+        releasePlacedClient(env, staff, clientId, {
+          releaseId: later.releaseId,
         })
-      );
-      const client = await db
-        .select({ status: clients.status })
-        .from(clients)
-        .where(eq(clients.id, clientId))
-        .get();
-      const route = await mappedRoute(env.ROUTER_HOSTS, hostname);
-      const offboardWon = offboarded === "started";
+      ),
+    ]);
+    const { started } = attempts;
+    // A run the offboarding refused ends errored.
+    await Promise.all(
+      started.map(async (id) => {
+        await ended(adminWorkflows.provisionPlacedClient, id);
+      })
+    );
+    const client = await db
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get();
+    const route = await mappedRoute(env.ROUTER_HOSTS, hostname);
+    const offboardWon = offboarded === "started";
 
-      expect({
-        oneWon: offboardWon !== (released === "started"),
-        status: client?.status,
-        routed: route !== null,
-      }).toStrictEqual({
-        oneWon: true,
-        status: offboardWon ? "offboarded" : "active",
-        // Offboarded: never routed again; released: still served.
-        routed: !offboardWon,
-      });
-    } finally {
-      await attempts.dispose();
-    }
+    expect({
+      oneWon: offboardWon !== (released === "started"),
+      status: client?.status,
+      routed: route !== null,
+    }).toStrictEqual({
+      oneWon: true,
+      status: offboardWon ? "offboarded" : "active",
+      // Offboarded: never routed again; released: still served.
+      routed: !offboardWon,
+    });
   });
 
   it("holds the client while it offboards: a release asked for as its hostname is deleted can't claim it, and starts nothing", async () => {
@@ -3044,42 +3682,36 @@ describe("a release's runner crashing, and another action on the client after", 
     const later = await importRelease("dedicated", {
       notes: "feat(core): later",
     });
-    const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-    try {
-      let meanwhile = "not asked";
-      const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
-      const deleting = vi
-        .spyOn(env.ROUTER_HOSTS, "delete")
-        .mockImplementationOnce(async (key: string) => {
-          // A release asked for while offboarding deletes the route.
-          meanwhile = await codeOf(
-            releasePlacedClient(env, staff, clientId, {
-              releaseId: later.releaseId,
-            })
-          );
-          await remove(key);
-        });
-
-      const offboarded = await codeOf(
-        offboardPlacedClient(env, staff, clientId)
-      );
-      deleting.mockRestore();
-      const started = await attempts.get();
-
-      expect({
-        offboarded,
-        meanwhile,
-        started: started.length,
-        route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
-      }).toStrictEqual({
-        offboarded: "started",
-        meanwhile: "already_running",
-        started: 0,
-        route: null,
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    let meanwhile = "not asked";
+    const remove = env.ROUTER_HOSTS.delete.bind(env.ROUTER_HOSTS);
+    const deleting = vi
+      .spyOn(env.ROUTER_HOSTS, "delete")
+      .mockImplementationOnce(async (key: string) => {
+        // A release asked for while offboarding deletes the route.
+        meanwhile = await codeOf(
+          releasePlacedClient(env, staff, clientId, {
+            releaseId: later.releaseId,
+          })
+        );
+        await remove(key);
       });
-    } finally {
-      await attempts.dispose();
-    }
+
+    const offboarded = await codeOf(offboardPlacedClient(env, staff, clientId));
+    deleting.mockRestore();
+    const { started } = attempts;
+
+    expect({
+      offboarded,
+      meanwhile,
+      started: started.length,
+      route: await mappedRoute(env.ROUTER_HOSTS, `${clientId}.${domain}`),
+    }).toStrictEqual({
+      offboarded: "started",
+      meanwhile: "already_running",
+      started: 0,
+      route: null,
+    });
   });
 
   it("keeps a client it couldn't unroute as it was, the route and its claim given back, and offboards it when tried again", async () => {

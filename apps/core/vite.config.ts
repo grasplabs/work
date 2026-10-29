@@ -15,6 +15,7 @@ import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
+  connectVersionMetadata,
   directoryClient,
   documentsClient,
   gmailAccount,
@@ -337,6 +338,9 @@ export const coreProject = (
               ],
               bindings: {
                 DURABLE_OBJECT_JURISDICTION: "none",
+                // Its version metadata, as Cloudflare gives a deployed
+                // connect: the version core names for it.
+                CF_VERSION_METADATA: connectVersionMetadata,
                 CAPABILITY_SIGNING_KEY: capabilitySigningKey,
                 TOKEN_ENCRYPTION_KEY: btoa("test-token-key-of-exactly-32-b!!"),
                 MICROSOFT_CLIENT_ID: connectClient.id,

@@ -27,12 +27,13 @@ import type { InstanceStatus as EngineStatus } from "@grasp-os/workerflow/contra
  * makes to the client's record carries `stillHolds` in the same
  * statement, so one that lost the client changes nothing.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
 import type { Actor, AdminDatabase, AdminEvent } from "./db/act.ts";
 import { actIfChanged, adminDatabase } from "./db/act.ts";
 import { clientRuns } from "./db/schema.ts";
+import { adminWorkflow, adminWorkflows } from "./workflow-runs.ts";
 
 /** Which Workflow a runner is an instance of. */
 export type RunKind = (typeof clientRuns.kind.enumValues)[number];
@@ -51,9 +52,17 @@ export type RunStatus =
   | "starting"
   | "gone";
 
-/** A run, on either engine: what `instanceStatus` reads of it. */
-interface RunInstance {
+/** A run, on either engine: what the admin reads and asks of it. */
+export interface RunInstance {
   status: () => Promise<{ status: RunStatus }>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
+  terminate: () => Promise<void>;
+}
+
+/** A binding of runs, on either engine. */
+interface RunBinding {
+  get: (id: string) => Promise<RunInstance>;
 }
 
 /** A client's current run. */
@@ -63,8 +72,8 @@ export interface CurrentRun {
   /** When it was claimed: what's newer belongs to it. */
   claimedAt: Date;
   status: RunStatus;
-  /** The instance, when Workflows has it. */
-  instance: WorkflowInstance | null;
+  /** The instance, when its engine has it. */
+  instance: RunInstance | null;
 }
 
 /**
@@ -99,12 +108,13 @@ export const hasEnded = (status: RunStatus): boolean =>
 const isMissingInstance = (error: unknown): boolean =>
   error instanceof Error && error.message.includes("instance.not_found");
 
-/** The Workflow a runner of `kind` is an instance of. */
-const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
+/** The workflow a runner of `kind` is a run of. */
+const workflows: Readonly<Record<RunKind, (env: Env) => RunBinding>> = {
   rollout: (env) => env.ROLLOUT,
   rollback: (env) => env.ROLLBACK_CLIENT,
   apply: (env) => env.APPLY_CLIENT,
-  provision_placed: (env) => env.PROVISION_PLACED_CLIENT,
+  provision_placed: (env) =>
+    adminWorkflow(env, adminWorkflows.provisionPlacedClient),
 };
 
 /**
@@ -179,11 +189,11 @@ export const claimRun = async (
     replacing === null
       ? db
           .insert(clientRuns)
-          .values({ clientId, runId, kind, claimedAt })
+          .values({ clientId, runId, kind, claimedAt, attempt: 0 })
           .onConflictDoNothing()
       : db
           .update(clientRuns)
-          .set({ runId, kind, claimedAt })
+          .set({ runId, kind, claimedAt, attempt: 0 })
           .where(
             and(
               eq(clientRuns.clientId, clientId),
@@ -198,46 +208,93 @@ export const claimRun = async (
 };
 
 /**
- * Whether runner `runId` is client `clientId`'s current one: what a
+ * Whether runner `runId` is client `clientId`'s current one, and, given
+ * `attempt`, that attempt is the runner's latest (`takeAttempt`): what a
  * runner checks before each change it makes live.
  */
 export const holdsClient = async (
   db: AdminDatabase,
   clientId: string,
-  runId: string
+  runId: string,
+  attempt?: number
 ): Promise<boolean> => {
   const [claim] = await db
-    .select({ runId: clientRuns.runId })
+    .select({ runId: clientRuns.runId, attempt: clientRuns.attempt })
     .from(clientRuns)
     .where(eq(clientRuns.clientId, clientId));
-  return claim?.runId === runId;
+  return (
+    claim?.runId === runId &&
+    (attempt === undefined || claim.attempt === attempt)
+  );
 };
 
 /** A runner and the client it claimed. */
 export interface HeldClient {
   clientId: string;
   runId: string;
+  /**
+   * The runner's attempt, for a runner on Workerflow that fences its
+   * attempts (`takeAttempt`): then only that attempt holds the client.
+   */
+  attempt?: number;
 }
 
 /**
- * That runner `held.runId` still holds `held.clientId`, as SQL: the
- * condition every write a runner makes to the client's record carries,
- * in the same statement, so a runner that lost the client changes
- * nothing.
+ * Takes client `held.clientId` for attempt `held.attempt` of runner
+ * `held.runId`, which holds it: from then on an older attempt of the same
+ * runner holds it no longer, and every check and write of it is refused
+ * (`holdsClient`, `stillHolds`). On Workerflow a step that timed out goes
+ * on running beside its retry, under the same run: this keeps the older
+ * one from acting. Whether it was taken: not when the runner lost the
+ * client, or a newer attempt took it first.
  */
-export const stillHolds = (held: HeldClient): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${held.clientId} AND ${clientRuns.runId} = ${held.runId})`;
+export const takeAttempt = async (
+  db: AdminDatabase,
+  held: HeldClient & { attempt: number }
+): Promise<boolean> => {
+  const taken = await db
+    .update(clientRuns)
+    .set({ attempt: held.attempt })
+    .where(
+      and(
+        eq(clientRuns.clientId, held.clientId),
+        eq(clientRuns.runId, held.runId),
+        lt(clientRuns.attempt, held.attempt)
+      )
+    )
+    .returning({ clientId: clientRuns.clientId });
+  return taken.length > 0;
+};
 
 /**
- * Releases client `clientId` from runner `runId`, if it still holds it,
- * as a statement to batch with what the runner records: the client then
- * has no runner, and the next claims it afresh.
+ * That runner `held.runId` (and its attempt `held.attempt`, when given)
+ * still holds `held.clientId`, as SQL: the condition every write a runner
+ * makes to the client's record carries, in the same statement, so a
+ * runner that lost the client changes nothing.
+ */
+export const stillHolds = (held: HeldClient): SQL =>
+  held.attempt === undefined
+    ? sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${held.clientId} AND ${clientRuns.runId} = ${held.runId})`
+    : sql`EXISTS (SELECT 1 FROM ${clientRuns} WHERE ${clientRuns.clientId} = ${held.clientId} AND ${clientRuns.runId} = ${held.runId} AND ${clientRuns.attempt} = ${held.attempt})`;
+
+/**
+ * Releases client `clientId` from runner `runId`, if it still holds it
+ * (and, given `attempt`, that attempt does: `takeAttempt`), as a
+ * statement to batch with what the runner records: the client then has
+ * no runner, and the next claims it afresh.
  */
 export const releaseRun = (
   db: AdminDatabase,
   clientId: string,
-  runId: string
+  runId: string,
+  attempt?: number
 ) =>
   db
     .delete(clientRuns)
-    .where(and(eq(clientRuns.clientId, clientId), eq(clientRuns.runId, runId)));
+    .where(
+      and(
+        eq(clientRuns.clientId, clientId),
+        eq(clientRuns.runId, runId),
+        attempt === undefined ? undefined : eq(clientRuns.attempt, attempt)
+      )
+    );

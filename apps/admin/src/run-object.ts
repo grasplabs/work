@@ -11,6 +11,7 @@ import type {
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 
 import { integrationBuild } from "./builds/workflow.ts";
+import { provisionPlacedClientRun } from "./hosting/workflow.ts";
 import { adminWorkflows } from "./workflow-runs.ts";
 import type { AdminWorkflow } from "./workflow-runs.ts";
 
@@ -19,6 +20,7 @@ const definitions: Readonly<
   Record<AdminWorkflow, (env: Env) => WorkflowDefinition>
 > = {
   [adminWorkflows.integrationBuild]: integrationBuild,
+  [adminWorkflows.provisionPlacedClient]: provisionPlacedClientRun,
 };
 
 const isAdminWorkflow = (name: string): name is AdminWorkflow =>
