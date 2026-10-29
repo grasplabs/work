@@ -461,7 +461,7 @@ export const assertReleaseDir = (outDir: string): void => {
 };
 
 /** Empties `outDir` for a new release, once {@link assertReleaseDir} allows it. */
-const clearReleaseDir = (outDir: string): void => {
+export const clearReleaseDir = (outDir: string): void => {
   assertReleaseDir(outDir);
   rmSync(outDir, { force: true, recursive: true });
   mkdirSync(outDir, { recursive: true });

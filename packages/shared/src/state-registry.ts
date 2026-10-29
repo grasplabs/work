@@ -313,6 +313,10 @@ const coreDb: D1State = {
       `${core}workflows/host.ts`,
       "What each run's latest recall cites, checked before its next calls."
     ),
+    run_evidence_holds: transient(
+      `${core}workflows/resource-reads.ts`,
+      "The runs whose evidence a run holds, its children's whose output it took: checked with its own."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),

@@ -679,6 +679,10 @@ msgstr "{label} · {count}"
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, sur le site d’assistance de Grasp, dans un nouvel onglet"
 
+#: src/activity/audit-log.tsx
+msgid "{label}, started by {name} (Grasp staff)"
+msgstr "{label}, à la demande de {name} (équipe Grasp)"
+
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -3916,6 +3920,10 @@ msgstr "Équipes choisies"
 msgid "Cited at revision {0}; it is at revision {1} now."
 msgstr "Cité à la révision {0} ; il en est maintenant à la révision {1}."
 
+#: src/brain/memory-page.tsx
+msgid "Cites a source you no longer have access to"
+msgstr "Cite une source à laquelle vous n’avez plus accès"
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Effacer"
@@ -6152,6 +6160,10 @@ msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
 msgid "Grasp can't count model spend right now. Try again later."
 msgstr "Grasp ne peut pas comptabiliser les dépenses de modèles pour le moment. Réessayez plus tard."
 
+#: src/onboarding/review-parts.tsx
+msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
+msgstr "Pour l’instant, Grasp ne peut pas envoyer à vos collaborateurs leur lien d’entretien par e-mail. Envoyez à chacun son lien vous-même depuis Entretiens."
+
 #: src/chat/failure.ts
 msgid "Grasp can't read your organization's model limits right now. Try again later."
 msgstr "Grasp ne peut pas lire les limites de modèles de votre organisation pour le moment. Réessayez plus tard."
@@ -7836,6 +7848,10 @@ msgstr "Madrid"
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Courriels et messages à d'autres personnes, après avoir appuyé sur une carte avec chaque destinataire."
+
+#: src/onboarding/review-parts.tsx
+msgid "Mail isn’t available on this hosting yet"
+msgstr "Les e-mails ne sont pas encore disponibles sur cet hébergement"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"

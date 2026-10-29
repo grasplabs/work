@@ -8,7 +8,8 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
-import { clientsNamespace, stageOf } from "@grasp-os/shared/names";
+import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 
 import type { ClientDispatcher } from "../clients/core-address.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
@@ -50,23 +51,27 @@ const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
 };
 
 /** The admin's Secrets Store bindings (wrangler.jsonc). */
-type StoreSecret = {
+export type StoreSecret = {
   [Name in keyof Env]-?: Env[Name] extends SecretsStoreSecret ? Name : never;
 }[keyof Env];
 
 /** A Secrets Store secret the admin needs isn't there. */
 export class MissingStoreSecretError extends Error {
+  /** The secret that isn't there: its name, never a value. */
+  readonly secret: StoreSecret;
+
   constructor(name: StoreSecret) {
     super(`${name} is missing from Secrets Store`);
     this.name = "MissingStoreSecretError";
+    this.secret = name;
   }
 }
 
 /**
  * The value of the Secrets Store secret `name`. One that's missing or
  * empty stops the caller (`MissingStoreSecretError`), naming the secret
- * and nothing of its value: deploy-platform writes every one of them, so a gap
- * is a store to fix, not a secret to leave off.
+ * and nothing of its value: Deploy platform copies every one of them in
+ * from 1Password, so a gap is a store to fix, not a secret to leave off.
  */
 export const storeSecret = async (
   env: Env,
@@ -209,8 +214,8 @@ const varOf = (value: string | undefined): string | undefined => {
 };
 
 /**
- * Grasp's OAuth apps' client ids, from the admin's vars (deploy-platform sets
- * them): not secrets, their secrets are shared secrets above.
+ * Grasp's OAuth apps' client ids, from the admin's vars (wrangler.jsonc):
+ * not secrets, their secrets are shared secrets above.
  */
 export const signInApps = (env: Env): SignInApps => {
   const entraClientId = varOf(env.ENTRA_CLIENT_ID);
@@ -250,16 +255,40 @@ export interface DeployContext {
      * placed on Workers for Platforms is reached (hosting/operation.ts).
      */
     dispatcher?: ClientDispatcher;
-    /** The namespace `dispatcher` binds: its stage's (`clientsNamespace`). */
+    /**
+     * The namespace `dispatcher` binds: its stage's (`clientsNamespace`).
+     * None when the admin's STAGE names no stage, and then it runs no
+     * operation (hosting/operation.ts, `stage_unset`).
+     */
     namespace?: string;
+    /** Relay mode for the clients it deploys (`oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
 }
+
+/**
+ * Relay mode for every client this admin deploys: the stage whose OAuth
+ * relay (@grasp-os/shared/oauth-relay) their sign-in and connections come
+ * back through, while `OAUTH_RELAY` is `on`, as wrangler.jsonc sets it
+ * for both stages: every client the admin deploys is Grasp-hosted, under
+ * its stage's hosted domain, on Grasp's shared OAuth apps. `off` leaves
+ * each client's IdPs returning to its own origin, as on-prem has it.
+ */
+export const oauthRelayOf = (env: {
+  STAGE?: string;
+  OAUTH_RELAY?: string;
+}): Stage | undefined =>
+  env.OAUTH_RELAY === "on" ? stageNamed(env.STAGE) : undefined;
 
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);
   if (domain === null) {
     throw new Error("CLIENT_DOMAIN isn't set: no client can be deployed");
   }
+  // Exactly staging or production: never production by default, so an
+  // admin whose STAGE is missing or misspelt runs no operation anywhere.
+  const stage = stageNamed(env.STAGE);
+  const relay = oauthRelayOf(env);
   return {
     api: await deployerApi(env),
     db: adminDatabase(env.DB),
@@ -270,7 +299,8 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
       hosts: env.ROUTER_HOSTS,
       domain,
       dispatcher: env.DISPATCHER,
-      namespace: clientsNamespace(stageOf(env.STAGE)),
+      ...(stage === undefined ? {} : { namespace: clientsNamespace(stage) }),
+      ...(relay === undefined ? {} : { oauthRelay: relay }),
     },
   };
 };

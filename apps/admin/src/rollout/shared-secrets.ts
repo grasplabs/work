@@ -10,8 +10,8 @@
  * rollout reached it, `previous`). A secret's old value can be revoked
  * when all of:
  * - the rollout rotated it: a target it reached ran another value before
- *   (none did: the store held what they ran, so deploy-platform may not have
- *   written a new value, and there's nothing to revoke yet);
+ *   (none did: the store held what they ran, so Deploy platform may not
+ *   have copied a new value in, and there's nothing to revoke yet);
  * - Secrets Store still holds what it held at the start;
  * - every active client runs the store's value on every Worker of its
  *   release that holds the secret, read live from its account as drift

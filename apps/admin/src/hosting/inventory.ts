@@ -16,12 +16,16 @@
  * comes first.
  */
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
-import { toHex } from "@grasp-os/shared/encoding";
-import { clientsNamespace } from "@grasp-os/shared/names";
+import {
+  clientResourceName,
+  clientsNamespace,
+  deploymentIdAlphabet,
+  deploymentIdLength,
+} from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { act, actIfChanged } from "../db/act.ts";
@@ -43,6 +47,7 @@ import {
   placementProblems,
 } from "./policy.ts";
 import type {
+  Capability,
   DestinationCapabilities,
   Evidence,
   HostingPolicyId,
@@ -76,6 +81,8 @@ export const inventoryErrorCodes = [
   "foreign_resource",
   /** A binding of a kind rendering doesn't map. */
   "unsupported_binding",
+  /** A release resource the client naming scheme doesn't name (@grasp-os/shared/names). */
+  "resource_unnamed",
   /** A binding that would take the Workers' Durable Objects out of the EU-restricted namespace. */
   "durable_object_jurisdiction",
   /** A binding names a placeholder rendering doesn't fill. */
@@ -141,7 +148,7 @@ const destinationIdSchema = z
  * deploy sets `RUNTIME_PROFILE` (src/deploy/core-config.ts), or plain
  * workerd's, which its operator runs.
  */
-const runtimeProfiles = {
+export const runtimeProfiles = {
   workers_for_platforms: "cloudflare",
   dedicated: "cloudflare",
   workerd: "workerd",
@@ -367,7 +374,21 @@ export const destinationOf = async (db: AdminDatabase, id: string) => {
   };
 };
 
-/** Throws unless `destinationId` satisfies every requirement of `policyId`. */
+/**
+ * Whether provisioning checks a destination of `kind` itself
+ * (`selfCheckedCapabilities`): a Workers for Platforms destination, which
+ * is always this admin's own stage's namespace (`saveDestination`), where
+ * the admin creates every client's databases and buckets and reads back
+ * where Cloudflare put them.
+ */
+export const checksItself = (kind: DestinationKind): boolean =>
+  kind === "workers_for_platforms";
+
+/**
+ * Throws unless `destinationId` satisfies every requirement of `policyId`,
+ * one its provisioning checks itself and hasn't yet aside
+ * (`placementProblems`).
+ */
 export const assertPlaceable = async (
   db: AdminDatabase,
   destinationId: string,
@@ -377,7 +398,8 @@ export const assertPlaceable = async (
   const problems = placementProblems(
     hostingPolicies[policyId],
     destination.policies,
-    destination.capabilities
+    destination.capabilities,
+    checksItself(destination.kind)
   );
   if (problems.length > 0) {
     throw new InventoryError(
@@ -388,15 +410,89 @@ export const assertPlaceable = async (
   }
 };
 
-const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
-const DEPLOYMENT_ID_LENGTH = 10;
+/**
+ * Records what was observed of some of destination `destinationId`'s
+ * capabilities (`observed`), as `actor`: staff checking one through the
+ * form (src/hosting/capability-checks.tsx), or provisioning's own check
+ * (`selfCheckedCapabilities`). Evidence must name a subject the admin
+ * knows, as `saveDestination`'s does.
+ *
+ * Each capability is written on its own, in one statement that sets only
+ * its key of the destination's capabilities (`json_set`), so two records
+ * at once, of the same destination, never undo each other: neither reads
+ * the capabilities and writes them back whole. With `unrecordedOnly`
+ * (provisioning's own check) a capability is written only while it has no
+ * record at all, decided in that same statement, so an automatic success
+ * never replaces what a person or an earlier check found. Each one
+ * written is kept in the capability's history and audited, in the same
+ * batch; one not written leaves neither. Returns the capabilities written.
+ */
+export const recordCapabilityEvidence = async (
+  db: AdminDatabase,
+  actor: Actor,
+  destinationId: string,
+  observed: DestinationCapabilities,
+  { unrecordedOnly = false }: { unrecordedOnly?: boolean } = {}
+): Promise<Capability[]> => {
+  const parsed = destinationCapabilitiesSchema.parse(observed);
+  const destination = await destinationOf(db, destinationId);
+  await assertSubjectsKnown(db, destination.kind, parsed);
+  const written: Capability[] = [];
+  for (const capability of capabilities) {
+    const entry = parsed[capability];
+    if (entry === undefined) {
+      continue;
+    }
+    const now = new Date();
+    // The capability's key: it has dots in it, so it's quoted.
+    const path = `$."${capability}"`;
+    const { evidence } = entry;
+    const declaredBy = actor === "system" ? actor : actor.email;
+    // oxlint-disable-next-line no-await-in-loop -- one capability at a time
+    const changed = await actIfChanged(
+      db,
+      actor,
+      db
+        .update(hostingDestinations)
+        .set({
+          capabilities: sql`json_set(${hostingDestinations.capabilities}, ${path}, json(${JSON.stringify(entry)}))`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(hostingDestinations.id, destinationId),
+            unrecordedOnly
+              ? sql`json_extract(${hostingDestinations.capabilities}, ${path}) IS NULL`
+              : undefined
+          )
+        ),
+      {
+        action: "destination.evidence",
+        target: destinationId,
+        detail: evidenceDetail({ [capability]: entry }),
+      },
+      [
+        // Only once the event is recorded: `changes()` reads its insert.
+        db
+          .insert(destinationCapabilityEvidence)
+          .select(
+            sql`SELECT NULL, ${destinationId}, ${capability}, ${entry.status}, ${evidence.subject.kind}, ${evidence.subject.id}, ${evidence.procedure}, ${new Date(evidence.observedAt).getTime()}, ${evidence.recordedBy}, ${evidence.record}, ${declaredBy}, ${now.getTime()} WHERE changes() > 0`
+          ),
+      ]
+    );
+    if (changed) {
+      written.push(capability);
+    }
+  }
+  return written;
+};
 
 /** A new deployment id: random, lowercase, never derived from the client. */
 const newDeploymentId = (): string =>
   Array.from(
-    crypto.getRandomValues(new Uint8Array(DEPLOYMENT_ID_LENGTH)),
+    crypto.getRandomValues(new Uint8Array(deploymentIdLength)),
     // 256 is a multiple of 32: no letter is likelier than another.
-    (byte) => BASE32[byte % BASE32.length]
+    (byte) => deploymentIdAlphabet[byte % deploymentIdAlphabet.length]
   ).join("");
 
 export const placementOf = async (
@@ -573,40 +669,31 @@ export const resourceRoles = (
   return [...roles.values()];
 };
 
-/** The longest name Workers, D1 and R2 all take. */
-const MAX_NAME = 63;
-const HASH_LENGTH = 8;
-
 /**
- * The name a resource has in the destination: the deployment id, then the
- * release's name for it, cut and suffixed with a hash of the whole when
- * it would be too long. Never the client's name, never a release's.
+ * The name the resource with role `role` has in the destination, by the
+ * names module (@grasp-os/shared/names): `grasp-<deployment id>-<its
+ * component and purpose>`. Never the client's name, never a release's. A
+ * role it doesn't name stops allocation (`resource_unnamed`).
  */
-export const physicalName = async (
-  deploymentId: string,
-  logicalName: string
-): Promise<string> => {
-  const name = `g${deploymentId}-${logicalName}`;
-  if (name.length <= MAX_NAME) {
-    return name;
+export const physicalName = (deploymentId: string, role: string): string => {
+  const name = clientResourceName(deploymentId, role);
+  if (name === undefined) {
+    throw new InventoryError(
+      "resource_unnamed",
+      `The release's ${role} has no name in the client naming scheme (@grasp-os/shared/names)`
+    );
   }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(name)
-  );
-  const hash = toHex(new Uint8Array(digest)).slice(0, HASH_LENGTH);
-  const kept = name.slice(0, MAX_NAME - HASH_LENGTH - 1).replace(/-+$/u, "");
-  return `${kept}-${hash}`;
+  return name;
 };
 
-const physicalNameOf = async (
+const physicalNameOf = (
   placement: ClientPlacement,
   scripts: ReadonlyMap<string, string>,
   role: Role,
   worker: string | undefined
-): Promise<string> => {
+): string => {
   if (role.kind !== "durable_object_class") {
-    return await physicalName(placement.deploymentId, role.logicalName);
+    return physicalName(placement.deploymentId, role.role);
   }
   // A class is named within its script: one namespace per script and class.
   const script = worker === undefined ? undefined : scripts.get(worker);
@@ -666,8 +753,7 @@ export const allocateClientResources = async (
   for (const worker of Object.values(manifest.workers)) {
     scripts.set(
       worker.name,
-      // oxlint-disable-next-line no-await-in-loop -- core and connect
-      await physicalName(placement.deploymentId, worker.name)
+      physicalName(placement.deploymentId, `worker:${worker.name}`)
     );
   }
   const workerOf = new Map(
@@ -676,30 +762,28 @@ export const allocateClientResources = async (
     )
   );
   const now = new Date();
-  const wanted = await Promise.all(
-    resourceRoles(manifest, jurisdiction).map(
-      async (role): Promise<ClientResource> => ({
-        clientId,
-        role: role.role,
-        kind: role.kind,
-        destinationId: placement.destinationId,
-        physicalName: await physicalNameOf(
-          placement,
-          scripts,
-          role,
-          workerOf.get(role.role)
-        ),
-        providerId: null,
-        createRequestedBy: null,
-        jurisdiction,
-        owner: placement.deploymentId,
-        operationId,
-        lifecycle: role.tombstoned ? "tombstoned" : "allocated",
-        deletedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-    )
+  const wanted = resourceRoles(manifest, jurisdiction).map(
+    (role): ClientResource => ({
+      clientId,
+      role: role.role,
+      kind: role.kind,
+      destinationId: placement.destinationId,
+      physicalName: physicalNameOf(
+        placement,
+        scripts,
+        role,
+        workerOf.get(role.role)
+      ),
+      providerId: null,
+      createRequestedBy: null,
+      jurisdiction,
+      owner: placement.deploymentId,
+      operationId,
+      lifecycle: role.tombstoned ? "tombstoned" : "allocated",
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    })
   );
 
   const before = await clientInventory(db, clientId);

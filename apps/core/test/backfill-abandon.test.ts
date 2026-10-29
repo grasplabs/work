@@ -437,6 +437,35 @@ describe("abandoning a failed backfill", () => {
     });
   });
 
+  it("waits while the store's App is archived, and is its admins' once the App is removed", async () => {
+    const { app, store, target } = await failedStore();
+    await registerApp(app, null, null);
+    await env.DB.prepare(
+      "INSERT INTO app_default_stores (app_id, store_id, created_at) VALUES (?, ?, ?)"
+    )
+      .bind(app, store.id, Date.now())
+      .run();
+    const input = { store: store.id, target, attempt: 1 };
+    await env.DB.prepare(
+      "UPDATE apps SET status = 'archived', status_changed_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), app)
+      .run();
+    const archived = await codeOf(abandonStoreBackfill(env, admin, input));
+    // Nobody can restore a removed App: its admins manage its store.
+    await env.DB.prepare(
+      "UPDATE apps SET removed_at = ?, removed_by = ? WHERE id = ?"
+    )
+      .bind(Date.now(), admin.userId, app)
+      .run();
+    const removed = await abandonStoreBackfill(env, admin, input);
+
+    expect({ archived, removed: removed.attempt }).toStrictEqual({
+      archived: "app.archived",
+      removed: 1,
+    });
+  });
+
   it("lists an App's failed change for its admins, until it is abandoned", async () => {
     const { app, store, target, odd } = await failedStore();
     await registerApp(app, 1, 2);

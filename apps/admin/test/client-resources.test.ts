@@ -1,3 +1,4 @@
+import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { clientsNamespace, platformWorkerName } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
@@ -440,17 +441,25 @@ describe("a client's resources", () => {
     expect(inventoryA.map(({ role }) => role)).toStrictEqual(
       inventoryB.map(({ role }) => role)
     );
-    expect(inventoryA.map(({ role }) => role)).toStrictEqual([
-      "d1:grasp-os-connect",
-      "d1:grasp-os-core",
-      "d1:grasp-os-knowledge",
-      "do:grasp-os-core:AuditLog",
-      "do:grasp-os-core:Workspace",
-      "r2:grasp-os-audit-archive",
-      "r2:grasp-os-files",
-      "worker:grasp-os-connect",
-      "worker:grasp-os-core",
-    ]);
+    // Every role the release names, each named by the scheme
+    // (@grasp-os/shared/names): grasp-<deployment id>-<component and
+    // purpose>, a class within its script.
+    const id = a.placement.deploymentId;
+    expect(
+      Object.fromEntries(
+        inventoryA.map(({ role, physicalName }) => [role, physicalName])
+      )
+    ).toStrictEqual({
+      "d1:grasp-os-connect": `grasp-${id}-connect-db`,
+      "d1:grasp-os-core": `grasp-${id}-core-db`,
+      "d1:grasp-os-knowledge": `grasp-${id}-core-knowledge`,
+      "do:grasp-os-core:AuditLog": `grasp-${id}-core:AuditLog`,
+      "do:grasp-os-core:Workspace": `grasp-${id}-core:Workspace`,
+      "r2:grasp-os-audit-archive": `grasp-${id}-core-audit`,
+      "r2:grasp-os-files": `grasp-${id}-core-files`,
+      "worker:grasp-os-connect": `grasp-${id}-connect`,
+      "worker:grasp-os-core": `grasp-${id}-core`,
+    });
     // ...and not one physical resource in common.
     const shared = physical(inventoryA).filter((name) =>
       physical(inventoryB).includes(name)
@@ -741,7 +750,7 @@ describe("a client's resources", () => {
     });
   });
 
-  it("are refused for a bucket outside the policy's jurisdiction or a class moved by a rename", async () => {
+  it("are refused for a bucket outside the policy's jurisdiction, one the naming scheme doesn't name, or a class moved by a rename", async () => {
     const destinationId = await destination();
     const { clientId } = await placedClient(destinationId);
     const manifest = await release();
@@ -776,6 +785,17 @@ describe("a client's resources", () => {
         },
       ])
     ).resolves.toMatchObject({ code: "bucket_jurisdiction" });
+    await expect(
+      allocate([
+        ...core.bindings,
+        {
+          type: "r2_bucket",
+          name: "BACKUPS",
+          bucket_name: "grasp-os-backups",
+          jurisdiction: "eu",
+        },
+      ])
+    ).resolves.toMatchObject({ code: "resource_unnamed" });
     await expect(
       allocate(core.bindings, [
         ...core.durableObjectMigrations,
@@ -891,7 +911,7 @@ describe("rendering a client's Worker", () => {
     ).toThrow(expect.objectContaining({ code: "resource_missing" }));
   });
 
-  it("binds a service through the connect gateway in a namespace, with props naming only the client's own script", async () => {
+  it("binds a service through the connect gateway in a namespace, with props naming only the client's own script, which the gateway accepts", async () => {
     const { core, a, b } = await setUp();
     const connectBinding = (inventory: typeof a.inventory) =>
       renderClientWorker(core, a.placement, inventory, {
@@ -901,11 +921,17 @@ describe("rendering a client's Worker", () => {
       ({ role }) => role === "worker:grasp-os-connect"
     )?.physicalName;
 
-    expect(connectBinding(a.inventory)).toStrictEqual({
-      type: "service",
-      name: "CONNECT",
-      service: platformWorkerName("connect-gateway", "production"),
-      props: { script: ownConnect },
+    const bound = connectBinding(a.inventory);
+    // The connect script the admin generated for a's new placement is one
+    // the gateway reaches (@grasp-os/shared/connect-gateway).
+    expect({ bound, accepted: gatewayScriptOf(bound?.props) }).toStrictEqual({
+      bound: {
+        type: "service",
+        name: "CONNECT",
+        service: platformWorkerName("connect-gateway", "production"),
+        props: { script: ownConnect },
+      },
+      accepted: ownConnect,
     });
     // Another client's inventory never names a script for a's core.
     expect(() => connectBinding(b.inventory)).toThrow(

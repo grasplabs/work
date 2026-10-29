@@ -13,6 +13,7 @@ const task: SealedTask = {
   kind: "set",
   steps: ["task"],
   scope: [],
+  branches: [],
   schemas: {},
 };
 
@@ -26,6 +27,7 @@ const onceTask = (
     kind: "call" as const,
     steps: ["task" as const],
     scope: [],
+    branches: [],
     schemas: {},
   };
   if (name === "grasp.model") {
@@ -114,6 +116,7 @@ describe("a step's failure, as a catch sees it", () => {
       kind: "call",
       steps: ["task"],
       scope: [],
+      branches: [],
       schemas: {},
       call: {
         name: "grasp.connector",
@@ -206,6 +209,7 @@ describe("a step's failure, as a catch sees it", () => {
       kind: "raise",
       steps: ["task"],
       scope: [],
+      branches: [],
       schemas: {},
       error: { type: "urn:grasp:error:denied", status: 409, title: "Denied." },
     };
