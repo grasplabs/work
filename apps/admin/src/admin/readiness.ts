@@ -30,7 +30,7 @@ import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
 import type { HostingPolicyId } from "../hosting/policy.ts";
-import { staffIds } from "./discord.ts";
+import { staffIds } from "./discord-staff.ts";
 
 /**
  * How a check stands:
