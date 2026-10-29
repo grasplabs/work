@@ -61,9 +61,11 @@ export const provisionProbeSchema = z.strictObject({
   /**
    * The version connect answers as, as connect named it to core over its
    * binding (through the connect gateway, in a namespace); null where it
-   * has none or didn't answer.
+   * has none or didn't answer; absent from a core of a release from
+   * before it, which the admin may still roll a client back to. Either way
+   * no version of connect's is recorded, which holds every secret it holds.
    */
-  connectVersion: z.string().nullable(),
+  connectVersion: z.string().nullable().optional(),
   /** The client id its deploy set (`CLIENT_ID`); null where none is set. */
   clientId: z.string().nullable(),
   /**

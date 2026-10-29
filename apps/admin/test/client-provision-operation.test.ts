@@ -1291,21 +1291,25 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it.each([
-    {
-      isolates:
-        "answer as the version recorded before it twice, then the new one",
-      stale: 2,
-      recordsNew: true,
-    },
-    {
-      isolates: "never answer as anything but the version recorded before it",
-      stale: "always" as const,
-      recordsNew: false,
-    },
-  ])(
-    "never records a namespace connect as the version it ran before the run's writes when its old isolates $isolates",
-    async ({ stale, recordsNew }) => {
+  it.each(
+    (["release", "secrets"] as const).flatMap((change) => [
+      {
+        change,
+        isolates:
+          "answer as the version recorded before it twice, then the new one",
+        stale: 2,
+        recordsNew: true,
+      },
+      {
+        change,
+        isolates: "never answer as anything but the version recorded before it",
+        stale: "always" as const,
+        recordsNew: false,
+      },
+    ])
+  )(
+    "never records a namespace connect as the version it ran before a $change change when its old isolates $isolates",
+    async ({ change, stale, recordsNew }) => {
       const manifest = await importRelease(
         "workers_for_platforms",
         {},
@@ -1341,17 +1345,29 @@ describe("provisioning a placed client", () => {
         return row?.versionId ?? null;
       };
       const before = await recordedConnect();
-      // A second release: connect uploaded again, its secrets delivered
-      // again, each a new version; isolates of the one before still
-      // answering core for a moment.
-      const second = await importRelease(
-        "workers_for_platforms",
-        { notes: "feat(core): second" },
-        bindsConnect
-      );
-      await startClientRelease(db, staff, await attempt(clientId), {
-        releaseId: second.releaseId,
-      });
+      // A second release (connect uploaded again, its secrets delivered
+      // again), or the same release run again with its secrets rotated
+      // (only its secrets delivered again): each write a new version;
+      // isolates of the one before still answering core for a moment.
+      if (change === "release") {
+        const second = await importRelease(
+          "workers_for_platforms",
+          { notes: "feat(core): second" },
+          bindsConnect
+        );
+        await startClientRelease(db, staff, await attempt(clientId), {
+          releaseId: second.releaseId,
+        });
+      } else {
+        await db
+          .update(clients)
+          .set({ generation: 2, rotatedAt: new Date() })
+          .where(eq(clients.id, clientId));
+        await startClientRelease(db, staff, await attempt(clientId), {
+          again: true,
+          what: "secrets",
+        });
+      }
       if (stale === "always") {
         account.connectAnswering = before;
       } else {
@@ -1400,6 +1416,67 @@ describe("provisioning a placed client", () => {
       });
     }
   );
+
+  it("goes live on a core of a release from before connect's version, recording none of connect's", async () => {
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    // Its core names no version of connect's: not in its probe, nor asked.
+    account.coreProbe = { noConnectVersion: true };
+
+    await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+    const recorded = await db
+      .select({
+        worker: clientWorkers.worker,
+        versionId: clientWorkers.versionId,
+      })
+      .from(clientWorkers)
+      .where(eq(clientWorkers.clientId, clientId))
+      .orderBy(clientWorkers.worker);
+    const [probed] = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.probe")
+        )
+      );
+    const operation = await operationOf(clientId);
+
+    expect({
+      status: operation?.status,
+      connect: recorded.find(({ worker }) => worker === "connect")?.versionId,
+      core: typeof recorded.find(({ worker }) => worker === "core")?.versionId,
+      unrecorded: z
+        .object({ connectUnrecorded: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).connectUnrecorded,
+    }).toStrictEqual({
+      status: "done",
+      connect: null,
+      core: "string",
+      unrecorded: 1,
+    });
+  });
 
   it("can't reach a core uploaded to the same namespace in another account, its hostname unpublished", async () => {
     const manifest = await importRelease("workers_for_platforms");

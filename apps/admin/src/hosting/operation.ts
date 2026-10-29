@@ -396,6 +396,13 @@ const progressSchema = z.object({
    * the probe records a version.
    */
   superseded: z.record(z.string(), z.string()).default({}),
+  /**
+   * Each Worker in a namespace's version recorded live as this run reached
+   * its upload step, by app, before the run's record of it cleared it
+   * (`provision.worker_live`), whether or not it uploads: what a later
+   * write of this run notes as superseded. Cleared with `superseded`.
+   */
+  recordedBefore: z.record(z.string(), z.string()).default({}),
   /** The core origin the probe passed at. */
   origin: z.string().optional(),
   /**
@@ -972,11 +979,55 @@ const recordProgress = async (
   }
 };
 
+/** The version recorded live for `app` of the client `loaded` holds; null when none. */
+const recordedVersionOf = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  app: App
+): Promise<string | null> => {
+  const row = await db
+    .select({ versionId: clientWorkers.versionId })
+    .from(clientWorkers)
+    .where(
+      and(
+        eq(clientWorkers.clientId, loaded.held.clientId),
+        eq(clientWorkers.worker, app)
+      )
+    )
+    .get();
+  return row?.versionId ?? null;
+};
+
+/**
+ * Notes on `progress` the version recorded live for `app` in a namespace
+ * as this run reaches its upload step (`recordedBefore`), and records it:
+ * the step clears the record whether or not it uploads, so a write after
+ * it (a secret) still finds what it supersedes.
+ */
+const noteRecordedBefore = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  app: App,
+  target: ScriptTarget
+): Promise<void> => {
+  if (target.namespace === null) {
+    return;
+  }
+  const versionId = await recordedVersionOf(db, loaded, app);
+  if (versionId === null || progress.recordedBefore[app] === versionId) {
+    return;
+  }
+  progress.recordedBefore = { ...progress.recordedBefore, [app]: versionId };
+  await recordProgress(db, loaded, progress);
+};
+
 /**
  * Notes on `progress` the version recorded live for `app`, before this run
- * changes a script in a namespace (`superseded`), and records it. Kept as
- * noted when nothing is recorded: an earlier run already changed it, and
- * the record went with that change.
+ * changes a script in a namespace (`superseded`), and records it: the one
+ * recorded now, or, cleared by this run's upload step, the one recorded
+ * before it (`recordedBefore`). Kept as noted when neither is: an earlier
+ * run already changed it, and the record went with that change.
  */
 const noteSuperseded = async (
   db: AdminDatabase,
@@ -988,17 +1039,10 @@ const noteSuperseded = async (
   if (target.namespace === null) {
     return;
   }
-  const row = await db
-    .select({ versionId: clientWorkers.versionId })
-    .from(clientWorkers)
-    .where(
-      and(
-        eq(clientWorkers.clientId, loaded.held.clientId),
-        eq(clientWorkers.worker, app)
-      )
-    )
-    .get();
-  const versionId = row?.versionId ?? null;
+  const versionId =
+    (await recordedVersionOf(db, loaded, app)) ??
+    progress.recordedBefore[app] ??
+    null;
   if (versionId === null || progress.superseded[app] === versionId) {
     return;
   }
@@ -1680,6 +1724,7 @@ const upload = async (
       worker.durableObjectMigrations
     );
   }
+  await noteRecordedBefore(db, loaded, progress, app, target);
   if (!done) {
     const migrations = pendingMigrations(
       worker.durableObjectMigrations,
@@ -2154,11 +2199,11 @@ const probe = async (
   const before = await progressNow(db, loaded.operation.id);
   const connect =
     target.namespace === null
-      ? answer.connectVersion
+      ? null
       : await freshConnectVersion(
           context,
           asking,
-          answer.connectVersion,
+          answer.connectVersion ?? null,
           before.superseded.connect
         );
   await recordLiveVersions(context, loaded, inventory, {
@@ -2166,7 +2211,8 @@ const probe = async (
     connect,
   });
   const { connect: _superseded, ...superseded } = before.superseded;
-  const progress = { ...before, superseded };
+  const { connect: _recorded, ...recordedBefore } = before.recordedBefore;
+  const progress = { ...before, superseded, recordedBefore };
   await recordStep(
     db,
     loaded,

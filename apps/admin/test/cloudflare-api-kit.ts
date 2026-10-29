@@ -140,6 +140,8 @@ export interface AccountState {
         asClient?: string;
         down?: readonly string[];
         clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
       };
   /**
    * The platform update notices its core took, signed with the key its

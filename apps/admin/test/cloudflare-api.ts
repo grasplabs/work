@@ -271,7 +271,9 @@ const answerProbe = async (
       : { armed: true, tasks: clockTaskNames[name] };
   return Response.json({
     version: account.answeringVersion ?? live.id,
-    connectVersion: connectAnswering(account, live),
+    ...(probe.noConnectVersion === true
+      ? {}
+      : { connectVersion: connectAnswering(account, live) }),
     clientId:
       probe.asClient ?? (typeof clientId === "string" ? clientId : null),
     bindings: Object.fromEntries(
@@ -303,6 +305,10 @@ const answerConnectVersion = async (
   live: VersionState,
   request: Request
 ): Promise<Response> => {
+  const probe = account.coreProbe ?? {};
+  if (probe === "absent" || probe.noConnectVersion === true) {
+    return frontendPage();
+  }
   const body = await request.text();
   const key = await hkdfHmacKey(
     live.secrets.get("BETTER_AUTH_SECRET") ?? "",
