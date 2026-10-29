@@ -5,25 +5,21 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { formatDate } from "../src/admin/words.ts";
 import { setStripeCustomerFn } from "../src/billing/functions.ts";
 import { stripeReadTools } from "../src/billing/stripe.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 import { daysFrom, fakeStripeMcp } from "./stripe-mcp.ts";
 
 const token = "test-deployer-token-admin-billing-7d2e41";
-const tenantToken = "test-tenant-admin-token-admin-billing-93ac06";
 /** A restricted key, as Stripe makes them; never a real one. */
 const stripeKey = "rk_test_console_billing_fake_key_4f1c";
 
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 const stripe = fakeStripeMcp(stripeKey);
 
@@ -54,31 +50,14 @@ const eachTest = ({ withKey }: { withKey: boolean }): void => {
 
 /** An active client running a new release, as a deploy made it live, whose core answers an empty snapshot. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): billing" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): billing");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot("Noordkade");
   return clientId;
 };
@@ -236,7 +215,7 @@ const late = (customerId: string) => {
 };
 
 describe("an organization's billing, with Stripe's key", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: true });
 
   it("shows a linked company's customer, how it pays, what it paid last and its next invoice, all paid, and nothing that needs Grasp", async () => {
@@ -457,7 +436,7 @@ describe("an organization's billing, with Stripe's key", () => {
 });
 
 describe("an organization's billing, without Stripe's key", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
   it("says Stripe isn't connected, keeps the customer it is linked to, and asks Stripe nothing", async () => {

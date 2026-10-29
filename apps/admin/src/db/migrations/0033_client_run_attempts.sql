@@ -1,0 +1,1 @@
+ALTER TABLE `client_runs` ADD `attempt` integer DEFAULT 0 NOT NULL;

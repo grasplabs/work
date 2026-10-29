@@ -98,6 +98,16 @@ export const buildOf = async (
   return { ...row, plan };
 };
 
+/** Every build the admin keeps, their plans parsed. */
+export const allBuilds = async (db: AdminDatabase): Promise<Build[]> => {
+  const rows = await db.select().from(integrationBuilds);
+  return rows.map((row) => ({
+    ...row,
+    plan:
+      row.plan === null ? null : buildPlanSchema.parse(JSON.parse(row.plan)),
+  }));
+};
+
 /** The events a build's run waits for, each named for what it waits on. */
 export const buildEvents = {
   /** The agent's plan of round `round` is ready for a person. */

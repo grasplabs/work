@@ -70,6 +70,7 @@ export type KickoffRefusal =
   | "kickoff.unreadable"
   | "kickoff.not_read"
   | "kickoff.invalid"
+  | "kickoff.purged"
   | "not_answered";
 
 /** What the page gets back. */
@@ -89,6 +90,7 @@ const kickoffCodes: ReadonlySet<string> = new Set([
   "kickoff.unreadable",
   "kickoff.not_read",
   "kickoff.invalid",
+  "kickoff.purged",
 ]);
 
 const isKickoffCode = (code: string): code is KickoffRefusal =>

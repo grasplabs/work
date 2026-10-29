@@ -96,6 +96,16 @@ export interface OAuthProviderConfig {
   tokenEndpoint: (tenant: string) => string;
   /** RFC 7009 revocation; none where the provider has no such endpoint. */
   revocationEndpoint?: string;
+  /**
+   * Where one grant covers every token of an account with one of Grasp's
+   * OAuth clients, the group of providers that share it: revoking any
+   * token of the account revokes them all. Google's grant is the account's
+   * with a client, so each Google client is a group of its own (Workspace,
+   * the directory and documents each have theirs). Unset where each token
+   * is a grant of its own (RFC 7009), which revoking one token leaves the
+   * rest of (src/revocations.ts).
+   */
+  accountWideGrant?: string;
   scopes: readonly string[];
   /** How the scope parameter joins `scopes`. */
   scopeSeparator: string;
@@ -337,6 +347,8 @@ const google: OAuthProviderConfig = {
   authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+  // Google revokes the account's whole grant with this client.
+  accountWideGrant: "google",
   // Those of the classes on by default; a consent asks those of the classes
   // the company turned on (`rightsFor`, GRA-756). A connection granted
   // before the connector wrote events is marked for reconnecting on its
@@ -428,6 +440,8 @@ const googleDirectoryScope =
 const googleDirectory: OAuthProviderConfig = {
   ...google,
   id: "google-directory",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-directory",
   server: "google-directory",
   scopes: ["openid", "email", "profile", googleDirectoryScope],
   granted: {
@@ -544,6 +558,8 @@ const googleDocumentsScope = "https://www.googleapis.com/auth/drive.readonly";
 const googleDocuments: OAuthProviderConfig = {
   ...google,
   id: "google-documents",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-documents",
   server: "google-documents",
   scopes: ["openid", "email", "profile", googleDocumentsScope],
   granted: {

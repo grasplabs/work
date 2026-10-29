@@ -496,13 +496,15 @@ export const setScriptSubdomain = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false }
+  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false },
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "POST",
       path: `${scriptPath(accountId, scriptName)}/subdomain`,
       json: { enabled, previews_enabled: previewsEnabled },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -636,13 +638,15 @@ export const putSchedules = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  crons: readonly string[]
+  crons: readonly string[],
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${scriptPath(accountId, scriptName)}/schedules`,
       json: crons.map((cron) => ({ cron })),
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -680,13 +684,15 @@ export const queryD1 = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  sql: string
+  sql: string,
+  beforeSend?: () => Promise<void>
 ): Promise<Record<string, unknown>[][]> => {
   const statements = await api.call(
     {
       method: "POST",
       path: `/accounts/${accountId}/d1/database/${databaseId}/query`,
       json: { sql },
+      ...(beforeSend === undefined ? {} : { beforeSend }),
     },
     queryResultSchema
   );
@@ -710,26 +716,36 @@ export interface D1Migration {
 const sqlText = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
 /**
+ * Before each send of a migration, its retries included: throws to stop
+ * it unsent, as a runner that no longer holds its client does.
+ */
+export type BeforeMigration = () => Promise<void>;
+
+/**
  * Applies `pending` in order, each with its record in one query, stopping
- * at the first that fails.
+ * at the first that fails, and checking `before` before each send of each.
  */
 const applyInOrder = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  pending: readonly D1Migration[]
+  pending: readonly D1Migration[],
+  before: BeforeMigration
 ): Promise<void> => {
   const [next, ...rest] = pending;
   if (next === undefined) {
     return;
   }
+  // Checked before each send of it, the API client's retries included: a
+  // 429 waited out must not let a runner that lost its client send it.
   await queryD1(
     api,
     accountId,
     databaseId,
-    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`
+    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`,
+    before
   );
-  await applyInOrder(api, accountId, databaseId, rest);
+  await applyInOrder(api, accountId, databaseId, rest, before);
 };
 
 /**
@@ -740,12 +756,17 @@ const applyInOrder = async (
  * query, as Wrangler sends them; the API doesn't document such a query as
  * atomic, so a failure part way could leave a migration half applied and
  * unrecorded (threat model CO13). The first that fails stops the rest.
+ * `before` is checked before each one: a runner's check that it still
+ * holds its client, so one that lost it applies nothing more.
  */
 export const applyD1Migrations = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  migrations: readonly D1Migration[]
+  migrations: readonly D1Migration[],
+  before: BeforeMigration = async () => {
+    await Promise.resolve();
+  }
 ): Promise<string[]> => {
   const [, applied = []] = await queryD1(
     api,
@@ -755,7 +776,7 @@ export const applyD1Migrations = async (
   );
   const done = new Set(applied.map(({ name }) => name));
   const pending = migrations.filter(({ name }) => !done.has(name));
-  await applyInOrder(api, accountId, databaseId, pending);
+  await applyInOrder(api, accountId, databaseId, pending, before);
   return pending.map(({ name }) => name);
 };
 
