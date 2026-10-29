@@ -198,7 +198,9 @@ describe("the company pages, in the admin", () => {
     const { html } = await setupOf(client.id);
 
     expect({
-      stopped: html.includes("Setting it up stopped at its resources step"),
+      stopped: html.includes(
+        "Stopped after its resources step, resume it from Hosting"
+      ),
       code: html.includes("probe_unanswered"),
       resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
     }).toStrictEqual({ stopped: true, code: true, resume: true });
