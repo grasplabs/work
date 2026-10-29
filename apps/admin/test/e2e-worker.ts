@@ -5,7 +5,7 @@
  *
  * - Cloudflare's API, and client Workers on workers.dev, answer from the
  *   fake the tests use (test/cloudflare-api.ts), in place of `fetch` in this
- *   isolate, where the Workflows' steps run too. Requests to this machine
+ *   isolate, where the runs' steps run too. Requests to this machine
  *   (Vite's dev server) go out as usual; anything else is refused.
  * - Each Worker upload takes seconds, as a real one may: a journey sees
  *   a rollout run before it's done.

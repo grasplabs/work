@@ -165,6 +165,14 @@ msgstr "{answered} respondidas"
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
 
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected"
+msgstr "{app} está conectado"
+
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected again"
+msgstr "{app} vuelve a estar conectado"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} aún no está conectado."
@@ -2711,6 +2719,7 @@ msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Aplícala si el dominio del remitente es {domain}."
 
 #: src/engines/screen-approval.tsx
+#: src/inbox/items.ts
 msgid "Approval"
 msgstr "Aprobación"
 
@@ -3792,6 +3801,7 @@ msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sen
 msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp en una y te enviará un enlace para vincular tu cuenta aquí. Desvincula la que ya no uses."
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Chat name"
 msgstr "Nombre del chat"
 
@@ -3918,6 +3928,7 @@ msgid "Click to open Usage"
 msgstr "Haz clic para abrir Uso"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
@@ -4234,11 +4245,6 @@ msgstr "Conectada, acceso directo"
 msgid "Connected, via Composio"
 msgstr "Conectada, a través de Composio"
 
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected."
-msgstr "Conectada."
-
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
@@ -4354,6 +4360,7 @@ msgid "Copenhagen"
 msgstr "Copenhague"
 
 #: src/chat/answer-markdown.tsx
+#: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
@@ -4373,6 +4380,10 @@ msgstr "Copiar dirección"
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
 msgstr "Copiar el ID de la aplicación"
+
+#: src/chat/chat-more.tsx
+msgid "Copy as Markdown"
+msgstr "Copiar como Markdown"
 
 #: src/chat/answer-markdown.tsx
 msgid "Copy code"
@@ -4411,6 +4422,7 @@ msgid "Copy the link for {name}"
 msgstr "Copiar el enlace de {name}"
 
 #: src/chat/answer-markdown.tsx
+#: src/chat/chat-more.tsx
 msgid "Copying didn't work"
 msgstr "No se ha podido copiar"
 
@@ -4681,6 +4693,8 @@ msgid "Definition version"
 msgstr "Versión de la definición"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
+#: src/chat/delete-chat-dialog.tsx
 #: src/policies/policy-editing.tsx
 msgid "Delete"
 msgstr "Eliminar"
@@ -4690,7 +4704,7 @@ msgctxt "button: delete an interview for good"
 msgid "Delete"
 msgstr "Eliminar"
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
 
@@ -4749,6 +4763,10 @@ msgstr "Denegó paquetes"
 #: src/dashboard/dependency-requests.tsx
 msgid "Depends on"
 msgstr "Depende de"
+
+#: src/engines/new-app.tsx
+msgid "Describe the app: what it shows, and for whom"
+msgstr "Describe la aplicación: qué muestra y para quién"
 
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
@@ -5019,6 +5037,7 @@ msgstr "Accesos directos de dominios"
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -5080,6 +5099,10 @@ msgstr "Bien hecho"
 msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Hacerlo bien"
+
+#: src/chat/chat-more.tsx
+msgid "Download"
+msgstr "Descargar"
 
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
@@ -5592,10 +5615,6 @@ msgstr "Exportar informe"
 msgid "Export the audit trail"
 msgstr "Exportar el registro de auditoría"
 
-#: src/routes/_shell.index.tsx
-msgid "Export this chat"
-msgstr "Exportar este chat"
-
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Exportó el registro de auditoría"
@@ -5898,6 +5917,7 @@ msgid "for every model call this month"
 msgstr "por todas las llamadas a modelos este mes"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "For everyone"
 msgstr "Para todos"
 
@@ -6016,6 +6036,10 @@ msgstr "Lagunas"
 msgid "Gave consent for a connection"
 msgstr "Dio su consentimiento para una conexión"
 
+#: src/activity/audit-words.ts
+msgid "Gave up revoking a disconnected account's access at its provider"
+msgstr "Desistió de revocar el acceso de una cuenta desconectada en su proveedor"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Recibe sus enlaces cuando se informe al equipo"
@@ -6117,6 +6141,18 @@ msgstr "Grasp ha añadido un widget a tu panel."
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Ahora mismo no se puede acceder a Grasp. Vuelve a intentarlo en un momento."
 
+#: src/chat/failure.ts
+msgid "Grasp can't count model spend right now. Try again later."
+msgstr "Grasp no puede contabilizar el gasto en modelos ahora mismo. Vuelve a intentarlo más tarde."
+
+#: src/chat/failure.ts
+msgid "Grasp can't read your organization's model limits right now. Try again later."
+msgstr "Grasp no puede leer los límites de modelos de tu organización ahora mismo. Vuelve a intentarlo más tarde."
+
+#: src/chat/failure.ts
+msgid "Grasp can't tell what this model would cost. Pick another one."
+msgstr "Grasp no sabe cuánto costaría este modelo. Elige otro."
+
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
 msgstr "Grasp ha cambiado un widget de tu panel."
@@ -6125,6 +6161,10 @@ msgstr "Grasp ha cambiado un widget de tu panel."
 msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp comprueba qué hace falta para conectarla. La encuentras en Solicitadas."
+
+#: src/chat/failure.ts
+msgid "Grasp could not be reached. Try again."
+msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not finish reading it. Read it again."
@@ -6137,6 +6177,10 @@ msgstr "Grasp no pudo crear reglas a partir de lo que leyó. Vuelve a leerla o c
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not read this policy"
 msgstr "Grasp no ha podido leer esta política"
+
+#: src/chat/failure.ts
+msgid "Grasp couldn't put this question to the model. Try again."
+msgstr "Grasp no pudo hacerle esta pregunta al modelo. Vuelve a intentarlo."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -6165,6 +6209,10 @@ msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is busy right now. Read it again in a minute."
 msgstr "Grasp está ocupado ahora. Vuelve a leerla en un minuto."
+
+#: src/chat/failure.ts
+msgid "Grasp is busy with other questions. Try again in a minute."
+msgstr "Grasp está ocupado con otras preguntas. Vuelve a intentarlo en un minuto."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -6195,6 +6243,14 @@ msgstr "Grasp permite enviarlo una vez más, exactamente igual que antes, y una 
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp hace este cambio en {connection}, exactamente con lo que se muestra."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may read and write in {app}, only for what you allow."
+msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may use {app} only through the tools you allowed."
+msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
@@ -7119,7 +7175,7 @@ msgstr "Sus enlaces salen el primer día"
 msgid "Its links wait for the day the interviews start."
 msgstr "Sus enlaces esperan al día en que empiezan las entrevistas."
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Sus mensajes se eliminan para siempre y se rechaza cada cambio que su agente retiene para ti. Lo que hizo el agente queda en el registro de auditoría."
 
@@ -7225,6 +7281,7 @@ msgid "Jump to the newest message"
 msgstr "Ir al mensaje más reciente"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Just for you"
 msgstr "Solo para ti"
 
@@ -7269,6 +7326,10 @@ msgstr "Falla una y otra vez"
 msgctxt "a proposed rule an admin kept"
 msgid "Kept"
 msgstr "Conservada"
+
+#: src/activity/audit-words.ts
+msgid "Kept access at the provider for an account connected again"
+msgstr "Mantuvo el acceso en el proveedor para una cuenta conectada de nuevo"
 
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
@@ -7669,6 +7730,10 @@ msgstr "En marcha, en medición"
 msgid "Live: {who}, version {version}."
 msgstr "En producción: {who}, versión {version}."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Live: version {version}"
+msgstr "En producción: versión {version}"
+
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Cargar más"
@@ -7820,6 +7885,7 @@ msgctxt "button: note the one reminder as sent"
 msgid "Mark reminded"
 msgstr "Marcar como recordado"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -7954,6 +8020,10 @@ msgstr "Modelos"
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Aún no hay modelos configurados en este despliegue, así que no se puede llamar a ningún modelo. Grasp los configura."
 
+#: src/chat/failure.ts
+msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
+msgstr "Los modelos aún no están configurados. Pide a tu administrador que Grasp los configure."
+
 #: src/chat/composer.tsx
 msgid "Models for your organization"
 msgstr "Modelos de tu organización"
@@ -7996,6 +8066,10 @@ msgstr "Más para {title}"
 #: src/chat/chat-list.tsx
 msgid "More for the project {name}"
 msgstr "Más opciones del proyecto {name}"
+
+#: src/chat/chat-more.tsx
+msgid "More for this chat"
+msgstr "Más opciones de este chat"
 
 #: src/interview/words.ts
 msgid "More of the steps."
@@ -8054,6 +8128,7 @@ msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "Mover {title}: arrástralo o usa las teclas de flecha"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Move to project"
 msgstr "Mover a un proyecto"
 
@@ -8214,6 +8289,11 @@ msgstr "Nunca"
 msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
+
+#: src/routes/_shell.apps.new.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "New app"
+msgstr "Nueva aplicación"
 
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
@@ -9616,6 +9696,7 @@ msgid "Only when a condition holds:"
 msgstr "Solo cuando se cumple una condición:"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Solo tú puedes usarlo."
 
@@ -9875,6 +9956,10 @@ msgstr "Otros dominios ahora pueden llamar a {name}"
 msgid "Other domains may now call {name}, which {does}"
 msgstr "Otros dominios ahora pueden llamar a {name}, que {does}"
 
+#: src/chat/failure.ts
+msgid "Other questions are using what's left of the model budget. Try again in a minute."
+msgstr "Otras preguntas están usando lo que queda del presupuesto de modelos. Vuelve a intentarlo en un minuto."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Si no:"
@@ -10079,6 +10164,7 @@ msgstr "Método de pago"
 msgid "Payment receipts"
 msgstr "Recibos de pago"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
@@ -10925,8 +11011,13 @@ msgid "Removed: it acts for whoever uses the domain, with everything the domain 
 msgstr "Eliminado: actúa en nombre de quien use el dominio, con todo lo que el dominio tiene"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Rename"
 msgstr "Cambiar nombre"
+
+#: src/chat/chat-more.tsx
+msgid "Rename chat"
+msgstr "Renombrar chat"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
@@ -11160,6 +11251,10 @@ msgstr "Revocar los paquetes de {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "¿Revocar los paquetes de {domain}?"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a disconnected account's access at its provider"
+msgstr "Revocó el acceso de una cuenta desconectada en su proveedor"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -11450,6 +11545,7 @@ msgid "Same version, different contents: {changed}"
 msgstr "Misma versión, contenido distinto: {changed}"
 
 #: src/brain/goals-editor.tsx
+#: src/chat/chat-more.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/policies/policy-editing.tsx
@@ -11635,6 +11731,14 @@ msgstr "Uso detectado: aún no, ni por el inicio de sesión ni por Pulse"
 #: src/brain/brain.ts
 msgid "Seen, never mentioned"
 msgstr "Vistas, nunca mencionadas"
+
+#: src/inbox/items.ts
+msgid "Self-approved"
+msgstr "Autoaprobada"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Self-approved: nobody else could approve it"
+msgstr "Autoaprobada: nadie más podía aprobarla"
 
 #: src/interview/composer.tsx
 msgid "Send"
@@ -12537,6 +12641,7 @@ msgid "Take off the list"
 msgstr "Quitar de la lista"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Take out of the project"
 msgstr "Sacar del proyecto"
 
@@ -13028,6 +13133,10 @@ msgstr "No se pudo leer el catálogo de integraciones, así que esta página mue
 msgid "The change to the store {name} was abandoned"
 msgstr "Se abandonó el cambio en el almacén {name}"
 
+#: src/chat/chat-more.tsx
+msgid "The chat wasn't moved"
+msgstr "El chat no se ha movido"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "El código de la versión {version}"
@@ -13169,6 +13278,7 @@ msgstr "La redacción anterior queda en el historial del objetivo."
 msgid "the EU"
 msgstr "la UE"
 
+#: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
@@ -13330,14 +13440,25 @@ msgstr "La migración {migration} de la tabla {table} falló en el registro {rec
 msgid "the migration threw an error"
 msgstr "la migración lanzó un error"
 
-#: src/chat/chat-markdown.ts
-#: src/chat/thread.tsx
-msgid "The model call failed."
-msgstr "La llamada al modelo falló."
+#: src/chat/failure.ts
+msgid "The model budget is used up. Ask your admin to have Grasp raise it."
+msgstr "El presupuesto de modelos se ha agotado. Pide a tu administrador que Grasp lo aumente."
+
+#: src/chat/failure.ts
+msgid "The model couldn't answer. Try again."
+msgstr "El modelo no pudo responder. Vuelve a intentarlo."
+
+#: src/chat/failure.ts
+msgid "The model is busy. Try again in a minute."
+msgstr "El modelo está ocupado. Vuelve a intentarlo en un minuto."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The model key does not work. Check it in Settings, under Models."
 msgstr "La clave del modelo no funciona. Revísala en Configuración, en Modelos."
+
+#: src/chat/failure.ts
+msgid "The model's answer came back in the wrong shape. Try again."
+msgstr "La respuesta del modelo llegó con un formato incorrecto. Vuelve a intentarlo."
 
 #: src/brain/brain-atlas.ts
 msgid "The monthly budget for AI is not set yet."
@@ -13828,9 +13949,17 @@ msgstr "Quien te envió el enlace ha cerrado este chat."
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Este chat ha llegado a su límite. Pulsa Terminar para acabarlo."
 
+#: src/chat/failure.ts
+msgid "This chat holds sensitive data this model may not see. Pick another one."
+msgstr "Este chat contiene datos sensibles que este modelo no puede ver. Elige otro."
+
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Este chat leyó datos restringidos: esto puede enviarlos fuera"
+
+#: src/chat/failure.ts
+msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
+msgstr "Este chat se queda en la UE, y este modelo no está alojado allí. Elige otro."
 
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "This collection has no files yet."
@@ -13958,6 +14087,10 @@ msgstr "Este enlace abre la app con algo que no admite. Abra la app desde su dom
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
 msgstr "Esta lista es demasiado grande. Puedo aceptar hasta {peopleMost} personas en hasta {teamsMost} equipos."
 
+#: src/chat/failure.ts
+msgid "This model can't give an answer that long. Pick another model, or ask for less."
+msgstr "Este modelo no puede dar una respuesta tan larga. Elige otro modelo o pide menos."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "Este mes"
@@ -13993,6 +14126,10 @@ msgstr "Esta política ya no está aquí"
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"
 msgstr "Esta regla ya no está aquí"
+
+#: src/chat/failure.ts
+msgid "This run has made all the model calls it may make."
+msgstr "Esta ejecución ya ha hecho todas las llamadas al modelo que puede hacer."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
@@ -15214,6 +15351,10 @@ msgstr "¿Qué debería cambiar?"
 msgid "What should Grasp do there?"
 msgstr "¿Qué debe hacer Grasp allí?"
 
+#: src/engines/new-app.tsx
+msgid "What should the app show, and for whom?"
+msgstr "¿Qué debe mostrar la aplicación y para quién?"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
 msgstr "¿Qué debería saber la próxima persona de Grasp?"
@@ -15323,6 +15464,10 @@ msgstr "Lo que has confirmado queda guardado. ¿Se te olvidó algo? Este enlace 
 #: src/brain/memory-page.tsx
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "Lo que tú y tus agentes recordáis, y lo que otros comparten contigo, aparece aquí."
+
+#: src/connections/connected-dialog.tsx
+msgid "What you chose"
+msgstr "Lo que elegiste"
 
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
@@ -16039,6 +16184,10 @@ msgstr "Allí lo apruebas. {app} muestra lo que pide Grasp."
 msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "Has iniciado sesión como personal de Grasp, por un tiempo limitado."
 
+#: src/inbox/items.ts
+msgid "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved."
+msgstr "Lo pediste tú y nadie más puede aprobarlo, así que decides tú. Queda registrado como autoaprobado."
+
 #: src/onboarding/setup-steps.tsx
 msgid "You can close this page now. Come back here to see how far I am."
 msgstr "Ya puedes cerrar esta página. Vuelve aquí para ver por dónde voy."
@@ -16167,13 +16316,22 @@ msgstr "Tu onboarding"
 msgid "your organization"
 msgstr "tu organización"
 
+#: src/chat/failure.ts
+msgid "Your organization doesn't allow this model. Pick another one."
+msgstr "Tu organización no permite este modelo. Elige otro."
+
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Tu organización lo usa mediante los permisos que concedes."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Your organization’s account"
 msgstr "La cuenta de tu organización"
+
+#: src/chat/failure.ts
+msgid "Your organization's model limits need a check. Ask your admin to have Grasp look at them."
+msgstr "Hay que revisar los límites de modelos de tu organización. Pide a tu administrador que Grasp los revise."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."

@@ -4567,6 +4567,13 @@ export const workflowResourceLifecycles = sqliteTable(
     liveVersion: integer("live_version"),
     liveApprovedBy: text("live_approved_by"),
     liveApprovedAt: timestamp("live_approved_at"),
+    /**
+     * Whether whoever asked for the live version approved it themselves,
+     * allowed only while nobody else could (GRA-1227).
+     */
+    liveSelfApproved: integer("live_self_approved", { mode: "boolean" })
+      .notNull()
+      .default(false),
     pausedBy: text("paused_by"),
     pausedAt: timestamp("paused_at"),
     goLiveVersion: integer("go_live_version"),

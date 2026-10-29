@@ -14,13 +14,17 @@ import type {
   WorkflowStage,
 } from "@grasp-os/shared/workflow-lifecycle";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  members,
   workflowResourceDrafts,
   workflowResourceLifecycles,
   workflowResources,
@@ -45,10 +49,18 @@ import {
 //   the second is refused (`workflow.lifecycle_conflict`), never merged;
 //   what each write checks against the state it read holds as it lands.
 // - Going live on one's own say. A builder asks for an exact published
-//   version; only the workflow's owner or an admin decides, and never the
+//   version; only the workflow's owner or an admin decides, and not the
 //   person who asked (`workflow.go_live_own_request`). A decision names
 //   the version it approves, so it never approves one asked for after it
 //   was read (`workflow.go_live_not_pending`).
+// - Nothing ever going live where nobody else may decide (a company with
+//   one admin, GRA-1227). Whoever asked decides it themselves only while
+//   no other active member may: an admin, or the workflow's owner. That
+//   is read with the state the decision names, and asked again by the
+//   decision's own write, so an approver who joins in between refuses it.
+//   It is recorded as self-approved, on the lifecycle and in the audit
+//   event, with why; the next request, once someone else may decide, is
+//   four-eyes again.
 // - A stage that says more than is true. `live` and `scaling` need a
 //   version that went live, and a workflow with one stays in them
 //   (`workflow.stage_invalid`); only an approval makes it live.
@@ -80,16 +92,40 @@ const followedStage = (
   return draft === null ? "mapped" : "designed";
 };
 
-/** The workflow's lifecycle row (if any) and its draft's revisions, read together. */
+/**
+ * That an active member of the organization other than `requester` may
+ * decide a go-live of a workflow owned by `owner`, as SQL: an admin, or
+ * its owner. Grasp staff aren't members, and never decide one.
+ */
+const otherApproverSql = (
+  owner: string | SQLiteColumn,
+  requester: string | SQL
+): SQL => sql`(EXISTS (
+    SELECT 1 FROM ${members}
+    WHERE ${members.userId} IS NOT ${requester}
+      AND ${activeMember(members.userId, ["admin"])}
+  )
+  OR (${owner} IS NOT ${requester} AND ${activeMember(owner)}))`;
+
+/**
+ * The workflow's lifecycle row (if any), its draft's revisions, and
+ * whether nobody but whoever asked for the version waiting may decide it,
+ * read together.
+ */
 const stateOf = async (
   env: Env,
-  id: string
+  workflow: Pick<Workflow, "id" | "owner">
 ): Promise<{
   row: Lifecycle | undefined;
   draft: WorkflowLifecycle["draft"];
+  onlyApprover: boolean;
 }> => {
+  const { id } = workflow;
   const db = drizzle(env.DB);
-  const [rows, drafts] = await db.batch([
+  const requester = sql`(SELECT ${workflowResourceLifecycles.goLiveRequestedBy}
+    FROM ${workflowResourceLifecycles}
+    WHERE ${workflowResourceLifecycles.workflowResourceId} = ${id})`;
+  const [rows, drafts, others] = await db.batch([
     db
       .select()
       .from(workflowResourceLifecycles)
@@ -103,10 +139,17 @@ const stateOf = async (
       })
       .from(workflowResourceDrafts)
       .where(eq(workflowResourceDrafts.workflowResourceId, id)),
+    db
+      .select({
+        other: sql<number>`${otherApproverSql(workflow.owner, requester)}`,
+      })
+      .from(workflowResources)
+      .where(eq(workflowResources.id, id)),
   ]);
   const [counted] = drafts;
   return {
     row: rows[0],
+    onlyApprover: others[0]?.other === 0,
     draft:
       counted?.revision === null || counted?.revision === undefined
         ? null
@@ -134,6 +177,7 @@ const liveOf = (row: Lifecycle | undefined): WorkflowLifecycle["live"] => {
     version: row.liveVersion,
     approvedBy: row.liveApprovedBy,
     approvedAt: row.liveApprovedAt.toISOString(),
+    selfApproved: row.liveSelfApproved,
   };
 };
 
@@ -144,7 +188,10 @@ const pausedOf = (row: Lifecycle | undefined): WorkflowLifecycle["paused"] =>
     : { by: row.pausedBy, at: row.pausedAt.toISOString() };
 
 /** The version waiting to go live, as the API answers it. */
-const goLiveOf = (row: Lifecycle | undefined): WorkflowLifecycle["goLive"] => {
+const goLiveOf = (
+  row: Lifecycle | undefined,
+  onlyApprover: boolean
+): WorkflowLifecycle["goLive"] => {
   if (
     row?.goLiveVersion === null ||
     row?.goLiveVersion === undefined ||
@@ -157,16 +204,16 @@ const goLiveOf = (row: Lifecycle | undefined): WorkflowLifecycle["goLive"] => {
     version: row.goLiveVersion,
     requestedBy: row.goLiveRequestedBy,
     requestedAt: row.goLiveRequestedAt.toISOString(),
+    onlyApprover,
   };
 };
 
 const lifecycleOf = (
   by: Acting,
   workflow: Workflow,
-  row: Lifecycle | undefined,
-  draft: WorkflowLifecycle["draft"]
+  { row, draft, onlyApprover }: Awaited<ReturnType<typeof stateOf>>
 ): WorkflowLifecycle => {
-  const goLive = goLiveOf(row);
+  const goLive = goLiveOf(row, onlyApprover);
   return {
     workflowId: workflow.id,
     revision: row?.revision ?? 0,
@@ -180,7 +227,7 @@ const lifecycleOf = (
     canChange: workflow.role === "builder" && !by.staff,
     canDecide:
       goLive !== null &&
-      goLive.requestedBy !== by.userId &&
+      (goLive.requestedBy !== by.userId || goLive.onlyApprover) &&
       decides(by, workflow),
   };
 };
@@ -192,8 +239,7 @@ export const workflowLifecycle = async (
   id: unknown
 ): Promise<WorkflowLifecycle> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  const { row, draft } = await stateOf(env, workflow.id);
-  return lifecycleOf(by, workflow, row, draft);
+  return lifecycleOf(by, workflow, await stateOf(env, workflow));
 };
 
 /** Whether workflow `id` is paused now. */
@@ -214,8 +260,9 @@ type Change = Partial<
 /**
  * Writes `change` over lifecycle revision `revision` of `workflow`, with
  * `entry` audited, and the policy generation moved on too if `fences`:
- * only if the revision is still the one read, or
- * `workflow.lifecycle_conflict`. Answers the lifecycle as it left it.
+ * only if the revision is still the one read, and `also` holds as it
+ * lands, or `workflow.lifecycle_conflict`. Answers the lifecycle as it
+ * left it.
  */
 const write = async (
   env: Env,
@@ -225,7 +272,7 @@ const write = async (
   change: Change,
   action: string,
   detail: AuditEntry["detail"],
-  fences = false
+  { fences = false, also }: { fences?: boolean; also?: SQL } = {}
 ): Promise<WorkflowLifecycle> => {
   const db = drizzle(env.DB);
   const updatedAt = new Date();
@@ -248,7 +295,8 @@ const write = async (
           .where(
             and(
               eq(workflowResourceLifecycles.workflowResourceId, workflow.id),
-              eq(workflowResourceLifecycles.revision, revision)
+              eq(workflowResourceLifecycles.revision, revision),
+              also
             )
           )
           .returning(returned);
@@ -268,8 +316,7 @@ const write = async (
   if (written.length === 0) {
     throw workflowResourceErrors.create("workflow.lifecycle_conflict");
   }
-  const { row, draft } = await stateOf(env, workflow.id);
-  return lifecycleOf(by, workflow, row, draft);
+  return lifecycleOf(by, workflow, await stateOf(env, workflow));
 };
 
 /** A change's input, parsed, and the workflow and state it changes. */
@@ -283,6 +330,7 @@ const changing = async <Schema extends z.ZodType>(
   workflow: Workflow;
   input: z.infer<Schema>;
   row: Lifecycle | undefined;
+  onlyApprover: boolean;
 }> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "user");
@@ -291,8 +339,8 @@ const changing = async <Schema extends z.ZodType>(
     schema,
     input
   );
-  const { row } = await stateOf(env, workflow.id);
-  return { workflow, input: parsed, row };
+  const { row, onlyApprover } = await stateOf(env, workflow);
+  return { workflow, input: parsed, row, onlyApprover };
 };
 
 /** That `revision` is the one `row` is at, or `workflow.lifecycle_conflict`. */
@@ -369,7 +417,7 @@ export const pauseWorkflow = async (
     { pausedAt: new Date(), pausedBy: by.userId },
     "workflow.paused",
     {},
-    true
+    { fences: true }
   );
 };
 
@@ -451,10 +499,13 @@ export const requestGoLive = async (
 
 /**
  * Approves or rejects the version waiting to go live on workflow `id`,
- * for its owner and the organization's admins, never who asked for it.
- * Approved, it is the live version, and the workflow live unless it was
- * scaling already. Audited as `workflow.go_live.approved` or
- * `workflow.go_live.rejected`.
+ * for its owner and the organization's admins; for whoever asked for it
+ * only while nobody else may (`otherApproverSql`), as read with the
+ * revision the decision names and again as it lands, else
+ * `workflow.go_live_own_request`. Approved, it is the live version, and
+ * the workflow live unless it was scaling already. Audited as
+ * `workflow.go_live.approved` or `workflow.go_live.rejected`, a decision
+ * of one's own request with `self` and why.
  */
 export const decideGoLive = async (
   env: Env,
@@ -466,6 +517,7 @@ export const decideGoLive = async (
     workflow,
     input: decision,
     row,
+    onlyApprover,
   } = await changing(env, by, id, workflowGoLiveDecisionSchema, input);
   if (!decides(by, workflow)) {
     throw roleErrors.create("role.forbidden");
@@ -474,7 +526,8 @@ export const decideGoLive = async (
   if (row === undefined || row.goLiveVersion !== decision.version) {
     throw workflowResourceErrors.create("workflow.go_live_not_pending");
   }
-  if (row.goLiveRequestedBy === by.userId) {
+  const own = row.goLiveRequestedBy === by.userId;
+  if (own && !onlyApprover) {
     throw workflowResourceErrors.create("workflow.go_live_own_request");
   }
   const cleared: Change = {
@@ -482,43 +535,73 @@ export const decideGoLive = async (
     goLiveRequestedBy: null,
     goLiveRequestedAt: null,
   };
-  if (decision.verdict === "reject") {
+  const self: AuditEntry["detail"] = own
+    ? { self: true, reason: "no_other_approver" }
+    : {};
+  // Asked again as it lands: an approver who joined since refuses it.
+  const also = own
+    ? sql`NOT ${otherApproverSql(workflow.owner, by.userId)}`
+    : undefined;
+  try {
+    if (decision.verdict === "reject") {
+      return await write(
+        env,
+        by,
+        workflow,
+        decision.revision,
+        cleared,
+        "workflow.go_live.rejected",
+        {
+          version: decision.version,
+          requestedBy: row.goLiveRequestedBy,
+          ...self,
+        },
+        { also }
+      );
+    }
     return await write(
       env,
       by,
       workflow,
       decision.revision,
-      cleared,
-      "workflow.go_live.rejected",
-      { version: decision.version, requestedBy: row.goLiveRequestedBy }
+      {
+        ...cleared,
+        liveVersion: decision.version,
+        liveApprovedBy: by.userId,
+        liveApprovedAt: new Date(),
+        liveSelfApproved: own,
+        stage: row.stage === "scaling" ? "scaling" : "live",
+      },
+      "workflow.go_live.approved",
+      {
+        version: decision.version,
+        previous: row.liveVersion,
+        requestedBy: row.goLiveRequestedBy,
+        ...self,
+      },
+      { also }
     );
-  }
-  return await write(
-    env,
-    by,
-    workflow,
-    decision.revision,
-    {
-      ...cleared,
-      liveVersion: decision.version,
-      liveApprovedBy: by.userId,
-      liveApprovedAt: new Date(),
-      stage: row.stage === "scaling" ? "scaling" : "live",
-    },
-    "workflow.go_live.approved",
-    {
-      version: decision.version,
-      previous: row.liveVersion,
-      requestedBy: row.goLiveRequestedBy,
+  } catch (error) {
+    // Refused as it landed: by an approver who joined, unless the
+    // lifecycle moved on too.
+    const now = own ? await stateOf(env, workflow) : undefined;
+    if (
+      workflowResourceErrors.codeOf(error) === "workflow.lifecycle_conflict" &&
+      now?.row?.revision === decision.revision &&
+      !now.onlyApprover
+    ) {
+      throw workflowResourceErrors.create("workflow.go_live_own_request");
     }
-  );
+    throw error;
+  }
 };
 
 /**
  * Every version waiting to go live that `by` may decide, oldest request
  * first: as `decides` has it, on the workflows they own, or every one for
- * the organization's admins, never Grasp staff, and never one they asked
- * for themselves. For the waiting feed (waiting-rpc.ts).
+ * the organization's admins, never Grasp staff, and one they asked for
+ * themselves only while nobody else may decide it. For the waiting feed
+ * (waiting-rpc.ts).
  */
 export const goLivesWaiting = async (
   env: Env,
@@ -547,7 +630,8 @@ export const goLivesWaiting = async (
       and(
         isNull(workflowResources.deletedAt),
         isNotNull(lifecycles.goLiveVersion),
-        ne(lifecycles.goLiveRequestedBy, by.userId),
+        sql`(${lifecycles.goLiveRequestedBy} IS NOT ${by.userId}
+          OR NOT ${otherApproverSql(workflowResources.ownerId, by.userId)})`,
         isAdmin(by.role) ? undefined : eq(workflowResources.ownerId, by.userId)
       )
     )
@@ -564,6 +648,7 @@ export const goLivesWaiting = async (
             requestedAt: row.requestedAt.toISOString(),
             revision: row.revision,
             asOwner: row.owner === by.userId,
+            selfApproval: row.requestedBy === by.userId,
           },
         ]
   );

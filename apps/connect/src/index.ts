@@ -30,6 +30,7 @@ import type {
   Disconnect,
   RequireClassRights,
   DisconnectPersonal,
+  ErasePersonal,
   FinishConnection,
   HeldCall,
   HeldOutcome,
@@ -151,6 +152,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -382,6 +384,12 @@ export default class Connect
     request: DisconnectPersonal
   ): Promise<{ disconnected: number }> {
     return await disconnectPersonal(this.env, request);
+  }
+
+  async erasePersonal(
+    request: ErasePersonal
+  ): Promise<{ connections: number }> {
+    return await erasePersonal(this.env, request);
   }
 
   async abandonFlow(state: string): Promise<void> {

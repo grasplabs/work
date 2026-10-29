@@ -224,6 +224,8 @@ export interface Checker {
   taskIds: Set<string>;
   /** Tasks counted so far, each before its body is walked. */
   taskCount: number;
+  /** How many forks the task being walked is inside. */
+  forkDepth: number;
   tasks: TaskRecord[];
   lists: ListRecord[];
   slots: ExpressionSlot[];
@@ -247,6 +249,7 @@ export const createChecker = (options: ReadOptions): Checker => ({
   reusableTimeouts: new Set(),
   taskIds: new Set(),
   taskCount: 0,
+  forkDepth: 0,
   tasks: [],
   lists: [],
   slots: [],
