@@ -56,7 +56,7 @@ import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { appHost, workspace } from "./durable-objects.ts";
-import { gatewaySettings, modelEffortsOf } from "./models.ts";
+import { modelSettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
@@ -299,21 +299,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   async models(): Promise<string[]> {
-    return await withPerson(
-      this.#check,
-      () => gatewaySettings(this.#env).models
-    );
+    return await withPerson(this.#check, async () => {
+      const { models: allowed } = await modelSettings(this.#env);
+      return allowed;
+    });
   }
 
   async efforts(): Promise<Record<string, ModelEfforts>> {
-    return await withPerson(this.#check, () =>
-      Object.fromEntries(
-        gatewaySettings(this.#env).models.map((model) => [
-          model,
-          modelEffortsOf(model),
-        ])
-      )
-    );
+    return await withPerson(this.#check, async () => {
+      const { models: allowed } = await modelSettings(this.#env);
+      return Object.fromEntries(
+        allowed.map((model) => [model, modelEffortsOf(model)])
+      );
+    });
   }
 
   async list(): Promise<ChatSummary[]> {
