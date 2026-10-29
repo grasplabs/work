@@ -313,6 +313,10 @@ const coreDb: D1State = {
       `${core}workflows/host.ts`,
       "What each run's latest recall cites, checked before its next calls."
     ),
+    run_evidence_holds: transient(
+      `${core}workflows/resource-reads.ts`,
+      "The runs whose evidence a run holds, its children's whose output it took: checked with its own."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -575,6 +579,14 @@ const connectDb: D1State = {
     call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
+    token_revocations: exported(
+      `${connect}revocations.ts`,
+      "Revokes a provider still owes, the tokens kept until they go through: an obligation a move must keep."
+    ),
+    erased_people: exported(
+      `${connect}person-erasure.ts`,
+      "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
+    ),
   },
 };
 
@@ -1030,9 +1042,9 @@ export const clientStateRegistry: ClientStateRegistry = {
   },
   notClientState: {
     "apps/admin/wrangler.jsonc":
-      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+      "Grasp's admin runs once per stage, in Grasp's account: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+      "The router runs once per stage, in Grasp's account, and holds only hostnames the admin writes.",
     "apps/gateway/wrangler.jsonc":
       "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },

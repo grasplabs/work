@@ -165,8 +165,8 @@ export const clients = sqliteTable(
 /**
  * The runner that's a client's current one (src/runners.ts): the
  * only one that may change what its account runs. A provisioning run (a
- * Workflow instance per attempt), a rollout while it deploys the client
- * (its Workflow instance), or a rollback of the client (its instance).
+ * run per attempt), a rollout while it deploys the client
+ * (its run), or a rollback of the client (its run).
  * Each claims it with one conditional write naming the runner it
  * replaces, so however many act at once, one wins: the single runner a
  * client's deploy relies on. No foreign key: a provisioning run is
@@ -176,7 +176,7 @@ export const clientRuns = sqliteTable("client_runs", {
   /** The client's id, as it will be recorded. */
   clientId: text("client_id").primaryKey(),
   /**
-   * The runner's id: a provisioning run's Workflow instance
+   * The runner's id: a provisioning attempt's run
    * (`<clientId>-<random>`), a rollout's (the rollout's id), a
    * rollback's (`rollback-<random>`), or applying the client's settings
    * (`apply-<random>`, src/clients/apply.ts).
@@ -623,7 +623,7 @@ export const clientProvisions = sqliteTable("client_provisions", {
    * of a secret.
    */
   progress: text(),
-  /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
+  /** The runner that last recorded a step: a run (src/runners.ts). */
   runId: text("run_id"),
   /**
    * The calls to the client's Workers still on their way, by sender (a
@@ -684,7 +684,7 @@ export const integrationBuilds = sqliteTable("integration_builds", {
   stoppedAt: text("stopped_at"),
   /** Why it needs a person, as a code; null otherwise. */
   reason: text(),
-  /** Its build's Workflow instance (src/builds/workflow.ts). */
+  /** Its build's run (src/builds/workflow.ts). */
   runId: text("run_id").notNull(),
   /**
    * The agent's plan, while it waits for a person or once approved: JSON

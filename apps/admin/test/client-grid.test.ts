@@ -1,7 +1,14 @@
-import { clientDispatchNamespace } from "@grasp-os/shared/router";
+import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -81,6 +88,9 @@ describe("the client grid", () => {
       .set({ status: "offboarded" })
       .where(eq(clients.status, "active"));
   });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("shows each client's release, ring and its operation's latest run from what the admin recorded, reading no account", async () => {
     const release = await importedRelease("feat(core): on the grid");
@@ -149,7 +159,7 @@ describe("the client grid", () => {
       throw new Error("The deploy left no core script");
     }
     acme.account.namespaces.set(
-      clientDispatchNamespace,
+      clientsNamespace("production"),
       new Map([[script, state]])
     );
     acme.account.scripts.delete(script);
@@ -159,7 +169,7 @@ describe("the client grid", () => {
     );
     const namespace = cloudflare.dispatcher(
       acme.account.id,
-      clientDispatchNamespace
+      clientsNamespace("production")
     );
     vi.spyOn(env.DISPATCHER, "get").mockImplementation(
       (name) =>
@@ -280,7 +290,21 @@ describe("the client grid", () => {
       cache: true,
     };
 
-    const first = await gridLive(env, options);
+    // The deadlines run on a clock the test moves: on the real one, a
+    // client that answers but is read slowly on a busy machine would run
+    // out of time too.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = gridLive(env, options);
+    // Every other client read, each deadline cleared as it answered: the
+    // slow client's, waiting on its account, is the only one left.
+    // (Not `vi.waitFor`: under fake timers it moves the clock as it polls.)
+    await slowArrived.promise;
+    while (vi.getTimerCount() !== 1) {
+      // oxlint-disable-next-line no-await-in-loop -- until the others are read
+      await scheduler.wait(1);
+    }
+    await vi.advanceTimersByTimeAsync(options.rowDeadlineMs);
+    const first = await reading;
     const peak = cloudflare.peakAccounts();
     const aborted = cloudflare.abortedCalls();
     // Both accounts answer from here on.

@@ -31,13 +31,7 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import {
-  guarded,
-  isEngineAbort,
-  quickStep,
-  stop,
-  stopReason,
-} from "../workflow-steps.ts";
+import { guarded, quickStep, stop, stopReason } from "../workflow-steps.ts";
 import {
   buildEvents,
   buildOf,
@@ -119,10 +113,10 @@ const leave = async (
     try {
       // oxlint-disable-next-line no-await-in-loop -- one day after another
       await step.waitForEvent(label, { type: event, timeout: "1 day" });
-    } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
+    } catch {
+      // A day without the event: the row is read again all the same. A
+      // run the engine stops (a pause, a terminate) never gets here: its
+      // activation's calls never settle.
     }
   }
   const stage = await step.do(
@@ -201,10 +195,10 @@ const write = async (
         type: buildEvents.pullRequest,
         timeout: `${sessionPollMinutes} minutes`,
       });
-    } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
+    } catch {
+      // No word from GitHub in time: the session is read again all the
+      // same. A run the engine stops never gets here: its activation's
+      // calls never settle.
     }
     // oxlint-disable-next-line no-await-in-loop -- one read after another
     const stage = await step.do(
@@ -323,9 +317,6 @@ export const integrationBuild = (env: Env): WorkflowDefinition => ({
       );
       ended = await follow(step, env, db, app);
     } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       const reason = stopReason(error);
       await step.do("stop after failing", quickStep, async () => {
         log.warn("build.stopped", { app, error: reason });

@@ -70,7 +70,7 @@
  *   (`wfp_binding_unqualified`): a release that sends mail among them, as
  *   whether a user Worker can send through a `send_email` binding at all
  *   is a spike of its own. The admin probes a user Worker in the
- *   namespace it and the router bind (`clientDispatchNamespace`) through
+ *   namespace it and the router bind (`router.namespace`) through
  *   that binding, as the router then reaches it (GRA-283); one in any
  *   other namespace stops at the probe (`probe_unqualified`), its
  *   hostname unpublished. Real-account qualification is GRA-430's.
@@ -81,15 +81,17 @@
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
+import {
+  deploymentPrefix,
+  platformWorkerName,
+  stageOfNamespace,
+} from "@grasp-os/shared/names";
 import type {
   LimitRaise,
   ReleaseManifest,
   WorkerEntry,
 } from "@grasp-os/shared/release";
-import {
-  clientDispatchNamespace,
-  deriveRouterSecret,
-} from "@grasp-os/shared/router";
+import { deriveRouterSecret } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
 import {
   and,
@@ -229,6 +231,14 @@ export const provisionOperationErrorCodes = [
   "model_spend_undecided",
   /** A binding kind Workers for Platforms doesn't document for user Workers. */
   "wfp_binding_unqualified",
+  /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
+  "destination_other_stage",
+  /**
+   * The admin's STAGE is neither staging nor production: it names no
+   * clients' namespace of its own, so it runs no operation, never taking
+   * itself for production.
+   */
+  "stage_unset",
   /** Cron triggers, which Workers for Platforms doesn't document for user Workers. */
   "wfp_schedule_unqualified",
   /** A script isn't at the release's Durable Object migration after its upload. */
@@ -329,6 +339,13 @@ export interface ProvisionContext {
      * placed on Workers for Platforms is reached (GRA-283).
      */
     dispatcher?: ClientDispatcher;
+    /**
+     * The namespace `dispatcher` binds: its stage's
+     * (@grasp-os/shared/names, `clientsNamespace`). A core in any other
+     * isn't reachable through it. Without it, or with one that is neither
+     * stage's, no operation runs (`stage_unset`).
+     */
+    namespace?: string;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
@@ -457,9 +474,13 @@ const wfpBindings: ReadonlySet<string> = new Set([
  * Platforms namespace, a service binding binds the connect gateway, with
  * props naming the client's own script (GRA-1217).
  */
-const renderOptionsOf = (loaded: Loaded): RenderOptions => ({
-  connectGateway: loaded.destination.kind === "workers_for_platforms",
-});
+const renderOptionsOf = (loaded: Loaded): RenderOptions => {
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  return loaded.destination.kind === "workers_for_platforms" &&
+    stage !== undefined
+    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
+    : {};
+};
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
 const assertHolds = async (
@@ -907,6 +928,11 @@ interface Loaded {
    * once this run's upload of it is observed, as `configuredAt` records it.
    */
   readAt: Date;
+  /**
+   * The clients' namespace of the admin's own stage (`router.namespace`):
+   * the only one it places a client in on Workers for Platforms.
+   */
+  ownNamespace: string;
 }
 
 /** The operation's progress, read afresh. */
@@ -1092,24 +1118,35 @@ const sendSettleMs = 5 * 60_000;
  */
 const defaultSendTimeoutMs = 150_000;
 
-/** One sender's mark: the change it sent for, and when (ms). */
-const sendMarkSchema = z.object({ change: z.int(), at: z.number() });
+/**
+ * One sender's mark: the change it sent for, and when (ms). A null change
+ * stands for marks that couldn't be read (`sendMarksOf`), and holds every
+ * change.
+ */
+const sendMarkSchema = z.object({ change: z.int().nullable(), at: z.number() });
 
 /** The marks on an operation (`clientProvisions.sending`), by sender. */
 const sendMarksSchema = z.record(z.string(), sendMarkSchema);
 
-/** The marks in `stored`; none for what doesn't parse. */
+/**
+ * The marks in `stored`, last written at `updatedAt`. What doesn't parse
+ * counts as a call still on its way, for any change, until it ages out
+ * from that write: never as none, which would let a rollback or a retry
+ * send past a call it can't see.
+ */
 const sendMarksOf = (
-  stored: string | null
+  stored: string | null,
+  updatedAt: Date
 ): z.infer<typeof sendMarksSchema> => {
   if (stored === null) {
     return {};
   }
+  const unreadable = { unreadable: { change: null, at: updatedAt.getTime() } };
   try {
     const parsed = sendMarksSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : {};
+    return parsed.success ? parsed.data : unreadable;
   } catch {
-    return {};
+    return unreadable;
   }
 };
 
@@ -1126,25 +1163,35 @@ const othersSending = (
   Object.entries(marks).some(
     ([sender, mark]) =>
       sender !== except &&
-      mark.change === change &&
+      (mark.change === change || mark.change === null) &&
       now - mark.at < sendSettleMs
   );
 
 /** The marks on client `clientId`'s operation, as stored now. */
 const sendMarks = async (db: AdminDatabase, clientId: string) => {
   const row = await db
-    .select({ sending: clientProvisions.sending })
+    .select({
+      sending: clientProvisions.sending,
+      updatedAt: clientProvisions.updatedAt,
+    })
     .from(clientProvisions)
     .where(eq(clientProvisions.clientId, clientId))
     .get();
-  return sendMarksOf(row?.sending ?? null);
+  return row === undefined ? {} : sendMarksOf(row.sending, row.updatedAt);
 };
 
 /** Who marks a call `held` sends: its attempt at its step, or the runner. */
 const senderOf = (held: HeldClient): string =>
   `${held.attemptKey ?? held.runId}#${String(held.attempt ?? 0)}`;
 
-/** `sender`'s path in an operation's marks, as SQLite's JSON functions take it. */
+/**
+ * `sender`'s path in an operation's marks, as SQLite's JSON functions take
+ * it. Stripping quotes changes no key in practice: a sender is
+ * `${attemptKey ?? runId}#${attempt}`, and neither Workerflow's
+ * idempotency keys nor the admin's run ids (UUIDs, `apply-…`,
+ * `rollback-…`, `<client>-p…`) hold a double quote. It only keeps the
+ * path's syntax whole.
+ */
 const markPath = (sender: string): string =>
   `$."${sender.replaceAll('"', "")}"`;
 
@@ -1321,6 +1368,15 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
   if (loaded.destination.kind !== "workers_for_platforms") {
     return;
   }
+  // The admin's own stage's namespace alone: a staging admin never places
+  // a client among production's, nor production's among staging's, with
+  // the deployer token they'd share (@grasp-os/shared/names).
+  if (loaded.destination.namespace !== loaded.ownNamespace) {
+    throw new ProvisionOperationError(
+      "destination_other_stage",
+      `${loaded.destination.id}'s namespace ${String(loaded.destination.namespace)} isn't this admin's own, ${loaded.ownNamespace}`
+    );
+  }
   const unqualified = worker.bindings.find(
     ({ type }) => !wfpBindings.has(type)
   );
@@ -1328,18 +1384,6 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
     throw new ProvisionOperationError(
       "wfp_binding_unqualified",
       `${worker.name}'s ${unqualified.name} is a ${unqualified.type} binding, which Workers for Platforms doesn't document for user Workers`
-    );
-  }
-  // The gateway reaches one namespace, the clients': a service binding of
-  // a Worker in any other would reach nothing.
-  const service = worker.bindings.find(({ type }) => type === "service");
-  if (
-    service !== undefined &&
-    loaded.destination.namespace !== clientDispatchNamespace
-  ) {
-    throw new ProvisionOperationError(
-      "wfp_binding_unqualified",
-      `${worker.name}'s ${service.name} needs the connect gateway, which serves namespace ${clientDispatchNamespace} alone`
     );
   }
   if (worker.crons.length > 0) {
@@ -1427,7 +1471,7 @@ const load = async (
   db: AdminDatabase,
   held: HeldClient,
   operation: Operation
-): Promise<Loaded> => {
+): Promise<Omit<Loaded, "ownNamespace">> => {
   // Before any setting is read, so one changed while this run goes on
   // reads as changed after it (`configuredAt`).
   const readAt = new Date();
@@ -2216,7 +2260,7 @@ const reachableCore = async (
   }
   const entry: RouterTarget = { kind: "dispatch", script: target.scriptName };
   const core =
-    target.namespace === clientDispatchNamespace
+    target.namespace === context.router.namespace
       ? coreAddressOf(
           entry,
           `${held.clientId}.${context.router.domain}`,
@@ -2397,11 +2441,11 @@ const route = async (
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
-  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
   if (
     target.kind === "dispatch" &&
-    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+    !target.script.startsWith(deploymentPrefix(loaded.placement.deploymentId))
   ) {
     throw new ProvisionOperationError(
       "probe_unqualified",
@@ -2588,8 +2632,24 @@ const runOperation = async (
   }
   let step: ProvisionStep = "validated";
   try {
+    // Before anything is read or asked of Cloudflare: an admin whose
+    // STAGE names no stage has no namespace of its own to hold a client
+    // to, and never takes itself for production.
+    const ownNamespace = context.router.namespace;
+    if (
+      ownNamespace === undefined ||
+      stageOfNamespace(ownNamespace) === undefined
+    ) {
+      throw new ProvisionOperationError(
+        "stage_unset",
+        "This admin's STAGE is neither staging nor production: it runs no operation"
+      );
+    }
     await assertHolds(db, held);
-    const loaded = await load(db, held, operation);
+    const loaded: Loaded = {
+      ...(await load(db, held, operation)),
+      ownNamespace,
+    };
     await validate(context, loaded);
 
     step = "resources";

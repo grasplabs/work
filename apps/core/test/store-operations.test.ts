@@ -18,6 +18,7 @@ import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { createStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { liveRuns } from "../src/live-runs.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -38,6 +39,7 @@ import {
   storeOperationFor,
 } from "../src/store-operations.ts";
 import type { StoreConsumer } from "../src/store-operations.ts";
+import { claimStore } from "../src/store-owners.ts";
 import {
   approveWorkflowBinding,
   callApprovedStoreOperation,
@@ -736,6 +738,29 @@ describe("an App calling another App's store", () => {
       ownStore: "permission.invalid",
       asAdmin: "ok",
     });
+  });
+
+  it("can't be asked for on a store a workflow owns, whose operations nothing serves yet", async () => {
+    const admin = await person("admin");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const store = await createStore(env, admin);
+    await claimStore(env, store, { kind: "workflow", id: crypto.randomUUID() });
+
+    await expect(
+      outcome(
+        requestPermission(
+          env,
+          admin,
+          {
+            subject: { type: "app", appId: desk.app },
+            object: { type: "store", storeId: store },
+            actions: ["contacts.list"],
+            binding: bindingName(),
+          },
+          rolesOf(admin)
+        )
+      )
+    ).resolves.toBe("permission.invalid");
   });
 
   it("lists a store permission only to those who may open the store's App", async () => {
