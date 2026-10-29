@@ -1986,6 +1986,12 @@ export const bindingDropRequestSchema = z.strictObject({
 });
 export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
 
+/** Which removed App's held actions to drop, as expired (app-removal.ts). */
+export const appDropRequestSchema = z.strictObject({
+  appId: identifierSchema,
+});
+export type AppDropRequest = z.input<typeof appDropRequestSchema>;
+
 // Generated connector contracts (spec 12): what an App's connector
 // resource is bound to. A native connector's actions of one family (its
 // tools named `<family>.<action>`, such as `mail.send`) make the contract

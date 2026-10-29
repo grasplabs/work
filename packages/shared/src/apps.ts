@@ -732,6 +732,15 @@ export interface AppsApi {
    * read.
    */
   update: (app: string, changes: AppChanges) => Promise<App>;
+  /**
+   * Removes an archived App, for its owner or an admin of the organization,
+   * never Grasp staff; audited as `app.removed`. Refused with
+   * `app.remove_unarchived` until it is archived, and `app.stops_pending`
+   * while runs it started are still being stopped. Its stores and their
+   * records, and the workflows it doesn't own, stay; its grants, members
+   * and bindings end. Afterwards it is answered as an App that isn't there.
+   */
+  remove: (app: string) => Promise<void>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;
@@ -820,6 +829,9 @@ export const appErrors = defineErrorFamily({
   "app.no_version":
     "Make a version of the domain current before publishing it.",
   "app.archived": "The domain is archived. A builder can restore it.",
+  "app.remove_unarchived": "Archive the domain before removing it.",
+  "app.remove_forbidden":
+    "Only the domain's owner or an admin of the organization removes it.",
   "app.stops_pending":
     "Runs the domain started are still being stopped from when it was archived. Try restoring it again in a few minutes.",
   "app.not_published":
