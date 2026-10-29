@@ -218,6 +218,15 @@ export const startConnectionSchema = z.strictObject({
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
   /**
+   * Relay mode: the OAuth relay's origin, from the deployment's sign-in
+   * config (`callbackOrigin`, @grasp-os/shared/oauth-relay). The provider
+   * then returns to the relay's connections path instead of `origin`, and
+   * the code is exchanged with that same redirect URI; core puts the
+   * state through the relay on the URL it gets back. Connect takes only a
+   * stage's relay origin.
+   */
+  callbackOrigin: z.url().optional(),
+  /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
    * it can be connected. Required for those suites; an app has none.

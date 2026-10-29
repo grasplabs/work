@@ -9,6 +9,7 @@
  * is stored (threat model R17, CO3).
  */
 import { clientsNamespace, stageNamed } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 
 import type { ClientDispatcher } from "../clients/core-address.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
@@ -256,8 +257,24 @@ export interface DeployContext {
      * operation (hosting/operation.ts, `stage_unset`).
      */
     namespace?: string;
+    /** Relay mode for the clients it deploys (`oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
 }
+
+/**
+ * Relay mode for every client this admin deploys: the stage whose OAuth
+ * relay (@grasp-os/shared/oauth-relay) their sign-in and connections come
+ * back through, while `OAUTH_RELAY` is `on`, as wrangler.jsonc sets it
+ * for both stages: every client the admin deploys is Grasp-hosted, under
+ * its stage's hosted domain, on Grasp's shared OAuth apps. `off` leaves
+ * each client's IdPs returning to its own origin, as on-prem has it.
+ */
+export const oauthRelayOf = (env: {
+  STAGE?: string;
+  OAUTH_RELAY?: string;
+}): Stage | undefined =>
+  env.OAUTH_RELAY === "on" ? stageNamed(env.STAGE) : undefined;
 
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);
@@ -267,6 +284,7 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
   // Exactly staging or production: never production by default, so an
   // admin whose STAGE is missing or misspelt runs no operation anywhere.
   const stage = stageNamed(env.STAGE);
+  const relay = oauthRelayOf(env);
   return {
     api: await deployerApi(env),
     db: adminDatabase(env.DB),
@@ -278,6 +296,7 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
       domain,
       dispatcher: env.DISPATCHER,
       ...(stage === undefined ? {} : { namespace: clientsNamespace(stage) }),
+      ...(relay === undefined ? {} : { oauthRelay: relay }),
     },
   };
 };

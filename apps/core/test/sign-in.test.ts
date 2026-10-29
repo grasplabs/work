@@ -1,4 +1,9 @@
 import { authErrors } from "@grasp-os/shared/errors";
+import {
+  readRelayRequest,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -674,5 +679,151 @@ describe("local development's stand-in for Entra", () => {
     expect(started.authorizationUrl.origin).toBe(
       "https://login.microsoftonline.com"
     );
+  });
+});
+
+/**
+ * The OAuth relay's step, as the router takes it with the secret it
+ * derives for this client (the same as core's `ROUTER_SECRET`): where it
+ * sends a browser the IdP brought back. Fails the test when it would
+ * refuse.
+ */
+const relayed = async (returned: URL): Promise<URL> => {
+  const request = readRelayRequest(returned, "production");
+  if (
+    request === null ||
+    !(await relayStateValid(env.ROUTER_SECRET, request))
+  ) {
+    throw new Error("The relay would refuse this callback");
+  }
+  return new URL(relayTarget(returned, request));
+};
+
+/** A session cookie a response sets, as a `Cookie` pair, if any. */
+const sessionOf = (response: Response): string | undefined =>
+  response.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith(`${sessionCookieName}=`))
+    ?.split(";")[0];
+
+describe("in relay mode", () => {
+  const hostedOrigin = "https://acme.ongrasp.app";
+  const relayOrigin = "https://auth.ongrasp.app";
+  const relayEnv = withSignIn({
+    origin: hostedOrigin,
+    callbackOrigin: relayOrigin,
+  });
+  const options = { coreEnv: relayEnv, origin: hostedOrigin };
+
+  it("sends the IdP to the relay with a state only this client could sign, and signs in once the relay sends the browser on", async () => {
+    const person = entraPerson(acmeTenant);
+    const started = await startSignIn("microsoft", options);
+    expect(started.authorizationUrl.searchParams.get("redirect_uri")).toBe(
+      `${relayOrigin}/callback/sign-in`
+    );
+
+    // The IdP sends the browser to the relay, which sends it on here; the
+    // fake IdP checks the code is exchanged with the redirect URI it was
+    // given for.
+    const callback = idp.authorize(started.authorizationUrl, person);
+    expect(callback.origin).toBe(relayOrigin);
+    const onward = await relayed(callback);
+    expect(onward.origin).toBe(hostedOrigin);
+    const response = await finishSignIn(onward, {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect(response.headers.get("location")).toBe("/");
+    await expect(whoami(sessionOf(response))).resolves.toMatchObject({
+      email: person.email,
+    });
+  });
+
+  it("signs in through Google the same way", async () => {
+    const person = googlePerson();
+    const started = await startSignIn("google", options);
+    const callback = idp.authorize(started.authorizationUrl, person);
+    const response = await finishSignIn(await relayed(callback), {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect(sessionOf(response)).toBeDefined();
+  });
+
+  it("lets listed staff in through the relay too, on Grasp's tenant", async () => {
+    const started = await startSignIn("grasp-staff", options);
+    const callback = idp.authorize(started.authorizationUrl, staffPerson());
+    const response = await finishSignIn(await relayed(callback), {
+      cookie: started.cookie,
+      coreEnv: relayEnv,
+    });
+
+    await expect(whoami(sessionOf(response))).resolves.toMatchObject({
+      staff: true,
+    });
+  });
+
+  it("signs nobody in with a code the relay brings back to another browser's sign-in, or with a callback replayed", async () => {
+    const person = entraPerson(acmeTenant);
+    const victim = await startSignIn("microsoft", options);
+    const attacker = await startSignIn("microsoft", options);
+    const onward = await relayed(
+      idp.authorize(attacker.authorizationUrl, person)
+    );
+    const crossed = await finishSignIn(onward, {
+      cookie: victim.cookie,
+      coreEnv: relayEnv,
+    });
+    const own = await finishSignIn(onward, {
+      cookie: attacker.cookie,
+      coreEnv: relayEnv,
+    });
+    const replayed = await finishSignIn(onward, {
+      cookie: attacker.cookie,
+      coreEnv: relayEnv,
+    });
+
+    expect({
+      crossed: sessionOf(crossed),
+      own: sessionOf(own) === undefined,
+      replayed: sessionOf(replayed),
+    }).toStrictEqual({ crossed: undefined, own: false, replayed: undefined });
+  });
+
+  it.each([
+    ["another stage's relay", hostedOrigin, "https://auth.staging.ongrasp.app"],
+    ["a relay with a path", hostedOrigin, `${relayOrigin}/x`],
+    ["a host that isn't a relay", hostedOrigin, "https://auth.grasp.test"],
+    ["an origin the relay doesn't serve", clientOrigin, relayOrigin],
+  ])("starts no sign-in with %s", async (_case, origin, callbackOrigin) => {
+    const response = await routed(
+      "/api/auth/sign-in/sso",
+      {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "microsoft", callbackURL: "/" }),
+      },
+      withSignIn({ origin, callbackOrigin })
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("leaves a deployment without it as it was: the IdP comes back to its own origin with Better Auth's own state", async () => {
+    const started = await startSignIn("microsoft");
+    const callback = idp.authorize(
+      started.authorizationUrl,
+      entraPerson(acmeTenant)
+    );
+
+    expect({
+      redirect: started.authorizationUrl.searchParams.get("redirect_uri"),
+      relayable: readRelayRequest(callback, "production"),
+    }).toStrictEqual({
+      redirect: `${clientOrigin}/api/auth/sso/callback/microsoft`,
+      relayable: null,
+    });
   });
 });
