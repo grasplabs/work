@@ -1,15 +1,16 @@
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
+import {
+  clientsNamespace,
+  platformWorkerName,
+  stageOfNamespace,
+} from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import {
   connectVersionPath,
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
-import {
-  clientDispatchNamespace,
-  deriveRouterSecret,
-  routerHostKey,
-} from "@grasp-os/shared/router";
+import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -44,6 +45,7 @@ import {
   offboardPlacedClient,
 } from "../src/hosting/offboarding.ts";
 import {
+  ProvisionOperationError,
   runClientProvision,
   sendsSettled,
   startClientProvision,
@@ -93,10 +95,18 @@ const context = {
   db,
   store: env.RELEASES,
   secrets,
-  router: { hosts: env.ROUTER_HOSTS, domain, smoke: { retryDelayMs: 0 } },
+  router: {
+    hosts: env.ROUTER_HOSTS,
+    domain,
+    smoke: { retryDelayMs: 0 },
+    // The stage these tests' admin serves (deploy/context.ts sets it).
+    namespace: clientsNamespace("production"),
+  },
   observe: { retryDelayMs: 0 },
 };
-const namespace = "production";
+const namespace = clientsNamespace("production");
+/** The namespace the admin and the router bind in these tests. */
+const clientDispatchNamespace = clientsNamespace("production");
 
 type Kind = "dedicated" | "workers_for_platforms";
 
@@ -207,11 +217,14 @@ const setUp = async (
   if (kind === "workers_for_platforms") {
     account.namespaces.set(inNamespace, new Map());
   }
-  const destinationId = await destination({
-    kind,
-    accountId: account.id,
-    namespace: kind === "workers_for_platforms" ? inNamespace : null,
-  });
+  const destinationId = await destination(
+    {
+      kind,
+      accountId: account.id,
+      namespace: kind === "workers_for_platforms" ? inNamespace : null,
+    },
+    stageOfNamespace(inNamespace) ?? "production"
+  );
   const placed = await placedOperation(destinationId, manifest);
   return { account, destinationId, ...placed };
 };
@@ -699,19 +712,6 @@ const refusals: Refusal[] = [
       bindings: [...core.bindings, { type: "ai", name: "AI" }],
     }),
     code: "model_spend_undecided",
-  },
-  {
-    // The connect gateway serves the clients' namespace alone (GRA-1217).
-    name: "a service binding in a namespace the connect gateway doesn't serve",
-    kind: "workers_for_platforms",
-    adjust: (core) => ({
-      ...core,
-      bindings: [
-        ...core.bindings,
-        { type: "service", name: "CONNECT", service: "grasp-os-connect" },
-      ],
-    }),
-    code: "wfp_binding_unqualified",
   },
   {
     // Whether a user Worker can send mail at all is a spike of its own.
@@ -1220,6 +1220,7 @@ describe("provisioning a placed client", () => {
         ...context,
         router: {
           ...context.router,
+          namespace: clientDispatchNamespace,
           dispatcher: cloudflare.dispatcher(
             account.id,
             clientDispatchNamespace
@@ -1293,7 +1294,7 @@ describe("provisioning a placed client", () => {
       connectBinding: {
         type: "service",
         name: "CONNECT",
-        service: connectGatewayScript,
+        service: platformWorkerName("connect-gateway", "production"),
         props: { script: connect },
       },
       dispatched: [
@@ -1697,6 +1698,7 @@ describe("provisioning a placed client", () => {
         ...context,
         router: {
           ...context.router,
+          namespace: clientDispatchNamespace,
           dispatcher: cloudflare.dispatcher(
             routers.id,
             clientDispatchNamespace
@@ -1722,32 +1724,59 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("stops at the probe for a core in a namespace the router doesn't bind, its hostname unpublished", async () => {
+  it("places a client only in its own stage's namespace, in either direction, before anything is created or uploaded", async () => {
     const manifest = await importRelease("workers_for_platforms");
-    const { account, clientId, held } = await setUp(
+    // A production destination, run by a staging admin...
+    const production = await setUp("workers_for_platforms", manifest);
+    // ...and a staging one, recorded by a staging admin, run by production's.
+    const staging = await setUp(
       "workers_for_platforms",
-      manifest
+      manifest,
+      clientsNamespace("staging")
     );
-
-    await expect(
-      runClientProvision(
-        {
-          ...context,
-          router: {
-            ...context.router,
-            dispatcher: cloudflare.dispatcher(account.id, namespace),
+    const runAs = async (held: HeldClient, stage: Stage): Promise<unknown> => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        return await runClientProvision(
+          {
+            ...context,
+            router: { ...context.router, namespace: clientsNamespace(stage) },
           },
-        },
-        held
-      ).then(
-        () => "done",
-        (error: unknown) => (error instanceof Error ? error.message : "")
-      )
-    ).resolves.toContain("which the router doesn't bind");
+          held
+        ).then(
+          () => null,
+          (error: unknown) => error
+        );
+      } finally {
+        errors.mockRestore();
+      }
+    };
+
+    const refused = [
+      await runAs(production.held, "staging"),
+      await runAs(staging.held, "production"),
+    ];
     expect({
-      dispatched: cloudflare.dispatched().length,
-      routed: await routed(clientId),
-    }).toStrictEqual({ dispatched: 0, routed: false });
+      refused: refused.map((error) =>
+        error instanceof ProvisionOperationError ? error.code : error
+      ),
+      created: [production.account, staging.account].map(
+        (account) => account.d1.length + account.scriptUploads.length
+      ),
+      inventory: [
+        await clientInventory(db, production.clientId),
+        await clientInventory(db, staging.clientId),
+      ],
+      routed: [
+        await routed(production.clientId),
+        await routed(staging.clientId),
+      ],
+    }).toStrictEqual({
+      refused: ["destination_other_stage", "destination_other_stage"],
+      created: [0, 0],
+      inventory: [[], []],
+      routed: [false, false],
+    });
   });
 
   it("builds a retry's Durable Object migrations from what an earlier attempt's upload left, once that upload landed", async () => {

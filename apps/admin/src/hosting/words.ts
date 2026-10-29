@@ -52,6 +52,8 @@ export const problemWords = (problem: DestinationProblem): string => {
 /** Why an operation stopped, by the inventory's code. */
 const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   destination_unknown: "There's no such destination.",
+  destination_other_stage:
+    "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
   placement_refused:
     "That destination misses a requirement of the policy: each is listed with it.",
   placement_changed:
@@ -86,6 +88,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
 /** Why an operation stopped, by its own code. */
 const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   client_unknown: "There's no such client.",
+  destination_other_stage:
+    "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
   release_not_imported: "That release isn't imported.",
   release_undeclared:
     "The release declares nothing of what its code works with.",

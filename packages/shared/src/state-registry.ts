@@ -1038,9 +1038,9 @@ export const clientStateRegistry: ClientStateRegistry = {
   },
   notClientState: {
     "apps/admin/wrangler.jsonc":
-      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+      "Grasp's admin runs once per stage, in Grasp's account: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+      "The router runs once per stage, in Grasp's account, and holds only hostnames the admin writes.",
     "apps/gateway/wrangler.jsonc":
       "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },

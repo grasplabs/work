@@ -1,5 +1,6 @@
 /**
- * Deploys the Worker in the current directory with the ids wrangler can't
+ * Deploys the Worker in the current directory, for the stage `--stage`
+ * names (staging or production, by the shared names module), with the ids wrangler can't
  * look up filled in: its Secrets Store bindings pointed at the account's
  * own store, and a binding to the router's hostname map at that
  * namespace. Both ids differ per account,
@@ -7,17 +8,15 @@
  * `wrangler deploy` (`filledConfig`, ./wrangler-deploy-config.ts); a config
  * with neither, such as the connect gateway's, deploys as it is:
  * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
- *   (deploy-ops does), otherwise from the Cloudflare API, as the
+ *   (deploy-platform does), otherwise from the Cloudflare API, as the
  *   account's only store;
- * - `"router-hosts-namespace"`: the KV namespace the router's first deploy
- *   created, `grasp-os-router-hosts`, from the Cloudflare API. The router
- *   deploys first (deploy-ops).
+ * - `"router-hosts-namespace"`: the router's hostname map, which
+ *   scripts/cloudflare-account-setup.ts creates as `grasp-router-hosts`
+ *   (`-staging` for staging), from the Cloudflare API.
  *
- * Cloudflare refuses a deploy that binds a secret the store doesn't have,
- * and Secrets Store keeps no empty values. So a binding to one of the
- * optional secrets (`optionalSecrets`) the store doesn't have yet is left
- * out of the deploy: the Worker reads it as not set up. Any other secret
- * the store lacks stops the deploy before it starts, naming all of them.
+ * Only the deployed stage's Secrets Store bindings are checked against the
+ * store: one to an optional secret (`optionalSecrets`) the store lacks is
+ * left out, any other the store lacks stops the deploy (`filledConfig`).
  *
  * A Worker built with the Cloudflare Vite plugin (the admin) deploys the
  * config its build wrote, which `.wrangler/deploy/config.json` points to;
@@ -31,10 +30,23 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { routerHostsName, stageOf } from "@grasp-os/shared/names";
+
 import { filledConfig } from "./wrangler-deploy-config.ts";
 
-/** The title the router's first deploy gives its map (wrangler's `<worker>-<binding>`). */
-const hostsTitle = "grasp-os-router-hosts";
+/**
+ * The stage `--stage` names (production unless it says staging), and the
+ * arguments for wrangler without it.
+ */
+const stageAt = process.argv.indexOf("--stage");
+const stage = stageOf(stageAt === -1 ? undefined : process.argv[stageAt + 1]);
+const wranglerArgs = process.argv
+  .slice(2)
+  .filter(
+    (_arg, at) => stageAt === -1 || (at !== stageAt - 2 && at !== stageAt - 1)
+  );
+/** The title of the stage's hostname map. */
+const hostsTitle = routerHostsName(stage);
 /** Where the Cloudflare Vite plugin's build says its config is. */
 const buildRedirect = ".wrangler/deploy/config.json";
 /**
@@ -133,7 +145,7 @@ const storeId = async (): Promise<string> => {
 };
 
 /** The names of the secrets in store `id`. */
-const secretNames = async (id: string): Promise<Set<string>> => {
+const storedSecrets = async (id: string): Promise<ReadonlySet<string>> => {
   const secrets = await listAll(`/secrets_store/stores/${id}/secrets`);
   return new Set(
     secrets.flatMap((secret) => {
@@ -143,53 +155,6 @@ const secretNames = async (id: string): Promise<Set<string>> => {
   );
 };
 
-/** The secrets the config's Secrets Store bindings name. */
-const boundSecrets = (config: string): string[] =>
-  [...config.matchAll(/"secret_name"\s*:\s*"(?<name>[^"]+)"/gu)].flatMap(
-    (match) => (match.groups?.name === undefined ? [] : [match.groups.name])
-  );
-
-/**
- * `config` without its bindings to optional secrets store `id` doesn't
- * have; stops, naming them, if it lacks any other. Leaving a binding out
- * takes a config in plain JSON, as the admin's build writes.
- */
-const withStoredSecrets = async (
-  config: string,
-  id: string
-): Promise<string> => {
-  const bound = boundSecrets(config);
-  if (bound.length === 0) {
-    return config;
-  }
-  const stored = await secretNames(id);
-  const missing = bound.filter((name) => !stored.has(name));
-  const needed = missing.filter((name) => !optionalSecrets.has(name));
-  if (needed.length > 0) {
-    throw new Error(
-      `Secrets Store ${id} doesn't have ${needed.join(", ")}: put them in, then deploy again`
-    );
-  }
-  if (missing.length === 0) {
-    return config;
-  }
-  const deployed: unknown = JSON.parse(config);
-  const bindings = field(deployed, "secrets_store_secrets");
-  if (typeof deployed !== "object" || deployed === null || !isList(bindings)) {
-    throw new TypeError("The config's Secrets Store bindings don't parse");
-  }
-  console.warn(
-    `Not in Secrets Store yet, so left unbound: ${missing.join(", ")}`
-  );
-  return JSON.stringify({
-    ...deployed,
-    secrets_store_secrets: bindings.filter((binding) => {
-      const name = field(binding, "secret_name");
-      return typeof name !== "string" || stored.has(name);
-    }),
-  });
-};
-
 /** The id of the router's hostname map. */
 const hostsId = async (): Promise<string> =>
   onlyId(
@@ -197,7 +162,7 @@ const hostsId = async (): Promise<string> =>
       await listAll("/storage/kv/namespaces"),
       (namespace) => field(namespace, "title") === hostsTitle
     ),
-    `one KV namespace ${hostsTitle} (deploy the router first)`
+    `one KV namespace ${hostsTitle} (run scripts/cloudflare-account-setup.ts first)`
   );
 
 /** The config to deploy: the build's, if the Vite plugin wrote one. */
@@ -216,18 +181,30 @@ const configPath = (): string => {
 };
 
 const config = configPath();
-const text = await filledConfig(readFileSync(config, "utf-8"), {
-  storeId,
-  hostsId,
-  withStoredSecrets,
-});
+/**
+ * A built config is the stage's already (the Vite plugin's
+ * CLOUDFLARE_ENV); wrangler.jsonc picks staging with --env.
+ */
+const env =
+  stage === "staging" && config === "wrangler.jsonc" ? "staging" : undefined;
+const text = await filledConfig(
+  readFileSync(config, "utf-8"),
+  { storeId, hostsId, storedSecrets },
+  { env, optional: optionalSecrets }
+);
 // Next to the config, so the paths in it (main, assets) still resolve.
 const deployConfig = path.join(path.dirname(config), "wrangler.deploy.jsonc");
 writeFileSync(deployConfig, text);
 try {
   execFileSync(
     "wrangler",
-    ["deploy", "--config", deployConfig, ...process.argv.slice(2)],
+    [
+      "deploy",
+      "--config",
+      deployConfig,
+      ...(env === undefined ? [] : ["--env", env]),
+      ...wranglerArgs,
+    ],
     { stdio: "inherit" }
   );
 } finally {

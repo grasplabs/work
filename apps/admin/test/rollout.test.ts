@@ -1,3 +1,4 @@
+import { clientsNamespace } from "@grasp-os/shared/names";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -2352,7 +2353,10 @@ describe("a client's changes, counted", () => {
         .get();
       await db
         .update(hostingDestinations)
-        .set({ kind: "workers_for_platforms", namespace: "production" })
+        .set({
+          kind: "workers_for_platforms",
+          namespace: clientsNamespace("production"),
+        })
         .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
       // A secrets rollout that rotated connect's Composio key: its operation
       // delivered the store's value, as on record.

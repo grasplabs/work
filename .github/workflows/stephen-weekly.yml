@@ -26,7 +26,7 @@ jobs:
     name: eval
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    environment: grasp-os-staging
+    environment: staging
     permissions:
       contents: read
       issues: write
