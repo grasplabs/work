@@ -207,9 +207,10 @@
   ],
   // Staging (`wrangler deploy --env staging`, deploy-platform with stage
   // staging): every name from @grasp-os/shared/names with -staging appended,
-  // its own rate limit namespaces, and its own router and client keys and
-  // deployer token in the account's Secrets Store, so it never deploys with
-  // production's; the clients' shared secrets are the same.
+  // and its own rate limit namespaces. Every secret it binds has its own
+  // name in the account's Secrets Store, `_STAGING` appended
+  // (`storeSecretName`), so a staging deploy never writes or reads one
+  // production uses.
   "env": {
     "staging": {
       "name": "grasp-admin-staging",
@@ -291,52 +292,52 @@
         {
           "binding": "ENTRA_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "ENTRA_CLIENT_SECRET",
+          "secret_name": "ENTRA_CLIENT_SECRET_STAGING",
         },
         {
           "binding": "MICROSOFT_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "MICROSOFT_CLIENT_SECRET",
+          "secret_name": "MICROSOFT_CLIENT_SECRET_STAGING",
         },
         {
           "binding": "GOOGLE_CLIENT_SECRET",
           "store_id": "account-secrets-store",
-          "secret_name": "GOOGLE_CLIENT_SECRET",
+          "secret_name": "GOOGLE_CLIENT_SECRET_STAGING",
         },
         {
           "binding": "COMPOSIO_API_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "COMPOSIO_API_KEY",
+          "secret_name": "COMPOSIO_API_KEY_STAGING",
         },
         {
           "binding": "APP_OAUTH_CLIENTS",
           "store_id": "account-secrets-store",
-          "secret_name": "APP_OAUTH_CLIENTS",
+          "secret_name": "APP_OAUTH_CLIENTS_STAGING",
         },
         {
           "binding": "STRIPE_RESTRICTED_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "STRIPE_RESTRICTED_KEY",
+          "secret_name": "STRIPE_RESTRICTED_KEY_STAGING",
         },
         {
           "binding": "ROOMS_READ_TOKEN",
           "store_id": "account-secrets-store",
-          "secret_name": "ROOMS_READ_TOKEN",
+          "secret_name": "ROOMS_READ_TOKEN_STAGING",
         },
         {
           "binding": "DISCORD_DIGEST_WEBHOOK",
           "store_id": "account-secrets-store",
-          "secret_name": "DISCORD_DIGEST_WEBHOOK",
+          "secret_name": "DISCORD_DIGEST_WEBHOOK_STAGING",
         },
         {
           "binding": "STAFF_ALERTS_WEBHOOK",
           "store_id": "account-secrets-store",
-          "secret_name": "STAFF_ALERTS_WEBHOOK",
+          "secret_name": "STAFF_ALERTS_WEBHOOK_STAGING",
         },
         {
           "binding": "ATTIO_READ_KEY",
           "store_id": "account-secrets-store",
-          "secret_name": "ATTIO_READ_KEY",
+          "secret_name": "ATTIO_READ_KEY_STAGING",
         },
       ],
     },

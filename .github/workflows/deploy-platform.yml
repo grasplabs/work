@@ -69,7 +69,8 @@ jobs:
           required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SECRETS_STORE_ID
       # The shared secrets, loaded right before the step that copies them
       # and cleared from the job's env right after, so no deploy sees them.
-      # Each is named as the Worker secret it becomes.
+      # Each is named in 1Password as the Worker secret it becomes, in both
+      # stages; the store names it for its stage (below).
       - uses: ./.github/actions/load-1password
         with:
           environment: ${{ inputs.stage }}
@@ -80,10 +81,15 @@ jobs:
       # on stdin, never as an argument or in a log line, and are written
       # every run: Secrets Store never reads a value back to compare.
       # The API token reaches curl through its config on stdin, not argv.
+      # Both stages share the account's one store, so each secret is
+      # written under its stage's name from the names module
+      # (`storeSecretName`: `_STAGING` appended in staging), the name the
+      # stage's admin binds: a staging run, which needs no reviewer, never
+      # writes a secret production reads.
       # The store holds only fixed secrets (these, the deployer token, the
-      # router key and the client key), never one per client, so one page
-      # normally covers it; the list is still read page by page up to
-      # `total_pages`.
+      # router key and the client key, per stage), never one per client, so
+      # one page normally covers it; the list is still read page by page up
+      # to `total_pages`.
       - name: Copy the shared secrets to Secrets Store
         run: |
           set -euo pipefail
@@ -114,9 +120,10 @@ jobs:
             page=$((page + 1))
           done
           for name in "${names[@]}"; do
-            id=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .id' <<< "$existing")
+            stored=$(vp exec node scripts/platform-names.ts "$STAGE" storeSecret "$name")
+            id=$(jq -r --arg name "$stored" '.[] | select(.name == $name) | .id' <<< "$existing")
             if [ -z "$id" ]; then
-              printf '%s' "${!name}" | vp exec wrangler secrets-store secret create "$SECRETS_STORE_ID" --name "$name" --scopes workers --remote
+              printf '%s' "${!name}" | vp exec wrangler secrets-store secret create "$SECRETS_STORE_ID" --name "$stored" --scopes workers --remote
             else
               printf '%s' "${!name}" | vp exec wrangler secrets-store secret update "$SECRETS_STORE_ID" --secret-id "$id" --remote
             fi

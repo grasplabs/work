@@ -125,6 +125,11 @@ const router = (overrides: { production?: object; staging?: object } = {}) =>
   });
 const routerFile = "apps/router/wrangler.jsonc";
 
+/** A router secret binding, stored as `name`. */
+const secret = (name: string) => [
+  { binding: "ROUTER_KEY", store_id: "s", secret_name: name },
+];
+
 describe("platform names", () => {
   it("accept a platform config named as @grasp-os/shared/names does, in both stages", () => {
     expect({
@@ -166,6 +171,36 @@ describe("platform names", () => {
       shared: ["1001"],
       noStaging: [
         `${routerFile}: add env.staging, the staging platform's names.`,
+      ],
+    });
+  });
+
+  it("refuse a staging secret under production's name in the store, and a production one under staging's", () => {
+    expect({
+      own: platformNameErrors(
+        routerFile,
+        router({
+          production: { secrets_store_secrets: secret("ROUTER_KEY") },
+          staging: { secrets_store_secrets: secret("ROUTER_KEY_STAGING") },
+        })
+      ),
+      stagingShares: platformNameErrors(
+        routerFile,
+        router({ staging: { secrets_store_secrets: secret("ROUTER_KEY") } })
+      ),
+      productionTakesStaging: platformNameErrors(
+        routerFile,
+        router({
+          production: { secrets_store_secrets: secret("ROUTER_KEY_STAGING") },
+        })
+      ),
+    }).toStrictEqual({
+      own: [],
+      stagingShares: [
+        `${routerFile} (env staging): the Secrets Store secret of ROUTER_KEY is ROUTER_KEY, not ROUTER_KEY_STAGING.`,
+      ],
+      productionTakesStaging: [
+        `${routerFile}: the Secrets Store secret of ROUTER_KEY is ROUTER_KEY_STAGING, not ROUTER_KEY.`,
       ],
     });
   });

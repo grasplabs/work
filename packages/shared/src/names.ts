@@ -10,6 +10,7 @@
  * | Releases bucket (R2)         | `grasp-releases`        | `grasp-releases-staging`         |
  * | Router's hostname map (KV)   | `grasp-router-hosts`    | `grasp-router-hosts-staging`     |
  * | Clients' dispatch namespace  | `grasp-clients`         | `grasp-clients-staging`          |
+ * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
  *
  * A staging client is never placed beside a production one: each stage
  * has its own namespace. Package scopes (`@grasp-os/*`) and code
@@ -51,6 +52,19 @@ export const releasesBucketName = (stage: Stage): string =>
 /** The router's hostname map (KV) in `stage`, by its title. */
 export const routerHostsName = (stage: Stage): string =>
   staged(`${namePrefix}router-hosts`, stage);
+
+/** What a staging secret's name ends with in the account's Secrets Store. */
+const stagingSecretSuffix = "_STAGING";
+
+/**
+ * The name secret `name` (a Worker's binding name, as 1Password holds it)
+ * has in the account's one Secrets Store, in `stage`: as is in production,
+ * `_STAGING` appended in staging. No secret is shared between stages, so a
+ * staging deploy, which needs no reviewer, never writes what production
+ * reads.
+ */
+export const storeSecretName = (name: string, stage: Stage): string =>
+  stage === "staging" ? `${name}${stagingSecretSuffix}` : name;
 
 /**
  * The Workers for Platforms dispatch namespace of `stage`'s clients: the

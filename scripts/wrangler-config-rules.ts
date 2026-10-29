@@ -18,6 +18,7 @@ import {
   clientsNamespace,
   platformWorkerName,
   releasesBucketName,
+  storeSecretName,
 } from "@grasp-os/shared/names";
 import type { PlatformWorker, Stage } from "@grasp-os/shared/names";
 
@@ -111,6 +112,16 @@ const stageNameErrors = (
       "the dispatch namespace",
       field(binding, "namespace"),
       clientsNamespace(stage)
+    );
+  }
+  // Every secret by its stage's name in the one Secrets Store, so a
+  // staging deploy never writes or reads what production does.
+  for (const secret of list(field(config, "secrets_store_secrets"))) {
+    const binding = field(secret, "binding");
+    expect(
+      `the Secrets Store secret of ${String(binding)}`,
+      field(secret, "secret_name"),
+      storeSecretName(String(binding), stage)
     );
   }
   if (worker === "admin") {
