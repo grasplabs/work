@@ -83,7 +83,9 @@ export interface RelayedClient {
  * The client at `origin` behind the relay at `callbackOrigin`: only when
  * `callbackOrigin` is a stage's relay origin, exactly, and `origin` is
  * `https://<label>.<that stage's hosted domain>`, with a label a client
- * can have. Null otherwise: the relay could never send its browser back.
+ * can have and no port: the relay sends browsers back to the default
+ * port alone (`relayTarget`). Null otherwise: the relay could never send
+ * its browser back.
  */
 export const relayedClientOf = (
   origin: string,
@@ -99,6 +101,7 @@ export const relayedClientOf = (
   if (
     url.origin !== origin ||
     url.protocol !== "https:" ||
+    url.port !== "" ||
     !url.hostname.endsWith(suffix) ||
     !newClientIdSchema.safeParse(label).success
   ) {

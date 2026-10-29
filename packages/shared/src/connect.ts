@@ -32,10 +32,14 @@ import { eventTypeSchema } from "./workflows.ts";
  * version, with the range below moved to say which cores work with
  * which connects; a release declares both (scripts/release).
  */
-export const connectInterfaceVersion = 1;
+export const connectInterfaceVersion = 2;
 
-/** The versions of connect's interface this core calls correctly. */
-export const connectInterfacesCoreCalls = { min: 1, max: 1 } as const;
+/**
+ * The versions of connect's interface this core calls correctly. 2: a
+ * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
+ * strict schema refuses.
+ */
+export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
 
 /**
  * One call from core to connect, over the service binding: an action on a

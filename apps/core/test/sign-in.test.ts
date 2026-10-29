@@ -797,6 +797,11 @@ describe("in relay mode", () => {
     ["a relay with a path", hostedOrigin, `${relayOrigin}/x`],
     ["a host that isn't a relay", hostedOrigin, "https://auth.grasp.test"],
     ["an origin the relay doesn't serve", clientOrigin, relayOrigin],
+    [
+      "an origin on a port the relay doesn't return to",
+      `${hostedOrigin}:8443`,
+      relayOrigin,
+    ],
   ])("starts no sign-in with %s", async (_case, origin, callbackOrigin) => {
     const response = await routed(
       "/api/auth/sign-in/sso",

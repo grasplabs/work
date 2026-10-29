@@ -366,6 +366,7 @@ describe("threat model", () => {
           start("https://auth.ongrasp.app.evil.test"),
           start("https://auth.staging.ongrasp.app"),
           start(relayOrigin, clientOrigin),
+          start(relayOrigin, "https://acme.ongrasp.app:8443"),
         ].map(async (attempt) => await outcome(attempt))
       ),
     }).toStrictEqual({
@@ -373,7 +374,7 @@ describe("threat model", () => {
       finished: "ok",
       exchanged: `${relayOrigin}/callback/connections`,
       refused: Array.from(
-        { length: 5 },
+        { length: 6 },
         () => "connection.provider_unavailable"
       ),
     });
