@@ -131,6 +131,14 @@ export const clients = sqliteTable(
      */
     configChangedAt: timestamp("config_changed_at"),
     /**
+     * The most its model calls may cost in a calendar month, in whole
+     * euros (GRA-141): €250 unless staff set another
+     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
+     * it to its core's model gateway as its deployment budget, which the
+     * gateway enforces before each provider request.
+     */
+    modelSpendCeiling: integer("model_spend_ceiling").notNull().default(250),
+    /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name
      * or email, so the admin never shows one company another's invoices.
