@@ -372,6 +372,7 @@ const coreDb: D1State = {
     guest_chats: exported(`${core}guests.ts`),
     guest_messages: exported(`${core}guests.ts`),
     app_visitor_entries: exported(`${core}app-visitors.ts`),
+    app_visitor_grants: exported(`${core}app-visitor-calls.ts`),
     app_visitor_codes: transient(
       `${core}app-visitors.ts`,
       "Codes last 10 minutes and their rows an hour: a restored deployment's visitors ask for new ones."

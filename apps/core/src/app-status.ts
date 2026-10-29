@@ -13,7 +13,7 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { apps } from "./db/core/schema.ts";
+import { apps, appVisitorSessions } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
@@ -259,6 +259,13 @@ export const changeStatus = async (
   if (found.status === "published" || to === "archived") {
     await tellKept(env, revocations);
     await closeScreens(env, app);
+  }
+  if (found.status === "published") {
+    // Every visitor's session ends with it (app-visitors.ts), as each of
+    // their requests would refuse it anyway from now on.
+    await db
+      .delete(appVisitorSessions)
+      .where(eq(appVisitorSessions.appId, app.id));
   }
   if (to === "archived") {
     await cancelRunsOf(env, by, app.id, now);
