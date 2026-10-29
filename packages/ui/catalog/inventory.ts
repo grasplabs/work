@@ -875,6 +875,12 @@ export const graspComponents = {
       "PageHeaderTitle",
     ],
   },
+  "painted-field": {
+    status: "supported",
+    summary:
+      "One of the brand book's paintings with a grain and a pattern over it, behind the one or two things on a screen that matter most.",
+    exports: ["PaintedField"],
+  },
   "prompt-input": {
     status: "supported",
     summary:
