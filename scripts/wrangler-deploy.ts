@@ -32,7 +32,8 @@ import path from "node:path";
 
 import { routerHostsName, stageOf } from "@grasp-os/shared/names";
 
-import { filledConfig, optionalSecrets } from "./wrangler-deploy-config.ts";
+import { optionalSecrets } from "./optional-secrets.ts";
+import { filledConfig } from "./wrangler-deploy-config.ts";
 
 /**
  * The stage `--stage` names (production unless it says staging), and the

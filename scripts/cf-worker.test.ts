@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
@@ -210,5 +210,49 @@ describe("the admin's Worker for cf", () => {
       other: undefined,
       settings: true,
     });
+  });
+});
+
+/** Every module specifier `file` imports. */
+const importsOf = (file: string): string[] =>
+  [
+    ...readFileSync(file, "utf-8").matchAll(
+      /^import[^"']*["'](?<specifier>[^"']+)["']/gmu
+    ),
+  ].flatMap((match) =>
+    match.groups?.specifier === undefined ? [] : [match.groups.specifier]
+  );
+
+/** The workspace packages `entry` reaches through its relative imports. */
+const workspaceImports = (entry: string): string[] => {
+  const seen = new Set<string>();
+  const found = new Set<string>();
+  const visit = (file: string): void => {
+    if (seen.has(file)) {
+      return;
+    }
+    seen.add(file);
+    for (const specifier of importsOf(file)) {
+      if (specifier.startsWith("@grasp-os/")) {
+        found.add(specifier);
+      } else if (specifier.startsWith(".")) {
+        const target = path.resolve(path.dirname(file), specifier);
+        if (existsSync(target)) {
+          visit(target);
+        }
+      }
+    }
+  };
+  visit(entry);
+  return [...found];
+};
+
+describe("the admin's cf config as Vite's Cloudflare plugin loads it", () => {
+  it("reaches none of the modules the Worker loads, which broke the dev server", () => {
+    expect(
+      workspaceImports(
+        path.join(import.meta.dirname, "../apps/admin/cloudflare.config.ts")
+      )
+    ).toStrictEqual([]);
   });
 });

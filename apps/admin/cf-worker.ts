@@ -21,7 +21,7 @@ import { bindings, exports, triggers } from "cf/config";
 import type { WorkerConfig } from "cf/config";
 
 import { parseJsonc } from "../../scripts/jsonc.ts";
-import { optionalSecrets } from "../../scripts/wrangler-deploy-config.ts";
+import { optionalSecrets } from "../../scripts/optional-secrets.ts";
 
 /** The admin's settings, passed at deploy time (deploy-platform), never secrets. */
 export const adminSettings = [
