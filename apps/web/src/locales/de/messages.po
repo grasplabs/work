@@ -157,10 +157,6 @@ msgstr "{amount} insgesamt"
 msgid "{amount} of {limitShown}"
 msgstr "{amount} von {limitShown}"
 
-#: src/brain/brain-atlas.ts
-msgid "{answered} answered"
-msgstr "{answered} beantwortet"
-
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} hat keine Tools."
@@ -204,10 +200,6 @@ msgstr "{artifacts, plural, one {# bereits erstellter Build ({targets}) funktion
 #: src/engines/package-approvals.tsx
 msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
 msgstr "{artifacts, plural, one {# damit erstellter Build ({targets}) stoppt sofort, und nichts von diesen Paketen läuft mehr.} other {# damit erstellte Builds ({targets}) stoppen sofort, und nichts von diesen Paketen läuft mehr.} =0 {Nichts von diesen Paketen läuft mehr.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
-msgstr "{asked, plural, one {# Frage ist noch offen, mit wer sie beantworten kann.} other {# Fragen sind noch offen, jede mit wer sie beantworten kann.}}"
 
 #: src/connections/request-app-dialog.tsx
 msgid "{asker} already asked for it on {askedOn}."
@@ -292,10 +284,6 @@ msgstr "{connection}, {resource} ({tool})"
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
 msgstr "{conversations, plural, one {# Gespräch} other {# Gespräche}}"
 
-#: src/brain/brain.ts
-msgid "{conversations, plural, one {Heard in # conversation.} other {Heard in # conversations.}}"
-msgstr "{conversations, plural, one {In # Gespräch genannt.} other {In # Gesprächen genannt.}}"
-
 #: src/routes/_shell.onboarding.log.tsx
 msgid "{count, plural, one {{date}: # entry} other {{date}: # entries}}"
 msgstr "{count, plural, one {{date}: # Eintrag} other {{date}: # Einträge}}"
@@ -304,6 +292,10 @@ msgstr "{count, plural, one {{date}: # Eintrag} other {{date}: # Einträge}}"
 #: src/inbox/items.ts
 msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
 msgstr "{count, plural, one {{name} hat # App, deren Code niemand genehmigt hat} other {{name} hat # Apps, deren Code niemand genehmigt hat}}"
+
+#: src/brain/brain-atlas.ts
+msgid "{count, plural, one {{names} work here, on # piece of work that came up in what people said.} other {{names} work here, on # pieces of work that came up in what people said.}}"
+msgstr "{count, plural, one {{names} arbeiten hier, an # Arbeit, die in dem, was Menschen erzählt haben, vorkam.} other {{names} arbeiten hier, an # Arbeiten, die in dem, was Menschen erzählt haben, vorkamen.}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# application} other {# applications}}"
@@ -345,6 +337,10 @@ msgstr "{count, plural, one {# Ziel} other {# Ziele}}"
 msgid "{count, plural, one {# handover} other {# handovers}}"
 msgstr "{count, plural, one {# Übergabe} other {# Übergaben}}"
 
+#: src/brain/brain-log.tsx
+msgid "{count, plural, one {# interview in week {week}} other {# interviews in week {week}}}"
+msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Interviews in Kalenderwoche {week}}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.} other {# eingeladene Teams noch nicht interviewt: {teams}.}}"
@@ -370,10 +366,6 @@ msgstr "{count, plural, one {# Person wird zu keiner Arbeit befragt} other {# Pe
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# Person} other {# Personen}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {# piece of time-consuming work came up in what people said.} other {# pieces of time-consuming work came up in what people said.}}"
-msgstr "{count, plural, one {# zeitraubende Arbeit kam in dem zur Sprache, was die Leute sagten.} other {# zeitraubende Arbeiten kamen in dem zur Sprache, was die Leute sagten.}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# Anmerkung zu Tools} other {# Anmerkungen zu Tools}}"
@@ -386,13 +378,13 @@ msgstr "{count, plural, one {# Regel in Kraft} other {# Regeln in Kraft}}"
 msgid "{count, plural, one {# rule} other {# rules}}"
 msgstr "{count, plural, one {# Regel} other {# Regeln}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{count, plural, one {# team is in the brain, from the directory.} other {# teams are in the brain, from the directory.}}"
-msgstr "{count, plural, one {# Team ist im Gehirn, aus dem Verzeichnis.} other {# Teams sind im Gehirn, aus dem Verzeichnis.}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# Team, mit seinen Rollen} other {# Teams, mit ihren Rollen}}"
+
+#: src/brain/brain-log.tsx
+msgid "{count, plural, one {# thing} other {# things}}"
+msgstr "{count, plural, one {# Aussage} other {# Aussagen}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
@@ -495,28 +487,12 @@ msgid "{domainName}, version {version}"
 msgstr "{domainName}, Version {version}"
 
 #: src/brain/brain-atlas.ts
-msgid "{done, plural, one {# of them is drawn in the builder.} other {# of them are drawn in the builder.}}"
-msgstr "{done, plural, one {# davon ist im Builder gezeichnet.} other {# davon sind im Builder gezeichnet.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{done, plural, one {# question is answered, by the person who knew.} other {# questions are answered, by the people who knew.}}"
-msgstr "{done, plural, one {# Frage ist beantwortet, von der Person, die es wusste.} other {# Fragen sind beantwortet, von den Personen, die es wussten.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{drawn} drawn in the builder"
-msgstr "{drawn} im Builder gezeichnet"
+msgid "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
+msgstr "{done, plural, one {# davon ist gezeichnet.} other {# davon sind gezeichnet.}}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "{each} a run"
 msgstr "{each} pro Lauf"
-
-#: src/brain/brain-atlas.ts
-msgid "{employees, plural, one {# employee answered as well, by voice or chat.} other {# employees answered as well, by voice or chat.}}"
-msgstr "{employees, plural, one {Auch # Mitarbeiter hat geantwortet, per Sprache oder Chat.} other {Auch # Mitarbeitende haben geantwortet, per Sprache oder Chat.}}"
-
-#: src/brain/brain.ts
-msgid "{employees, plural, one {# employee} other {# employees}}"
-msgstr "{employees, plural, one {# Mitarbeitende} other {# Mitarbeitende}}"
 
 #: src/policies/policy.ts
 msgid "{excepted, plural, one {# exception} other {# exceptions}}"
@@ -647,10 +623,6 @@ msgstr "{idle, plural, one {# weiterer Workflow lief in dieser Zeit nicht.} othe
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Ihr nächster Bericht ist morgen fertig} other {Ihr nächster Bericht ist in # Tagen fertig}}"
 
-#: src/brain/brain-atlas.ts
-msgid "{interviewed} of {teams} interviewed"
-msgstr "{interviewed} von {teams} interviewt"
-
 #: src/policies/policies-table.tsx
 msgid "{inUse, plural, one {# rule in use} other {# rules in use}}"
 msgstr "{inUse, plural, one {# Regel im Einsatz} other {# Regeln im Einsatz}}"
@@ -683,6 +655,10 @@ msgstr "{label}, auf der Support-Seite von Grasp, in einem neuen Tab"
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
 msgstr "{label}:"
+
+#: src/brain/brain-log.tsx
+msgid "{label}: {things}"
+msgstr "{label}: {things}"
 
 #: src/landscape/overview-tab.tsx
 msgid "{label}: open in {tabLabel}"
@@ -725,12 +701,8 @@ msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} von {leads}"
 
 #: src/brain/brain-atlas.ts
-msgid "{left, plural, one {# is not drawn yet.} other {# are not drawn yet.}}"
-msgstr "{left, plural, one {# ist noch nicht gezeichnet.} other {# sind noch nicht gezeichnet.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{left, plural, one {# of them is not interviewed yet.} other {# of them are not interviewed yet.}}"
-msgstr "{left, plural, one {# davon ist noch nicht interviewt.} other {# davon sind noch nicht interviewt.}}"
+msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
+msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Teams hier sind noch nicht interviewt.}}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{limit} a month for each, admins alerted at {alertAt}."
@@ -825,6 +797,16 @@ msgstr "{most, plural, one {Ein Projekt enthält bis zu # Dokument.} other {Ein 
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# davon hat sich später geändert, in einem weiteren Gespräch mit der Geschäftsleitung.} other {# davon haben sich später geändert, in weiteren Gesprächen mit der Geschäftsleitung.}}"
+
+#: src/brain/brain-article/team-work.tsx
+msgctxt "the same pain: these teams told it too"
+msgid "{name} · also {teams}"
+msgstr "{name} · auch {teams}"
+
+#: src/brain/brain-article/team-work.tsx
+msgctxt "a handover: the work passes between this team and these"
+msgid "{name} · with {teams}"
+msgstr "{name} · mit {teams}"
 
 #: src/engines/resource-bindings.tsx
 msgid "{name} ({appId})"
@@ -965,12 +947,8 @@ msgid "{name}: version {version} waiting for review"
 msgstr "{name}: Version {version} wartet auf Prüfung"
 
 #: src/brain/brain-atlas.ts
-msgid "{named, plural, one {# tool named in the interviews} other {# tools named in the interviews}}"
-msgstr "{named, plural, one {# Tool in den Interviews genannt} other {# Tools in den Interviews genannt}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{named, plural, one {# tool was named in the interviews.} other {# tools were named in the interviews.}}"
-msgstr "{named, plural, one {# Tool wurde in den Interviews genannt.} other {# Tools wurden in den Interviews genannt.}}"
+msgid "{names} work here. No work of theirs came up yet."
+msgstr "{names} arbeiten hier. Von ihrer Arbeit kam noch nichts vor."
 
 #: src/onboarding/work-record.tsx
 msgid "{needed, plural, one {A step counts once # person told it.} other {A step counts once # people told it, or one fewer and a document.}}"
@@ -1015,10 +993,6 @@ msgstr "{only} kann ich nicht lesen."
 #: src/brain/region-marks.tsx
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# offene Frage} other {# offene Fragen}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{open} still open"
-msgstr "{open} noch offen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
@@ -1185,14 +1159,6 @@ msgid "{role}, Grasp staff"
 msgstr "{role}, Grasp-Team"
 
 #: src/brain/brain.ts
-msgid "{role}, interviewed {date}"
-msgstr "{role}, interviewt am {date}"
-
-#: src/brain/brain.ts
-msgid "{role}, interviewed {date} ({how})"
-msgstr "{role}, interviewt am {date} ({how})"
-
-#: src/brain/brain.ts
 msgid "{role}, invited {date}, not interviewed yet"
 msgstr "{role}, eingeladen am {date}, noch nicht interviewt"
 
@@ -1219,6 +1185,10 @@ msgstr "{runs, plural, one {# Durchlauf} other {# Durchläufe}}"
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {von # Lauf} other {von # Läufen}}"
+
+#: src/brain/brain-log.tsx
+msgid "{said, plural, one {# thing said} other {# things said}}"
+msgstr "{said, plural, one {# Aussage} other {# Aussagen}}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{score} of 5"
@@ -1357,10 +1327,6 @@ msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitun
 msgid "{team} interviewed"
 msgstr "{team} interviewt"
 
-#: src/brain/brain.ts
-msgid "{team}, {total} interviewed: {who}."
-msgstr "{team}, {total} interviewt: {who}."
-
 #: src/onboarding/review-parts.tsx
 msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
 msgstr "{team}: Manche machen einen Schritt anders, und niemand konnte sagen, warum. Ich behalte beide Wege, bis Sie entscheiden."
@@ -1476,10 +1442,6 @@ msgid "{unled, plural, one {# team without a lead} other {# teams without a lead
 msgstr "{unled, plural, one {# Team ohne Teamleitung} other {# Teams ohne Teamleitung}}"
 
 #: src/brain/brain-atlas.ts
-msgid "{unnamed, plural, one {# more application is in use that nobody named.} other {# more applications are in use that nobody named.}}"
-msgstr "{unnamed, plural, one {Noch # Anwendung ist im Einsatz, die niemand genannt hat.} other {Noch # Anwendungen sind im Einsatz, die niemand genannt hat.}}"
-
-#: src/brain/brain-atlas.ts
 msgid "{unnamed} of {total} seen in use, never named"
 msgstr "{unnamed} von {total} im Einsatz gesehen, nie genannt"
 
@@ -1590,9 +1552,17 @@ msgstr "{who} liest vor."
 msgid "{who}, thinking."
 msgstr "{who} denkt nach."
 
+#: src/brain/brain-log.tsx
+msgid "{who}: “{answer}”"
+msgstr "{who}: „{answer}“"
+
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "{who}'s text:"
 msgstr "Text von {who}:"
+
+#: src/brain/brain-atlas.ts
+msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
+msgstr "{work, plural, one {# Arbeit} other {# Arbeiten}}"
 
 #: src/inbox/items.ts
 msgid "{workflow} in {appName} failed"
@@ -1606,7 +1576,6 @@ msgstr "{workflowId} in {domain}"
 msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
 msgstr "{workflows, plural, one {{ran} von # Workflow lief} other {{ran} von # Workflows liefen}}"
 
-#: src/brain/brain-atlas.ts
 #: src/routes/_shell.domains.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
 msgstr "{workflows, plural, one {# Workflow} other {# Workflows}}"
@@ -2029,6 +1998,13 @@ msgctxt "inbox tab: what Grasp and people did"
 msgid "Activity"
 msgstr "Aktivität"
 
+#: src/brain/brain-log.tsx
+#: src/brain/brain-nav.tsx
+#: src/routes/_shell.brain.tsx
+msgctxt "the brain's log"
+msgid "Activity"
+msgstr "Aktivität"
+
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
 msgstr "Akteur-ID"
@@ -2334,6 +2310,7 @@ msgid "Alert at"
 msgstr "Warnen bei"
 
 #: src/brain/atlas-overlays.tsx
+#: src/brain/brain-log.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Alle"
@@ -2375,10 +2352,6 @@ msgstr "Alle Aufrufe"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Alle Aufrufe zusammen"
-
-#: src/brain/brain-atlas.ts
-msgid "All interviewed"
-msgstr "Alle interviewt"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "All interviews"
@@ -2580,6 +2553,10 @@ msgstr "Beantwortet am {date}."
 #: src/brain/brain.ts
 msgid "Answered: {question}"
 msgstr "Beantwortet: {question}"
+
+#: src/brain/brain-log.tsx
+msgid "Answered: {title}"
+msgstr "Beantwortet: {title}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 #: src/routes/_shell.onboarding.interviews.$person.tsx
@@ -3052,6 +3029,10 @@ msgstr "Das Senden, Bearbeiten oder Löschen einer Chat-App-Nachricht als Bot de
 msgid "Asked which work they do"
 msgstr "Wird gefragt, welche Arbeit sie macht"
 
+#: src/brain/brain-log.tsx
+msgid "Asked: {title}"
+msgstr "Gefragt: {title}"
+
 #: src/onboarding/send-plan-form.tsx
 msgctxt "at an hour of the day: on Tuesday at 9:00"
 msgid "at"
@@ -3283,6 +3264,10 @@ msgstr "Hindernis"
 #: src/brain/brain.ts
 msgid "Blockers"
 msgstr "Hindernisse"
+
+#: src/brain/brain-atlas.ts
+msgid "Board"
+msgstr "Vorstand"
 
 #: src/brain/goals-editor.tsx
 msgid "Board goals"
@@ -4282,6 +4267,7 @@ msgstr "Verbindung {connectionId}"
 msgid "Connection {connectionId}, {resource}"
 msgstr "Verbindung {connectionId}, {resource}"
 
+#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 msgid "Connections"
 msgstr "Verbindungen"
@@ -4626,6 +4612,10 @@ msgstr "Tag"
 msgid "Day {day} of {days}"
 msgstr "Tag {day} von {days}"
 
+#: src/brain/brain-log.tsx
+msgid "Day by day"
+msgstr "Tag für Tag"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Day the data processing agreement was signed"
 msgstr "Tag, an dem der Auftragsverarbeitungsvertrag unterschrieben wurde"
@@ -4916,6 +4906,7 @@ msgstr "Dokument"
 msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
+#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/chat/project-dialog.tsx
 #: src/onboarding/document-drop.tsx
@@ -5421,10 +5412,6 @@ msgstr "Alle eingeladenen Teams interviewt"
 #: src/routes/_shell.settings.notifications.tsx
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Jeden Montag: Stunden, Läufe und was wartet."
-
-#: src/brain/brain-atlas.ts
-msgid "Every one of them is interviewed."
-msgstr "Alle sind interviewt."
 
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
@@ -6121,6 +6108,11 @@ msgstr "Ausnahme gewähren"
 msgid "Granted a permission"
 msgstr "Eine Berechtigung erteilt"
 
+#. tab: what Grasp did itself, its questions
+#: src/brain/brain-log.tsx
+msgid "Grasp"
+msgstr "Grasp"
+
 #: src/brain/brain.ts
 msgid "Grasp access"
 msgstr "Grasp-Zugriff"
@@ -6255,6 +6247,10 @@ msgstr "Grasp darf {app} nur über die Werkzeuge nutzen, die Sie erlaubt haben."
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
 msgstr "Grasp sendet es nie wieder. Auf {connection} wird nichts geändert oder rückgängig gemacht."
+
+#: src/brain/brain-log.tsx
+msgid "Grasp noticed it did not know"
+msgstr "Grasp hat gemerkt, dass es das nicht weiß"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Grasp opens"
@@ -6841,6 +6837,7 @@ msgctxt "onboarding area section"
 msgid "Interviewers"
 msgstr "Interviewer"
 
+#: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/routes/_shell.onboarding.interviews.index.tsx
 msgid "Interviews"
@@ -7250,6 +7247,10 @@ msgstr "Die Schritte lassen sich nicht aus dem Code lesen, also kann jeder Schri
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Ihre Tokens werden gelöscht, jede Domäne und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
+
+#: src/brain/brain-article/team-work.tsx
+msgid "Its work"
+msgstr "Die Arbeit"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "Its work is mapped; nothing is redesigned with AI yet."
@@ -8082,6 +8083,10 @@ msgstr "Mehr von dem, was Sie mir über KI erzählt haben."
 #: src/interview/words.ts
 msgid "More of when it goes differently."
 msgstr "Noch mehr dazu, was anders läuft."
+
+#: src/brain/brain-atlas.ts
+msgid "More teams"
+msgstr "Weitere Teams"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
@@ -9145,6 +9150,10 @@ msgstr "Nicht gut"
 msgid "Not in a domain yet"
 msgstr "Noch in keiner Domäne"
 
+#: src/brain/brain.ts
+msgid "Not interviewed yet."
+msgstr "Noch nicht interviewt."
+
 #: src/landscape/landscape-overview.ts
 msgid "Not known"
 msgstr "Unbekannt"
@@ -9391,6 +9400,10 @@ msgstr "Nichts fehlt"
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Nothing needs Grasp right now."
 msgstr "Gerade braucht nichts Grasp."
+
+#: src/brain/brain-log.tsx
+msgid "Nothing of this kind yet."
+msgstr "Davon noch nichts."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the domain's first current version."
@@ -10503,6 +10516,16 @@ msgstr "Projekte"
 msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Projekte und Aufgaben"
+
+#: src/brain/brain-nav.tsx
+msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
+msgid "Proposed"
+msgstr "Vorgeschlagen"
+
+#: src/brain/brain-article/team-work.tsx
+msgctxt "a link Grasp proposed that nobody confirmed yet"
+msgid "Proposed"
+msgstr "Vorgeschlagen"
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record state"
@@ -11797,6 +11820,10 @@ msgctxt "what an App's screen sends with an answer to a decision"
 msgid "Sent by the app"
 msgstr "Von der App mitgesendet"
 
+#: src/brain/brain-log.tsx
+msgid "Sent to the {who}"
+msgstr "Gesendet an: {who}"
+
 #: src/brain/brain.ts
 msgid "Served by"
 msgstr "Umgesetzt durch"
@@ -11927,6 +11954,10 @@ msgstr "Weniger anzeigen"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Im Gehirn zeigen"
+
+#: src/brain/brain-log.tsx
+msgid "Show in the log"
+msgstr "Im Protokoll zeigen"
 
 #: src/chat/held-writes.tsx
 msgid "Show less"
@@ -13026,14 +13057,6 @@ msgstr "Damit kann ich gut anfangen. Machen wir weiter."
 msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden mich genau hier."
 
-#: src/brain/brain.ts
-msgid "the {role}"
-msgstr "{role}"
-
-#: src/brain/brain.ts
-msgid "the {role} and {staff}"
-msgstr "{role} und {staff}"
-
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} that spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
@@ -13468,10 +13491,6 @@ msgstr "Das Monatsbudget für KI ist noch nicht festgelegt."
 msgid "The most pressing first."
 msgstr "Das Dringendste zuerst."
 
-#: src/brain/brain-atlas.ts
-msgid "The most used AI tool nobody mentioned is {name}, used by {people} people."
-msgstr "Das meistgenutzte KI-Tool, das niemand genannt hat, ist {name}, genutzt von {people} Personen."
-
 #: src/engines/store-changes.tsx
 msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
 msgstr "Das neue Feld {field} der Tabelle {table} lässt sich nicht ausfüllen: Der Datensatz {record} enthält unter diesem Namen bereits einen Wert, den das Feld nicht akzeptiert."
@@ -13627,6 +13646,10 @@ msgstr "Der Lauf startet."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "Der Lauf wurde gestoppt."
+
+#: src/brain/brain-article/team-work.tsx
+msgid "The same pain in other teams"
+msgstr "Derselbe Schmerz in anderen Teams"
 
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"
@@ -14279,6 +14302,10 @@ msgstr "An diese Teams"
 #: src/engines/package-approvals.tsx
 msgid "To use them again, someone who approves packages reviews them again."
 msgstr "Um sie wieder zu nutzen, prüft jemand, der Pakete genehmigt, sie erneut."
+
+#: src/brain/brain-log.tsx
+msgid "Today"
+msgstr "Heute"
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
@@ -15099,6 +15126,10 @@ msgstr "Wir öffnen Ihre Plattform, sobald wir alles mit Ihnen geprüft haben. S
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "Wir wollen weniger Zeit mit wiederkehrender Arbeit verbringen, damit mehr Zeit für unsere Kunden bleibt. Es geht darum, wie die Arbeit läuft, nicht um Stellen."
 
+#: src/brain/brain-article/kern.tsx
+msgid "week {week}"
+msgstr "KW {week}"
+
 #: src/dashboard/report.ts
 msgid "Week {week}"
 msgstr "Woche {week}"
@@ -15148,6 +15179,11 @@ msgstr "Woran arbeiten Sie?"
 msgctxt "inbox sort"
 msgid "What blocks first, then newest"
 msgstr "Was blockiert zuerst, dann neueste"
+
+#: src/brain/brain-atlas.ts
+msgctxt "the brainstem: every conversation, document and connection"
+msgid "What came in"
+msgstr "Was hereinkam"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -15250,10 +15286,6 @@ msgstr "Was ich über Ihre Organisation weiß: {percent} %. Das ist nicht, wie w
 msgid "What is marked is what I wrote down. You check it at the end."
 msgstr "Was markiert ist, habe ich notiert. Sie prüfen es am Ende."
 
-#: src/brain/brain-atlas.ts
-msgid "What is seen in use"
-msgstr "Was im Einsatz zu sehen ist"
-
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
 msgid "What is sensitive now"
@@ -15262,10 +15294,6 @@ msgstr "Was gerade heikel ist"
 #: src/onboarding/work-record.tsx
 msgid "What is still missing"
 msgstr "Was noch fehlt"
-
-#: src/brain/brain-atlas.ts
-msgid "What is still unknown"
-msgstr "Was noch unbekannt ist"
 
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "What it checks"
@@ -15388,6 +15416,10 @@ msgstr "Was Stripe an die Rechnungs-E-Mail-Adresse sendet."
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Was die Geschäftsleitung vom Sprint will: die Ziele und die Spielregeln."
 
+#: src/brain/brain-log.tsx
+msgid "What the brain kept of it"
+msgstr "Was das Gehirn davon behalten hat"
+
 #: src/brain/brain.ts
 msgid "What the client shares, and our own desk research. Adds policies, procedures and process examples."
 msgstr "Was der Kunde teilt, und unsere eigene Desk-Recherche. Ergänzt Richtlinien, Verfahren und Prozessbeispiele."
@@ -15440,6 +15472,10 @@ msgstr "Was gehört, geschrieben und verbunden wurde"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "What was said"
 msgstr "Was gesagt wurde"
+
+#: src/brain/brain-log.tsx
+msgid "What was said is on the work it was about"
+msgstr "Was gesagt wurde, steht bei der Arbeit, um die es ging"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "What was said stays with the person who said it. Nobody at Grasp reads it."
@@ -15606,6 +15642,10 @@ msgstr "Wo das Onboarding steht, Phase für Phase."
 msgid "Where the vendor says data is stored and processed, and any transfers to other countries."
 msgstr "Wo Daten laut Anbieter gespeichert und verarbeitet werden, und etwaige Übermittlungen in andere Länder."
 
+#: src/brain/brain-article/team-work.tsx
+msgid "Where the work passes on"
+msgstr "Wo die Arbeit weitergeht"
+
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Wo die Workflows stehen"
@@ -15715,10 +15755,6 @@ msgstr "Wer entscheidet, wer blockieren kann"
 #: src/onboarding/work-record.tsx
 msgid "who do it have talked"
 msgstr "die es machen, haben gesprochen"
-
-#: src/brain/brain-atlas.ts
-msgid "Who does what"
-msgstr "Wer was macht"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Who leads it?"
@@ -15893,10 +15929,6 @@ msgctxt "kickoff field"
 msgid "Work that costs too much time"
 msgstr "Arbeit, die zu viel Zeit kostet"
 
-#: src/brain/brain-atlas.ts
-msgid "Work that could be automated"
-msgstr "Arbeit, die automatisiert werden könnte"
-
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Workaround"
@@ -16059,6 +16091,10 @@ msgstr "Betriebsrat"
 msgid "Works council heard, where there is one"
 msgstr "Betriebsrat angehört, wo es einen gibt"
 
+#: src/brain/brain-article/team-work.tsx
+msgid "Works in"
+msgstr "Arbeitet in"
+
 #: src/routes/_shell.settings.tsx
 msgid "Workspace"
 msgstr "Workspace"
@@ -16131,6 +16167,11 @@ msgstr "Fehlerhaft"
 
 #: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx
+msgid "Yes"
+msgstr "Ja"
+
+#: src/brain/brain.ts
+msgctxt "a team was interviewed"
 msgid "Yes"
 msgstr "Ja"
 

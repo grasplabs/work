@@ -23,7 +23,6 @@ import {
   atlasOf,
   isRegion,
   REGION_IDS,
-  REGIONS,
   signalPaths,
 } from "../brain/brain-atlas.ts";
 import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
@@ -189,7 +188,7 @@ const keyOnControl = (event: KeyboardEvent): boolean =>
 const AtlasPage = () => {
   // The brain's chat, open as a drawer, takes the right of the canvas.
   const dock = useDockMode();
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const { workspace: ws, brain } = useBrainData();
   const atlas = atlasOf(ws, brain);
   const search = Route.useSearch();
@@ -229,10 +228,10 @@ const AtlasPage = () => {
   const [spot, setSpot] = useState<Spot>();
   const { gap, neuron } = inHandOf(ws, neurons, view.note);
 
-  const regionLabel = REGIONS.find((each) => each.id === region)?.label;
+  const regionName = atlas.regions.find((each) => each.id === region)?.name;
   const trail = trailOf(view, {
     brain: t`Brain`,
-    region: regionLabel === undefined ? undefined : i18n._(regionLabel),
+    region: regionName,
     group: groups.find((each) => each.key === group)?.label,
     inHand: gap?.question ?? neuron?.title ?? neuron?.label,
   });

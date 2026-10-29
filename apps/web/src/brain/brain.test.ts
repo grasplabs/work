@@ -245,7 +245,8 @@ describe(buildBrain, () => {
       appOwner: words(app, "Owner"),
       candidateTeams: words(candidate, "Teams"),
     }).toStrictEqual({
-      team: "15 people, 9 interviewed: the head of customer service and 8 employees. Heard in 2 conversations.",
+      // Its size, never who of it talked, nor how many.
+      team: "15 people.",
       teamUses: "Outlook, CRM, Microsoft Copilot",
       app: "47 people use it, seen through Pulse. No team has named it yet.",
       appOwner: "Revenue",
@@ -369,12 +370,9 @@ describe("the inventory", () => {
     expect(words(noteIn(ws, "company"), "Interviews")).toBe(
       "Stakeholders of 5 of 5 invited teams, 22 employees interviewed"
     );
-    expect(words(noteIn(ws, "team-mortgage"), "Interviewed")).toBe(
-      "Team lead mortgage advice, interviewed Aug 27, 2026 (voice agent)"
-    );
-    expect(noteIn(ws, "team-mortgage").summary).toMatch(
-      /, 7 interviewed: the team lead mortgage advice and 6 employees\. /u
-    );
+    // Whether it was interviewed, never by whom or when.
+    expect(words(noteIn(ws, "team-mortgage"), "Interviewed")).toBe("Yes");
+    expect(noteIn(ws, "team-mortgage").summary).toBe("9 people.");
   });
 
   it("counts a team whose stakeholder no source speaks for as not interviewed yet", () => {
@@ -543,7 +541,7 @@ describe("a living brain", () => {
     expect(finance.timeline.map((entry) => entry.title)).toContain(
       "Stakeholder changed to the CFO"
     );
-    expect(words(finance, "Interviewed")).toMatch(/^CFO, interviewed/u);
+    expect(words(finance, "Interviewed")).toBe("Yes");
   });
 
   it("keeps an adjusted goal as a new version, and shows the newest", () => {
@@ -748,6 +746,8 @@ describe("a brain of a deployment that holds nothing yet", () => {
     },
     goals: [],
     teams: [],
+    teamGroups: [],
+    interviewWeeks: [],
     tools: [],
     sources: [],
     statements: [],
@@ -829,6 +829,8 @@ describe("a brain of the onboarding alone, as core reads it for an admin", () =>
         ],
       },
     ],
+    teamGroups: [],
+    interviewWeeks: [],
     tools: [
       {
         id: "tool.document-exact-online",
@@ -907,7 +909,7 @@ describe("a brain of the onboarding alone, as core reads it for an admin", () =>
         "src.document-booking": ["Sources", "Documents"],
         "tool.document-exact-online": ["2 Inventory", "Tools", "Mentioned"],
       },
-      interviewed: "Head of finance, interviewed Oct 5, 2026",
+      interviewed: "Yes",
       legal: true,
       dangling: [],
     });

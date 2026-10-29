@@ -4919,6 +4919,24 @@ export const brainRecords = sqliteTable(
 );
 
 /**
+ * The company's groups of teams (brain-team-groups.ts): the brain's
+ * regions. One row per group, in the company's order. A group Grasp
+ * proposed has no `confirmedAt` until an admin confirms it, or changes it.
+ */
+export const brainTeamGroups = sqliteTable("brain_team_groups", {
+  id: text().primaryKey(),
+  /** The company's own name for it. */
+  name: text().notNull(),
+  /** The brain's team ids in it, as JSON: each team in one group at most. */
+  teamIds: text("team_ids").notNull(),
+  /** Its place in the company's order. */
+  position: integer().notNull(),
+  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  confirmedAt: timestamp("confirmed_at"),
+  savedAt: timestamp("saved_at").notNull(),
+});
+
+/**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.

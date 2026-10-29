@@ -25,6 +25,7 @@ import { BannerHeader, Interviewed } from "../brain/brain-article/kern.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
+import { TeamWork } from "../brain/brain-article/team-work.tsx";
 import { Capped, NoteChip } from "../brain/brain-chips.tsx";
 import { dotClass, tintClass } from "../brain/brain-colors.ts";
 import { useBrainData } from "../brain/brain-data.ts";
@@ -47,6 +48,7 @@ import {
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { placeOf } from "../brain/transcript.ts";
+import { labelOf } from "../brain/witness.ts";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
@@ -672,6 +674,7 @@ const NoteBody = ({
   statements: StatementRow[];
   activeId: string | undefined;
 }) => {
+  const { brain } = useBrainData();
   const nameable = nameableFrom(note, byId);
   const article = (
     <Article byId={byId} nameable={nameable} paragraphs={note.article} />
@@ -719,7 +722,11 @@ const NoteBody = ({
         <SourceContentsTable byId={byId} contents={contents} />
       ) : null}
       {article}
-      {statements.length > 0 ? (
+      {note.kind === "team" ? (
+        // A team's page is its work, never its people's words: those live on the work's pages.
+        <TeamWork brain={brain} team={note} ws={workspace} />
+      ) : null}
+      {note.kind !== "team" && statements.length > 0 ? (
         <StatementsByKind
           activeId={activeId}
           kern={kernOf(note.id, statements)}
@@ -755,7 +762,9 @@ const NoteContent = ({
       (candidate) => candidate.id === id
     );
     const place = statement ? placeOf(statement, workspace.sources) : undefined;
-    return statement && place ? [{ statement, place }] : [];
+    return statement && place
+      ? [{ statement, place, who: labelOf(workspace, place.source) }]
+      : [];
   });
   // The statement a link opened, when it is one of this note's.
   const activeId = statements.some((row) => row.statement.id === hash)

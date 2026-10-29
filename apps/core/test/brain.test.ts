@@ -288,6 +288,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
       goals: [],
       teams: [],
+      teamGroups: [],
+      interviewWeeks: [],
       tools: [],
       sources: [],
       statements: [],

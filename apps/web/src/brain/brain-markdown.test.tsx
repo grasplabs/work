@@ -58,7 +58,8 @@ describe(noteMarkdown, () => {
     expect(events).toHaveLength(team.timeline.length);
     expect(events[0]).toContain("Desk research: website, vacancies and news");
     expect(text).toContain("Size changed to 15");
-    expect(text).toContain(
+    // A team's history never says who talked or when; the work it does quotes what was said.
+    expect(noteMarkdown(note("cand-email"), options)).toContain(
       "  - [“About 600 emails a week land in one shared inbox, and every one is routed by hand”](https://grasp.example/brain/src-service#st-inbox)"
     );
   });

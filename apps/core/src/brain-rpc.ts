@@ -10,6 +10,7 @@ import type {
   Source,
   Stakeholder,
   Team,
+  TeamGroup,
   Tool,
   Transcript,
   Vision,
@@ -47,6 +48,11 @@ import {
   readBrainRecords,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
+import {
+  proposeTeamGroups,
+  saveTeamGroups,
+  teamGroupsOf,
+} from "./brain-team-groups.ts";
 import {
   brainTranscript,
   knowledgeTranscriptSources,
@@ -102,6 +108,11 @@ import { visibleApps } from "./workflows/overview.ts";
 // Grasp's staff are admins, and read what admins read (Nick,
 // 2026-10-25): that each of their reads is audited and visible to the
 // client is GRA-1087's.
+// | teamGroups         | the company's groups of teams (brain-team-groups.ts),    |
+// |                    | for everyone signed in, naming only the reader's teams   |
+// | interviewWeeks     | the interviews the brain learned from, five or more a    |
+// |                    | week, never who or which day (the onboarding's store),   |
+// |                    | for everyone signed in                                   |
 // | goals              | the brain's records, for everyone signed in; each goal's |
 // |                    | linked workflows only as far as the person may see their |
 // |                    | App, while it still has them                             |
@@ -917,13 +928,16 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [facts, name, connections, held, transcribed] = await Promise.all([
-    onboardingFacts(env, person),
-    organizationName(env),
-    connectionsOf(env, person),
-    readBrainRecords(env),
-    knowledgeTranscriptSources(env, person),
-  ]);
+  const [facts, name, connections, held, transcribed, groups, weeks] =
+    await Promise.all([
+      onboardingFacts(env, person),
+      organizationName(env),
+      connectionsOf(env, person),
+      readBrainRecords(env),
+      knowledgeTranscriptSources(env, person),
+      teamGroupsOf(env),
+      onboardingStore(env).interviewWeeks(),
+    ]);
   const onboarding = onboardingTeams(facts);
   const records = withSuccessors(onboarding, held);
 
@@ -964,6 +978,15 @@ export const readBrain = async (
     vision: visionOf(records, facts),
     goals: await goalsFor(env, person, records.goals),
     teams,
+    // A group names only the teams this reader has; one left with none is
+    // not theirs to see.
+    teamGroups: groups.flatMap((group) => {
+      const teamIds = group.teamIds.filter((id) =>
+        teams.some((team) => team.id === id)
+      );
+      return teamIds.length === 0 ? [] : [{ ...group, teamIds }];
+    }),
+    interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
     sources: [...sources, ...records.sources, ...transcribed],
     statements: records.statements,
@@ -1044,6 +1067,37 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           person,
           records,
           async () => await onboardingHeld(this.#env)
+        )
+    );
+  }
+
+  /** The brain's teams as `person` reads them. */
+  async #teams(person: Identity): Promise<Team[]> {
+    const { teams } = await readBrain(this.#env, person);
+    return teams;
+  }
+
+  async proposeTeamGroups(): Promise<TeamGroup[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await proposeTeamGroups(
+          this.#env,
+          person,
+          async () => await this.#teams(person)
+        )
+    );
+  }
+
+  async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await saveTeamGroups(
+          this.#env,
+          person,
+          groups,
+          async () => await this.#teams(person)
         )
     );
   }

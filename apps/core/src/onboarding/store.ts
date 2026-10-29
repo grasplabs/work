@@ -190,6 +190,7 @@ import {
   dueLinks,
   leads,
   leadsTalked,
+  mondayOf,
   progressOf,
   sendsFrom,
   takingPart,
@@ -2682,6 +2683,57 @@ export class Onboarding extends DurableObject<Env> {
           ? []
           : [{ team: id, name: team.name, people: agreed.length, since }];
       });
+  }
+
+  /**
+   * How many interviews the brain learned from, week by week, never who
+   * gave them or on which day (GRA-1278): the interviews of the people who
+   * agreed, in teams whose interviews the brain holds, by the Monday of the
+   * week each finished in. A week of fewer than `minTeamShown` is counted
+   * with the weeks after it, on the Monday of the week that brings the
+   * count to it, so no line ever stands for fewer people than a team's
+   * claim needs; what is left at the end waits for more.
+   */
+  interviewWeeks(): { week: string; interviews: number }[] {
+    const roster = this.#roster();
+    const sent = new Set(
+      this.#db
+        .select({ team: brainTeams.team })
+        .from(brainTeams)
+        .where(isNotNull(brainTeams.sentAt))
+        .all()
+        .map(({ team }) => team)
+    );
+    const inSent = new Set(
+      (roster?.people ?? [])
+        .filter((person) => sent.has(person.team))
+        .map(({ id }) => id)
+    );
+    const days = this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .where(isNotNull(interviewStates.agreedAt))
+      .all()
+      .flatMap(({ person, completedAt }) =>
+        completedAt === null || !inSent.has(person)
+          ? []
+          : [mondayOf(dayOf(completedAt))]
+      )
+      .toSorted();
+    const weeks: { week: string; interviews: number }[] = [];
+    let waiting = 0;
+    for (const [index, week] of days.entries()) {
+      waiting += 1;
+      const last = days[index + 1] !== week;
+      if (last && waiting >= minTeamShown) {
+        weeks.push({ week, interviews: waiting });
+        waiting = 0;
+      }
+    }
+    return weeks;
   }
 
   /**

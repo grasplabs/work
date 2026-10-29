@@ -227,6 +227,20 @@ describe(
         rota: false,
         named: { ids: [], names: [], words: false, lead: false },
       });
+      // The interviews it learned from, counted by week, five or more a
+      // week, on the week's Monday: never who gave them, or on which day.
+      expect({
+        mondays: brain.interviewWeeks.every(
+          ({ week }) => new Date(`${week}T00:00:00Z`).getUTCDay() === 1
+        ),
+        fiveOrMore: brain.interviewWeeks.every(
+          ({ interviews }) => interviews >= 5
+        ),
+        counted: brain.interviewWeeks.reduce(
+          (sum, { interviews }) => sum + interviews,
+          0
+        ),
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
