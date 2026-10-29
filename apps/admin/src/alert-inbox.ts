@@ -27,9 +27,6 @@ import { adminDatabase } from "./db/act.ts";
 import type { AdminDatabase } from "./db/act.ts";
 import { alerts, clients } from "./db/schema.ts";
 
-/** How many open alerts the inbox lists: the newest. */
-export const inboxLimit = 50;
-
 /** An open alert, as the inbox shows it. */
 export interface AlertView {
   id: string;
@@ -57,6 +54,7 @@ const isKind = (kind: string): kind is AlertKindName =>
   Object.hasOwn(alertKinds, kind);
 
 const deliveries: readonly AlertDelivery[] = [
+  "held",
   "sent",
   "no_channel",
   "failed",
@@ -77,15 +75,18 @@ const numbersOf = (text: string): AlertNumbers => {
   }
 };
 
-/** Every open alert, the newest raised first. */
+/**
+ * Every open alert, the newest raised first: all of them, so none is
+ * hidden behind newer ones. They're few by construction: one open per
+ * client, kind and subject, each gone once resolved.
+ */
 export const openAlerts = async (db: AdminDatabase): Promise<AlertView[]> => {
   const rows = await db
     .select({ alert: alerts, clientName: clients.name })
     .from(alerts)
     .leftJoin(clients, eq(clients.id, alerts.clientId))
     .where(isNull(alerts.resolvedAt))
-    .orderBy(desc(alerts.lastRaisedAt), desc(alerts.id))
-    .limit(inboxLimit);
+    .orderBy(desc(alerts.lastRaisedAt), desc(alerts.id));
   return rows.flatMap(({ alert, clientName }) => {
     const { kind, delivery } = alert;
     // One of a kind this build no longer has isn't shown with words it lacks.

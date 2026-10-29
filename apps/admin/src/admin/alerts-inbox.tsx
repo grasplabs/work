@@ -22,6 +22,7 @@ const refusals: Readonly<Record<"not_open", string>> = {
 /** What became of an alert's delivery, as the inbox says it. */
 const deliveryWords: Readonly<Record<AlertDelivery, string>> = {
   sent: "Posted to the alerts channel.",
+  held: "Posted to the alerts channel before, or held there within its window.",
   sending: "Being posted to the alerts channel.",
   no_channel:
     "Not posted: no alerts channel is set, so it's only here. Add STAFF_ALERTS_WEBHOOK to the stage's 1Password Environment, then run Deploy platform.",

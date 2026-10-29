@@ -27,7 +27,7 @@ import type { AlertView } from "../src/alert-inbox.ts";
 import { alertKinds, sendStaffAlert } from "../src/alerts.ts";
 import { sendTestAlertFn } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
-import { auditEvents, clients } from "../src/db/schema.ts";
+import { auditEvents, clients, staffAlerts } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn, page } from "./pages.ts";
@@ -349,6 +349,73 @@ describe("staff alerts", () => {
       posted: 2,
       acknowledgedBy: [staff.email],
       resolvedBy: [staff.email],
+    });
+  });
+
+  it("open in the inbox when held by a claim no open alert has, as one made before the inbox, or before an inbox write that failed", async () => {
+    const clientId = await aClient("Acme Logistics");
+    // Claimed by an earlier admin, which kept no inbox.
+    await db
+      .insert(staffAlerts)
+      .values({ clientId, kind: "stephen_failing", sentAt: at });
+
+    const outcome = await sendStaffAlert(
+      env,
+      { clientId, kind: "stephen_failing", numbers: { failed: 9, turns: 40 } },
+      later(1000)
+    );
+    const again = await sendStaffAlert(
+      env,
+      { clientId, kind: "stephen_failing", numbers: { failed: 9, turns: 40 } },
+      later(2000)
+    );
+
+    expect({
+      outcome,
+      again,
+      posted: posted.length,
+      inbox: await inboxRead(clientId, ({ title, delivery, times }) => ({
+        title,
+        delivery,
+        times,
+      })),
+    }).toStrictEqual({
+      outcome: "held",
+      again: "held",
+      posted: 0,
+      inbox: [{ title: "Stephen: turns failing", delivery: "held", times: 1 }],
+    });
+  });
+
+  it("keep a fresh alert's hold when a second resolve of an older one changes nothing", async () => {
+    const clientId = await aClient("Acme Logistics");
+    await sendStaffAlert(env, { clientId, kind: "test" }, at);
+    const [first] = await inboxOf(clientId);
+    const alertId = first?.id ?? "";
+    await callServerFn(resolveAlertFn, { alertId }, { email: staff.email });
+    // Raised again, and claimed afresh, before the second resolve lands.
+    const fresh = await sendStaffAlert(
+      env,
+      { clientId, kind: "test" },
+      later(1000)
+    );
+
+    const late = await callServerFn(
+      resolveAlertFn,
+      { alertId },
+      { email: "other@grasp.test" }
+    );
+    const within = await sendStaffAlert(
+      env,
+      { clientId, kind: "test" },
+      later(2000)
+    );
+
+    expect({ fresh, late, within, posted: posted.length }).toStrictEqual({
+      fresh: "sent",
+      late: { refused: "not_open" },
+      within: "held",
+      posted: 2,
     });
   });
 

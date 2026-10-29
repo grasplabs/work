@@ -58,7 +58,7 @@ import type {
   PlatformLimits,
   ReleaseManifest,
 } from "@grasp-os/shared/release";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 
 import {
   clearStaffAlert,
@@ -68,6 +68,7 @@ import {
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
+  alerts,
   auditEvents,
   releaseImportFailures,
   releaseImportProgress,
@@ -620,9 +621,18 @@ export const alertOnImports = async (
   db: AdminDatabase,
   result: ImportResult
 ): Promise<void> => {
-  for (const id of result.imported) {
+  // Every open import alert whose release is imported now, not only this
+  // run's: one whose clear failed before is cleared on the next run.
+  const imported = await db
+    .select({ releaseId: releases.id })
+    .from(alerts)
+    .innerJoin(releases, eq(releases.id, alerts.subject))
+    .where(
+      and(eq(alerts.kind, "release_import_failing"), isNull(alerts.resolvedAt))
+    );
+  for (const { releaseId } of imported) {
     // oxlint-disable-next-line no-await-in-loop -- a few releases a run
-    await clearStaffAlert(env, null, "release_import_failing", id);
+    await clearStaffAlert(env, null, "release_import_failing", releaseId);
   }
   if (result.failed.length === 0) {
     return;

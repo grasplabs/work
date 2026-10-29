@@ -312,7 +312,7 @@ export type AlertOutcome =
   | "failed";
 
 /** What became of an alert's delivery, as its record keeps it: its outcome, or still being posted. */
-export type AlertDelivery = Exclude<AlertOutcome, "held"> | "sending";
+export type AlertDelivery = AlertOutcome | "sending";
 
 /** The channel's webhook; null while there is none, or it isn't Discord's. */
 const alertsWebhook = async (env: Env): Promise<URL | null> => {
@@ -406,7 +406,10 @@ const record = async (
       set: {
         numbers,
         lastRaisedAt: now,
-        times: sql`${alerts.times} + 1`,
+        // One a held raise opened (`keepOpen`) counts this raise as its
+        // own: in a storm, a held raise can open it a moment before the
+        // one that claimed it records it.
+        times: sql`case when ${alerts.delivery} = 'held' then ${alerts.times} else ${alerts.times} + 1 end`,
         delivery,
       },
     })
@@ -415,6 +418,32 @@ const record = async (
     throw new Error("The alert wasn't recorded");
   }
   return row.id;
+};
+
+/**
+ * Opens `alert` in the inbox at `now` unless one of its client, kind and
+ * subject is open already, which it leaves as it is.
+ */
+const keepOpen = async (
+  env: Env,
+  alert: AnyStaffAlert,
+  now: Date
+): Promise<void> => {
+  await adminDatabase(env.DB)
+    .insert(alerts)
+    .values({
+      id: crypto.randomUUID(),
+      clientId: alert.clientId,
+      kind: alert.kind,
+      subject: alert.subject ?? null,
+      numbers: JSON.stringify(alert.numbers ?? {}),
+      openKey: openKeyOf(alert),
+      raisedAt: now,
+      lastRaisedAt: now,
+      times: 1,
+      delivery: "held",
+    })
+    .onConflictDoNothing({ target: alerts.openKey });
 };
 
 /** Records what became of alert `id`'s delivery. */
@@ -455,6 +484,7 @@ export const resolveStaffAlert = async (
   // What holds it back, as `heldBy` makes it.
   const kind =
     open.subject === null ? open.kind : `${open.kind}/${open.subject}`;
+  const resolvedBy = by === "system" ? "system" : by.email;
   return await actIfChanged(
     db,
     by,
@@ -462,7 +492,7 @@ export const resolveStaffAlert = async (
       .update(alerts)
       .set({
         resolvedAt: now,
-        resolvedBy: by === "system" ? "system" : by.email,
+        resolvedBy,
         openKey: null,
       })
       .where(and(eq(alerts.id, id), isNull(alerts.resolvedAt))),
@@ -473,14 +503,15 @@ export const resolveStaffAlert = async (
       detail: { kind: open.kind },
     },
     [
-      db
-        .delete(staffAlerts)
-        .where(
-          and(
-            eq(staffAlerts.clientId, claimantOf(open.clientId)),
-            eq(staffAlerts.kind, kind)
-          )
-        ),
+      db.delete(staffAlerts).where(
+        and(
+          eq(staffAlerts.clientId, claimantOf(open.clientId)),
+          eq(staffAlerts.kind, kind),
+          // Only once this resolve is the one that resolved it: a later
+          // one that changed nothing leaves a fresh alert's claim be.
+          sql`exists (select 1 from ${alerts} where ${alerts.id} = ${id} and ${alerts.resolvedAt} = ${now.getTime()} and ${alerts.resolvedBy} = ${resolvedBy})`
+        )
+      ),
     ]
   );
 };
@@ -659,6 +690,10 @@ export const sendStaffAlert = async (
 ): Promise<AlertOutcome> => {
   const fields = { client: alert.clientId ?? "platform", kind: alert.kind };
   if (!(await claim(env, alert, now))) {
+    // Held back from the channel, never from the inbox: one held by a
+    // claim with no open alert (an inbox write that failed after its
+    // claim, or a claim older than the inbox) is opened now.
+    await keepOpen(env, alert, now);
     return "held";
   }
   const webhook = await alertsWebhook(env);

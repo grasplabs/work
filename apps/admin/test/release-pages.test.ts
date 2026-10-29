@@ -4,7 +4,11 @@ import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { fetchAlerts } from "../src/alert-inbox.ts";
-import { alertKinds, importAlertAttempts } from "../src/alerts.ts";
+import {
+  alertKinds,
+  importAlertAttempts,
+  sendStaffAlert,
+} from "../src/alerts.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { releaseImportFailures, releases } from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
@@ -293,5 +297,27 @@ describe("a release the import can't verify", () => {
       afterImport: [],
       listedAfter: false,
     });
+  });
+
+  it("resolves an open import alert once its release is imported, whichever run imported it", async () => {
+    const release = await publishRelease({
+      notes: "feat(core): imported while its alert stayed open",
+    });
+    await importCron();
+    // An alert the run that imported it didn't clear.
+    await sendStaffAlert(env, {
+      clientId: null,
+      kind: "release_import_failing",
+      subject: release.id,
+      numbers: { attempts: importAlertAttempts },
+    });
+    const before = await importAlertsOf(release.id);
+
+    await importCron();
+
+    expect({
+      before: before.length,
+      after: await importAlertsOf(release.id),
+    }).toStrictEqual({ before: 1, after: [] });
   });
 });
