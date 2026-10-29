@@ -125,6 +125,16 @@ const appInUse = async (env: Env, appId: string) =>
     .where(eq(apps.id, appId))
     .get();
 
+/** Whether the App `appId` was removed (app-removal.ts). */
+const isRemovedApp = async (env: Env, appId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ removedAt: apps.removedAt })
+    .from(apps)
+    .where(eq(apps.id, appId))
+    .get();
+  return row !== undefined && row.removedAt !== null;
+};
+
 /** The AGENTS.md of version `version` of the App `appId`, as indexed. */
 const agentsOf = async (
   env: Env,
@@ -500,6 +510,23 @@ export const indexApps = async (env: Env): Promise<void> => {
 };
 
 /**
+ * What any indexing of the App `appId` would write from now on, as
+ * `entryNow` has it: for a removed App, its tombstone for good
+ * (`forgetAppEntry`), as nothing makes its entry from the App again, so a
+ * purge of its earlier versions lasts, and nobody can restore the App to
+ * unblock one.
+ */
+const entryToCome = async (
+  env: Env,
+  appId: string
+): ReturnType<typeof entryNow> => {
+  if (await isRemovedApp(env, appId)) {
+    return { text: removedEntryText, name: "", description: "", agents: "" };
+  }
+  return await entryNow(env, appId);
+};
+
+/**
  * Refuses with `knowledge.read_only` a purge of an App's entry while what
  * indexing would write now (`entryNow`) holds a term (`holds`), saying
  * where: the next indexing (a version made current, the clock catching up)
@@ -522,7 +549,7 @@ const requireIndexedWithout = async (
   const appId = appOfEntry(document.path);
   let now: Awaited<ReturnType<typeof entryNow>>;
   try {
-    now = appId === undefined ? undefined : await entryNow(env, appId);
+    now = appId === undefined ? undefined : await entryToCome(env, appId);
   } catch (error) {
     log.error("knowledge.purge.app_unreadable", {
       documentId: document.id,
