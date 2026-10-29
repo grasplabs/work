@@ -30,6 +30,7 @@ import { z } from "zod";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import type { Connection } from "./connections.ts";
 import { connections, connectorEvents, eventSources } from "./db/schema.ts";
+import { ownerErased } from "./erased-people.ts";
 import {
   SourceError,
   maxWaitMs,
@@ -281,10 +282,12 @@ const reconcile = async (
       sourceEntry("connection.events.started", source),
       {
         from: connections,
+        // Nowhere for a connection whose owner's erasure began.
         where:
           and(
             eq(connections.id, source.connectionId),
-            notExists(db.select().from(eventSources).where(same))
+            notExists(db.select().from(eventSources).where(same)),
+            sql`NOT ${ownerErased(source.connectionId)}`
           ) ?? sql`0`,
       },
       [
@@ -400,26 +403,27 @@ const keepRead = async (
       updatedAt: done,
     })
     .where(sameCursor(source));
+  // Never for a connection whose owner's erasure began: a read that was
+  // out as it began keeps nothing of theirs after it (person-erasure.ts).
   const inserts: BatchItem<"sqlite">[] = events.map((event) =>
     db
       .insert(connectorEvents)
-      .values({
-        id: crypto.randomUUID(),
-        key: JSON.stringify([source.id, event.id]),
-        connectionId: connection.id,
-        event: JSON.stringify({
-          id: event.id,
-          connection: connection.id,
-          owner: connection.ownerUserId,
-          ...(source.resource === "" ? {} : { resource: source.resource }),
-          action,
-          type: source.type,
-          payload: event.payload,
-          ...(event.stamp === undefined ? {} : { stamp: event.stamp }),
-        }),
-        retryAt: done,
-        createdAt: done,
-      })
+      .select(
+        sql`SELECT ${crypto.randomUUID()}, ${JSON.stringify([source.id, event.id])},
+          ${connection.id},
+          ${JSON.stringify({
+            id: event.id,
+            connection: connection.id,
+            owner: connection.ownerUserId,
+            ...(source.resource === "" ? {} : { resource: source.resource }),
+            action,
+            type: source.type,
+            payload: event.payload,
+            ...(event.stamp === undefined ? {} : { stamp: event.stamp }),
+          })},
+          0, ${done.getTime()}, ${done.getTime()}
+          WHERE NOT ${ownerErased(connection.id)}`
+      )
       .onConflictDoNothing()
   );
   const entries: AuditEntry[] = [];

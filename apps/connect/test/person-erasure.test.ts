@@ -1,5 +1,5 @@
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import { connectionIdSchema } from "@grasp-os/shared/ids";
+import { agentIdSchema, connectionIdSchema } from "@grasp-os/shared/ids";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -16,6 +16,7 @@ import {
   eventSources,
   idempotentCalls,
 } from "../src/db/schema.ts";
+import { idempotencyStore } from "../src/idempotency.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import { auditEvents, outcome, someone } from "./connect.ts";
 import { sampleOAuthAuthHost } from "./fixtures/sample-oauth-connector.ts";
@@ -414,5 +415,38 @@ describe("erasing a person in connect", () => {
       named: named.length,
       calls: calls.flatMap(({ calls: made }) => made).length,
     }).toStrictEqual({ erased: { connections: 150 }, named: 0, calls: 0 });
+  });
+
+  it("claims no call through their connection once their erasure began, so nothing it answers is kept", async () => {
+    const person = someone();
+    const { connectionId } = await liveConnection(person);
+    // A call checked before the erasure began claims its key after:
+    // their connection is still live, but the mark is there.
+    await drizzle(env.DB)
+      .insert(erasedPeople)
+      .values({ userId: person.userId, beganAt: new Date() });
+    const store = idempotencyStore(
+      env.DB,
+      {
+        subject: {
+          type: "agent",
+          agentId: agentIdSchema.parse(crypto.randomUUID()),
+        },
+        onBehalfOf: person.userId,
+        connectionId,
+        action: "items.update",
+        idempotencyKey: crypto.randomUUID(),
+        resource: null,
+      },
+      "input-hash"
+    );
+
+    const claimed = await outcome(store.claim());
+    const kept = await keptOf(connectionId);
+
+    expect({ claimed, kept: kept.calls }).toStrictEqual({
+      claimed: "connect.connection_inactive",
+      kept: [],
+    });
   });
 });
