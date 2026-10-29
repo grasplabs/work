@@ -38,6 +38,7 @@ import type { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import type { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
 
 // What waits on a person, in one feed (@grasp-os/shared/waiting). It
 // keeps nothing of its own: each part is read through the namespace the
@@ -48,7 +49,9 @@ import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 // lists more than that: permission requests (listed for builders too)
 // and apps to approve wait on the organization's own admins, never Grasp
 // staff; a connection on whoever may sign in to it again; a version up
-// for review on the member who answers for its App. Not audited: reading
+// for review on the member who answers for its App; a workflow's version
+// asked to go live on its owner, else the organization's admins. Not
+// audited: reading
 // it shows a person what they may already see, as the parts do.
 
 /** The namespaces the feed is read from and acts through: the session's own. */
@@ -63,6 +66,8 @@ export interface WaitingSources {
   connections: ConnectionsRpc;
   decisions: DecisionsRpc;
   chats: ChatsRpc;
+  /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
+  lifecycles: WorkflowLifecycleRpc;
 }
 
 /** Who reads the feed: whom each item is for follows from it. */
@@ -337,6 +342,25 @@ const parts: Parts = {
       ),
     };
   },
+  // A go-live waits on the workflow's owner as such, else on an admin.
+  workflowGoLives: async ({ lifecycles }, { forMe }) => {
+    const waiting = await lifecycles.waiting();
+    return {
+      items: waiting.map((goLive) => ({
+        kind: "workflowGoLive",
+        id: `workflowGoLive:${goLive.workflowId}:${goLive.version}`,
+        at: goLive.requestedAt,
+        urgent: false,
+        waitsOn: goLive.asOwner ? forMe : { type: "admin" },
+        verdicts: ["approve", "reject"],
+        workflow: { id: goLive.workflowId, name: goLive.name },
+        version: goLive.version,
+        requestedBy: goLive.requestedBy,
+        revision: goLive.revision,
+        selfApproval: goLive.selfApproval,
+      })),
+    };
+  },
   notifications: notificationItems,
   connections: connectionItems,
   decisions: async ({ decisions }, { forMe }) => {
@@ -479,6 +503,14 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
         await sources.dependencies.decide(verdict.id, {
           approved: verdict.verdict === "approve",
           reviewed: verdict.reviewed,
+        });
+        return { kind: verdict.kind };
+      }
+      case "workflowGoLive": {
+        await sources.lifecycles.decideGoLive(verdict.workflow, {
+          version: verdict.version,
+          verdict: verdict.verdict,
+          revision: verdict.revision,
         });
         return { kind: verdict.kind };
       }

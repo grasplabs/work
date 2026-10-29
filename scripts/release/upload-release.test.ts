@@ -56,7 +56,7 @@ const outcomeOf = async (running: Promise<unknown>): Promise<string> => {
     return error instanceof Error ? error.message : String(error);
   }
 };
-const BUCKET = "grasp-os-releases";
+const BUCKET = "grasp-releases-staging";
 const HTTP_OK = 200;
 const HTTP_NOT_FOUND = 404;
 const HTTP_PRECONDITION_FAILED = 412;

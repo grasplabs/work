@@ -47,6 +47,7 @@ import { z } from "zod";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { clientWorkers, releases } from "../db/schema.ts";
+import { clientRuntimeProfile } from "../deploy/core-config.ts";
 import { DeployError } from "../deploy/errors.ts";
 
 /** At most this many releases are walked back through, so a cycle in the records ends. */
@@ -362,4 +363,29 @@ export const uncoveredLimitRaise = async (
   const check = await limitRaiseCheck(db, releaseId, profile);
   const running = await runningReleases(db, clientId);
   return await check(running.map(({ id }) => id));
+};
+
+/**
+ * Throws `limit_evidence_missing` when release `releaseId` raises a
+ * platform limit over what client `clientId` runs that no evidence covers
+ * on the client's profile; `release_not_imported` when it isn't imported,
+ * or records no limits (`uncoveredLimitRaise`).
+ */
+export const assertLimitEvidence = async (
+  db: AdminDatabase,
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  const raise = await uncoveredLimitRaise(
+    db,
+    clientId,
+    releaseId,
+    clientRuntimeProfile
+  );
+  if (raise !== undefined) {
+    throw new DeployError(
+      "limit_evidence_missing",
+      `Release ${releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} over what ${clientId} runs, without capacity and security evidence for ${clientRuntimeProfile}`
+    );
+  }
 };

@@ -36,7 +36,7 @@ import { and, eq } from "drizzle-orm";
 import { adminDatabase } from "../db/act.ts";
 import { clients, settings } from "../db/schema.ts";
 import { clientDomain, deploySecrets } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import { within } from "../live-reads.ts";
 import { isConfigPending } from "../rollout/targets.ts";

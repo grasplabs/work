@@ -76,6 +76,12 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { gapAnswerErasure } from "../brain-gaps.ts";
 import { brainRecordErasure } from "../brain-records.ts";
 import { documentReadingErasure } from "../onboarding/documents.ts";
+import {
+  drawingErasure,
+  interviewErasure,
+} from "../onboarding/interview-erasure.ts";
+import { kickoffErasure } from "../onboarding/kickoff-erasure.ts";
+import { staffTextErasure } from "../onboarding/staff-text-erasure.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -118,7 +124,8 @@ const allOf = (copies: readonly Copies[]): Copies => ({
 
 /**
  * What a purge reaches of core's own copies (purge.ts `OnErase`): the
- * brain's gap answers and records, the originals of uploaded files, the
+ * brain's gap answers and records, the kickoff, the interviews and staff's
+ * own text, the originals of uploaded files, the
  * onboarding's readings of the documents shared in it with what was drawn
  * from them, the Apps collection's entries and each person's Personal
  * collection.
@@ -127,6 +134,19 @@ const coreErasure = (env: Env): OnErase => {
   const readings = documentReadingErasure(env);
   return {
     ...allOf([
+      // The kickoff first: once it is gone, nothing gives the brain its
+      // words again while the records are rewritten.
+      kickoffErasure(env),
+      // The interviews' words, and what was drawn from them, before the
+      // brain's records: an intake after reads them as the purge left
+      // them, and one before gave the brain words its records step then
+      // rewrites. Each intake runs under the onboarding's brain lock, as
+      // each of these does.
+      interviewErasure(env),
+      drawingErasure(env),
+      // Staff's own notes and Stephen's setup: a purge of terms only, never
+      // one naming a document (it has no `forgetDocuments`).
+      staffTextErasure(env),
       gapAnswerErasure(env),
       brainRecordErasure(env),
       // A reading names no person: there is no one to forget in it.

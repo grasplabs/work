@@ -108,6 +108,23 @@ export interface GoLiveItem extends ItemBase {
   version: number;
 }
 
+/**
+ * A version of an independent workflow a builder asked to go live, for
+ * its owner or an admin to approve or send back; for whoever asked only
+ * while nobody else may (`selfApproval`).
+ */
+export interface WorkflowGoLiveItem extends ItemBase {
+  kind: "workflowGoLive";
+  verdicts: ("approve" | "reject")[];
+  workflow: { id: string; name: string };
+  version: number;
+  requestedBy: string;
+  /** The lifecycle revision it was read at: a verdict names it. */
+  revision: number;
+  /** The reader asked for it, and approves it themselves as nobody else may. */
+  selfApproval: boolean;
+}
+
 /** A workflow that failed while acting for the person, which they can ask the agent to fix. */
 export interface FailedRunItem extends ItemBase {
   kind: "failedRun";
@@ -153,6 +170,7 @@ export type WaitingItem =
   | PackagesItem
   | AppApprovalItem
   | GoLiveItem
+  | WorkflowGoLiveItem
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
@@ -172,6 +190,7 @@ export const waitingParts = [
   "packages",
   "screens",
   "versions",
+  "workflowGoLives",
   "notifications",
   "connections",
   "decisions",
@@ -231,6 +250,14 @@ export const waitingVerdictSchema = z.union([
     id: identifierSchema,
     verdict: z.enum(["approve", "reject"]),
     reviewed: dependencyDecisionSchema.shape.reviewed,
+  }),
+  z.strictObject({
+    kind: z.literal("workflowGoLive"),
+    workflow: identifierSchema,
+    version: z.int().min(1),
+    /** The lifecycle revision as shown: one changed since is refused. */
+    revision: z.int().min(0),
+    verdict: z.enum(["approve", "reject"]),
   }),
   z.strictObject({
     kind: z.literal("failedRun"),

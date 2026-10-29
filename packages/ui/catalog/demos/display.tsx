@@ -13,6 +13,7 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { AspectRatio } from "@grasp-os/ui/components/aspect-ratio";
+import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
 import {
   Avatar,
   AvatarFallback,
@@ -78,6 +79,7 @@ import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { SuccessMark } from "@grasp-os/ui/components/success-mark";
 import {
   Table,
   TableBody,
@@ -332,10 +334,31 @@ const TableDemo = () => (
   </Table>
 );
 
+const AutoHeightDemo = () => (
+  <AutoHeight>
+    <FadeIn>
+      <div className="flex flex-col gap-1">
+        <p className="font-medium">Sign in</p>
+        <p className="text-muted-foreground">
+          Signing in happens at Microsoft 365. It takes about a minute.
+        </p>
+      </div>
+    </FadeIn>
+  </AutoHeight>
+);
+
+const SuccessMarkDemo = () => (
+  <div className="flex flex-col items-center gap-4 text-center">
+    <SuccessMark />
+    <p className="font-medium">Microsoft 365 is connected</p>
+  </div>
+);
+
 export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
   "aspect-ratio": AspectRatioDemo,
+  "auto-height": AutoHeightDemo,
   avatar: AvatarDemo,
   badge: BadgeDemo,
   card: CardDemo,
@@ -348,6 +371,7 @@ export const displayDemos = {
   progress: ProgressDemo,
   resizable: ResizableDemo,
   "scroll-area": ScrollAreaDemo,
+  "success-mark": SuccessMarkDemo,
   separator: SeparatorDemo,
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
