@@ -82,7 +82,7 @@
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import {
-  clientsNamespace,
+  deploymentPrefix,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -233,6 +233,12 @@ export const provisionOperationErrorCodes = [
   "wfp_binding_unqualified",
   /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
   "destination_other_stage",
+  /**
+   * The admin's STAGE is neither staging nor production: it names no
+   * clients' namespace of its own, so it runs no operation, never taking
+   * itself for production.
+   */
+  "stage_unset",
   /** Cron triggers, which Workers for Platforms doesn't document for user Workers. */
   "wfp_schedule_unqualified",
   /** A script isn't at the release's Durable Object migration after its upload. */
@@ -336,7 +342,8 @@ export interface ProvisionContext {
     /**
      * The namespace `dispatcher` binds: its stage's
      * (@grasp-os/shared/names, `clientsNamespace`). A core in any other
-     * isn't reachable through it.
+     * isn't reachable through it. Without it, or with one that is neither
+     * stage's, no operation runs (`stage_unset`).
      */
     namespace?: string;
   };
@@ -467,15 +474,13 @@ const wfpBindings: ReadonlySet<string> = new Set([
  * Platforms namespace, a service binding binds the connect gateway, with
  * props naming the client's own script (GRA-1217).
  */
-const renderOptionsOf = (loaded: Loaded): RenderOptions =>
-  loaded.destination.kind === "workers_for_platforms"
-    ? {
-        connectGateway: platformWorkerName(
-          "connect-gateway",
-          stageOfNamespace(loaded.ownNamespace) ?? "production"
-        ),
-      }
+const renderOptionsOf = (loaded: Loaded): RenderOptions => {
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  return loaded.destination.kind === "workers_for_platforms" &&
+    stage !== undefined
+    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
     : {};
+};
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
 const assertHolds = async (
@@ -2436,11 +2441,11 @@ const route = async (
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
-  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
   if (
     target.kind === "dispatch" &&
-    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+    !target.script.startsWith(deploymentPrefix(loaded.placement.deploymentId))
   ) {
     throw new ProvisionOperationError(
       "probe_unqualified",
@@ -2627,10 +2632,23 @@ const runOperation = async (
   }
   let step: ProvisionStep = "validated";
   try {
+    // Before anything is read or asked of Cloudflare: an admin whose
+    // STAGE names no stage has no namespace of its own to hold a client
+    // to, and never takes itself for production.
+    const ownNamespace = context.router.namespace;
+    if (
+      ownNamespace === undefined ||
+      stageOfNamespace(ownNamespace) === undefined
+    ) {
+      throw new ProvisionOperationError(
+        "stage_unset",
+        "This admin's STAGE is neither staging nor production: it runs no operation"
+      );
+    }
     await assertHolds(db, held);
     const loaded: Loaded = {
       ...(await load(db, held, operation)),
-      ownNamespace: context.router.namespace ?? clientsNamespace("production"),
+      ownNamespace,
     };
     await validate(context, loaded);
 

@@ -49,8 +49,10 @@ jobs:
           environment: staging
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: CLOUDFLARE_API_TOKEN
-          settings: CLOUDFLARE_ACCOUNT_ID STEPHEN_EVAL_MODEL STEPHEN_WEEKLY_BUDGET_USD STEPHEN_WEEKLY_GATEWAY STEPHEN_EVAL_ISSUE
-          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
+          settings: STEPHEN_EVAL_MODEL STEPHEN_WEEKLY_BUDGET_USD STEPHEN_WEEKLY_GATEWAY STEPHEN_EVAL_ISSUE
+          required: CLOUDFLARE_API_TOKEN
+      # Grasp Work's account, by the names module.
+      - run: echo "CLOUDFLARE_ACCOUNT_ID=$(vp exec node scripts/platform-names.ts staging accountId)" >> "$GITHUB_ENV"
       - name: Run Stephen's eval with the real model
         run: |
           set -o pipefail

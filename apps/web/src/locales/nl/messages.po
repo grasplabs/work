@@ -3918,6 +3918,10 @@ msgstr "Gekozen teams"
 msgid "Cited at revision {0}; it is at revision {1} now."
 msgstr "Geciteerd bij revisie {0}; nu is het revisie {1}."
 
+#: src/brain/memory-page.tsx
+msgid "Cites a source you no longer have access to"
+msgstr "Verwijst naar een bron waar je geen toegang meer toe hebt"
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Wissen"

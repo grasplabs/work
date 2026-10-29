@@ -511,7 +511,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -540,7 +540,7 @@ describe("rolling a release out to placed clients", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // The release's core answers the probe as another client; the
     // rollback's connect upload finds it answering as it should again.
     internal.account.coreProbe = { asClient: "someone-else" };
@@ -583,7 +583,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -1612,7 +1612,7 @@ const crashedRollout = async (
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${client.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await runClientProvision(await deployContext(env), holder).catch(() => {
@@ -1692,7 +1692,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // Its first try's core answers the probe as another client; the
     // rollback's upload finds it answering as it should again.
     acme.account.coreProbe = { asClient: "someone-else" };
@@ -1736,7 +1736,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await using run = await followRollouts();
@@ -2121,7 +2121,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -2232,7 +2232,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     await using run = await followRollouts();
     await using rollbacks = await followRollbacks();
     // The rollout's change fails on its first upload.
@@ -2280,7 +2280,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await rollbackClient(env, staff, rolloutId, internal.clientId);
