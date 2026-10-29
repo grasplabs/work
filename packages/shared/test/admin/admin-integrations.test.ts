@@ -224,7 +224,7 @@ describe("the sample integrations to build", () => {
     ).toStrictEqual(new Set(["grasp", "agent", "nobody"]));
     for (const each of SAMPLE_BUILDS) {
       const reached =
-        each.stage === "declined"
+        each.stage === "declined" || each.stage === "needsPerson"
           ? []
           : BUILD_STAGES.slice(0, BUILD_STAGES.indexOf(each.stage) + 1);
       expect(
