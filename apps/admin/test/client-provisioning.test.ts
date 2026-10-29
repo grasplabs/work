@@ -9,7 +9,12 @@ import {
 } from "../src/hosting/inventory.ts";
 import type { ClientResource } from "../src/hosting/inventory.ts";
 import { ensureClientResources } from "../src/hosting/provision.ts";
-import { claimRun } from "../src/runners.ts";
+import {
+  claimRun,
+  holdsClient,
+  releaseRun,
+  takeAttempt,
+} from "../src/runners.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, release, staff } from "./hosting.ts";
@@ -263,5 +268,32 @@ describe("provisioning a client's resources", () => {
       )
     ).resolves.toMatchObject({ code: "destination_unsupported" });
     expect(cloudflare.calls).toHaveLength(before);
+  });
+
+  it("keeps a client with the retry once an attempt that timed out finishes late, and lets the retry release it", async () => {
+    const account = cloudflare.addAccount();
+    const { held: run } = await allocated(account, await release());
+    await takeAttempt(db, { ...run, attempt: 1 });
+    // The first attempt timed out, and its retry took the client.
+    await takeAttempt(db, { ...run, attempt: 2 });
+
+    const lateTake = await takeAttempt(db, { ...run, attempt: 1 });
+    // The first attempt finishes late, and releases what it held.
+    await releaseRun(db, run.clientId, run.runId, 1);
+    const kept = {
+      first: await holdsClient(db, run.clientId, run.runId, 1),
+      retry: await holdsClient(db, run.clientId, run.runId, 2),
+    };
+    await releaseRun(db, run.clientId, run.runId, 2);
+
+    expect({
+      lateTake,
+      kept,
+      released: await holdsClient(db, run.clientId, run.runId),
+    }).toStrictEqual({
+      lateTake: false,
+      kept: { first: false, retry: true },
+      released: false,
+    });
   });
 });

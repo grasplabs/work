@@ -200,6 +200,13 @@ export const clientRuns = sqliteTable("client_runs", {
   kind: text({
     enum: ["rollout", "rollback", "apply", "provision_placed"],
   }).notNull(),
+  /**
+   * The runner's attempt that holds the client, for a runner on Workerflow
+   * (src/runners.ts, `takeAttempt`): an attempt that timed out goes on
+   * beside its retry under the same run, and only the latest may act. 0
+   * for a runner that doesn't fence its attempts.
+   */
+  attempt: integer().notNull().default(0),
 });
 
 /**

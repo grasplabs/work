@@ -23,7 +23,6 @@ import { seed, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { ApplyClient } from "../src/clients/apply.ts";
-export { ProvisionPlacedClient } from "../src/hosting/workflow.ts";
 export { RolloutClient } from "../src/rollout/fleet-client.ts";
 export { RollbackClient } from "../src/rollout/rollback.ts";
 export { AdminRuns } from "../src/run-object.ts";
