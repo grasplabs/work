@@ -269,6 +269,7 @@ export default defineConfig({
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
             "apps/core/host-json.bundle.test.ts",
+            "apps/admin/vite.config.test.ts",
           ],
           environment: "node",
         },

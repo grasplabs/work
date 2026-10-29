@@ -21,6 +21,7 @@
     "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
+    "@grasp-os/workerflow": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",

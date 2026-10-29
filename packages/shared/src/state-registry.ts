@@ -414,6 +414,7 @@ const coreDb: D1State = {
     workflow_resource_draft_inspections: cache(`${core}workflow-drafts.ts`),
     app_workflow_bindings: exported(`${core}app-workflow-bindings.ts`),
     workflow_candidate_runs: exported(`${core}workflows/candidate-runs.ts`),
+    workflow_item_tests: exported(`${core}workflows/item-tests.ts`),
     landscape_syncs: transient(`${core}landscape.ts`),
     landscape_apps: cache(
       `${core}landscape.ts`,
