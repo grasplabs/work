@@ -17,7 +17,8 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A run laid over its version's diagram (resource-run-trace.ts): the
-// tasks its own journal reached, and so the path it took through the
+// tasks its own journal reached, each step of them in order, with its loop
+// item, times and failure's code, and so the path it took through the
 // declared branches, never one the diagram suggests; the diagram of the
 // version the run pinned, whatever was published since; and only for the
 // workflow's builders.
@@ -108,6 +109,10 @@ const ranFor = async (
   return runId;
 };
 
+/** A trace's steps: each one's task, state and failure's code. */
+const shown = (trace: WorkflowRunTrace) =>
+  trace.steps.map(({ task, state, errorCode }) => ({ task, state, errorCode }));
+
 /** A trace as lines: what the diagram declares, and what the run reached. */
 const pathOf = (trace: WorkflowRunTrace) => ({
   status: trace.status,
@@ -182,6 +187,119 @@ describe("a run's trace", () => {
     });
   });
 
+  it("lists each step in the order the run reached it, with the loop item it ran in and when it ran", async () => {
+    const by = await person();
+    const workflow = await createWorkflowResource(
+      env,
+      by,
+      `traced-${unique()}`
+    );
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", [
+        { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
+        {
+          "each-name": {
+            for: { each: "name", in: '${ ["Ada", "Grace"] }', at: "i" },
+            do: [
+              {
+                note: {
+                  set: "${ . }",
+                  export: { as: "${ {seen: ($context.seen + [$name])} }" },
+                },
+              },
+            ],
+          },
+        },
+        { finished: { set: '${ {status: ($context.seen | join(","))} }' } },
+      ]),
+      basedOn: null,
+    });
+    const run = await ranFor(by, workflow.id, 1, "Ada");
+    const { steps } = await resourceRunTrace(env, by, workflow.id, run);
+    const timed = steps.every(
+      ({ startedAt, endedAt }) =>
+        endedAt !== null && Date.parse(startedAt) <= Date.parse(endedAt)
+    );
+    expect({
+      steps: steps.map(
+        ({ task, item, state, errorCode }) =>
+          `${task}${item === null ? "" : `@${item}`} ${state} ${errorCode ?? "-"}`
+      ),
+      ordered: steps.every(
+        (step, index) =>
+          index === 0 || (steps[index - 1]?.ordinal ?? 0) < step.ordinal
+      ),
+      timed,
+    }).toStrictEqual({
+      steps: [
+        "init reached -",
+        "each-name reached -",
+        "note@each-name.0 reached -",
+        "note@each-name.1 reached -",
+        "finished reached -",
+      ],
+      ordered: true,
+      timed: true,
+    });
+  });
+
+  it("names the code each failed step failed with", async () => {
+    const by = await person();
+    const workflow = await createWorkflowResource(
+      env,
+      by,
+      `traced-${unique()}`
+    );
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", [
+        {
+          mark: {
+            set: { status: "marked" },
+            export: {
+              as: '${ {count: "not a number"} }',
+              schema: objectSchema({ count: { type: "integer" } }),
+            },
+          },
+        },
+      ]),
+      basedOn: null,
+    });
+    const raising = await createWorkflowResource(env, by, `traced-${unique()}`);
+    await publishWorkflowVersion(env, by, raising.id, {
+      definition: definitionOf(raising.name, "1.0.0", [
+        {
+          refuse: {
+            raise: {
+              error: {
+                type: "urn:grasp:error:refused",
+                status: 409,
+                title: "Refused.",
+              },
+            },
+          },
+        },
+      ]),
+      basedOn: null,
+    });
+    const failed = await ranFor(by, workflow.id, 1, "Ada");
+    const raised = await ranFor(by, raising.id, 1, "Ada");
+    expect({
+      failed: shown(await resourceRunTrace(env, by, workflow.id, failed)),
+      raised: shown(await resourceRunTrace(env, by, raising.id, raised)),
+    }).toStrictEqual({
+      failed: [
+        {
+          task: "mark",
+          state: "failed",
+          errorCode: "workflow.task_data_invalid",
+        },
+      ],
+      raised: [
+        { task: "refuse", state: "failed", errorCode: "workflow.raised" },
+      ],
+    });
+  });
+
   it("shows nothing a run reached once its retention, as the deployment has it now, is over", async () => {
     const by = await person();
     const workflow = await createWorkflowResource(
@@ -211,8 +329,9 @@ describe("a run's trace", () => {
     expect({
       removed: trace.detailsRemoved,
       reached: trace.tasks,
+      steps: trace.steps,
       declared: trace.diagram.tasks.length,
-    }).toStrictEqual({ removed: true, reached: [], declared: 4 });
+    }).toStrictEqual({ removed: true, reached: [], steps: [], declared: 4 });
   });
 
   it("is only for the workflow's builders, and only of its own runs", async () => {

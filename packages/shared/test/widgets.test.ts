@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { widgetAnswer, widgetAnswerMaxChars } from "../src/widgets.ts";
+import {
+  widgetAnswer,
+  widgetAnswerMaxChars,
+  widgetDraftOf,
+} from "../src/widgets.ts";
 
 // A model's answer read as a widget (widgets.ts): untrusted text, so a
 // parser, tested on its own. What core does with what it reads is tested
@@ -82,5 +86,39 @@ describe(widgetAnswer, () => {
       read: answer.ok,
       few: !answer.ok && answer.problems.length <= 8,
     }).toStrictEqual({ read: false, few: true });
+  });
+});
+
+describe("a widget read while its answer is still written", () => {
+  it("has its title as far as it came and its parts' kinds, a half-written escape left out", () => {
+    const whole = JSON.stringify({
+      widget: {
+        title: 'Fails "now"',
+        days: 7,
+        parts: [
+          { type: "number", measure: "failed", label: "Failed" },
+          row([{ type: "bars", measure: "started", by: "workflow" }]),
+          { type: "html", html: "<b>x</b>" },
+        ],
+      },
+    });
+    const upTo = (end: string) => whole.slice(0, whole.indexOf(end));
+
+    expect([
+      widgetDraftOf(""),
+      widgetDraftOf('{"widget": {"title": "'),
+      widgetDraftOf(upTo("now")),
+      widgetDraftOf(`${upTo("now")}now\\`),
+      widgetDraftOf(upTo('"days"')),
+      widgetDraftOf(whole),
+    ]).toStrictEqual([
+      { title: null, parts: [] },
+      { title: null, parts: [] },
+      { title: 'Fails "', parts: [] },
+      { title: 'Fails "now', parts: [] },
+      { title: 'Fails "now"', parts: [] },
+      // A part the dashboard doesn't have isn't one.
+      { title: 'Fails "now"', parts: ["number", "row", "bars"] },
+    ]);
   });
 });

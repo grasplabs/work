@@ -5,7 +5,7 @@ import type {
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
-import type { CustomWidget } from "@grasp-os/shared/widgets";
+import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -68,6 +68,7 @@ import {
   WidgetLoading,
   useFull,
 } from "./widget-block.tsx";
+import { WidgetProgressLine } from "./widget-progress.tsx";
 
 // The dashboard's widget board, under what waits on the person, as the
 // prototype's (`components/dashboard/widget-board.tsx`, `widget-add.tsx`,
@@ -734,8 +735,10 @@ const AddTile = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  // Drawn in dots while Grasp makes the widget, in the place it takes.
+  // Drawn in dots while Grasp makes the widget, in the place it takes,
+  // with how it goes.
   const [making, setMaking] = useState(false);
+  const [progress, setProgress] = useState<WidgetProgress | null>(null);
   const back: readonly DashboardWidgetId[] = [
     ...missing,
     ...takenOff.map(({ id }) => id),
@@ -743,7 +746,12 @@ const AddTile = ({
   return (
     <div className="relative h-80 min-w-0">
       <div aria-busy={making} className="relative h-full">
-        {making ? <MakingDots /> : null}
+        {making ? (
+          <>
+            <MakingDots />
+            <WidgetProgressLine progress={progress} />
+          </>
+        ) : null}
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger
             render={
@@ -761,8 +769,8 @@ const AddTile = ({
               </PopoverTitle>
             </PopoverHeader>
             <WidgetAsk
-              ask={async (session, asked) =>
-                await session.dashboard.makeWidget(asked)
+              ask={async (session, asked, told) =>
+                await session.dashboard.makeWidget(asked, told)
               }
               label={t`Ask Grasp for a widget`}
               onBusy={setMaking}
@@ -770,6 +778,7 @@ const AddTile = ({
                 setOpen(false);
               }}
               onMade={onMade}
+              onProgress={setProgress}
               placeholder={t`Which workflows failed most this month?`}
             />
             {back.length === 0 ? null : (
@@ -872,6 +881,9 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const [announcement, setAnnouncement] = useState("");
   // The widget Grasp is changing now, drawn in dots meanwhile.
   const [changing, setChanging] = useState<DashboardWidgetId | null>(null);
+  const [changeProgress, setChangeProgress] = useState<WidgetProgress | null>(
+    null
+  );
   const [dragged, setDragged] = useState<DashboardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
@@ -1140,7 +1152,12 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                   dragging && "scale-102 shadow-lg"
                 )}
               >
-                {changing === id ? <MakingDots /> : null}
+                {changing === id ? (
+                  <>
+                    <MakingDots />
+                    <WidgetProgressLine progress={changeProgress} />
+                  </>
+                ) : null}
                 <WidgetControls
                   value={{
                     movable: true,
@@ -1159,6 +1176,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                               setChanging(busy ? id : null);
                             }}
                             onChanged={changedOne}
+                            onProgress={setChangeProgress}
                             widget={changeable}
                           />
                         )}
