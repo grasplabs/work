@@ -1010,6 +1010,65 @@ export interface WorkflowDefinitionProblem {
 }
 
 /** Independent workflows over `/rpc`. */
+/**
+ * A Knowledge collection a workflow may read itself, through a permission
+ * it holds (GRA-700): its name, what the permission allows, and the
+ * knowledge bindings of its versions that use it, by alias.
+ */
+export interface WorkflowKnowledge {
+  collectionId: string;
+  name: string;
+  actions: string[];
+  /** Its knowledge bindings' aliases, active ones only; none while no binding uses it. */
+  aliases: string[];
+}
+
+/**
+ * A file a run of a workflow wrote: what it is and which run wrote it,
+ * never its bytes. Seen as a run's results are: by the person the run
+ * acted for, and the organization's admins. Kept with its run, and gone
+ * when the run's details are.
+ */
+export interface WorkflowFile {
+  id: string;
+  runId: string;
+  name: string;
+  /** Its media type, as the run gave it. */
+  type: string;
+  /** In bytes. */
+  size: number;
+  /** When its run finished writing it (ISO 8601). */
+  writtenAt: string;
+}
+
+/** One thing that happened to a workflow, newest first in its activity. */
+export type WorkflowActivity =
+  /** A version was published, by its author. */
+  | { kind: "version"; at: string; by: string; version: number }
+  /** A binding of a version was approved or revoked, by whom. */
+  | {
+      kind: "binding";
+      at: string;
+      by: string;
+      alias: string;
+      bindingKind: string;
+      version: number;
+      change: "approved" | "revoked";
+    }
+  /**
+   * A run started, or ended with its status, for the person it acted for
+   * (`principal`): every run for its builders, a user's own for a user.
+   */
+  | {
+      kind: "run";
+      at: string;
+      runId: string;
+      principal: string;
+      version: number;
+      status: WorkflowRunStatus;
+      change: "started" | "ended";
+    };
+
 export interface WorkflowResourcesApi {
   /** Creates a workflow the caller owns, named `name`; for builders. */
   create: (name: string) => Promise<WorkflowResource>;
@@ -1073,6 +1132,20 @@ export interface WorkflowResourcesApi {
    * a user's own for a user; never what one returned or why it failed.
    */
   runs: (id: string) => Promise<WorkflowResourceRun[]>;
+  /** The Knowledge collections it may read itself, by name; for anyone with a role. */
+  knowledge: (id: string) => Promise<WorkflowKnowledge[]>;
+  /**
+   * The files its runs wrote, newest first, the latest page: what they are,
+   * never their bytes. For anyone with a role, of the runs that acted for
+   * them; every run's for the organization's admins, as a run's results are.
+   */
+  files: (id: string) => Promise<WorkflowFile[]>;
+  /**
+   * What happened to it, newest first, the latest page: versions,
+   * bindings approved and revoked, and runs, as `runs` shows them to the
+   * reader.
+   */
+  activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** What run `runId` did, over its version's diagram, for builders. */
