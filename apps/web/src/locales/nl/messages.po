@@ -349,6 +349,10 @@ msgstr "{count, plural, one {Nog # domein zonder workflows om te tonen} other {N
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# pakket} other {# pakketten}}"
 
+#: src/dashboard/widget-progress.tsx
+msgid "{count, plural, one {# part so far} other {# parts so far}}"
+msgstr "{count, plural, one {# onderdeel tot nu toe} other {# onderdelen tot nu toe}}"
+
 #: src/onboarding/organization-words.ts
 msgid "{count, plural, one {# person is asked about no piece of work} other {# people are asked about no piece of work}}"
 msgstr "{count, plural, one {# persoon krijgt geen vragen over een stuk werk} other {# personen krijgen geen vragen over een stuk werk}}"
@@ -3848,6 +3852,10 @@ msgstr "Geluid en microfoon testen"
 msgid "Checked the audit trail's chain"
 msgstr "De keten van het auditlogboek gecontroleerd"
 
+#: src/dashboard/widget-progress.tsx
+msgid "Checking it against your numbers…"
+msgstr "Wordt gecontroleerd tegen je cijfers…"
+
 #: src/workflows/definition-editor.tsx
 msgid "Checking…"
 msgstr "Bezig met controleren…"
@@ -6197,6 +6205,10 @@ msgstr "Grasp maakt hem…"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is reading the policy"
 msgstr "Grasp leest het beleid"
+
+#: src/dashboard/widget-progress.tsx
+msgid "Grasp is starting on the widget…"
+msgstr "Grasp begint aan de widget…"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Grasp is still putting the agreements in place. Your people’s links go out once that is done."
@@ -10540,6 +10552,14 @@ msgstr "Terugzetten"
 #: src/dashboard/widget-board.tsx
 msgid "Put one back"
 msgstr "Terugzetten"
+
+#: src/dashboard/widget-progress.tsx
+msgid "Putting it on your board…"
+msgstr "Wordt op je dashboard gezet…"
+
+#: src/dashboard/widget-progress.tsx
+msgid "Putting it right, try {attempt} of {attempts}…"
+msgstr "Wordt verbeterd, poging {attempt} van {attempts}…"
 
 #: src/workflows/runs.tsx
 msgid "Queued"
@@ -15992,6 +16012,14 @@ msgstr "Schrijfacties die een model kan sturen: {target}"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schrijft"
+
+#: src/dashboard/widget-progress.tsx
+msgid "Writing “{title}”…"
+msgstr "“{title}” wordt geschreven…"
+
+#: src/dashboard/widget-progress.tsx
+msgid "Writing the widget…"
+msgstr "De widget wordt geschreven…"
 
 #. placeholder {0}: version.wording
 #: src/brain/lessons-view.tsx
