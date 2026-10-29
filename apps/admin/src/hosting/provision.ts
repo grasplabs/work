@@ -151,7 +151,10 @@ const judge = async (
 /**
  * Reads `resource`, made by an earlier attempt, back from the provider
  * and judges where it is (`judge`), as a run that made it would have.
- * One the provider no longer has is left to the steps that use it.
+ * Only the client's own: one the provider no longer has, or has under its
+ * name with another id than the one recorded (a database replaced since;
+ * a bucket's id is its name), says nothing of the destination, and is
+ * left to the steps that use it, which refuse it (`foreign_resource`).
  */
 const checkJurisdiction = async (
   db: AdminDatabase,
@@ -161,7 +164,7 @@ const checkJurisdiction = async (
   provider: Provider
 ): Promise<void> => {
   const observed = await provider.find(resource);
-  if (observed !== undefined) {
+  if (observed !== undefined && observed.id === resource.providerId) {
     await judge(db, destinationId, check, resource, observed.jurisdiction);
   }
 };

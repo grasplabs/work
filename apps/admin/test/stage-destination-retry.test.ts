@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { auditEvents } from "../src/db/schema.ts";
+import { auditEvents, clientProvisions } from "../src/db/schema.ts";
 import { destinationOf } from "../src/hosting/inventory.ts";
 import { ensureStageDestination } from "../src/hosting/placement.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
@@ -102,6 +102,48 @@ describe("provisioning's own check, tried again", () => {
       d1: "verified by system",
       r2: "verified by system",
       written: 2,
+    });
+  });
+
+  it("judges nothing of the destination by a database replaced under the client's name since, and refuses it as foreign", async () => {
+    const account = graspAccount(cloudflare);
+    const releaseId = await sharedRelease();
+    const clientId = await added();
+    cloudflare.failNext(
+      (call) => call.method === "POST" && call.path.endsWith("/r2/buckets"),
+      "400-uncoded"
+    );
+
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    await place(clientId, releaseId);
+    await ended(
+      adminWorkflows.provisionPlacedClient,
+      attempts.started.at(-1) ?? ""
+    );
+    // Someone replaces the client's database with one of the same name,
+    // outside the EU.
+    for (const database of account.d1) {
+      database.uuid = crypto.randomUUID();
+      database.jurisdiction = undefined;
+    }
+    await place(clientId, releaseId);
+    await ended(
+      adminWorkflows.provisionPlacedClient,
+      attempts.started.at(-1) ?? ""
+    );
+    const recorded = await recordedOf();
+    const operation = await db
+      .select({ error: clientProvisions.error })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, clientId))
+      .get();
+
+    expect({
+      d1: recorded["d1.eu_jurisdiction"],
+      operation,
+    }).toStrictEqual({
+      d1: "verified by system",
+      operation: { error: "foreign_resource" },
     });
   });
 });
