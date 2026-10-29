@@ -67,7 +67,6 @@ import {
   sdkReleaseManifests,
   sdkReleaseTombstones,
   sdkResourceBindings,
-  sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withReferencesText } from "./draft-references.ts";
@@ -82,6 +81,7 @@ import { screenArtifact, versionScreens } from "./screens.ts";
 import type { BuildProfile, BuiltScreen } from "./screens.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
+import { claimedFor, claimStore } from "./store-owners.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
 // spec 8's layout into an immutable manifest and the content-addressed
@@ -912,49 +912,6 @@ const isDefaultStore = async (
   return row !== undefined;
 };
 
-/** Whether `store` is claimed for `app` (`sdk_store_owners`). */
-const claimedBy = async (
-  env: Env,
-  store: string | undefined,
-  app: AppId
-): Promise<boolean> => {
-  if (store === undefined) {
-    return false;
-  }
-  const row = await drizzle(env.DB)
-    .select({ app: sdkStoreOwners.appId })
-    .from(sdkStoreOwners)
-    .where(eq(sdkStoreOwners.storeId, store))
-    .get();
-  return row?.app === app;
-};
-
-/**
- * Claims `store` for `app` for good (`sdk_store_owners`), or refuses
- * (`version.store_bound_elsewhere`) a store another App claimed: one
- * statement claims it only where no claim exists, so of two Apps sealing
- * onto a new store at once, exactly one gets it.
- */
-const claimStore = async (
-  env: Env,
-  store: StoreId,
-  app: AppId
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await db
-    .insert(sdkStoreOwners)
-    .values({ storeId: store, appId: app, claimedAt: new Date() })
-    .onConflictDoNothing();
-  const owner = await db
-    .select({ app: sdkStoreOwners.appId })
-    .from(sdkStoreOwners)
-    .where(eq(sdkStoreOwners.storeId, store))
-    .get();
-  if (owner?.app !== app) {
-    throw versionErrors.create("version.store_bound_elsewhere");
-  }
-};
-
 /**
  * The App needs a store: its schema has tables, or it declares
  * preferences, which its store keeps (app-preferences.ts).
@@ -1208,7 +1165,7 @@ const boundStore = async (
   // so a seal that loses the store never defines its tables there, and
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
-  await claimStore(env, opened.id, request.app);
+  await claimStore(env, opened.id, { kind: "app", id: request.app });
   // Its preferences checked against the store's preferences contract
   // first (store-host.ts, `definePreferences`): a version that changes one
   // people may have chosen is refused before its tables are touched. The
@@ -1732,7 +1689,7 @@ export const sealRelease = async (
   } catch (error) {
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       // Another App's, or being deleted (or gone) as the batch ran.
-      throw (await claimedBy(env, store?.storeId, app))
+      throw (await claimedFor(env, store?.storeId, { kind: "app", id: app }))
         ? dataErrors.create("data.store_unavailable")
         : versionErrors.create("version.store_bound_elsewhere");
     }

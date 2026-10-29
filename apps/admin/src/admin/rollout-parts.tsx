@@ -264,7 +264,7 @@ const keepReason = (check: RevocationCheck, name: string): string | null => {
 const checkLines = (check: RevocationCheck): string[] => [
   ...(check.rotated.length === 0
     ? [
-        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so deploy-platform may not have run, and there's nothing to revoke yet.",
+        "Secrets Store held what the clients this rollout reached already ran: it hasn't changed, so Deploy platform may not have copied a new value in, and there's nothing to revoke yet.",
       ]
     : []),
   ...(check.revocable.length === 0

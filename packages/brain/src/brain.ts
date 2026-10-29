@@ -167,14 +167,15 @@ export interface BrainPorts<C> {
     refs: readonly BrainSourceRef[]
   ) => Promise<void>;
   /**
-   * Whether `reader` may retire the shared record `record` (GRA-298): the
-   * host's decision, refused as `brain.not_found` (alike for one they
-   * can't see and one that isn't theirs to retire).
+   * Whether `reader` may retire `record` (GRA-298): the host's decision,
+   * refused as `brain.not_found` (alike for one they can't see and one
+   * that isn't theirs to retire). A person's own record reaches it only
+   * when it is the caller's own (GRA-1177).
    */
   mayRetire: (
     reader: C,
     record: {
-      scope: "team" | "company" | "session";
+      scope: "person" | "team" | "company" | "session";
       scopeId: string | null;
       ownerId: string;
     }

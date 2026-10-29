@@ -19,6 +19,8 @@ import {
   platformWorkerName,
   releasesBucketName,
   storeSecretName,
+  adminHost,
+  clientDomain,
 } from "@grasp-os/shared/names";
 import type { PlatformWorker, Stage } from "@grasp-os/shared/names";
 
@@ -118,6 +120,13 @@ const stageNameErrors = (
     );
   }
   if (worker === "admin") {
+    const vars = field(config, "vars");
+    expect(
+      "vars.CLIENT_DOMAIN",
+      field(vars, "CLIENT_DOMAIN"),
+      clientDomain(stage)
+    );
+    expect("vars.ADMIN_HOST", field(vars, "ADMIN_HOST"), adminHost(stage));
     for (const database of list(field(config, "d1_databases"))) {
       expect(
         "the D1 database",
