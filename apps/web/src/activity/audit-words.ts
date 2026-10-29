@@ -141,6 +141,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "member.address.released",
     text: msg`Let an erased member's old address in again`,
   },
+  {
+    action: "member.erasures.viewed",
+    text: msg`Looked at where erasures stand`,
+  },
   { action: "member.role", text: msg`Changed a member's role` },
   { action: "member.invited", text: msg`Invited someone` },
   {

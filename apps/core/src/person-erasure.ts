@@ -4,15 +4,33 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Erasure, ErasurePreview } from "@grasp-os/shared/members";
+import type {
+  Erasure,
+  ErasureArea,
+  ErasurePreview,
+  ErasureRecordsPage,
+  RemovedPeoplePage,
+} from "@grasp-os/shared/members";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { z } from "zod";
 
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { activeMember, isRemoved, notRemoved } from "./auth/auth.ts";
+import {
+  appendAuditEvent,
+  auditedBatch,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
+import {
+  activeMember,
+  isRemoved,
+  notRemoved,
+  organizationId,
+} from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
@@ -26,6 +44,7 @@ import {
   erasedSubjects,
   invitations,
   knowledgeSignals,
+  memberRemovals,
   notifications,
   personErasureAreas,
   personErasures,
@@ -35,6 +54,7 @@ import {
   users,
   workflowDecisionConfirmations,
 } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
@@ -532,6 +552,16 @@ const targetOf = (by: Identity, userId: unknown): string => {
   return parsed.data;
 };
 
+/** `areas` in the order the erasure runs them; any it doesn't know last. */
+const inStepOrder = (areas: readonly ErasureArea[]): ErasureArea[] => {
+  const order = new Map(steps.map(({ area }, index) => [area, index]));
+  return areas.toSorted(
+    (one, other) =>
+      (order.get(one.area) ?? steps.length) -
+      (order.get(other.area) ?? steps.length)
+  );
+};
+
 /** Where `userId`'s erasure stands, or null if none was asked for. */
 const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
   const db = drizzle(env.DB);
@@ -549,16 +579,35 @@ const erasureOf = async (env: Env, userId: string): Promise<Erasure | null> => {
     .select({ area: personErasureAreas.area, state: personErasureAreas.state })
     .from(personErasureAreas)
     .where(eq(personErasureAreas.userId, userId));
-  const order = new Map(steps.map(({ area }, index) => [area, index]));
   return {
     requestedAt: erasure.requestedAt.toISOString(),
     completedAt: erasure.completedAt?.toISOString() ?? null,
-    areas: areas.toSorted(
-      (one, other) =>
-        (order.get(one.area) ?? steps.length) -
-        (order.get(other.area) ?? steps.length)
-    ),
+    areas: inStepOrder(areas),
   };
+};
+
+/** The areas of the erasures of `userIds`, by the person erased. */
+const areasByPerson = async (
+  env: Env,
+  userIds: readonly string[]
+): Promise<Map<string, ErasureArea[]>> => {
+  if (userIds.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: personErasureAreas.userId,
+      area: personErasureAreas.area,
+      state: personErasureAreas.state,
+    })
+    .from(personErasureAreas)
+    // One bound value however many: D1 binds at most 100.
+    .where(inList(personErasureAreas.userId, userIds));
+  const byPerson = new Map<string, ErasureArea[]>();
+  for (const { userId, area, state } of rows) {
+    byPerson.set(userId, [...(byPerson.get(userId) ?? []), { area, state }]);
+  }
+  return byPerson;
 };
 
 /**
@@ -674,6 +723,7 @@ export const erasurePreview = async (
     email: erasure === null ? person.email : null,
     removed: await isRemoved(env, target),
     erasure,
+    areas: steps.map(({ area }) => area),
     addressKeptOut: await addressKeptOut(env, target),
   };
 };
@@ -798,6 +848,152 @@ export const releaseAddress = async (
     throw roleErrors.create("role.forbidden");
   }
   return { released: true };
+};
+
+/** The most people a page of `removedPeople` or `erasureRecords` holds. */
+export const erasurePageSize = 100;
+
+const cursorSchema = z
+  .object({ at: z.iso.datetime(), userId: identifierSchema })
+  .optional();
+
+/**
+ * The page before `before` (by `at`, then the person's ID, both newest
+ * first), as SQL on `at` and `userId`: none for the latest page. A cursor
+ * that isn't one is `member.invalid`.
+ */
+const pageBefore = (
+  before: unknown,
+  at: SQLiteColumn,
+  userId: SQLiteColumn
+): SQL | undefined => {
+  const cursor = cursorSchema.safeParse(before);
+  if (!cursor.success) {
+    throw memberErrors.create("member.invalid");
+  }
+  return cursor.data === undefined
+    ? undefined
+    : sql`(${at}, ${userId}) < (${new Date(cursor.data.at).getTime()}, ${cursor.data.userId})`;
+};
+
+/**
+ * The people admins removed, most recently first, with where each one's
+ * erasure stands, for one of the client's admins: whom they may erase. The
+ * latest page, or the page before `before`.
+ */
+export const removedPeople = async (
+  env: Env,
+  by: Identity,
+  before?: unknown
+): Promise<RemovedPeoplePage> => {
+  requireMemberAdmin(by);
+  const after = pageBefore(
+    before,
+    memberRemovals.removedAt,
+    memberRemovals.userId
+  );
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: memberRemovals.userId,
+      name: users.name,
+      email: users.email,
+      removedAt: memberRemovals.removedAt,
+      requestedAt: personErasures.requestedAt,
+      completedAt: personErasures.completedAt,
+      emailHash: personErasures.emailHash,
+    })
+    .from(memberRemovals)
+    .innerJoin(users, eq(users.id, memberRemovals.userId))
+    .leftJoin(personErasures, eq(personErasures.userId, memberRemovals.userId))
+    .where(and(eq(memberRemovals.organizationId, organizationId), after))
+    .orderBy(desc(memberRemovals.removedAt), desc(memberRemovals.userId))
+    // One past the page: whether more follow.
+    .limit(erasurePageSize + 1);
+  const page = rows.slice(0, erasurePageSize);
+  const areas = await areasByPerson(
+    env,
+    page.flatMap((row) => (row.requestedAt === null ? [] : [row.userId]))
+  );
+  return {
+    people: page.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      email: row.requestedAt === null ? row.email : null,
+      removedAt: row.removedAt.toISOString(),
+      erasure:
+        row.requestedAt === null
+          ? null
+          : {
+              requestedAt: row.requestedAt.toISOString(),
+              completedAt: row.completedAt?.toISOString() ?? null,
+              areas: inStepOrder(areas.get(row.userId) ?? []),
+            },
+      addressKeptOut: row.emailHash !== null,
+    })),
+    more: rows.length > erasurePageSize,
+  };
+};
+
+const requesters = alias(users, "requesters");
+
+/**
+ * Every erasure, newest first, for Grasp's staff alone: who was erased, by
+ * ID and the name the admin confirmed, who asked and where it stands. The
+ * latest page, or the page before `before`. Recorded as the staff
+ * member's before it is read: a log that can't take it refuses the read.
+ */
+export const erasureRecords = async (
+  env: Env,
+  by: Identity,
+  before?: unknown
+): Promise<ErasureRecordsPage> => {
+  // Staff let in for the onboarding alone see only it.
+  if (!by.staff || by.onboardingOnly === true) {
+    log.warn("member.refused", { actor: by.userId, reason: "role.forbidden" });
+    throw roleErrors.create("role.forbidden");
+  }
+  const after = pageBefore(
+    before,
+    personErasures.requestedAt,
+    personErasures.userId
+  );
+  await appendAuditEvent(env, {
+    actor: actorOf(by),
+    action: "member.erasures.viewed",
+    target: { type: "organization", id: organizationId },
+    detail: {},
+  });
+  const rows = await drizzle(env.DB)
+    .select({
+      userId: personErasures.userId,
+      name: personErasures.name,
+      requestedAt: personErasures.requestedAt,
+      completedAt: personErasures.completedAt,
+      requestedBy: personErasures.requestedBy,
+      requesterName: requesters.name,
+    })
+    .from(personErasures)
+    .leftJoin(requesters, eq(requesters.id, personErasures.requestedBy))
+    .where(after)
+    .orderBy(desc(personErasures.requestedAt), desc(personErasures.userId))
+    // One past the page: whether more follow.
+    .limit(erasurePageSize + 1);
+  const page = rows.slice(0, erasurePageSize);
+  const areas = await areasByPerson(
+    env,
+    page.map(({ userId }) => userId)
+  );
+  return {
+    records: page.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      requestedAt: row.requestedAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null,
+      requestedBy: { userId: row.requestedBy, name: row.requesterName ?? "" },
+      areas: inStepOrder(areas.get(row.userId) ?? []),
+    })),
+    more: rows.length > erasurePageSize,
+  };
 };
 
 /**
