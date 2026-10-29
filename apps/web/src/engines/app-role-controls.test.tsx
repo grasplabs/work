@@ -48,6 +48,7 @@ const appAs = (role: ViewedApp["role"]): ViewedApp => ({
   owner: "owner",
   responsible: "owner",
   audience: null,
+  process: null,
   blueprint: null,
   currentVersion: null,
   pendingVersion: null,
