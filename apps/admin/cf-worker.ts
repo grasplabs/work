@@ -190,7 +190,8 @@ const secretBindings = (config: Json, inputs: DeployInputs): Env => {
   for (const secret of list(config.secrets_store_secrets)) {
     const secretName = text(secret.secret_name);
     if (stored !== undefined && !stored.has(secretName)) {
-      if (!optionalSecrets.has(secretName)) {
+      // Optional by its binding: its store name is the stage's.
+      if (!optionalSecrets.has(text(secret.binding))) {
         missing.push(secretName);
       }
       continue;

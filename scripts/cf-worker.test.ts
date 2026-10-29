@@ -26,14 +26,11 @@ const bindingOf = (
     : undefined;
 };
 
-/** Every secret the config binds, as STORED_SECRETS lists them. */
-const everySecret = [
+/** Every secret the admin binds, by its binding name. */
+const adminSecrets = [
   "DEPLOYER_API_TOKEN",
-  "DEPLOYER_API_TOKEN_STAGING",
   "ROUTER_KEY",
   "CLIENT_KEY",
-  "ROUTER_KEY_STAGING",
-  "CLIENT_KEY_STAGING",
   "ENTRA_CLIENT_SECRET",
   "MICROSOFT_CLIENT_SECRET",
   "GOOGLE_CLIENT_SECRET",
@@ -44,7 +41,12 @@ const everySecret = [
   "DISCORD_DIGEST_WEBHOOK",
   "STAFF_ALERTS_WEBHOOK",
   "ATTIO_READ_KEY",
-].join(",");
+];
+/** Each stage's names for them in the store. */
+const productionSecrets = adminSecrets;
+const stagingSecrets = adminSecrets.map((name) => `${name}_STAGING`);
+/** Every secret both stages bind, as STORED_SECRETS lists them. */
+const everySecret = [...productionSecrets, ...stagingSecrets].join(",");
 
 const deployed = {
   SECRETS_STORE_ID: "store-1",
@@ -140,12 +142,27 @@ describe("the admin's Worker for cf", () => {
         }),
         "STRIPE_RESTRICTED_KEY"
       ),
+      // Staging's, under its staging name, is optional just the same.
+      stagingOptional: bindingOf(
+        cfWorker(wranglerText, "staging", {
+          ...deployed,
+          STORED_SECRETS: everySecret
+            .split(",")
+            .filter((name) => name !== "STRIPE_RESTRICTED_KEY_STAGING")
+            .join(","),
+        }),
+        "STRIPE_RESTRICTED_KEY"
+      ),
       // A build passes no STORED_SECRETS: every binding stays.
       build: bindingOf(
         cfWorker(wranglerText, "production", {}),
         "STRIPE_RESTRICTED_KEY"
       )?.storeId,
-    }).toStrictEqual({ optional: undefined, build: "account-secrets-store" });
+    }).toStrictEqual({
+      optional: undefined,
+      stagingOptional: undefined,
+      build: "account-secrets-store",
+    });
     expect(() =>
       cfWorker(wranglerText, "production", {
         ...deployed,
@@ -154,26 +171,20 @@ describe("the admin's Worker for cf", () => {
     ).toThrow("Secrets Store doesn't have DEPLOYER_API_TOKEN");
   });
 
-  it("deploys each stage when the store lacks only the other stage's keys", () => {
+  it("deploys each stage when the store lacks only the other stage's secrets", () => {
     const without = (names: readonly string[]): string =>
       everySecret
         .split(",")
         .filter((name) => !names.includes(name))
         .join(",");
-    const stagingKeys = [
-      "DEPLOYER_API_TOKEN_STAGING",
-      "ROUTER_KEY_STAGING",
-      "CLIENT_KEY_STAGING",
-    ];
-    const productionKeys = ["DEPLOYER_API_TOKEN", "ROUTER_KEY", "CLIENT_KEY"];
     expect({
       production: cfWorker(wranglerText, "production", {
         ...deployed,
-        STORED_SECRETS: without(stagingKeys),
+        STORED_SECRETS: without(stagingSecrets),
       }).name,
       staging: cfWorker(wranglerText, "staging", {
         ...deployed,
-        STORED_SECRETS: without(productionKeys),
+        STORED_SECRETS: without(productionSecrets),
       }).name,
     }).toStrictEqual({
       production: "grasp-admin",
