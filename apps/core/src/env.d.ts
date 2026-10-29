@@ -121,7 +121,9 @@ interface __BaseEnv_Env {
    * what a draft's preview writes goes to its tail's report, recorded in
    * the isolate rather than printed (GRA-919), and an App's v1 server has
    * no tail here. That holds as long as the process isn't served
-   * `--verbose`, which core can't detect: an operator who sets this
+   * `--verbose`, which core can't detect: served so, a timer imported by
+   * name from `node:timers` in core's own Node code (the compiler,
+   * extraction) still has its throw reported. An operator who sets this
    * doesn't serve core so (GRA-939).
    */
   SANDBOX_IN_PROCESS?: string;

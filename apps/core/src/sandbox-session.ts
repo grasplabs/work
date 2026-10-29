@@ -98,6 +98,13 @@ export interface SessionCall {
    */
   readonly nodejsCompat?: boolean;
   /**
+   * Whether the isolate gets `AsyncLocalStorage` alone (`nodejs_als`), as
+   * workflow code's run bindings need it: what core's Loader gives it off
+   * the sandbox host (workflows/code.ts, `workflowSandbox`), never the rest
+   * of Node.js.
+   */
+  readonly asyncContext?: boolean;
+  /**
    * The resident memory the call's process may use, in MiB, where core's
    * platform code needs more than App code gets: the supervisor holds it
    * to its most. Never set for App code.
@@ -871,7 +878,8 @@ export const runInSession = async (
   // its forwarder live while `isLive` says; the isolate never sees these,
   // only what the sandbox host makes of them.
   const callIn = (
-    given: NestedCall & Pick<SessionCall, "platformModules" | "nodejsCompat">,
+    given: NestedCall &
+      Pick<SessionCall, "platformModules" | "nodejsCompat" | "asyncContext">,
     isCallLive: () => boolean
   ): unknown => {
     const specs: Record<string, { methods: string[] } | { function: true }> =
@@ -934,6 +942,7 @@ export const runInSession = async (
         args,
         capabilities: specs,
         nodejsCompat: given.nodejsCompat === true,
+        ...(given.asyncContext === true ? { asyncContext: true } : {}),
         ...chunked,
         ...sink,
       },
