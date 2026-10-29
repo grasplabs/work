@@ -6,6 +6,7 @@ import {
   customWidgetsMax,
   widgetAnswer,
   widgetAnswerMaxChars,
+  widgetDraftOf,
   widgetProblems,
   widgetProblemsMax,
   widgetRequestSchema,
@@ -16,7 +17,9 @@ import type {
   CustomWidget,
   CustomWidgetId,
   WidgetData,
+  WidgetDraft,
   WidgetMade,
+  WidgetProgress,
   WidgetRow,
   WidgetSpec,
   WidgetState,
@@ -53,6 +56,10 @@ import { workflowOverview } from "./workflows/overview.ts";
 // - Another person's widgets: kept in the person's own Workspace object,
 //   keyed by them, reached only for the person the session or the chat
 //   names.
+// - Making it shown to someone else: how it goes (`onProgress`: its
+//   stage, and the title and kinds of parts its answer has so far) goes
+//   only to the page that asked, while it asks; it holds no number and is
+//   never kept, and a page that stops taking it doesn't stop the widget.
 // - A change no one can trace: making, changing and removing a widget are
 //   recorded with the change (`keepCustomWidget`), and each model call by
 //   the gateway, as `dashboard.widget`, with `platform: dashboard_widgets`
@@ -234,6 +241,12 @@ interface Repair {
   problems: string[];
 }
 
+/** Whether two drafts of a widget read the same. */
+const sameDraft = (one: WidgetDraft, other: WidgetDraft): boolean =>
+  one.title === other.title &&
+  one.parts.length === other.parts.length &&
+  one.parts.every((part, at) => part === other.parts[at]);
+
 /**
  * Has Grasp make a widget for `asker.member` from what they asked
  * (`request`), or change their widget `changing` as asked: the model
@@ -246,7 +259,8 @@ export const makeWidget = async (
   env: Env,
   asker: WidgetAsker,
   request: unknown,
-  changing?: unknown
+  changing?: unknown,
+  onProgress?: (progress: WidgetProgress) => void
 ): Promise<WidgetMade> => {
   const asked = widgetRequestSchema.safeParse(request);
   if (!asked.success) {
@@ -288,6 +302,9 @@ export const makeWidget = async (
     let repair: Repair | null = null;
     // In turn: each answer is checked before the next is asked for.
     for (let attempt = 1; attempt <= widgetAttempts; attempt += 1) {
+      const stage = { attempt, attempts: widgetAttempts };
+      let draft: WidgetDraft = { title: null, parts: [] };
+      onProgress?.({ stage: "writing", ...stage, draft });
       // oxlint-disable-next-line no-await-in-loop -- see above
       const { text }: { text: string } = await models(env).call({
         model,
@@ -304,7 +321,16 @@ export const makeWidget = async (
         trigger: asker.trigger,
         work: asker.work,
         requestId: asker.requestId,
+        // Told only when what can be read of it changes, not each token.
+        onText: (sofar) => {
+          const next = widgetDraftOf(sofar);
+          if (!sameDraft(draft, next)) {
+            draft = next;
+            onProgress?.({ stage: "writing", ...stage, draft });
+          }
+        },
       });
+      onProgress?.({ stage: "checking", ...stage });
       const answer = widgetAnswer(text);
       if (!answer.ok) {
         repair = {
@@ -326,6 +352,7 @@ export const makeWidget = async (
       if (current !== null && sameSpec(current.spec, answer.spec)) {
         throw dashboardErrors.create("dashboard.widget_unchanged");
       }
+      onProgress?.({ stage: "keeping" });
       // oxlint-disable-next-line no-await-in-loop -- the last, it returns
       const kept = await store.keepCustomWidget(
         person,
