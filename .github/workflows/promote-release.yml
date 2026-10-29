@@ -1,0 +1,70 @@
+# Promotes a release staging ran to production: copies it, byte for byte,
+# from staging's releases bucket, where CI publishes every merge
+# (publish-release in ci.yml), to production's, where production's admin
+# imports it and rolls it out to clients ring by ring. Run it by hand from
+# main with the release's id (`r<run>-<sha7>`, as the staging admin shows
+# it) once staging's clients run it well. It builds nothing: the release
+# is checked against its manifest when fetched and again before it's
+# uploaded, with the limit evidence CI published beside it, which
+# production's admin checks again on import. A release already in
+# production's bucket stays as it is.
+#
+# It runs in the production GitHub environment, whose required reviewers
+# are the gate: a second person approves every promotion. Its R2 key, from
+# the production 1Password Environment, reads staging's bucket and writes
+# production's; staging's own key can't reach production's.
+name: Promote release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: The release's id, as the staging admin shows it (r<run>-<sha7>)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
+jobs:
+  promote-release:
+    name: promote-release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/load-1password
+        with:
+          environment: production
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      # Each bucket by the names module.
+      - name: Fetch the release from staging's bucket
+        run: |
+          set -euo pipefail
+          R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)
+          export R2_BUCKET
+          vp run release:download --release "$RELEASE" --out release-out
+      - name: Publish it to production's bucket
+        run: |
+          set -euo pipefail
+          R2_BUCKET=$(vp exec node scripts/platform-names.ts production releasesBucket)
+          export R2_BUCKET
+          vp run release:upload --release release-out
