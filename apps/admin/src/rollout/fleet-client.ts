@@ -10,12 +10,7 @@ import { adminDatabase } from "../db/act.ts";
 import { errorCode } from "../deploy/errors.ts";
 import type { DeployErrorCode } from "../deploy/errors.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
-import {
-  guarded,
-  isEngineAbort,
-  quickStep,
-  stopReason,
-} from "../workflow-steps.ts";
+import { guarded, quickStep, stopReason } from "../workflow-steps.ts";
 import {
   clientEndedEvent,
   codeOf,
@@ -86,9 +81,6 @@ export const rolloutClientRun = (env: Env): WorkflowDefinition => ({
     } catch (error) {
       const reason = stopReason(error);
       const replaced: DeployErrorCode = "runner_replaced";
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       if (codeOf(reason) === replaced) {
         await step.do("record stop", quickStep, async () => {
           await recordStop(db, rolloutId, clientId, reason);

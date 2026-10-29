@@ -5,6 +5,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
+import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Table,
   TableBody,
@@ -19,6 +20,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
@@ -27,7 +29,7 @@ import {
   Link,
   useRouterState,
 } from "@tanstack/react-router";
-import { CogIcon, LayoutGridIcon } from "lucide-react";
+import { CogIcon, LayoutGridIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
 
@@ -229,22 +231,37 @@ const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
 );
 
 /**
- * The engine's apps, or why there are none; for an admin, with whether
- * their code is approved for the engine's data (`approval`).
+ * The engine's apps, or why there are none, and for someone who builds
+ * (`builds`) the way to make a new one; for an admin, with whether their
+ * code is approved for the engine's data (`approval`).
  */
 const Apps = ({
   engine,
   contents,
   approval,
+  builds,
 }: {
   engine: string;
   contents: AppContents;
   approval: Deferred<ScreenTrustReview> | undefined;
+  builds: boolean;
 }) => {
   const { t } = useLingui();
   const none = contents.version === null || contents.screens.length === 0;
   return (
     <div className="flex flex-col gap-6">
+      {builds ? (
+        <Link
+          className={cn(
+            buttonVariants({ size: "sm", variant: "outline" }),
+            "self-end"
+          )}
+          to="/apps/new"
+        >
+          <PlusIcon data-icon="inline-start" />
+          <Trans>New app</Trans>
+        </Link>
+      ) : null}
       {none ? (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
           <span
@@ -595,7 +612,12 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </TabsContent>
         <TabsContent value="apps">
           <div className="pt-4">
-            <Apps approval={approval} contents={contents} engine={app.id} />
+            <Apps
+              approval={approval}
+              builds={canBuild(identity.role)}
+              contents={contents}
+              engine={app.id}
+            />
           </div>
         </TabsContent>
         {integrations === undefined ? null : (

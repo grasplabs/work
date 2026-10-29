@@ -357,6 +357,7 @@ const parts: Parts = {
         version: goLive.version,
         requestedBy: goLive.requestedBy,
         revision: goLive.revision,
+        selfApproval: goLive.selfApproval,
       })),
     };
   },

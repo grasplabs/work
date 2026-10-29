@@ -1092,24 +1092,35 @@ const sendSettleMs = 5 * 60_000;
  */
 const defaultSendTimeoutMs = 150_000;
 
-/** One sender's mark: the change it sent for, and when (ms). */
-const sendMarkSchema = z.object({ change: z.int(), at: z.number() });
+/**
+ * One sender's mark: the change it sent for, and when (ms). A null change
+ * stands for marks that couldn't be read (`sendMarksOf`), and holds every
+ * change.
+ */
+const sendMarkSchema = z.object({ change: z.int().nullable(), at: z.number() });
 
 /** The marks on an operation (`clientProvisions.sending`), by sender. */
 const sendMarksSchema = z.record(z.string(), sendMarkSchema);
 
-/** The marks in `stored`; none for what doesn't parse. */
+/**
+ * The marks in `stored`, last written at `updatedAt`. What doesn't parse
+ * counts as a call still on its way, for any change, until it ages out
+ * from that write: never as none, which would let a rollback or a retry
+ * send past a call it can't see.
+ */
 const sendMarksOf = (
-  stored: string | null
+  stored: string | null,
+  updatedAt: Date
 ): z.infer<typeof sendMarksSchema> => {
   if (stored === null) {
     return {};
   }
+  const unreadable = { unreadable: { change: null, at: updatedAt.getTime() } };
   try {
     const parsed = sendMarksSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : {};
+    return parsed.success ? parsed.data : unreadable;
   } catch {
-    return {};
+    return unreadable;
   }
 };
 
@@ -1126,25 +1137,35 @@ const othersSending = (
   Object.entries(marks).some(
     ([sender, mark]) =>
       sender !== except &&
-      mark.change === change &&
+      (mark.change === change || mark.change === null) &&
       now - mark.at < sendSettleMs
   );
 
 /** The marks on client `clientId`'s operation, as stored now. */
 const sendMarks = async (db: AdminDatabase, clientId: string) => {
   const row = await db
-    .select({ sending: clientProvisions.sending })
+    .select({
+      sending: clientProvisions.sending,
+      updatedAt: clientProvisions.updatedAt,
+    })
     .from(clientProvisions)
     .where(eq(clientProvisions.clientId, clientId))
     .get();
-  return sendMarksOf(row?.sending ?? null);
+  return row === undefined ? {} : sendMarksOf(row.sending, row.updatedAt);
 };
 
 /** Who marks a call `held` sends: its attempt at its step, or the runner. */
 const senderOf = (held: HeldClient): string =>
   `${held.attemptKey ?? held.runId}#${String(held.attempt ?? 0)}`;
 
-/** `sender`'s path in an operation's marks, as SQLite's JSON functions take it. */
+/**
+ * `sender`'s path in an operation's marks, as SQLite's JSON functions take
+ * it. Stripping quotes changes no key in practice: a sender is
+ * `${attemptKey ?? runId}#${attempt}`, and neither Workerflow's
+ * idempotency keys nor the admin's run ids (UUIDs, `apply-…`,
+ * `rollback-…`, `<client>-p…`) hold a double quote. It only keeps the
+ * path's syntax whole.
+ */
 const markPath = (sender: string): string =>
   `$."${sender.replaceAll('"', "")}"`;
 

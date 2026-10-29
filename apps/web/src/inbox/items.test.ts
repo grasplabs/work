@@ -153,6 +153,7 @@ const workflowGoLive: WorkflowGoLiveItem = {
   version: 2,
   requestedBy: "builder-1",
   revision: 3,
+  selfApproval: false,
 };
 
 /** What waits, every part read. */
@@ -305,6 +306,31 @@ describe(inboxItems, () => {
     expect(kinds).not.toContain("signInAgain");
     expect(kinds).not.toContain("heldWrite");
     expect(kinds).not.toContain("unknownOutcome");
+  });
+
+  it("marks a go-live the reader asked for, and decides as nobody else may, as self-approved", () => {
+    const own = {
+      ...waiting(),
+      workflowGoLives: {
+        state: "ready",
+        data: [{ ...workflowGoLive, selfApproval: true }],
+      },
+    } satisfies Waiting;
+    const [mine, theirs] = [own, waiting()].map((read) =>
+      inboxItems(read, admin, readAt).find(({ id }) => id === workflowGoLive.id)
+    );
+    expect({
+      mine: mine?.facts,
+      theirs: theirs?.facts,
+      said: mine?.body.at(-1),
+    }).toStrictEqual({
+      mine: [
+        { label: "Version", value: "2" },
+        { label: "Approval", value: "Self-approved" },
+      ],
+      theirs: [{ label: "Version", value: "2" }],
+      said: "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.",
+    });
   });
 
   it("makes nothing of a part that couldn't be read, and says which", () => {

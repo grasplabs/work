@@ -1149,54 +1149,31 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     const staff = await staffApi();
     await bringInKickoff();
     const pain = `Late reports ${unique()}.`;
-    // The brain's first write of records fails, as D1 can.
-    const database = env.DB;
-    let records = false;
-    let failed = false;
-    env.DB = new Proxy(database, {
-      get: (target, name, receiver): unknown => {
-        if (name === "prepare") {
-          return (query: string) => {
-            records ||= query.includes("brain_records");
-            return target.prepare(query);
-          };
-        }
-        if (name === "batch") {
-          return async (statements: D1PreparedStatement[]) => {
-            // The first batch once the records are reached: their write.
-            if (!failed && records) {
-              failed = true;
-              throw new Error("D1 is unavailable");
-            }
-            return await target.batch(statements);
-          };
-        }
-        return Reflect.get(target, name, receiver);
-      },
-    });
+    // D1 refuses the brain's write of the vision naming this answer, and
+    // only that one, until the trigger goes: however often anything tries
+    // it meanwhile (an alarm left due by an earlier test, say), it fails.
+    const trigger = `refuse_${unique().replaceAll(/\W/gu, "_")}`;
+    await env.DB.exec(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON brain_records WHEN NEW.body LIKE '%${pain}%' BEGIN SELECT RAISE(ABORT, 'D1 is unavailable'); END`
+    );
     let answered: unknown;
+    let before: string;
     try {
       answered = await staff.onboardingStaff.answerKickoff("pain", pain);
+      before = JSON.stringify(await member.api.brain.read());
     } finally {
-      env.DB = database;
+      await env.DB.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
     }
-    const before = JSON.stringify(await member.api.brain.read());
     await runInDurableObject(onboardingStore(env), async (store) => {
       await store.alarm();
     });
     const after = JSON.stringify(await member.api.brain.read());
 
     expect({
-      failed,
       answered: answered !== undefined,
       before: before.includes(pain),
       after: after.includes(pain),
-    }).toStrictEqual({
-      failed: true,
-      answered: true,
-      before: false,
-      after: true,
-    });
+    }).toStrictEqual({ answered: true, before: false, after: true });
   });
 
   it("still names the kickoff as the source of its records after a purge forgot it", async () => {

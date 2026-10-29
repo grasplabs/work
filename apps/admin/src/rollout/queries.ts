@@ -95,7 +95,7 @@ export interface TargetView {
 
 /** A rollout, as its page shows it. */
 export interface RolloutView extends RolloutSummary {
-  /** Its run's status, as Workflows has it: `paused` while staff paused it. */
+  /** Its run's status, as the engine has it: `paused` while staff paused it. */
   run: RunStatus;
   /** Its clients, ring by ring, then by id. */
   targets: TargetView[];

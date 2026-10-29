@@ -157,11 +157,20 @@ export const limitEvidenceSchema = z.strictObject({
     commit: commitSchema,
     profile: runtimeProfileSchema,
   }),
-  /** The pull request that made the change, and its CODEOWNERS approval. */
-  securityReview: z.strictObject({
-    pullRequest: z.int().positive(),
-    approvedBy: githubLoginSchema,
-  }),
+  /**
+   * The security review of the change: every pull request merged since
+   * the release before it that touched the platform limits or a capacity
+   * workload, each with its CODEOWNER's approval, oldest first. At least
+   * one: the change that raised it.
+   */
+  securityReviews: z
+    .array(
+      z.strictObject({
+        pullRequest: z.int().positive(),
+        approvedBy: githubLoginSchema,
+      })
+    )
+    .min(1),
 });
 export type LimitEvidence = z.infer<typeof limitEvidenceSchema>;
 
