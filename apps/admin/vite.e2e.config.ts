@@ -1,6 +1,7 @@
+import { bindings } from "cf/config";
 import { defineConfig } from "vite-plus";
 
-import { adminPlugins, localVars } from "./vite.config.ts";
+import { adminPlugins, localEnv } from "./vite.config.ts";
 
 /** How many client databases the fake Cloudflare API holds at once. */
 const clientDatabases = 24;
@@ -16,32 +17,31 @@ export default defineConfig({
   plugins: adminPlugins({
     persistState: { path: process.env.ADMIN_E2E_STATE ?? ".wrangler/e2e" },
     config: (worker) => ({
-      main: "./test/e2e-worker.ts",
-      vars: {
-        ...worker.vars,
-        ...localVars,
+      entrypoint: "./test/e2e-worker.ts",
+      env: {
+        ...worker.env,
         // Who every request comes from: the dev bypass (src/access.ts).
-        DEV_ACCESS_EMAIL: "staff@grasp.test",
+        DEV_ACCESS_EMAIL: bindings.text("staff@grasp.test"),
         // Where provisioned clients are served (src/deploy/context.ts).
-        CLIENT_DOMAIN: "grasp.test",
+        CLIENT_DOMAIN: bindings.text("grasp.test"),
         // Grasp's OAuth apps, which clients' sign-in names (src/deploy/core-config.ts).
-        ENTRA_CLIENT_ID: "test-entra-app",
-        GOOGLE_CLIENT_ID: "test-google-app.apps.googleusercontent.com",
+        ENTRA_CLIENT_ID: bindings.text("test-entra-app"),
+        GOOGLE_CLIENT_ID: bindings.text(
+          "test-google-app.apps.googleusercontent.com"
+        ),
         // What the dev server runs with beyond wrangler.jsonc: no
         // jurisdiction for the admin's runs on Workerflow, which workerd
         // lacks. The e2e config sets its own vars, so it takes them here.
-        ...localVars,
+        ...localEnv,
+        // Where the fake Cloudflare API runs client D1 queries
+        // (test/cloudflare-api-workers.ts), as in vite.test.config.ts.
+        ...Object.fromEntries(
+          Array.from({ length: clientDatabases }, (_, slot) => [
+            `CLIENT_D1_${slot}`,
+            bindings.d1({ name: `client-d1-${slot}` }),
+          ])
+        ),
       },
-      // Where the fake Cloudflare API runs client D1 queries
-      // (test/cloudflare-api-workers.ts), as in vite.test.config.ts.
-      d1_databases: [
-        ...worker.d1_databases,
-        ...Array.from({ length: clientDatabases }, (_, slot) => ({
-          binding: `CLIENT_D1_${slot}`,
-          database_name: `client-d1-${slot}`,
-          database_id: `client-d1-${slot}`,
-        })),
-      ],
     }),
   }),
 });

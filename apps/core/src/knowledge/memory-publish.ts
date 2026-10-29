@@ -288,11 +288,17 @@ export const mayPublish = async (
  */
 export const mayRetire = async (
   reader: Reader,
-  record: { ownerId: string }
+  record: { scope: string; ownerId: string }
 ): Promise<void> => {
+  // A person's own record by them alone, in person: never by an admin, nor
+  // by an App or agent acting for them.
+  const own =
+    reader.type === "person" && record.ownerId === reader.person.userId;
   const allowed =
-    reader.type === "person" &&
-    (record.ownerId === reader.person.userId || isMemberAdmin(reader.person));
+    own ||
+    (reader.type === "person" &&
+      record.scope !== "person" &&
+      isMemberAdmin(reader.person));
   if (!allowed) {
     throw brainErrors.create("brain.not_found");
   }

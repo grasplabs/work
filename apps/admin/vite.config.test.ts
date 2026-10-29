@@ -1,3 +1,4 @@
+import { bindings } from "cf/config";
 import { describe, expect, it } from "vite-plus/test";
 
 import { adminWorker } from "./vite.config.ts";
@@ -6,40 +7,42 @@ import { adminWorker } from "./vite.config.ts";
 // project, in Node): locally, workerd has no Durable Object
 // jurisdictions, so the run objects must be reached outside one
 // (src/workflow-runs.ts); a build must never carry that, or a deployment
-// would keep its objects outside the EU.
+// would keep its objects outside the EU. A local run also answers on
+// localhost instead of moving to production's own hostname.
 
-/** The vars `command`'s Worker runs with, over `vars` from wrangler.jsonc. */
-const varsOf = (
+/** The bindings `command`'s Worker runs with, over `env` from cloudflare.config.ts. */
+const envOf = (
   command: "serve" | "build",
-  vars: Record<string, string>
+  env: Record<string, unknown>
 ): unknown => {
   const { config } = adminWorker(command);
   if (config === undefined) {
-    return vars;
+    return env;
   }
   if (typeof config !== "function") {
-    return { ...vars, ...config.vars };
+    return { ...env, ...config.env };
   }
-  // SAFETY: the admin's customizer reads `vars` alone of the config it's
+  // SAFETY: the admin's customizer reads `env` alone of the config it's
   // given (vite.config.ts, `adminWorker`).
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const shown = { vars } as Parameters<typeof config>[0];
-  return config(shown)?.vars ?? vars;
+  const shown = { env } as Parameters<typeof config>[0];
+  return config(shown)?.env ?? env;
 };
 
 describe("the admin's Worker as Vite runs it", () => {
-  it("is reached outside any jurisdiction locally, keeping the other vars, and never in a build", () => {
-    const vars = { CLIENT_DOMAIN: "grasp.test" };
+  it("is reached outside any jurisdiction and on localhost locally, keeping the other vars, and never in a build", () => {
+    const env = { CLIENT_DOMAIN: bindings.text("grasp.test") };
 
     expect({
-      serve: varsOf("serve", vars),
-      build: varsOf("build", vars),
+      serve: envOf("serve", env),
+      build: envOf("build", env),
     }).toStrictEqual({
       serve: {
-        CLIENT_DOMAIN: "grasp.test",
-        DURABLE_OBJECT_JURISDICTION: "none",
+        CLIENT_DOMAIN: { type: "text", value: "grasp.test" },
+        DURABLE_OBJECT_JURISDICTION: { type: "text", value: "none" },
+        ADMIN_HOST: { type: "text", value: "" },
       },
-      build: { CLIENT_DOMAIN: "grasp.test" },
+      build: { CLIENT_DOMAIN: { type: "text", value: "grasp.test" } },
     });
   });
 });

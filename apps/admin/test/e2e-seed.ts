@@ -1,7 +1,7 @@
 /**
  * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
  * as the admin's tests make it: its database migrated, its Secrets Store
- * filled as deploy-ops fills it, and a client in ring 0, placed in a
+ * filled with every secret it binds, and a client in ring 0, placed in a
  * dedicated destination of its own on the fake Cloudflare API, provisioned
  * on a release, with a newer release imported to roll out.
  */
@@ -133,14 +133,19 @@ export const seedPlaced = async (
   await fillStore(tokens);
   const account = cloudflare.addAccount();
   const destinationId = `dedicated-${crypto.randomUUID().slice(0, 8)}`;
-  await saveDestination(adminDatabase(env.DB), staff, {
-    id: destinationId,
-    kind: "dedicated",
-    accountId: account.id,
-    namespace: null,
-    policies: ["eu-storage"],
-    capabilities: verified({}, evidence),
-  });
+  await saveDestination(
+    adminDatabase(env.DB),
+    staff,
+    {
+      id: destinationId,
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+      policies: ["eu-storage"],
+      capabilities: verified({}, evidence),
+    },
+    "production"
+  );
   const first = await placedRelease("feat(core): what it starts on", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
