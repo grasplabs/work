@@ -107,6 +107,12 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * What its Workers' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
    * The version its cores name for their connect instead of its live one
    * (@grasp-os/shared/provision-probe), as an isolate of an old version
    * still answering would; null as a connect that doesn't answer, or has

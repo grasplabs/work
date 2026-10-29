@@ -1,5 +1,8 @@
 import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
-import { provisionProbePath } from "@grasp-os/shared/provision-probe";
+import {
+  connectVersionPath,
+  provisionProbePath,
+} from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { moduleKey } from "@grasp-os/shared/release";
 import {
@@ -1245,10 +1248,10 @@ describe("provisioning a placed client", () => {
       );
     expect({
       operation: await operationOf(clientId),
-      // On record: the version it answered wasn't checked against its upload.
-      versionUnchecked: z
-        .object({ versionUnchecked: z.number().optional() })
-        .parse(JSON.parse(probed?.detail ?? "{}")).versionUnchecked,
+      // Nothing left unrecorded: connect's settled.
+      unrecorded: z
+        .object({ connectUnrecorded: z.number().optional() })
+        .parse(JSON.parse(probed?.detail ?? "{}")).connectUnrecorded,
       // What drift compares against: core's as it answered, and its
       // connect's as connect named it to core in the probe.
       recorded,
@@ -1267,7 +1270,7 @@ describe("provisioning a placed client", () => {
         .filter(({ path }) => path.includes("workers.dev")).length,
     }).toMatchObject({
       operation: { status: "done" },
-      versionUnchecked: 1,
+      unrecorded: undefined,
       recorded: [
         { worker: "connect", versionId: liveIn(connect) ?? "none" },
         { worker: "core", versionId: liveIn(core) ?? "none" },
@@ -1284,6 +1287,12 @@ describe("provisioning a placed client", () => {
         {
           script: core,
           path: provisionProbePath,
+          host: `${clientId}.${domain}`,
+        },
+        // Connect's version read again, signed: the same twice apart.
+        {
+          script: core,
+          path: connectVersionPath,
           host: `${clientId}.${domain}`,
         },
       ],
@@ -1416,6 +1425,186 @@ describe("provisioning a placed client", () => {
       });
     }
   );
+
+  it.each([
+    {
+      worker: "connect" as const,
+      answers: "a version made earlier in the run once",
+    },
+    {
+      worker: "core" as const,
+      answers: "the version recorded before the run, until they stop",
+    },
+  ])(
+    "records a namespace $worker only as its latest version when its isolates answer $answers",
+    async ({ worker }) => {
+      const manifest = await importRelease(
+        "workers_for_platforms",
+        {},
+        bindsConnect
+      );
+      const { account, clientId, held } = await setUp(
+        "workers_for_platforms",
+        manifest,
+        clientDispatchNamespace
+      );
+      const namespaced = {
+        ...context,
+        router: {
+          ...context.router,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      };
+      await runClientProvision(namespaced, held);
+      const recordedOf = async (): Promise<Record<string, string | null>> => {
+        const rows = await db
+          .select({
+            worker: clientWorkers.worker,
+            versionId: clientWorkers.versionId,
+          })
+          .from(clientWorkers)
+          .where(eq(clientWorkers.clientId, clientId));
+        return Object.fromEntries(
+          rows.map(({ worker: name, versionId }) => [name, versionId])
+        );
+      };
+      const before = await recordedOf();
+      const second = await importRelease(
+        "workers_for_platforms",
+        { notes: "feat(core): second" },
+        bindsConnect
+      );
+      await startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: second.releaseId,
+      });
+      const rerun = await attempt(clientId);
+      let stopped: unknown = null;
+      let whileOld: string | null = null;
+      if (worker === "connect") {
+        // Its upload's version, made before its secrets': not the latest.
+        account.connectAnswersFirst = ["made-earlier-in-this-run"];
+      } else {
+        // Its old isolates answer its health and its probe alike: the run
+        // stops rather than record what it superseded, and goes on once
+        // they're gone.
+        account.answeringVersion = before.core ?? "none";
+        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+        stopped = await runClientProvision(namespaced, rerun).then(
+          () => null,
+          (error: unknown) => error
+        );
+        errors.mockRestore();
+        const meanwhile = await recordedOf();
+        whileOld = meanwhile.core ?? null;
+        delete account.answeringVersion;
+      }
+      await runClientProvision(namespaced, rerun);
+      const scripts = await scriptsOf(clientId);
+      const live = account.namespaces
+        .get(clientDispatchNamespace)
+        ?.get(scripts[worker])?.deployments[0]?.versions[0]?.version_id;
+      const operation = await operationOf(clientId);
+      const recorded = await recordedOf();
+
+      expect({
+        stopped: worker === "core" ? stopped instanceof Error : null,
+        whileOld,
+        status: operation?.status,
+        changed: live !== before[worker],
+        recorded: recorded[worker],
+      }).toStrictEqual({
+        stopped: worker === "core" ? true : null,
+        whileOld: null,
+        status: "done",
+        changed: true,
+        recorded: live ?? "none",
+      });
+    }
+  );
+
+  it("still refuses what a run superseded on its retry, after its probe recorded none of connect's and a later step failed", async () => {
+    const manifest = await importRelease(
+      "workers_for_platforms",
+      {},
+      bindsConnect
+    );
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      manifest,
+      clientDispatchNamespace
+    );
+    const namespaced = {
+      ...context,
+      router: {
+        ...context.router,
+        dispatcher: cloudflare.dispatcher(account.id, clientDispatchNamespace),
+      },
+    };
+    await runClientProvision(namespaced, held);
+    const recordedConnect = async (): Promise<string | null> => {
+      const row = await db
+        .select({ versionId: clientWorkers.versionId })
+        .from(clientWorkers)
+        .where(
+          and(
+            eq(clientWorkers.clientId, clientId),
+            eq(clientWorkers.worker, "connect")
+          )
+        )
+        .get();
+      return row?.versionId ?? null;
+    };
+    const before = await recordedConnect();
+    const second = await importRelease(
+      "workers_for_platforms",
+      { notes: "feat(core): second" },
+      bindsConnect
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const rerun = await attempt(clientId);
+    // Its probe: only the old isolates answer, so none is recorded; then
+    // publishing its hostname fails.
+    account.connectAnswering = before;
+    const put = vi
+      .spyOn(env.ROUTER_HOSTS, "put")
+      .mockRejectedValueOnce(new Error("the router's map is down"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = await runClientProvision(namespaced, rerun).then(
+      () => null,
+      (error: unknown) => error
+    );
+    errors.mockRestore();
+    put.mockRestore();
+    const afterFailure = await recordedConnect();
+    // Retried: nothing uploaded or delivered again, and an old isolate
+    // answers first, twice.
+    delete account.connectAnswering;
+    account.connectAnswersFirst = [before, before];
+    await runClientProvision(namespaced, rerun);
+    const { connect } = await scriptsOf(clientId);
+    const live = account.namespaces.get(clientDispatchNamespace)?.get(connect)
+      ?.deployments[0]?.versions[0]?.version_id;
+    const operation = await operationOf(clientId);
+
+    expect({
+      failed: failed instanceof Error,
+      afterFailure,
+      changed: live !== before,
+      status: operation?.status,
+      recorded: await recordedConnect(),
+    }).toStrictEqual({
+      failed: true,
+      afterFailure: null,
+      changed: true,
+      status: "done",
+      recorded: live ?? "none",
+    });
+  });
 
   it("goes live on a core of a release from before connect's version, recording none of connect's", async () => {
     const manifest = await importRelease(

@@ -1481,12 +1481,15 @@ export const fakeCloudflareApi = (
         adminReads.now -= 1;
       }
     }
-    return url.pathname === "/health"
-      ? Response.json({
-          ok: true,
-          version: account.answeringVersion ?? live.id,
-        })
-      : new Response("Not found", { status: 404 });
+    if (url.pathname !== "/health") {
+      return new Response("Not found", { status: 404 });
+    }
+    const [early, ...later] = account.healthAnswersFirst ?? [];
+    account.healthAnswersFirst = later;
+    return Response.json({
+      ok: true,
+      version: early ?? account.answeringVersion ?? live.id,
+    });
   };
 
   const workersDev = async (

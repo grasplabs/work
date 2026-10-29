@@ -979,6 +979,15 @@ const recordProgress = async (
   }
 };
 
+/** `notes` without the apps `dropped` names. */
+const withoutApps = (
+  notes: Readonly<Record<string, string>>,
+  dropped: readonly string[]
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(notes).filter(([app]) => !dropped.includes(app))
+  );
+
 /** The version recorded live for `app` of the client `loaded` holds; null when none. */
 const recordedVersionOf = async (
   db: AdminDatabase,
@@ -2043,12 +2052,15 @@ const recordLiveVersions = async (
 
 /**
  * The version a namespace connect answers as after this run's writes to
- * it: `first`, what it named in the probe, unless that is the version
- * recorded before them (`superseded`), which an isolate of it still
- * answering would name without the secrets just delivered, or none. Then
- * asked again (`connectVersionOf`), with a doubling wait, until another
- * answers; null when none does, so none is recorded, which holds every
- * secret connect holds (src/rollout/drift.ts).
+ * it, read twice in a row the same: `first`, what it named in the probe,
+ * then asked again (`connectVersionOf`) after a wait, until two reads in a
+ * row name one version, and not the one recorded before those writes
+ * (`superseded`), which an isolate of it still answering would name
+ * without the secrets just delivered. Two reads apart the same keep an
+ * isolate of a version made earlier in this run (its upload's, before its
+ * secrets') from being taken for the latest. Null when none settles, so
+ * none is recorded, which holds every secret connect holds
+ * (src/rollout/drift.ts).
  */
 const freshConnectVersion = async (
   context: ProvisionContext,
@@ -2056,21 +2068,24 @@ const freshConnectVersion = async (
   first: string | null,
   superseded: string | undefined
 ): Promise<string | null> => {
-  const fresh = (version: string | null) =>
-    version !== null && version !== superseded;
   let asked = false;
-  const version = await observed(
+  let previous: string | null = null;
+  const read = await observed(
     context,
     async () => {
-      if (!asked) {
-        asked = true;
-        return first;
+      let version = first;
+      if (asked) {
+        version = (await connectVersionOf(asking)) ?? null;
       }
-      return (await connectVersionOf(asking)) ?? null;
+      asked = true;
+      const settled =
+        version !== null && version !== superseded && version === previous;
+      previous = version;
+      return { version, settled };
     },
-    fresh
+    ({ settled }) => settled
   );
-  return fresh(version) ? version : null;
+  return read.settled ? read.version : null;
 };
 
 /** How long core's signed probe may take, its body included. */
@@ -2145,8 +2160,8 @@ const probe = async (
   const smoke = { ...context.router.smoke, fetch: core.fetch };
   // An account's own Worker: the version its deployment has live, which
   // core must answer as. One in the namespace: live at once on upload, its
-  // versions not listed by the documented API, so the version answering
-  // is the one the probe is held to (GRA-283; GRA-430 qualifies it).
+  // versions not listed by the documented API, so the version answering,
+  // never the one this run superseded, is the one the probe is held to.
   let version: string;
   let attempts: number;
   if (target.namespace === null) {
@@ -2165,7 +2180,15 @@ const probe = async (
     version = live;
     attempts = await smokeCheck(origin, routerSecret, live, smoke);
   } else {
-    ({ version, attempts } = await smokeAnswering(origin, routerSecret, smoke));
+    // Never the version recorded before this run's writes to core: an
+    // isolate of it still answering is asked again until another answers.
+    // The probe then answers as the same version, or the run stops: two
+    // reads apart the same.
+    const { superseded } = await progressNow(db, loaded.operation.id);
+    ({ version, attempts } = await smokeAnswering(origin, routerSecret, {
+      ...smoke,
+      refuses: superseded.core,
+    }));
   }
   const asking = {
     origin,
@@ -2210,25 +2233,23 @@ const probe = async (
     core: version,
     connect,
   });
-  const { connect: _superseded, ...superseded } = before.superseded;
-  const { connect: _recorded, ...recordedBefore } = before.recordedBefore;
-  const progress = { ...before, superseded, recordedBefore };
+  // What this run superseded is forgotten only once a version is recorded
+  // in its place: a retry after a later step fails still refuses it.
+  const settled = connect === null ? [] : ["connect"];
+  const progress = {
+    ...before,
+    superseded: withoutApps(before.superseded, ["core", ...settled]),
+    recordedBefore: withoutApps(before.recordedBefore, ["core", ...settled]),
+  };
   await recordStep(
     db,
     loaded,
     "probe",
-    // On record: a namespace core's version, and its connect's, were the
-    // ones they answered, not checked against their uploads (GRA-430
-    // qualifies how to).
-    target.namespace === null
+    // No version of connect's recorded: none settled but the one this run
+    // replaced, or none at all.
+    target.namespace === null || connect !== null
       ? { attempts }
-      : {
-          attempts,
-          versionUnchecked: 1,
-          // No version of connect's recorded: none answered but the one
-          // this run replaced, or none at all.
-          ...(connect === null ? { connectUnrecorded: 1 } : {}),
-        },
+      : { attempts, connectUnrecorded: 1 },
     { ...progress, origin }
   );
   return entry;
