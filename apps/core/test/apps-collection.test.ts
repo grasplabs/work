@@ -749,6 +749,25 @@ describe("read-only", setUpTime, () => {
     }).toStrictEqual({ planned: 1, purged: 1, holding: 0 });
   });
 
+  it("purges a removed App's entry history, which no indexing writes again", async () => {
+    const admin = await personOf("admin");
+    const owner = await personOf("builder");
+    const word = term();
+    const app = await releasedApp(owner, agentsMd(word));
+    const { id } = await entryOf(owner, app.id);
+    await owner.api.apps.archive(app.id);
+    await owner.api.apps.remove(app.id);
+    const input = purgeOf(id, word);
+    const plan = await admin.knowledge.preparePurge(input);
+    const result = await admin.knowledge.purge(input, plan.token);
+
+    expect({
+      planned: plan.versions,
+      purged: result.versions,
+      holding: await versionsHolding(id, word),
+    }).toStrictEqual({ planned: 1, purged: 1, holding: 0 });
+  });
+
   it("refuses to purge an App's entry while the App's name holds the term, until it is changed, and while the App can't be read", async () => {
     const admin = await personOf("admin");
     const owner = await personOf("builder");

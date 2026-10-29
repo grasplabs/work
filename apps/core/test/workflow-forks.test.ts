@@ -1,0 +1,436 @@
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import type { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import { withCpuKills } from "./cpu-kills.ts";
+import {
+  builder,
+  codeOf,
+  completedSteps,
+  endOf,
+  hostOf,
+  objectSchema,
+  published,
+  ranFor,
+} from "./json-workflows.ts";
+
+// `fork` tasks of JSON workflows (GRA-276; @grasp-os/open-workflow's
+// generate.ts, the SDK's open-workflow.ts and core's resource-host.ts), run
+// one branch after another (concurrency 1, until GRA-956), from their
+// threat model: a branch sees the context as the fork found it, never
+// another branch's exports, and none reaches the fork's own context; a
+// fork's output is its branches' outputs in declaration order; a race
+// (`compete: true`) records the first branch that succeeds, never admits
+// a branch after it, and doesn't claim a failed branch's completed effects
+// were undone; a replay or a killed attempt takes the recorded winner and
+// runs no branch's step again; and each branch's steps are its own
+// (`task:<id>@<fork>.<branch>`), only of a branch the fork has.
+
+/** Starts the context with `value`. */
+const initially = (value: string) => ({
+  init: { set: "${ . }", export: { as: value } },
+});
+
+/** A branch `id` that sets `value`, exporting `exported` if given. */
+const branch = (id: string, value: string, exported?: string) => ({
+  [id]: {
+    set: value,
+    ...(exported === undefined ? {} : { export: { as: exported } }),
+  },
+});
+
+/** A branch `id` whose output breaks its schema: it fails for good. */
+const failing = (id: string) => ({
+  [id]: {
+    set: "${ {other: 1} }",
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+  },
+});
+
+/** A race of `branches`, its winner's status, then the context's `marks`. */
+const race = (branches: unknown[]) => [
+  initially("${ {marks: 0} }"),
+  { pick: { fork: { branches, compete: true } } },
+  {
+    finished: {
+      set: '${ {status: (.status + ":" + ($context.marks | tostring))} }',
+    },
+  },
+];
+
+describe("fork tasks of JSON workflows", { timeout: 60_000 }, () => {
+  it("run every branch from the context the fork found, and answer their outputs in declaration order", async () => {
+    const by = await builder();
+    const { workflow, version } = await published(by, [
+      initially("${ {n: 1} }"),
+      {
+        both: {
+          fork: {
+            branches: [
+              // Its export is its own: neither the next branch nor the
+              // fork's context sees it.
+              branch("first", "${ {v: ($context.n + 1)} }", "${ {n: 100} }"),
+              branch("second", "${ {v: ($context.n + 2)} }"),
+            ],
+          },
+          output: { as: '${ {status: (map(.v | tostring) | join(","))} }' },
+        },
+      },
+      {
+        finished: {
+          set: '${ {status: (.status + ":" + ($context.n | tostring))} }',
+        },
+      },
+    ]);
+    expect({
+      executable: version.build.executable,
+      end: endOf(await ranFor(by, workflow.id)),
+    }).toStrictEqual({
+      executable: true,
+      end: { status: "completed", output: { status: "2,3:1" } },
+    });
+  });
+
+  it("give a fork's output.as the time it started, before its branches waited", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      {
+        both: {
+          fork: { branches: [{ pause: { wait: "PT1S" } }] },
+          output: {
+            as: "${ {status: ($task.startedAt.epoch.milliseconds | tostring)} }",
+          },
+        },
+      },
+    ]);
+    const run = await ranFor(by, workflow.id);
+    const started = Number(
+      z.object({ status: z.string() }).parse(run.output).status
+    );
+    // Started before the branch's wait: the run ended a second or more later.
+    expect(Date.parse(run.endedAt ?? "") - started).toBeGreaterThanOrEqual(
+      1000
+    );
+  });
+
+  it("leave a branch at its exit, and the workflow at an end in a branch", async () => {
+    const by = await builder();
+    /** A fork whose branch is a list that leaves early by `then`. */
+    const leaving = (then: string) => [
+      {
+        both: {
+          fork: {
+            branches: [
+              {
+                early: {
+                  do: [
+                    { mark: { set: '${ {status: "left"} }', then } },
+                    { never: { set: '${ {status: "never"} }' } },
+                  ],
+                },
+              },
+              branch("other", '${ {status: "other"} }'),
+            ],
+          },
+          output: { as: '${ {status: (map(.status) | join(","))} }' },
+        },
+      },
+      { finished: { set: '${ {status: (.status + "!")} }' } },
+    ];
+    const exited = await published(by, leaving("exit"));
+    const ended = await published(by, leaving("end"));
+    expect({
+      exited: endOf(await ranFor(by, exited.workflow.id)),
+      ended: endOf(await ranFor(by, ended.workflow.id)),
+    }).toStrictEqual({
+      exited: { status: "completed", output: { status: "left,other!" } },
+      ended: { status: "completed", output: { status: "left" } },
+    });
+  });
+
+  it("race: record the first branch that succeeds, and never run a branch after it", async () => {
+    const by = await builder();
+    const { workflow } = await published(
+      by,
+      race([
+        failing("broken"),
+        branch(
+          "winner",
+          '${ {status: "won"} }',
+          "${ {marks: ($context.marks + 1)} }"
+        ),
+        branch("late", '${ {status: "late"} }'),
+      ])
+    );
+    const run = await ranFor(by, workflow.id);
+    const completed = await completedSteps(run.id);
+    expect({
+      end: endOf(run),
+      raced: completed.get("task:pick") ?? 0,
+      winner: completed.get("task:winner@pick.1") ?? 0,
+      late: completed.get("task:late@pick.2") ?? 0,
+    }).toStrictEqual({
+      // The winner's output; its export stays its own.
+      end: { status: "completed", output: { status: "won:0" } },
+      raced: 1,
+      winner: 1,
+      late: 0,
+    });
+  });
+
+  it("race: fail when every branch fails, as the last one did", async () => {
+    const by = await builder();
+    const { workflow } = await published(
+      by,
+      race([failing("one"), failing("two")])
+    );
+    expect(endOf(await ranFor(by, workflow.id))).toStrictEqual({
+      status: "failed",
+      code: "workflow.task_data_invalid",
+    });
+  });
+
+  it("race: keep its recorded winner across a replay after a wait and a killed attempt, running no branch again", async () => {
+    const by = await builder();
+    const { workflow } = await published(
+      by,
+      race([
+        failing("broken"),
+        {
+          slow: {
+            do: [
+              { roll: { call: "grasp.random" } },
+              // A new activation: the branches before replay.
+              { pause: { wait: "PT1S" } },
+              { done: { set: '${ {status: "slow"} }' } },
+            ],
+          },
+        },
+        branch("late", '${ {status: "late"} }'),
+      ])
+    );
+    // The race's record is lost once, its first attempt cut off as its
+    // code returned: its retry takes the same winner.
+    const run = await withCpuKills(
+      "task:pick",
+      (attempt) => attempt === 1,
+      async () => await ranFor(by, workflow.id),
+      "end"
+    );
+    const completed = await completedSteps(run.id);
+    expect({
+      end: endOf(run),
+      rolled: completed.get("task:roll@pick.1") ?? 0,
+      raced: completed.get("task:pick") ?? 0,
+      late: completed.get("task:late@pick.2") ?? 0,
+    }).toStrictEqual({
+      end: { status: "completed", output: { status: "slow:0" } },
+      rolled: 1,
+      raced: 1,
+      late: 0,
+    });
+  });
+
+  it("don't lower branches at once yet", async () => {
+    const by = await builder();
+    const { version } = await published(by, [
+      {
+        both: {
+          fork: { branches: [branch("only", '${ {status: "x"} }')] },
+          metadata: { grasp: { concurrency: 2 } },
+        },
+      },
+    ]);
+    expect(
+      version.build.executable
+        ? []
+        : version.build.unsupported.map(({ feature }) => feature)
+    ).toStrictEqual(["fork:concurrency"]);
+  });
+});
+
+const ada = { input: { input: { who: "Ada" }, context: {} } };
+
+/** A race of two branches, for the forged modules below. */
+const twoWay = [
+  {
+    pick: {
+      fork: {
+        branches: [
+          // Its expression fails on Ada (`failed`); a module may still say
+          // it succeeded, for the cases that need it.
+          branch("left", "${ {status: (.who | tonumber)} }"),
+          branch("right", '${ {status: "right"} }'),
+        ],
+        compete: true,
+      },
+    },
+  },
+];
+
+const left = { output: { status: "left" } };
+const right = { output: { status: "right" } };
+
+/** Step `name` of `host` recording `value`. */
+const ran = async (host: ResourceRunHost, name: string, value: unknown) =>
+  await host.do(name, ada, async () => {
+    await Promise.resolve();
+    return { ok: true, value };
+  });
+
+/**
+ * Step `name` of `host` failing on its expression (slot `slot`), which the
+ * host evaluates and fails: a failure a catch, or a race, may take.
+ */
+const failed = async (host: ResourceRunHost, name: string, slot = 0) =>
+  await host.do(name, ada, async (attempt) => {
+    const evaluated = await attempt.evaluate(slot, {
+      input: ada.input.input,
+      output: null,
+    });
+    return evaluated.ok
+      ? { ok: false, error: { name: "Error", message: "It didn't fail." } }
+      : evaluated;
+  });
+
+/** Step `name` of `host` failing as only its module says: no catch's, nor a race's, to take. */
+const failedAsReported = async (host: ResourceRunHost, name: string) =>
+  await host.do(name, ada, async () => {
+    await Promise.resolve();
+    return {
+      ok: false,
+      error: { name: "Error", message: "It failed.", code: "resource.busy" },
+    };
+  });
+
+describe("a run's host, against a forged module's fork", () => {
+  it("runs a branch's steps only in a branch the fork has, and records only a winner it has", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, twoWay);
+    const forged = async (name: string, value: unknown) =>
+      codeOf(await ran(await hostOf(by, workflow.id), name, value));
+    expect({
+      first: await forged("task:left@pick.0", { output: { status: "left" } }),
+      pastBranches: await forged("task:right@pick.2", {
+        output: { status: "right" },
+      }),
+      otherBranchTask: await forged("task:right", {
+        output: { status: "right" },
+      }),
+      // The second branch's task, run as the first branch's: a later
+      // branch's calls never run before the earlier branch fails.
+      asAnotherBranch: await forged("task:right@pick.0", {
+        output: { status: "right" },
+      }),
+      winner: await forged("task:pick", { output: { status: "x" }, branch: 0 }),
+      noSuchWinner: await forged("task:pick", {
+        output: { status: "x" },
+        branch: 2,
+      }),
+      noWinner: await forged("task:pick", { output: { status: "x" } }),
+    }).toStrictEqual({
+      first: "ok",
+      pastBranches: "workflow.invalid",
+      otherBranchTask: "workflow.invalid",
+      asAnotherBranch: "workflow.invalid",
+      winner: "ok",
+      noSuchWinner: "workflow.invalid",
+      noWinner: "workflow.invalid",
+    });
+  });
+
+  it("goes on to a branch only past the failure of every branch before it, and records only the branch that got there", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, twoWay);
+    // The first branch succeeds: the race is over, whatever a module says.
+    const won = await hostOf(by, workflow.id);
+    const afterSuccess = {
+      left: codeOf(await ran(won, "task:left@pick.0", left)),
+      laterBranch: codeOf(await ran(won, "task:right@pick.1", right)),
+    };
+    const recorded = await hostOf(by, workflow.id);
+    const afterRecord = {
+      left: codeOf(await ran(recorded, "task:left@pick.0", left)),
+      winner: codeOf(
+        await ran(recorded, "task:pick", { output: left.output, branch: 0 })
+      ),
+      laterBranch: codeOf(await ran(recorded, "task:right@pick.1", right)),
+    };
+    // A branch that never ran nor failed before it: no winner past it.
+    const skipped = await hostOf(by, workflow.id);
+    const skipping = codeOf(
+      await ran(skipped, "task:pick", { output: right.output, branch: 1 })
+    );
+    // The first branch fails: the second runs, and only it may win.
+    const failedFirst = await hostOf(by, workflow.id);
+    const afterFailure = {
+      leftFailed:
+        codeOf(await failed(failedFirst, "task:left@pick.0")) !== "ok",
+      right: codeOf(await ran(failedFirst, "task:right@pick.1", right)),
+      winner: codeOf(
+        await ran(failedFirst, "task:pick", { output: right.output, branch: 1 })
+      ),
+    };
+    const lost = await hostOf(by, workflow.id);
+    await failed(lost, "task:left@pick.0");
+    const failedWinner = codeOf(
+      await ran(lost, "task:pick", { output: left.output, branch: 0 })
+    );
+
+    expect({
+      afterSuccess,
+      afterRecord,
+      skipping,
+      afterFailure,
+      failedWinner,
+    }).toStrictEqual({
+      afterSuccess: { left: "ok", laterBranch: "workflow.invalid" },
+      afterRecord: {
+        left: "ok",
+        winner: "ok",
+        laterBranch: "workflow.invalid",
+      },
+      skipping: "workflow.invalid",
+      afterFailure: { leftFailed: true, right: "ok", winner: "ok" },
+      failedWinner: "workflow.invalid",
+    });
+  });
+
+  it("lets nothing but the race's next branch get past a failure, and nothing get past one no race may take", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, [
+      { first: { set: "${ {n: (.who | tonumber)} }" } },
+      ...twoWay,
+    ]);
+    // A failure before the race: no branch of it gets past.
+    const before = await hostOf(by, workflow.id);
+    await failed(before, "task:first");
+    const intoRace = codeOf(await ran(before, "task:left@pick.0", left));
+    // A failure in a branch: neither the race's own record nor any step
+    // after it gets past; only its next branch.
+    const recordPast = await hostOf(by, workflow.id);
+    await ran(recordPast, "task:first", { output: { n: 1 } });
+    await failed(recordPast, "task:left@pick.0", 1);
+    const record = codeOf(
+      await ran(recordPast, "task:pick", { output: left.output, branch: 0 })
+    );
+    // The same failure, then its next branch: the race takes it.
+    const taken = await hostOf(by, workflow.id);
+    await ran(taken, "task:first", { output: { n: 1 } });
+    await failed(taken, "task:left@pick.0", 1);
+    const takenByRace = codeOf(await ran(taken, "task:right@pick.1", right));
+    // One only the module claims, which no catch may take: no race either.
+    const reported = await hostOf(by, workflow.id);
+    await ran(reported, "task:first", { output: { n: 1 } });
+    await failedAsReported(reported, "task:left@pick.0");
+    const nextBranch = codeOf(await ran(reported, "task:right@pick.1", right));
+
+    expect({ intoRace, record, takenByRace, nextBranch }).toStrictEqual({
+      intoRace: "workflow.invalid",
+      record: "workflow.invalid",
+      takenByRace: "ok",
+      nextBranch: "workflow.invalid",
+    });
+  });
+});
