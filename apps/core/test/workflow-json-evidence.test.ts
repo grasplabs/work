@@ -142,7 +142,34 @@ const recalledType = "grasp.leave.recalled";
  * its output, asks a model about it, starts a child on it, asks its
  * builder to decide on it, or emits it as an event's data.
  */
-type Then = "output" | "model" | "child" | "heldChild" | "decision" | "emit";
+type Then =
+  | "output"
+  | "model"
+  | "child"
+  | "heldChild"
+  | "decision"
+  | "emit"
+  | "file";
+
+/**
+ * Action `save`, beside `look`: writes a first file, then one named after
+ * what it was handed.
+ */
+const saveModule = `
+const loose = (files: unknown) =>
+  files as { write: (request: object) => Promise<{ file: string }> };
+
+export const save = action({
+  args: { recalled: v.string() },
+  returns: v.object({ status: v.string() }),
+  uses: [resource.files("files", { operations: ["write"] })],
+  handler: async (ctx, args) => {
+    await loose(ctx.resources.files).write({ name: "first.md", type: "text/markdown", content: "first" });
+    await loose(ctx.resources.files).write({ name: args.recalled.replace(/[^A-Za-z0-9 ]/g, " ").trim().slice(0, 80) + ".md", type: "text/markdown", content: "second" });
+    return { status: "saved" };
+  },
+});
+`;
 
 /**
  * A child workflow of `by`'s greeting its input's `who`, at 1.0.0, after
@@ -191,7 +218,9 @@ const recallingWorkflow = async (
     model: `summary-${unique()}`,
     decision: `review-${unique()}`,
     event: `recalled-${unique()}`,
+    files: `files-${unique()}`,
   };
+  await publishCatalogContract(env, admin, { key: keys.files, kind: "files" });
   await publishCatalogContract(env, admin, {
     key: keys.knowledge,
     kind: "knowledge",
@@ -298,6 +327,18 @@ const recallingWorkflow = async (
       },
       { finish: { set: { status: "${ $context.recalled }" } } },
     ],
+    file: [
+      {
+        save: {
+          call: "grasp.operation",
+          with: {
+            binding: "save",
+            arguments: { recalled: "${ $context.recalled }" },
+          },
+        },
+      },
+      { finish: { set: { status: "saved" } } },
+    ],
   };
   const extraBindings: Record<Then, Record<string, unknown>> = {
     output: {},
@@ -311,6 +352,10 @@ const recallingWorkflow = async (
     heldChild: {},
     decision: { review: { kind: "decision", contract: keys.decision } },
     emit: { recalledEvents: { kind: "event", contract: keys.event } },
+    file: {
+      save: { kind: "operation", contract: "local:code/look.ts#save" },
+      files: { kind: "files", contract: keys.files },
+    },
   };
   if (child !== undefined) {
     await granted(by, admin, {
@@ -358,7 +403,9 @@ const recallingWorkflow = async (
       ],
     }),
     basedOn: null,
-    modules: { "code/look.ts": lookModule(how) },
+    modules: {
+      "code/look.ts": lookModule(how) + (then === "file" ? saveModule : ""),
+    },
   });
   const collectionGrant = await granted(by, admin, {
     subject: { type: "workflow", workflowId: workflow.id },
@@ -391,6 +438,13 @@ const recallingWorkflow = async (
     await approveWorkflowBinding(env, admin, workflow.id, {
       alias: "review",
       target: { kind: "decision", deciders: [`person:${admin.userId}`] },
+      reviewed: { version: 1 },
+    });
+  }
+  if (then === "file") {
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "files",
+      target: { kind: "files" },
       reviewed: { version: 1 },
     });
   }
@@ -1016,6 +1070,53 @@ describe("a JSON workflow's recalled evidence", () => {
       gone: {
         child: { status: "completed", code: null, carries: true },
         parent: { status: "failed", code: "brain.revoked", carries: false },
+      },
+    });
+  });
+
+  it("writes no file named after what it recalled once it may no longer read it, though it does as long as it can", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    /** The files a run wrote, `revoking` its collection as its first file lands. */
+    const filesWritten = async (revoking: boolean) => {
+      const made = await recallingWorkflow(ada, admin, "file");
+      // The collection revoked as the action's first file lands: its
+      // second, named after what it recalled, comes after.
+      const trigger = `revoke_${unique().replaceAll(/\W/gu, "_")}`;
+      if (revoking) {
+        await env.DB.exec(
+          `CREATE TRIGGER ${trigger} AFTER INSERT ON workflow_run_files WHEN NEW.name = 'first.md' BEGIN UPDATE permissions SET status = 'revoked' WHERE id = '${made.collectionGrant}'; END`
+        );
+      }
+      try {
+        const runId = await startedHolding(ada, made);
+        const run = await ended(ada, made.workflow.id, runId);
+        const files = await env.DB.prepare(
+          "SELECT name FROM workflow_run_files WHERE run_id = ? ORDER BY name"
+        )
+          .bind(runId)
+          .all<{ name: string }>();
+        return {
+          status: run.status,
+          code: run.status === "failed" ? (run.error?.code ?? null) : null,
+          files: files.results.length,
+          named: files.results.some(({ name }) => name.includes(made.lead)),
+        };
+      } finally {
+        await env.DB.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+      }
+    };
+
+    const kept = await filesWritten(false);
+    const revoked = await filesWritten(true);
+
+    expect({ kept, revoked }).toStrictEqual({
+      kept: { status: "completed", code: null, files: 2, named: true },
+      revoked: {
+        status: "failed",
+        code: "brain.revoked",
+        files: 1,
+        named: false,
       },
     });
   });
