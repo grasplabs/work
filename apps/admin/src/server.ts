@@ -55,12 +55,12 @@ import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
-export { IntegrationBuild } from "./builds/workflow.ts";
 export { ApplyClient } from "./clients/apply.ts";
 export { ProvisionPlacedClient } from "./hosting/workflow.ts";
 export { RollbackClient } from "./rollout/rollback.ts";
 export { RolloutClient } from "./rollout/fleet-client.ts";
 export { Rollout } from "./rollout/workflow.ts";
+export { AdminRuns } from "./run-object.ts";
 
 declare module "@tanstack/react-start" {
   interface Register {

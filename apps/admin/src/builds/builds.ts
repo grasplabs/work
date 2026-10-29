@@ -32,8 +32,10 @@ import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import { integrationBuilds } from "../db/schema.ts";
 import { instanceStatus } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { buildPlanSchema } from "./plan.ts";
 import type { BuildPlan } from "./plan.ts";
+import type { BuildParams } from "./workflow.ts";
 
 /** Where a build is. */
 export type BuildStage = (typeof integrationBuilds.stage.enumValues)[number];
@@ -110,10 +112,27 @@ export const buildEvents = {
   merged: "merged",
 } as const;
 
-/** Sends the build's run `type`, once its row has moved. */
+/** The builds' runs (src/builds/workflow.ts). */
+const buildRuns = (env: Env) =>
+  adminWorkflow<BuildParams>(env, adminWorkflows.integrationBuild);
+
+/** Whether `error` is the engine saying the run has ended and takes no events. */
+const hasEnded = (error: unknown): boolean =>
+  error instanceof Error && error.message.startsWith("instance.not_running");
+
+/**
+ * Sends the build's run `type`, once its row has moved. A run that ended
+ * meanwhile read the row as it ended: it has nothing left to wake.
+ */
 const wake = async (env: Env, runId: string, type: string): Promise<void> => {
-  const instance = await env.INTEGRATION_BUILD.get(runId);
-  await instance.sendEvent({ type, payload: {} });
+  const instance = await buildRuns(env).get(runId);
+  try {
+    await instance.sendEvent({ type, payload: {} });
+  } catch (error) {
+    if (!hasEnded(error)) {
+      throw error;
+    }
+  }
 };
 
 /** A move from `from` to the fields in `set`, audited as `action`. */
@@ -214,7 +233,7 @@ export const requestBuild = async (
   const build = await existing(db, app);
   if (!created) {
     const { status } = await instanceStatus(
-      env.INTEGRATION_BUILD,
+      buildRuns(env),
       build.runId,
       build.createdAt
     );
@@ -222,7 +241,7 @@ export const requestBuild = async (
       return build.runId;
     }
   }
-  await env.INTEGRATION_BUILD.create({ id: build.runId, params: { app } });
+  await buildRuns(env).create({ id: build.runId, params: { app } });
   return build.runId;
 };
 
