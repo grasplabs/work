@@ -64,11 +64,21 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      * by its adapter's name; none in Grasp's own app.
      */
     via: chatPlatformSchema.optional(),
+    /**
+     * The Grasp staff member whose work this is, when staff started it
+     * (GRA-1088): shown as "(Grasp staff)". Set by core only.
+     */
+    staff: identifierSchema.optional(),
   }),
   z.object({
     type: z.literal("app"),
     appId: appIdSchema,
     part: z.enum(["screen", "server"]),
+    /**
+     * The Grasp staff member whose work this is, when staff started it
+     * (GRA-1088): shown as "(Grasp staff)". Set by core only.
+     */
+    staff: identifierSchema.optional(),
   }),
   z.object({
     type: z.literal("workflow"),
@@ -90,6 +100,11 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      * run charged to its lineage's own.
      */
     accountRunId: runIdSchema.optional(),
+    /**
+     * The Grasp staff member whose work this is, when staff started it
+     * (GRA-1088): shown as "(Grasp staff)". Set by core only.
+     */
+    staff: identifierSchema.optional(),
   }),
   z.object({
     type: z.literal("staff"),
@@ -111,7 +126,14 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     appId: appIdSchema,
     invitedBy: identifierSchema,
   }),
-  z.object({ type: z.literal("system") }),
+  z.object({
+    type: z.literal("system"),
+    /**
+     * The Grasp staff member whose work this is, when staff started it
+     * (GRA-1088): shown as "(Grasp staff)". Set by core only.
+     */
+    staff: identifierSchema.optional(),
+  }),
 ]);
 export type AuditActor = z.infer<typeof auditActorSchema>;
 
@@ -139,9 +161,11 @@ export const actorOf = (
  * the chat's `channel` when it is a chat platform's.
  */
 export const delegateActorOf = (
-  { subject, onBehalfOf }: Authority,
+  { subject, onBehalfOf, staff }: Authority,
   channel?: ChatChannel
 ): AuditActor => {
+  // Work a Grasp staff member started says so, whoever does it for them.
+  const byStaff = staff === true ? { staff: onBehalfOf } : {};
   switch (subject.type) {
     case "agent": {
       return {
@@ -149,13 +173,14 @@ export const delegateActorOf = (
         agentId: subject.agentId,
         onBehalfOf,
         ...viaOf(channel),
+        ...byStaff,
       };
     }
     case "app": {
-      return { type: "app", appId: subject.appId, part: "server" };
+      return { type: "app", appId: subject.appId, part: "server", ...byStaff };
     }
     case "workflow": {
-      return { type: "system" };
+      return { type: "system", ...byStaff };
     }
     default: {
       return subject satisfies never;
@@ -173,12 +198,18 @@ export const runActorOf = ({
   workflow,
   rootRunId,
   accountRunId,
+  authority,
 }: {
   runId: string;
   app: string;
   workflow: string;
   rootRunId?: string | null | undefined;
   accountRunId?: string | null | undefined;
+  /**
+   * Whom the run acts for: a run a Grasp staff member started (its
+   * `staff` mark, GRA-1088) names them.
+   */
+  authority?: Pick<Authority, "onBehalfOf" | "staff"> | undefined;
 }): AuditActor => ({
   type: "workflow",
   appId: appIdSchema.parse(app),
@@ -190,6 +221,7 @@ export const runActorOf = ({
   ...(accountRunId === null || accountRunId === undefined
     ? {}
     : { accountRunId: runIdSchema.parse(accountRunId) }),
+  ...(authority?.staff === true ? { staff: authority.onBehalfOf } : {}),
 });
 
 /** The Workers that send audit events. */
