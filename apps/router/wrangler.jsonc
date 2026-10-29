@@ -1,8 +1,8 @@
-// Deployed by hand, with deploy-ops, to Grasp's account; staging has none. Serves
-// *.<domain> and stores nothing.
+// Deployed by hand, with deploy-platform, to Grasp's account, once per stage.
+// Serves *.<domain> and stores nothing.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "grasp-os-router",
+  "name": "grasp-router",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-15",
   "workers_dev": false,
@@ -10,6 +10,10 @@
   // No platform line per invocation, and query strings stay out of logs and
   // traces: the router sees every client's full URLs, OAuth callbacks'
   // code and state included (threat model R17, RT2).
+  // Which stage this Worker serves (@grasp-os/shared/names): production
+  // here, staging in `env.staging`, which repeats every binding under its
+  // staging name, as wrangler inherits none of them.
+  "vars": { "STAGE": "production" },
   "observability": {
     "enabled": true,
     "redact_query_string": true,
@@ -17,18 +21,20 @@
     "traces": { "enabled": true },
   },
   // The hostname map the admin writes: hostname -> { clientId, coreUrl,
-  // generation } (@grasp-os/shared/router). No id: the first deploy to an
-  // account creates it as grasp-os-router-hosts, later deploys keep it. It
-  // holds routing only, no client content, so KV's lack of an EU
-  // jurisdiction doesn't matter (threat model R18).
-  "kv_namespaces": [{ "binding": "HOSTS" }],
+  // generation } (@grasp-os/shared/router), titled grasp-router-hosts
+  // (@grasp-os/shared/names): scripts/cloudflare-account-setup.ts creates
+  // it, and `deploy` fills in its id (scripts/wrangler-deploy.ts), so this
+  // placeholder only reaches local runs and tests. It holds routing only,
+  // no client content, so KV's lack of an EU jurisdiction doesn't matter
+  // (threat model R18).
+  "kv_namespaces": [{ "binding": "HOSTS", "id": "router-hosts-namespace" }],
   // Every client's core, as a user Worker in this account's Workers for
-  // Platforms namespace (@grasp-os/shared/router, `clientDispatchNamespace`):
+  // Platforms namespace (@grasp-os/shared/names, `clientsNamespace`):
   // reached only through this binding, by the script its map entry names
   // (GRA-283). Core, connect and App code bind no namespace, so no client
   // can reach another's.
   "dispatch_namespaces": [
-    { "binding": "DISPATCHER", "namespace": "grasp-os-clients" },
+    { "binding": "DISPATCHER", "namespace": "grasp-clients" },
   ],
   // The key every client's router secret is derived from. The store id is
   // the account's own: `deploy` fills it in (scripts/wrangler-deploy.ts), so
@@ -84,4 +90,69 @@
       "simple": { "limit": 600, "period": 60 },
     },
   ],
+  // Staging (`wrangler deploy --env staging`, deploy-platform with stage
+  // staging): every name from @grasp-os/shared/names with -staging appended,
+  // its own rate limit namespaces, and its own router and client keys in
+  // the account's Secrets Store; the clients' shared secrets are the same.
+  "env": {
+    "staging": {
+      "name": "grasp-router-staging",
+      "vars": {
+        "STAGE": "staging",
+      },
+      "ratelimits": [
+        {
+          "name": "AUTH_RATE_LIMIT",
+          "namespace_id": "2001",
+          "simple": {
+            "limit": 300,
+            "period": 60,
+          },
+        },
+        {
+          "name": "GUEST_RATE_LIMIT",
+          "namespace_id": "2002",
+          "simple": {
+            "limit": 30,
+            "period": 60,
+          },
+        },
+        {
+          "name": "INTERVIEW_RATE_LIMIT",
+          "namespace_id": "2003",
+          "simple": {
+            "limit": 300,
+            "period": 60,
+          },
+        },
+        {
+          "name": "CHANNELS_RATE_LIMIT",
+          "namespace_id": "2006",
+          "simple": {
+            "limit": 600,
+            "period": 60,
+          },
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "HOSTS",
+          "id": "router-hosts-namespace",
+        },
+      ],
+      "dispatch_namespaces": [
+        {
+          "binding": "DISPATCHER",
+          "namespace": "grasp-clients-staging",
+        },
+      ],
+      "secrets_store_secrets": [
+        {
+          "binding": "ROUTER_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ROUTER_KEY_STAGING",
+        },
+      ],
+    },
+  },
 }
