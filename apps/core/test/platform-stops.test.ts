@@ -136,7 +136,7 @@ const stoppedOnce = "The compiler was stopped before it finished:";
 const throwing = (message: string): string =>
   `throw new Error(${JSON.stringify(message)});`;
 
-/** An isolate whose compiler's `build` runs `body`. */
+/** An isolate whose compiler's builds (whole and incremental) run `body`. */
 const compilerOf = (body: string): WorkerLoaderWorkerCode => ({
   ...isolateBase,
   mainModule: "compiler.js",
@@ -144,6 +144,7 @@ const compilerOf = (body: string): WorkerLoaderWorkerCode => ({
     "compiler.js": `import { WorkerEntrypoint } from "cloudflare:workers";
 export default class extends WorkerEntrypoint {
   async build() { ${body} }
+  async buildIncrementally() { ${body} }
 }`,
   },
 });
