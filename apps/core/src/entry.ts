@@ -1,6 +1,7 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
+import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -37,6 +38,7 @@ import {
 } from "./app-function-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
+import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -163,6 +165,9 @@ const linkResponse = async (
 ): Promise<Response | undefined> => {
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
+  }
+  if (pathname === appVisitorApiPath) {
+    return await appVisitorResponse(request, env, requestId);
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);

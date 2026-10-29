@@ -11,6 +11,7 @@ import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
+import { sweepAppVisitors } from "./app-visitors.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
@@ -208,6 +209,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).
   {

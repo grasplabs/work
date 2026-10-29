@@ -111,6 +111,16 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     appId: appIdSchema,
     invitedBy: identifierSchema,
   }),
+  /**
+   * Someone who isn't a member, opening a published App at its link
+   * (`@grasp-os/shared/app-visitors`): by their session once they signed
+   * in, by the App alone while they ask for a code.
+   */
+  z.object({
+    type: z.literal("visitor"),
+    appId: appIdSchema,
+    sessionId: identifierSchema.optional(),
+  }),
   z.object({ type: z.literal("system") }),
 ]);
 export type AuditActor = z.infer<typeof auditActorSchema>;

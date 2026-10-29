@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
+import type { AppVisitorEntry } from "./app-visitors.ts";
 import { businessProcessSchema } from "./business-processes.ts";
 import type { BusinessProcess } from "./business-processes.ts";
 import type { CatalogEntryRef } from "./connect.ts";
@@ -787,6 +788,22 @@ export interface AppsApi {
    * (`app.not_found`), so a link tells nothing of an App they can't open.
    */
   openLink: (link: string) => Promise<{ app: AppId }>;
+  /**
+   * Who may open the App without being a member (`@grasp-os/shared/app-
+   * visitors`): the addresses and domains its builders listed. For its
+   * builders.
+   */
+  visitors: (app: string) => Promise<AppVisitorEntry[]>;
+  /**
+   * Sets who may open the App without being a member, the whole list at
+   * once, for its builders: `visitor.invalid` for an address or domain it
+   * can't be, or more than 50. Audited. Whoever leaves the list can't open
+   * it from their next request on.
+   */
+  setVisitors: (
+    app: string,
+    list: AppVisitorEntry[]
+  ) => Promise<AppVisitorEntry[]>;
   /**
    * Takes a published App back to a draft, for its builders: the people
    * it is shared with as users lose it, their open screens cleared.
