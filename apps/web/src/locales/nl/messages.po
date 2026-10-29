@@ -84,6 +84,11 @@ msgstr "{0, plural, one {Heeft # ding nodig dat Grasp weigert uit te voeren} oth
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
 msgstr "{0, plural, one {Het team dat je hebt uitgezonderd} other {De # teams die je hebt uitgezonderd}}"
 
+#. placeholder {0}: person.email
+#: src/settings/erasures.tsx
+msgid "{0} · removed on {date}"
+msgstr "{0} · verwijderd op {date}"
+
 #. {about} is what the app is for, as the app list writes it, e.g. “Accounting”. {date} is a day and month.
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{about} · connected {date}"
@@ -535,6 +540,11 @@ msgstr "{done, plural, one {# daarvan is getekend.} other {# daarvan zijn geteke
 msgid "{done} done · {failed} failed · 30 days"
 msgstr "{done} gedaan · {failed} mislukt · 30 dagen"
 
+#. placeholder {0}: areas.length
+#: src/settings/erasures.tsx
+msgid "{done} of {0}"
+msgstr "{done} van {0}"
+
 #: src/brain/thinking/work-hours.tsx
 msgid "{each, plural, one {# hour a week} other {# hours a week}}"
 msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
@@ -842,6 +852,10 @@ msgstr "{name} is een concept: alleen de bouwers openen het, en de triggers gaan
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
 msgstr "{name} is gekoppeld. Ik lees alleen wat je met mij deelt."
+
+#: src/settings/erasures.tsx
+msgid "{name} is erased."
+msgstr "{name} is gewist."
 
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
@@ -2434,6 +2448,10 @@ msgstr "Goedkeuring van apps"
 msgid "App not found"
 msgstr "App niet gevonden"
 
+#: src/settings/erasures.tsx
+msgid "App preferences and form answers"
+msgstr "App-voorkeuren en formulierantwoorden"
+
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Applicatie"
@@ -2608,6 +2626,10 @@ msgstr "Gearchiveerde gebeurtenissen"
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
 msgstr "Gearchiveerd: niemand opent de apps en er draait niets, tot een bouwer het herstelt."
+
+#: src/settings/erasures.tsx
+msgid "Areas erased"
+msgstr "Gewiste onderdelen"
 
 #: src/brain/brain-markdown.ts
 msgid "Article"
@@ -3168,6 +3190,7 @@ msgstr "Niet leesbaar"
 #: src/link-confirmation.tsx
 #: src/onboarding/place-picker.tsx
 #: src/routes/_shell.projects.$projectId.tsx
+#: src/settings/erasures.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
@@ -3421,6 +3444,10 @@ msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
+#: src/settings/erasures.tsx
+msgid "Chat accounts, invitations and notifications"
+msgstr "Chataccounts, uitnodigingen en meldingen"
+
 #: src/settings/chat-accounts.tsx
 msgid "Chat apps"
 msgstr "Chat-apps"
@@ -3449,6 +3476,10 @@ msgstr "Chats"
 #: src/brain/brain.ts
 msgid "Chats with Grasp"
 msgstr "Chats met Grasp"
+
+#: src/settings/erasures.tsx
+msgid "Chats, drafts and dashboard"
+msgstr "Chats, concepten en dashboard"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
@@ -3605,6 +3636,7 @@ msgstr "Filters wissen"
 #: src/onboarding/place-picker.tsx
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
+#: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
@@ -4765,6 +4797,10 @@ msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/settings/erasures.tsx
+msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
+msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw geprobeerd tot het klaar is, ook nadat u dit sluit."
+
 #: src/chat/project-dialog.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Each document holds up to {maxKb} KB."
@@ -4826,6 +4862,10 @@ msgctxt "kind of app"
 msgid "Email and calendar"
 msgstr "E-mail en agenda"
 
+#: src/settings/erasures.tsx
+msgid "Email and sign-ins"
+msgstr "E-mail en aanmeldingen"
+
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Medewerker"
@@ -4879,9 +4919,37 @@ msgstr "De items tot en met {purged} zijn verwijderd toen hun bewaartermijn afli
 msgid "Entry {sequence} can't be read."
 msgstr "Item {sequence} kan niet worden gelezen."
 
+#: src/settings/erasures.tsx
+msgid "Erase"
+msgstr "Wissen"
+
+#: src/settings/erasures.tsx
+msgid "Erase {name}?"
+msgstr "{name} wissen?"
+
+#: src/settings/erasures.tsx
+msgid "Erase {who}"
+msgstr "{who} wissen"
+
+#: src/settings/erasures.tsx
+msgid "Erase…"
+msgstr "Wissen…"
+
+#: src/settings/erasures.tsx
+msgid "Erased"
+msgstr "Gewist"
+
 #: src/activity/audit-words.ts
 msgid "Erased a removed member"
 msgstr "Een verwijderd lid gewist"
+
+#: src/settings/erasures.tsx
+msgid "Erasing, {done} of {total}"
+msgstr "Wordt gewist, {done} van {total}"
+
+#: src/settings/erasures.tsx
+msgid "Erasing…"
+msgstr "Wordt gewist…"
 
 #: src/chat/thread.tsx
 msgid "Error"
@@ -5001,6 +5069,10 @@ msgstr "Alles wat Grasp voor je organisatie opslaat, blijft hier."
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Alles wat je me hebt verteld, wordt voorgoed verwijderd en is niet terug te halen. Klopt er alleen iets niet? Verbeter het dan met ‘Iets toevoegen’."
+
+#: src/settings/erasures.tsx
+msgid "Exactly as it’s written here."
+msgstr "Precies zoals het hier staat."
 
 #: src/interview/words.ts
 msgid "Example"
@@ -5301,6 +5373,14 @@ msgstr "Chat inklappen"
 msgid "Fold the navigation"
 msgstr "Navigatie inklappen"
 
+#: src/settings/erasures.tsx
+msgid "Follow"
+msgstr "Volgen"
+
+#: src/settings/erasures.tsx
+msgid "Follow the erasure of {who}"
+msgstr "Het wissen van {who} volgen"
+
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
 msgid "For {0}"
@@ -5318,6 +5398,10 @@ msgstr "Voor {person}"
 #: src/engines/new-domain-dialog.tsx
 msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
 msgstr "Voor een deel van het bedrijf, zoals een productlijn of een vestiging. Het begint leeg: wat Grasp erin bouwt, brengt de workflows, apps en integraties mee."
+
+#: src/settings/erasures.tsx
+msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
+msgstr "Voor een adres dat uw bedrijf aan iemand anders heeft gegeven. Wie zich ermee aanmeldt, komt dan binnen, ook {name} als uw aanmeldprovider het nog voor die persoon heeft."
 
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
@@ -5556,6 +5640,10 @@ msgstr "Grasp kan je mensen hun interviewlinks voorlopig niet mailen. Stuur iede
 msgid "Grasp can't read your organization's model limits right now. Try again later."
 msgstr "Grasp kan de modellimieten van je organisatie nu niet lezen. Probeer het later opnieuw."
 
+#: src/settings/erasures.tsx
+msgid "Grasp can’t say how far it got just now. It goes on all the same."
+msgstr "Grasp kan nu niet zeggen hoe ver het is. Het gaat toch door."
+
 #: src/chat/failure.ts
 msgid "Grasp can't tell what this model would cost. Pick another one."
 msgstr "Grasp weet niet wat dit model zou kosten. Kies een ander model."
@@ -5620,6 +5708,10 @@ msgstr "Grasp regelt de afspraken nog. De links van je mensen worden beschikbaar
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp is still working out a proposal."
 msgstr "Grasp werkt nog aan een voorstel."
+
+#: src/settings/erasures.tsx
+msgid "Grasp keeps no copy of it, so type it in full."
+msgstr "Grasp bewaart er geen kopie van, dus typ het volledig."
 
 #: src/brain/work-knowledge.tsx
 msgid "Grasp knows nothing about this work in its own words yet."
@@ -6133,6 +6225,10 @@ msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van me
 #: src/dashboard/pile-cards.tsx
 msgid "In one chat only, for {requester}"
 msgstr "Alleen in één chat, voor {requester}"
+
+#: src/settings/erasures.tsx
+msgid "In progress"
+msgstr "Bezig"
 
 #: src/brain/brain.ts
 msgid "In the brain"
@@ -6702,6 +6798,10 @@ msgstr "Mijn tekst houden"
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
 
+#: src/settings/erasures.tsx
+msgid "Kept"
+msgstr "Behouden"
+
 #: src/activity/audit-words.ts
 msgid "Kept access at the provider for an account connected again"
 msgstr "De toegang bij de provider behouden voor een opnieuw gekoppeld account"
@@ -6857,6 +6957,10 @@ msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
 msgstr "Lessen"
 
+#: src/settings/erasures.tsx
+msgid "Let {name}’s old address in again?"
+msgstr "Het oude adres van {name} weer toelaten?"
+
 #: src/activity/audit-words.ts
 msgid "Let a domain's visitors use one of its functions"
 msgstr "De bezoekers van een domein een van zijn functies laten gebruiken"
@@ -6874,6 +6978,10 @@ msgstr "Laat los om ze toe te voegen"
 msgid "Let Grasp’s mail through"
 msgstr "Laat de mails van Grasp door"
 
+#: src/settings/erasures.tsx
+msgid "Let it in"
+msgstr "Toelaten"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Let me put it all together for you."
 msgstr "Ik zet het nu allemaal voor je klaar."
@@ -6885,6 +6993,10 @@ msgstr "Laat mensen Stephen vragen om hem te starten"
 #: src/activity/audit-words.ts
 msgid "Let someone visit a domain"
 msgstr "Iemand een domein laten bezoeken"
+
+#: src/settings/erasures.tsx
+msgid "Let the old address of {who} in again"
+msgstr "Het oude adres van {who} weer toelaten"
 
 #: src/inbox/items.ts
 msgid "Let version {version} of {name} go live?"
@@ -8069,6 +8181,10 @@ msgstr "Niemand heeft {doc} in {where} {days, plural, one {de afgelopen dag} oth
 msgid "Nobody reads it"
 msgstr "Niemand leest het"
 
+#: src/settings/erasures.tsx
+msgid "Nobody was removed."
+msgstr "Niemand is verwijderd."
+
 #: src/people/person-picker.tsx
 msgid "Nobody with that name."
 msgstr "Niemand met die naam."
@@ -8441,6 +8557,10 @@ msgstr "Niets start hem vanzelf: hij draait wanneer iemand hem start."
 msgid "Nothing this domain asked for is waiting."
 msgstr "Niets wat dit domein vroeg, wacht nog."
 
+#: src/settings/erasures.tsx
+msgid "Nothing to erase"
+msgstr "Niets te wissen"
+
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
@@ -8628,6 +8748,10 @@ msgstr "Op deze pagina koppel je de applicaties waar jullie organisatie mee werk
 #: src/routes/_shell.settings.tsx
 msgid "Onboarding"
 msgstr "Onboarding"
+
+#: src/settings/erasures.tsx
+msgid "Onboarding interview"
+msgstr "Onboardinginterview"
 
 #: src/settings/staff-access.tsx
 msgid "Onboarding only"
@@ -9283,6 +9407,10 @@ msgstr "Mensen loggen in met een adres in deze domeinen, via het account van je 
 msgid "People who asked"
 msgstr "Mensen die iets vroegen"
 
+#: src/settings/erasures.tsx
+msgid "People you removed can’t sign in. Erasing someone also takes their personal data, for good, keeping their name on what they did."
+msgstr "Mensen die u verwijderde kunnen zich niet aanmelden. Wie gewist wordt, verliest ook zijn persoonlijke gegevens, voorgoed; zijn naam blijft bij wat hij deed."
+
 #: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Toestemming"
@@ -9317,6 +9445,14 @@ msgstr "Persoon"
 msgctxt "who does a step"
 msgid "Person"
 msgstr "Persoon"
+
+#: src/settings/erasures.tsx
+msgid "Personal connections"
+msgstr "Persoonlijke koppelingen"
+
+#: src/settings/erasures.tsx
+msgid "Personal Knowledge and memories"
+msgstr "Persoonlijke Kennis en herinneringen"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -9920,6 +10056,10 @@ msgstr "Afgewezen: {rejected}"
 msgid "Rejected: {who}."
 msgstr "Afgewezen: {who}."
 
+#: src/settings/erasures.tsx
+msgid "Release address…"
+msgstr "Adres vrijgeven…"
+
 #: src/brain/remember-dialog.tsx
 msgid "Remember it"
 msgstr "Onthouden"
@@ -10014,6 +10154,7 @@ msgid "Remove this from the brain"
 msgstr "Dit uit het brein verwijderen"
 
 #: src/chat/builds.tsx
+#: src/settings/erasures.tsx
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Verwijderd"
@@ -10035,9 +10176,17 @@ msgstr "Na een week verwijderd"
 msgid "Removed from the brain"
 msgstr "Uit het brein verwijderd"
 
+#: src/settings/erasures.tsx
+msgid "Removed on {date} · email erased"
+msgstr "Verwijderd op {date} · e-mail gewist"
+
 #: src/chat/builds.tsx
 msgid "Removed parameter {name}"
 msgstr "Parameter {name} verwijderd"
+
+#: src/settings/erasures.tsx
+msgid "Removed people"
+msgstr "Verwijderde mensen"
 
 #: src/chat/builds.tsx
 msgid "Removed step {name}"
@@ -10571,6 +10720,10 @@ msgstr "Gestarte runs"
 msgid "Runs started from {from} to {to}."
 msgstr "Runs gestart van {from} tot {to}."
 
+#: src/settings/erasures.tsx
+msgid "Runs still going, and their spending limit"
+msgstr "Lopende runs en hun bestedingslimiet"
+
 #: src/workflows/item-test.tsx
 msgid "Runs the draft on the input of your {most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding."
 msgstr "Voert het concept uit op de invoer van je {most} meest recente runs. Er wordt niets verzonden of gewijzigd: elke aanroep wordt beantwoord met wat je hier opgeeft, onder de naam van de koppeling."
@@ -10578,6 +10731,10 @@ msgstr "Voert het concept uit op de invoer van je {most} meest recente runs. Er 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Voert de eigen testcases van de workflow uit met de waarden die nu zijn ingesteld. Er wordt niets gewijzigd: wat hij zou wijzigen, wordt in plaats daarvan opgesomd."
+
+#: src/settings/erasures.tsx
+msgid "Runs they started, and their place in the roster"
+msgstr "Runs die ze startten, en hun plek in de personeelslijst"
 
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
@@ -11134,6 +11291,7 @@ msgid "Show more · {left} left"
 msgstr "Meer tonen · nog {left}"
 
 #: src/dashboard/failed-workflows.tsx
+#: src/settings/erasures.tsx
 msgid "Show older"
 msgstr "Oudere tonen"
 
@@ -12127,6 +12285,10 @@ msgstr "Het e-mailadres van dat account is niet van je organisatie."
 msgid "That account's email address isn't verified."
 msgstr "Het e-mailadres van dat account is niet geverifieerd."
 
+#: src/settings/erasures.tsx
+msgid "That address wasn’t kept out."
+msgstr "Dat adres werd niet buitengehouden."
+
 #: src/guest/api.ts
 #: src/interview/api.ts
 msgid "That didn't work. Try again in a moment."
@@ -12188,6 +12350,14 @@ msgstr "Het account waarmee je bent ingelogd."
 msgid "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
 msgstr "De accounts waarmee mensen inloggen in Grasp. Grasp stelt dit in voor je werkruimte: vraag Grasp om het te wijzigen."
 
+#: src/settings/erasures.tsx
+msgid "The address"
+msgstr "Het adres"
+
+#: src/settings/erasures.tsx
+msgid "The address can sign in again."
+msgstr "Met het adres kan weer worden aangemeld."
+
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Misschien klopt het adres niet, of is de pagina verplaatst of verwijderd."
@@ -12241,6 +12411,10 @@ msgstr "Hier verschijnen de apps die je collega’s maken."
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per app toestaat."
+
+#: src/settings/erasures.tsx
+msgid "The audit trail"
+msgstr "De audittrail"
 
 #: src/settings/audit-chain.tsx
 msgid "The audit trail has no entries yet: there is nothing to verify."
@@ -12787,6 +12961,10 @@ msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is geslo
 msgid "Their access ends on its own then."
 msgstr "Dan stopt hun toegang vanzelf."
 
+#: src/settings/erasures.tsx
+msgid "Their name, on what they did, so it stays traceable"
+msgstr "Hun naam bij wat ze deden, zodat het herleidbaar blijft"
+
 #: src/engines/app-sharing.tsx
 msgid "Their open screens of it stop within seconds, and they can no longer open it. You can share it with them again."
 msgstr "Hun geopende schermen ervan stoppen binnen enkele seconden en ze kunnen het niet meer openen. Je kunt het opnieuw met hen delen."
@@ -12794,6 +12972,10 @@ msgstr "Hun geopende schermen ervan stoppen binnen enkele seconden en ze kunnen 
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
 msgstr "Hun eigen mail, agenda en bestanden. Gebeurt meteen."
+
+#: src/settings/erasures.tsx
+msgid "Their personal data goes for good. Their name stays on the company’s records, so what they did stays traceable."
+msgstr "Hun persoonlijke gegevens verdwijnen voorgoed. Hun naam blijft in de administratie van het bedrijf, zodat herleidbaar blijft wat ze deden."
 
 #: src/frame/person-menu.tsx
 msgid "Theme"
@@ -13459,6 +13641,10 @@ msgstr "Twee antwoorden"
 #: src/workflows/files-and-apps.tsx
 msgid "Type"
 msgstr "Type"
+
+#: src/settings/erasures.tsx
+msgid "Type {name} to confirm"
+msgstr "Typ {name} om te bevestigen"
 
 #: src/workflows/start-run.tsx
 msgid "Type a number."

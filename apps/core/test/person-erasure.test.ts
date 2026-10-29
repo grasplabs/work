@@ -642,6 +642,17 @@ describe("erasing a person", () => {
         email,
         removed: true,
         erasure: null,
+        // Exactly what this erasure runs: nothing more is promised.
+        areas: [
+          "identity",
+          "channels",
+          "connect",
+          "workspace",
+          "apps",
+          "interview",
+          "runs",
+          "brain",
+        ],
       },
       erased: {
         requestedAt: "string",

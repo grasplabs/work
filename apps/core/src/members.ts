@@ -14,6 +14,7 @@ import type {
   Invitation,
   Member,
   MembersApi,
+  RemovedPeoplePage,
 } from "@grasp-os/shared/members";
 import {
   canBuild,
@@ -67,6 +68,7 @@ import {
   erasePerson,
   erasurePreview,
   releaseAddress,
+  removedPeople,
 } from "./person-erasure.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { discardPreviewStoresOf } from "./sealed-previews.ts";
@@ -968,6 +970,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await erasePerson(this.#env, person, userId, name)
+    );
+  }
+
+  async removed(before?: unknown): Promise<RemovedPeoplePage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await removedPeople(this.#env, person, before)
     );
   }
 }
