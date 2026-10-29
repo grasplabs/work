@@ -13,6 +13,7 @@ import type {
   WorkflowDiagram,
   WorkflowRunTrace,
 } from "./workflow-diagrams.ts";
+import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
 
@@ -219,6 +220,18 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed this draft since you read it. Read it again, then make your change.",
   "workflow.draft_unchecked":
     "Only the latest draft can be published, and only once it passes the profile.",
+  "workflow.paused":
+    "This workflow is paused, so it starts no runs. Someone who builds it can resume it.",
+  "workflow.lifecycle_conflict":
+    "Someone changed this workflow's stage, pause or go-live since you read it. Read it again, then make your change.",
+  "workflow.stage_invalid":
+    "A workflow is live or scaling only once a version went live, and stays one of the two from then on.",
+  "workflow.go_live_invalid":
+    "That version can't be asked to go live: name a published version that isn't live already.",
+  "workflow.go_live_not_pending":
+    "That version isn't the one waiting to go live.",
+  "workflow.go_live_own_request":
+    "Someone other than who asked for it approves a version going live: the workflow's owner or an admin.",
   "workflow.step_not_found":
     "There's no step there in this draft: read the draft again and pick the step, or the list to insert into, from its diagram.",
   "workflow.draft_not_json":
@@ -1249,4 +1262,6 @@ export interface WorkflowResourcesApi {
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
+  /** Its stage, draft and live versions, pause and go-live. */
+  readonly lifecycle: WorkflowLifecycleApi;
 }
