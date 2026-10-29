@@ -61,6 +61,7 @@ import type { ReleaseSpec } from "./releases.ts";
 import {
   deliverAlarm,
   ended,
+  holdBatchOf,
   holdFirstBatchOf,
   journalOf,
   startsOf,
@@ -2008,6 +2009,50 @@ describe("provisioning a placed client", () => {
       first.release();
       retry.release();
       errors.mockRestore();
+    }
+  });
+
+  it("reports a provision done when its attempt loses the step's result after the operation completed", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    let held: LostWrite | undefined;
+    // Held once the operation is done: its last write, which also gave the
+    // client's claim back.
+    using attempts = startsOf(
+      adminWorkflows.provisionPlacedClient,
+      async (stub) => {
+        held = await holdBatchOf(stub, async (database) => {
+          const status = await database
+            .prepare("SELECT status FROM client_provisions WHERE client_id = ?")
+            .bind(clientId)
+            .first<string>("status");
+          return status === "done";
+        });
+      }
+    );
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      const [finished] = attempts.started;
+      if (finished === undefined || held === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await held.committed;
+      // The activation is lost before the step's result is kept: the step
+      // runs again, finds the operation done, and the run succeeds.
+      await deliverAlarm(adminWorkflows.provisionPlacedClient, finished);
+      await attemptEnded(finished, "complete");
+
+      await expect(provisioned(account, clientId)).resolves.toMatchObject(
+        once(clientId)
+      );
+    } finally {
+      held?.lose();
     }
   });
 

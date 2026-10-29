@@ -178,13 +178,17 @@ export interface LostWrite {
 type RunStub = ReturnType<typeof runObject>;
 
 /**
- * Has the first D1 batch of the run in `stub` commit and then hang until
- * lost, when it fails: the effect of the step that made it is left, and
- * its result never reaches the run, as when the activation is lost right
- * after the step's write. Set up before the run starts. Every later batch
- * of the run goes through.
+ * Has the first D1 batch of the run in `stub` after which `when` holds (of
+ * the run's own database) commit and then hang until lost, when it fails:
+ * the effect of the step that made it is left, and its result never
+ * reaches the run, as when the activation is lost right after the step's
+ * write. Set up before the run starts. Every other batch of the run goes
+ * through.
  */
-export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> => {
+export const holdBatchOf = async (
+  stub: RunStub,
+  when: (database: D1Database) => Promise<boolean>
+): Promise<LostWrite> => {
   const lost = Promise.withResolvers<unknown>();
   let first = true;
   let wrote = false;
@@ -204,7 +208,7 @@ export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> => {
         database.withSession(constraint),
       batch: async <T>(statements: D1PreparedStatement[]) => {
         const results = await database.batch<T>(statements);
-        if (first) {
+        if (first && (await when(database))) {
           first = false;
           wrote = true;
           await lost.promise;
@@ -229,6 +233,10 @@ export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> => {
     },
   };
 };
+
+/** `holdBatchOf` for the run's first batch, whatever it wrote. */
+export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> =>
+  await holdBatchOf(stub, async () => await Promise.resolve(true));
 
 /** `holdFirstBatchOf` for run `id` of `workflow`. */
 export const holdFirstBatch = async (

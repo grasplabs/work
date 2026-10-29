@@ -31,6 +31,7 @@ import { asStepError, stop, workerflowDeployStep } from "../workflow-steps.ts";
 import { InventoryError } from "./inventory.ts";
 import {
   ProvisionOperationError,
+  provisionOf,
   runClientProvision,
   startClientProvision,
   startClientRelease,
@@ -64,7 +65,9 @@ const asOperationStepError = (error: unknown): Error =>
  * An attempt: the client's operation, run as one step. Each try of the
  * step takes the client for itself first (`takeAttempt`): one that timed
  * out goes on beside its retry, and from then on every check and write
- * of it is refused.
+ * of it is refused. A try that finds the operation done by this run
+ * already succeeds at once: an earlier try finished it, and released the
+ * client, but its result was lost before the engine kept it.
  */
 export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
   run: async (event, step): Promise<void> => {
@@ -73,6 +76,10 @@ export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
       const held = { clientId, runId: event.instanceId, attempt };
       try {
         const context = await deployContext(env);
+        const operation = await provisionOf(context.db, clientId);
+        if (operation?.status === "done" && operation.runId === held.runId) {
+          return;
+        }
         if (!(await takeAttempt(context.db, held))) {
           throw new ProvisionOperationError(
             "runner_replaced",
