@@ -86,35 +86,6 @@ const observations = (
   );
 
 /**
- * Records, in a destination that checks itself, each capability the kinds
- * in `seen` showed in the policy's jurisdiction: provisioning's own
- * evidence, written only where the capability has no record yet
- * (`unrecordedOnly`), in the statement that writes it, so it never
- * replaces what a person or an earlier check found, a capability found
- * not to hold above all.
- */
-const recordObserved = async (
-  db: AdminDatabase,
-  destinationId: string,
-  check: SelfCheck,
-  seen: ReadonlySet<ClientResource["kind"]>
-): Promise<void> => {
-  const observed = [...seen].flatMap((kind) => {
-    const capability = capabilityOf[kind];
-    return capability === undefined ? [] : [capability];
-  });
-  if (observed.length > 0) {
-    await recordCapabilityEvidence(
-      db,
-      "system",
-      destinationId,
-      observations(check, observed, "verified"),
-      { unrecordedOnly: true }
-    );
-  }
-};
-
-/**
  * Records, in a destination that checks itself, that the resource just
  * read back shows `capability` unsupported, then throws: the run stops
  * there, and the destination takes no one until a person looks.
@@ -142,6 +113,57 @@ const refuseOutside = async (
       ? []
       : [{ kind: "capability_unsupported", capability }]
   );
+};
+
+/**
+ * Judges what the provider reported of `resource`'s jurisdiction: outside
+ * the recorded one, it stops the run (`refuseOutside`); in it, in a
+ * destination that checks itself, it is recorded as the capability's
+ * evidence there and then, before the next resource, so a run that
+ * fails later has recorded it already. Written only where the capability
+ * has no record yet (`unrecordedOnly`), in the statement that writes it:
+ * a retry, or the next resource of the same kind, writes nothing again,
+ * and it never replaces what a person or an earlier check found, a
+ * capability found not to hold above all.
+ */
+const judge = async (
+  db: AdminDatabase,
+  destinationId: string,
+  check: SelfCheck | undefined,
+  resource: ClientResource,
+  jurisdiction: string | null | undefined
+): Promise<void> => {
+  if (jurisdiction !== resource.jurisdiction) {
+    await refuseOutside(db, destinationId, check, resource, jurisdiction);
+  }
+  const capability = capabilityOf[resource.kind];
+  if (check !== undefined && capability !== undefined) {
+    await recordCapabilityEvidence(
+      db,
+      "system",
+      destinationId,
+      observations(check, [capability], "verified"),
+      { unrecordedOnly: true }
+    );
+  }
+};
+
+/**
+ * Reads `resource`, made by an earlier attempt, back from the provider
+ * and judges where it is (`judge`), as a run that made it would have.
+ * One the provider no longer has is left to the steps that use it.
+ */
+const checkJurisdiction = async (
+  db: AdminDatabase,
+  destinationId: string,
+  check: SelfCheck,
+  resource: ClientResource,
+  provider: Provider
+): Promise<void> => {
+  const observed = await provider.find(resource);
+  if (observed !== undefined) {
+    await judge(db, destinationId, check, resource, observed.jurisdiction);
+  }
 };
 
 /** What the provider reports of a database or bucket. */
@@ -301,16 +323,20 @@ export const ensureClientResources = async (
   }
   const { accountId } = destination;
   const check = checksItself(destination.kind) ? selfCheck : undefined;
-  /** The kinds of resource this run read back in the policy's jurisdiction. */
-  const seen = new Set<ClientResource["kind"]>();
 
   for (const resource of await clientInventory(db, clientId)) {
     const provider = providerFor(api, accountId, resource.kind);
-    if (
-      provider === undefined ||
-      resource.lifecycle !== "allocated" ||
-      resource.providerId !== null
-    ) {
+    if (provider === undefined || resource.lifecycle !== "allocated") {
+      continue;
+    }
+    if (resource.providerId !== null) {
+      // Made by an earlier attempt: only read back again where the
+      // destination checks itself, so a retry checks, and records, every
+      // resource the client has, not only the ones it made itself.
+      if (check !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
+        await checkJurisdiction(db, destination.id, check, resource, provider);
+      }
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
@@ -329,17 +355,8 @@ export const ensureClientResources = async (
     }
     // Whichever call answered, only what the provider reports in the
     // recorded jurisdiction is used: one set at creation isn't relabelled.
-    if (observed.jurisdiction !== resource.jurisdiction) {
-      // oxlint-disable-next-line no-await-in-loop -- recorded before it stops
-      await refuseOutside(
-        db,
-        destination.id,
-        check,
-        resource,
-        observed.jurisdiction
-      );
-    }
-    seen.add(resource.kind);
+    // oxlint-disable-next-line no-await-in-loop -- recorded before the next
+    await judge(db, destination.id, check, resource, observed.jurisdiction);
     // oxlint-disable-next-line no-await-in-loop -- persisted before the next
     await recordProviderId(
       db,
@@ -352,9 +369,6 @@ export const ensureClientResources = async (
       },
       held
     );
-  }
-  if (check !== undefined) {
-    await recordObserved(db, destination.id, check, seen);
   }
   return await clientInventory(db, clientId);
 };
