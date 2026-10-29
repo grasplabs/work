@@ -165,6 +165,14 @@ msgstr "{answered} beantwoord"
 msgid "{app} has no tools."
 msgstr "{app} heeft geen tools."
 
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected"
+msgstr "{app} is gekoppeld"
+
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected again"
+msgstr "{app} is weer gekoppeld"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} is nog niet gekoppeld."
@@ -3920,6 +3928,7 @@ msgid "Click to open Usage"
 msgstr "Klik om Gebruik te openen"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
@@ -4235,11 +4244,6 @@ msgstr "Gekoppeld, direct"
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Gekoppeld, via Composio"
-
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected."
-msgstr "Gekoppeld."
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5913,6 +5917,7 @@ msgid "for every model call this month"
 msgstr "voor alle modelaanroepen deze maand"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
 
@@ -6238,6 +6243,14 @@ msgstr "Grasp laat het nog één keer versturen, precies zoals eerder, en een ru
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp voert deze wijziging uit in {connection}, met precies wat er getoond wordt."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may read and write in {app}, only for what you allow."
+msgstr "Grasp mag lezen en schrijven in {app}, alleen voor wat je toestaat."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may use {app} only through the tools you allowed."
+msgstr "Grasp mag {app} alleen gebruiken via de tools die je hebt toegestaan."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
@@ -7268,6 +7281,7 @@ msgid "Jump to the newest message"
 msgstr "Naar het nieuwste bericht"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Just for you"
 msgstr "Alleen voor jou"
 
@@ -9682,6 +9696,7 @@ msgid "Only when a condition holds:"
 msgstr "Alleen als aan een voorwaarde is voldaan:"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Alleen jij kunt het gebruiken."
 
@@ -15450,6 +15465,10 @@ msgstr "Wat je hebt bevestigd, blijft bewaard. Iets vergeten? Deze link werkt to
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "Wat jij en je agents onthouden, en wat anderen met je delen, staat hier."
 
+#: src/connections/connected-dialog.tsx
+msgid "What you chose"
+msgstr "Wat je hebt gekozen"
+
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
 msgstr "Wat je identiteitsprovider aan {appName} heeft toegekend."
@@ -16302,6 +16321,7 @@ msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Je organisatie staat dit model niet toe. Kies een ander model."
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Je organisatie gebruikt het via de toestemmingen die je geeft."
 

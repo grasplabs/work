@@ -165,6 +165,14 @@ msgstr "{answered} answered"
 msgid "{app} has no tools."
 msgstr "{app} has no tools."
 
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected"
+msgstr "{app} is connected"
+
+#: src/connections/connected-dialog.tsx
+msgid "{app} is connected again"
+msgstr "{app} is connected again"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} isn't connected yet."
@@ -3920,6 +3928,7 @@ msgid "Click to open Usage"
 msgstr "Click to open Usage"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
@@ -4235,11 +4244,6 @@ msgstr "Connected, direct"
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Connected, via Composio"
-
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected."
-msgstr "Connected."
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5913,6 +5917,7 @@ msgid "for every model call this month"
 msgstr "for every model call this month"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "For everyone"
 msgstr "For everyone"
 
@@ -6238,6 +6243,14 @@ msgstr "Grasp lets it be sent once more, exactly as before, and a run waiting on
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp makes this change on {connection}, with exactly what is shown."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may read and write in {app}, only for what you allow."
+msgstr "Grasp may read and write in {app}, only for what you allow."
+
+#: src/connections/connected-dialog.tsx
+msgid "Grasp may use {app} only through the tools you allowed."
+msgstr "Grasp may use {app} only through the tools you allowed."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
@@ -7268,6 +7281,7 @@ msgid "Jump to the newest message"
 msgstr "Jump to the newest message"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Just for you"
 msgstr "Just for you"
 
@@ -9682,6 +9696,7 @@ msgid "Only when a condition holds:"
 msgstr "Only when a condition holds:"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Only you can use it."
 
@@ -15450,6 +15465,10 @@ msgstr "What you agreed to is kept. Forgot something? This link works until {clo
 msgid "What you and your agents remember, and what others share with you, shows here."
 msgstr "What you and your agents remember, and what others share with you, shows here."
 
+#: src/connections/connected-dialog.tsx
+msgid "What you chose"
+msgstr "What you chose"
+
 #: src/landscape/data-tab.tsx
 msgid "What your identity provider granted {appName}."
 msgstr "What your identity provider granted {appName}."
@@ -16302,6 +16321,7 @@ msgid "Your organization doesn't allow this model. Pick another one."
 msgstr "Your organization doesn't allow this model. Pick another one."
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/connected-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Your organization uses it through the permissions you grant."
 
