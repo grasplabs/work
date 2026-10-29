@@ -304,7 +304,7 @@ const CollectionView = () => {
           {collection.state === "ready" ? (
             <>
               <header className="flex flex-col gap-2.5">
-                <h1 className="text-2xl font-medium tracking-tight">
+                <h1 className="type-title">
                   {collection.data.collection.name}
                 </h1>
                 {collection.data.collection.description === "" ? null : (

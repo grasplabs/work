@@ -65,7 +65,7 @@ export const Talk = ({
             className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500"
             key={loop.saying}
           >
-            <p className="text-2xl font-medium tracking-tight text-balance">
+            <p className="type-display">
               <SpokenText said={said} text={title} />
             </p>
             {rest === "" ? null : (

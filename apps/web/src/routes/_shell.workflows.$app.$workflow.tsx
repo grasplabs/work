@@ -369,7 +369,7 @@ const ParamField = ({
           {param.label}
         </label>
         {param.sensitive ? (
-          <Badge variant="destructive">
+          <Badge variant="attention">
             <Trans>Sensitive</Trans>
           </Badge>
         ) : null}
@@ -614,9 +614,7 @@ const WorkflowView = ({
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="flex min-w-0 grow basis-96 flex-col gap-2">
-            <h1 className="text-2xl font-medium tracking-tight">
-              {summary.workflow}
-            </h1>
+            <h1 className="type-title">{summary.workflow}</h1>
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
                 render={
@@ -641,7 +639,7 @@ const WorkflowView = ({
               <WorkflowTeamPicker workflow={summary} />
             </div>
             {summary.scheduleStopped ? (
-              <p className="text-destructive">
+              <p className="text-status-attention">
                 {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current.`}
               </p>
             ) : null}

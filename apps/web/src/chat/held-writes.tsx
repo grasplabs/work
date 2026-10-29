@@ -328,7 +328,7 @@ export const HeldWriteDetails = ({
         </Trans>
       </p>
       {action.restricted ? (
-        <Badge variant="destructive">
+        <Badge variant="attention">
           <Trans>This chat read restricted data: this may send it out</Trans>
         </Badge>
       ) : null}

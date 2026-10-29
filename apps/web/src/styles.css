@@ -1,6 +1,11 @@
 @import "@grasp-os/ui/styles.css";
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
+/*
+ * Newsreader, for what Grasp says, page titles and key figures (the kit's
+ * type-* utilities), with its optical sizes: the cut follows the size.
+ */
+@import "@fontsource-variable/newsreader/opsz.css";
 /* How each icon of a control moves when it is pointed at. */
 @import "./icon-moves.css";
 
@@ -40,10 +45,10 @@
 /*
  * What Stephen's tour points at (tour/tour-layer.tsx): the sidebar's way
  * to the page he shows. Inside its edge, as the sidebar clips what is
- * outside it.
+ * outside it, and in the sidebar's own ring, which shows on its ink.
  */
 [data-tour-target] {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--sidebar-ring);
   outline-offset: -2px;
 }
 
@@ -53,27 +58,6 @@
     --sidebar-width: calc(var(--spacing) * 60);
     --header-height: calc(var(--spacing) * 12);
   }
-}
-
-/*
- * The dot figures (buddy/grasp-buddy.tsx): ink dots, and warmth where there
- * is activity, the one place with hues besides status.
- */
-:root {
-  --brain-ink: var(--foreground);
-  --brain-heat: oklch(0.63 0.2 35);
-  --brain-glow: oklch(0.86 0.13 82);
-}
-
-@media screen {
-  .dark {
-    --brain-heat: oklch(0.68 0.19 38);
-    --brain-glow: oklch(0.88 0.12 85);
-  }
-}
-
-@theme inline {
-  --color-brain-heat: var(--brain-heat);
 }
 
 /*

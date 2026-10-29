@@ -303,9 +303,7 @@ export const ReturnChartView = ({
           <Ring pieces={pieces}>
             <span
               className={
-                full
-                  ? "text-2xl font-medium tabular-nums"
-                  : "font-medium tabular-nums @sm:text-2xl"
+                full ? "type-figure" : "font-medium tabular-nums @sm:text-2xl"
               }
             >
               {whole}
@@ -500,7 +498,7 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                   <span
                     className={
                       full
-                        ? "text-2xl font-medium tabular-nums"
+                        ? "type-figure"
                         : "font-medium tabular-nums @sm:text-2xl"
                     }
                   >

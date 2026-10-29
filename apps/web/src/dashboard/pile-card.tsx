@@ -90,7 +90,7 @@ const AnswerButton = ({
   busy: boolean;
   pile: Pile;
   first?: boolean;
-  variant: "default" | "outline";
+  variant: "highlight" | "outline";
 }) => {
   const [confirming, setConfirming] = useState(false);
   const press = async (keys?: boolean): Promise<void> => {
@@ -202,10 +202,7 @@ export const PileCard = ({
           </span>
           <Trans>Waiting on you</Trans>
         </p>
-        <h2
-          className="max-w-3xl text-2xl font-medium tracking-tight text-balance break-words"
-          id={nameId}
-        >
+        <h2 className="type-title max-w-3xl break-words" id={nameId}>
           {name}
         </h2>
       </div>
@@ -222,7 +219,7 @@ export const PileCard = ({
             busy={busy || pile.deciding}
             first
             pile={pile}
-            variant="default"
+            variant="highlight"
           />
           <AnswerButton
             answer={no}

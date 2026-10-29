@@ -137,14 +137,19 @@ export const Closed = ({
       />
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-medium tracking-tight text-balance">
+          <h1 className="type-title">
             <SpokenText said={said} text={title} />
           </h1>
           <p aria-live="polite" className="text-muted-foreground text-balance">
             <SpokenText from={title.length + 1} said={said} text={message} />
           </p>
         </div>
-        <Button className="w-full max-w-sm" onClick={onAdd} size="xl">
+        <Button
+          className="w-full max-w-sm"
+          onClick={onAdd}
+          size="xl"
+          variant="highlight"
+        >
           <PlusIcon data-icon="inline-start" />
           {t`Add something`}
         </Button>

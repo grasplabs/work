@@ -17,6 +17,7 @@
     "@cfworker/json-schema": "catalog:",
     "@chat-adapter/discord": "catalog:",
     "@fontsource-variable/geist": "catalog:",
+    "@fontsource-variable/newsreader": "catalog:",
     "@grasp-os/chat": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/shared": "workspace:*",
