@@ -77,6 +77,9 @@ const save = async (
   ask: Extract<AdminAsk, { kind: "save" }>,
   by: AuditActor
 ): Promise<KickoffView | "shut_out"> => {
+  const store = onboardingStore(env);
+  // As the reading begins: a purge of the kickoff since refuses it.
+  const mark = await store.purgeMark();
   const { text, fileName } = await transcriptOf(
     env,
     transcriptInput(ask.transcript)
@@ -87,9 +90,10 @@ const save = async (
   if (!(await staffLetIn(env))) {
     return "shut_out";
   }
-  return await onboardingStore(env).saveKickoff(
+  return await store.saveKickoff(
     { transcript: text, fileName, reading },
-    by
+    by,
+    mark
   );
 };
 

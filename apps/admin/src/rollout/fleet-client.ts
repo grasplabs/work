@@ -1,14 +1,15 @@
 /**
- * Deploying one fleet client of a rollout, as a Cloudflare Workflow
+ * Deploying one fleet client of a rollout, as a run on Workerflow
  * (src/rollout/workflow.ts starts it, `deployFleet`).
  */
 import { log } from "@grasp-os/shared/log";
-import { WorkflowEntrypoint } from "cloudflare:workers";
-import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
+import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { errorCode } from "../deploy/errors.ts";
 import type { DeployErrorCode } from "../deploy/errors.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
   guarded,
   isEngineAbort,
@@ -21,6 +22,7 @@ import {
   deployClient,
   failTarget,
   recordStop,
+  rolloutParamsSchema,
 } from "./workflow.ts";
 import type { RolloutClientParams } from "./workflow.ts";
 
@@ -35,7 +37,9 @@ const sendClientEnded = async (
   clientId: string
 ): Promise<void> => {
   try {
-    const rollout = await env.ROLLOUT.get(rolloutId);
+    const rollout = await adminWorkflow(env, adminWorkflows.rollout).get(
+      rolloutId
+    );
     await rollout.sendEvent({ type: clientEndedEvent, payload: { clientId } });
   } catch (error) {
     log.warn("rollout.client_end_untold", {
@@ -46,9 +50,15 @@ const sendClientEnded = async (
   }
 };
 
+/** `RolloutClientParams`, as a run reads its payload back. */
+const rolloutClientParamsSchema = rolloutParamsSchema.extend({
+  clientId: z.string(),
+  round: z.int(),
+});
+
 /**
- * Deploying one fleet client of a rollout, as a Cloudflare Workflow: an
- * instance per client and round (`clientRunId`), started by the rollout's
+ * Deploying one fleet client of a rollout, as a run on Workerflow
+ * (src/workflow-runs.ts): one per client and round (`clientRunId`), started by the rollout's
  * run (`deployFleet`). It deploys the client as the rollout's run deploys
  * one of its first ring (`deployClient`), claimed in the rollout's name,
  * and records how it ended on the client's target: done, skipped, or
@@ -59,24 +69,20 @@ const sendClientEnded = async (
  * run records it (`recordStop`), and the child fails with it. However it
  * ends, short of the engine stopping it, it tells the rollout's run.
  */
-export class RolloutClient extends WorkflowEntrypoint<
-  Env,
-  RolloutClientParams
-> {
-  override async run(
-    event: WorkflowEvent<RolloutClientParams>,
-    step: WorkflowStep
-  ): Promise<void> {
-    const { payload: params } = event;
+export const rolloutClientRun = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<void> => {
+    const params: RolloutClientParams = rolloutClientParamsSchema.parse(
+      event.payload
+    );
     const { rolloutId, clientId } = params;
-    const db = adminDatabase(this.env.DB);
+    const db = adminDatabase(env.DB);
     const tellRollout = async (): Promise<void> => {
       await step.do("tell rollout", quickStep, async () => {
-        await sendClientEnded(this.env, rolloutId, clientId);
+        await sendClientEnded(env, rolloutId, clientId);
       });
     };
     try {
-      await deployClient(this.env, step, params, clientId);
+      await deployClient(env, step, params, clientId);
     } catch (error) {
       const reason = stopReason(error);
       const replaced: DeployErrorCode = "runner_replaced";
@@ -99,5 +105,5 @@ export class RolloutClient extends WorkflowEntrypoint<
       );
     }
     await tellRollout();
-  }
-}
+  },
+});
