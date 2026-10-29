@@ -1,13 +1,23 @@
+import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { eq } from "drizzle-orm";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchAlerts } from "../src/alert-inbox.ts";
+import { alertKinds, importAlertAttempts } from "../src/alerts.ts";
 import { adminDatabase } from "../src/db/act.ts";
-import { releases } from "../src/db/schema.ts";
+import { releaseImportFailures, releases } from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { RELEASE_LIST_LIMIT } from "../src/releases/queries.ts";
+import worker from "../src/server.ts";
 import { mockAccess } from "./access.ts";
-import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { callServerFn, page } from "./pages.ts";
+import {
+  buildRelease,
+  publishRelease,
+  putBlobs,
+  putManifest,
+} from "./releases.ts";
 import type { TestRelease } from "./releases.ts";
 
 mockAccess();
@@ -184,5 +194,104 @@ describe("the release pages", () => {
     );
     expect(diff.status).toBe(200);
     expect(diff.html).toContain("and 3 more");
+  });
+});
+
+/** Runs the admin's import cron once, the failures it logs kept out of the test output. */
+const importCron = async (): Promise<void> => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {
+    // A failed import is logged; the test reads the page and the inbox.
+  });
+  try {
+    await worker.scheduled(
+      createScheduledController({ cron: "*/5 * * * *" }),
+      env
+    );
+  } finally {
+    errors.mockRestore();
+  }
+};
+
+/** The open alerts about release `releaseId`'s import, as the inbox lists them. */
+const importAlertsOf = async (releaseId: string) => {
+  const open = await callServerFn(fetchAlerts);
+  return open
+    .filter(
+      (alert) =>
+        alert.kind === "release_import_failing" && alert.subject === releaseId
+    )
+    .map(({ clientId, title, words, page: to }) => ({
+      clientId,
+      title,
+      words,
+      to: to.to,
+    }));
+};
+
+describe("a release the import can't verify", () => {
+  it("is listed on Releases with why, and raises an alert once it failed again and again, resolved once it imports", async () => {
+    const release = await buildRelease({
+      notes: "feat(core): its migration is missing for a while",
+      migrations: {
+        "0000_only.sql": `-- ${crypto.randomUUID()}\nCREATE TABLE t (id TEXT);`,
+      },
+    });
+    const [key, bytes] =
+      [...release.blobs].find(([blobKey]) =>
+        blobKey.startsWith("blobs/migrations/")
+      ) ?? [];
+    if (key === undefined || bytes === undefined) {
+      throw new Error("expected a migration");
+    }
+    await putBlobs(release);
+    await env.RELEASES.delete(key);
+    await putManifest(release);
+    const db = adminDatabase(env.DB);
+    const dueNow = async () => {
+      await db
+        .update(releaseImportFailures)
+        .set({ nextAttemptAt: new Date(0) })
+        .where(eq(releaseImportFailures.releaseId, release.id));
+    };
+
+    await importCron();
+    const once = await page("/platform/releases");
+    const alertedOnce = await importAlertsOf(release.id);
+    for (let attempt = 1; attempt < importAlertAttempts; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- attempts in order
+      await dueNow();
+      // oxlint-disable-next-line no-await-in-loop -- attempts in order
+      await importCron();
+    }
+    const alerted = await importAlertsOf(release.id);
+    await env.RELEASES.put(key, bytes);
+    await dueNow();
+    await importCron();
+    const after = await page("/platform/releases");
+
+    expect({
+      listed: once.html.includes(release.id),
+      why: once.html.includes(key),
+      alertedOnce,
+      alerted,
+      afterImport: await importAlertsOf(release.id),
+      listedAfter: after.html.includes("Not imported yet"),
+    }).toStrictEqual({
+      listed: true,
+      why: true,
+      alertedOnce: [],
+      alerted: [
+        {
+          clientId: null,
+          title: "Release import failing",
+          words: alertKinds.release_import_failing.words({
+            attempts: importAlertAttempts,
+          }),
+          to: "releases",
+        },
+      ],
+      afterImport: [],
+      listedAfter: false,
+    });
   });
 });

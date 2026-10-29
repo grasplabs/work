@@ -1,8 +1,10 @@
 /**
- * Staff alerts, written from how they could fail first: a person's
- * content reaching the channel, a storm of the same alert flooding it, a
- * failed send silencing the next, a webhook that isn't Discord's posted
- * to, or anyone but staff sending one.
+ * Staff alerts, written from how they could fail first: an alert lost
+ * because no channel is set, a person's content reaching the channel, a
+ * storm of the same alert flooding it or the inbox, a failed send
+ * silencing the next, an alert resolved while what raised it goes on, a
+ * webhook that isn't Discord's posted to, or anyone but staff sending,
+ * acknowledging or resolving one.
  */
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -16,13 +18,19 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
+import {
+  acknowledgeAlertFn,
+  fetchAlerts,
+  resolveAlertFn,
+} from "../src/alert-inbox.ts";
+import type { AlertView } from "../src/alert-inbox.ts";
 import { alertKinds, sendStaffAlert } from "../src/alerts.ts";
 import { sendTestAlertFn } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { callServerFn } from "./pages.ts";
+import { callServerFn, page } from "./pages.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-alerts-6d1a09";
@@ -90,6 +98,32 @@ const aClient = async (name: string): Promise<string> => {
     { action: "client.create", clientId }
   );
   return clientId;
+};
+
+/** The open alerts about client `clientId`, as the inbox lists them to staff. */
+const inboxOf = async (clientId: string | null): Promise<AlertView[]> => {
+  const open = await callServerFn(fetchAlerts);
+  return open.filter((alert) => alert.clientId === clientId);
+};
+
+/** Who did `action` about client `clientId`, in order. */
+const actorsOf = async (clientId: string, action: string) => {
+  const events = await db
+    .select({ actor: auditEvents.actor })
+    .from(auditEvents)
+    .where(
+      and(eq(auditEvents.clientId, clientId), eq(auditEvents.action, action))
+    );
+  return events.map(({ actor }) => actor);
+};
+
+/** What of each open alert about client `clientId` `pick` reads. */
+const inboxRead = async <T>(
+  clientId: string,
+  pick: (alert: AlertView) => T
+): Promise<T[]> => {
+  const open = await inboxOf(clientId);
+  return open.map(pick);
 };
 
 const at = new Date("2026-11-02T09:00:00Z");
@@ -191,8 +225,9 @@ describe("staff alerts", () => {
     });
   });
 
-  it("are only logged while there's no channel, or one that isn't Discord's", async () => {
+  it("are kept in the inbox while there's no channel, or one that isn't Discord's, posting nothing", async () => {
     const clientId = await aClient("Acme Logistics");
+    const other = await aClient("Other Company");
     await setStoreSecret(env.STAFF_ALERTS_WEBHOOK, "STAFF_ALERTS_WEBHOOK", "");
     const none = await sendStaffAlert(env, { clientId, kind: "test" }, at);
     await setStoreSecret(
@@ -200,13 +235,181 @@ describe("staff alerts", () => {
       "STAFF_ALERTS_WEBHOOK",
       "https://stranger.test/api/webhooks/1/x"
     );
-    const stranger = await sendStaffAlert(env, { clientId, kind: "test" }, at);
+    const stranger = await sendStaffAlert(
+      env,
+      { clientId: other, kind: "test" },
+      at
+    );
 
-    expect({ none, stranger, posted }).toStrictEqual({
+    expect({
+      none,
+      stranger,
+      posted,
+      inbox: [...(await inboxOf(clientId)), ...(await inboxOf(other))].map(
+        ({ title, delivery, times }) => ({ title, delivery, times })
+      ),
+    }).toStrictEqual({
       none: "no_channel",
       stranger: "no_channel",
       posted: [],
+      inbox: [
+        { title: "Test alert", delivery: "no_channel", times: 1 },
+        { title: "Test alert", delivery: "no_channel", times: 1 },
+      ],
     });
+  });
+
+  it("are kept in the inbox when the channel refuses them, saying so", async () => {
+    const clientId = await aClient("Acme Logistics");
+    discordStatus = 500;
+
+    const outcome = await sendStaffAlert(env, { clientId, kind: "test" }, at);
+
+    expect({
+      outcome,
+      inbox: await inboxRead(clientId, ({ delivery }) => delivery),
+    }).toStrictEqual({ outcome: "failed", inbox: ["failed"] });
+  });
+
+  it("keep one open in the inbox for a storm, counting each raised after its window", async () => {
+    const clientId = await aClient("Acme Logistics");
+    const { windowMs } = alertKinds.test;
+
+    await Promise.all(
+      Array.from(
+        { length: 10 },
+        async () => await sendStaffAlert(env, { clientId, kind: "test" }, at)
+      )
+    );
+    await sendStaffAlert(env, { clientId, kind: "test" }, later(windowMs));
+
+    await expect(
+      inboxRead(clientId, ({ times, raisedAt, lastRaisedAt }) => ({
+        times,
+        raisedAt,
+        lastRaisedAt,
+      }))
+    ).resolves.toStrictEqual([
+      { times: 2, raisedAt: at, lastRaisedAt: later(windowMs) },
+    ]);
+  });
+
+  it("are acknowledged and resolved by staff, audited, and told again once raised after being resolved", async () => {
+    const clientId = await aClient("Acme Logistics");
+    await sendStaffAlert(env, { clientId, kind: "test" }, at);
+    const [alert] = await inboxOf(clientId);
+    if (alert === undefined) {
+      throw new Error("expected an open alert");
+    }
+    const alertId = alert.id;
+
+    const acknowledged = await callServerFn(
+      acknowledgeAlertFn,
+      { alertId },
+      { email: staff.email }
+    );
+    const [onIt] = await inboxOf(clientId);
+    const resolved = await callServerFn(
+      resolveAlertFn,
+      { alertId },
+      { email: staff.email }
+    );
+    const again = await callServerFn(
+      resolveAlertFn,
+      { alertId },
+      { email: staff.email }
+    );
+    const afterResolving = await inboxOf(clientId);
+    // Within its window still: resolved, it's told again all the same.
+    const raised = await sendStaffAlert(
+      env,
+      { clientId, kind: "test" },
+      later(1000)
+    );
+
+    expect({
+      acknowledged,
+      onIt: onIt?.acknowledgedBy,
+      resolved,
+      again,
+      afterResolving,
+      raised,
+      reopened: await inboxRead(clientId, ({ id }) => id !== alertId),
+      posted: posted.length,
+      acknowledgedBy: await actorsOf(clientId, "alert.acknowledge"),
+      resolvedBy: await actorsOf(clientId, "alert.resolve"),
+    }).toStrictEqual({
+      acknowledged: { refused: null },
+      onIt: staff.email,
+      resolved: { refused: null },
+      again: { refused: "not_open" },
+      afterResolving: [],
+      raised: "sent",
+      reopened: [true],
+      posted: 2,
+      acknowledgedBy: [staff.email],
+      resolvedBy: [staff.email],
+    });
+  });
+
+  it("are listed, acknowledged and resolved only for staff Access vouches for, from the admin's own pages", async () => {
+    const clientId = await aClient("Acme Logistics");
+    await sendStaffAlert(env, { clientId, kind: "test" }, at);
+    const [alert] = await inboxOf(clientId);
+    const alertId = alert?.id ?? "";
+
+    const refusals = await Promise.allSettled([
+      callServerFn(fetchAlerts, undefined, { email: null }),
+      callServerFn(acknowledgeAlertFn, { alertId }, { email: null }),
+      callServerFn(resolveAlertFn, { alertId }, { email: null }),
+      callServerFn(
+        resolveAlertFn,
+        { alertId },
+        { email: staff.email, from: "https://elsewhere.test" }
+      ),
+    ]);
+
+    expect({
+      refusals: refusals.map((each) =>
+        each.status === "rejected" && each.reason instanceof Error
+          ? each.reason.message
+          : each.status
+      ),
+      open: await inboxRead(clientId, ({ acknowledgedBy }) => acknowledgedBy),
+    }).toStrictEqual({
+      refusals: Array.from(
+        { length: 4 },
+        () => "The server function answered 403"
+      ),
+      open: [null],
+    });
+  });
+
+  it("show on Platform and Home with whom they're about, what to do next and a link there", async () => {
+    const clientId = await aClient("Inbox Shown Ltd");
+    await sendStaffAlert(env, { clientId, kind: "apply_failed" }, at);
+    const words = alertKinds.apply_failed.words({});
+
+    const platform = await page("/platform");
+    const home = await page("/");
+
+    for (const { html } of [platform, home]) {
+      expect({
+        title: html.includes("Applying settings stopped"),
+        about: html.includes("Inbox Shown Ltd"),
+        words: html.includes(words.replaceAll("'", "&#x27;")),
+        link: html.includes(`href="/organizations/${clientId}/setup"`),
+        acknowledge: html.includes(">Acknowledge<"),
+        resolve: html.includes(">Resolve<"),
+      }).toStrictEqual({
+        title: true,
+        about: true,
+        words: true,
+        link: true,
+        acknowledge: true,
+        resolve: true,
+      });
+    }
   });
 
   it("carry nothing but their kind's words, the client and numbers: no person's content", async () => {

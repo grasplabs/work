@@ -14,6 +14,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AlertsInbox } from "../../admin/alerts-inbox.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { Panel } from "../../admin/panel.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
@@ -40,6 +41,7 @@ import {
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
 import { formatDate, whole } from "../../admin/words.ts";
+import { fetchAlerts } from "../../alert-inbox.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
@@ -426,7 +428,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * ring is the one thing done here.
  */
 const PlatformPage = () => {
-  const { rows, platform } = Route.useLoaderData();
+  const { rows, platform, alerts } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -459,6 +461,7 @@ const PlatformPage = () => {
       {/* The panels' type, as the prototype's sections set it. */}
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
+        <AlertsInbox alerts={alerts} />
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
         <EveryCompany live={live} releases={platform.releases} rows={rows} />
@@ -471,11 +474,12 @@ const PlatformPage = () => {
 /** Every company's own deployment, and the rollout going out. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform] = await Promise.all([
+    const [rows, platform, alerts] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
+      fetchAlerts(),
     ]);
-    return { rows, platform };
+    return { rows, platform, alerts };
   },
   component: PlatformPage,
 });

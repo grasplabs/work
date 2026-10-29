@@ -24,7 +24,8 @@ import type { PlatformCounts } from "./platform.ts";
 /**
  * What someone at Grasp does to the platform by hand, as the admin's
  * audit log names it: starting and steering rollouts, rolling a client
- * back, and moving, pinning or rotating a client. The admin's own jobs
+ * back, moving, pinning or rotating a client, and acknowledging or
+ * resolving an alert. The admin's own jobs
  * (actor `system`) and each deploy's steps aren't "done here".
  */
 export const staffActions = [
@@ -43,6 +44,8 @@ export const staffActions = [
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "alert.acknowledge",
+  "alert.resolve",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

@@ -110,6 +110,7 @@ import {
   stop,
   stopReason,
   deployStepConfig,
+  wasReplaced,
 } from "../workflow-steps.ts";
 import { ClientEndedError } from "./client-ended.ts";
 import {
@@ -1384,6 +1385,7 @@ const retryOf = async (
  * staff cancelled the rollout instead.
  */
 const awaitRetry = async (
+  env: Env,
   step: WorkflowStep,
   db: AdminDatabase,
   rolloutId: string,
@@ -1410,6 +1412,13 @@ const awaitRetry = async (
             detail: { failed: clientIds.length },
           }
         );
+        // It waits for staff: told whatever the channel.
+        await sendStaffAlert(env, {
+          clientId: null,
+          kind: "rollout_failed",
+          subject: rolloutId,
+          numbers: { failed: clientIds.length },
+        });
       }
       return clientIds.length;
     })
@@ -1571,7 +1580,7 @@ export const rolloutRun = (env: Env): WorkflowDefinition => ({
       // the others again, or the rollout cancelled.
       for (let round = 1; ; round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const retried = await awaitRetry(step, db, rolloutId, round);
+        const retried = await awaitRetry(env, step, db, rolloutId, round);
         if (retried === "cancelled") {
           return result;
         }
@@ -1604,6 +1613,16 @@ export const rolloutRun = (env: Env): WorkflowDefinition => ({
       await step.do("record stop", quickStep, async () => {
         await recordStop(db, rolloutId, failed, stopReason(error));
       });
+      // A rollback taking its client cancels it: nothing failed.
+      if (!wasReplaced(error)) {
+        await step.do("alert", quickStep, async () => {
+          await sendStaffAlert(env, {
+            clientId: null,
+            kind: "rollout_failed",
+            subject: rolloutId,
+          });
+        });
+      }
       throw error;
     }
   },

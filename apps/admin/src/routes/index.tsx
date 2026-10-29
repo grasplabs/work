@@ -30,6 +30,7 @@ import {
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AlertsInbox } from "../admin/alerts-inbox.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
@@ -45,6 +46,7 @@ import {
   stageWords,
   whole,
 } from "../admin/words.ts";
+import { fetchAlerts } from "../alert-inbox.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchGridLive } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
@@ -561,6 +563,7 @@ const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
   const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const alerts = Route.useLoaderData();
   const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
@@ -583,6 +586,8 @@ const Overview = () => {
       overview
       title="Organizations"
     >
+      {/* Open alerts first, when there are any: Platform always lists them. */}
+      {alerts.length === 0 ? null : <AlertsInbox alerts={alerts} />}
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
@@ -669,5 +674,6 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: async () => await fetchAlerts(),
   component: Overview,
 });

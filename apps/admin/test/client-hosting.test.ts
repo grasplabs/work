@@ -1,7 +1,9 @@
+import { routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { fetchAlerts } from "../src/alert-inbox.ts";
 import {
   auditEvents,
   clientPlacements,
@@ -70,6 +72,14 @@ const importedRelease = async (): Promise<string> => {
 };
 
 /** Client `clientId`'s hosting, as its page reads it. */
+/** The kinds of the open alerts about client `clientId`, as the inbox lists them to staff. */
+const alertsOf = async (clientId: string): Promise<string[]> => {
+  const open = await callServerFn(fetchAlerts, undefined, { email: caller });
+  return open
+    .filter((alert) => alert.clientId === clientId)
+    .map(({ kind }) => kind);
+};
+
 const hostingOf = async (clientId: string) => {
   const view = await getClientHosting(env, clientId, policyId);
   if (view === null) {
@@ -382,6 +392,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       operation: stopped.operation,
       run: stopped.run,
       going: stopped.going,
+      alerts: await alertsOf(clientId),
     }).toMatchObject({
       operation: {
         releaseId,
@@ -390,6 +401,8 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       },
       run: "errored",
       going: false,
+      // Staff are told it stopped, whatever the channel.
+      alerts: ["provisioning_failed"],
     });
 
     const resumed = await place(clientId, releaseId, null);
@@ -577,6 +590,51 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       gone: 404,
       deleteOffer: true,
       kept: true,
+    });
+  });
+
+  it("tells staff when offboarding fails for something to look at, and not for a refusal they act on at once", async () => {
+    const destinationId = await destination();
+    const clientId = await client();
+    const other = await client();
+    await placeClient(db, staff, { clientId, destinationId, policyId });
+    await db
+      .update(clients)
+      .set({ status: "active" })
+      .where(eq(clients.id, clientId));
+    // Not yet due: refused, for staff to wait out, and no alert.
+    const early = await callServerFn(
+      deletePlacedClientFn,
+      { clientId, exportConfirmed: true },
+      { email: caller }
+    );
+    const afterEarly = await alertsOf(clientId);
+    // The router's map gives its hostname another client.
+    await env.ROUTER_HOSTS.put(
+      routerHostKey(`${clientId}.${env.CLIENT_DOMAIN}`),
+      JSON.stringify({
+        clientId: other,
+        coreUrl: "https://other-core.grasp.workers.dev",
+        generation: 1,
+      })
+    );
+
+    const notOurs = await callServerFn(
+      offboardPlacedClientFn,
+      { clientId },
+      { email: caller }
+    );
+
+    expect({
+      early: early.refused,
+      afterEarly,
+      notOurs: notOurs.refused,
+      alerts: await alertsOf(clientId),
+    }).toStrictEqual({
+      early: "not_offboarded",
+      afterEarly: [],
+      notOurs: "hostname_not_ours",
+      alerts: ["offboarding_failed"],
     });
   });
 });

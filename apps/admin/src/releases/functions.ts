@@ -8,10 +8,20 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import { compareReleases, getRelease, listReleases } from "./queries.ts";
+import {
+  compareReleases,
+  getRelease,
+  listImportFailures,
+  listReleases,
+} from "./queries.ts";
 
 export const fetchReleases = createServerFn({ method: "GET" }).handler(
   async () => await listReleases(adminDatabase(env.DB))
+);
+
+/** The releases CI published that the import couldn't verify yet. */
+export const fetchImportFailures = createServerFn({ method: "GET" }).handler(
+  async () => await listImportFailures(adminDatabase(env.DB))
 );
 
 export const fetchRelease = createServerFn({ method: "GET" })

@@ -52,7 +52,7 @@ import {
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
-import { importReleases } from "./releases/import.ts";
+import { alertOnImports, importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { AdminRuns } from "./run-object.ts";
@@ -96,6 +96,7 @@ export default {
       await watchStephen(env, new Date(controller.scheduledTime));
       return;
     }
-    await importReleases(env.RELEASES, adminDatabase(env.DB));
+    const db = adminDatabase(env.DB);
+    await alertOnImports(env, db, await importReleases(env.RELEASES, db));
   },
 } satisfies ExportedHandler<Env>;

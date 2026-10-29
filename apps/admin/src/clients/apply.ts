@@ -16,6 +16,7 @@ import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
+import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
@@ -41,6 +42,7 @@ import {
   quickStep,
   stop,
   stopReason,
+  wasReplaced,
   deployStepConfig,
 } from "../workflow-steps.ts";
 import { SettingsError } from "./settings.ts";
@@ -231,6 +233,12 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
         log.warn("apply.stopped", { clientId, error: stopReason(error) });
         await releaseQuietly(db, clientId, event.instanceId);
       });
+      // Another runner taking the client isn't a failure: that one goes on.
+      if (!wasReplaced(error)) {
+        await step.do("alert", quickStep, async () => {
+          await sendStaffAlert(env, { clientId, kind: "apply_failed" });
+        });
+      }
       throw error;
     }
     await step.do("release", quickStep, async () => {

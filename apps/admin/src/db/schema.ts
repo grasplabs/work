@@ -54,6 +54,12 @@ export const releaseImportFailures = sqliteTable("release_import_failures", {
   attempts: integer().notNull(),
   failedAt: timestamp("failed_at").notNull(),
   nextAttemptAt: timestamp("next_attempt_at").notNull(),
+  /**
+   * Why the last attempt failed, in the import's own words (which file,
+   * what size, which check), for the Releases page; null for an attempt
+   * recorded before it was kept.
+   */
+  lastError: text("last_error"),
 });
 
 /**
@@ -728,6 +734,47 @@ export const staffAlerts = sqliteTable(
     sentAt: timestamp("sent_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
+);
+
+/**
+ * Every staff alert the admin raised (src/alerts.ts), whatever became of
+ * its delivery: the Alerts inbox on Home and Platform reads it, and staff
+ * acknowledge and resolve each there, audited. One stays open per client,
+ * kind and subject: raised again while open, it counts once more. Words
+ * aren't kept, only its kind and numbers, which its kind's words read.
+ */
+export const alerts = sqliteTable(
+  "alerts",
+  {
+    id: text().primaryKey(),
+    /** The client it's about; null for one about the platform (a rollout, a release). */
+    clientId: text("client_id"),
+    /** Its kind (`AlertKindName`, src/alerts.ts). */
+    kind: text().notNull(),
+    /** What of the client or platform it's about, such as a rollout's or release's id. */
+    subject: text(),
+    /** `AlertNumbers` (src/alerts.ts), as JSON: the latest it was raised with. */
+    numbers: text().notNull(),
+    /**
+     * Its client, kind and subject while it's open, so one stays open of
+     * each; null once resolved, as SQLite lets many rows be.
+     */
+    openKey: text("open_key"),
+    raisedAt: timestamp("raised_at").notNull(),
+    lastRaisedAt: timestamp("last_raised_at").notNull(),
+    /** How many times it was raised while open. */
+    times: integer().notNull(),
+    /** What became of its last delivery to the channel (`AlertDelivery`, src/alerts.ts). */
+    delivery: text().notNull(),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgedAt: timestamp("acknowledged_at"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at"),
+  },
+  (table) => [
+    uniqueIndex("alerts_open_key_idx").on(table.openKey),
+    index("alerts_resolved_idx").on(table.resolvedAt, table.raisedAt),
+  ]
 );
 
 /**

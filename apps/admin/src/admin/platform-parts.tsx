@@ -98,6 +98,14 @@ export const eventWords = (
     "client.sign_in": `changed how ${company}'s people sign in`,
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
+    "alert.acknowledge":
+      company === ""
+        ? "acknowledged an alert"
+        : `acknowledged an alert about ${company}`,
+    "alert.resolve":
+      company === ""
+        ? "resolved an alert"
+        : `resolved an alert about ${company}`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

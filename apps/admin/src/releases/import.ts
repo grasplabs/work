@@ -58,8 +58,13 @@ import type {
   PlatformLimits,
   ReleaseManifest,
 } from "@grasp-os/shared/release";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
+import {
+  clearStaffAlert,
+  importAlertAttempts,
+  sendStaffAlert,
+} from "../alerts.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -482,6 +487,22 @@ const importRelease = async (
   return "imported";
 };
 
+/** The longest a failure's words are kept. */
+const MAX_FAILURE_WORDS = 500;
+
+/**
+ * Why an attempt failed, as the Releases page says it: the import's own
+ * message (which file, what size, which check), or only the name of an
+ * error it didn't throw.
+ */
+const failureWords = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return typeof error;
+  }
+  const words = error.name === "Error" ? error.message : error.name;
+  return words.slice(0, MAX_FAILURE_WORDS);
+};
+
 /** Past this many doublings the wait is at its longest anyway. */
 const MAX_DOUBLINGS = 20;
 
@@ -493,7 +514,8 @@ const MAX_DOUBLINGS = 20;
 const recordFailure = async (
   db: AdminDatabase,
   id: string,
-  now: Date
+  now: Date,
+  error: string
 ): Promise<void> => {
   const at = now.getTime();
   const { attempts } = releaseImportFailures;
@@ -506,12 +528,14 @@ const recordFailure = async (
       attempts: 1,
       failedAt: now,
       nextAttemptAt: new Date(at + FIRST_RETRY_MS),
+      lastError: error,
     })
     .onConflictDoUpdate({
       target: releaseImportFailures.releaseId,
       set: {
         attempts: sql`${attempts} + 1`,
         failedAt: now,
+        lastError: error,
         nextAttemptAt: sql`${at} + min(${FIRST_RETRY_MS} * (1 << min(${attempts}, ${MAX_DOUBLINGS})), ${MAX_RETRY_MS})`,
       },
     });
@@ -572,7 +596,7 @@ export const importReleases = async (
         ...errorFields(error),
       });
       // oxlint-disable-next-line no-await-in-loop -- one release at a time
-      await recordFailure(db, id, now);
+      await recordFailure(db, id, now, failureWords(error));
       continue;
     }
     if (outcome === "deferred") {
@@ -584,4 +608,44 @@ export const importReleases = async (
     }
   }
   return result;
+};
+
+/**
+ * Tells staff of each release in `result` that failed to import at least
+ * `importAlertAttempts` times, and resolves the alert of each that
+ * imported: a release that keeps failing is never only a missing release.
+ */
+export const alertOnImports = async (
+  env: Env,
+  db: AdminDatabase,
+  result: ImportResult
+): Promise<void> => {
+  for (const id of result.imported) {
+    // oxlint-disable-next-line no-await-in-loop -- a few releases a run
+    await clearStaffAlert(env, null, "release_import_failing", id);
+  }
+  if (result.failed.length === 0) {
+    return;
+  }
+  const failing = await db
+    .select({
+      releaseId: releaseImportFailures.releaseId,
+      attempts: releaseImportFailures.attempts,
+    })
+    .from(releaseImportFailures)
+    .where(
+      and(
+        inArray(releaseImportFailures.releaseId, result.failed),
+        gte(releaseImportFailures.attempts, importAlertAttempts)
+      )
+    );
+  for (const { releaseId, attempts } of failing) {
+    // oxlint-disable-next-line no-await-in-loop -- one alert at a time: the channel rate-limits
+    await sendStaffAlert(env, {
+      clientId: null,
+      kind: "release_import_failing",
+      subject: releaseId,
+      numbers: { attempts },
+    });
+  }
 };

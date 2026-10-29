@@ -9,6 +9,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
@@ -136,17 +137,40 @@ export type OffboardResult =
   | { refused: null; deletion: Deletion | null }
   | { refused: OffboardingErrorCode; deletion: null };
 
-/** Runs `task`, a refusal as its code. */
+/**
+ * Refusals that say something is wrong rather than wait for staff: a
+ * resource or hostname that isn't the client's, a destination or routing
+ * the admin can't act in. Staff are told of each (src/alerts.ts), as of
+ * any failure that isn't a refusal; a refusal staff act on at once (busy,
+ * not yet due, unconfirmed) isn't one.
+ */
+const failingRefusals: ReadonlySet<OffboardingErrorCode> = new Set([
+  "resource_not_owned",
+  "hostname_not_ours",
+  "destination_unsupported",
+  "routing_unconfigured",
+]);
+
+/**
+ * Runs `task` for client `clientId`, a refusal as its code, telling staff
+ * with an alert of `kind` when it failed.
+ */
 const offboarding = async (
+  clientId: string,
+  kind: "offboarding_failed" | "deletion_failed",
   task: () => Promise<Deletion | null>
 ): Promise<OffboardResult> => {
   try {
     return { refused: null, deletion: await task() };
   } catch (error) {
-    if (error instanceof OffboardingError) {
-      return { refused: error.code, deletion: null };
+    const refusal = error instanceof OffboardingError ? error.code : null;
+    if (refusal === null || failingRefusals.has(refusal)) {
+      await sendStaffAlert(env, { clientId, kind });
     }
-    throw error;
+    if (refusal === null) {
+      throw error;
+    }
+    return { refused: refusal, deletion: null };
   }
 };
 
@@ -155,7 +179,7 @@ export const offboardPlacedClientFn = createServerFn({ method: "POST" })
   .validator(z.object({ clientId: z.string().min(1) }))
   .handler(
     async ({ data, context }): Promise<OffboardResult> =>
-      await offboarding(async () => {
+      await offboarding(data.clientId, "offboarding_failed", async () => {
         await offboardPlacedClient(env, context.staff, data.clientId);
         return null;
       })
@@ -169,6 +193,8 @@ export const deletePlacedClientFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }): Promise<OffboardResult> =>
       await offboarding(
+        data.clientId,
+        "deletion_failed",
         async () =>
           await deletePlacedClient(env, context.staff, data.clientId, {
             exportConfirmed: data.exportConfirmed,

@@ -23,6 +23,7 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
+import { fetchAlerts } from "../src/alert-inbox.ts";
 import { fetchClientSetup } from "../src/clients/functions.ts";
 import { overBars } from "../src/clients/watch-signals.ts";
 import type { WatchedSignals } from "../src/clients/watch-signals.ts";
@@ -114,6 +115,14 @@ const answering = (
   account.admin = snapshot;
 };
 
+/** The titles of the open alerts about client `clientId`, as the inbox lists them. */
+const inboxOf = async (clientId: string): Promise<string[]> => {
+  const open = await callServerFn(fetchAlerts);
+  return open
+    .filter((alert) => alert.clientId === clientId)
+    .map(({ title }) => title);
+};
+
 /** Runs the watch's cron once. */
 const watch = async (): Promise<void> => {
   await worker.scheduled(
@@ -152,13 +161,19 @@ describe("the watch of Stephen", () => {
     await watch();
     await watch();
     const whileOver = toldOf(acme.clientId);
+    const openWhileOver = await inboxOf(acme.clientId);
     answering(acme.account, quiet);
     await watch();
+    const openOnceUnder = await inboxOf(acme.clientId);
     answering(acme.account, { ...quiet, failed: 12 });
     await watch();
 
     expect({
       whileOver,
+      // The inbox has it while it's over, and the watch resolves it once under.
+      openWhileOver,
+      openOnceUnder,
+      openAgain: await inboxOf(acme.clientId),
       after: toldOf(acme.clientId),
       calm: toldOf(calm.clientId),
       words: posted
@@ -168,6 +183,9 @@ describe("the watch of Stephen", () => {
       whileOver: [
         `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,
       ],
+      openWhileOver: ["Stephen: turns failing"],
+      openOnceUnder: [],
+      openAgain: ["Stephen: turns failing"],
       after: [
         `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,
         `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,

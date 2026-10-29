@@ -101,3 +101,10 @@ export const stopReason = (error: unknown): string =>
   error instanceof Error
     ? error.message.replace(errorNamePrefix, "")
     : "unexpected";
+
+/**
+ * Whether `error` stopped a run only because another runner took its
+ * client (`runner_replaced`): that one goes on, so nothing failed.
+ */
+export const wasReplaced = (error: unknown): boolean =>
+  stopReason(error).split(":", 1)[0] === "runner_replaced";

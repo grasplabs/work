@@ -15,8 +15,14 @@ import { Panel } from "../../../admin/panel.tsx";
 import { PlatformNav, platformCrumb } from "../../../admin/platform-nav.tsx";
 import { Quiet } from "../../../admin/release-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
-import { fetchReleases } from "../../../releases/functions.ts";
-import type { ReleaseSummary } from "../../../releases/queries.ts";
+import {
+  fetchImportFailures,
+  fetchReleases,
+} from "../../../releases/functions.ts";
+import type {
+  ImportFailure,
+  ReleaseSummary,
+} from "../../../releases/queries.ts";
 import {
   releaseName,
   releaseTitle,
@@ -159,11 +165,41 @@ const EveryRelease = ({
 );
 
 /**
+ * The releases CI published that the import couldn't verify yet: each
+ * with why, how often and when it's tried again, and what to do. None, no
+ * panel.
+ */
+const ImportFailures = ({ failures }: { failures: ImportFailure[] }) =>
+  failures.length === 0 ? null : (
+    <Panel
+      description="Published by CI, but not imported: each is tried again after a longer wait every time, and can't be rolled out until it imports. If its files are wrong, publish it again from CI; one that keeps failing raises an alert."
+      title="Not imported yet"
+    >
+      <ul className="flex flex-col">
+        {failures.map((failure) => (
+          <li
+            className="flex flex-col gap-1 border-t px-5 py-3"
+            key={failure.releaseId}
+          >
+            <span className="font-mono text-xs">{failure.releaseId}</span>
+            <span className="text-status-attention">
+              {failure.lastError ?? "Why the last attempt failed wasn't kept."}
+            </span>
+            <span className="text-muted-foreground text-xs">
+              {`Failed ${failure.attempts} ${failure.attempts === 1 ? "time" : "times"}, last at ${formatTime(failure.failedAt)} UTC; tried again from ${formatTime(failure.nextAttemptAt)} UTC.`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+
+/**
  * Every release CI published, as the admin imported it: the admin's
  * Releases page, under Platform.
  */
 const ReleasesPage = () => {
-  const { releases, older } = Route.useLoaderData();
+  const { releases, older, failures } = Route.useLoaderData();
   return (
     <AdminPage
       description="Every merge to main publishes a release, and the admin imports it within five minutes. A rollout takes one to the companies, ring by ring."
@@ -172,6 +208,7 @@ const ReleasesPage = () => {
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
+        <ImportFailures failures={failures} />
         {releases.length > 1 ? <Compare releases={releases} /> : null}
         <EveryRelease older={older} releases={releases} />
       </div>
@@ -180,6 +217,12 @@ const ReleasesPage = () => {
 };
 
 export const Route = createFileRoute("/platform/releases/")({
-  loader: async () => await fetchReleases(),
+  loader: async () => {
+    const [listed, failures] = await Promise.all([
+      fetchReleases(),
+      fetchImportFailures(),
+    ]);
+    return { ...listed, failures };
+  },
   component: ReleasesPage,
 });

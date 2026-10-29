@@ -4,7 +4,7 @@ import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { and, count, desc, eq, gt, lte, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
-import { releases } from "../db/schema.ts";
+import { releaseImportFailures, releases } from "../db/schema.ts";
 import { diffReleases } from "./diff.ts";
 import type { ReleaseDiff } from "./diff.ts";
 
@@ -286,3 +286,30 @@ export const compareReleases = async (
     moreBetween: Math.max((counted?.total ?? 0) - between.length, 0),
   };
 };
+
+/** A published release the import couldn't verify yet, as the Releases page lists it. */
+export interface ImportFailure {
+  releaseId: string;
+  /** Failed attempts so far. */
+  attempts: number;
+  failedAt: Date;
+  /** When the import tries it again. */
+  nextAttemptAt: Date;
+  /** Why the last attempt failed, in the import's words; null for one recorded before they were kept. */
+  lastError: string | null;
+}
+
+/** Every release the import couldn't verify yet, the latest failed first. */
+export const listImportFailures = async (
+  db: AdminDatabase
+): Promise<ImportFailure[]> =>
+  await db
+    .select({
+      releaseId: releaseImportFailures.releaseId,
+      attempts: releaseImportFailures.attempts,
+      failedAt: releaseImportFailures.failedAt,
+      nextAttemptAt: releaseImportFailures.nextAttemptAt,
+      lastError: releaseImportFailures.lastError,
+    })
+    .from(releaseImportFailures)
+    .orderBy(desc(releaseImportFailures.failedAt));

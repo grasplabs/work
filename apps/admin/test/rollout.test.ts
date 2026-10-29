@@ -1,7 +1,7 @@
 import { clientsNamespace } from "@grasp-os/shared/names";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -10,6 +10,7 @@ import { setSignIn } from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { deployVersion } from "../src/cloudflare/workers.ts";
 import {
+  alerts,
   auditEvents,
   clientPlacements,
   clientProvisions,
@@ -282,6 +283,27 @@ const statusOf = async (id: string) => {
   return row?.status;
 };
 
+/**
+ * The open staff alerts of `kind` (src/alerts.ts) about `about`, a client
+ * or what a platform alert's subject names (a rollout), as the inbox
+ * reads them.
+ */
+const openAlertsOf = async (kind: string, about: string) =>
+  await db
+    .select({
+      clientId: alerts.clientId,
+      subject: alerts.subject,
+      numbers: alerts.numbers,
+    })
+    .from(alerts)
+    .where(
+      and(
+        eq(alerts.kind, kind),
+        isNull(alerts.resolvedAt),
+        or(eq(alerts.clientId, about), eq(alerts.subject, about))
+      )
+    );
+
 /** The runner client `clientId` has, if any. */
 const runnerOf = async (clientId: string) => {
   const [row] = await db
@@ -524,11 +546,13 @@ describe("rolling a release out to placed clients", () => {
       internal: await targetOf(rolloutId, internal.clientId),
       acme: await releasesOf(acme.clientId),
       runner: await runnerOf(internal.clientId),
+      alerted: await openAlertsOf("rollout_failed", rolloutId),
     }).toStrictEqual({
       rollout: { status: "failed", ring: 0 },
       internal: { ring: 0, status: "failed", error: "cloudflare_400_10000" },
       acme: on(before),
       runner: null,
+      alerted: [{ clientId: null, subject: rolloutId, numbers: "{}" }],
     });
   });
 
@@ -593,12 +617,14 @@ describe("rolling a release out to placed clients", () => {
     await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStepResult({ name: "retry 1 asked" });
     const failed = await targetsOf(rolloutId);
+    const alerted = await openAlertsOf("rollout_failed", rolloutId);
     const betaUploads = uploadsOf(beta);
     await retryRollout(env, staff, rolloutId);
     await run.waitForStatus("complete");
 
     expect({
       failed: [failed[acme.clientId], failed[beta.clientId]],
+      alerted,
       retried: await targetsOf(rolloutId),
       releases: [
         await releasesOf(acme.clientId),
@@ -609,6 +635,14 @@ describe("rolling a release out to placed clients", () => {
       failed: [
         { ring: 1, status: "failed", error: "cloudflare_400_10000" },
         { ring: 1, status: "done", error: null },
+      ],
+      // Waiting for staff to retry it is told, whatever the channel.
+      alerted: [
+        {
+          clientId: null,
+          subject: rolloutId,
+          numbers: JSON.stringify({ failed: 1 }),
+        },
       ],
       retried: {
         [internal.clientId]: { ring: 0, status: "done", error: null },
@@ -1129,6 +1163,32 @@ describe("rolling a release out to placed clients", () => {
       uploadedAgain: true,
       releases: on(release),
       runner: null,
+    });
+  });
+
+  it("tells staff when applying a client's settings stops, and gives the client back", async () => {
+    const release = await placedRelease("feat(core): won't apply");
+    const client = await live(0, release);
+    // Its Workers' first upload is refused: no retry fixes that.
+    cloudflare.failNext(
+      (call) =>
+        call.method === "PUT" &&
+        call.path.startsWith(`/accounts/${client.account.id}/`) &&
+        scriptPath.test(call.path),
+      400
+    );
+
+    const runId = await applySettings(env, staff, client.clientId);
+    const ended = await runEnded(adminWorkflows.applyClient, runId);
+
+    expect({
+      status: ended.status,
+      runner: await runnerOf(client.clientId),
+      alerted: await openAlertsOf("apply_failed", client.clientId),
+    }).toStrictEqual({
+      status: "errored",
+      runner: null,
+      alerted: [{ clientId: client.clientId, subject: null, numbers: "{}" }],
     });
   });
 

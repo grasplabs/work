@@ -10,7 +10,10 @@
  * Parameters and step results are identifiers only: the run's journal
  * keeps them (threat model R17).
  */
-import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
+import type {
+  WorkflowDefinition,
+  WorkflowStep,
+} from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -27,7 +30,13 @@ import {
 } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
-import { asStepError, stop, deployStepConfig } from "../workflow-steps.ts";
+import {
+  asStepError,
+  stop,
+  deployStepConfig,
+  quickStep,
+  wasReplaced,
+} from "../workflow-steps.ts";
 import { InventoryError } from "./inventory.ts";
 import {
   ProvisionOperationError,
@@ -61,6 +70,51 @@ const asOperationStepError = (error: unknown): Error =>
     ? stop(error.code, error.message)
     : asStepError(error);
 
+/** The attempt's one step: the client's operation. */
+const provisionStep = async (
+  env: Env,
+  step: WorkflowStep,
+  runId: string,
+  clientId: string
+): Promise<void> => {
+  await step.do(
+    "provision",
+    deployStepConfig,
+    async ({ attempt, idempotencyKey }) => {
+      const held = {
+        clientId,
+        runId,
+        attempt,
+        attemptKey: idempotencyKey,
+      };
+      try {
+        const context = await deployContext(env);
+        const operation = await provisionOf(context.db, clientId);
+        if (operation?.status === "done" && operation.runId === held.runId) {
+          return;
+        }
+        if (!(await takeAttempt(context.db, held))) {
+          throw new ProvisionOperationError(
+            "runner_replaced",
+            `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+          );
+        }
+        await runClientProvision(
+          {
+            ...context,
+            alert: async (alert) => {
+              await sendStaffAlert(env, alert);
+            },
+          },
+          held
+        );
+      } catch (error) {
+        throw asOperationStepError(error);
+      }
+    }
+  );
+};
+
 /**
  * An attempt: the client's operation, run as one step. Each try of the
  * step takes the client for itself first (`takeAttempt`): one that timed
@@ -72,42 +126,17 @@ const asOperationStepError = (error: unknown): Error =>
 export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
   run: async (event, step): Promise<void> => {
     const { clientId } = provisionPlacedParamsSchema.parse(event.payload);
-    await step.do(
-      "provision",
-      deployStepConfig,
-      async ({ attempt, idempotencyKey }) => {
-        const held = {
-          clientId,
-          runId: event.instanceId,
-          attempt,
-          attemptKey: idempotencyKey,
-        };
-        try {
-          const context = await deployContext(env);
-          const operation = await provisionOf(context.db, clientId);
-          if (operation?.status === "done" && operation.runId === held.runId) {
-            return;
-          }
-          if (!(await takeAttempt(context.db, held))) {
-            throw new ProvisionOperationError(
-              "runner_replaced",
-              `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
-            );
-          }
-          await runClientProvision(
-            {
-              ...context,
-              alert: async (alert) => {
-                await sendStaffAlert(env, alert);
-              },
-            },
-            held
-          );
-        } catch (error) {
-          throw asOperationStepError(error);
-        }
+    try {
+      await provisionStep(env, step, event.instanceId, clientId);
+    } catch (error) {
+      // An attempt another took the client from didn't stop: that one goes on.
+      if (!wasReplaced(error)) {
+        await step.do("alert", quickStep, async () => {
+          await sendStaffAlert(env, { clientId, kind: "provisioning_failed" });
+        });
       }
-    );
+      throw error;
+    }
   },
 });
 
