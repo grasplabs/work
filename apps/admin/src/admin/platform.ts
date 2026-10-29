@@ -201,6 +201,7 @@ export const behindOf = (
 export type PlatformNeed =
   | { kind: "not_started"; why: NotStarted | null }
   | { kind: "stopped" }
+  | { kind: "setup_unread" }
   | { kind: "failed"; releaseId: string }
   | { kind: "drift"; drift: "drifted" | "split" | "off_pin" }
   | { kind: "behind"; releases: number };
@@ -219,6 +220,8 @@ export const needsOf = (
     needs.push({ kind: "not_started", why: row.setup.why });
   } else if (row.setup?.state === "stopped") {
     needs.push({ kind: "stopped" });
+  } else if (row.setup?.state === "unread") {
+    needs.push({ kind: "setup_unread" });
   } else if (row.lastDeploy?.status === "failed") {
     needs.push({ kind: "failed", releaseId: row.lastDeploy.releaseId });
   }

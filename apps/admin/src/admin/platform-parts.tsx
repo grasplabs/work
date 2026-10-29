@@ -64,6 +64,9 @@ export const needWords = (need: PlatformNeed): string => {
     case "stopped": {
       return "Stopped: resume it from its Setup.";
     }
+    case "setup_unread": {
+      return "Being set up: status unavailable just now. Its Setup reads it again.";
+    }
     case "failed": {
       return `Its last deploy failed (${need.releaseId}).`;
     }

@@ -102,6 +102,7 @@ export interface GridRow {
   setup:
     | { state: "not_started"; why: NotStarted | null }
     | { state: "stopped" }
+    | { state: "unread" }
     | null;
 }
 
@@ -434,6 +435,9 @@ const deployerApiFor = async (
     : (signal) => cloudflareApi({ token, waitBudgetMs, signal });
 };
 
+/** How long the grid waits for one provisioning client's run to be read. */
+const runReadMs = 2000;
+
 /**
  * What waits for staff in a client's provisioning (`GridRow["setup"]`):
  * read only for a client being provisioned, its run only while its
@@ -456,8 +460,18 @@ const setupOf = async (
   if (row.lastDeploy.status === "done") {
     return null;
   }
-  const run = await currentRun(env, row.id);
-  return run === null || isReplaceable(run.status)
+  // Its run read within a short deadline, a failure this row's alone: a
+  // slow or failing read never stalls or breaks the grid (`unread`).
+  const read = await within(
+    runReadMs,
+    async () => ({ run: await currentRun(env, row.id) }),
+    null
+  );
+  if (read === null) {
+    log.warn("grid.run_unread", { clientId: row.id });
+    return { state: "unread" };
+  }
+  return read.run === null || isReplaceable(read.run.status)
     ? { state: "stopped" }
     : null;
 };

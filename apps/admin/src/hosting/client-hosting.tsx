@@ -530,7 +530,11 @@ const offeredReleases = (
     return [];
   }
   const at = releases.findIndex(({ id }) => id === operation.releaseId);
-  return at === -1 ? releases : releases.slice(0, at + 1);
+  // Older than every release listed: offered all the same, last, so a
+  // stopped operation can always be resumed on the release it has.
+  return at === -1
+    ? [...releases, { id: operation.releaseId, notes: "" }]
+    : releases.slice(0, at + 1);
 };
 
 /**

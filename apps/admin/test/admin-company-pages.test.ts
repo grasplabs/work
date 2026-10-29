@@ -6,10 +6,12 @@ import { act, adminDatabase } from "../src/db/act.ts";
 import {
   clientProvisions,
   clients,
+  releases as releaseRows,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
 import { importReleases } from "../src/releases/import.ts";
+import { RELEASE_LIST_LIMIT } from "../src/releases/queries.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
@@ -57,6 +59,16 @@ const importedRelease = async (notes: string): Promise<string> => {
   await importReleases(env.RELEASES, db);
   return release.id;
 };
+
+/** A release row, imported as built at `builtAt`, with nothing of a manifest. */
+const releaseRow = (id: string, builtAt: Date) => ({
+  id,
+  commitSha: "0".repeat(40),
+  manifest: "{}",
+  manifestSha256: "0".repeat(64),
+  builtAt,
+  importedAt: builtAt,
+});
 
 /** Client `clientId`'s Setup, on `tab` (how it stands when none). */
 const setupOf = async (clientId: string, tab?: string) =>
@@ -204,6 +216,44 @@ describe("the company pages, in the admin", () => {
       code: html.includes("probe_unanswered"),
       resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
     }).toStrictEqual({ stopped: true, code: true, resume: true });
+  });
+
+  it("offers a stopped provisioning its own release to resume on, even one older than every release listed", async () => {
+    // Built long ago, then a full list of newer ones: not among the
+    // newest releases the page lists.
+    const releaseId = "r000000001-0000000";
+    const now = new Date();
+    await db.insert(releaseRows).values(releaseRow(releaseId, new Date(0)));
+    const newer = Array.from({ length: RELEASE_LIST_LIMIT }, (_, at) =>
+      releaseRow(
+        `r9${String(at).padStart(8, "0")}-0000000`,
+        new Date(now.getTime() + at)
+      )
+    );
+    for (let at = 0; at < newer.length; at += 10) {
+      // oxlint-disable-next-line no-await-in-loop -- D1 binds so many values a statement
+      await db.insert(releaseRows).values(newer.slice(at, at + 10));
+    }
+    const client = await recordClient();
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId,
+      status: "failed",
+      step: "resources",
+      error: "probe_unanswered",
+      startedBy: staff.email,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+    const hosting = sectionOf(html, "Hosting");
+
+    expect({
+      offered: hosting.includes(`value="${releaseId}"`),
+      resume: hosting.includes("Resume provisioning"),
+    }).toStrictEqual({ offered: true, resume: true });
   });
 
   it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {
