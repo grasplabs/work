@@ -39,6 +39,7 @@ import {
   landscapeSyncs,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { startOAuthConnection } from "./oauth-relay.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -909,11 +910,10 @@ export class LandscapeRpc extends CoreRpcTarget implements LandscapeApi {
       if (back === undefined) {
         throw connectionErrors.create("connection.invalid");
       }
-      return await this.#env.CONNECT.startConnection({
+      return await startOAuthConnection(this.#env, config, {
         person: await personOf(this.#env, identity),
         provider: "microsoft-landscape",
         scope: "shared",
-        origin: config.origin,
         tenant,
         returnTo: `${back.pathname}${back.search}`,
       });
