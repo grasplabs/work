@@ -1,3 +1,4 @@
+import { Workflow } from "@grasp-os/workerflow/binding";
 import { env } from "cloudflare:workers";
 import { asc, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -587,6 +588,34 @@ describe("integration builds", () => {
           },
         },
       ],
+    });
+  });
+
+  it("puts a stopped build back for staff when its restart's run doesn't start, so it can be restarted or closed again", async () => {
+    const app = await stoppedBuild();
+    // The engine refuses the new run once, as a Durable Object that
+    // doesn't answer would.
+    vi.spyOn(Workflow.prototype, "create").mockRejectedValueOnce(
+      new Error("engine unavailable")
+    );
+
+    const failed = await codeOf(restartBuild(env, staff, app));
+    const back = await buildOf(db, app);
+    vi.restoreAllMocks();
+    const again = await codeOf(restartBuild(env, staff, app));
+    const trail = await trailOf(app);
+
+    expect({
+      failed,
+      back: { stage: back?.stage, reason: back?.reason },
+      again,
+      failures: trail.filter(({ action }) => action === "build.restart_failed")
+        .length,
+    }).toStrictEqual({
+      failed: "not a build error",
+      back: { stage: "needs_person", reason: "restart_not_started" },
+      again: "resolved",
+      failures: 1,
     });
   });
 

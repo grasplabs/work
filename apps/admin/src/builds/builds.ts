@@ -584,7 +584,33 @@ export const restartBuild = async (
   if (!moved) {
     throw wrongStage(app, "needs_person");
   }
-  await buildRuns(env).create({ id: runId, params: { app } });
+  try {
+    await buildRuns(env).create({ id: runId, params: { app } });
+  } catch (error) {
+    // Its run never started: back where staff can restart or close it
+    // again, rather than at `asked` with no run, which neither takes.
+    await actIfChanged(
+      db,
+      staff,
+      db
+        .update(integrationBuilds)
+        .set({
+          stage: "needs_person",
+          stoppedAt: "asked",
+          reason: "restart_not_started",
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(integrationBuilds.app, app),
+            eq(integrationBuilds.stage, "asked"),
+            eq(integrationBuilds.runId, runId)
+          )
+        ),
+      { action: "build.restart_failed", target: app, detail: { run: runId } }
+    );
+    throw error;
+  }
   return runId;
 };
 

@@ -356,6 +356,9 @@ const stoppedWords = ({ stoppedAt, reason }: StoppedBuild): string => {
   if (reason?.endsWith("_timed_out") === true) {
     return `It waited too long at ${stoppedAt ?? "a stage"} and stopped.`;
   }
+  if (reason === "restart_not_started") {
+    return "A restart didn't start its run: restart it again, or close it.";
+  }
   if (reason === "too_many_plans") {
     return "No plan was approved in five rounds.";
   }
