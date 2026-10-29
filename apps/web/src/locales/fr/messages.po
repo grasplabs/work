@@ -1661,6 +1661,10 @@ msgstr "5, très bien"
 msgid "50 to 99 users"
 msgstr "50 à 99 utilisateurs"
 
+#: src/inbox/items.ts
+msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
+msgstr "Un builder a demandé que cette version de {name} soit mise en production : approuvée, c’est la version qu’utilise l’entreprise. Renvoyez-la pour garder la version qui tourne maintenant."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -7531,6 +7535,14 @@ msgstr "Permettre de demander à Stephen de le lancer"
 msgid "Let the interviews run again"
 msgstr "Relancer les entretiens"
 
+#: src/inbox/items.ts
+msgid "Let version {version} of {name} go live?"
+msgstr "Mettre en production la version {version} de {name} ?"
+
+#: src/inbox/item-detail.tsx
+msgid "Let version {version} of {who} go live"
+msgstr "Mettre en production la version {version} de {who}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
 msgstr "Commençons"
@@ -7652,6 +7664,10 @@ msgstr "En production"
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "En production, en cours de mesure"
+
+#: src/inbox/item-detail.tsx
+msgid "Live: {who}, version {version}."
+msgstr "En production : {who}, version {version}."
 
 #: src/workflows/history-view.tsx
 msgid "Load more"
@@ -11633,6 +11649,10 @@ msgstr "Envoyer"
 msgid "Send answer"
 msgstr "Envoyer la réponse"
 
+#: src/inbox/item-detail.tsx
+msgid "Send back"
+msgstr "Renvoyer"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Send request"
 msgstr "Envoyer la demande"
@@ -11640,6 +11660,10 @@ msgstr "Envoyer la demande"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Send the link now"
 msgstr "Envoyer le lien maintenant"
+
+#: src/inbox/item-detail.tsx
+msgid "Send version {version} of {who} back"
+msgstr "Renvoyer la version {version} de {who}"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11659,6 +11683,10 @@ msgstr "Envoyé"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Envoyé <0>{sent}</0>"
+
+#: src/inbox/item-detail.tsx
+msgid "Sent back: {who}, version {version}."
+msgstr "Renvoyée : {who}, version {version}."
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"

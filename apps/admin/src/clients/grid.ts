@@ -344,7 +344,7 @@ const liveOf = async (
               apiFor(signal),
               db,
               row.id,
-              routerKey === null ? undefined : { fetch, routerKey }
+              secrets === null ? undefined : { fetch, secrets }
             ),
           null,
           "grid.drift_unread",

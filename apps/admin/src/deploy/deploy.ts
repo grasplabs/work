@@ -591,7 +591,7 @@ const assertLatest = async (
   }
   if (
     runner !== undefined &&
-    !(await holdsClient(db, runner.clientId, runner.runId))
+    !(await holdsClient(db, runner.clientId, runner.runId, runner.attempt))
   ) {
     throw runnerReplaced(runner);
   }
