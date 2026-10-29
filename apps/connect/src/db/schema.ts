@@ -457,6 +457,28 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
+ * A revoke at its provider still owed for a disconnected connection
+ * (GRA-1191): the provider was down, or refused, when it was
+ * disconnected. Its sealed tokens stay in `connection_tokens` until the
+ * revoke goes through, so the cron trigger can try again
+ * (`retryRevocations`, src/revocations.ts); the connection is
+ * disconnected, so nothing calls with them meanwhile. `attempts` counts
+ * the failed tries, each waiting longer, until `retry_at`.
+ */
+export const tokenRevocations = sqliteTable(
+  "token_revocations",
+  {
+    connectionId: text("connection_id")
+      .primaryKey()
+      .references(() => connections.id),
+    attempts: integer().notNull().default(0),
+    retryAt: timestamp("retry_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("token_revocations_retry_idx").on(table.retryAt)]
+);
+
+/**
  * Audit events core hasn't appended to the audit log yet. Each call's
  * events are stored here, with the call's own result where it has one;
  * core's clock takes them and acknowledges those it appended
