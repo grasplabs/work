@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -28,7 +27,8 @@ import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
-import { ended } from "./runs.ts";
+import { ended, followAdminRuns, reached, stepSucceeded } from "./runs.ts";
+import type { FollowedRuns } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-functions-6a2f90";
@@ -86,33 +86,26 @@ const activeClient = async (
   return clientId;
 };
 
-/** The runs of `workflow` a test starts, their holds and retry waits going at once. */
-const follow = async (workflow: Workflow) => {
-  const runs = await introspectWorkflow(workflow);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableSleeps();
-    await modifier.disableRetryDelays();
-  });
-  return runs;
-};
+/** The runs a test starts, followed: their retries and sleeps going at once. */
+type Runs = FollowedRuns;
 
-type Runs = Awaited<ReturnType<typeof follow>>;
-
-/** The latest run `runs` follows. */
-const latestOf = async (runs: Runs) => {
-  const all = await runs.get();
-  const last = all.at(-1);
-  if (last === undefined) {
-    throw new Error("No run was started");
-  }
-  return last;
-};
+/** Rollout `rolloutId`'s run, as a test waits on it. */
+const rolloutRunOf = (rolloutId: string) => ({
+  waitForStepResult: async (step: { name: string }) => {
+    await stepSucceeded(adminWorkflows.rollout, rolloutId, step.name);
+  },
+  waitForStatus: async (
+    status: "complete" | "errored" | "terminated" | "paused"
+  ) => {
+    await reached(adminWorkflows.rollout, rolloutId, status);
+  },
+});
 
 /**
  * A rollout of a new release, started by `setup`, that deployed ring 0's
  * client and waits for approval of ring 1, with its run.
  */
-const waitingRollout = async (rolloutRuns: Runs) => {
+const waitingRollout = async (_rolloutRuns: Runs) => {
   const before = await importedRelease("feat(core): the release before");
   const internal = await activeClient(0, before);
   await activeClient(1, before);
@@ -122,7 +115,7 @@ const waitingRollout = async (rolloutRuns: Runs) => {
     releaseId: release,
     scope: { scope: "ring", ring: 1 },
   });
-  const run = await latestOf(rolloutRuns);
+  const run = rolloutRunOf(rolloutId);
   await run.waitForStepResult({ name: "ring 1 approved" });
   return { rolloutId, internal, run };
 };
@@ -427,9 +420,8 @@ describe("the admin's changes, through its entry", () => {
   it.each(changes.map(({ name, arrange }) => [name, arrange] as const))(
     "%s is audited as the staff member Access vouches for, about its client and target",
     async (_name, arrange) => {
-      await using rolloutRuns = await follow(env.ROLLOUT);
       // An approved rollout deploys its fleet clients in runs of their own.
-      await using _fleetRuns = await follow(env.ROLLOUT_CLIENT);
+      await using rolloutRuns = followAdminRuns();
       const { make, audited, settled } = await arrange({ rolloutRuns });
 
       const { refused } = await make();

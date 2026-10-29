@@ -800,7 +800,13 @@ export const recordProviderId = async (
   }
   if (
     held !== undefined &&
-    !(await holdsClient(db, held.clientId, held.runId, held.attempt))
+    !(await holdsClient(
+      db,
+      held.clientId,
+      held.runId,
+      held.attempt,
+      held.attemptKey
+    ))
   ) {
     throw new InventoryError(
       "runner_replaced",
