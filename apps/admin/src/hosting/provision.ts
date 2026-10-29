@@ -137,7 +137,7 @@ const requestCreate = async (
     }
   );
   if (!requested) {
-    throw (await holdsClient(db, held.clientId, held.runId))
+    throw (await holdsClient(db, held.clientId, held.runId, held.attempt))
       ? new InventoryError(
           "resource_conflict",
           `${held.clientId}'s ${resource.role} was observed by another run`
@@ -159,7 +159,7 @@ export const ensureClientResources = async (
   held: HeldClient
 ): Promise<ClientResource[]> => {
   const { clientId } = held;
-  if (!(await holdsClient(db, clientId, held.runId))) {
+  if (!(await holdsClient(db, clientId, held.runId, held.attempt))) {
     throw replaced(held);
   }
   const placement = await placementOf(db, clientId);

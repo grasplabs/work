@@ -710,26 +710,34 @@ export interface D1Migration {
 const sqlText = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
 /**
+ * Before each migration is applied: throws to stop before it, as a runner
+ * that no longer holds its client does.
+ */
+export type BeforeMigration = () => Promise<void>;
+
+/**
  * Applies `pending` in order, each with its record in one query, stopping
- * at the first that fails.
+ * at the first that fails, and checking `before` first each time.
  */
 const applyInOrder = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  pending: readonly D1Migration[]
+  pending: readonly D1Migration[],
+  before: BeforeMigration
 ): Promise<void> => {
   const [next, ...rest] = pending;
   if (next === undefined) {
     return;
   }
+  await before();
   await queryD1(
     api,
     accountId,
     databaseId,
     `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`
   );
-  await applyInOrder(api, accountId, databaseId, rest);
+  await applyInOrder(api, accountId, databaseId, rest, before);
 };
 
 /**
@@ -740,12 +748,17 @@ const applyInOrder = async (
  * query, as Wrangler sends them; the API doesn't document such a query as
  * atomic, so a failure part way could leave a migration half applied and
  * unrecorded (threat model CO13). The first that fails stops the rest.
+ * `before` is checked before each one: a runner's check that it still
+ * holds its client, so one that lost it applies nothing more.
  */
 export const applyD1Migrations = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  migrations: readonly D1Migration[]
+  migrations: readonly D1Migration[],
+  before: BeforeMigration = async () => {
+    await Promise.resolve();
+  }
 ): Promise<string[]> => {
   const [, applied = []] = await queryD1(
     api,
@@ -755,7 +768,7 @@ export const applyD1Migrations = async (
   );
   const done = new Set(applied.map(({ name }) => name));
   const pending = migrations.filter(({ name }) => !done.has(name));
-  await applyInOrder(api, accountId, databaseId, pending);
+  await applyInOrder(api, accountId, databaseId, pending, before);
   return pending.map(({ name }) => name);
 };
 

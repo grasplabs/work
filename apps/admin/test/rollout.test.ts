@@ -48,11 +48,13 @@ import {
   targetClients,
 } from "../src/rollout/targets.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, staff } from "./hosting.ts";
 import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
 import { evidenceFor, testLimits } from "./releases.ts";
+import { ended as runEnded, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // Rolling a release out to placed clients (GRA-388): ring 0 first, one
@@ -2113,21 +2115,20 @@ describe("a rollout's run dying on a client, and staff acting on the client afte
       await using rollouts_ = await followRollouts();
       await using rollbacks = await followRollbacks();
       const applies = await introspectWorkflow(env.APPLY_CLIENT);
-      const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+      using attempts = startsOf(adminWorkflows.provisionPlacedClient);
       try {
-        for (const each of [applies, attempts]) {
-          // oxlint-disable-next-line no-await-in-loop -- set up before any run
-          await each.modifyAll(async (modifier) => {
-            await modifier.disableRetryDelays();
-          });
-        }
+        await applies.modifyAll(async (modifier) => {
+          await modifier.disableRetryDelays();
+        });
         let acted: unknown;
         if (action === "release") {
           acted = await codeOf(
             releasePlacedClient(env, staff, clientId, { releaseId: later })
           );
-          const [only] = await attempts.get();
-          await only?.waitForStatus("complete");
+          const [only] = attempts.started;
+          if (only !== undefined) {
+            await runEnded(adminWorkflows.provisionPlacedClient, only);
+          }
         } else if (action === "apply") {
           acted = await codeOf(applySettings(env, staff, clientId));
           const [only] = await applies.get();
@@ -2165,7 +2166,6 @@ describe("a rollout's run dying on a client, and staff acting on the client afte
         });
       } finally {
         await applies.dispose();
-        await attempts.dispose();
       }
     }
   );

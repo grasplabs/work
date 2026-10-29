@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -25,6 +24,7 @@ import {
   placeClient,
 } from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import {
@@ -36,6 +36,8 @@ import {
   verified,
 } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
+import { ended, startsOf } from "./runs.ts";
+import type { Starts } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-hosting-3c81d2";
@@ -120,25 +122,18 @@ const actorsOf = async (clientId: string, action: string) => {
   return events.map(({ actor }) => actor);
 };
 
-/** The attempts a test starts, their retries going at once. */
-const followAttempts = async () => {
-  const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-  await attempts.modifyAll(async (modifier) => {
-    await modifier.disableRetryDelays();
-  });
-  return attempts;
-};
-
-type Attempts = Awaited<ReturnType<typeof followAttempts>>;
+/** The attempts a test starts. */
+const followAttempts = () => startsOf(adminWorkflows.provisionPlacedClient);
 
 /** Waits until the latest attempt stopped, which it does at validation. */
-const latestStopped = async (attempts: Attempts): Promise<void> => {
-  const started = await attempts.get();
+const latestStopped = async ({ started }: Starts): Promise<void> => {
   const latest = started.at(-1);
   if (latest === undefined) {
     throw new Error("No attempt was started");
   }
-  await latest.waitForStatus("errored");
+  await expect(
+    ended(adminWorkflows.provisionPlacedClient, latest)
+  ).resolves.toMatchObject({ status: "errored" });
 };
 
 describe("placing a client and provisioning it, through the admin's entry", () => {
@@ -196,7 +191,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       },
     });
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     const result = await place(clientId, releaseId, null);
     await latestStopped(attempts);
 
@@ -337,7 +332,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       refused: "no_automatic_destination",
     });
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await expect(place(clientId, releaseId, second)).resolves.toMatchObject({
       refused: null,
     });
@@ -356,7 +351,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const clientId = await client();
     const releaseId = await importedRelease();
 
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await expect(place(clientId, releaseId, dedicated)).resolves.toMatchObject({
       refused: null,
     });
@@ -378,7 +373,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const other = await destination({ kind: "dedicated", namespace: null });
     const clientId = await client();
     const releaseId = await importedRelease();
-    await using attempts = await followAttempts();
+    using attempts = followAttempts();
     await place(clientId, releaseId, null);
     await latestStopped(attempts);
     const first = await operationOf(clientId);
@@ -401,7 +396,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const resumed = await place(clientId, releaseId, null);
     await latestStopped(attempts);
     const again = await operationOf(clientId);
-    const started = await attempts.get();
+    const { started } = attempts;
     expect({
       resumed,
       operation: again?.id,
