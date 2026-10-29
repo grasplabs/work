@@ -148,6 +148,13 @@
       "when": 1793217487078,
       "tag": "0020_erased_people",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1793228066253,
+      "tag": "0021_token_revocations",
+      "breakpoints": true
     }
   ]
 }

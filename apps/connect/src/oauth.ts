@@ -47,9 +47,10 @@ import {
   connectionTokens,
   oauthFlows,
   pendingActions,
+  tokenRevocations,
 } from "./db/schema.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
-import { exchangeCode, revokeToken } from "./oauth-client.ts";
+import { exchangeCode } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
@@ -61,12 +62,8 @@ import type {
   ProviderAccount,
   ProviderConfig,
 } from "./providers.ts";
-import {
-  apiKeyExpiresAt,
-  discardMint,
-  firstTokens,
-  revocableToken,
-} from "./tokens.ts";
+import { firstRevokeRetryMs, revokeAtProvider } from "./revocations.ts";
+import { apiKeyExpiresAt, discardMint, firstTokens } from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
@@ -1010,39 +1007,11 @@ export const organizationConnections = async (
 };
 
 /**
- * Revokes the grant at the provider where it can. Best effort: a provider
- * that is down doesn't keep a person from disconnecting, and the tokens are
- * deleted either way (threat model CN14).
- */
-export const revoke = async (
-  env: Env,
-  connection: ConnectionRow
-): Promise<boolean> => {
-  const provider = providerFor(connection.provider);
-  // An API key has no grant to revoke: the app's own settings do that.
-  if (provider?.kind !== "oauth") {
-    return false;
-  }
-  const client = provider.client(env);
-  const token = await revocableToken(env, connection.id);
-  if (client === undefined || token === undefined) {
-    return false;
-  }
-  try {
-    return await revokeToken(provider, client, token);
-  } catch (error) {
-    log.warn("oauth.revoke_failed", {
-      provider: provider.id,
-      ...errorFields(error),
-    });
-    return false;
-  }
-};
-
-/**
  * Stops `connection`: revokes the grant where the provider can, then
- * deletes the tokens and marks it disconnected, in one write with its
- * event, then drops the actions held for it, which can no longer run.
+ * marks it disconnected and deletes the tokens, in one write with its
+ * event, then drops the actions held for it, which can no longer run. A
+ * revoke the provider wouldn't take is owed instead: the tokens stay,
+ * sealed, for the cron trigger to revoke with (src/revocations.ts).
  * Returns whether the provider revoked the grant, and whether this call
  * stopped it (a concurrent one may have first).
  *
@@ -1064,7 +1033,11 @@ const stop = async (
   // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
   const composio = connection.serverKind === "composio";
   const cleanupId = crypto.randomUUID();
-  const revokedGrant = composio ? false : await revoke(env, connection);
+  const revokeOutcome = composio
+    ? "nothing"
+    : await revokeAtProvider(env, connection);
+  const revokedGrant = revokeOutcome === "revoked";
+  const owed = revokeOutcome === "failed";
   // Recorded only by the disconnect that stops it, if two run at once.
   const waiting = connection.status === "needs_reauth";
   const stillConnected = waiting
@@ -1077,7 +1050,9 @@ const stop = async (
       provider: connection.provider,
       scope: connection.scope,
       outcome: "ok",
-      ...(composio ? { tokenHolder: "composio" } : { revoked: revokedGrant }),
+      ...(composio
+        ? { tokenHolder: "composio" }
+        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
     }),
     { from: connections, where: stillConnected },
     [
@@ -1086,11 +1061,24 @@ const stop = async (
         .update(connections)
         .set({ status: "disconnected", updatedAt: new Date() })
         .where(stillConnected),
-      // After the status: only a stopped connection's tokens go.
+      // After the status, by the call that stopped it: the revoke it owes,
+      // while it holds tokens to revoke with.
+      ...(owed
+        ? [
+            db.insert(tokenRevocations).select(
+              sql`SELECT ${connection.id}, 0, ${Date.now() + firstRevokeRetryMs}, ${Date.now()}
+                WHERE EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')
+                  AND EXISTS (SELECT 1 FROM ${connectionTokens} WHERE ${connectionTokens.connectionId} = ${connection.id})
+                  AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
+            ),
+          ]
+        : []),
+      // Only a stopped connection's tokens go, and not while a revoke is
+      // owed with them.
       db
         .delete(connectionTokens)
         .where(
-          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected') AND NOT EXISTS (SELECT 1 FROM ${tokenRevocations} WHERE ${tokenRevocations.connectionId} = ${connection.id})`
         ),
     ]
   );

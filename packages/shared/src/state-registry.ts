@@ -575,6 +575,10 @@ const connectDb: D1State = {
     call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
+    token_revocations: exported(
+      `${connect}revocations.ts`,
+      "Revokes a provider still owes, the tokens kept until they go through: an obligation a move must keep."
+    ),
     erased_people: exported(
       `${connect}person-erasure.ts`,
       "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
