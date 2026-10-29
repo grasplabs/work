@@ -123,8 +123,9 @@
   // them: provisioning makes each client's gateway; and Zone and Email
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
-  // are derived from; and the secrets every client shares, which
-  // are set in the store by hand, from 1Password. The store id is the account's own: `deploy` fills it in
+  // are derived from; and the secrets every client shares. Deploy platform
+  // copies every one of them in from the stage's 1Password Environment
+  // (scripts/store-secrets.ts). The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [

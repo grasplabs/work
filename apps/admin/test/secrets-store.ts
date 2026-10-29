@@ -8,8 +8,8 @@ import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 import type { SecretsStoreAdmin } from "./secrets-store-admin.ts";
 
 /**
- * Sets the secret `binding` names, `name` in the store, to `value`, as a
- * rotation in the store does: kept under its id, so
+ * Sets the secret `binding` names, `name` in the store, to `value`, as
+ * Deploy platform does after a rotation in 1Password: kept under its id, so
  * it's taken out after the test as usual.
  */
 export const setStoreSecret = async (
