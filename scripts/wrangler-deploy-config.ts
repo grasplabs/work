@@ -121,16 +121,19 @@ export const filledConfig = async (
   const stored = await lookups.storedSecrets(store);
   const missing = bound.filter(({ name }) => !stored.has(name));
   const needed = missing.filter(({ binding }) => !target.optional.has(binding));
+  // Secrets Store names a staging secret `<binding>_STAGING`; the stage's
+  // 1Password Environment names it as its binding, which Deploy platform
+  // copies in under the store's name (scripts/store-secrets-lib.ts).
   if (needed.length > 0) {
     throw new Error(
-      `Secrets Store ${store} doesn't have ${needed.map(({ name }) => name).join(", ")}: add them to the stage's 1Password Environment, then run Deploy platform again`
+      `Secrets Store ${store} doesn't have ${needed.map(({ name }) => name).join(", ")}: add ${needed.map(({ binding }) => binding).join(", ")} to the stage's 1Password Environment, then run Deploy platform again`
     );
   }
   if (missing.length === 0 || view === undefined) {
     return filled;
   }
   console.warn(
-    `Not in Secrets Store yet, so left unbound until a Deploy platform after they're added to the stage's 1Password Environment: ${missing.map(({ name }) => name).join(", ")}`
+    `Not in Secrets Store yet, so left unbound until a Deploy platform after ${missing.map(({ binding }) => binding).join(", ")} ${missing.length === 1 ? "is" : "are"} added to the stage's 1Password Environment: ${missing.map(({ name }) => name).join(", ")}`
   );
   const bindings = field(view, "secrets_store_secrets");
   view.secrets_store_secrets = Array.isArray(bindings)
