@@ -27,6 +27,7 @@ export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
   CompileTarget,
+  IncrementalTarget,
   ComputeModulesBuild,
   InspectTarget,
   OpenWorkflowBuild,
@@ -71,6 +72,19 @@ export {
   previewRuntime,
   screenRuntime,
 } from "./kit.ts";
+export {
+  checkRecordOf,
+  incrementSchema,
+  moduleRecordOf,
+  screenIncrementKeys,
+} from "./increments.ts";
+export type {
+  BuildMetrics,
+  CheckRecord,
+  IncrementalBuild,
+  Increments,
+  ModuleRecord,
+} from "./increments.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
