@@ -31,7 +31,6 @@ const recordClient = async (): Promise<string> => {
       db.insert(clients).values({
         id,
         name: id,
-        accountId: crypto.randomUUID().replaceAll("-", ""),
         ring: 1,
         status: "active",
         signIn: JSON.stringify(signIn),
@@ -99,10 +98,7 @@ const signInDetailsOf = async (clientId: string) => {
 };
 
 describe("a client's settings", () => {
-  useStoreSecrets({
-    deployer: "test-deployer-token-settings-2b9d41",
-    tenant: "test-tenant-admin-token-settings-7e0c63",
-  });
+  useStoreSecrets({ deployer: "test-deployer-token-settings-2b9d41" });
 
   it("move a client to another ring, audited once per change, and leave its config as it was", async () => {
     const clientId = await recordClient();

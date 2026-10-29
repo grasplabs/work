@@ -66,10 +66,7 @@ const migrate = async (database: D1Database): Promise<void> => {
 };
 
 /** Puts every secret the admin reads in its store, unless it's there. */
-const fillStore = async (tokens: {
-  deployer: string;
-  tenant: string;
-}): Promise<void> => {
+const fillStore = async (tokens: { deployer: string }): Promise<void> => {
   for (const [binding, value] of adminSecrets(tokens)) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
@@ -94,7 +91,7 @@ const staff = { email: "staff@grasp.test", sub: "" };
  */
 export const seed = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  tokens: { deployer: string; tenant: string }
+  tokens: { deployer: string }
 ): Promise<Seeded> => {
   await migrate(env.DB);
   await fillStore(tokens);
@@ -130,7 +127,7 @@ export interface SeededPlaced {
  */
 export const seedPlaced = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  tokens: { deployer: string; tenant: string }
+  tokens: { deployer: string }
 ): Promise<SeededPlaced> => {
   await migrate(env.DB);
   await fillStore(tokens);

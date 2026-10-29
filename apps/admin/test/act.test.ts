@@ -8,14 +8,13 @@ import { auditEvents, clients, settings } from "../src/db/schema.ts";
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
-/** A new client's row, with a unique slug and account. */
+/** A new client's row, with a unique slug. */
 const newClient = () => {
   const id = `client-${crypto.randomUUID()}`;
   const now = new Date();
   return {
     id,
     name: id,
-    accountId: `account-${crypto.randomUUID()}`,
     createdAt: now,
     updatedAt: now,
   };
@@ -31,7 +30,7 @@ describe(act, () => {
     await act(db, staff, [db.insert(clients).values(client)], {
       action: "client.create",
       clientId: client.id,
-      target: client.accountId,
+      target: "eu-dedicated",
       detail: { ring: 1 },
     });
 
@@ -39,16 +38,13 @@ describe(act, () => {
       .select()
       .from(clients)
       .where(eq(clients.id, client.id));
-    expect(row).toMatchObject({
-      accountId: client.accountId,
-      status: "provisioning",
-    });
+    expect(row).toMatchObject({ name: client.name, status: "provisioning" });
     const events = await eventsFor(client.id);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       actor: staff.email,
       action: "client.create",
-      target: client.accountId,
+      target: "eu-dedicated",
       detail: JSON.stringify({ ring: 1 }),
     });
     expect(events[0]?.at).toBeInstanceOf(Date);
@@ -73,17 +69,15 @@ describe(act, () => {
     await db.insert(clients).values(taken);
     const client = newClient();
 
-    // One Cloudflare account is one client: a second client on it fails, and
-    // takes the first statement and the event with it.
+    // One slug is one client: a second client of it fails, and takes the
+    // first statement and the event with it.
     await expect(
       act(
         db,
         staff,
         [
           db.insert(clients).values(client),
-          db
-            .insert(clients)
-            .values({ ...newClient(), accountId: taken.accountId }),
+          db.insert(clients).values({ ...newClient(), id: taken.id }),
         ],
         { action: "client.create", clientId: client.id }
       )

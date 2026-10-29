@@ -29,8 +29,7 @@ import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-functions-6a2f90";
-const tenantToken = "test-tenant-admin-token-functions-1d8b47";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -63,7 +62,6 @@ const recordClient = async (ring: number): Promise<string> => {
       db.insert(clients).values({
         id: clientId,
         name: clientId,
-        accountId: cloudflare.addAccount().id,
         ring,
         status: "active",
         signIn: JSON.stringify(signIn),
@@ -394,7 +392,7 @@ const changes: {
 ];
 
 describe("the admin's changes, through its entry", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The database outlives each test, and every rollout reaches ring 0:
   // each test's rollout reaches only its own clients, and starts while no
   // earlier test's is open.

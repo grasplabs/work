@@ -8,11 +8,14 @@
  * running in a Workflow step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
+import type { ClientDispatcher } from "../clients/core-address.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
 import type { CloudflareApi, CloudflareApiOptions } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
+import type { AdminDatabase } from "../db/act.ts";
+import type { ReleaseStore } from "../releases/import.ts";
 import type { SignInApps } from "./core-config.ts";
-import type { DeployContext } from "./deploy.ts";
+import type { RouterHosts, SmokeOptions } from "./router.ts";
 import type { DeploySecrets } from "./secrets.ts";
 
 /** The secrets every client shares, as their bindings are named. */
@@ -217,6 +220,37 @@ export const signInApps = (env: Env): SignInApps => {
 };
 
 /** Everything a deploy works with, from `env`. Throws while no domain is set. */
+/** What the client's operation works with (src/hosting/operation.ts). */
+export interface DeployContext {
+  /** The Cloudflare API, as the deployer. */
+  api: CloudflareApi;
+  db: AdminDatabase;
+  /** The releases bucket, read only. */
+  store: ReleaseStore;
+  /** The secrets to give the Workers, from Secrets Store. */
+  secrets: DeploySecrets;
+  /**
+   * Grasp's OAuth apps' client ids, for core's `SIGN_IN`
+   * (src/deploy/core-config.ts); none unless given.
+   */
+  signInApps?: SignInApps;
+  /** The time now: `new Date()` unless a test sets it. */
+  now?: () => Date;
+  router: {
+    /** The router's hostname map. */
+    hosts: RouterHosts;
+    /** The domain clients are served under: a client is `<id>.<domain>`. */
+    domain: string;
+    /** How the probe reaches core. */
+    smoke?: SmokeOptions;
+    /**
+     * The clients' dispatch namespace, as the router binds it: how a core
+     * placed on Workers for Platforms is reached (hosting/operation.ts).
+     */
+    dispatcher?: ClientDispatcher;
+  };
+}
+
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);
   if (domain === null) {

@@ -6,7 +6,7 @@ import {
   notFound,
   useRouter,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { z } from "zod";
 
 import { AdminPage } from "../../../admin/page.tsx";
@@ -25,25 +25,14 @@ import {
   Revocation,
   rolloutStateWords,
   Targets,
-  totalCostWords,
 } from "../../../admin/rollout-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { versionWords } from "../../../releases/version.ts";
-import type { RolloutCost } from "../../../rollout/cost.ts";
-import { fetchRollout, fetchRolloutCost } from "../../../rollout/functions.ts";
+import { fetchRollout } from "../../../rollout/functions.ts";
 import type { RolloutView } from "../../../rollout/queries.ts";
 
 /** How often the page reads the rollout again while it's going. */
 const refreshMs = 5000;
-
-/** Rollout `rolloutId`'s clients' cost, or `failed` when it couldn't be read. Never throws. */
-const readCost = async (rolloutId: string): Promise<RolloutCost | "failed"> => {
-  try {
-    return await fetchRolloutCost({ data: { rolloutId } });
-  } catch {
-    return "failed";
-  }
-};
 
 /** What the rollout takes out, as its page's title says it. */
 const titleOf = (rollout: RolloutView): string =>
@@ -77,28 +66,6 @@ const RolloutPage = () => {
       clearInterval(timer);
     };
   }, [going, router]);
-  // Read once the page shows, from the clients' accounts, and not again
-  // as the page refreshes: a month's cost doesn't move in seconds. An
-  // answer is the rollout's it was read for, so another rollout's page
-  // shows its own as reading until it comes.
-  const [costRead, setCostRead] = useState<{
-    rolloutId: string;
-    cost: RolloutCost | "failed";
-  } | null>(null);
-  useEffect(() => {
-    let current = true;
-    void (async () => {
-      const cost = await readCost(rollout.id);
-      // A page left before its answer came doesn't take it.
-      if (current) {
-        setCostRead({ rolloutId: rollout.id, cost });
-      }
-    })();
-    return () => {
-      current = false;
-    };
-  }, [rollout.id]);
-  const cost = costRead?.rolloutId === rollout.id ? costRead.cost : null;
   const state = rolloutStateWords(rollout);
   return (
     <AdminPage
@@ -148,10 +115,6 @@ const RolloutPage = () => {
                   },
               { label: "Started by", value: rollout.startedBy },
               { label: "Started (UTC)", value: formatTime(rollout.createdAt) },
-              {
-                label: "Its clients' cost this month",
-                value: totalCostWords(cost),
-              },
             ]}
           />
           <Controls rollout={rollout} />
@@ -159,12 +122,7 @@ const RolloutPage = () => {
         {rollout.kind === "secrets" ? (
           <Revocation rolloutId={rollout.id} />
         ) : null}
-        <Targets cost={cost} names={names} rollout={rollout} />
-        <p className="text-muted-foreground">
-          Cost is each client&apos;s for the calendar month so far, estimated as
-          on the client grid and read from its account after the page shows:
-          what the client costs, not what this rollout did.
-        </p>
+        <Targets names={names} rollout={rollout} />
       </div>
     </AdminPage>
   );
