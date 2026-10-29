@@ -117,7 +117,10 @@ const NewChat = ({
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
-            <h1 className="type-display" id="new-chat">
+            <h1
+              className="text-2xl font-medium tracking-tight text-balance"
+              id="new-chat"
+            >
               <Trans>What should we look at today?</Trans>
             </h1>
           </div>
