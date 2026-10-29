@@ -107,6 +107,25 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * What its Workers' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
+   * The version its cores name for their connect instead of its live one
+   * (@grasp-os/shared/provision-probe), as an isolate of an old version
+   * still answering would; null as a connect that doesn't answer, or has
+   * no version metadata.
+   */
+  connectAnswering?: string | null;
+  /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
+  /**
    * Where its Workers redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
    * follows the redirect as fetch does, unless the request says
@@ -127,6 +146,8 @@ export interface AccountState {
         asClient?: string;
         down?: readonly string[];
         clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
       };
   /**
    * The platform update notices its core took, signed with the key its
@@ -184,18 +205,6 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
-  /**
-   * What the analytics API reports for it (`/graphql`): its Workers'
-   * requests and CPU time this month, its AI Gateway's spend, and its
-   * requests and errors over the last day. Unset, it reports nothing.
-   */
-  usage?: {
-    monthRequests: number;
-    monthCpuTimeUs: number;
-    monthAiCost: number;
-    dayRequests: number;
-    dayErrors: number;
-  };
 }
 
 /** A call the fake got. */

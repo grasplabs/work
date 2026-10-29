@@ -22,6 +22,13 @@ import { mailServerScript } from "./mail-server.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
 
+/** Connect's version metadata, as set on connect in the tests. */
+export const connectVersionMetadata = {
+  id: "c0ec7000-0000-4000-8000-000000000001",
+  tag: "",
+  timestamp: "2026-10-29T00:00:00.000Z",
+};
+
 /** Grasp's Entra app for connections, as set on connect in the tests. */
 export const connectClient = clients.microsoft;
 

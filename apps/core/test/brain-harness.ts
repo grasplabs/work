@@ -639,7 +639,10 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
 };
 
 /** Applies the updates of `window`, as the admin who owns the corpus. */
-const applyWindow = async (company: BrainCompany, window: BrainWindow) => {
+export const applyWindow = async (
+  company: BrainCompany,
+  window: BrainWindow
+) => {
   const { admin } = company;
   for (const update of brainUpdates.filter((each) => each.window === window)) {
     const document = held(company.documents, update.document);

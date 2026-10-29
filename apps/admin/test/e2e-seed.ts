@@ -1,7 +1,7 @@
 /**
  * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
  * as the admin's tests make it: its database migrated, its Secrets Store
- * filled as deploy-ops fills it, and a client in ring 0, placed in a
+ * filled with every secret it binds, and a client in ring 0, placed in a
  * dedicated destination of its own on the fake Cloudflare API, provisioned
  * on a release, with a newer release imported to roll out.
  */
@@ -66,10 +66,7 @@ const migrate = async (database: D1Database): Promise<void> => {
 };
 
 /** Puts every secret the admin reads in its store, unless it's there. */
-const fillStore = async (tokens: {
-  deployer: string;
-  tenant: string;
-}): Promise<void> => {
+const fillStore = async (tokens: { deployer: string }): Promise<void> => {
   for (const [binding, value] of adminSecrets(tokens)) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- a few, in order
@@ -94,7 +91,7 @@ const staff = { email: "staff@grasp.test", sub: "" };
  */
 export const seed = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  tokens: { deployer: string; tenant: string }
+  tokens: { deployer: string }
 ): Promise<Seeded> => {
   await migrate(env.DB);
   await fillStore(tokens);
@@ -130,20 +127,25 @@ export interface SeededPlaced {
  */
 export const seedPlaced = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
-  tokens: { deployer: string; tenant: string }
+  tokens: { deployer: string }
 ): Promise<SeededPlaced> => {
   await migrate(env.DB);
   await fillStore(tokens);
   const account = cloudflare.addAccount();
   const destinationId = `dedicated-${crypto.randomUUID().slice(0, 8)}`;
-  await saveDestination(adminDatabase(env.DB), staff, {
-    id: destinationId,
-    kind: "dedicated",
-    accountId: account.id,
-    namespace: null,
-    policies: ["eu-storage"],
-    capabilities: verified({}, evidence),
-  });
+  await saveDestination(
+    adminDatabase(env.DB),
+    staff,
+    {
+      id: destinationId,
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+      policies: ["eu-storage"],
+      capabilities: verified({}, evidence),
+    },
+    "production"
+  );
   const first = await placedRelease("feat(core): what it starts on", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
