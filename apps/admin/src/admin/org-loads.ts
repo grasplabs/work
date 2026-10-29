@@ -105,19 +105,23 @@ const unanswered = (client: GridRow): ClientAdmin => ({
 /**
  * Organization `client`'s page as read: an answer the page has while it
  * is fresh, at once (unless asked anew, `again`); otherwise its core
- * asked now. The frame's read (`admins`) counts once it is in.
+ * asked now, unless only preloaded (undefined: asked once opened). The
+ * frame's read (`admins`) counts once it is in.
  */
 export const readOrganization = async ({
   reads,
   client,
   admins,
   again,
+  preload,
 }: {
   reads: OrgReads;
   client: GridRow;
   admins: Promise<ClientAdmin[] | null>;
   again: boolean;
-}): Promise<{ read: Deferred<OrgRead> }> => {
+  /** Only pointed at, not opened: what the page has, its core never asked. */
+  preload: boolean;
+}): Promise<{ read: Deferred<OrgRead> | undefined }> => {
   if (!again) {
     const framed = await peek(admins);
     const found =
@@ -131,6 +135,11 @@ export const readOrganization = async ({
     if (fresh !== undefined) {
       return { read: { admin: fresh, stale: null } };
     }
+  }
+  // Every read of a core is audited as staff opening the organization:
+  // a link pointed at, or focused, preloads its shell alone.
+  if (preload) {
+    return { read: undefined };
   }
   const read = (async () => {
     let admin: ClientAdmin | null = null;

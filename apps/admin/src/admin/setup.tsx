@@ -508,7 +508,7 @@ const checkSaid: Record<CheckState, string> = {
  * place, in the order it comes. The contract and its agreements are known
  * once core holds them; until then they are not known here.
  */
-const Checklist = ({
+export const Checklist = ({
   clientId,
   setup,
   view,
@@ -831,7 +831,7 @@ const Status = ({
   clientId,
   setup,
   needs,
-  view,
+  checklist,
   quotaPolicy,
   modelSpend,
   hosting,
@@ -841,8 +841,8 @@ const Status = ({
   clientId: string;
   setup: ClientSetup;
   needs: PlatformNeed[];
-  /** What its core answered, worked out; null when it didn't answer. */
-  view: AdminView | null;
+  /** Its checklist, from what its core answers: filled in once that is in. */
+  checklist: ReactNode;
   /** Its quota policy, its core read live; null when it couldn't be read. */
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
@@ -919,14 +919,7 @@ const Status = ({
         )}
       </div>
     </SetupSection>
-    {view === null ? null : (
-      <Checklist
-        clientId={clientId}
-        contractRead={!view.unknown.contract}
-        setup={setup}
-        view={view}
-      />
-    )}
+    {checklist}
   </>
 );
 
@@ -1809,15 +1802,16 @@ const useFollow = (
 
 /**
  * The company's own Grasp, tab by tab: how it stands, its deploys, its
- * account, its releases and its settings. `view` is what its core
- * answered, worked out, for the checklist; null when it didn't answer
- * (being set up, or not reachable), when the rest still shows.
+ * account, its releases and its settings. Its `checklist` comes from
+ * what its core answers, and fills in once that is in (never when it
+ * doesn't answer: being set up, or not reachable), while the rest shows
+ * at once and stays as it is.
  */
 export const OrgSetup = ({
   clientId,
   setup,
   tab,
-  view,
+  checklist,
   quotaPolicy,
   modelSpend,
   releases,
@@ -1826,7 +1820,7 @@ export const OrgSetup = ({
   clientId: string;
   setup: ClientSetup;
   tab: SetupTab;
-  view: AdminView | null;
+  checklist: ReactNode;
   /** Its quota policy, read live and not awaited; null when it couldn't be read. */
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
@@ -1866,9 +1860,9 @@ export const OrgSetup = ({
             modelSpend={modelSpend}
             quotaPolicy={quotaPolicy}
             refresh={refresh}
+            checklist={checklist}
             releases={releases}
             setup={setup}
-            view={view}
           />
         </div>
       </TabsContent>

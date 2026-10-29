@@ -168,7 +168,7 @@ export interface SeededOrganizations {
 
 /**
  * Seeds the admin for the organization sections' journey: every client an
- * earlier seed made offboarded, then one client live on a release and one
+ * earlier seed made offboarded, and its account in the fake gone, then one client live on a release and one
  * only added, as staff leave an organization before its Setup runs.
  */
 export const seedOrganizations = async (
@@ -181,6 +181,9 @@ export const seedOrganizations = async (
     .update(clients)
     .set({ status: "offboarded" })
     .where(ne(clients.status, "offboarded"));
+  // Each of these journeys seeds anew: the accounts earlier ones made, all
+  // offboarded now, go, so the fake's few databases are free again.
+  cloudflare.reset();
   const release = await placedRelease("feat(core): the sections", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",

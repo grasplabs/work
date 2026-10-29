@@ -62,12 +62,19 @@ import {
   PanelLeftOpenIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { createContext, Fragment, use, useState } from "react";
+import {
+  createContext,
+  Fragment,
+  Suspense,
+  use,
+  useEffect,
+  useState,
+} from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
+import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
 import { AdminHeader, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
@@ -80,7 +87,8 @@ import {
   sourceNames,
 } from "./sections.ts";
 import type { OrgSection, Origin } from "./sections.ts";
-import { Ago } from "./settled.tsx";
+import { Ago, useSettled } from "./settled.tsx";
+import type { Deferred } from "./settled.tsx";
 import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
 import { formatDate, formatList, stageLines } from "./words.ts";
 
@@ -92,12 +100,20 @@ export interface AnsweredOrganization {
 
 const OrganizationContext = createContext<AnsweredOrganization | null>(null);
 
+/** What the page read of its organization's core, or will: undefined until it is asked. */
+const OrgReadContext = createContext<Deferred<OrgRead> | undefined>(undefined);
+
+/** Never settles: what a part waits on while its organization's core isn't asked yet. */
+// Never resolved: asked once the page is opened, which loads it anew.
+const { promise: notAsked } = Promise.withResolvers<never>();
+
 /**
- * The organization a section is of when its core answered; null on the
- * page of one that didn't, where only its Setup shows.
+ * What the page read of its organization's core, once it is in: the
+ * part that asks waits under its own Suspense until then, and the rest
+ * of the page, a Setup being typed in included, stays as it is.
  */
-export const useAnsweredOrganization = (): AnsweredOrganization | null =>
-  use(OrganizationContext);
+export const useOrgRead = (): OrgRead =>
+  useSettled(use(OrgReadContext) ?? notAsked);
 
 /** The organization a section is of: only ever rendered under its page. */
 export const useOrganization = (): AnsweredOrganization => {
@@ -317,11 +333,13 @@ const InterviewDay = ({ view }: { view: AdminView }) => {
  * on top, then every section in its groups, and once the team is told,
  * the day its interviews are on. Folded, a rail of the sections' icons.
  */
-const OrgColumn = ({
+const ColumnLayout = ({
   name,
   clientId,
   view,
   reading,
+  folded,
+  setFolded,
 }: {
   name: string;
   clientId: string;
@@ -329,8 +347,9 @@ const OrgColumn = ({
   view: AdminView | null;
   /** Its core's answer isn't in yet. */
   reading: boolean;
+  folded: boolean;
+  setFolded: (folded: boolean) => void;
 }) => {
-  const [folded, setFolded] = useState(false);
   const waiting = new Set(view?.needs.map(needSection));
 
   if (folded) {
@@ -411,6 +430,35 @@ const OrgColumn = ({
       </div>
       {view?.told === true ? <InterviewDay view={view} /> : null}
     </nav>
+  );
+};
+
+/** The column once its core's answer is in. */
+const SettledColumn = (props: {
+  name: string;
+  clientId: string;
+  folded: boolean;
+  setFolded: (folded: boolean) => void;
+}) => {
+  const { admin } = useOrgRead();
+  return (
+    <ColumnLayout
+      {...props}
+      reading={false}
+      view={organizationOf(admin).view}
+    />
+  );
+};
+
+/** The column: every section at once, what waits where once its core answered. */
+const OrgColumn = ({ name, clientId }: { name: string; clientId: string }) => {
+  // Kept here, above what fills in, so the column stays as it was left.
+  const [folded, setFolded] = useState(false);
+  const column = { name, clientId, folded, setFolded };
+  return (
+    <Suspense fallback={<ColumnLayout {...column} reading view={null} />}>
+      <SettledColumn {...column} />
+    </Suspense>
   );
 };
 
@@ -638,78 +686,131 @@ const AnsweredSection = ({
   </OrganizationContext>
 );
 
+/** Where the section is: its own content once its core answered, else why it isn't read. */
+const SectionGate = ({ section }: { section: OrgSection }) => {
+  const { admin } = useOrgRead();
+  const { view } = organizationOf(admin);
+  if (admin.state === "answered" && view !== null) {
+    return <AnsweredSection organization={{ admin, view }} />;
+  }
+  return admin.state === "answered" ? (
+    <SectionLoading />
+  ) : (
+    <UnreadSection admin={admin} section={section} />
+  );
+};
+
+/** The overview's line under its name: what the company is, or why nothing of it is read. */
+const OverviewAbout = () => {
+  const { admin } = useOrgRead();
+  const { view } = organizationOf(admin);
+  let about = "";
+  if (view !== null) {
+    about = aboutOf(view);
+  } else if (admin.state !== "answered") {
+    about = unreadWhy(admin);
+  }
+  return about === "" ? null : (
+    <p className="text-muted-foreground text-sm">{about}</p>
+  );
+};
+
+/** Where a section's figures come from, and when they were read, once its core answered. */
+const ReadNotes = ({ section }: { section: OrgSection }) => {
+  const read = useOrgRead();
+  const { admin } = read;
+  if (admin.state !== "answered") {
+    return null;
+  }
+  return (
+    <>
+      <SourceNote
+        origins={
+          originsOf(
+            admin.snapshot,
+            admin.billing.state === "read",
+            admin.proposal.state === "read",
+            admin.crm.state === "read"
+          )[section]
+        }
+      />
+      <ReadNote read={{ ...read, admin }} />
+    </>
+  );
+};
+
+/**
+ * Keeps the answer the page shows in its router's reads: one read on the
+ * server, for the page this tab opened on, too; read again and not
+ * answering, the page keeps it.
+ */
+const KeepRead = ({ reads }: { reads: OrgReads }) => {
+  const { admin } = useOrgRead();
+  useEffect(() => {
+    reads.remember(admin);
+  }, [reads, admin]);
+  return null;
+};
+
 /**
  * One organization's page: its column of sections and the section it is
- * on, shown at once from what the admin recorded (`client`). A section
- * is shown only once its core answered (`read`, null while it is read),
- * under it; until then, only one that shows without it (its Setup) is,
- * and in every other's place the page holds its place while it is read,
- * or says why it isn't read and what to do.
+ * on, shown at once from what the admin recorded (`client`). What its
+ * core answers (`read`; undefined until it is asked) fills in the parts
+ * that need it, each in its own place, so the rest of the page stays as
+ * it is while it comes: a Setup being typed in keeps what was typed. A
+ * section is shown only once its core answered, under it; until then,
+ * only one that shows without it (its Setup) is, and in every other's
+ * place the page holds its place while it is read, or says why it isn't
+ * read and what to do.
  */
 export const OrganizationPage = ({
   client,
   read,
+  reads,
 }: {
   client: GridRow;
-  read: OrgRead | null;
+  read: Deferred<OrgRead> | undefined;
+  reads: OrgReads;
 }) => {
-  const admin = read?.admin ?? null;
-  const view = admin === null ? null : organizationOf(admin).view;
   const { id: clientId, name } = client;
   const { section, withoutCore } = useShownSection();
   const { title, about } = sectionWords[section];
-  const unread = admin !== null && admin.state !== "answered" ? admin : null;
-  let description = about;
-  if (section === "overview") {
-    description = unread === null ? "" : unreadWhy(unread);
-    description = view === null ? description : aboutOf(view);
-  }
-  let shown = <SectionLoading />;
-  if (read !== null && read.admin.state === "answered" && view !== null) {
-    shown = <AnsweredSection organization={{ admin: read.admin, view }} />;
-  } else if (withoutCore) {
-    shown = <Outlet />;
-  } else if (unread !== null) {
-    shown = <UnreadSection admin={unread} section={section} />;
-  }
   return (
-    <>
+    <OrgReadContext value={read}>
       <AdminHeader page={name} />
+      <Suspense fallback={null}>
+        <KeepRead reads={reads} />
+      </Suspense>
       <div className="flex min-h-0 flex-1 text-sm">
-        <OrgColumn
-          clientId={clientId}
-          name={name}
-          reading={read === null}
-          view={view}
-        />
+        <OrgColumn clientId={clientId} name={name} />
         <div className="relative min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
             <SectionSelect clientId={clientId} section={section} />
             <PageHeading
-              description={description}
+              description={section === "overview" ? undefined : about}
               title={section === "overview" ? name : title}
             >
-              {read !== null && read.admin.state === "answered" ? (
-                <>
-                  <SourceNote
-                    origins={
-                      originsOf(
-                        read.admin.snapshot,
-                        read.admin.billing.state === "read",
-                        read.admin.proposal.state === "read",
-                        read.admin.crm.state === "read"
-                      )[section]
-                    }
-                  />
-                  <ReadNote read={{ ...read, admin: read.admin }} />
-                </>
+              {section === "overview" ? (
+                <Suspense fallback={null}>
+                  <OverviewAbout />
+                </Suspense>
               ) : null}
+              <Suspense fallback={null}>
+                <ReadNotes section={section} />
+              </Suspense>
             </PageHeading>
-            {shown}
+            {withoutCore ? (
+              // Shown at once, and never swapped for anything as the answer comes.
+              <Outlet />
+            ) : (
+              <Suspense fallback={<SectionLoading />}>
+                <SectionGate section={section} />
+              </Suspense>
+            )}
           </div>
         </div>
       </div>
-    </>
+    </OrgReadContext>
   );
 };
 

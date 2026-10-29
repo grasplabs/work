@@ -12,15 +12,54 @@ import { use, useDeferredValue, useEffect, useState } from "react";
 export type Deferred<T> = T | Promise<T>;
 
 /**
+ * A promise of `value` that is already settled, marked as React marks
+ * one it has read (`status`, `value`), so `use` returns it without
+ * suspending. Not an async function: that would hand back a new
+ * promise, without the marks.
+ */
+// oxlint-disable-next-line typescript/promise-function-async -- see above
+const settledThenable = <T,>(value: T): Promise<T> =>
+  Object.assign(Promise.resolve(value), { status: "fulfilled", value });
+
+/** Each value already in, as its settled promise: the same one every render. */
+const settledThenables = new WeakMap<object, Promise<unknown>>();
+const settledNull = settledThenable(null);
+
+/** `value` as a promise: itself when it is one, else settled already. */
+// oxlint-disable-next-line typescript/promise-function-async -- it returns the promise it is given, unwrapped
+const thenableOf = <T,>(value: Deferred<T>): Promise<T> => {
+  if (value instanceof Promise) {
+    return value;
+  }
+  if (value === null) {
+    // SAFETY: `value` is null, so a promise of null is a promise of `T`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return settledNull as Promise<T>;
+  }
+  if (typeof value !== "object") {
+    return settledThenable(value);
+  }
+  const held = settledThenables.get(value);
+  if (held !== undefined) {
+    // SAFETY: held for `value` alone, as a promise of it.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return held as Promise<T>;
+  }
+  const made = settledThenable(value);
+  settledThenables.set(value, made);
+  return made;
+};
+
+/**
  * `value` once it settles: the component suspends until it first does,
  * and later, while a new one is read, shows the one it had. Rendered
  * keyed by what it is of (an organization), so another one's never
- * shows in its place.
+ * shows in its place. `use` is called on every render, for a value as
+ * for a promise: React requires a component to call it the same way
+ * each time.
  */
-export const useSettled = <T,>(value: Deferred<T>): T => {
-  const shown = useDeferredValue(value);
-  return shown instanceof Promise ? use(shown) : shown;
-};
+export const useSettled = <T,>(value: Deferred<T>): T =>
+  use(useDeferredValue(thenableOf(value)));
 
 /** How often the words of an `Ago` are worked out again. */
 const agoEveryMs = 30_000;
