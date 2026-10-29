@@ -110,8 +110,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
-  model_spend_undecided:
-    "Model spend isn't decided yet (GRA-141): provisioning stops here. Core binds Workers AI, and a placed client gets no model spend until a spend ceiling and the shared AI Gateway are set. Resume once they are.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",
   wfp_schedule_unqualified:

@@ -54,16 +54,19 @@
  * fencing: a call already in flight can still land, and the runner that
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
+ * Model spend (GRA-141): core reaches models through an AI Gateway in the
+ * destination's account (`modelGatewayOf`): the client's own in a
+ * dedicated account, the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), ensured with the client's resources.
+ * Its core's model gateway holds every client to its monthly ceiling, the
+ * deployment budget its vars carry (src/deploy/core-vars.ts
+ * `withSpendCeiling`), so no client has unbounded spend on the account.
+ *
  * Not here, on purpose:
  * - A probe of an owned workflow's run: core's probe asks its identity,
  *   every private binding of core and connect (databases, buckets,
  *   Durable Object namespaces, the sandbox with a fresh isolate's answer,
  *   connect) and both clocks, but starts no workflow.
- * - The model-spend admission ceiling (40.5) waits for a product decision
- *   (GRA-141), and the shared AI Gateway reference for a destination (37.5)
- *   isn't recorded yet. Until both exist, a release whose Worker binds
- *   Workers AI is refused (`model_spend_undecided`) rather than given
- *   unbounded spend on the destination's account.
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
@@ -83,9 +86,11 @@
  * fingerprints.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
+  placedModelGateway,
   platformWorkerName,
   adminHost,
   stageOfNamespace,
@@ -116,7 +121,7 @@ import type { StaffAlert } from "../alerts.ts";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
-import { findD1Database } from "../cloudflare/accounts.ts";
+import { ensureAiGateway, findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -145,6 +150,7 @@ import {
   incompatibility,
 } from "../deploy/compatibility.ts";
 import {
+  clientGatewayId,
   clientMailDomain,
   clientRuntimeProfile,
   derivedCoreConfig,
@@ -229,11 +235,6 @@ export const provisionOperationErrorCodes = [
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
   "unknown_worker",
-  /**
-   * A Worker binds Workers AI: no model spend until a ceiling is configured
-   * (GRA-141) and the destination's shared gateway is recorded (spec 37.5).
-   */
-  "model_spend_undecided",
   /** A binding kind Workers for Platforms doesn't document for user Workers. */
   "wfp_binding_unqualified",
   /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
@@ -457,8 +458,9 @@ const appSchema = z.enum(apps);
 
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
- * Workers: D1, R2 and Durable Objects (configuration/bindings), and
- * static assets (configuration/static-assets), and what the GRA-430 run
+ * Workers: D1, R2, Durable Objects and Workers AI
+ * (configuration/bindings), and static assets
+ * (configuration/static-assets), and what the GRA-430 run
  * on a real namespace (28 Oct) qualified: the Worker Loader, version
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
@@ -467,6 +469,7 @@ const appSchema = z.enum(apps);
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
+  "ai",
   "d1",
   "r2_bucket",
   "durable_object_namespace",
@@ -1382,18 +1385,10 @@ const targetOf = (
 
 /**
  * Throws unless the destination can run `worker` as the release declares
- * it: no Workers AI anywhere (`model_spend_undecided`, until GRA-141
- * decides model spend), and in a Workers for Platforms namespace only
- * documented bindings and no cron triggers.
+ * it: in a Workers for Platforms namespace only documented bindings and
+ * no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
-  const ai = worker.bindings.find(({ type }) => type === "ai");
-  if (ai !== undefined) {
-    throw new ProvisionOperationError(
-      "model_spend_undecided",
-      `${worker.name}'s ${ai.name} binds Workers AI, but no spend ceiling or shared gateway is configured for placed clients`
-    );
-  }
   if (loaded.destination.kind !== "workers_for_platforms") {
     return;
   }
@@ -1424,17 +1419,40 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 };
 
 /**
- * Core's vars: its derived sign-in and runtime profile, the client's
- * settings, and the change core records. No `MODEL_GATEWAY`: a placed
- * client's gateway is the destination's shared one (spec 37.5), which
- * isn't recorded yet, and no Worker of a placed client binds Workers AI
- * (`assertRunnable`).
+ * The AI Gateway `loaded`'s core reaches models through, in its
+ * destination's account: the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), the client's own in a dedicated one.
+ */
+const modelGatewayOf = (loaded: Loaded): string => {
+  if (loaded.destination.kind !== "workers_for_platforms") {
+    return clientGatewayId;
+  }
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  if (stage === undefined) {
+    throw new ProvisionOperationError(
+      "stage_unset",
+      "This admin's STAGE is neither staging nor production: it runs no operation"
+    );
+  }
+  return placedModelGateway(stage);
+};
+
+/** Whether any of the release's Workers binds Workers AI. */
+const bindsModels = (manifest: ReleaseManifest): boolean =>
+  Object.values(manifest.workers).some((worker) =>
+    worker.bindings.some(({ type }) => type === "ai")
+  );
+
+/**
+ * Core's vars: its derived sign-in, runtime profile and model gateway
+ * (`modelGatewayOf`), the client's settings, its monthly model spend
+ * ceiling as the gateway's budget, and the change core records.
  */
 const coreVarsOf = async (
   context: ProvisionContext,
   loaded: Loaded
 ): Promise<Record<string, unknown>> => {
-  const { MODEL_GATEWAY: _gateway, ...derived } = derivedCoreConfig({
+  const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
     domain: context.router.domain,
@@ -1446,7 +1464,13 @@ const coreVarsOf = async (
   return await configuredCoreVars(
     context.db,
     loaded.held.clientId,
-    derived,
+    {
+      ...derived,
+      MODEL_GATEWAY: {
+        gateway: modelGatewayOf(loaded),
+        models: defaultGatewayModels,
+      },
+    },
     {
       by: loaded.operation.startedBy,
       // What started it: a release, or new settings or secrets on the
@@ -2711,6 +2735,11 @@ const runOperation = async (
       runId: held.runId,
       record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
     });
+    // Before core goes live naming it: the gateway its model calls take.
+    if (bindsModels(loaded.manifest)) {
+      await assertHolds(db, held);
+      await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
+    }
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";

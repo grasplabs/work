@@ -4,6 +4,7 @@ import { useAnsweredOrganization } from "../../../admin/organization.tsx";
 import { OrgSetup, setupTabs } from "../../../admin/setup.tsx";
 import type { SetupTab } from "../../../admin/setup.tsx";
 import {
+  fetchClientModelSpend,
   fetchClientQuotaPolicy,
   fetchClientSetup,
 } from "../../../clients/functions.ts";
@@ -13,7 +14,8 @@ import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
   const { clientId } = Route.useParams();
-  const { setup, releases, hosting, quotaPolicy } = Route.useLoaderData();
+  const { setup, releases, hosting, quotaPolicy, modelSpend } =
+    Route.useLoaderData();
   const { tab = "status" } = Route.useSearch();
   // Shown whether or not its core answered: being set up, it has none yet.
   const organization = useAnsweredOrganization();
@@ -21,6 +23,7 @@ const Setup = () => {
     <OrgSetup
       clientId={clientId}
       hosting={hosting}
+      modelSpend={modelSpend}
       quotaPolicy={quotaPolicy}
       releases={releases}
       setup={setup}
@@ -55,6 +58,15 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
         return null;
       }
     })();
+    const modelSpend = (async () => {
+      try {
+        return await fetchClientModelSpend({
+          data: { clientId: params.clientId },
+        });
+      } catch {
+        return null;
+      }
+    })();
     const [setup, { releases }, hosting] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
@@ -65,7 +77,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     if (setup === null) {
       throw notFound();
     }
-    return { setup, releases, hosting, quotaPolicy };
+    return { setup, releases, hosting, quotaPolicy, modelSpend };
   },
   component: Setup,
 });
