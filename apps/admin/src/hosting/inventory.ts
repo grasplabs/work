@@ -15,9 +15,14 @@
  * (src/deploy/), which doesn't read it yet: the real-account qualification
  * comes first.
  */
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
-import { toHex } from "@grasp-os/shared/encoding";
+import {
+  clientResourceName,
+  clientsNamespace,
+  deploymentIdAlphabet,
+  deploymentIdLength,
+} from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
@@ -54,6 +59,8 @@ export const inventoryErrorCodes = [
   "destination_unknown",
   /** The destination doesn't satisfy the policy, or doesn't serve it. */
   "placement_refused",
+  /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
+  "destination_other_stage",
   /**
    * The client is placed elsewhere or under another policy: moving it is a
    * migration onto new resources, never a relabel.
@@ -73,6 +80,8 @@ export const inventoryErrorCodes = [
   "foreign_resource",
   /** A binding of a kind rendering doesn't map. */
   "unsupported_binding",
+  /** A release resource the client naming scheme doesn't name (@grasp-os/shared/names). */
+  "resource_unnamed",
   /** A binding that would take the Workers' Durable Objects out of the EU-restricted namespace. */
   "durable_object_jurisdiction",
   /** A binding names a placeholder rendering doesn't fill. */
@@ -259,14 +268,27 @@ const evidenceDetail = (
  * client checks them again, so a capability withdrawn here stops the next
  * allocation for every client in it. Evidence must name a subject the
  * admin knows, and every capability's declaration, the unlisted ones as
- * unknown, is kept (`capabilityEvidence`).
+ * unknown, is kept (`capabilityEvidence`). A Workers for Platforms
+ * destination must be in the admin's own `stage`'s clients' namespace
+ * (`destination_other_stage`): a staging admin never records one among
+ * production's clients, nor production's among staging's.
  */
 export const saveDestination = async (
   db: AdminDatabase,
   actor: Actor,
-  input: DestinationInput
+  input: DestinationInput,
+  stage: Stage
 ): Promise<void> => {
   destinationIdSchema.parse(input.id);
+  if (
+    input.kind === "workers_for_platforms" &&
+    input.namespace !== clientsNamespace(stage)
+  ) {
+    throw new InventoryError(
+      "destination_other_stage",
+      `${input.id}'s namespace ${String(input.namespace)} isn't this admin's own, ${clientsNamespace(stage)}`
+    );
+  }
   const policies = z.array(hostingPolicyIdSchema).parse(input.policies);
   const verified = destinationCapabilitiesSchema.parse(input.capabilities);
   await assertSubjectsKnown(db, input.kind, verified);
@@ -372,15 +394,12 @@ export const assertPlaceable = async (
   }
 };
 
-const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
-const DEPLOYMENT_ID_LENGTH = 10;
-
 /** A new deployment id: random, lowercase, never derived from the client. */
 const newDeploymentId = (): string =>
   Array.from(
-    crypto.getRandomValues(new Uint8Array(DEPLOYMENT_ID_LENGTH)),
+    crypto.getRandomValues(new Uint8Array(deploymentIdLength)),
     // 256 is a multiple of 32: no letter is likelier than another.
-    (byte) => BASE32[byte % BASE32.length]
+    (byte) => deploymentIdAlphabet[byte % deploymentIdAlphabet.length]
   ).join("");
 
 export const placementOf = async (
@@ -557,40 +576,31 @@ export const resourceRoles = (
   return [...roles.values()];
 };
 
-/** The longest name Workers, D1 and R2 all take. */
-const MAX_NAME = 63;
-const HASH_LENGTH = 8;
-
 /**
- * The name a resource has in the destination: the deployment id, then the
- * release's name for it, cut and suffixed with a hash of the whole when
- * it would be too long. Never the client's name, never a release's.
+ * The name the resource with role `role` has in the destination, by the
+ * names module (@grasp-os/shared/names): `grasp-<deployment id>-<its
+ * component and purpose>`. Never the client's name, never a release's. A
+ * role it doesn't name stops allocation (`resource_unnamed`).
  */
-export const physicalName = async (
-  deploymentId: string,
-  logicalName: string
-): Promise<string> => {
-  const name = `g${deploymentId}-${logicalName}`;
-  if (name.length <= MAX_NAME) {
-    return name;
+export const physicalName = (deploymentId: string, role: string): string => {
+  const name = clientResourceName(deploymentId, role);
+  if (name === undefined) {
+    throw new InventoryError(
+      "resource_unnamed",
+      `The release's ${role} has no name in the client naming scheme (@grasp-os/shared/names)`
+    );
   }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(name)
-  );
-  const hash = toHex(new Uint8Array(digest)).slice(0, HASH_LENGTH);
-  const kept = name.slice(0, MAX_NAME - HASH_LENGTH - 1).replace(/-+$/u, "");
-  return `${kept}-${hash}`;
+  return name;
 };
 
-const physicalNameOf = async (
+const physicalNameOf = (
   placement: ClientPlacement,
   scripts: ReadonlyMap<string, string>,
   role: Role,
   worker: string | undefined
-): Promise<string> => {
+): string => {
   if (role.kind !== "durable_object_class") {
-    return await physicalName(placement.deploymentId, role.logicalName);
+    return physicalName(placement.deploymentId, role.role);
   }
   // A class is named within its script: one namespace per script and class.
   const script = worker === undefined ? undefined : scripts.get(worker);
@@ -650,8 +660,7 @@ export const allocateClientResources = async (
   for (const worker of Object.values(manifest.workers)) {
     scripts.set(
       worker.name,
-      // oxlint-disable-next-line no-await-in-loop -- core and connect
-      await physicalName(placement.deploymentId, worker.name)
+      physicalName(placement.deploymentId, `worker:${worker.name}`)
     );
   }
   const workerOf = new Map(
@@ -660,30 +669,28 @@ export const allocateClientResources = async (
     )
   );
   const now = new Date();
-  const wanted = await Promise.all(
-    resourceRoles(manifest, jurisdiction).map(
-      async (role): Promise<ClientResource> => ({
-        clientId,
-        role: role.role,
-        kind: role.kind,
-        destinationId: placement.destinationId,
-        physicalName: await physicalNameOf(
-          placement,
-          scripts,
-          role,
-          workerOf.get(role.role)
-        ),
-        providerId: null,
-        createRequestedBy: null,
-        jurisdiction,
-        owner: placement.deploymentId,
-        operationId,
-        lifecycle: role.tombstoned ? "tombstoned" : "allocated",
-        deletedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-    )
+  const wanted = resourceRoles(manifest, jurisdiction).map(
+    (role): ClientResource => ({
+      clientId,
+      role: role.role,
+      kind: role.kind,
+      destinationId: placement.destinationId,
+      physicalName: physicalNameOf(
+        placement,
+        scripts,
+        role,
+        workerOf.get(role.role)
+      ),
+      providerId: null,
+      createRequestedBy: null,
+      jurisdiction,
+      owner: placement.deploymentId,
+      operationId,
+      lifecycle: role.tombstoned ? "tombstoned" : "allocated",
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    })
   );
 
   const before = await clientInventory(db, clientId);
@@ -843,9 +850,10 @@ export interface RenderOptions {
    * A Workers for Platforms namespace: a user Worker can't bind another
    * by a service binding (10143, GRA-430), so each service binding binds
    * the connect gateway instead, its props naming the client's own script
-   * (@grasp-os/shared/connect-gateway, GRA-1217).
+   * (@grasp-os/shared/connect-gateway, GRA-1217): this one, the gateway of
+   * the namespace's stage (@grasp-os/shared/names). Unset elsewhere.
    */
-  connectGateway?: boolean;
+  connectGateway?: string;
 }
 
 /** One of `worker`'s Workers as the destination takes it. */
@@ -869,7 +877,7 @@ export const renderClientWorker = (
   worker: WorkerEntry,
   placement: ClientPlacement,
   inventory: readonly ClientResource[],
-  { connectGateway = false }: RenderOptions = {}
+  { connectGateway }: RenderOptions = {}
 ): RenderedWorker => {
   const byRole = new Map(inventory.map((row) => [row.role, row]));
   const resource = (
@@ -960,7 +968,7 @@ export const renderClientWorker = (
           `worker:${String(binding.service)}`,
           "worker_script"
         ).physicalName;
-        if (!connectGateway) {
+        if (connectGateway === undefined) {
           rendered.service = script;
           break;
         }
@@ -976,7 +984,7 @@ export const renderClientWorker = (
         return {
           type: "service",
           name: binding.name,
-          service: connectGatewayScript,
+          service: connectGateway,
           props: { script } satisfies ConnectGatewayProps,
         };
       }
