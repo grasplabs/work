@@ -90,10 +90,10 @@ export const asStepError = (error: unknown): Error => {
 
 /** `task` as a step runs it, its failures as `asStepError` makes them. */
 export const guarded =
-  <T>(task: () => Promise<T>) =>
-  async (): Promise<T> => {
+  <T, Args extends unknown[]>(task: (...args: Args) => Promise<T>) =>
+  async (...args: Args): Promise<T> => {
     try {
-      return await task();
+      return await task(...args);
     } catch (error) {
       throw asStepError(error);
     }
