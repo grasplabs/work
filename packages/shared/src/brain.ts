@@ -196,6 +196,17 @@ export interface Source {
    * `brain.transcript` read.
    */
   transcript?: Transcript;
+  /**
+   * An admin may take it out of the brain (`brain.forget`): one of the
+   * brain's own records. The onboarding's sources and Knowledge's
+   * documents leave the brain their own way.
+   */
+  forgettable?: true;
+  /**
+   * When (ISO date) it was taken out of the brain: it keeps only its id,
+   * kind and day, so what still names it can say its source was removed.
+   */
+  removedAt?: string;
 }
 
 /** What a statement is about. */
@@ -371,6 +382,36 @@ export interface Workspace {
   policies: PolicyDocument[];
 }
 
+/** Most statements one call takes out of the brain. */
+export const brainForgetMaxStatements = 50;
+
+/**
+ * What is taken out of the brain: a whole source, with everything said
+ * in it, or some things that were said.
+ */
+export const brainForgetTargetSchema = z.union([
+  z.strictObject({ source: sourceIdSchema }),
+  z.strictObject({
+    statements: z.array(sourceIdSchema).min(1).max(brainForgetMaxStatements),
+  }),
+]);
+export type BrainForgetTarget = z.infer<typeof brainForgetTargetSchema>;
+
+/**
+ * What taking a source or statements out of the brain takes with it, as
+ * it stands now (`brain.forgetPreview`): what `brain.forget` would take,
+ * by id. The notes resting only on it are what the brain, built without
+ * those statements, no longer has.
+ */
+export interface BrainForgetPreview {
+  /** The source that goes, if one does; null for statements alone, or one gone already. */
+  source: string | null;
+  /** The statements that go. */
+  statements: string[];
+  /** The workflows whose numbers rest on the source: they keep them, and say their source was removed. */
+  workflows: string[];
+}
+
 /**
  * The brain's workspace, assembled by core from what it holds: the
  * onboarding, the brain's records and the connections. Each part as the
@@ -413,6 +454,18 @@ export interface BrainApi {
    * staff.
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /**
+   * What taking a source or statements out of the brain takes with it,
+   * nothing taken yet: for the company's admins.
+   */
+  forgetPreview: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
+  /**
+   * Takes a source, with everything said in it, or statements out of the
+   * brain, for good, audited without what they said: for the company's
+   * admins. Taking out again what is gone takes nothing; returns what it
+   * took.
+   */
+  forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
   /** Closes an open gap without an answer: for the company's admins. */
   closeGap: (gapId: string) => Promise<Gap>;
   /**
@@ -425,6 +478,8 @@ export interface BrainApi {
 /** Why a brain call was refused. */
 export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
+  "brain.forget_missing":
+    "The brain holds no such source or statement to take out.",
 });
 
 /**

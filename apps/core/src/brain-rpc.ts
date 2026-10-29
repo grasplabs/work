@@ -2,6 +2,7 @@ import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
   BrainChangePage,
+  BrainForgetPreview,
   BrainNotePage,
   Company,
   Connection,
@@ -33,6 +34,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
+import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
   askAboutGap,
@@ -982,7 +984,8 @@ export const readBrain = async (
  * as the Knowledge read that listing is; the rest reads nothing from
  * Knowledge. Opening a source's transcript is audited as that one read
  * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
- * (brain-changes.ts). Adding records is, with the records it added.
+ * (brain-changes.ts). Adding records is, with the records it added;
+ * taking them out is, by each record's key (brain-forget.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -1045,6 +1048,20 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           records,
           async () => await onboardingHeld(this.#env)
         )
+    );
+  }
+
+  async forgetPreview(target: unknown): Promise<BrainForgetPreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await forgetPreview(this.#env, person, target)
+    );
+  }
+
+  async forget(target: unknown): Promise<BrainForgetPreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await forget(this.#env, person, target)
     );
   }
 

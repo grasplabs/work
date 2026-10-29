@@ -163,6 +163,8 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         step: 2,
         interviewee: "stakeholder",
         teamIds: ["team-finance"],
+        // One of the brain's own records: an admin may take it out.
+        forgettable: true,
       },
       tool: {
         id: ids.tool,

@@ -1,4 +1,4 @@
-import type { Source, Workspace } from "@grasp-os/shared/brain";
+import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
@@ -13,7 +13,12 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -46,6 +51,7 @@ import {
   splitTimeline,
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
+import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
 import { placeOf } from "../brain/transcript.ts";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
@@ -124,11 +130,13 @@ const SourceTabs = ({
   source,
   statements,
   activeId,
+  onRemove,
   children,
 }: {
   source: TranscribedSource;
   statements: Workspace["statements"];
   activeId: string | undefined;
+  onRemove: ((statement: Statement) => void) | undefined;
   children: ReactNode;
 }) => {
   const [tab, setTab] = useState("transcript");
@@ -170,6 +178,7 @@ const SourceTabs = ({
           {/* The transcript stays mounted behind the summary, so its tools only take the row while it shows. */}
           <TranscriptView
             activeId={activeId}
+            onRemove={onRemove}
             source={source}
             statements={statements}
             toolbarIn={tab === "transcript" ? toolbar : null}
@@ -555,11 +564,15 @@ const ExportButton = ({
 const NoteToolbar = ({
   note,
   source,
+  onForget,
 }: {
   note: Note;
   source: Source | undefined;
+  /** Takes the source out of the brain, for whoever may. */
+  onForget?: (() => void) | undefined;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
+  const { title } = note;
   return (
     // The row wraps when there is no room for both sides, so nothing runs off the page.
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -589,6 +602,12 @@ const NoteToolbar = ({
           <Trans>Show in the brain</Trans>
         </Button>
         <ExportButton note={note} source={source} />
+        {onForget === undefined ? null : (
+          <ForgetButton
+            label={t`Remove ${title} from the brain`}
+            onClick={onForget}
+          />
+        )}
       </div>
     </div>
   );
@@ -664,6 +683,7 @@ const NoteBody = ({
   transcribed,
   statements,
   activeId,
+  onRemove,
 }: {
   note: Note;
   workspace: Workspace;
@@ -671,6 +691,8 @@ const NoteBody = ({
   transcribed: TranscribedSource | undefined;
   statements: StatementRow[];
   activeId: string | undefined;
+  /** Takes one thing that was said out of the brain, for whoever may. */
+  onRemove: ((statement: Statement) => void) | undefined;
 }) => {
   const nameable = nameableFrom(note, byId);
   const article = (
@@ -691,6 +713,7 @@ const NoteBody = ({
     return (
       <TranscriptView
         activeId={activeId}
+        onRemove={onRemove}
         source={transcribed}
         statements={workspace.statements}
       />
@@ -700,6 +723,7 @@ const NoteBody = ({
     return (
       <SourceTabs
         activeId={activeId}
+        onRemove={onRemove}
         source={transcribed}
         statements={workspace.statements}
       >
@@ -723,6 +747,7 @@ const NoteBody = ({
         <StatementsByKind
           activeId={activeId}
           kern={kernOf(note.id, statements)}
+          onRemove={onRemove}
           rows={statements}
         />
       ) : null}
@@ -743,9 +768,29 @@ const NoteContent = ({
   hash: string;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
+  const canForget = useCanForget();
+  // Once a source is gone its page is too: back to the brain. One thing said goes and the page stays.
+  const forget = useForget((target) => {
+    if ("source" in target) {
+      void navigate({ to: "/brain" });
+    }
+  });
   const source = workspace.sources.find(
     (candidate) => candidate.id === note.id
   );
+  const onRemove = canForget
+    ? (statement: Statement) => {
+        forget.ask({ statements: [statement.id] }, t`what was said`);
+      }
+    : undefined;
+  const { title } = note;
+  const onForget =
+    canForget && source?.forgettable === true
+      ? () => {
+          forget.ask({ source: note.id }, title);
+        }
+      : undefined;
   const transcribed: TranscribedSource | undefined =
     source?.transcript === undefined
       ? undefined
@@ -776,6 +821,7 @@ const NoteContent = ({
             content: (
               <TranscriptRail
                 activeId={activeId}
+                onRemove={onRemove}
                 source={transcribed}
                 statements={workspace.statements}
               />
@@ -816,16 +862,18 @@ const NoteContent = ({
         />
       }
       tabs={tabs}
-      toolbar={<NoteToolbar note={note} source={source} />}
+      toolbar={<NoteToolbar note={note} onForget={onForget} source={source} />}
     >
       <NoteBody
         activeId={activeId}
         byId={byId}
         note={note}
+        onRemove={onRemove}
         statements={statements}
         transcribed={transcribed}
         workspace={workspace}
       />
+      {forget.element}
     </NoteArticle>
   );
 };

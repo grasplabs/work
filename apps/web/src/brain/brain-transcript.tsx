@@ -29,6 +29,7 @@ import {
   HighlighterIcon,
   SearchIcon,
   SlidersHorizontalIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -101,13 +102,16 @@ const TurnText = ({
   hits,
   length,
   current,
+  onRemove,
 }: {
   text: string;
   highlights: Highlight[];
   hits: { start: number; index: number }[];
   length: number;
   current: number;
+  onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
+  const { t } = useLingui();
   const parts = turnParts(text, highlights, hits, length);
   return (
     <>
@@ -124,6 +128,8 @@ const TurnText = ({
         if (!part.statement) {
           return <span key={index}>{body}</span>;
         }
+        const { statement } = part;
+        const closes = parts[index + 1]?.statement !== statement;
         return (
           <span
             className={`scroll-mt-24 box-decoration-clone py-0.5 ${tintClass("statement")} ${opens ? "rounded-l-sm pl-1" : ""} ${parts[index + 1]?.statement === part.statement ? "" : "rounded-r-sm pr-1"}`}
@@ -136,6 +142,21 @@ const TurnText = ({
               </span>
             ) : null}
             {body}
+            {/* At the end of what was marked: the way to take it out of the brain. */}
+            {onRemove !== undefined && closes ? (
+              <Button
+                aria-label={t`Remove this from the brain`}
+                className="ml-1 align-middle"
+                onClick={() => {
+                  onRemove(statement);
+                }}
+                size="icon-xs"
+                title={t`Remove from the brain`}
+                variant="ghost"
+              >
+                <Trash2Icon />
+              </Button>
+            ) : null}
           </span>
         );
       })}
@@ -276,10 +297,13 @@ export const TranscriptView = ({
   statements,
   activeId,
   toolbarIn,
+  onRemove,
 }: {
   source: TranscribedSource;
   statements: Statement[];
   activeId?: string | undefined;
+  /** Takes one marked passage out of the brain, for whoever may. */
+  onRemove?: ((statement: Statement) => void) | undefined;
   /**
    * Where the search and filter go when the page has a row for them, such as beside its tabs. Null
    * while that row is not there yet; left out, they sit above the transcript.
@@ -488,6 +512,7 @@ export const TranscriptView = ({
                     highlights={own}
                     hits={turnHits}
                     length={needleLength}
+                    onRemove={onRemove}
                     text={turn.text}
                   />
                 </p>
@@ -594,11 +619,15 @@ export const TranscriptRail = ({
   source,
   statements,
   activeId,
+  onRemove,
 }: {
   source: TranscribedSource;
   statements: Statement[];
   activeId?: string | undefined;
+  /** Takes one thing that was said out of the brain, for whoever may. */
+  onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
+  const { t } = useLingui();
   const { chapters, turns } = source.transcript;
   const isDocument = source.transcript.unit === "passage";
   const label = (at: string): string =>
@@ -671,32 +700,50 @@ export const TranscriptRail = ({
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               {highlights.map((highlight) => (
-                <Link
-                  className={
-                    highlight.statement.id === activeId
-                      ? "border-foreground bg-background flex flex-col gap-1 rounded-lg border px-2.5 py-2"
-                      : "bg-background hover:border-foreground/40 flex flex-col gap-1 rounded-lg border px-2.5 py-2"
-                  }
-                  hash={highlight.statement.id}
-                  hashScrollIntoView={false}
+                <div
+                  className="relative flex flex-col"
                   key={highlight.statement.id}
-                  params={{ noteId: source.id }}
-                  to="/brain/$noteId"
                 >
-                  <span className="flex items-center justify-between gap-2 text-xs">
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium ${tintClass("statement")}`}
+                  <Link
+                    className={
+                      highlight.statement.id === activeId
+                        ? "border-foreground bg-background flex flex-col gap-1 rounded-lg border px-2.5 py-2"
+                        : "bg-background hover:border-foreground/40 flex flex-col gap-1 rounded-lg border px-2.5 py-2"
+                    }
+                    hash={highlight.statement.id}
+                    hashScrollIntoView={false}
+                    params={{ noteId: source.id }}
+                    to="/brain/$noteId"
+                  >
+                    <span className="flex items-center justify-between gap-2 text-xs">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium ${tintClass("statement")}`}
+                      >
+                        <KindLabel kind={highlight.statement.kind} />
+                      </span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {label(turns[highlight.turn]?.at ?? "")}
+                      </span>
+                    </span>
+                    <span className="line-clamp-2 text-xs leading-5">
+                      {highlight.statement.text}
+                    </span>
+                  </Link>
+                  {onRemove === undefined ? null : (
+                    <Button
+                      aria-label={t`Remove this from the brain`}
+                      className="absolute right-1 bottom-1"
+                      onClick={() => {
+                        onRemove(highlight.statement);
+                      }}
+                      size="icon-xs"
+                      title={t`Remove from the brain`}
+                      variant="ghost"
                     >
-                      <KindLabel kind={highlight.statement.kind} />
-                    </span>
-                    <span className="text-muted-foreground tabular-nums">
-                      {label(turns[highlight.turn]?.at ?? "")}
-                    </span>
-                  </span>
-                  <span className="line-clamp-2 text-xs leading-5">
-                    {highlight.statement.text}
-                  </span>
-                </Link>
+                      <Trash2Icon />
+                    </Button>
+                  )}
+                </div>
               ))}
             </div>
           </div>

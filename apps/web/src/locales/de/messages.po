@@ -72,6 +72,16 @@ msgstr "{0, plural, one {Insgesamt # Paket, ausgeführt in: {targets}} other {In
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# Person} other {# Personen}}"
 
+#. placeholder {0}: effect.statements
+#: src/brain/forget.tsx
+msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
+msgstr "{0, plural, one {# Aussage daraus geht mit.} other {# Aussagen daraus gehen mit.}}"
+
+#. placeholder {0}: effect.workflows.length
+#: src/brain/forget.tsx
+msgid "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
+msgstr "{0, plural, one {# Workflow behält seine Zahlen; sie zeigen dann, dass ihre Quelle entfernt wurde.} other {# Workflows behalten ihre Zahlen; sie zeigen dann, dass ihre Quelle entfernt wurde.}}"
+
 #. placeholder {0}: cited.length
 #: src/chat/sources.tsx
 msgid "{0, plural, one {Based on # source} other {Based on # sources}}"
@@ -3927,6 +3937,7 @@ msgstr "Suche und Filter zurücksetzen"
 msgid "Click to open Usage"
 msgstr "Klicken, um die Nutzung zu öffnen"
 
+#: src/brain/forget.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -6995,6 +7006,10 @@ msgstr "Er hat keine Parameter."
 msgid "It has no steps."
 msgstr "Er hat keine Schritte."
 
+#: src/brain/forget.tsx
+msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
+msgstr "Es ist endgültig weg und lässt sich nicht zurückholen. Das Audit-Protokoll hält fest, dass und von wem es entfernt wurde, nie, was es war."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It is no longer held."
 msgstr "Er wird nicht mehr zurückgehalten."
@@ -7302,6 +7317,7 @@ msgstr "Beide behalten"
 msgid "Keep holding"
 msgstr "Weiter gedrückt halten"
 
+#: src/brain/forget.tsx
 #: src/onboarding/interview-people.tsx
 msgid "Keep it"
 msgstr "Behalten"
@@ -10970,17 +10986,40 @@ msgstr "{file} entfernen"
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Remove {title} from the brain"
+msgstr "{title} aus dem Gehirn entfernen"
+
 #: src/policies/policy-editing.tsx
 msgid "Remove {title}?"
 msgstr "{title} entfernen?"
+
+#: src/brain/forget.tsx
+msgid "Remove {what} from the brain?"
+msgstr "{what} aus dem Gehirn entfernen?"
 
 #: src/policies/policy-editing.tsx
 msgid "Remove condition {position}"
 msgstr "Bedingung {position} entfernen"
 
+#: src/brain/brain-article/kern.tsx
+#: src/brain/brain-transcript.tsx
+#: src/brain/forget.tsx
+msgid "Remove from the brain"
+msgstr "Aus dem Gehirn entfernen"
+
+#: src/brain/forget.tsx
+msgid "Remove it"
+msgstr "Entfernen"
+
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
 msgstr "Ausnahme für {name} entfernen"
+
+#: src/brain/brain-article/kern.tsx
+#: src/brain/brain-transcript.tsx
+msgid "Remove this from the brain"
+msgstr "Dies aus dem Gehirn entfernen"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
@@ -10993,6 +11032,11 @@ msgstr "Entfernt"
 #: src/activity/audit-words.ts
 msgid "Removed a member"
 msgstr "Ein Mitglied entfernt"
+
+#: src/brain/brain.ts
+#: src/brain/forget.tsx
+msgid "Removed from the brain"
+msgstr "Aus dem Gehirn entfernt"
 
 #: src/chat/builds.tsx
 msgid "Removed parameter {name}"
@@ -13835,6 +13879,14 @@ msgstr "Das sind Ihre Domänen. Jede ist ein Teil Ihres Unternehmens, mit ihren 
 msgid "These fields stay reserved with their current meaning: {reserved}."
 msgstr "Diese Felder bleiben mit ihrer jetzigen Bedeutung reserviert: {reserved}."
 
+#: src/brain/forget.tsx
+msgid "These notes rest on nothing else and go too: {named} and {more} more."
+msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named} und {more} weitere."
+
+#: src/brain/forget.tsx
+msgid "These notes rest on nothing else and go too: {named}."
+msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named}."
+
 #: src/engines/store-changes.tsx
 msgid "These releases can never be made current: {releases}."
 msgstr "Diese Releases können nie aktuell gemacht werden: {releases}."
@@ -14195,6 +14247,10 @@ msgstr "Über den eigenen Connector von Grasp, der den Zugriff in Ihrer Installa
 msgid "Time (UTC)"
 msgstr "Uhrzeit (UTC)"
 
+#: src/brain/forget.tsx
+msgid "Time left to undo"
+msgstr "Verbleibende Zeit zum Rückgängigmachen"
+
 #: src/brain/brain.ts
 msgid "Time waster"
 msgstr "Zeitfresser"
@@ -14503,6 +14559,11 @@ msgstr "Lassen Sie unter „Spam“ die Spamfilter für eine Liste zugelassener 
 msgctxt "programme stage"
 msgid "Under way"
 msgstr "Im Gange"
+
+#: src/brain/forget.tsx
+msgctxt "take a removal back before it happens"
+msgid "Undo"
+msgstr "Rückgängig"
 
 #: src/workflows/history-view.tsx
 msgid "Undoing {label}"
@@ -15435,6 +15496,10 @@ msgstr "Was auf Sie wartet, jeweils mit dem nächsten Schritt, und was besser ge
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
 msgstr "Was gehört, geschrieben und verbunden wurde"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "what was said"
+msgstr "das Gesagte"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
