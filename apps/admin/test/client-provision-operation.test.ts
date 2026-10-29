@@ -29,6 +29,7 @@ import {
   releases,
 } from "../src/db/schema.ts";
 import { appliedSchema } from "../src/deploy/compatibility.ts";
+import { deployContext } from "../src/deploy/context.ts";
 import {
   clientMailDomain,
   onboardingSender,
@@ -326,7 +327,7 @@ const failing = async (held: HeldClient): Promise<unknown> => {
 
 /** A core script's upload, wherever it's put. */
 const isCoreUpload = ({ method, path }: ApiCall): boolean =>
-  method === "PUT" && path.endsWith("-grasp-os-core");
+  method === "PUT" && path.endsWith("-core");
 
 /** The code an operation's failure carries, or what it was. */
 const codeFrom = (outcome: unknown): unknown =>
@@ -833,6 +834,36 @@ const attemptEnded = async (
 
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token });
+
+  it.each(["", "Production", "prod", "staging "])(
+    "runs no operation for an admin whose STAGE is %j, before any Cloudflare call",
+    async (stage) => {
+      const manifest = await importRelease("dedicated");
+      const { clientId, held } = await setUp("dedicated", manifest);
+      const before = cloudflare.calls.length;
+
+      // The admin as its deploy left it, its STAGE misconfigured: never
+      // taken for production. Set as a deploy could, past what the
+      // generated types allow.
+      const deployed = { ...env };
+      Reflect.set(deployed, "STAGE", stage);
+      const misconfigured = await deployContext(deployed);
+      const refused = await runClientProvision(misconfigured, held).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      expect({
+        refused: refused instanceof ProvisionOperationError && refused.code,
+        operation: await operationOf(clientId),
+        calls: cloudflare.calls.length - before,
+      }).toMatchObject({
+        refused: "stage_unset",
+        operation: { status: "failed", step: null, error: "stage_unset" },
+        calls: 0,
+      });
+    }
+  );
 
   it("provisions a fresh client end to end, its hostname published last", async () => {
     const manifest = await importRelease("dedicated");
@@ -1899,8 +1930,7 @@ describe("provisioning a placed client", () => {
     // Connect's upload goes unanswered until the test ends.
     const answered = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       async () => {
         await answered.promise;
       }
@@ -2434,8 +2464,7 @@ describe("provisioning a placed client", () => {
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // The first attempt is refused connect's upload, and stops.
     cloudflare.failNext(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       400
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2953,7 +2982,7 @@ describe("provisioning a placed client", () => {
     });
     // Core's upload is refused: connect runs the later release already.
     cloudflare.failNext(
-      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      (call) => call.method === "PUT" && call.path.endsWith("-core"),
       400
     );
     await expect(failing(await attempt(clientId))).resolves.toMatchObject({

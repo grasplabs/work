@@ -7,9 +7,8 @@
  * so the config carries placeholders and this fills them in before
  * `wrangler deploy` (`filledConfig`, ./wrangler-deploy-config.ts); a config
  * with neither, such as the connect gateway's, deploys as it is:
- * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
- *   (deploy-platform does), otherwise from the Cloudflare API, as the
- *   account's only store;
+ * - `"account-secrets-store"`: the account's one store, by the names
+ *   module (`platformSecretsStoreId`);
  * - `"router-hosts-namespace"`: the router's hostname map, which
  *   scripts/cloudflare-account-setup.ts creates as `grasp-router-hosts`
  *   (`-staging` for staging), from the Cloudflare API.
@@ -23,23 +22,34 @@
  * any other deploys its wrangler.jsonc. Arguments are passed on to
  * `wrangler deploy`, such as the admin's `--var`s.
  *
- * The lookups need CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (with
- * Secrets Store and Workers KV read), as the deploy jobs set them.
+ * The lookups need CLOUDFLARE_API_TOKEN (with Secrets Store and Workers KV
+ * read), as the deploy job sets it; the account is the names module's.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { routerHostsName, stageOf } from "@grasp-os/shared/names";
+import {
+  platformAccountId,
+  platformSecretsStoreId,
+  routerHostsName,
+  stageNamed,
+} from "@grasp-os/shared/names";
 
+import { optionalSecrets } from "./optional-secrets.ts";
 import { filledConfig } from "./wrangler-deploy-config.ts";
 
 /**
- * The stage `--stage` names (production unless it says staging), and the
- * arguments for wrangler without it.
+ * The stage `--stage` names (production without it; anything but staging
+ * or production refused, never taken for production), and the arguments
+ * for wrangler without it.
  */
 const stageAt = process.argv.indexOf("--stage");
-const stage = stageOf(stageAt === -1 ? undefined : process.argv[stageAt + 1]);
+const stage =
+  stageAt === -1 ? "production" : stageNamed(process.argv[stageAt + 1]);
+if (stage === undefined) {
+  throw new Error("--stage names staging or production");
+}
 const wranglerArgs = process.argv
   .slice(2)
   .filter(
@@ -49,19 +59,6 @@ const wranglerArgs = process.argv
 const hostsTitle = routerHostsName(stage);
 /** Where the Cloudflare Vite plugin's build says its config is. */
 const buildRedirect = ".wrangler/deploy/config.json";
-/**
- * Secrets a Worker runs without, until someone puts them in the store: the
- * admin's apps' OAuth clients, Stripe, Rooms, Attio and its Discord
- * webhooks (apps/admin/wrangler.jsonc).
- */
-const optionalSecrets: ReadonlySet<string> = new Set([
-  "APP_OAUTH_CLIENTS",
-  "STRIPE_RESTRICTED_KEY",
-  "ROOMS_READ_TOKEN",
-  "ATTIO_READ_KEY",
-  "DISCORD_DIGEST_WEBHOOK",
-  "STAFF_ALERTS_WEBHOOK",
-]);
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -81,7 +78,7 @@ const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 
 /** Every item of the account's list at `list`, page by page. */
 const listAll = async (list: string): Promise<unknown[]> => {
-  const accountId = required("CLOUDFLARE_ACCOUNT_ID");
+  const accountId = platformAccountId;
   const items: unknown[] = [];
   for (let page = 1; ; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
@@ -132,17 +129,9 @@ const onlyId = (ids: string[], expected: string): string => {
   return id;
 };
 
-/** The store id the job gives, else the account's only store's. */
-const storeId = async (): Promise<string> => {
-  const configured = process.env.SECRETS_STORE_ID;
-  if (configured !== undefined && configured !== "") {
-    return configured;
-  }
-  return onlyId(
-    idsOf(await listAll("/secrets_store/stores"), () => true),
-    "one Secrets Store"
-  );
-};
+/** The account's one store. */
+const storeId = async (): Promise<string> =>
+  await Promise.resolve(platformSecretsStoreId);
 
 /** The names of the secrets in store `id`. */
 const storedSecrets = async (id: string): Promise<ReadonlySet<string>> => {

@@ -43,6 +43,7 @@ import {
   buildServer,
   buildWorkflows,
 } from "../src/screens.ts";
+import { claimStore } from "../src/store-owners.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -1630,6 +1631,30 @@ JSON.stringify = (value, ...rest) => {
     ).resolves.toBe("version.store_bound_elsewhere");
     const opened = await openStore(env, first.store);
     await expect(opened.generations(["beta"])).resolves.toStrictEqual({});
+  });
+
+  it("can't be bound to a store a workflow owns, and never touches its tables", async () => {
+    const fixture = await appWith(withTable(notesFiles(), "gamma"));
+    const store = await createStore(env, fixture.owner);
+    await claimStore(env, store, {
+      kind: "workflow",
+      id: crypto.randomUUID(),
+    });
+    await expect(
+      failure(
+        async () =>
+          await sealRelease(env, {
+            app: fixture.app,
+            version: 1,
+            store,
+            by: fixture.owner,
+          })
+      )
+    ).resolves.toBe("version.store_bound_elsewhere");
+    const opened = await openStore(env, store);
+    await expect(opened.generations(["gamma"])).rejects.toThrow(
+      /wasn't handed/u
+    );
   });
 
   it("goes to exactly one of two Apps sealed onto a new store at once, and only its tables", async () => {

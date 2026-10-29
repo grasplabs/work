@@ -19,20 +19,15 @@ import {
   platformWorkerName,
   releasesBucketName,
   storeSecretName,
+  adminHost,
+  clientDomain,
 } from "@grasp-os/shared/names";
 import type { PlatformWorker, Stage } from "@grasp-os/shared/names";
 
-// Strings are matched first, so a `//` or `,}` inside one is kept.
-const COMMENT = /(?<string>"(?:[^"\\]|\\.)*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu;
-const TRAILING_COMMA = /(?<string>"(?:[^"\\]|\\.)*")|,(?=\s*[}\]])/gu;
+import { parseJsonc } from "./jsonc.ts";
 
-const keepStrings = (_match: string, string?: string): string => string ?? "";
-
-/** Wrangler's JSONC: JSON with comments and trailing commas. */
-export const parseJsonc = (text: string): unknown =>
-  JSON.parse(
-    text.replace(COMMENT, keepStrings).replace(TRAILING_COMMA, keepStrings)
-  );
+// Read by the scripts that take a config as JSONC, as they always have.
+export { parseJsonc } from "./jsonc.ts";
 
 /** `value[key]` when value is an object, else undefined. */
 const field = (value: unknown, key: string): unknown =>
@@ -125,6 +120,13 @@ const stageNameErrors = (
     );
   }
   if (worker === "admin") {
+    const vars = field(config, "vars");
+    expect(
+      "vars.CLIENT_DOMAIN",
+      field(vars, "CLIENT_DOMAIN"),
+      clientDomain(stage)
+    );
+    expect("vars.ADMIN_HOST", field(vars, "ADMIN_HOST"), adminHost(stage));
     for (const database of list(field(config, "d1_databases"))) {
       expect(
         "the D1 database",

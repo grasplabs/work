@@ -72,6 +72,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   foreign_resource:
     "A binding would reach a resource that isn't this client's own.",
   unsupported_binding: "The release has a binding the admin doesn't map.",
+  resource_unnamed:
+    "The release has a resource the client naming scheme doesn't name: add it to the names module first.",
   unknown_placeholder:
     "The release names a placeholder the admin doesn't fill.",
   destination_unsupported:
@@ -90,6 +92,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   client_unknown: "There's no such client.",
   destination_other_stage:
     "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
+  stage_unset:
+    "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
   release_undeclared:
     "The release declares nothing of what its code works with.",
