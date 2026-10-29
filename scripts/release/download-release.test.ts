@@ -8,7 +8,14 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -137,12 +144,15 @@ describe("promoting a release from staging's bucket to production's", () => {
     rmSync(dir, { force: true, recursive: true });
   });
 
-  const promote = async (releaseId = manifest.releaseId): Promise<void> => {
-    const fetched = path.join(dir, "fetched");
+  const download = async (out: string, releaseId = manifest.releaseId) =>
     await run(
-      [script("download-release.ts"), "--release", releaseId, "--out", fetched],
+      [script("download-release.ts"), "--release", releaseId, "--out", out],
       envFor(STAGING)
     );
+
+  const promote = async (releaseId = manifest.releaseId): Promise<void> => {
+    const fetched = path.join(dir, "fetched");
+    await download(fetched, releaseId);
     await upload(PRODUCTION, fetched);
   };
 
@@ -162,6 +172,24 @@ describe("promoting a release from staging's bucket to production's", () => {
         limitEvidenceKey(manifest.releaseId),
       ])
     );
+  });
+
+  it("leaves a non-empty directory that isn't a release untouched, and replaces one it downloaded before", async () => {
+    const unrelated = path.join(dir, "notes");
+    mkdirSync(unrelated);
+    writeFileSync(path.join(unrelated, "keep.txt"), "mine");
+    const again = path.join(dir, "again");
+    await download(again);
+    await download(again);
+
+    await expect(download(unrelated)).rejects.toThrow(
+      /isn't a release directory/u
+    );
+    expect({
+      files: readdirSync(unrelated),
+      kept: readFileSync(path.join(unrelated, "keep.txt"), "utf-8"),
+      replaced: readdirSync(again).includes("manifest.json"),
+    }).toStrictEqual({ files: ["keep.txt"], kept: "mine", replaced: true });
   });
 
   it("publishes nothing for a release staging doesn't hold", async () => {

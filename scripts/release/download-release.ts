@@ -14,7 +14,7 @@
  *      R2_SECRET_ACCESS_KEY
  * Usage: vp run release:download --release <id> --out <dir>
  */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
@@ -29,6 +29,8 @@ import {
 import type { Bytes } from "@grasp-os/shared/release";
 import { AwsClient } from "aws4fetch";
 
+import { assertReleaseDir, clearReleaseDir } from "./manifest-lib.ts";
+
 const HTTP_NOT_FOUND = 404;
 
 const { values: args } = parseArgs({
@@ -42,6 +44,9 @@ if (args.release === undefined || args.out === undefined) {
 }
 const releaseId = releaseIdSchema.parse(args.release);
 const outDir = path.resolve(args.out);
+// Before anything is read: a mistyped `--out` (the repo, a home directory)
+// is refused here, never emptied once the manifest arrives.
+assertReleaseDir(outDir);
 
 const requireEnv = (name: string): string => {
   const value = process.env[name];
@@ -91,8 +96,9 @@ if (manifest.releaseId !== releaseId) {
   );
 }
 
-rmSync(outDir, { force: true, recursive: true });
-mkdirSync(outDir, { recursive: true });
+// A release directory as build-release.ts writes one, its marker first, so
+// a later download (or build) may replace it.
+clearReleaseDir(outDir);
 // Keys are content addresses under blobs/ by the time they're read:
 // `verifyReleaseBlobs` refuses any other, so none names a path outside the
 // release directory.
