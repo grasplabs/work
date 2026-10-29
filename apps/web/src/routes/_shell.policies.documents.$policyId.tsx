@@ -32,6 +32,11 @@ import {
   PolicyExcerpt,
   RuleStatusBadge,
 } from "../policies/policy-parts.tsx";
+import {
+  ProposalChoice,
+  ProposalDecided,
+  ReadAgain,
+} from "../policies/policy-proposals.tsx";
 import { effectLabel } from "../policies/policy.ts";
 import type {
   PolicyBook,
@@ -44,28 +49,35 @@ import type {
 // One of the company's policies, as in the prototype
 // (`routes/policies/documents/$policyId.tsx`): while Grasp reads it, the
 // page says so; then each proposed rule waits for a decision, and its
-// published rules are listed. The organization's own admins publish and
-// remove the policy here, and make a rule from one of its passages
-// (policies/policy-editing.tsx). Grasp doesn't read policies yet, so
-// there are no proposals to keep or leave out. A link to a policy that
-// isn't there finds the prototype's state for one.
+// published rules are listed. Core reads an uploaded policy into its
+// proposals (core's policy-reading.ts). The organization's own admins
+// keep or leave out each one, and have a policy read again whose reading
+// failed (policies/policy-proposals.tsx); they publish and remove the
+// policy here, and make a rule from one of its passages
+// (policies/policy-editing.tsx). A link to a policy that isn't there
+// finds the prototype's state for one.
 
 const readingProblem: Record<PolicyReadingProblem, MessageDescriptor> = {
-  notSetUp: msg`Reading policies is not set up yet. Add your own Anthropic key in Settings, under Models, and upload the policy again.`,
-  busy: msg`Grasp is busy right now. Remove this policy and upload it again in a minute.`,
+  notSetUp: msg`Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand.`,
+  busy: msg`Grasp is busy right now. Read it again in a minute.`,
   badKey: msg`The model key does not work. Check it in Settings, under Models.`,
-  unreadable: msg`The file could not be read. Try a PDF or a text file.`,
-  offline: msg`Grasp could not be reached. Check the connection and upload the policy again.`,
+  unreadable: msg`Grasp could not make rules of what it read. Read it again, or make its rules by hand.`,
+  offline: msg`Grasp could not finish reading it. Read it again.`,
 };
 
 /** One proposed rule: what it checks, the passage it comes from, and what was decided. */
 const ProposalCard = ({
+  policyId,
   proposal,
   caught,
+  edits,
 }: {
+  policyId: string;
   proposal: RuleProposal;
   /** How many apps it would catch today, as core worked it out. */
   caught: number;
+  /** Whether the reader may keep or leave it out. */
+  edits: boolean;
 }) => {
   const { t, i18n } = useLingui();
   return (
@@ -77,7 +89,10 @@ const ProposalCard = ({
       }
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 className="font-medium">{proposal.name}</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-medium">{proposal.name}</h3>
+          <ProposalDecided decision={proposal.decision} />
+        </div>
         {proposal.description === "" ? null : (
           <p className="text-muted-foreground">{proposal.description}</p>
         )}
@@ -98,6 +113,9 @@ const ProposalCard = ({
       {proposal.excerpt === "" ? null : (
         <PolicyExcerpt text={proposal.excerpt} />
       )}
+      {edits && proposal.decision === "open" ? (
+        <ProposalChoice policyId={policyId} proposal={proposal} />
+      ) : null}
     </article>
   );
 };
@@ -177,6 +195,9 @@ const PolicyDetail = ({
             </AlertDescription>
           </Alert>
         ) : null}
+        {policy.status === "failed" && edits ? (
+          <ReadAgain policyId={policy.id} />
+        ) : null}
 
         {policy.status === "review" ? (
           <section className="flex flex-col gap-3">
@@ -207,7 +228,9 @@ const PolicyDetail = ({
                         policyId === policy.id && proposalId === proposal.id
                     )?.apps ?? 0
                   }
+                  edits={edits}
                   key={proposal.id}
+                  policyId={policy.id}
                   proposal={proposal}
                 />
               ))

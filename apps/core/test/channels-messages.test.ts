@@ -48,6 +48,58 @@ describe("a known person's message", () => {
     expect(toMicrosoft).toStrictEqual([]);
   });
 
+  it("keeps no conversation of theirs when they were removed and erased while it waited", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { userId, person, teams } = await member(idp, says("Too late."));
+    // Core's database as the message reaches it: checked as theirs, then,
+    // just before its conversation is kept, an admin removes and erases
+    // them.
+    let erased: Promise<unknown> | undefined;
+    const waiting = (statement: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(statement, {
+        get: (target, property): unknown => {
+          if (property === "bind") {
+            return (...values: unknown[]) => waiting(target.bind(...values));
+          }
+          const value: unknown = Reflect.get(target, property);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return async (...args: unknown[]): Promise<unknown> => {
+            erased ??= (async () => {
+              await admin.api.members.remove(userId);
+              await admin.api.members.erase(userId, String(person.name));
+            })();
+            await erased;
+            const answered: unknown = await Reflect.apply(value, target, args);
+            return answered;
+          };
+        },
+      });
+    const real = env.DB;
+    const interleaved = new Proxy(real, {
+      get: (target, property): unknown => {
+        if (property === "prepare") {
+          return (query: string): D1PreparedStatement => {
+            const statement = target.prepare(query);
+            return /^insert into "channel_conversations"/iu.test(query)
+              ? waiting(statement)
+              : statement;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await post(messageFrom(teams), { coreEnv: { ...env, DB: interleaved } });
+
+    expect({
+      erased: erased !== undefined,
+      kept: await kept(teams.conversation),
+    }).toStrictEqual({ erased: true, kept: [] });
+  });
+
   it("is taken once when Teams sends it again", async () => {
     const { teams, gateway } = await member(
       idp,

@@ -16,6 +16,7 @@ import type {
   PolicyRule,
   PolicyUpload,
   RuleInput,
+  RuleProposal,
 } from "@grasp-os/shared/policies";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -32,6 +33,8 @@ import {
   policyRules,
 } from "./db/core/schema.ts";
 import { policyFindings } from "./policy-findings.ts";
+import { readingTimeoutMs, readPolicy } from "./policy-reading.ts";
+import type { PolicyReading } from "./policy-reading.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -44,9 +47,10 @@ import type { SessionCheck } from "./session-check.ts";
 // them, never Grasp staff: what the company allows is the company's to
 // say. Each change writes only while its admin still is one, with its
 // audit event in the same batch, recorded only when it wrote; an event
-// names what changed by ID, never a policy's text or a reason. Grasp
-// doesn't read policies yet: an upload waits for an admin to publish it,
-// and proposes no rules.
+// names what changed by ID, never a policy's text or a reason. Grasp reads
+// an uploaded policy into proposed rules (policy-reading.ts), which wait
+// for an admin to keep or leave out; a kept one becomes a rule through
+// the same checked write as one made by hand.
 
 const idSchema = z.string().min(1).max(200);
 
@@ -96,19 +100,36 @@ type DocumentRow = typeof policyDocuments.$inferSelect;
 type RuleRow = typeof policyRules.$inferSelect;
 type ExceptionRow = typeof policyExceptions.$inferSelect;
 
-const documentOf = (row: DocumentRow): PolicyDocument => ({
-  id: row.id,
-  title: row.title,
-  fileName: row.fileName,
-  uploadedBy: row.uploadedBy,
-  uploadedAt: row.uploadedAt.toISOString(),
-  status: row.status,
-  proposals: [],
-  unchecked: [],
-  ...(row.publishedAt === null
-    ? {}
-    : { publishedAt: row.publishedAt.toISOString() }),
-});
+/**
+ * How long a reading may be under way before it counts as failed: its
+ * model call's own limit, and a minute more. A reading whose request went
+ * away before it finished never finishes on its own.
+ */
+const readingStaleMs = readingTimeoutMs + 60_000;
+
+/** Whether a reading started at `readAt` should have finished by now. */
+const readingStale = (readAt: Date | null): boolean =>
+  readAt === null || readAt.getTime() < Date.now() - readingStaleMs;
+
+const documentOf = (row: DocumentRow): PolicyDocument => {
+  const stale = row.status === "reading" && readingStale(row.readAt);
+  const error = stale ? "offline" : row.error;
+  return {
+    id: row.id,
+    title: row.title,
+    fileName: row.fileName,
+    uploadedBy: row.uploadedBy,
+    uploadedAt: row.uploadedAt.toISOString(),
+    status: stale ? "failed" : row.status,
+    ...(error === null ? {} : { error }),
+    ...(row.summary === null ? {} : { summary: row.summary }),
+    proposals: row.proposals,
+    unchecked: row.unchecked,
+    ...(row.publishedAt === null
+      ? {}
+      : { publishedAt: row.publishedAt.toISOString() }),
+  };
+};
 
 const ruleOf = (row: RuleRow): PolicyRule => ({
   id: row.id,
@@ -182,6 +203,60 @@ const as = <T>(value: unknown, column: string) => sql<T>`${value}`.as(column);
 const onlyWhile = (by: Identity, also: SQL = sql`1`): SQL =>
   and(stillAdmin(by), also) ?? stillAdmin(by);
 
+/**
+ * Reads the policy `id`, whose reading started at `readAt`, for `by`, and
+ * keeps what was read: its proposals for review, or why it failed. Only
+ * that reading's outcome is kept: one started again meanwhile keeps its own.
+ */
+const finishReading = async (
+  env: Env,
+  by: Identity,
+  id: string,
+  readAt: Date,
+  policy: { title: string; text: string }
+): Promise<void> => {
+  const reading: PolicyReading = await readPolicy(
+    env,
+    policy,
+    actorOf(by),
+    crypto.randomUUID()
+  );
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(policyDocuments)
+      .set(
+        reading.ok
+          ? {
+              status: "review",
+              error: null,
+              summary: reading.summary === "" ? null : reading.summary,
+              proposals: reading.proposals,
+              unchecked: reading.unchecked,
+            }
+          : { status: "failed", error: reading.error }
+      )
+      .where(
+        and(
+          eq(policyDocuments.id, id),
+          eq(policyDocuments.status, "reading"),
+          eq(policyDocuments.readAt, readAt)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "policy.read",
+      target: target("policy", id),
+      detail: reading.ok
+        ? {
+            proposals: reading.proposals.length,
+            unchecked: reading.unchecked.length,
+          }
+        : { error: reading.error },
+    }),
+  ]);
+};
+
 const upload = async (
   env: Env,
   by: Identity,
@@ -200,10 +275,15 @@ const upload = async (
           title: as<string>(title, "title"),
           fileName: as<string>(fileName, "file_name"),
           text: as<string>(text, "text"),
-          status: as<"review">("review", "status"),
+          status: as<"reading">("reading", "status"),
           uploadedBy: as<string>(by.userId, "uploaded_by"),
           uploadedAt: as<Date>(now, "uploaded_at"),
           publishedAt: as<Date | null>(null, "published_at"),
+          readAt: as<Date>(now, "read_at"),
+          error: as<DocumentRow["error"]>(null, "error"),
+          summary: as<string | null>(null, "summary"),
+          proposals: as<RuleProposal[]>("[]", "proposals"),
+          unchecked: as<DocumentRow["unchecked"]>("[]", "unchecked"),
         })
         .from(sql`(SELECT 1)`)
         .where(onlyWhile(by))
@@ -217,6 +297,7 @@ const upload = async (
   if (written.meta.changes === 0) {
     return await unwritten(env, by, notFound);
   }
+  await finishReading(env, by, id, new Date(now), { title, text });
   return (await readDocument(env, id)) ?? notFound();
 };
 
@@ -546,6 +627,176 @@ const revokeException = async (
   }
 };
 
+/** Reads a policy again whose reading failed or never finished. */
+const readAgain = async (
+  env: Env,
+  by: Identity,
+  id: string
+): Promise<PolicyDocument> => {
+  requireOwnAdmin(by, "readAgain");
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const [claimed] = await db
+    .update(policyDocuments)
+    .set({ status: "reading", readAt: now, error: null })
+    .where(
+      and(
+        eq(policyDocuments.id, id),
+        sql`(${policyDocuments.status} = 'failed' OR (${policyDocuments.status} = 'reading'
+          AND coalesce(${policyDocuments.readAt}, 0) < ${now.getTime() - readingStaleMs}))`,
+        stillAdmin(by)
+      )
+    )
+    .returning({ title: policyDocuments.title, text: policyDocuments.text });
+  if (claimed === undefined) {
+    const found = await readDocument(env, id);
+    if (found === undefined) {
+      return notFound();
+    }
+    return await unwritten(env, by, () => {
+      // Being read now, or read already.
+      throw policyErrors.create("policy.conflict");
+    });
+  }
+  await finishReading(env, by, id, now, claimed);
+  return (await readDocument(env, id)) ?? notFound();
+};
+
+/** The open proposal `proposalId` of the policy `policyId`, and its place among them. */
+const openProposal = async (
+  env: Env,
+  policyId: string,
+  proposalId: string
+): Promise<{ proposal: RuleProposal; at: number }> => {
+  const [row] = await drizzle(env.DB)
+    .select({ proposals: policyDocuments.proposals })
+    .from(policyDocuments)
+    .where(eq(policyDocuments.id, policyId));
+  const at = row?.proposals.findIndex(({ id }) => id === proposalId) ?? -1;
+  const proposal = row?.proposals[at];
+  if (proposal === undefined) {
+    return notFound();
+  }
+  if (proposal.decision !== "open") {
+    throw policyErrors.create("policy.conflict");
+  }
+  return { proposal, at };
+};
+
+/** While the proposal at `at` is still `proposalId`, and still open, as the statement runs. */
+const stillOpen = (policyId: string, proposalId: string, at: number): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${policyDocuments} WHERE ${policyDocuments.id} = ${policyId}
+    AND json_extract(${policyDocuments.proposals}, ${`$[${at}].id`}) = ${proposalId}
+    AND json_extract(${policyDocuments.proposals}, ${`$[${at}].decision`}) = 'open')`;
+
+const acceptProposal = async (
+  env: Env,
+  by: Identity,
+  policyId: string,
+  proposalId: string
+): Promise<PolicyRule> => {
+  requireOwnAdmin(by, "acceptProposal");
+  const { proposal, at } = await openProposal(env, policyId, proposalId);
+  // Checked as a rule made by hand is; a kept proposal starts by watching.
+  const row = await ruleRow(env, {
+    name: proposal.name,
+    description: proposal.description,
+    conditions: proposal.conditions,
+    effect: proposal.effect,
+    status: "watching",
+    policyId,
+    excerpt: proposal.excerpt,
+  });
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const db = drizzle(env.DB);
+  const [written] = await auditedBatch(env, db, [
+    db.insert(policyRules).select(
+      db
+        .select({
+          id: as<string>(id, "id"),
+          name: as<string>(row.name, "name"),
+          description: as<string>(row.description, "description"),
+          conditions: as<RuleRow["conditions"]>(
+            JSON.stringify(row.conditions),
+            "conditions"
+          ),
+          effect: as<RuleRow["effect"]>(row.effect, "effect"),
+          status: as<RuleRow["status"]>(row.status, "status"),
+          policyId: as<string | null>(row.policyId, "policy_id"),
+          excerpt: as<string | null>(row.excerpt, "excerpt"),
+          createdBy: as<string>(by.userId, "created_by"),
+          createdAt: as<Date>(now, "created_at"),
+          updatedAt: as<Date>(now, "updated_at"),
+        })
+        .from(sql`(SELECT 1)`)
+        .where(onlyWhile(by, stillOpen(policyId, proposalId, at)))
+    ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "policy.rule.created",
+      target: target("policy_rule", id),
+      detail: { effect: row.effect, status: row.status, proposal: proposalId },
+    }),
+    // Kept, in the same batch: only once its rule was made.
+    db
+      .update(policyDocuments)
+      .set({
+        proposals: sql`json_set(${policyDocuments.proposals}, ${`$[${at}].decision`}, 'accepted')`,
+      })
+      .where(
+        and(
+          eq(policyDocuments.id, policyId),
+          stillOpen(policyId, proposalId, at),
+          sql`EXISTS (SELECT 1 FROM ${policyRules} WHERE ${policyRules.id} = ${id})`
+        )
+      ),
+  ]);
+  if (written.meta.changes === 0) {
+    return await unwritten(env, by, () => {
+      throw policyErrors.create("policy.conflict");
+    });
+  }
+  return (await readRule(env, id)) ?? notFound();
+};
+
+const rejectProposal = async (
+  env: Env,
+  by: Identity,
+  policyId: string,
+  proposalId: string
+): Promise<PolicyDocument> => {
+  requireOwnAdmin(by, "rejectProposal");
+  const { at } = await openProposal(env, policyId, proposalId);
+  const db = drizzle(env.DB);
+  const [written] = await auditedBatch(env, db, [
+    db
+      .update(policyDocuments)
+      .set({
+        proposals: sql`json_set(${policyDocuments.proposals}, ${`$[${at}].decision`}, 'rejected')`,
+      })
+      .where(
+        and(
+          eq(policyDocuments.id, policyId),
+          stillOpen(policyId, proposalId, at),
+          stillAdmin(by)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "policy.proposal.rejected",
+      target: target("policy", policyId),
+      detail: { proposal: proposalId },
+    }),
+  ]);
+  if (written.meta.changes === 0) {
+    return await unwritten(env, by, () => {
+      throw policyErrors.create("policy.conflict");
+    });
+  }
+  return (await readDocument(env, policyId)) ?? notFound();
+};
+
 /** A signed-in person's `policies`. */
 export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
   readonly #env: Env;
@@ -573,6 +824,35 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
     return await withPerson(
       this.#check,
       async (by) => await upload(this.#env, by, input)
+    );
+  }
+
+  async readAgain(policyId: string): Promise<PolicyDocument> {
+    return await withPerson(
+      this.#check,
+      async (by) => await readAgain(this.#env, by, idOf(policyId))
+    );
+  }
+
+  async acceptProposal(
+    policyId: string,
+    proposalId: string
+  ): Promise<PolicyRule> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await acceptProposal(this.#env, by, idOf(policyId), idOf(proposalId))
+    );
+  }
+
+  async rejectProposal(
+    policyId: string,
+    proposalId: string
+  ): Promise<PolicyDocument> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await rejectProposal(this.#env, by, idOf(policyId), idOf(proposalId))
     );
   }
 
