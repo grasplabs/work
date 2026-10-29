@@ -30,17 +30,22 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { routerHostsName, stageOf } from "@grasp-os/shared/names";
+import { routerHostsName, stageNamed } from "@grasp-os/shared/names";
 
 import { optionalSecrets } from "./optional-secrets.ts";
 import { filledConfig } from "./wrangler-deploy-config.ts";
 
 /**
- * The stage `--stage` names (production unless it says staging), and the
- * arguments for wrangler without it.
+ * The stage `--stage` names (production without it; anything but staging
+ * or production refused, never taken for production), and the arguments
+ * for wrangler without it.
  */
 const stageAt = process.argv.indexOf("--stage");
-const stage = stageOf(stageAt === -1 ? undefined : process.argv[stageAt + 1]);
+const stage =
+  stageAt === -1 ? "production" : stageNamed(process.argv[stageAt + 1]);
+if (stage === undefined) {
+  throw new Error("--stage names staging or production");
+}
 const wranglerArgs = process.argv
   .slice(2)
   .filter(

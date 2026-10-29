@@ -77,9 +77,13 @@ export const clientsNamespace = (stage: Stage): string =>
 export const stageOfNamespace = (namespace: unknown): Stage | undefined =>
   stages.find((stage) => clientsNamespace(stage) === namespace);
 
-/** `value` as a stage, or production when it names none. */
-export const stageOf = (value: unknown): Stage =>
-  value === "staging" ? "staging" : "production";
+/**
+ * `value` as a stage when it is exactly one, else undefined: never
+ * production by default, so an admin whose STAGE is missing or misspelt
+ * places no client anywhere (apps/admin/src/deploy/context.ts).
+ */
+export const stageNamed = (value: unknown): Stage | undefined =>
+  stages.find((stage) => stage === value);
 
 /**
  * The longest name Cloudflare takes for a Worker, a D1 database, an R2
