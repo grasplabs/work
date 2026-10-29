@@ -736,7 +736,9 @@ export const unshareStore = async (
 /**
  * Whom store `id` is shared with to manage it, for `by`, who must manage
  * it: the people still in the organization and the teams that still
- * exist, in the order they were shared.
+ * exist, in the order they were shared. A removed App's default store
+ * lists nobody: its builders are gone, and only the organization's admins
+ * manage it (`managedBy`), never its former owner.
  */
 export const storeManagers = async (
   env: Env,
@@ -744,6 +746,9 @@ export const storeManagers = async (
   id: string
 ): Promise<StoreManager[]> => {
   const store = await managedBy(env, by, id, false);
+  if (store.defaultOf?.removed === true) {
+    return [];
+  }
   if (store.defaultOf !== undefined) {
     return await appBuilders(env, store.defaultOf);
   }

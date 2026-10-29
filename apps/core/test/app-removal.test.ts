@@ -7,7 +7,7 @@ import { removeApp } from "../src/app-removal.ts";
 import { updateApp } from "../src/app-settings.ts";
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { deleteStore } from "../src/data-stores.ts";
+import { deleteStore, storeManagers } from "../src/data-stores.ts";
 import { authorize } from "../src/knowledge/app-entries.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
 import { requestPermission } from "../src/permissions.ts";
@@ -303,14 +303,18 @@ describe("removing an App", slow, () => {
     const app = await archivedApp(owner);
     const store = await ownedStore(app);
     await owner.api.apps.remove(app);
+    // Its owner still builds in the organization, yet manages it no more.
+    const managers = await storeManagers(env, acting(admin, "admin"), store);
 
     expect({
+      managers,
       byOwner: await outcome(deleteStore(env, acting(owner, "builder"), store)),
       byStaff: await outcome(
         deleteStore(env, acting(admin, "admin", true), store)
       ),
       byAdmin: await outcome(deleteStore(env, acting(admin, "admin"), store)),
     }).toStrictEqual({
+      managers: [],
       byOwner: "data.store_unavailable",
       byStaff: "role.forbidden",
       byAdmin: "ok",
