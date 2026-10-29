@@ -69,7 +69,8 @@ export interface RulesInput {
           | "brain_upkeep"
           | "dashboard_widgets"
           | "brain_recall"
-          | "policy_reading";
+          | "policy_reading"
+          | "transport_probe";
       };
 }
 
@@ -188,6 +189,8 @@ export interface Refusal {
     | "model.ledger_unavailable"
     | "model.quota_policy_unavailable"
     | "model.quota_policy_behind"
+    | "model.unconfigured"
+    | "model.failed"
     | "permission.context_invalid";
   because?: string;
   /**

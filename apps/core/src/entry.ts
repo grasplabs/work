@@ -20,6 +20,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { modelSpendReportPath } from "@grasp-os/shared/model-spend-report";
+import { modelTransportReportPath } from "@grasp-os/shared/model-transport-report";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
@@ -60,6 +61,7 @@ import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { modelSpendReportResponse } from "./model-spend-report.ts";
+import { modelTransportReportResponse } from "./model-transport-report.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
@@ -305,6 +307,7 @@ const pathHandlers: ReadonlyMap<
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
   [modelSpendReportPath, modelSpendReportResponse],
+  [modelTransportReportPath, modelTransportReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
   [adminKickoffPath, adminKickoffResponse],

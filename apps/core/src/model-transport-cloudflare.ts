@@ -148,6 +148,7 @@ export const cloudflareAiGateway = (
   const fetch = createAiBindingFetch(ai);
   return {
     kind: "cloudflare-ai-gateway",
+    label: "cloudflare-ai-gateway",
     capabilities: {
       providers: providerNames,
       payloadLoggingOff: true,
@@ -155,13 +156,18 @@ export const cloudflareAiGateway = (
       voice: true,
       sdkRetries: true,
     },
-    route: (ref, metadata): TransportRoute | undefined => {
+    // oxlint-disable-next-line require-await -- the interface's: other transports load their catalogs
+    route: async (ref, metadata): Promise<TransportRoute | undefined> => {
       const { api } = ref.catalog;
       if (!isRouteApi(api)) {
         return undefined;
       }
       return {
         transport: "cloudflare-ai-gateway",
+        label: "cloudflare-ai-gateway",
+        provider: ref.provider,
+        privateHost: false,
+        euAttested: false,
         model: {
           ...ref.catalog,
           baseUrl: `${gatewayBase(gateway)}/${gatewayPaths[ref.provider]}`,

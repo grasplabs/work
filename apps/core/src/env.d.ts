@@ -51,6 +51,17 @@ interface __BaseEnv_Env {
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
   /**
+   * How the deployment reaches its models (src/model-routing.ts): JSON,
+   * `@grasp-os/shared/model-transport`'s `modelTransportConfigSchema`.
+   * AI Gateway unless set.
+   */
+  MODEL_TRANSPORT?: unknown;
+  /**
+   * The provider keys `MODEL_TRANSPORT` names, by name: a Worker secret,
+   * JSON. Never logged, never in a var or D1.
+   */
+  MODEL_PROVIDER_KEYS?: string;
+  /**
    * The deployment's AI Gateway token, a Worker secret: the
    * `cf-aig-authorization` an authenticated gateway asks for, which voice
    * requests carry (src/models.ts). Never logged, never sent to the

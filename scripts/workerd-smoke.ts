@@ -17,12 +17,16 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import type { Server } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 
+import { hkdfHmacKey } from "../packages/shared/src/client-secrets.ts";
+import { toHex } from "../packages/shared/src/encoding.ts";
 import {
   mailIngressRequest,
   mailRejectedStatus,
@@ -30,6 +34,12 @@ import {
   signMail,
 } from "../packages/shared/src/mail-ingress.ts";
 import type { RawMail } from "../packages/shared/src/mail-ingress.ts";
+import {
+  modelTransportReportPath,
+  modelTransportReportPurpose,
+  modelTransportReportSchema,
+} from "../packages/shared/src/model-transport-report.ts";
+import { platformUpdateSignatureHeader } from "../packages/shared/src/platform-change.ts";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { writeAssetsService } from "./workerd-assets.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
@@ -38,8 +48,10 @@ import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import {
   coreWranglerConfig,
+  smokeAuthSecret,
   smokeConfig,
   smokeHostname,
+  smokeModel,
 } from "./workerd-smoke-config.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
@@ -80,6 +92,7 @@ const freePort = async (): Promise<number> => {
   return address.port;
 };
 const PORT = await freePort();
+const MODEL_PORT = await freePort();
 
 // Durable Object migrations and the Grasp skills are bundled next to
 // index.js as text modules, and WebAssembly (the jq evaluator) as wasm
@@ -180,6 +193,109 @@ const mailDelivered = async (origin: string): Promise<void> => {
   await refused.body?.cancel();
 };
 
+/** A chat completion streamed as an OpenAI-compatible server streams one. */
+const completionEvents = [
+  {
+    id: "smoke",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "smoke-model",
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant", content: "OK" },
+        finish_reason: null,
+      },
+    ],
+  },
+  {
+    id: "smoke",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "smoke-model",
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+  },
+  {
+    id: "smoke",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "smoke-model",
+    choices: [],
+    usage: { prompt_tokens: 12, completion_tokens: 1, total_tokens: 13 },
+  },
+];
+
+/**
+ * The model on the deployment's own network: an OpenAI-compatible server
+ * on the machine, answering every chat completion with "OK", and counting
+ * what it was asked.
+ */
+const startModelServer = async (): Promise<{
+  server: Server;
+  asked: string[];
+}> => {
+  const asked: string[] = [];
+  const server = createHttpServer((request, response) => {
+    asked.push(`${request.method ?? ""} ${request.url ?? ""}`);
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      for (const event of completionEvents) {
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+      response.end("data: [DONE]\n\n");
+    });
+  }).listen(MODEL_PORT, "127.0.0.1");
+  await once(server, "listening");
+  return { server, asked };
+};
+
+/**
+ * Asks core, as the admin does, to probe its model transport: one call
+ * through the model gateway, admitted, charged and audited like any, to
+ * the model server on the deployment's own network, with no AI binding.
+ */
+const modelReached = async (origin: string, asked: string[]): Promise<void> => {
+  const body = JSON.stringify({
+    sentAt: new Date().toISOString(),
+    probe: true,
+  });
+  const key = await hkdfHmacKey(smokeAuthSecret, modelTransportReportPurpose, [
+    "sign",
+  ]);
+  const signature = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const response = await fetch(new URL(modelTransportReportPath, origin), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      [routerSecretHeader]: ROUTER_SECRET,
+      [platformUpdateSignatureHeader]: signature,
+    },
+    body,
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `the model transport report: core answered ${String(response.status)} ${text}`
+    );
+  }
+  const { probe } = modelTransportReportSchema.parse(JSON.parse(text));
+  if (
+    probe?.ok !== true ||
+    probe.model !== smokeModel ||
+    probe.transport !== "openai-compatible/smoke" ||
+    !asked.includes("POST /v1/chat/completions")
+  ) {
+    throw new Error(
+      `the model probe didn't reach the deployment's own model server: ${JSON.stringify({ probe, asked })}`
+    );
+  }
+};
+
 /** A script the page loads from the frontend's own files. */
 const pageScript = /<script[^>]*\ssrc="(?<src>\/[^"]+\.js)"/u;
 
@@ -224,7 +340,10 @@ const frontendServed = async (origin: string): Promise<void> => {
 // supervisor and core and removes `out`, however the run ends.
 let sandbox: SandboxSupervisor | undefined;
 let server: ChildProcess | undefined;
+let modelServer: Server | undefined;
 try {
+  const model = await startModelServer();
+  modelServer = model.server;
   // The sandbox supervisor core's SANDBOX_HOST reaches, with its pool of
   // workerd processes, as on-prem runs it beside core.
   sandbox = await startSandboxSupervisor({ workerd: nativeWorkerd });
@@ -233,6 +352,7 @@ try {
     path.join(out, "config.capnp"),
     smokeConfig({
       port: PORT,
+      modelPort: MODEL_PORT,
       sandboxSocket: sandbox.socket,
       routerSecret: ROUTER_SECRET,
       modules,
@@ -277,13 +397,15 @@ try {
   }
   await frontendServed(`http://127.0.0.1:${PORT}`);
   await mailDelivered(`http://127.0.0.1:${PORT}`);
+  await modelReached(`http://127.0.0.1:${PORT}`, model.asked);
   console.info(
     excused.length === 0
-      ? "core runs on workerd, its built-in content installed, it serves the frontend, and it takes signed mail"
-      : "core runs on workerd, its built-in content installed but for the known gaps above, it serves the frontend, and it takes signed mail"
+      ? "core runs on workerd, its built-in content installed, it serves the frontend, it takes signed mail, and it reaches a model on its own network"
+      : "core runs on workerd, its built-in content installed but for the known gaps above, it serves the frontend, it takes signed mail, and it reaches a model on its own network"
   );
 } finally {
   server?.kill();
+  modelServer?.close();
   await sandbox?.stop();
   rmSync(out, { force: true, recursive: true });
 }

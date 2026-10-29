@@ -7,6 +7,7 @@ import type {
   SimpleStreamOptions,
   TranscriptContext,
 } from "@earendil-works/pi-ai";
+import type { ModelTransportKind } from "@grasp-os/shared/model-transport";
 
 import { adapterFor } from "./model-catalog.ts";
 import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
@@ -37,11 +38,7 @@ import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 //   promise about payload logging and caching (`TransportCapabilities`).
 
 /** The ways a deployment can reach its models. */
-export const transportKinds = [
-  /** Cloudflare AI Gateway, over the AI binding (model-transport-cloudflare.ts). */
-  "cloudflare-ai-gateway",
-] as const;
-export type TransportKind = (typeof transportKinds)[number];
+export type TransportKind = ModelTransportKind;
 
 /** What a transport can do, as the gateway and the admin read it. */
 export interface TransportCapabilities {
@@ -80,6 +77,20 @@ export interface RouteMetadata {
 /** One model reached one way: everything the gateway needs to send to it. */
 export interface TransportRoute {
   transport: TransportKind;
+  /**
+   * The transport as the ledger, the audit log and Setup name it: its
+   * kind, and a custom endpoint's name (`openai-compatible/<name>`).
+   */
+  label: string;
+  /** The provider of the model, as the gateway names models. */
+  provider: Provider;
+  /**
+   * Whether the endpoint is one of the deployment's own private hosts
+   * (on-prem, src/model-endpoint-guard.ts).
+   */
+  privateHost: boolean;
+  /** Whether staff attested that the endpoint processes in the EU. */
+  euAttested: boolean;
   /** pi's model, pointed at the endpoint, under the name it has there. */
   model: Model<Api>;
   /** The API the endpoint speaks, which picks pi's adapter. */
@@ -104,9 +115,14 @@ export interface TransportRoute {
 /** A way to reach models. */
 export interface ModelTransport {
   kind: TransportKind;
+  /** As the ledger, the audit log and Setup name it (`TransportRoute.label`). */
+  label: string;
   capabilities: TransportCapabilities;
   /** The route to `ref`, or `undefined` when this transport doesn't reach it. */
-  route: (ref: ModelRef, metadata: RouteMetadata) => TransportRoute | undefined;
+  route: (
+    ref: ModelRef,
+    metadata: RouteMetadata
+  ) => Promise<TransportRoute | undefined>;
 }
 
 /**

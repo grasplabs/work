@@ -67,6 +67,7 @@ describe("the runtime profile each deployment says", () => {
   it("is workerd in the on-prem smoke run on plain workerd", () => {
     const config = smokeConfig({
       port: 8790,
+      modelPort: 8791,
       sandboxSocket: "/run/grasp-sandbox/supervisor.sock",
       routerSecret: "s",
       modules: [],

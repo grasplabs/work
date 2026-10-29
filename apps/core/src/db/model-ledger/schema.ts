@@ -112,6 +112,15 @@ export const requests = sqliteTable(
      * most. It holds its shares only while `dispatched` and before this.
      */
     leaseEndsAt: integer("lease_ends_at"),
+    /**
+     * The way it went (models.ts, model-routing.ts): its transport, as the
+     * audit log names it, the model's provider and the region of the
+     * route's residency entry. Metadata only; null for one admitted
+     * before routes were recorded, and for a voice model's.
+     */
+    transport: text(),
+    provider: text(),
+    region: text(),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -309,6 +318,22 @@ export const personLimits = sqliteTable(
     ),
   ]
 );
+
+/**
+ * How each transport fared last, as its requests settled: when one last
+ * worked, and when one last failed and how, never what it carried. What
+ * Setup shows as the transport's status (model-transport-report.ts).
+ */
+export const transportHealth = sqliteTable("transport_health", {
+  /** The transport, as the audit log names it (`TransportRoute.label`). */
+  transport: text().primaryKey(),
+  lastOkAt: integer("last_ok_at"),
+  lastFailedAt: integer("last_failed_at"),
+  /** How it last failed (`TransportFailure`'s kind). */
+  lastFailure: text("last_failure"),
+  /** The HTTP status it last failed with, if it answered. */
+  lastStatus: integer("last_status"),
+});
 
 /** Audit events stored with the change they record, until the log has them. */
 export const auditOutbox = sqliteTable("audit_outbox", {

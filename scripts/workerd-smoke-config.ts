@@ -62,10 +62,36 @@ const signIn = {
   },
 };
 
+/** The auth secret core signs the admin's requests with, as the admin derives it. */
+export const smokeAuthSecret = "smoke-auth-secret-of-32-characters-or-more";
+
+/**
+ * How the smoke's core reaches its model: an OpenAI-compatible server on
+ * the machine itself (the smoke's own, `workerd-smoke.ts`), named as the
+ * deployment's own private host, as an on-prem deployment names a model
+ * server on its network. No AI binding, no AI Gateway: plain workerd.
+ */
+export const smokeModel = "openai/gpt-5.4";
+
+const modelConfig = (modelPort: number) => ({
+  gateway: { models: [smokeModel] },
+  transport: {
+    primary: {
+      kind: "openai-compatible",
+      name: "smoke",
+      baseUrl: `http://127.0.0.1:${modelPort}/v1`,
+      models: { [smokeModel]: "smoke-model" },
+    },
+    privateHosts: ["127.0.0.1"],
+  },
+});
+
 /** What the config is made from. */
 export interface SmokeConfigInputs {
   /** The local port core is served on. */
   port: number;
+  /** The local port the smoke's model server answers on. */
+  modelPort: number;
   /** The Unix socket the sandbox supervisor answers on. */
   sandboxSocket: string;
   /** The router secret every request to core must carry. */
@@ -82,6 +108,7 @@ export interface SmokeConfigInputs {
 /** The `config.capnp` text that serves core on plain workerd. */
 export const smokeConfig = ({
   port,
+  modelPort,
   sandboxSocket,
   routerSecret,
   modules,
@@ -93,6 +120,7 @@ export const smokeConfig = ({
     ({ name, className }) =>
       `(name = "${name}", durableObjectNamespace = (className = "${className}"))`
   );
+  const models = modelConfig(modelPort);
   const durableObjectNamespaces = durableObjects.map(
     ({ className }) =>
       `(className = "${className}", uniqueKey = "${className}", enableSql = true)`
@@ -119,6 +147,10 @@ const config :Workerd.Config = (
     # profile's assets service: workerd has no assets binding
     # (apps/core/src/on-prem/assets.ts).
     ${assetsServices(assets.directory).join(",\n    ")},
+    # Core's way out: the internet, and the machine itself, where the
+    # smoke's model server answers as a model on the deployment's own
+    # network would. workerd's default allows public addresses only.
+    (name = "internet", network = (allow = ["public", "local"])),
   ],
   sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
 );
@@ -132,6 +164,9 @@ const core :Workerd.Worker = (
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
     (name = "RUNTIME_PROFILE", text = "workerd"),
     (name = "SIGN_IN", text = ${JSON.stringify(JSON.stringify(signIn))}),
+    (name = "BETTER_AUTH_SECRET", text = "${smokeAuthSecret}"),
+    (name = "MODEL_GATEWAY", text = ${JSON.stringify(JSON.stringify(models.gateway))}),
+    (name = "MODEL_TRANSPORT", text = ${JSON.stringify(JSON.stringify(models.transport))}),
     (name = "SANDBOX_HOST", service = "sandbox"),
     ${assetsBinding(assets.binding)},
     ${durableObjectBindings.join(",\n    ")},
@@ -147,6 +182,7 @@ const core :Workerd.Worker = (
   # On disk, as on-prem: workerd keeps no SQLite in memory, and in-memory
   # storage aborts workerd when an alarm fires (the audit log's retention).
   durableObjectStorage = (localDisk = "storage"),
+  globalOutbound = "internet",
 );
 `;
 };

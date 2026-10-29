@@ -207,8 +207,14 @@ const voiceGatewaySchema = z
 export const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
   z
     .object({
-      /** The deployment's AI Gateway, in the deployment's own account. */
-      gateway: z.string().regex(gatewayIdPattern),
+      /**
+       * The deployment's AI Gateway, in the deployment's own account: what
+       * the `cloudflare-ai-gateway` transport and voice models go
+       * through. A deployment that reaches its models another way
+       * (`MODEL_TRANSPORT`, ./model-transport.ts), such as on-prem, names
+       * none.
+       */
+      gateway: z.string().regex(gatewayIdPattern).optional(),
       /** The models this deployment allows; every other model is refused. */
       models: z.array(modelRef).min(1),
       /**

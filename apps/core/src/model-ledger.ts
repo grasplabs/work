@@ -43,6 +43,7 @@ import {
   requestScopes,
   requests,
   spend,
+  transportHealth,
 } from "./db/model-ledger/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import {
@@ -64,7 +65,19 @@ import { queueLiveMs } from "./workflows/admission.ts";
 // asks it to admit each provider request, every HTTP request, a retry
 // too, before it is sent, and settles it once the request ends. Money is
 // whole micros (model-prices.ts) at prices pinned to the request when it
-// is admitted. Threat model, and how each is closed:
+// is admitted.
+//
+// Currency: every amount here is US dollars at the model's list prices
+// (model-catalog.ts, model-prices.ts), whatever transport carried the
+// request (model-transport.ts): the token counts are the provider's own,
+// where it reported them, so AI Gateway, OpenRouter, a provider's own API
+// and a custom endpoint are all charged alike, and the deployment budget,
+// which the admin's spend ceiling sets, counts every one of them. What a
+// transport's own invoice says (OpenRouter's fee, an Azure discount, a
+// bill in euros) can differ from list prices; the ledger bounds and
+// reports list-price dollars. Each request keeps the way it went
+// (`requests.transport`, `provider`, `region`). Threat model, and how
+// each is closed:
 //
 // - Concurrent requests overspend a budget: an admission reserves the
 //   request's most possible cost (its bound) against every one of its
@@ -405,6 +418,13 @@ const storedLimitSchema = z.strictObject({
   messagesAnHour: z.int().positive().nullable(),
 });
 
+/** The way a request goes, as recorded with it: identifiers only. */
+const routeSchema = z.strictObject({
+  transport: z.string().min(1).max(64),
+  provider: z.string().min(1).max(32),
+  region: z.string().min(1).max(32),
+});
+
 /** What an admin's limit came to: set, or refused as above Grasp's budget. */
 export type PersonLimitSetting =
   | { state: "set" }
@@ -464,6 +484,12 @@ const admissionSchema = z
      * as the `person` scope; none for a call made for nobody.
      */
     person: limitedPersonSchema.optional(),
+    /**
+     * The way it goes: its transport, the model's provider and the
+     * route's region (model-routing.ts), recorded with it; none for a
+     * voice model's.
+     */
+    route: routeSchema.optional(),
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
@@ -472,6 +498,27 @@ const admissionSchema = z
   .refine(({ scopes }) => scopes.every(({ scope }) => scope !== "person"), {
     message: "The ledger makes the person's scope",
   });
+
+/** How a transport fared last, as Setup shows it: times in ms since the epoch. */
+export interface TransportHealth {
+  transport: string;
+  lastOkAt: number | null;
+  lastFailedAt: number | null;
+  lastFailure: string | null;
+  lastStatus: number | null;
+}
+
+/** A request's route as its row keeps it: null for one with none. */
+const routeColumns = (
+  route: z.output<typeof routeSchema> | undefined
+): {
+  transport: string | null;
+  provider: string | null;
+  region: string | null;
+} => route ?? { transport: null, provider: null, region: null };
+
+/** The way a request goes, as recorded with it. */
+export type LedgerRoute = z.input<typeof routeSchema>;
 
 /** A provider request to admit. */
 export type Admission = z.input<typeof admissionSchema>;
@@ -523,6 +570,12 @@ export type Admitted =
       };
     };
 
+/** How a refused or failed request failed, for its transport's status. */
+const failureSchema = z.strictObject({
+  kind: z.enum(["auth", "rate_limited", "refused", "provider_down"]),
+  status: z.int().min(100).max(599).optional(),
+});
+
 const tokensSchema = z.strictObject({
   input: microsSchema,
   output: microsSchema,
@@ -534,7 +587,10 @@ const settlementSchema = z.discriminatedUnion("by", [
   /** It ended, with the provider's whole count of what it used. */
   z.strictObject({ by: z.literal("usage"), tokens: tokensSchema }),
   /** The provider answered with a refusal before taking it on. */
-  z.strictObject({ by: z.literal("refused") }),
+  z.strictObject({
+    by: z.literal("refused"),
+    failure: failureSchema.optional(),
+  }),
   /** It was never sent. */
   z.strictObject({ by: z.literal("unsent") }),
   /**
@@ -543,7 +599,10 @@ const settlementSchema = z.discriminatedUnion("by", [
    */
   z.strictObject({ by: z.literal("cut"), tokens: tokensSchema }),
   /** It was sent, and what it used can't be known. */
-  z.strictObject({ by: z.literal("unknown") }),
+  z.strictObject({
+    by: z.literal("unknown"),
+    failure: failureSchema.optional(),
+  }),
 ]);
 
 /** How a provider request ended, as far as the gateway knows. */
@@ -839,6 +898,7 @@ export class ModelLedger extends DurableObject<Env> {
             admission.deadline,
             now + (admission.leaseMs ?? maxLeaseMs)
           ),
+          ...routeColumns(admission.route),
         })
         .run();
       for (const {
@@ -1311,6 +1371,7 @@ export class ModelLedger extends DurableObject<Env> {
       if (row === undefined) {
         return { settled: { state: "missing" } as const, alerted: 0 };
       }
+      this.#noteTransport(row.transport, settlement);
       if (row.state === "settled") {
         return {
           settled: {
@@ -1379,6 +1440,61 @@ export class ModelLedger extends DurableObject<Env> {
     this.#deliverIfStored();
     await Promise.resolve();
     return settled;
+  }
+
+  /**
+   * Notes how a request of `transport` ended, as it settles: worked once
+   * it ended with a count, failed once it was refused or failed with a
+   * failure named. Nothing for one never sent, or of no transport.
+   */
+  #noteTransport(transport: string | null, settlement: Settlement): void {
+    if (transport === null) {
+      return;
+    }
+    const now = Date.now();
+    if (settlement.by === "usage" || settlement.by === "cut") {
+      this.#db
+        .insert(transportHealth)
+        .values({ transport, lastOkAt: now })
+        .onConflictDoUpdate({
+          target: transportHealth.transport,
+          set: { lastOkAt: now },
+        })
+        .run();
+      return;
+    }
+    if (
+      (settlement.by === "refused" || settlement.by === "unknown") &&
+      settlement.failure !== undefined
+    ) {
+      const failed = {
+        lastFailedAt: now,
+        lastFailure: settlement.failure.kind,
+        lastStatus: settlement.failure.status ?? null,
+      };
+      this.#db
+        .insert(transportHealth)
+        .values({ transport, ...failed })
+        .onConflictDoUpdate({ target: transportHealth.transport, set: failed })
+        .run();
+    }
+  }
+
+  /** How each transport fared last (`transportHealth`). */
+  async transportHealth(): Promise<TransportHealth[]> {
+    await Promise.resolve();
+    return this.#db
+      .select()
+      .from(transportHealth)
+      .orderBy(asc(transportHealth.transport))
+      .all()
+      .map((row) => ({
+        transport: row.transport,
+        lastOkAt: row.lastOkAt,
+        lastFailedAt: row.lastFailedAt,
+        lastFailure: row.lastFailure,
+        lastStatus: row.lastStatus,
+      }));
   }
 
   /** The requests set aside because they couldn't be read, oldest first, at most `limit`. */

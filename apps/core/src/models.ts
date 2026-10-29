@@ -93,9 +93,11 @@ import {
   parseModelRef,
 } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
+import { failed, succeeded } from "./model-circuit.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   Admitted as LedgerAdmitted,
+  LedgerRoute,
   LedgerScope,
   LedgerScopeName,
   LimitedPerson,
@@ -111,18 +113,23 @@ import {
 } from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
+import { routeCall, transportConfigOf, transportsOf } from "./model-routing.ts";
+import type { Routed, Transports } from "./model-routing.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
 import {
-  cloudflareAiGateway,
   gatewayBase,
   gatewayHeaders,
   withRequestId,
 } from "./model-transport-cloudflare.ts";
-import { streamRoute } from "./model-transport.ts";
+import {
+  failureOfResponse,
+  neverTakenOn,
+  streamRoute,
+} from "./model-transport.ts";
 import type {
-  ModelTransport,
   RouteMetadata,
+  TransportFailure,
   TransportRoute,
 } from "./model-transport.ts";
 import {
@@ -505,6 +512,14 @@ const sessionShape = {
        * own code makes such a call.
        */
       z.strictObject({ platform: z.literal("policy_reading") }),
+      /**
+       * Core's own probe of its model transport, asked by the admin
+       * (model-transport-report.ts): a fixed line of no one's data, judged
+       * as onboarding's is all the same, so the rules' strictest models
+       * answer it, and kept apart from it in spend and audit. Only core's
+       * own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("transport_probe") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -799,6 +814,8 @@ interface Admitted {
   call: Session;
   ref: ModelRef;
   judged: Judged;
+  /** The way it goes, as the ledger and the audit log record it. */
+  way: LedgerRoute;
 }
 
 /** An admitted request's way to the model, through the deployment's transport. */
@@ -806,6 +823,10 @@ interface Route extends Admitted {
   model: Model<Api>;
   /** The way to the model: its endpoint, headers and fetch (model-transport.ts). */
   endpoint: TransportRoute;
+  /** The route as chosen, with its place among the transports and its residency. */
+  routed: Routed;
+  /** The deployment's transports, for a call that fails over to the next. */
+  transports: Transports;
   /** Whether the transport's provider SDKs retry a refused request themselves. */
   sdkRetries: boolean;
   /** The prices its provider requests are pinned to; none for a model with none. */
@@ -877,21 +898,22 @@ interface RequestBound {
  * What admitting a provider request takes of its route: a text model's
  * (`Route`), or a voice model's (`speak`).
  */
-type Admitting = Pick<
-  Route,
-  | "env"
-  | "call"
-  | "price"
-  | "perRequest"
-  | "scopesNow"
-  | "disclose"
-  | "beforeSend"
-  | "onQueued"
-  | "notes"
-  | "place"
-  | "bound"
-  | "leaseMs"
->;
+type Admitting = Partial<Pick<Route, "way">> &
+  Pick<
+    Route,
+    | "env"
+    | "call"
+    | "price"
+    | "perRequest"
+    | "scopesNow"
+    | "disclose"
+    | "beforeSend"
+    | "onQueued"
+    | "notes"
+    | "place"
+    | "bound"
+    | "leaseMs"
+  >;
 
 interface Request extends Route {
   /** Ends the call when it takes too long, retries included. */
@@ -928,6 +950,8 @@ interface GatewayResponse {
    * the last refusal was something else.
    */
   rateLimited: number | undefined;
+  /** How the last provider request failed, if it did (model-transport.ts). */
+  failure: TransportFailure | undefined;
 }
 
 /** A provider request the ledger admitted: its ID, and what it reserved. */
@@ -1467,6 +1491,7 @@ const admitRequest = async (
       ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
       ...(person === undefined ? {} : { person }),
+      ...(route.way === undefined ? {} : { route: route.way }),
     });
     if ("policyBehind" in admitted) {
       if (!retried) {
@@ -1642,6 +1667,17 @@ const admitWaiting = async (
   }
 };
 
+/** The host a fetch is asked for, lowercase; none for a URL that isn't one. */
+const hostOf = (input: Parameters<FetchFunction>[0]): string | undefined => {
+  let href = "";
+  if (typeof input === "string") {
+    href = input;
+  } else {
+    href = input instanceof URL ? input.href : input.url;
+  }
+  return URL.parse(href)?.hostname.toLowerCase();
+};
+
 /**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
@@ -1652,7 +1688,7 @@ const open = async (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { endpoint } = route;
+  const { endpoint, call } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -1662,7 +1698,9 @@ const open = async (
     pending: undefined,
     settled: [],
     rateLimited: undefined,
+    failure: undefined,
   };
+  const { label } = endpoint;
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
   // One the provider refused is settled at nothing; one whose fate can't
@@ -1672,7 +1710,17 @@ const open = async (
   // what a refusal's body says went wrong, which the provider SDKs drop
   // when it isn't in their provider's shape (Workers AI's has no `error`,
   // so OpenAI's SDK reports "400 status code (no body)").
-  const measured: FetchFunction = async (input, init) => {
+  const sendOnce: FetchFunction = async (input, init) => {
+    // Only to the route's own host, whatever asks: a request anywhere
+    // else, after a misconfiguration or a redirect an SDK took, is never
+    // admitted or sent (residency, and a key's one destination).
+    if (hostOf(input) !== endpoint.host) {
+      log.error("model.route_host_mismatch", {
+        model: call.model,
+        transport: label,
+      });
+      throw new Error("The model request's host isn't its route's");
+    }
     const admitted = await admitWaiting(route, init?.body, { endsAt, signal });
     if ("held" in admitted) {
       response.held = admitted.held;
@@ -1703,8 +1751,20 @@ const open = async (
         endpoint.tagged(init, admitted.id)
       );
     } catch (error) {
+      // Not answered at all: down, unless the caller cut it off.
+      const failure: TransportFailure = {
+        kind: "provider_down",
+        status: undefined,
+      };
+      if (!signal.aborted) {
+        failed(label, failure);
+        response.failure = failure;
+      }
       response.settled.push(
-        await settleAdmitted(route, admitted, { by: "unknown" })
+        await settleAdmitted(route, admitted, {
+          by: "unknown",
+          ...(signal.aborted ? {} : { failure: { kind: failure.kind } }),
+        })
       );
       throw error;
     }
@@ -1714,16 +1774,27 @@ const open = async (
         ? rateLimitedSeconds(answered.headers)
         : undefined;
     if (!answered.ok) {
+      const failure = failureOfResponse(
+        answered.status,
+        response.rateLimited ?? 0
+      );
+      failed(label, failure);
+      response.failure = failure;
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
       response.settled.push(
         await settleAdmitted(route, admitted, {
           by: answered.status < 500 ? "refused" : "unknown",
+          ...(failure.kind === "budget"
+            ? {}
+            : { failure: { kind: failure.kind, status: answered.status } }),
         })
       );
       response.refusal = refusalOf(await answered.clone().text());
       return answered;
     }
+    succeeded(label);
+    response.failure = undefined;
     if (response.pending !== undefined) {
       response.settled.push(
         await settleAdmitted(route, response.pending, { by: "unknown" })
@@ -1732,7 +1803,34 @@ const open = async (
     response.pending = admitted;
     return answered;
   };
-  const { model, call } = route;
+  // Where the transport's SDKs don't retry (`sdkRetries`), the gateway
+  // retries only a rate limit's refusal, which the provider refused before
+  // taking anything on, after the wait it asked for, and only while that
+  // wait ends before the call's deadline. Never a server error or a
+  // request that got no answer: those may have been taken on, and billed.
+  // Each retry is admitted by the ledger on its own.
+  const measured: FetchFunction = async (input, init) => {
+    let answered = await sendOnce(input, init);
+    for (
+      let retry = 0;
+      retry < maxRetries &&
+      !route.sdkRetries &&
+      route.providerRetries !== false &&
+      answered.status === 429 &&
+      response.rateLimited !== undefined &&
+      Date.now() + response.rateLimited * 1000 < endsAt;
+      retry += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as asked
+      await answered.body?.cancel();
+      // oxlint-disable-next-line no-await-in-loop -- the wait the provider asked for
+      await pause(response.rateLimited * 1000, signal);
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      answered = await sendOnce(input, init);
+    }
+    return answered;
+  };
+  const { model } = route;
   const events = await streamRoute(endpoint, context, {
     fetch: measured,
     maxTokens: answerTokens(call, model),
@@ -2110,7 +2208,7 @@ const bindingOf = ({
     : { binding: binding.alias, bindingApp: binding.app };
 
 const auditEntry = (
-  { call, ref, judged }: Admitted,
+  { call, ref, judged, way }: Admitted,
   recorded: Recorded
 ): AuditEntry => {
   const { logId } = recorded;
@@ -2139,6 +2237,9 @@ const auditEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      // The way it went: its transport and the region its route runs in.
+      transport: way.transport,
+      region: way.region,
       // Never an ID so long that the event would be refused.
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -2180,6 +2281,13 @@ const largestRecord: Recorded = {
     charged: Number.MAX_VALUE,
     held: Number.MAX_VALUE,
   },
+};
+
+/** The longest way a call's audit event can name. */
+const largestWay: LedgerRoute = {
+  transport: "x".repeat(64),
+  provider: "x".repeat(32),
+  region: "x".repeat(32),
 };
 
 /** The most the rules can add to a call's audit event. */
@@ -2508,13 +2616,88 @@ const metadataOf = (
  * The deployment's model transport: its AI Gateway over the AI binding.
  * None on plain workerd (on-prem), which has no AI binding.
  */
-const modelTransport = (
+/**
+ * What `routing` failed of, as the gateway refuses it: no route the
+ * organization's residency allows (`model.eu_only`, because `residency`);
+ * every transport that reaches the model paused by its circuit
+ * (`model.failed`); or none that reaches it at all (`model.unconfigured`).
+ */
+const unroutable = (
+  why: "residency" | "unreachable" | "circuit_open"
+): Refusal => {
+  if (why === "residency") {
+    return { code: "model.eu_only", because: "residency" };
+  }
+  return why === "circuit_open"
+    ? { code: "model.failed", because: "circuit_open" }
+    : { code: "model.unconfigured", because: "transport" };
+};
+
+/**
+ * Records that `call` failed over: from the transport it would have
+ * taken, to the one it takes, and why. Metadata only.
+ */
+const auditFailover = async (
   env: ModelsEnv,
-  config: ModelGatewayConfig
-): ModelTransport | undefined =>
-  typeof env.AI?.fetch === "function"
-    ? cloudflareAiGateway(env.AI, config.gateway)
-    : undefined;
+  call: Session,
+  { from, to, why }: { from: string; to: Routed; why: string }
+): Promise<void> => {
+  log.warn("model.failover", {
+    model: call.model,
+    from,
+    to: to.route.label,
+    why,
+  });
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: call.trigger,
+    action: "model.failover",
+    requestId: call.requestId,
+    detail: {
+      purpose: call.purpose,
+      model: call.model.length <= auditIdentifierMaxLength ? call.model : null,
+      from,
+      to: to.route.label,
+      why,
+      route: to.residency?.id ?? null,
+      region: to.residency?.region ?? null,
+    },
+  });
+};
+
+/**
+ * The way `call` goes, last of its checks: the first transport that
+ * reaches the model on a route the organization's residency allows, whose
+ * circuit lets it try (model-routing.ts); refused, and audited, when none
+ * does. Nothing is sent on any other. A call that passes over the primary
+ * fails over, audited.
+ */
+const routedOrRefused = async (
+  env: ModelsEnv,
+  call: Session,
+  transports: Transports,
+  ref: ModelRef
+): Promise<Routed> => {
+  const routing = await routeCall(transports, ref, metadataOf(call));
+  if (!routing.ok) {
+    return await refuse(env, call, unroutable(routing.why));
+  }
+  const { routed, passed } = routing;
+  if (routed.place > 0) {
+    await auditFailover(env, call, {
+      from: transports.each[0]?.label ?? "none",
+      to: routed,
+      why: passed[0]?.why ?? "unreachable",
+    });
+  }
+  return routed;
+};
+
+/** The route's names, as the ledger and the audit log record them. */
+const ledgerRouteOf = ({ route, residency }: Routed): LedgerRoute => ({
+  transport: route.label,
+  provider: route.provider,
+  region: residency?.region ?? "unknown",
+});
 
 /**
  * Checks a request against the deployment's config and rules, before
@@ -2524,22 +2707,23 @@ const modelTransport = (
 const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  const transport =
-    config === undefined ? undefined : modelTransport(env, config);
-  if (config === undefined || rules === undefined || transport === undefined) {
+  const transports =
+    config === undefined ? undefined : transportsOf(env, config.gateway);
+  if (config === undefined || rules === undefined || transports === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = config.models.includes(call.model)
     ? parseModelRef(call.model)
     : undefined;
-  const endpoint =
-    ref === undefined ? undefined : transport.route(ref, metadataOf(call));
-  if (ref === undefined || endpoint === undefined) {
+  if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
     createAuditEvent(
-      auditEntry({ call, ref, judged: largestJudged }, largestRecord),
+      auditEntry(
+        { call, ref, judged: largestJudged, way: largestWay },
+        largestRecord
+      ),
       "core"
     );
   } catch {
@@ -2552,7 +2736,8 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   if (
     call.binding !== undefined &&
     call.maxTokens !== undefined &&
-    call.maxTokens > usableAnswer(endpoint.model)
+    call.maxTokens >
+      usableAnswer({ ...ref.catalog, maxTokens: maxTokensOf(ref) })
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
@@ -2580,18 +2765,23 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
+  const routed = await routedOrRefused(env, call, transports, ref);
   // Whose shares of the requests in flight the call takes, from its
   // trigger and work context, which core's host sets: never from App code.
   const { disclose } = shareIdentity(call);
   const place = crypto.randomUUID();
+  const endpoint = routed.route;
   const { model } = endpoint;
   return {
     call,
     ref,
     judged: verdict.judged,
+    way: ledgerRouteOf(routed),
     model,
     endpoint,
-    sdkRetries: transport.capabilities.sdkRetries,
+    routed,
+    transports,
+    sdkRetries: routed.capabilities.sdkRetries,
     bound: (body) => textBound(call, model, body),
     price,
     place,
@@ -2604,6 +2794,102 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
         : { limitMicros: requestMicros, heldMicros: 0 },
     env,
   };
+};
+
+/**
+ * The route a request that failed goes to next, when the deployment fails
+ * over (`MODEL_TRANSPORT.failover`) and it may: only once the endpoint
+ * refused it before taking anything on (credentials, or a rate limit its
+ * retries didn't outlast), never once it may have been billed (a server
+ * error, no answer, an answer cut off), never past its deadline or once
+ * its caller cancelled it, and only to a later transport whose route the
+ * organization's residency allows (model-routing.ts). Audited.
+ */
+const failoverOf = async (
+  env: ModelsEnv,
+  route: Route,
+  response: GatewayResponse,
+  stopped: Stopped | undefined,
+  /** Records the failed request, before the failover is: in order. */
+  recordFailed: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
+): Promise<Route | undefined> => {
+  const { failure } = response;
+  if (
+    failure === undefined ||
+    stopped !== undefined ||
+    response.held !== undefined ||
+    response.pending !== undefined ||
+    !neverTakenOn(failure) ||
+    failure.kind === "refused" ||
+    failure.kind === "budget"
+  ) {
+    return undefined;
+  }
+  const next = route.routed.place + 1;
+  if (next >= route.transports.each.length) {
+    return undefined;
+  }
+  const routing = await routeCall(
+    route.transports,
+    route.ref,
+    metadataOf(route.call),
+    next
+  );
+  if (!routing.ok) {
+    return undefined;
+  }
+  const { routed } = routing;
+  await recordFailed();
+  await auditFailover(env, route.call, {
+    from: route.endpoint.label,
+    to: routed,
+    why: failure.kind,
+  });
+  const endpoint = routed.route;
+  return {
+    ...route,
+    endpoint,
+    routed,
+    model: endpoint.model,
+    way: ledgerRouteOf(routed),
+    sdkRetries: routed.capabilities.sdkRetries,
+    bound: (body) => textBound(route.call, endpoint.model, body),
+  };
+};
+
+/**
+ * Sends `request`, and again along the next transport each time it fails
+ * over (`failoverOf`), each failed request recorded as `attempt`.
+ */
+const sendFailingOver = async (
+  env: ModelsEnv,
+  request: Request,
+  limit: Deadline,
+  attempt: number
+): Promise<Sent> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one transport after another
+    const sent = await send(request);
+    if (!hasFailed(sent.answer) || sent.held !== undefined) {
+      return sent;
+    }
+    const stopped = limit.stopped();
+    // oxlint-disable-next-line no-await-in-loop -- one transport after another
+    const next = await failoverOf(env, request, sent, stopped, async () => {
+      const failure = failureOf(sent, stopped);
+      log.warn(
+        "model.failed",
+        failureFields(request.call.model, sent, failure)
+      );
+      await record(env, request, sent, attempt, "failed", failure);
+    });
+    if (next === undefined) {
+      return sent;
+    }
+    Object.assign(request, next);
+  }
 };
 
 /** A call's requests: one, or a second when the answer doesn't fit its schema. */
@@ -2629,7 +2915,7 @@ const answerCall = async <Output>(
     // provider requests is admitted by the ledger, in the month it is
     // sent in: one the ledger held back was never sent.
     // oxlint-disable-next-line no-await-in-loop
-    const sent = await send(request);
+    const sent = await sendFailingOver(env, request, limit, attempt);
     if (sent.held !== undefined) {
       // oxlint-disable-next-line no-await-in-loop
       await refuse(env, call, sent.held);
@@ -2809,7 +3095,7 @@ const relayEvents = async (
   { events, response }: Awaited<ReturnType<typeof open>>,
   out: AssistantMessageEventStream,
   limit: Deadline
-): Promise<void> => {
+): Promise<Route | undefined> => {
   // The answer as far as it came, as the adapter's last event had it.
   let partial: AssistantMessage | undefined = undefined;
   for await (const event of events) {
@@ -2827,7 +3113,7 @@ const relayEvents = async (
               : `The model call was refused (${code}). Try again in ${retryAfter} seconds.`,
         },
       });
-      return;
+      return undefined;
     }
     if (event.type === "error") {
       const sent: Sent = { answer: event.error, ...response };
@@ -2842,6 +3128,15 @@ const relayEvents = async (
         stopped === "cancelled" ? "cancelled" : "failed",
         failure
       );
+      // Refused before anything streamed: the loop never saw it, so it
+      // may go the next way, where the deployment fails over.
+      const next =
+        partial === undefined
+          ? await failoverOf(env, route, response, stopped)
+          : undefined;
+      if (next !== undefined) {
+        return next;
+      }
       const rateLimited =
         response.rateLimited === undefined || stopped !== undefined
           ? undefined
@@ -2853,7 +3148,7 @@ const relayEvents = async (
           errorMessage: rateLimited ?? failureMessage(failure),
         },
       });
-      return;
+      return undefined;
     }
     if (event.type === "done") {
       const sent: Sent = { answer: event.message, ...response };
@@ -2865,7 +3160,7 @@ const relayEvents = async (
         event.reason === "length" ? "truncated" : "answered"
       );
       out.push({ ...event, message: chargedAnswer(route, sent) });
-      return;
+      return undefined;
     }
     ({ partial } = event);
     out.push(event);
@@ -2885,6 +3180,7 @@ const relayEvents = async (
     reason: "error",
     error: chargedAnswer(route, sent),
   });
+  return undefined;
 };
 
 /**
@@ -2926,13 +3222,19 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(
-      env,
-      route,
-      await open(route, context, limit),
-      out,
-      limit
-    );
+    let current: Route | undefined = route;
+    while (current !== undefined) {
+      // One transport after another, as the call fails over.
+      // oxlint-disable-next-line no-await-in-loop
+      current = await relayEvents(
+        env,
+        current,
+        // oxlint-disable-next-line no-await-in-loop
+        await open(current, context, limit),
+        out,
+        limit
+      );
+    }
   } finally {
     limit.clear();
   }
@@ -3118,6 +3420,39 @@ const largestSpeech: SpeechRecord = {
 /** The gateway path to ElevenLabs's native host, unless the config names another. */
 const nativeVoiceProvider = "elevenlabs";
 
+/** The AI Gateway voice models go through, over the AI binding. */
+interface VoiceGateway {
+  ai: AiBinding;
+  gateway: string;
+}
+
+/**
+ * How voice models are reached: through the deployment's AI Gateway over
+ * the AI binding, whatever its text models' transport (no other transport
+ * carries voice, model-transport.ts). `residency` for an organization
+ * whose calls must stay in the EU: the gateway hop isn't pinned there
+ * (@grasp-os/shared/model-residency), so no line goes through it. None on
+ * plain workerd (on-prem), which has no AI binding, or without a gateway.
+ */
+const voiceGatewayOf = (
+  env: ModelsEnv,
+  config: ModelGatewayConfig
+): VoiceGateway | "residency" | undefined => {
+  const transport = transportConfigOf(env);
+  const ai = env.AI;
+  if (
+    transport === undefined ||
+    ai === undefined ||
+    typeof ai.fetch !== "function" ||
+    config.gateway === undefined
+  ) {
+    return undefined;
+  }
+  return transport.residency === "global"
+    ? { ai, gateway: config.gateway }
+    : "residency";
+};
+
 /** A line's way to the voice model at the deployment's gateway. */
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
@@ -3142,12 +3477,8 @@ const admitSpeech = async (
 ): Promise<SpeechRoute> => {
   const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  // Plain workerd (on-prem) has no AI binding, so no voice either.
-  if (
-    config === undefined ||
-    rules === undefined ||
-    typeof env.AI?.fetch !== "function"
-  ) {
+  const voice = config === undefined ? undefined : voiceGatewayOf(env, config);
+  if (config === undefined || rules === undefined || voice === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = config.models.includes(call.model)
@@ -3155,6 +3486,12 @@ const admitSpeech = async (
     : undefined;
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  if (voice === "residency") {
+    return await refuse(env, call, {
+      code: "model.eu_only",
+      because: "residency",
+    });
   }
   try {
     createAuditEvent(
@@ -3187,8 +3524,8 @@ const admitSpeech = async (
     ref,
     judged: verdict.judged,
     price,
-    transport: createAiBindingFetch(env.AI),
-    url: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    transport: createAiBindingFetch(voice.ai),
+    url: `${gatewayBase(voice.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
     body: JSON.stringify({
       text: call.text,
       model_id: ref.id,
@@ -3483,12 +3820,12 @@ export interface VoiceGatewayRoute {
  */
 const voiceGatewayRoute = (
   env: ModelsEnv,
-  ai: AiBinding,
+  { ai, gateway }: VoiceGateway,
   config: ModelGatewayConfig
 ): VoiceGatewayRoute => {
   const token = env.AI_GATEWAY_TOKEN;
   return {
-    base: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}`,
+    base: `${gatewayBase(gateway)}/${config.voice?.provider ?? nativeVoiceProvider}`,
     transport: createAiBindingFetch(ai),
     headers: {
       "cf-aig-authorization": `Bearer ${
@@ -3639,13 +3976,8 @@ const listenThrough = async (
   const call = parseCall(listeningSchema, fields);
   const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  const ai = env.AI;
-  if (
-    config === undefined ||
-    rules === undefined ||
-    ai === undefined ||
-    typeof ai.fetch !== "function"
-  ) {
+  const voice = config === undefined ? undefined : voiceGatewayOf(env, config);
+  if (config === undefined || rules === undefined || voice === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = config.models.includes(call.model)
@@ -3653,6 +3985,12 @@ const listenThrough = async (
     : undefined;
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  if (voice === "residency") {
+    return await refuse(env, call, {
+      code: "model.eu_only",
+      because: "residency",
+    });
   }
   try {
     createAuditEvent(
@@ -3708,7 +4046,7 @@ const listenThrough = async (
   let ended = false;
   return {
     modelId: ref.id,
-    route: voiceGatewayRoute(env, ai, config),
+    route: voiceGatewayRoute(env, voice, config),
     seconds: call.seconds,
     heard: async (heard, outcome) => {
       if (ended) {

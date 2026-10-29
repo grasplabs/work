@@ -70,6 +70,12 @@
   // secret AI_GATEWAY_TOKEN, which voice requests carry; a realtime
   // WebSocket to the gateway needs it.
   //
+  // And how the gateway reaches its models: the `MODEL_TRANSPORT` var
+  // (src/model-routing.ts), AI Gateway unless set, or OpenRouter, each
+  // provider's own API, or an OpenAI-compatible endpoint. Their keys are
+  // the optional secret MODEL_PROVIDER_KEYS (JSON, by name), only ever a
+  // secret.
+  //
   // So is `PLATFORM_CHANGE` (src/platform-updates.ts): who made this
   // version, and what they changed, which the clock records in the audit log
   // once per version.

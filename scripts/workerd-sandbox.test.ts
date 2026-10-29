@@ -1295,6 +1295,7 @@ describe("the on-prem config", () => {
   it("binds core's SANDBOX_HOST to the sandbox supervisor's socket, so no untrusted code runs in core's process", () => {
     const config = smokeConfig({
       port: 8790,
+      modelPort: 8791,
       sandboxSocket: "/run/grasp-sandbox/supervisor.sock",
       routerSecret: "s",
       modules: [],

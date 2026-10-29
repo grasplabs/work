@@ -131,7 +131,8 @@ export interface BudgetInput {
           | "brain_upkeep"
           | "dashboard_widgets"
           | "brain_recall"
-          | "policy_reading";
+          | "policy_reading"
+          | "transport_probe";
       };
 }
 
