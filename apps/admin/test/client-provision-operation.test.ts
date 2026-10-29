@@ -49,15 +49,18 @@ import {
 } from "../src/hosting/offboarding.ts";
 import {
   ProvisionOperationError,
+  recordUnstarted,
   runClientProvision,
   sendsSettled,
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import { operationErrorWords } from "../src/hosting/words.ts";
 import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
+import { getProvisioning } from "../src/provision/queries.ts";
 import {
   claimRun,
   currentRun,
@@ -82,7 +85,11 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import {
+  emptyStoreSecret,
+  setStoreSecret,
+  useStoreSecrets,
+} from "./secrets-store.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
@@ -2634,6 +2641,96 @@ describe("provisioning a placed client", () => {
     await expect(provisioned(account, clientId)).resolves.toMatchObject(
       once(clientId)
     );
+  });
+
+  it("records why an attempt stopped before its operation could run, a secret missing from Secrets Store by name, for Setup to say, and resumes once it's back", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[0], "errored");
+    errors.mockRestore();
+
+    const code = "store_secret_missing: DEPLOYER_API_TOKEN";
+    const view = await getProvisioning(env, clientId);
+    const failed = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.fail")
+        )
+      );
+    expect({
+      operation: await operationOf(clientId),
+      stopped: view?.stopped,
+      phase: view?.phase,
+      audited: failed.map(({ detail }): unknown => JSON.parse(detail ?? "{}")),
+      calls: account.d1.length,
+    }).toMatchObject({
+      operation: { status: "failed", step: null, error: code },
+      stopped: { step: "validated", error: code },
+      phase: "failed",
+      audited: [{ step: "validated", error: code }],
+      calls: 0,
+    });
+    expect(operationErrorWords(code)).toContain(
+      "Secrets Store has no DEPLOYER_API_TOKEN"
+    );
+
+    // Back in the store, a new attempt resumes it.
+    await setStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN", token);
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[1], "complete");
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "done",
+      error: null,
+    });
+  });
+
+  it("records a failure before the operation ran as that attempt alone: an old attempt's never lands over the retry that took the client over", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    const attemptKey = `${held.runId}-provision`;
+    const old = { ...held, attempt: 1, attemptKey };
+    const retry = { ...held, attempt: 2, attemptKey };
+    await takeAttempt(db, old);
+    // The old attempt timed out, and its retry took the client.
+    await takeAttempt(db, retry);
+    const code = "store_secret_missing: ROUTER_KEY";
+
+    await recordUnstarted(db, old, code);
+    const afterOld = await operationOf(clientId);
+    await recordUnstarted(db, retry, code);
+    const afterRetry = await operationOf(clientId);
+    const failed = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.fail")
+        )
+      );
+
+    expect({
+      afterOld: [afterOld?.status, afterOld?.error],
+      afterRetry: [afterRetry?.status, afterRetry?.error],
+      audited: failed.length,
+    }).toStrictEqual({
+      afterOld: ["running", null],
+      afterRetry: ["failed", code],
+      audited: 1,
+    });
   });
 
   it("migrates a client once when its attempt times out mid-migration and its retry runs", async () => {
