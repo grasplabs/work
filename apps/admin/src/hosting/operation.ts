@@ -67,9 +67,12 @@
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
- *   (`wfp_binding_unqualified`): a release that sends mail among them, as
- *   whether a user Worker can send through a `send_email` binding at all
- *   is a spike of its own. The admin probes a user Worker in the
+ *   (`wfp_binding_unqualified`). Mail is the exception: whether a user
+ *   Worker can send through a `send_email` binding at all is a spike of
+ *   its own (GRA-965), so there a release's `send_email` bindings are left
+ *   out (`withoutMail`) rather than refused. Its core then sends no mail,
+ *   and says so (core's src/mail.ts), and no sending domain is set up. The
+ *   admin probes a user Worker in the
  *   namespace it and the router bind (`router.namespace`) through
  *   that binding, as the router then reaches it (GRA-283); one in any
  *   other namespace stops at the probe (`probe_unqualified`), its
@@ -460,7 +463,7 @@ const appSchema = z.enum(apps);
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
  * `send_email` binding uploads, but whether it delivers is GRA-965's
- * spike, still open. The vars and secrets the admin adds go in the
+ * spike, still open: it's left out there (`withoutMail`). The vars and secrets the admin adds go in the
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
@@ -472,6 +475,27 @@ const wfpBindings: ReadonlySet<string> = new Set([
   "version_metadata",
   "service",
 ]);
+
+/**
+ * `manifest` as a Workers for Platforms namespace runs it: every Worker
+ * without its `send_email` bindings, as whether a user Worker can send
+ * mail at all is GRA-965's spike, still open. Its core then has no `EMAIL`
+ * and sends nothing, saying why (core's src/mail.ts), and the operation
+ * sets up no sending domain (`setUpMail`). A dedicated destination keeps
+ * its mail.
+ */
+const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
+  ...manifest,
+  workers: Object.fromEntries(
+    Object.entries(manifest.workers).map(([name, worker]) => [
+      name,
+      {
+        ...worker,
+        bindings: worker.bindings.filter(({ type }) => type !== "send_email"),
+      },
+    ])
+  ),
+});
 
 /**
  * How `loaded`'s destination takes a Worker's bindings: in a Workers for
@@ -1358,8 +1382,9 @@ const targetOf = (
 
 /**
  * Throws unless the destination can run `worker` as the release declares
- * it: no Workers AI anywhere (`model_spend_undecided`), and in a Workers
- * for Platforms namespace only documented bindings and no cron triggers.
+ * it: no Workers AI anywhere (`model_spend_undecided`, until GRA-141
+ * decides model spend), and in a Workers for Platforms namespace only
+ * documented bindings and no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
   const ai = worker.bindings.find(({ type }) => type === "ai");
@@ -1534,7 +1559,10 @@ const load = async (
   return {
     operation,
     held,
-    manifest,
+    manifest:
+      destination.kind === "workers_for_platforms"
+        ? withoutMail(manifest)
+        : manifest,
     placement,
     destination,
     accountId: destination.accountId,
