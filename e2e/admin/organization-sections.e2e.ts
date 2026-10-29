@@ -122,6 +122,15 @@ const fault = async (
   expect(response.status()).toBe(204);
 };
 
+// The dev server is shared by every test and retry: a fault a test set
+// never outlives it, however the test ends, nor is one left from before.
+test.beforeEach(async ({ request }) => {
+  await fault(request, null);
+});
+test.afterEach(async ({ request }) => {
+  await fault(request, null);
+});
+
 /** The section's failure in its place, and Try again bringing the section back once its cause is gone. */
 const failsThenRecovers = async (
   page: Page,
