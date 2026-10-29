@@ -205,9 +205,13 @@ describe("the admin's Worker for cf", () => {
     const settings = (stage: "production" | "staging") => {
       const worker = cfWorker(wranglerText, stage, deployed);
       return Object.fromEntries(
-        ["STAGE", "CF_ACCESS_ISS", "GOOGLE_CLIENT_ID", "CLIENT_DOMAIN"].map(
-          (name) => [name, bindingOf(worker, name)?.value]
-        )
+        [
+          "STAGE",
+          "CF_ACCESS_ISS",
+          "ENTRA_CLIENT_ID",
+          "GOOGLE_CLIENT_ID",
+          "CLIENT_DOMAIN",
+        ].map((name) => [name, bindingOf(worker, name)?.value])
       );
     };
     expect({
@@ -217,6 +221,7 @@ describe("the admin's Worker for cf", () => {
       production: {
         STAGE: "production",
         CF_ACCESS_ISS: "https://grasp-work.cloudflareaccess.com",
+        ENTRA_CLIENT_ID: "01228906-bd5b-488e-b7c1-720f4dc12dc2",
         GOOGLE_CLIENT_ID:
           "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
         CLIENT_DOMAIN: "ongrasp.app",
@@ -224,6 +229,7 @@ describe("the admin's Worker for cf", () => {
       staging: {
         STAGE: "staging",
         CF_ACCESS_ISS: "https://grasp-work.cloudflareaccess.com",
+        ENTRA_CLIENT_ID: "01228906-bd5b-488e-b7c1-720f4dc12dc2",
         GOOGLE_CLIENT_ID:
           "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
         CLIENT_DOMAIN: undefined,
