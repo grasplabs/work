@@ -469,10 +469,15 @@ type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
   /**
-   * Not due: parked until `wake`, the event wait's type given; a wait
-   * reached while a pause is asked for parks unjournaled, due at once.
+   * Not due: parked until `wake`, the event wait's type or match given; a
+   * wait reached while a pause is asked for parks unjournaled, due at once.
    */
-  | { park: number; eventType: string | null; deadline: number }
+  | {
+      park: number;
+      eventType: string | null;
+      eventMatch: string | null;
+      deadline: number;
+    }
   | { mismatch: string }
   | null;
 
@@ -610,6 +615,26 @@ const contextOf = (
 });
 
 /**
+ * The event a wait for `eventType` (a `waitForEvent`) or for `eventMatch`
+ * (a `waitForMatch`) takes, if the run accepted one for it before
+ * `deadline`; none for a sleep.
+ */
+const parkedEventFor = (
+  sql: SqlStorage,
+  eventType: string | null,
+  eventMatch: string | null,
+  deadline: number
+): EventRow | undefined => {
+  if (eventType !== null) {
+    return readNextEvent(sql, eventType, deadline);
+  }
+  if (eventMatch !== null) {
+    return readMatchingEvent(sql, readEventMatch(eventMatch), deadline);
+  }
+  return undefined;
+};
+
+/**
  * The event the waiting `step` takes, if the run accepted one for it
  * before `deadline`: by its type for a `waitForEvent`, by its match for a
  * `waitForMatch`; none for a sleep.
@@ -618,15 +643,8 @@ const eventFor = (
   sql: SqlStorage,
   step: StepRow,
   deadline: number
-): EventRow | undefined => {
-  if (step.event_type !== null) {
-    return readNextEvent(sql, step.event_type, deadline);
-  }
-  if (step.event_match !== null) {
-    return readMatchingEvent(sql, readEventMatch(step.event_match), deadline);
-  }
-  return undefined;
-};
+): EventRow | undefined =>
+  parkedEventFor(sql, step.event_type, step.event_match, deadline);
 
 const stepEvent = <Payload>(event: EventRow): WorkflowStepEvent<Payload> => ({
   // SAFETY: what the sender sent, through the codec; the payload's type is
@@ -724,7 +742,11 @@ export class Activation {
    * The parked event waits, by their event type and deadline: an event
    * accepted for one before the activation suspends wakes the run at once.
    */
-  readonly #parkedEventWaits: { eventType: string; deadline: number }[] = [];
+  readonly #parkedEventWaits: {
+    eventType: string | null;
+    eventMatch: string | null;
+    deadline: number;
+  }[] = [];
   /**
    * The definition's work outside the step API that it said will reach
    * the step API again (`step.busy`), not yet ended: the activation
@@ -1837,13 +1859,13 @@ export class Activation {
         if (!this.#compensating) {
           wake = Math.min(wake, journalWake(sql, now));
         }
-        // An event accepted for a parked wait while this activation ran
-        // woke no one (`run.ts` wakes only a waiting run): the run wakes
+        // An event accepted for a parked wait (by its type or its match)
+        // while this activation ran woke no one (`run.ts` wakes only a waiting run): the run wakes
         // for it now, not at the wait's deadline.
         if (
           this.#parkedEventWaits.some(
-            ({ eventType, deadline }) =>
-              readNextEvent(sql, eventType, deadline) !== undefined
+            ({ eventType, eventMatch, deadline }) =>
+              parkedEventFor(sql, eventType, eventMatch, deadline) !== undefined
           )
         ) {
           wake = Math.min(wake, now);
@@ -2102,12 +2124,27 @@ export class Activation {
     if (landed === "retry") {
       return await this.#attempts(identity, config, work);
     }
+    // Owed from the turn it is journaled in, before anything else is
+    // awaited, as a replay owes it from the turn it is called in: a step
+    // journaled earlier is handed over earlier, however long its result
+    // takes to read back (a stream's digest, say), so a race between steps
+    // has the winner the journal holds, the first time as on every replay.
+    const owed = this.#write(() => this.#owe(identity));
+    if (owed === failed) {
+      return await this.#never();
+    }
     await this.#renewWatchdog();
     if ("failed" in landed) {
       await this.#inTurn(identity);
       throw rebuild(landed.failed);
     }
-    const value = await this.#result(landed.ordinal, landed.value);
+    let value: unknown;
+    try {
+      value = await this.#result(landed.ordinal, landed.value);
+    } catch (error) {
+      this.#forgo(owed);
+      throw error;
+    }
     await this.#inTurn(identity);
     return value;
   }
@@ -2182,7 +2219,7 @@ export class Activation {
         // event: it parks, due at once, and the run pauses once nothing
         // else of this activation is out (`#suspendIfParked`). Should the
         // pause be called off first, the next activation reaches it again.
-        return { park: now, eventType: null, deadline: now };
+        return { park: now, eventType: null, eventMatch: null, deadline: now };
       }
       let step = readStep(sql, identity);
       // Checked before anything is written: a replay that strayed leaves
@@ -2234,6 +2271,7 @@ export class Activation {
         return {
           park: step.deadline,
           eventType: step.event_type,
+          eventMatch: step.event_match,
           deadline: step.deadline,
         };
       }
@@ -2312,9 +2350,10 @@ export class Activation {
     if ("park" in outcome) {
       this.#parkedWaits += 1;
       this.#parkedWake = Math.min(this.#parkedWake, outcome.park);
-      if (outcome.eventType !== null) {
+      if (outcome.eventType !== null || outcome.eventMatch !== null) {
         this.#parkedEventWaits.push({
           eventType: outcome.eventType,
+          eventMatch: outcome.eventMatch,
           deadline: outcome.deadline,
         });
       }
