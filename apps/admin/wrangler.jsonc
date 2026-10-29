@@ -65,11 +65,18 @@
   ],
   // The Chat SDK's state for Grasp's Discord bot (src/admin/discord.ts,
   // @grasp-os/chat/state): one SQLite object per key and per conversation,
-  // in the EU.
+  // in the EU. And the admin's workflow runs on Workerflow
+  // (src/workflow-runs.ts): one SQLite object per run, in the EU.
   "durable_objects": {
-    "bindings": [{ "name": "CHAT_STATE", "class_name": "ChatState" }],
+    "bindings": [
+      { "name": "CHAT_STATE", "class_name": "ChatState" },
+      { "name": "ADMIN_RUNS", "class_name": "AdminRuns" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatState"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatState"] },
+    { "tag": "v2", "new_sqlite_classes": ["AdminRuns"] },
+  ],
   // Imports newly published releases (src/releases/import.ts) every 5
   // minutes; on weekday mornings, posts the admin's digest to Discord
   // (src/admin/discord-digest.ts, `digestCron`); every morning, warns
@@ -110,14 +117,6 @@
       "name": "grasp-os-apply-client",
       "binding": "APPLY_CLIENT",
       "class_name": "ApplyClient",
-    },
-    // Follows a build of an integration by Grasp's agent through its
-    // stages and waits (src/builds/workflow.ts): an instance per build,
-    // one build per app.
-    {
-      "name": "grasp-os-integration-build",
-      "binding": "INTEGRATION_BUILD",
-      "class_name": "IntegrationBuild",
     },
     // Provisions a client placed in a hosting destination
     // (src/hosting/workflow.ts): an instance per attempt, each claimed in
