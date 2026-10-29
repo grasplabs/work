@@ -1,10 +1,14 @@
-import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
+import type {
+  WorkflowCandidateTrace,
+  WorkflowRunTrace,
+} from "@grasp-os/shared/workflow-diagrams";
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
+  WorkflowItemTest,
   WorkflowMember,
   WorkflowParams,
   WorkflowResource,
@@ -65,9 +69,11 @@ import {
 import { startWorkflow } from "./workflow-starts.ts";
 import {
   candidateRunFor,
+  candidateRunTrace,
   startCandidateRun,
   terminateCandidateRun,
 } from "./workflows/candidate-runs.ts";
+import { itemTestFor, startItemTest } from "./workflows/item-tests.ts";
 import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
 import {
   listResourceRuns,
@@ -274,6 +280,30 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await terminateCandidateRun(this.#env, person, id, runId)
+    );
+  }
+
+  async candidateRunTrace(
+    id: string,
+    runId: string
+  ): Promise<WorkflowCandidateTrace> {
+    return await withPerson(
+      this.#check,
+      async (person) => await candidateRunTrace(this.#env, person, id, runId)
+    );
+  }
+
+  async startItemTest(id: string, input: unknown): Promise<WorkflowItemTest> {
+    return await withPerson(
+      this.#check,
+      async (person) => await startItemTest(this.#env, person, id, input)
+    );
+  }
+
+  async itemTest(id: string, testId: string): Promise<WorkflowItemTest> {
+    return await withPerson(
+      this.#check,
+      async (person) => await itemTestFor(this.#env, person, id, testId)
     );
   }
 
