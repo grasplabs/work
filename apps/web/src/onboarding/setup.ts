@@ -360,9 +360,17 @@ export type ReviewItemId = (typeof reviewItems)[number];
 export const isReviewItem = (value: unknown): value is ReviewItemId =>
   reviewItems.some((item) => item === value);
 
-/** What still needs the admin: every item they haven't settled. */
-export const openItems = (settled: readonly ReviewItemId[]): ReviewItemId[] =>
-  reviewItems.filter((item) => !settled.includes(item));
+/**
+ * What still needs the admin: every item they haven't settled. Where Grasp
+ * sends no mail (`mailSends`), there's no mail to let through.
+ */
+export const openItems = (
+  settled: readonly ReviewItemId[],
+  mailSends: boolean
+): ReviewItemId[] =>
+  reviewItems.filter(
+    (item) => !settled.includes(item) && (item !== "mail" || mailSends)
+  );
 
 /** What this browser keeps of an admin's onboarding: the furthest step they reached, the message they wrote, and what they settled. */
 export interface Kept {

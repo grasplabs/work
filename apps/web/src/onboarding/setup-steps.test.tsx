@@ -57,7 +57,8 @@ const page = (children: ReactElement): string => {
 const view = (
   paused: boolean,
   sponsor: string | null,
-  context: OnboardingContext
+  context: OnboardingContext,
+  mailSends: boolean
 ): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
@@ -67,6 +68,7 @@ const view = (
   sponsor,
   context,
   waiting: 0,
+  mailSends,
 });
 
 interface Shown {
@@ -78,6 +80,8 @@ interface Shown {
   choices?: SetupChoices;
   documents?: OnboardingDocument[];
   context?: OnboardingContext;
+  /** Whether Grasp sends mail where it runs: it does unless said. */
+  mailSends?: boolean;
 }
 
 /** A step as it is drawn as it arrives, its markup and all. */
@@ -91,6 +95,7 @@ const drawn = (
     seen = false,
     choices = noChoices,
     documents = [],
+    mailSends = true,
   }: Shown
 ): string => {
   if (seen) {
@@ -99,7 +104,7 @@ const drawn = (
   const data: SetupData = {
     admin: "Ada",
     company: null,
-    view: view(paused, sponsor, context),
+    view: view(paused, sponsor, context, mailSends),
     links: [],
     documents,
     sendingDomain: "mail.example.test",
@@ -201,6 +206,25 @@ describe("what needs the admin", () => {
         done.includes("Continue"),
       ],
     }).toStrictEqual({ open: [true, false], done: [true, true, true] });
+  });
+
+  it("says mail isn't available where Grasp sends none, and leaves nothing to settle for it", () => {
+    const review = said("review", { mailSends: false });
+    expect({
+      told: review.includes("Mail isn’t available on this hosting yet"),
+      byHand: review.includes(
+        "Send each one their link by hand from Interviews."
+      ),
+      asked: review.includes("Let Grasp’s mail through"),
+      nothingOpen: review.includes("Nothing needs you"),
+      onward: review.includes("Continue"),
+    }).toStrictEqual({
+      told: true,
+      byHand: true,
+      asked: false,
+      nothingOpen: true,
+      onward: true,
+    });
   });
 });
 

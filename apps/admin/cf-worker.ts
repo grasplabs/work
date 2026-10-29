@@ -9,6 +9,9 @@
  * - declares each Durable Object class the migrations create, and each
  *   Workflow, as an export of cf's exports model (the admin's Worker is
  *   new on Grasp's account: nothing there was migrated the classic way);
+ * - declares where it answers: wrangler.jsonc's Custom Domain routes as
+ *   cf's `domains`, any other route as a fetch trigger, so every deploy
+ *   applies them (without them it is uploaded and served nowhere);
  * - fills in what a deploy passes (the account's Secrets Store, the
  *   stage's hostname map and the store's secrets, `DeployInputs`), leaving
  *   out bindings to optional secrets the store doesn't have yet, and
@@ -196,6 +199,28 @@ const secretBindings = (config: Json, inputs: DeployInputs): Env => {
   return env;
 };
 
+/** Where it answers: its Custom Domains, and its other routes. */
+const addresses = (
+  config: Json
+): { domains: string[]; routes: WorkerConfig["triggers"] } => {
+  const routes = list(config.routes);
+  return {
+    domains: routes
+      .filter((route) => route.custom_domain === true)
+      .map((route) => text(route.pattern)),
+    routes: routes
+      .filter((route) => route.custom_domain !== true)
+      .map((route) =>
+        triggers.fetch({
+          pattern: text(route.pattern),
+          ...(route.zone_name === undefined
+            ? {}
+            : { zone: text(route.zone_name) }),
+        })
+      ),
+  };
+};
+
 /** Its Durable Objects, Workflows and rate limits, and the exports they need. */
 const classBindings = (
   config: Json,
@@ -260,6 +285,7 @@ export const cfWorker = (
   }
   const observability = objectOf(config.observability);
   const classes = classBindings(config, name);
+  const { domains, routes } = addresses(config);
   return {
     name,
     compatibilityDate: text(config.compatibility_date),
@@ -275,9 +301,13 @@ export const cfWorker = (
       },
       traces: { enabled: objectOf(observability.traces).enabled === true },
     },
-    triggers: strings(objectOf(config.triggers).crons).map((schedule) =>
-      triggers.scheduled({ schedule })
-    ),
+    domains,
+    triggers: [
+      ...(routes ?? []),
+      ...strings(objectOf(config.triggers).crons).map((schedule) =>
+        triggers.scheduled({ schedule })
+      ),
+    ],
     env: {
       ...textBindings(config),
       ...storageBindings(config, inputs),

@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c157edf0-fece-493b-b772-95682a56a574",
-  "prevId": "76208a5c-e589-4d94-b5f1-4b01a516dc32",
+  "id": "7f6308fa-b201-4f3a-9ce6-04816c67b0bb",
+  "prevId": "7ca01fc7-6025-441d-af33-b63c892abae2",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -1920,74 +1920,6 @@
             "value"
           ],
           "name": "app_visitor_entries_app_id_kind_value_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "app_visitor_grants": {
-      "name": "app_visitor_grants",
-      "columns": {
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "function": {
-          "name": "function",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "app_visitor_grants_app_id_apps_id_fk": {
-          "name": "app_visitor_grants_app_id_apps_id_fk",
-          "tableFrom": "app_visitor_grants",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "app_visitor_grants_app_id_version_function_pk": {
-          "columns": [
-            "app_id",
-            "version",
-            "function"
-          ],
-          "name": "app_visitor_grants_app_id_version_function_pk"
         }
       },
       "uniqueConstraints": {},
@@ -13055,6 +12987,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "started_by_staff": {
+          "name": "started_by_staff",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "status": {
           "name": "status",
