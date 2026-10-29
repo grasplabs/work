@@ -7,6 +7,7 @@ import { clients, releases, rollouts, rolloutTargets } from "../db/schema.ts";
 import { listReleases, versionsOf } from "../releases/queries.ts";
 import { instanceStatus } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { firstRing } from "./targets.ts";
 
 /** How many rollouts the list shows: the latest. */
@@ -128,7 +129,11 @@ export const getRollout = async (
     })
     .from(rolloutTargets)
     .where(eq(rolloutTargets.rolloutId, id));
-  const { status } = await instanceStatus(env.ROLLOUT, id, rollout.createdAt);
+  const { status } = await instanceStatus(
+    adminWorkflow(env, adminWorkflows.rollout),
+    id,
+    rollout.createdAt
+  );
   return {
     ...rollout,
     run: status,

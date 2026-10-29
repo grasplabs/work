@@ -1,7 +1,9 @@
 import type { ReleaseManifest } from "@grasp-os/shared/release";
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import { cloudflareApi } from "../src/cloudflare/api.ts";
+import { clientRuns } from "../src/db/schema.ts";
 import {
   allocateClientResources,
   clientInventory,
@@ -13,6 +15,7 @@ import {
   claimRun,
   holdsClient,
   releaseRun,
+  stillHolds,
   takeAttempt,
 } from "../src/runners.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
@@ -273,18 +276,19 @@ describe("provisioning a client's resources", () => {
   it("keeps a client with the retry once an attempt that timed out finishes late, and lets the retry release it", async () => {
     const account = cloudflare.addAccount();
     const { held: run } = await allocated(account, await release());
-    await takeAttempt(db, { ...run, attempt: 1 });
+    const step = { attemptKey: "provision-step" };
+    await takeAttempt(db, { ...run, ...step, attempt: 1 });
     // The first attempt timed out, and its retry took the client.
-    await takeAttempt(db, { ...run, attempt: 2 });
+    await takeAttempt(db, { ...run, ...step, attempt: 2 });
 
-    const lateTake = await takeAttempt(db, { ...run, attempt: 1 });
+    const lateTake = await takeAttempt(db, { ...run, ...step, attempt: 1 });
     // The first attempt finishes late, and releases what it held.
-    await releaseRun(db, run.clientId, run.runId, 1);
+    await releaseRun(db, run.clientId, run.runId, 1, step.attemptKey);
     const kept = {
-      first: await holdsClient(db, run.clientId, run.runId, 1),
-      retry: await holdsClient(db, run.clientId, run.runId, 2),
+      first: await holdsClient(db, run.clientId, run.runId, 1, step.attemptKey),
+      retry: await holdsClient(db, run.clientId, run.runId, 2, step.attemptKey),
     };
-    await releaseRun(db, run.clientId, run.runId, 2);
+    await releaseRun(db, run.clientId, run.runId, 2, step.attemptKey);
 
     expect({
       lateTake,
@@ -294,6 +298,52 @@ describe("provisioning a client's resources", () => {
       lateTake: false,
       kept: { first: false, retry: true },
       released: false,
+    });
+  });
+
+  it("keeps a client from an earlier run's attempt under the same runner id, as a rollout's fleet client's round 2 counts from 1 again", async () => {
+    const account = cloudflare.addAccount();
+    const { held: claim } = await allocated(account, await release());
+    const { clientId, runId } = claim;
+    // Round 1's run takes the client for its step's attempt 1, which then
+    // times out and goes on; the round fails, and its client is released.
+    const round1 = { clientId, runId, attempt: 1, attemptKey: "round-1-run" };
+    await takeAttempt(db, round1);
+    await releaseRun(db, clientId, runId);
+    // Staff retry: round 2's run claims it under the same runner id, the
+    // rollout's, and takes it for its own step's attempt 1.
+    await claimRun(
+      db,
+      staff,
+      clientId,
+      null,
+      { action: "rollout.client_start", clientId },
+      { kind: "rollout", runId }
+    );
+    const round2 = { clientId, runId, attempt: 1, attemptKey: "round-2-run" };
+    const taken = await takeAttempt(db, round2);
+
+    // Round 1's attempt goes on: every check and write of it is refused.
+    const lateTake = await takeAttempt(db, round1);
+    const [written] = await db
+      .update(clientRuns)
+      .set({ claimedAt: new Date() })
+      .where(and(eq(clientRuns.clientId, clientId), stillHolds(round1)))
+      .returning({ clientId: clientRuns.clientId });
+    await releaseRun(db, clientId, runId, 1, round1.attemptKey);
+
+    expect({
+      taken,
+      lateTake,
+      old: await holdsClient(db, clientId, runId, 1, round1.attemptKey),
+      written: written ?? null,
+      round2: await holdsClient(db, clientId, runId, 1, round2.attemptKey),
+    }).toStrictEqual({
+      taken: true,
+      lateTake: false,
+      old: false,
+      written: null,
+      round2: true,
     });
   });
 });

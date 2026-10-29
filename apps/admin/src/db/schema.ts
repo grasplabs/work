@@ -199,6 +199,12 @@ export const clientRuns = sqliteTable("client_runs", {
    * for a runner that doesn't fence its attempts.
    */
   attempt: integer().notNull().default(0),
+  /**
+   * The step that attempt is of (Workerflow's idempotency key for it):
+   * with `attempt`, which attempt of which run's step holds the client
+   * (src/runners.ts, `takeAttempt`). Null until one takes it.
+   */
+  attemptKey: text("attempt_key"),
 });
 
 /**
@@ -619,6 +625,14 @@ export const clientProvisions = sqliteTable("client_provisions", {
   progress: text(),
   /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
   runId: text("run_id"),
+  /**
+   * The calls to the client's Workers still on their way, by sender (a
+   * runner's attempt at a step): JSON, each sender's change and when it
+   * sent (src/hosting/operation.ts, `sendHolding`). Apart from `progress`,
+   * which every step rewrites: a mark stays until its own sender clears it,
+   * or it ages out.
+   */
+  sending: text(),
   /**
    * Counts every change started on the client: each release, run again
    * and rollback raises it (src/hosting/operation.ts). What a rollout or
