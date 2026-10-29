@@ -1,5 +1,6 @@
 import {
   clientsNamespace,
+  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -9,13 +10,14 @@ import {
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { moduleKey } from "@grasp-os/shared/release";
+import { moduleKey, releaseManifestSchema } from "@grasp-os/shared/release";
 import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
 import type { StaffAlert } from "../src/alerts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
@@ -131,7 +133,7 @@ const bindsConnect = (core: WorkerEntry): WorkerEntry => ({
 /**
  * A release imported for a placed client: core binds its own Durable
  * Object classes, as the real one does, and nothing a placed client
- * refuses outright (Workflows, Workers AI). For a Workers for Platforms
+ * refuses outright (Workflows). For a Workers for Platforms
  * destination, only the bindings its documentation lists for user
  * Workers, and no cron triggers. `adjust` changes core.
  */
@@ -166,6 +168,52 @@ const importRelease = async (
       }),
     },
   };
+  await putBlobs(built);
+  const now = new Date();
+  await db.insert(releases).values({
+    id: manifest.releaseId,
+    commitSha: manifest.commit,
+    manifest: JSON.stringify(manifest),
+    manifestSha256: "0".repeat(64),
+    limitEvidence: built.limitEvidenceText ?? null,
+    builtAt: now,
+    importedAt: now,
+  });
+  return manifest;
+};
+
+/**
+ * The release as `release:build` makes it from the real wrangler.jsonc of
+ * core and connect (its golden test, scripts/release/manifest-lib.test.ts,
+ * keeps it theirs): every binding, cron and Durable Object migration of
+ * theirs, on the modules, assets and migrations of a test release, which
+ * the bucket holds. Imported; `adjust` changes each Worker first.
+ */
+const importRealRelease = async (
+  adjust: (worker: WorkerEntry) => WorkerEntry = (worker) => worker
+): Promise<ReleaseManifest> => {
+  const real = releaseManifestSchema.parse(golden);
+  const built = await buildRelease({ notes: "feat(core): the real one" });
+  const workers = Object.fromEntries(
+    Object.entries(built.manifest.workers).map(([name, worker]) => {
+      const own = real.workers[name];
+      if (own === undefined) {
+        throw new Error(`The real release has no ${name}`);
+      }
+      return [
+        name,
+        adjust({
+          ...worker,
+          bindings: own.bindings,
+          crons: own.crons,
+          durableObjectMigrations: own.durableObjectMigrations,
+          requiredSecrets: own.requiredSecrets,
+          compatibilityFlags: own.compatibilityFlags,
+        }),
+      ];
+    })
+  );
+  const manifest: ReleaseManifest = { ...built.manifest, workers };
   await putBlobs(built);
   const now = new Date();
   await db.insert(releases).values({
@@ -706,21 +754,11 @@ const refusals: Refusal[] = [
     code: "release_incompatible",
   },
   {
-    name: "a release that binds Workers AI, with no spend ceiling decided",
-    kind: "dedicated",
-    adjust: (core) => ({
-      ...core,
-      bindings: [...core.bindings, { type: "ai", name: "AI" }],
-    }),
-    code: "model_spend_undecided",
-  },
-  {
-    // Whether a user Worker can send mail at all is a spike of its own.
-    name: "a release that sends mail into Workers for Platforms",
+    name: "a release with a binding Workers for Platforms doesn't document",
     kind: "workers_for_platforms",
     adjust: (core) => ({
       ...core,
-      bindings: [...core.bindings, { type: "send_email", name: "EMAIL" }],
+      bindings: [...core.bindings, { type: "kv_namespace", name: "CACHE" }],
     }),
     code: "wfp_binding_unqualified",
   },
@@ -1847,6 +1885,119 @@ describe("provisioning a placed client", () => {
     }).toStrictEqual({
       first: "runner_replaced",
       retry: "probe_unqualified",
+    });
+  });
+
+  it("takes the real release live in Workers for Platforms, its model calls through the destination's gateway held to the client's ceiling, and without mail", async () => {
+    const real = await importRealRelease();
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+
+    await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          namespace: clientDispatchNamespace,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+
+    const { core } = await scriptsOf(clientId);
+    const coreBindings = z
+      .array(z.object({ type: z.string(), name: z.string() }).loose())
+      .parse(
+        account.namespaces
+          .get(clientDispatchNamespace)
+          ?.get(core)
+          ?.versions.at(-1)?.metadata.bindings ?? []
+      );
+    const gateway = coreBindings.find(({ name }) => name === "MODEL_GATEWAY");
+    expect({
+      operation: await operationOf(clientId),
+      // Workers AI bound, as the real core binds it.
+      ai: coreBindings
+        .filter(({ type }) => type === "ai")
+        .map(({ name }) => name),
+      // Through the destination's shared gateway, ensured before core went
+      // live, at the client's ceiling: €250 a month unless staff set another.
+      gateways: account.gateways.map(({ id }) => id),
+      gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
+      // Its core goes live without `EMAIL`, so it sends nothing and says
+      // so, and no sending domain is set up for it.
+      mail: coreBindings.filter(
+        ({ type, name }) => type === "send_email" || name === "EMAIL"
+      ),
+      zones: account.zones.length,
+      routed: await routed(clientId),
+    }).toMatchObject({
+      operation: { status: "done" },
+      ai: ["AI"],
+      gateways: [placedModelGateway("production")],
+      gateway: {
+        gateway: placedModelGateway("production"),
+        budgets: { deployment: { limit: 250, alertAt: 80 } },
+      },
+      mail: [],
+      zones: 0,
+      routed: true,
+    });
+  });
+
+  it("takes two clients first provisioned into one shared account at once live, through the one gateway either of them made", async () => {
+    const real = await importRealRelease();
+    const first = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+    const second = await placedOperation(first.destinationId, real);
+    const wfp = {
+      ...context,
+      router: {
+        ...context.router,
+        namespace: clientDispatchNamespace,
+        dispatcher: cloudflare.dispatcher(
+          first.account.id,
+          clientDispatchNamespace
+        ),
+      },
+    };
+    const gateway = placedModelGateway("production");
+    // The first finds no gateway, and before it creates one the second
+    // provisions all the way, making it: the first's create is refused.
+    let secondRan: Promise<unknown> = Promise.resolve();
+    cloudflare.afterAnswering(
+      ({ method, path }) =>
+        method === "GET" && path.endsWith(`/ai-gateway/gateways/${gateway}`),
+      async () => {
+        secondRan = runClientProvision(wfp, second.held);
+        await secondRan;
+      }
+    );
+
+    await runClientProvision(wfp, first.held);
+    await secondRan;
+
+    expect({
+      first: await operationOf(first.clientId),
+      second: await operationOf(second.clientId),
+      gateways: first.account.gateways.map(({ id, authentication }) => ({
+        id,
+        authentication,
+      })),
+    }).toMatchObject({
+      first: { status: "done" },
+      second: { status: "done" },
+      gateways: [{ id: gateway, authentication: true }],
     });
   });
 

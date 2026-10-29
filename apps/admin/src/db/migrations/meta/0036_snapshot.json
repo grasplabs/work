@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dae87192-5bc9-49f9-a2a6-09b8d17d35fb",
+  "id": "13e5e324-acef-47b9-9054-4d06f5b85951",
   "prevId": "b6f24c43-10b2-4f61-a663-4771005deae6",
   "tables": {
     "audit_events": {
@@ -878,6 +878,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "model_spend_ceiling": {
+          "name": "model_spend_ceiling",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 250
+        },
         "stripe_customer_id": {
           "name": "stripe_customer_id",
           "type": "text",
@@ -1224,27 +1232,6 @@
         },
         "merge_commit_sha": {
           "name": "merge_commit_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "session_nonce": {
-          "name": "session_nonce",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "session_run": {
-          "name": "session_run",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "session_url": {
-          "name": "session_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
