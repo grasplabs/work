@@ -28,6 +28,11 @@ export interface EvidenceQuery {
   collectionIds?: readonly CollectionId[];
   /** Most sections to return, best first. */
   limit: number;
+  /**
+   * For the exact lane (exact.ts): only sections that hold one of these,
+   * each its words in a row, in place of `query`'s words.
+   */
+  exact?: readonly (readonly string[])[];
 }
 
 /** A document's version, as recalled evidence cites it. */
@@ -129,6 +134,16 @@ export interface BrainStore<C> {
     reader: C,
     pins: readonly PinnedVersion[]
   ) => Promise<void>;
+  /**
+   * The vector lane (GRA-303), where the store has one: sections whose
+   * meaning is close to `query`'s, best first, of those `reader` may read,
+   * noted as read as `findEvidence` notes them. Absent until an index is
+   * kept; a recall then reports the route as not enabled.
+   */
+  findSimilar?: (
+    reader: C,
+    query: EvidenceQuery
+  ) => Promise<{ sections: FoundSection[]; provenance: Provenance }>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: C,
@@ -173,15 +188,11 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
       throw brainErrors.create("brain.not_found");
     }
   },
-  findEvidence: async (reader, { query, collectionIds, limit }) =>
-    await searchSections(
-      brain,
-      reader,
-      query,
-      { limit },
-      undefined,
-      collectionIds === undefined ? {} : { among: collectionIds }
-    ),
+  findEvidence: async (reader, { query, collectionIds, limit, exact }) =>
+    await searchSections(brain, reader, query, { limit }, undefined, {
+      ...(collectionIds === undefined ? {} : { among: collectionIds }),
+      ...(exact === undefined ? {} : { exact }),
+    }),
   accessKey: async (reader) => {
     // What may be read now: each collection the reader may read, with
     // what decides who reads it (its access, whether it is sensitive),

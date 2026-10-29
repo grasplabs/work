@@ -54,6 +54,34 @@ export interface WorkflowDiagram {
 export type TraceState = "reached" | "running" | "waiting" | "failed";
 
 /**
+ * One durable step of a task, as the run's journal records it, in the
+ * order the run reached it: what a run's step detail shows. Metadata only,
+ * as the rest of a trace: no value the step read or made, and a failure
+ * only by a code the platform defines (any other reads
+ * `workflow.step_failed`), never its message.
+ */
+export interface TraceStep {
+  /** Its place in the run, never another step's: tells two steps apart. */
+  ordinal: number;
+  /** The task it is a step of, by ID. */
+  task: string;
+  /**
+   * The loop item it ran in, as its step's name places it
+   * (`<for>.<index>`, nested loops joined by `/`); null outside a loop.
+   */
+  item: string | null;
+  state: TraceState;
+  /** How many attempts it made, as far as the journal tells. */
+  attempts: number;
+  /** When the journal first recorded it. */
+  startedAt: string;
+  /** When it completed or failed for good; null while it hasn't. */
+  endedAt: string | null;
+  /** Why it failed for good, once it did. */
+  errorCode: string | null;
+}
+
+/**
  * What a run did, laid over its own version's diagram: each task its
  * journal reached, by ID, and how that stands. Only what the engine
  * journaled, as metadata: never a value the run read or made, and never
@@ -68,6 +96,8 @@ export interface WorkflowRunTrace {
   /** The diagram of the run's own version, as it was published. */
   diagram: WorkflowDiagram;
   tasks: { task: string; state: TraceState; attempts: number }[];
+  /** Each of its tasks' steps, in the order the run reached them. */
+  steps: TraceStep[];
   /** False when the journal held more than one read takes. */
   complete: boolean;
   /**
@@ -75,4 +105,18 @@ export interface WorkflowRunTrace {
    * details were swept: nothing of what it reached is shown.
    */
   detailsRemoved: boolean;
+}
+
+/**
+ * What a test run of a draft's checkpoint did, step by step: its steps
+ * name tasks of the checkpoint it ran (`WorkflowCandidateRun`), whose
+ * diagram the draft shows.
+ */
+export interface WorkflowCandidateTrace {
+  runId: string;
+  draftRevision: number;
+  status: WorkflowRunStatus;
+  steps: TraceStep[];
+  /** False when the journal held more than one read takes. */
+  complete: boolean;
 }
