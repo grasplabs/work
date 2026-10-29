@@ -41,8 +41,10 @@ import { inList } from "../db/d1.ts";
 //   person: every lookup is by the file's ID *and* the calling run's,
 //   and anything else answers `file.not_found`, as a file that isn't
 //   there does. A file's ID is a random UUID; holding one grants nothing
-//   outside its run. Nothing serves a run file outside its run's actions:
-//   no route, no RPC, no download.
+//   outside its run. Nothing serves a run file's bytes outside its run's
+//   actions: no route, no RPC, no download. What a file is (its name,
+//   type and size) is listed only to whom its run's results are shown:
+//   the person it acted for, and admins (workflow-own.ts).
 // - Data leaving through a file: it has no way out but the run's own
 //   bindings, each approved and decided again on every call; a restricted
 //   run's actions still make no connector call (resource-calls.ts). A
