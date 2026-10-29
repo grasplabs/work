@@ -14,7 +14,12 @@ import { sendStaffAlert } from "../alerts.ts";
 import type { AlertOutcome } from "../alerts.ts";
 import { adminDatabase, audit } from "../db/act.ts";
 import { rotateClientSecrets } from "../deploy/rotation.ts";
-import { adminReader } from "./admin.ts";
+import {
+  clientAdmins,
+  defaultAdminReadOptions,
+  pageReadOptions,
+} from "./admin.ts";
+import type { ClientAdmin } from "./admin.ts";
 import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
@@ -86,13 +91,35 @@ export const fetchClientLive = createServerFn({ method: "GET" })
 /**
  * Every client's admin snapshot, as its core answers the verified staff
  * member asking (whom its audit log records), or as not reachable since it
- * last answered (`clientAdmins`). A POST, though it reads: it keeps when
- * each core answered, and every core's audit log records the read, so it
- * takes the same-origin check every change does (src/access.ts).
+ * last answered (`clientAdmins`), but those in `except`: the one whose
+ * page is open, which that page reads on its own (`fetchClientAdmin`).
+ * A POST, though it reads: it keeps when each core answered, and every
+ * core's audit log records the read, so it takes the same-origin check
+ * every change does (src/access.ts).
  */
-export const fetchClientAdmins = createServerFn({ method: "POST" }).handler(
-  async ({ context }) => await adminReader(env, context.staff)()
-);
+export const fetchClientAdmins = createServerFn({ method: "POST" })
+  .validator(z.object({ except: z.array(z.string().min(1)).max(1) }).optional())
+  .handler(
+    async ({ data, context }) =>
+      await clientAdmins(env, context.staff, defaultAdminReadOptions, {
+        except: data?.except,
+      })
+  );
+
+/**
+ * One client's admin snapshot, as its core answers the verified staff
+ * member asking, within an organization page's deadline
+ * (`pageReadOptions`); null for a client the admin doesn't know, or has
+ * offboarded. A POST for the reasons `fetchClientAdmins` is.
+ */
+export const fetchClientAdmin = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(async ({ data, context }): Promise<ClientAdmin | null> => {
+    const [admin] = await clientAdmins(env, context.staff, pageReadOptions, {
+      only: data.clientId,
+    });
+    return admin ?? null;
+  });
 
 /** A client's own Grasp as the admin runs it, for the admin's Setup; null for no such client. */
 export const fetchClientSetup = createServerFn({ method: "GET" })

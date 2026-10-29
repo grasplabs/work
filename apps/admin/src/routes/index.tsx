@@ -20,16 +20,11 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import {
-  createFileRoute,
-  getRouteApi,
-  Link,
-  rootRouteId,
-  useNavigate,
-} from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { WithAdmins } from "../admin/admins.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
@@ -49,9 +44,6 @@ import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchGridLive } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
-
-/** Every organization, as the admin's layout read them. */
-const adminRoute = getRouteApi(rootRouteId);
 
 interface AdminSearch {
   /** Only the organizations in this phase. */
@@ -557,10 +549,10 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
  * and the prototype's line on which are past the milestone and still
  * closed.
  */
-const Overview = () => {
+const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
-  const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const organizations = organizationsOf(admins);
   const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
@@ -572,17 +564,7 @@ const Overview = () => {
           ({ view }) => view !== null && phaseOf(view) === phase
         );
   return (
-    <AdminPage
-      action={
-        <Button nativeButton={false} render={<Link to="/new-organization" />}>
-          <PlusIcon data-icon="inline-start" />
-          New organization
-        </Button>
-      }
-      description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
-      overview
-      title="Organizations"
-    >
+    <>
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
@@ -659,9 +641,26 @@ const Overview = () => {
           </TableBody>
         </Table>
       </section>
-    </AdminPage>
+    </>
   );
 };
+
+/** The overview's title and its action at once; the organizations once their cores answered. */
+const Overview = () => (
+  <AdminPage
+    action={
+      <Button nativeButton={false} render={<Link to="/new-organization" />}>
+        <PlusIcon data-icon="inline-start" />
+        New organization
+      </Button>
+    }
+    description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
+    overview
+    title="Organizations"
+  >
+    <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
+  </AdminPage>
+);
 
 /** The admin's overview: every organization together. */
 export const Route = createFileRoute("/")({

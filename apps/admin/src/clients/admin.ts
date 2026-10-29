@@ -358,21 +358,49 @@ export const defaultAdminReadOptions: AdminReadOptions = {
 };
 
 /**
+ * How long one organization's page waits for its core: shorter than the
+ * grid's deadline, for staff wait on it. A core that takes longer shows
+ * as not answering in time, with what it last answered in the page if
+ * the page has it (src/admin/org-reads.ts).
+ */
+export const pageReadOptions: AdminReadOptions = {
+  concurrency: 1,
+  timeoutMs: 3000,
+};
+
+/**
+ * Which clients a read takes: one alone (`only`), or every one but some
+ * (`except`), as a page that reads one of them on its own asks.
+ */
+export interface ClientChoice {
+  only?: string;
+  except?: readonly string[];
+}
+
+/**
  * Every client the admin knows but those offboarded, each with its admin
  * snapshot as its core answers `staff` now, or as not reachable since it
  * last answered. Never throws for a client; every one is in the answer.
+ * `which` narrows it to one client, or leaves some out.
  */
 export const clientAdmins = async (
   env: Env,
   staff: Staff,
-  options: AdminReadOptions = defaultAdminReadOptions
+  options: AdminReadOptions = defaultAdminReadOptions,
+  which: ClientChoice = {}
 ): Promise<ClientAdmin[]> => {
   if (staff.email === "") {
     throw new Error("Reading clients' admin snapshots takes a staff member");
   }
   const db = adminDatabase(env.DB);
   const grid = await clientGrid(env);
-  const known = grid.filter(({ status }) => status !== "offboarded");
+  const except = new Set(which.except);
+  const known = grid.filter(
+    ({ id, status }) =>
+      status !== "offboarded" &&
+      !except.has(id) &&
+      (which.only === undefined || id === which.only)
+  );
   const [
     lastAnswered,
     secrets,
@@ -503,21 +531,4 @@ export const clientSnapshots = async (
     askedAt
   );
   return answered;
-};
-
-/**
- * Every client's admin snapshot, read at most once however often it's
- * asked for: one per request, so a page whose sections each want the
- * organizations reads each client once. Nothing is kept across requests.
- */
-export const adminReader = (
-  env: Env,
-  staff: Staff,
-  options: AdminReadOptions = defaultAdminReadOptions
-): (() => Promise<ClientAdmin[]>) => {
-  let read: Promise<ClientAdmin[]> | undefined = undefined;
-  return async () => {
-    read ??= clientAdmins(env, staff, options);
-    return await read;
-  };
 };

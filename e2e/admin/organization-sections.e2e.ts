@@ -224,3 +224,95 @@ test("a frame that can't be read says so with Try again, which brings the admin 
     page.getByRole("navigation", { name: "Organizations" })
   ).toBeVisible();
 });
+
+/** What a seeded core answered so far, holding each answer `holdMs` from now on if given. */
+const core = async (
+  request: APIRequestContext,
+  clientId: string,
+  holdMs?: number
+): Promise<number> => {
+  const response = await request.post("/__e2e/core", {
+    data: { clientId, holdMs },
+  });
+  expect(response.status()).toBe(200);
+  return z.object({ reads: z.number() }).parse(await response.json()).reads;
+};
+
+/** Goes to the section at `path` from the column and sees its title. */
+const switchTo = async (
+  page: Page,
+  clientId: string,
+  path: string,
+  title: string
+): Promise<void> => {
+  await openSection(page, "Answering Acme", clientId, path);
+  await expect(
+    page.getByRole("main").getByRole("heading", {
+      level: 1,
+      name: path === "" ? "Answering Acme" : title,
+    })
+  ).toBeVisible();
+};
+
+test("moving between an organization's sections asks its core once", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  const before = await core(request, answered);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  await expect(page.getByText("Read just now.")).toBeVisible();
+
+  for (const [path, title] of sections) {
+    // oxlint-disable-next-line no-await-in-loop -- one section after another, as staff move
+    await switchTo(page, answered, path, title);
+  }
+  await page.waitForLoadState("networkidle");
+
+  // The page and its frame read it once together, and every section after reuses that.
+  expect((await core(request, answered)) - before).toBe(1);
+});
+
+test("a core that doesn't answer in time leaves its last answer on the page, marked as such", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, "members"), {
+    waitUntil: "networkidle",
+  });
+  await expect(page.getByText("Nobody has made an account yet.")).toBeVisible();
+
+  // Longer than the page waits for a core, shorter than the test.
+  await core(request, answered, 10_000);
+  await page.getByRole("button", { name: "Read again" }).click();
+
+  const main = page.getByRole("main");
+  await expect(
+    main.getByText("Its Grasp couldn’t be read again just now")
+  ).toBeVisible();
+  await expect(
+    main.getByText(/didn’t answer in time\. This is what it answered/u)
+  ).toBeVisible();
+  // What it last answered stays, rather than a page saying nothing is read.
+  await expect(main.getByText("Nobody has made an account yet.")).toBeVisible();
+  await expect(main.getByText("’s Grasp didn’t answer")).toHaveCount(0);
+  await core(request, answered, 0);
+});
+
+test("a core that hangs holds up no other organization's page", async ({
+  page,
+  request,
+}) => {
+  const { answered, unset } = await seed(request);
+  await core(request, answered, 20_000);
+
+  const started = Date.now();
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "commit" });
+  await expect(
+    page.getByRole("main").getByRole("heading", { level: 1, name: "Setup" })
+  ).toBeVisible();
+  // The admin's frame used to wait for every client's core, up to its 5 s deadline.
+  expect(Date.now() - started).toBeLessThan(4000);
+  await core(request, answered, 0);
+});

@@ -20,6 +20,12 @@
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -37,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -49,13 +56,18 @@ import {
   useChildMatches,
   useNavigate,
   useRouter,
-  rootRouteId,
 } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import {
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { createContext, Fragment, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
+import type { GridRow } from "../clients/grid.ts";
+import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
 import { AdminHeader, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
@@ -68,7 +80,8 @@ import {
   sourceNames,
 } from "./sections.ts";
 import type { OrgSection, Origin } from "./sections.ts";
-import { organizationOf, unreadWhy } from "./views.ts";
+import { Ago } from "./settled.tsx";
+import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
 import { formatDate, formatList, stageLines } from "./words.ts";
 
 /** A client whose core answered, with its view. */
@@ -308,11 +321,14 @@ const OrgColumn = ({
   name,
   clientId,
   view,
+  reading,
 }: {
   name: string;
   clientId: string;
   /** Null when its core isn't read now: the column then says so on top. */
   view: AdminView | null;
+  /** Its core's answer isn't in yet. */
+  reading: boolean;
 }) => {
   const [folded, setFolded] = useState(false);
   const waiting = new Set(view?.needs.map(needSection));
@@ -357,7 +373,10 @@ const OrgColumn = ({
         <FoldButton folded={false} onFold={setFolded} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pt-0.5 pb-3">
-        {view === null ? (
+        {view === null && reading ? (
+          <Skeleton className="mb-2 h-10 flex-none" data-loading />
+        ) : null}
+        {view === null && !reading ? (
           // Nothing of it is known now: where to see why, in sight on every section.
           <SectionLink
             className="text-status-attention hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex-none rounded-md px-2 py-1.5 text-xs outline-none focus-visible:ring-3"
@@ -366,9 +385,8 @@ const OrgColumn = ({
           >
             Not read now: see its Setup
           </SectionLink>
-        ) : (
-          <Knowing clientId={clientId} view={view} />
-        )}
+        ) : null}
+        {view === null ? null : <Knowing clientId={clientId} view={view} />}
         <SectionItem
           clientId={clientId}
           section="overview"
@@ -487,6 +505,29 @@ const aboutOf = (view: AdminView): string => {
 };
 
 /**
+ * Reads the organization's core again, keeping what the page shows until
+ * the answer is in: `busy` while it is read.
+ */
+const useReadAgain = (): { busy: boolean; readAgain: () => void } => {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  // The router never throws for a load: one that fails shows where it would be.
+  const read = async () => {
+    setBusy(true);
+    await router.invalidate({
+      filter: (match) => match.routeId === "/organizations/$clientId",
+    });
+    setBusy(false);
+  };
+  return {
+    busy,
+    readAgain: () => {
+      void read();
+    },
+  };
+};
+
+/**
  * Where a section would be, for an organization whose core didn't
  * answer: why, and what to do. Not set up yet, its Setup shows how far
  * that is; not answering, it can be asked again, and its Setup shows why.
@@ -498,7 +539,7 @@ const UnreadSection = ({
   admin: Extract<ClientAdmin, { state: "unreachable" }>;
   section: OrgSection;
 }) => {
-  const router = useRouter();
+  const { busy, readAgain } = useReadAgain();
   const { id: clientId, name } = admin.client;
   const unset = admin.error === "not_deployed";
   return (
@@ -515,15 +556,8 @@ const UnreadSection = ({
       </EmptyHeader>
       <EmptyContent className="flex-row justify-center">
         {unset ? null : (
-          <Button
-            onClick={() => {
-              void router.invalidate({
-                filter: (match) => match.routeId === rootRouteId,
-              });
-            }}
-            size="sm"
-          >
-            Try again
+          <Button disabled={busy} onClick={readAgain} size="sm">
+            {busy ? "Asking again…" : "Try again"}
           </Button>
         )}
         {/* A link that looks like a button: it is announced as the link it is. */}
@@ -536,6 +570,60 @@ const UnreadSection = ({
         </Link>
       </EmptyContent>
     </Empty>
+  );
+};
+
+/** Where a section will be, while its organization's core is read. */
+const SectionLoading = () => (
+  <div aria-busy className="flex flex-col gap-4" data-loading>
+    <span className="sr-only">Reading it from the company’s own Grasp…</span>
+    <Skeleton className="h-28 w-full" />
+    <Skeleton className="h-48 w-full" />
+  </div>
+);
+
+/** `text` with its first letter a capital, as a sentence starts. */
+const capitalized = (text: string): string =>
+  `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
+
+/**
+ * When what the page shows was read, and a way to read it again; when
+ * reading it again failed just now, why, above what it last answered.
+ */
+const ReadNote = ({ read }: { read: OrgRead & { admin: AnsweredAdmin } }) => {
+  const { busy, readAgain } = useReadAgain();
+  const again = (
+    <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
+      {busy ? "Reading…" : "Read again"}
+    </Button>
+  );
+  if (read.stale === null) {
+    return (
+      <p
+        className="text-muted-foreground flex items-center gap-1 text-xs"
+        data-slot="read-note"
+      >
+        <span>
+          Read <Ago at={read.admin.at} />.
+        </span>
+        {again}
+      </p>
+    );
+  }
+  return (
+    <Alert data-slot="read-note" live="polite" variant="attention">
+      <TriangleAlertIcon />
+      <AlertTitle>Its Grasp couldn’t be read again just now</AlertTitle>
+      <AlertDescription>
+        {`${capitalized(whyUnread(read.stale.error))}. This is what it answered `}
+        <Ago at={read.admin.at} />.
+      </AlertDescription>
+      <AlertAction>
+        <Button disabled={busy} onClick={readAgain} size="sm" variant="outline">
+          {busy ? "Asking again…" : "Try again"}
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 };
 
@@ -552,32 +640,48 @@ const AnsweredSection = ({
 
 /**
  * One organization's page: its column of sections and the section it is
- * on. A section is shown only once its core answered, under it; until
- * then, only one that shows without it (its Setup) is, and in every
- * other's place the page says why it isn't read and what to do.
+ * on, shown at once from what the admin recorded (`client`). A section
+ * is shown only once its core answered (`read`, null while it is read),
+ * under it; until then, only one that shows without it (its Setup) is,
+ * and in every other's place the page holds its place while it is read,
+ * or says why it isn't read and what to do.
  */
-export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
-  const { view } = organizationOf(admin);
-  const { id: clientId, name } = admin.client;
+export const OrganizationPage = ({
+  client,
+  read,
+}: {
+  client: GridRow;
+  read: OrgRead | null;
+}) => {
+  const admin = read?.admin ?? null;
+  const view = admin === null ? null : organizationOf(admin).view;
+  const { id: clientId, name } = client;
   const { section, withoutCore } = useShownSection();
   const { title, about } = sectionWords[section];
-  const unread = admin.state === "answered" ? null : admin;
+  const unread = admin !== null && admin.state !== "answered" ? admin : null;
   let description = about;
   if (section === "overview") {
     description = unread === null ? "" : unreadWhy(unread);
     description = view === null ? description : aboutOf(view);
   }
-  let shown = <Outlet />;
-  if (admin.state === "answered" && view !== null) {
-    shown = <AnsweredSection organization={{ admin, view }} />;
-  } else if (!withoutCore && unread !== null) {
+  let shown = <SectionLoading />;
+  if (read !== null && read.admin.state === "answered" && view !== null) {
+    shown = <AnsweredSection organization={{ admin: read.admin, view }} />;
+  } else if (withoutCore) {
+    shown = <Outlet />;
+  } else if (unread !== null) {
     shown = <UnreadSection admin={unread} section={section} />;
   }
   return (
     <>
       <AdminHeader page={name} />
       <div className="flex min-h-0 flex-1 text-sm">
-        <OrgColumn clientId={clientId} name={name} view={view} />
+        <OrgColumn
+          clientId={clientId}
+          name={name}
+          reading={read === null}
+          view={view}
+        />
         <div className="relative min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
             <SectionSelect clientId={clientId} section={section} />
@@ -585,17 +689,20 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
               description={description}
               title={section === "overview" ? name : title}
             >
-              {admin.state === "answered" ? (
-                <SourceNote
-                  origins={
-                    originsOf(
-                      admin.snapshot,
-                      admin.billing.state === "read",
-                      admin.proposal.state === "read",
-                      admin.crm.state === "read"
-                    )[section]
-                  }
-                />
+              {read !== null && read.admin.state === "answered" ? (
+                <>
+                  <SourceNote
+                    origins={
+                      originsOf(
+                        read.admin.snapshot,
+                        read.admin.billing.state === "read",
+                        read.admin.proposal.state === "read",
+                        read.admin.crm.state === "read"
+                      )[section]
+                    }
+                  />
+                  <ReadNote read={{ ...read, admin: read.admin }} />
+                </>
               ) : null}
             </PageHeading>
             {shown}
@@ -605,6 +712,37 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
     </>
   );
 };
+
+/**
+ * An organization the admin offboarded: its core is gone, so nothing of
+ * it is read, on any of its sections. Platform keeps what is left of it.
+ */
+export const OffboardedPage = ({ client }: { client: GridRow }) => (
+  <>
+    <AdminHeader page={client.name} />
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 text-sm md:px-9">
+      <PageHeading title={client.name} />
+      <Empty data-unread="offboarded">
+        <EmptyHeader>
+          <EmptyTitle>{`${client.name} was offboarded`}</EmptyTitle>
+          <EmptyDescription>
+            Its own Grasp is gone, so there is nothing of it to read. Platform
+            keeps what is left of it.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          {/* A link that looks like a button: it is announced as the link it is. */}
+          <Link
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+            to="/platform/offboarded"
+          >
+            Offboarded organizations
+          </Link>
+        </EmptyContent>
+      </Empty>
+    </div>
+  </>
+);
 
 /** What a section shows until its content is ported: a line saying so. */
 export const SectionToCome = () => (

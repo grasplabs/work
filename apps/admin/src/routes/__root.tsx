@@ -1,5 +1,5 @@
 import {
-  createRootRoute,
+  createRootRouteWithContext,
   HeadContent,
   Link,
   Scripts,
@@ -8,18 +8,18 @@ import type { ReactNode } from "react";
 
 import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
+import { openClientId, readAdmins } from "../admin/org-loads.ts";
+import { freshMs } from "../admin/org-reads.ts";
+import type { OrgReads } from "../admin/org-reads.ts";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
-import { fetchClientAdmins } from "../clients/functions.ts";
+import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
 
-/**
- * How long the organizations read for the frame stand while staff move
- * between the admin's pages: each read asks every client's core, whose
- * audit log records it, so not on every click. Older, they are read again
- * behind the page shown.
- */
-const organizationsFreshMs = 60_000;
+/** What every route's loader is given: the router's own reads of clients' cores. */
+interface AdminContext {
+  reads: OrgReads;
+}
 
 /** The document every page renders in. */
 const RootDocument = ({ children }: { children: ReactNode }) => (
@@ -35,8 +35,8 @@ const RootDocument = ({ children }: { children: ReactNode }) => (
 );
 
 const Frame = () => {
-  const { admins, platform } = Route.useLoaderData();
-  return <AdminFrame admins={admins} platform={platform} />;
+  const { clients, admins, platform } = Route.useLoaderData();
+  return <AdminFrame admins={admins} clients={clients} platform={platform} />;
 };
 
 /** A page there isn't, in the admin's frame. */
@@ -55,19 +55,29 @@ const NotFound = () => (
  * staff manage everything, served from the root of its hostname. For
  * Grasp's staff only: a request Access doesn't vouch for gets nothing
  * (src/access.ts), so nothing here, not even that it exists, is seen by
- * anyone else. Every organization is every client the admin knows, as its
- * core answers now (`fetchClientAdmins`).
+ * anyone else. Every organization is every client the admin knows, from
+ * its own D1 at once; as its core answers now (`readAdmins`) after, not
+ * waited on: a page never waits on a client's core it doesn't show.
+ *
+ * Each read asks every client's core, whose audit log records it, so not
+ * on every click: the read stands `freshMs`, and older, is read again
+ * behind the page shown.
  */
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<AdminContext>()({
   // Beside Platform, what the admin recorded alone: no account is read.
-  loader: async () => {
-    const [admins, platform] = await Promise.all([
-      fetchClientAdmins(),
+  loader: async ({ context, location }) => {
+    const [clients, platform] = await Promise.all([
+      fetchClientGrid(),
       fetchPlatformSidebar(),
     ]);
-    return { admins, platform };
+    const known = clients.filter(({ status }) => status !== "offboarded");
+    return {
+      clients,
+      platform,
+      admins: readAdmins(context.reads, known, openClientId(location.pathname)),
+    };
   },
-  staleTime: organizationsFreshMs,
+  staleTime: freshMs,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
