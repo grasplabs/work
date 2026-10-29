@@ -726,6 +726,13 @@ export const apps = sqliteTable("apps", {
     staff: boolean;
   }>(),
   createdAt: timestamp("created_at").notNull(),
+  /**
+   * When it was removed (app-removal.ts), and by whom: a removed App is a
+   * tombstone, kept so what names it stays history, and answers nothing.
+   * Null while it is an App.
+   */
+  removedAt: timestamp("removed_at"),
+  removedBy: text("removed_by"),
 });
 
 /**

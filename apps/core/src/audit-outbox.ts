@@ -1,4 +1,5 @@
 import type { BrainEvent } from "@grasp-os/brain/events";
+import { appErrors } from "@grasp-os/shared/apps";
 import {
   auditEntrySchema,
   auditEventSchema,
@@ -26,6 +27,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { auditLog } from "./audit-log.ts";
 import type { AuditLogEnv } from "./audit-log.ts";
 import { auditOutbox } from "./db/core/schema.ts";
+import { isRemovedAppRefusal } from "./db/d1.ts";
 
 // A change to the core or Knowledge database that must be audited stores
 // its event in that database's outbox (each has an `audit_outbox` table) in
@@ -519,7 +521,17 @@ export const auditedBatch = async <
   db: AuditedDatabase,
   statements: T
 ): Promise<BatchResponse<T>> => {
-  const results = await db.batch(statements);
+  let results: BatchResponse<T>;
+  try {
+    results = await db.batch(statements);
+  } catch (error) {
+    // A write that read the App before it was removed and landed after:
+    // refused by the database, answered as for an App that isn't there.
+    if (isRemovedAppRefusal(error)) {
+      throw appErrors.create("app.not_found");
+    }
+    throw error;
+  }
   drainSoon(env, db);
   return results;
 };

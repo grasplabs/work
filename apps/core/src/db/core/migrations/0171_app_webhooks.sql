@@ -32,3 +32,15 @@ CREATE TABLE `app_webhooks` (
 );
 --> statement-breakpoint
 CREATE INDEX `app_webhooks_app` ON `app_webhooks` (`app_id`);
+--> statement-breakpoint
+CREATE TRIGGER `app_webhooks_removed_app_insert` BEFORE INSERT ON `app_webhooks`
+WHEN EXISTS (SELECT 1 FROM `apps` WHERE `id` = NEW.`app_id` AND `removed_at` IS NOT NULL)
+BEGIN
+	SELECT RAISE(ABORT, 'app_webhooks: takes nothing new for a removed App');
+END;
+--> statement-breakpoint
+CREATE TRIGGER `app_webhook_deliveries_removed_app_insert` BEFORE INSERT ON `app_webhook_deliveries`
+WHEN EXISTS (SELECT 1 FROM `apps` WHERE `id` = NEW.`app_id` AND `removed_at` IS NOT NULL)
+BEGIN
+	SELECT RAISE(ABORT, 'app_webhook_deliveries: takes nothing new for a removed App');
+END;
