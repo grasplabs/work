@@ -1,12 +1,16 @@
 import type {
   BrainSourceRef,
-  EntitySummary,
+  EntitiesAnswer,
+  EntitySourcesAnswer,
   MemoryPack,
   RelationsAnswer,
   SkillRead,
   SkillSelection,
 } from "@grasp-os/brain/contract";
-import { entitiesWithSources, entitySources } from "@grasp-os/brain/entities";
+import {
+  entitiesWithSources,
+  entitySourcesRead,
+} from "@grasp-os/brain/entities";
 import { recallWithSources } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type { PinnedVersion, VersionRef } from "@grasp-os/brain/recall-store";
@@ -286,10 +290,10 @@ export class BrainAgentApi
    * start (at least two characters, as for every caller that isn't a
    * person): the Brain's own read, as the chat's agent.
    */
-  async entities(input: unknown): Promise<EntitySummary[]> {
+  async entities(input: unknown): Promise<EntitiesAnswer> {
     return await this.#delegated("brain.entities", async (reader) => {
       const brain = brainOf(this.env);
-      const { entities, sources } = await entitiesWithSources(
+      const { entities, sources, truncated } = await entitiesWithSources(
         brain,
         reader,
         input
@@ -297,7 +301,7 @@ export class BrainAgentApi
       // The sources whose mentions named them, pinned, as recall records
       // its own.
       return {
-        value: entities,
+        value: { entities, truncated },
         sources: {
           collections: sources.collections,
           documents: await d1BrainStore(brain).pinsOf(
@@ -311,10 +315,13 @@ export class BrainAgentApi
   }
 
   /** The readable sources that mention one entity, at their versions. */
-  async entitySources(input: unknown): Promise<BrainSourceRef[]> {
+  async entitySources(input: unknown): Promise<EntitySourcesAnswer> {
     return await this.#delegated("brain.entitySources", async (reader) => {
-      const refs = await entitySources(brainOf(this.env), reader, input);
-      return { value: refs, ...(await citing(this.env, reader, refs)) };
+      const answer = await entitySourcesRead(brainOf(this.env), reader, input);
+      return {
+        value: answer,
+        ...(await citing(this.env, reader, answer.sources)),
+      };
     });
   }
 
@@ -502,10 +509,10 @@ brain: {
     filters?: { collectionIds?: string[] };
     budget?: { maxItems?: number; maxTokens?: number; deadlineMs?: number };
   }): Promise<MemoryPack>;
-  /** The people, teams, processes and things its sources mention, by the start of a name (two characters at least): needs the brain permission. */
-  entities(input: { query: string; limit?: number }): Promise<Entity[]>;
-  /** The sources that mention one entity, at their versions: documents, or the person's own memories. */
-  entitySources(input: { entityId: string }): Promise<Relation["sourceRef"][]>;
+  /** The people, teams, processes and things its sources mention, by the start of a name (two characters at least): needs the brain permission. \`truncated\`: they come from its newest sources only, so say some may be missing. */
+  entities(input: { query: string; limit?: number }): Promise<{ entities: Entity[]; truncated: boolean }>;
+  /** The newest sources that mention one entity, at their versions. \`truncated\`: more mention it than came back. */
+  entitySources(input: { entityId: string }): Promise<{ sources: Relation["sourceRef"][]; truncated: boolean }>;
   /** What its sources say relates one entity to others (who owns or leads what), each with the source's own sentence: \`at\` (YYYY-MM-DD) for who held it on a date, \`knownAt\` (ISO instant) for what was known then. Quote the evidence; when relations conflict, say so and show both. \`truncated\`: more relations exist than came back, so say what you show isn't all of them. */
   relations(input: { entityId: string; predicate?: string; at?: string; knownAt?: string }): Promise<{ relations: Relation[]; truncated: boolean }>;
   /** Its open questions. Bring one up when the person could answer it, and say who can; you can't answer or close one yourself. */

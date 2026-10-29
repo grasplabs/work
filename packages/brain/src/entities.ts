@@ -9,10 +9,15 @@ import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import {
   brainErrors,
+  delegateCitesMax,
   entitiesListInputSchema,
   entitySourcesInputSchema,
 } from "./contract.ts";
-import type { BrainSourceRef, EntitySummary } from "./contract.ts";
+import type {
+  BrainSourceRef,
+  EntitySourcesAnswer,
+  EntitySummary,
+} from "./contract.ts";
 import { inList, insertChunks } from "./db/d1.ts";
 import {
   brainAssertions,
@@ -1646,6 +1651,30 @@ const isPerson = <C>(brain: Brain<C>, reader: C): boolean => {
 };
 
 /**
+ * Of `rows`, newest first, those of their newest `max` source versions,
+ * and whether that left any out: what a caller that isn't a person is
+ * answered from, so it cites no more than it pins (`delegateCitesMax`).
+ */
+export const withinCites = <Row extends { source: string; version: number }>(
+  rows: readonly Row[],
+  max: number
+): { within: Row[]; truncated: boolean } => {
+  const kept = new Set<string>();
+  const within: Row[] = [];
+  let truncated = false;
+  for (const row of rows) {
+    const key = `${row.source}:${row.version}`;
+    if (!kept.has(key) && kept.size >= max) {
+      truncated = true;
+    } else {
+      kept.add(key);
+      within.push(row);
+    }
+  }
+  return { within, truncated };
+};
+
+/**
  * `entitiesFor`, with the collections and documents whose mentions it
  * listed: so a caller that labels what it was handed (a chat) labels the
  * names, and can withhold them once that source goes.
@@ -1657,6 +1686,7 @@ export const entitiesWithSources = async <C>(
 ): Promise<{
   entities: EntitySummary[];
   sources: { collections: string[]; documents: VersionRef[] };
+  truncated: boolean;
 }> => {
   const { query, limit = 20 } = brainErrors.parse(
     "brain.invalid",
@@ -1672,7 +1702,7 @@ export const entitiesWithSources = async <C>(
   ) {
     throw brainErrors.create("brain.invalid");
   }
-  const rows = await readableMentions(
+  const read = await readableMentions(
     brain,
     reader,
     and(
@@ -1682,6 +1712,13 @@ export const entitiesWithSources = async <C>(
         : sql`substr(${brainMentions.alias}, 1, ${folded.length}) = ${folded}`
     )
   );
+  // A caller that isn't a person is answered from the newest sources it
+  // can pin, its names and counts from those alone.
+  const { within: rows, truncated } = isPerson(brain, reader)
+    ? { within: read, truncated: false }
+    : withinCites(read, delegateCitesMax);
+  // The scan's own cap may have left some out too.
+  const cut = truncated || read.length >= readRowsMax;
   const byEntity = new Map<
     string,
     { kind: string; names: Map<string, number>; sources: Set<string> }
@@ -1740,6 +1777,7 @@ export const entitiesWithSources = async <C>(
         ).values(),
       ],
     },
+    truncated: cut,
   };
 };
 
@@ -1772,12 +1810,16 @@ const refOf = (row: ReadableMention): BrainSourceRef =>
         revision: row.version,
       };
 
-/** The sources `reader` may read that mention `entityId`. */
-export const entitySources = async <C>(
+/**
+ * `entitySources`, and whether it left any out: a caller that isn't a
+ * person is answered the newest `delegateCitesMax` sources, as many as it
+ * pins.
+ */
+export const entitySourcesRead = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown
-): Promise<BrainSourceRef[]> => {
+): Promise<EntitySourcesAnswer> => {
   const { entityId } = brainErrors.parse(
     "brain.invalid",
     entitySourcesInputSchema,
@@ -1790,8 +1832,25 @@ export const entitySources = async <C>(
     eq(brainMentions.entityId, entityId)
   );
   const unique = [...new Map(rows.map((row) => [row.source, row])).values()];
-  await noteRead(brain, reader, "entity_sources", unique);
-  return unique.map(refOf);
+  const { within, truncated } = isPerson(brain, reader)
+    ? { within: unique, truncated: false }
+    : withinCites(unique, delegateCitesMax);
+  await noteRead(brain, reader, "entity_sources", within);
+  return {
+    sources: within.map(refOf),
+    // The scan's own cap counts its rows, not their sources.
+    truncated: truncated || rows.length >= readRowsMax,
+  };
+};
+
+/** The sources `reader` may read that mention `entityId`. */
+export const entitySources = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<BrainSourceRef[]> => {
+  const { sources } = await entitySourcesRead(brain, reader, input);
+  return sources;
 };
 
 /** An ambiguous mention: who it may be, never linked until decided. */

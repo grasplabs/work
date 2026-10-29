@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { brainErrors } from "../src/contract.ts";
+import { brainErrors, delegateCitesMax } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitiesWithSources,
   entitySources,
+  entitySourcesRead,
   relationsPerSource,
   runLinking,
   settleMs,
@@ -730,6 +732,89 @@ describe("typed relations", () => {
       oneLetter: "brain.invalid",
       byStart: "ok",
       person: "ok",
+    });
+  });
+
+  it("answer a caller that isn't a person from no more sources than it pins, and say what that left out", async () => {
+    const thing = `Payroll ${word()}`;
+    const holders = Array.from(
+      { length: delegateCitesMax + 5 },
+      (_, index) => `Owner ${word()} ${index}`
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          holders.map((holder) => [
+            holder,
+            {
+              entities: [
+                { kind: "person", name: holder },
+                { kind: "process", name: thing },
+              ],
+              relations: [
+                {
+                  subject: holder,
+                  predicate: "owns",
+                  object: thing,
+                  evidence: `${holder} owns ${thing}.`,
+                },
+              ],
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Desk");
+    for (const [index, holder] of holders.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one source after another
+      await savedAndLinked(
+        host,
+        collection,
+        `holder-${index}.md`,
+        `${holder} owns ${thing}.`
+      );
+    }
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const agent = {
+      ...host.brain,
+      ports: {
+        ...host.brain.ports,
+        ownerOf: (): string => {
+          throw brainErrors.create("brain.denied");
+        },
+      },
+    };
+    const entityId = await entityOf(host, reader, thing);
+    /** What each read answers `as`, and how many versions it cites. */
+    const read = async (as: typeof host.brain) => {
+      const listed = await entitiesWithSources(as, reader, { query: thing });
+      const sources = await entitySourcesRead(as, reader, { entityId });
+      const { relations, truncated } = await relationsFor(as, reader, {
+        entityId,
+      });
+      return {
+        listed: [listed.sources.documents.length, listed.truncated],
+        sources: [sources.sources.length, sources.truncated],
+        relations: [relations.length, truncated],
+      };
+    };
+
+    expect({
+      agent: await read(agent),
+      person: await read(host.brain),
+    }).toStrictEqual({
+      // As many as it pins, the newest, and cut.
+      agent: {
+        listed: [delegateCitesMax, true],
+        sources: [delegateCitesMax, true],
+        relations: [delegateCitesMax, true],
+      },
+      // A person pins nothing: every one.
+      person: {
+        listed: [holders.length, false],
+        sources: [holders.length, false],
+        relations: [holders.length, false],
+      },
     });
   });
 });

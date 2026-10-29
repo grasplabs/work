@@ -3,7 +3,11 @@ import type { SQL } from "drizzle-orm";
 
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
-import { brainErrors, relationsGetInputSchema } from "./contract.ts";
+import {
+  brainErrors,
+  delegateCitesMax,
+  relationsGetInputSchema,
+} from "./contract.ts";
 import type { RelationsAnswer, RelationView } from "./contract.ts";
 import {
   brainAssertions,
@@ -12,7 +16,7 @@ import {
   collections,
   documents,
 } from "./db/schema.ts";
-import { kindOf, requireBrainRead } from "./entities.ts";
+import { kindOf, requireBrainRead, withinCites } from "./entities.ts";
 import { collectionIdSchema, documentIdSchema, memoryIdSchema } from "./ids.ts";
 import { citesReadable } from "./memory-cites.ts";
 
@@ -221,7 +225,7 @@ export const relationsRead = async <C>(
   };
   // Both kinds of source together, newest first: the answer is the newest
   // `readRowsMax`.
-  const rows = [
+  const newestRows = [
     ...read.documents.slice(0, readRowsMax),
     ...read.memories
       .slice(0, readRowsMax)
@@ -229,6 +233,12 @@ export const relationsRead = async <C>(
   ]
     .toSorted((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime())
     .slice(0, readRowsMax);
+  // A caller that isn't a person (it has no memories here) is answered
+  // from the newest sources it can pin (`delegateCitesMax`).
+  const { within: rows, truncated: uncited } =
+    owner === undefined
+      ? withinCites(newestRows, delegateCitesMax)
+      : { within: newestRows, truncated: false };
   const weighed = [
     ...claims.documents.slice(0, claimRowsMax),
     ...claims.memories
@@ -306,7 +316,10 @@ export const relationsRead = async <C>(
     ...collectionIds.map((id) => ({ id, sensitive: false }))
   );
   return {
-    answer: { relations: answered, truncated: read.cut || claims.cut },
+    answer: {
+      relations: answered,
+      truncated: read.cut || claims.cut || uncited,
+    },
     considered: { collectionIds, documentIds },
   };
 };
