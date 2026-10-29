@@ -44,6 +44,7 @@ import {
   fetchTeamsPackageFn,
   rotateSecretsFn,
   sendTestAlertFn,
+  setModelSpendCeilingFn,
   setRingFn,
   setSealedSecretFn,
   setSignInFn,
@@ -164,6 +165,72 @@ export const PinRelease = ({
             Unpin
           </Button>
         )}
+        <Failure failure={failure} />
+      </div>
+    </form>
+  );
+};
+
+/**
+ * Its monthly model spend ceiling, in whole euros (GRA-141): what its
+ * core's model gateway lets its model calls cost in a calendar month,
+ * from its next deploy.
+ */
+export const ModelSpendCeilingChange = ({
+  clientId,
+  ceiling,
+  refresh,
+}: {
+  clientId: string;
+  ceiling: number;
+  refresh: Refresh;
+}) => {
+  const { busy, failure, run } = useSettingsAction();
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const euros = Number(
+          textOf(new FormData(event.currentTarget), "ceiling")
+        );
+        void run(
+          async () =>
+            await thenRefresh(
+              async () =>
+                await setModelSpendCeilingFn({ data: { clientId, euros } }),
+              refresh
+            )
+        );
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="setup-model-ceiling">
+          Model spend ceiling, euros a month
+        </FieldLabel>
+        <Input
+          className="max-w-48"
+          defaultValue={String(ceiling)}
+          id="setup-model-ceiling"
+          inputMode="numeric"
+          // Keyed by the ceiling: it starts again from the one read after each change.
+          key={ceiling}
+          max={100_000}
+          min={1}
+          name="ceiling"
+          required
+          step={1}
+          type="number"
+        />
+        <FieldDescription>
+          Past it, its model calls are refused until the next month. It reaches
+          its core with its next deploy: apply its settings for it to hold now.
+        </FieldDescription>
+      </Field>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
+          Save ceiling
+        </Button>
         <Failure failure={failure} />
       </div>
     </form>
