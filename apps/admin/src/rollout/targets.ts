@@ -2,7 +2,7 @@
  * Who a rollout reaches and in what order, and what each client ran
  * before it did.
  *
- * Ring 0 is Grasp's own deployments (`grasp-os-internal`): every rollout
+ * Ring 0 is Grasp's own deployments: every rollout
  * reaches them first, then, once a staff member approves, what it was
  * started for: one ring, one client, or every client, ring by ring, with
  * no approval between them (src/rollout/workflow.ts). Each is a client
