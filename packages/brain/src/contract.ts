@@ -353,6 +353,12 @@ export const memoryRecordSchema = z.strictObject({
   validTo: instantSchema.nullable(),
   recordedAt: instantSchema,
   reviewAt: instantSchema.nullable(),
+  /**
+   * One of the reader's own that rests on a collection they can't read
+   * now (GRA-1177): shown without its statement or what it cites, only so
+   * they can retire it. Absent otherwise.
+   */
+  withheld: z.literal(true).optional(),
 });
 export type MemoryRecord = z.infer<typeof memoryRecordSchema>;
 

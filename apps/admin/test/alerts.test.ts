@@ -26,8 +26,7 @@ import { callServerFn } from "./pages.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-alerts-6d1a09";
-const tenantToken = "test-tenant-admin-token-alerts-2f8c3e";
-mockCloudflareApi(token, tenantToken);
+mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
@@ -83,7 +82,6 @@ const aClient = async (name: string): Promise<string> => {
       db.insert(clients).values({
         id: clientId,
         name,
-        accountId: `account-${clientId}`,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -98,7 +96,7 @@ const at = new Date("2026-11-02T09:00:00Z");
 const later = (ms: number): Date => new Date(at.getTime() + ms);
 
 describe("staff alerts", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   mockDiscord();
   beforeEach(async () => {
     await setStoreSecret(

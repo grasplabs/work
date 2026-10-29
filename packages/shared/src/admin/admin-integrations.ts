@@ -9,7 +9,11 @@ import type { Ring, Rollout, RolloutTarget } from "./admin-platform.ts";
  * what the admin reads of a build is here; moving one on stays a button a person presses. Pure.
  */
 
-/** The steps of a build, in order. A build that Grasp decided not to make is `declined`, beside them. */
+/**
+ * The steps of a build, in order. A build that Grasp decided not to make is `declined`, beside them,
+ * and one that stopped for a person to look (the agent gave up, a limit was hit, a wait ran out) is
+ * `needsPerson`.
+ */
 export const BUILD_STAGES = [
   "requested",
   "researching",
@@ -24,7 +28,7 @@ export const BUILD_STAGES = [
   "live",
 ] as const;
 export type BuildStep = (typeof BUILD_STAGES)[number];
-export type BuildStage = BuildStep | "declined";
+export type BuildStage = BuildStep | "declined" | "needsPerson";
 
 /** Who a build waits on now: Grasp's agent (or the release, which runs by itself), a person at Grasp, the companies, or nobody. */
 export type Waiter = "agent" | "grasp" | "company" | "nobody";
@@ -103,6 +107,7 @@ export interface IntegrationBuild {
 export const waitsOn = (stage: BuildStage): Waiter => {
   switch (stage) {
     case "requested":
+    case "needsPerson":
     case "plan":
     case "credentials":
     case "review":

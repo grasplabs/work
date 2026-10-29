@@ -4,6 +4,7 @@ import { d1BrainStore } from "@grasp-os/brain/recall-store";
 import type {
   CollectionReader,
   KnowledgeApi,
+  PurgeInput,
 } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -153,6 +154,50 @@ describe("the Brain's recall", setUpTime, () => {
       locator: ["Onboarding", "Onboarding", "Owner"],
     });
   });
+
+  it(
+    "keeps a pinned version only as its text was pinned, though the same version was pinned again after a purge",
+    setUpTime,
+    async () => {
+      const admin = await personOf("admin");
+      const word = rareWord();
+      const term = rareWord();
+      const { collectionId, documentId } = await collectionSaying(
+        admin,
+        "everyone",
+        `# Onboarding\n\n${word} ${term}`
+      );
+      const reader = {
+        type: "person" as const,
+        person: await admin.api.whoami(),
+      };
+      const store = d1BrainStore(brainOf(env));
+      const ref = { collectionId, documentId, version: 1 };
+      const [before] = await store.pinsOf(reader, [ref]);
+      // Rewrites version 1 in place, without the term.
+      const purge: PurgeInput = {
+        type: "content",
+        documentIds: [documentId],
+        terms: [term],
+        reason: "erasure_request",
+      };
+      const plan = await admin.knowledge.preparePurge(purge);
+      await admin.knowledge.purge(purge, plan.token);
+      const [after] = await store.pinsOf(reader, [ref]);
+      const pins = [before, after].filter((pin) => pin !== undefined);
+      const both = await outcome(store.requireDocumentsReadable(reader, pins));
+
+      expect({
+        rewritten: before?.text !== after?.text,
+        unchanged: await store.unchangedPins(reader, pins),
+        both,
+      }).toStrictEqual({
+        rewritten: true,
+        unchanged: [after],
+        both: "brain.not_found",
+      });
+    }
+  );
 
   it("finds a question's section by its words, the one holding most of them first", async () => {
     const admin = await personOf("admin");

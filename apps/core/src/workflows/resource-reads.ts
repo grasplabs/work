@@ -1,5 +1,7 @@
-import { recallInputSchema } from "@grasp-os/brain/contract";
+import { brainErrors, recallInputSchema } from "@grasp-os/brain/contract";
 import { recall } from "@grasp-os/brain/recall";
+import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { PinnedVersion } from "@grasp-os/brain/recall-store";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
@@ -14,12 +16,24 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { permissions } from "../db/core/schema.ts";
+import { permissions, runEvidenceHolds } from "../db/core/schema.ts";
+import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
-import { runAuthority, runContext } from "./resource-authority.ts";
+import {
+  callingRunOf,
+  heldRunOf,
+  runAuthority,
+  runContext,
+} from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
+import {
+  citedVersions,
+  evidenceOf,
+  isAccessRefusal,
+  recordRunEvidence,
+} from "./run-evidence.ts";
 
 // A run's reads of Knowledge and of published templates, for its
 // workflow's own actions (GRA-700; the threat model is on the issue). Each
@@ -81,7 +95,7 @@ export interface KnowledgeCall {
  * The collection a knowledge binding reads through its permission, read
  * now: the workflow's own, active, allowing `read`, or the call is denied.
  */
-const boundCollection = async (
+export const boundCollection = async (
   env: Env,
   run: CallingRun,
   permissionId: string
@@ -116,20 +130,31 @@ const searched = async (
   request: z.infer<typeof searchSchema>
 ): Promise<Json> => {
   try {
-    const results = await readAsDelegate(
+    const { results, pins } = await readAsDelegate(
       env,
       runAuthority(run),
       runContext(run),
       bound.permissionId,
-      async (reader) =>
-        await search(
-          brainOf(env),
+      async (reader) => {
+        const brain = brainOf(env);
+        const found = await search(
+          brain,
           reader,
           request.text,
           { limit: request.limit ?? defaultHits },
           bound.collectionId
-        )
+        );
+        return {
+          results: found,
+          pins: await d1BrainStore(brain).pinsOf(reader, found.hits),
+        };
+      }
     );
+    // Each document version whose excerpt it hands over, pinned to the run
+    // as a recall's evidence is, without the Brain (run-evidence.ts).
+    await recordRunEvidence(env, run, bound.permissionId, pins, {
+      recalled: false,
+    });
     return results.hits.map((hit) => ({
       id: hit.documentId,
       title: hit.title,
@@ -145,6 +170,92 @@ const searched = async (
   }
 };
 
+/** Where document `id` is, and its version now; undefined when there is none. */
+const locatedDocument = async (env: Env, id: string) =>
+  await drizzle(env.KNOWLEDGE)
+    .select({
+      collectionId: documents.collectionId,
+      currentVersion: documents.currentVersion,
+    })
+    .from(documents)
+    .where(eq(documents.id, id))
+    .get();
+
+/**
+ * `store`'s pins of `refs` as `reader` may read them, a version it may not
+ * read refused as a read refuses it (`knowledge.not_found`): so a pin taken
+ * before the read says no more of what the person can't read than the
+ * read does.
+ */
+const readablePinsOf = async (
+  store: ReturnType<typeof d1BrainStore<Reader>>,
+  reader: Reader,
+  refs: Parameters<ReturnType<typeof d1BrainStore<Reader>>["pinsOf"]>[1]
+): Promise<PinnedVersion[]> => {
+  try {
+    return await store.pinsOf(reader, refs);
+  } catch (error) {
+    if (brainErrors.codeOf(error) === "brain.not_found") {
+      throw knowledgeErrors.create("knowledge.not_found");
+    }
+    throw error;
+  }
+};
+
+/** Tries of a read that a purge or a save keeps crossing. */
+const pinnedReadTries = 3;
+
+/**
+ * Document `id` as `reader` reads it, with the pin of exactly the text it
+ * hands over. The version is pinned before its text is read and again
+ * after: the same pin both times says no purge or save landed between, so
+ * the text is the pinned version's. A purge landing between the text and
+ * the pin would otherwise pair the old text with the purged version's
+ * pin, which every later check accepts. Crossed, it is read again, a few
+ * times; then refused (`resource.unavailable`), never handed over
+ * unpinned.
+ */
+const pinnedRead = async (
+  env: Env,
+  reader: Reader,
+  id: string
+): Promise<{
+  found: Awaited<ReturnType<typeof read>>;
+  pins: PinnedVersion[];
+}> => {
+  const brain = brainOf(env);
+  const store = d1BrainStore(brain);
+  for (let attempt = 1; attempt <= pinnedReadTries; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
+    const located = await locatedDocument(env, id);
+    if (located === undefined) {
+      throw knowledgeErrors.create("knowledge.not_found");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
+    const before = await readablePinsOf(store, reader, [
+      {
+        documentId: id,
+        collectionId: located.collectionId,
+        version: located.currentVersion,
+      },
+    ]);
+    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
+    const found = await read(brain, reader, id);
+    // oxlint-disable-next-line no-await-in-loop -- read again only when crossed
+    const pins = await readablePinsOf(store, reader, [
+      {
+        documentId: found.id,
+        collectionId: found.collectionId,
+        version: found.section?.version ?? found.currentVersion,
+      },
+    ]);
+    if (JSON.stringify(before) === JSON.stringify(pins)) {
+      return { found, pins };
+    }
+  }
+  throw operationErrors.create("resource.unavailable");
+};
+
 /** One document of the bound collection, by its ID. */
 const document = async (
   env: Env,
@@ -152,22 +263,23 @@ const document = async (
   bound: { permissionId: PermissionId; collectionId: CollectionId },
   request: z.infer<typeof readSchema>
 ): Promise<Json> => {
-  const located = await drizzle(env.KNOWLEDGE)
-    .select({ collectionId: documents.collectionId })
-    .from(documents)
-    .where(eq(documents.id, request.id))
-    .get();
+  const located = await locatedDocument(env, request.id);
   if (located?.collectionId !== bound.collectionId) {
     throw operationErrors.create("resource.item_not_found");
   }
   try {
-    const found = await readAsDelegate(
+    const { found, pins } = await readAsDelegate(
       env,
       runAuthority(run),
       runContext(run),
       bound.permissionId,
-      async (reader) => await read(brainOf(env), reader, request.id)
+      async (reader) => await pinnedRead(env, reader, request.id)
     );
+    // The document version it hands over, pinned to the run
+    // (run-evidence.ts).
+    await recordRunEvidence(env, run, bound.permissionId, pins, {
+      recalled: false,
+    });
     return { title: found.title, text: found.text };
   } catch (error) {
     if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
@@ -187,14 +299,31 @@ const recalled = async (
   bound: { permissionId: PermissionId; collectionId: CollectionId },
   request: z.infer<typeof recallSchema>
 ): Promise<Json> => {
-  const pack = await readAsDelegate(
+  const { pack, pins } = await readAsDelegate(
     env,
     runAuthority(run),
     runContext(run),
     bound.permissionId,
-    async (reader) =>
-      await recall(brainOf(env), reader, request, [bound.collectionId])
+    async (reader) => {
+      const brain = brainOf(env);
+      const recalledPack = await recall(brain, reader, request, [
+        bound.collectionId,
+      ]);
+      return {
+        pack: recalledPack,
+        pins: await d1BrainStore(brain).pinsOf(
+          reader,
+          citedVersions(recalledPack)
+        ),
+      };
+    }
   );
+  // What it cites, pinned to the run under the binding's permission
+  // (run-evidence.ts): checked before anything leaves the run from now on.
+  // A replayed step answers its record and pins nothing more.
+  await recordRunEvidence(env, run, bound.permissionId, pins, {
+    recalled: true,
+  });
   // A memory pack is plain data: what the contract's schemas parse.
   return z.json().parse(pack);
 };
@@ -294,4 +423,143 @@ export const callTemplate = async (
     version: pinned.version,
     content: pinned.content,
   };
+};
+
+/** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
+const requireOwnEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  const rows = await evidenceOf(env, run.runId);
+  if (rows.length === 0) {
+    return;
+  }
+  const store = d1BrainStore(brainOf(env));
+  try {
+    for (const permissionId of new Set(rows.map((row) => row.permissionId))) {
+      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
+      const bound = await boundCollection(env, run, permissionId);
+      // oxlint-disable-next-line no-await-in-loop -- one per binding, few
+      await readAsDelegate(
+        env,
+        runAuthority(run),
+        runContext(run),
+        bound.permissionId,
+        async (reader) => {
+          const pinned = rows.filter(
+            (row) => row.permissionId === permissionId
+          );
+          // A recall's evidence needs the Brain too; a search's or a
+          // read's only the collection.
+          if (pinned.some((row) => row.recalled)) {
+            await store.requireBrainGrant(reader);
+          }
+          await store.requireDocumentsReadable(reader, pinned);
+        }
+      );
+    }
+  } catch (error) {
+    if (isAccessRefusal(error)) {
+      throw brainErrors.create("brain.revoked");
+    }
+    throw error;
+  }
+};
+
+/**
+ * Most ancestors a run's check follows: past any lineage's levels, so one
+ * deeper is held as one it can't check.
+ */
+const ancestorsMax = 64;
+
+/**
+ * `requireOwnEvidenceReadable` for each run `run` holds (`runEvidenceHolds`):
+ * a child whose output it took, and every run that child held, each under
+ * its own workflow's authority as it stands now, ended or not. One whose
+ * details are gone is refused as `brain.revoked`: what its output carried
+ * can no longer be checked.
+ */
+const requireHeldEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  const held = await drizzle(env.DB)
+    .select({ runId: runEvidenceHolds.heldRunId })
+    .from(runEvidenceHolds)
+    .where(eq(runEvidenceHolds.runId, run.runId));
+  for (const { runId } of held) {
+    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
+    const heldRun = await heldRunOf(env, runId);
+    if (heldRun === undefined) {
+      throw brainErrors.create("brain.revoked");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
+    await requireOwnEvidenceReadable(env, heldRun);
+  }
+};
+
+/**
+ * `requireRunEvidenceReadable` for a run of a JSON workflow
+ * (resource-host.ts, GRA-299): its recalls are each through a knowledge
+ * binding, one collection under one permission of the workflow's, so each
+ * binding's documents are checked under that permission, as the run
+ * reads now: the permission still the workflow's and active
+ * (`boundCollection`), the Brain still admitting the run, each document
+ * still in its collection, readable there and unpurged. A test run
+ * recalls nothing, so has nothing to check. A child run (run-children.ts,
+ * GRA-1093) took its input from its parent's steps, so it is held to each
+ * ancestor's evidence too, each under that ancestor's own authority and
+ * bindings as they are now. An ancestor no longer going is refused as
+ * `brain.revoked`, as is a lineage past `ancestorsMax`. That refuses no
+ * live child: a parent that ends stops its children, every call a child
+ * makes already asks that its parent is still going (run-children.ts),
+ * and retention removes only ended runs' records.
+ *
+ * A run that took a child's output holds that child's evidence, and the
+ * evidence of every run the child held (`runEvidenceHolds`, kept as its
+ * parent is told of its end): each checked too, under that run's own
+ * authority as it stands now, so a child's output loses none of its
+ * protection in its parent's hands.
+ *
+ * The walk follows workflow parents alone. A JSON run an App's run
+ * started went through that run's App function call, which its own gate
+ * checked first (host.ts, `#callFunction`). It isn't held to the App
+ * run's evidence after it started: that gap is recorded on GRA-1093.
+ *
+ * What a running run shows needs no check: its details (`resourceRunFor`)
+ * hold its output or failure only once it ended, which this checks first,
+ * and an App's workflow queries answer run metadata alone
+ * (workflow-reference-queries.ts), a failure as a platform code.
+ *
+ * It checks, then the caller acts: a revoke, erase or purge landing in
+ * between lets that one call through, as on an App's run
+ * (run-evidence.ts). Every later one is refused, and the run with it.
+ */
+export const requireResourceRunEvidenceReadable = async (
+  env: Env,
+  run: CallingRun
+): Promise<void> => {
+  let current = run;
+  for (let depth = 0; depth <= ancestorsMax; depth += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+    await requireOwnEvidenceReadable(env, current);
+    // What it took from its children carries their evidence too.
+    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+    await requireHeldEvidenceReadable(env, current);
+    const { invoker } = current;
+    if (invoker.type !== "workflow") {
+      return;
+    }
+    const parentWorkflowId = invoker.parentWorkflowId ?? null;
+    const parent =
+      parentWorkflowId === null
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop -- one run after its parent
+          await callingRunOf(env, parentWorkflowId, invoker.id);
+    if (parent === undefined) {
+      throw brainErrors.create("brain.revoked");
+    }
+    current = parent;
+  }
+  throw brainErrors.create("brain.revoked");
 };

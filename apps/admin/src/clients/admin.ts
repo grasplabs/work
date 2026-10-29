@@ -58,7 +58,7 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientAdminReads } from "../db/schema.ts";
 import { deploySecrets } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited } from "../live-reads.ts";
