@@ -630,6 +630,26 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
+ * The platform's own settings that staff choose (src/platform-settings.ts):
+ * one row, `id` 1. Which organization is Grasp's own is chosen on
+ * Platform, audited; Grasp's own public settings live in wrangler.jsonc
+ * per stage, and secrets in the stage's 1Password Environment.
+ */
+export const platformSettings = sqliteTable("platform_settings", {
+  /** Always 1: there is one platform. */
+  id: integer().primaryKey(),
+  /**
+   * Grasp's own organization: the client whose core answers Ask Grasp
+   * (src/admin/ask.ts). Null until staff choose one. Not a reference: a
+   * client discarded later leaves it naming one the admin no longer has,
+   * which Ask Grasp says.
+   */
+  graspClientId: text("grasp_client_id"),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * What the admin's watch last read of how each client's Stephen fares
  * (src/clients/watch.ts): the signals it reads from the client's admin
  * snapshot, as JSON, and when. Counts only. One row a client, replaced

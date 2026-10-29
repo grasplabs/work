@@ -1,15 +1,19 @@
 import { routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { askGraspFn } from "../src/admin/ask-functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
+import { auditEvents, clients } from "../src/db/schema.ts";
+import {
+  fetchPlatformSettings,
+  setGraspClientFn,
+} from "../src/platform-settings.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { callServerFn } from "./pages.ts";
+import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
@@ -46,9 +50,10 @@ const liveClient = async () => {
 };
 
 /**
- * Runs `run` with `GRASP_CLIENT_ID` set to `clientId` (undefined for none),
- * its client domain as `clientDomain` gives it, and without its
- * dispatcher binding for `noDispatcher`.
+ * Runs `run` with `clientId` chosen as Grasp's own organization on
+ * Platform, as staff choose it (undefined for none), its client domain as
+ * `clientDomain` gives it, and without its dispatcher binding for
+ * `noDispatcher`.
  */
 const asGrasp = async <T>(
   clientId: string | undefined,
@@ -59,7 +64,14 @@ const asGrasp = async <T>(
   }: { clientDomain?: string; noDispatcher?: boolean } = {}
 ): Promise<T> => {
   const before = { ...env };
-  env.GRASP_CLIENT_ID = clientId;
+  const chosen = await callServerFn(
+    setGraspClientFn,
+    { clientId: clientId ?? null },
+    { email: staff.email }
+  );
+  if (chosen.refused !== null) {
+    throw new Error(`Choosing ${clientId} was refused: ${chosen.refused}`);
+  }
   if (clientDomain !== undefined) {
     env.CLIENT_DOMAIN = clientDomain;
   }
@@ -70,7 +82,6 @@ const asGrasp = async <T>(
   try {
     return await run();
   } finally {
-    env.GRASP_CLIENT_ID = before.GRASP_CLIENT_ID;
     env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
     env.DISPATCHER = before.DISPATCHER;
   }
@@ -108,12 +119,18 @@ describe("Ask Grasp", () => {
     });
   });
 
-  it("says the organization named as Grasp's own is one the admin doesn't have", async () => {
+  it("says the organization chosen as Grasp's own is one the admin no longer has", async () => {
     const { account } = await liveClient();
-    const answer = await asGrasp(
-      "client-nobody",
-      async () => await ask(question)
-    );
+    const gone = `client-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    await db
+      .insert(clients)
+      .values({ id: gone, name: gone, createdAt: now, updatedAt: now });
+    const answer = await asGrasp(gone, async () => {
+      // Discarded after it was chosen.
+      await db.delete(clients).where(eq(clients.id, gone));
+      return await ask(question);
+    });
     expect({ answer, asked: account.asked.length }).toStrictEqual({
       answer: cannotAsk("grasp_client_unknown"),
       asked: 0,
@@ -245,6 +262,101 @@ describe("Ask Grasp", () => {
       answer: { text: null, truncated: false, refused: "not_answered" },
       asked: 0,
       redirected: [],
+    });
+  });
+});
+
+describe("Grasp's own organization", () => {
+  useStoreSecrets({ deployer: token });
+  eachTest();
+
+  it("is chosen by staff on Platform, audited as them, and shown there", async () => {
+    const { clientId } = await liveClient();
+
+    const chosen = await callServerFn(
+      setGraspClientFn,
+      { clientId },
+      { email: staff.email }
+    );
+    const settings = await callServerFn(fetchPlatformSettings);
+    const { html } = await page("/platform", staff.email);
+    const events = await db
+      .select({ actor: auditEvents.actor })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "platform.grasp_client"),
+          eq(auditEvents.clientId, clientId)
+        )
+      );
+
+    expect({
+      chosen,
+      graspClientId: settings.graspClientId,
+      shown: html.includes(`Noordkade ${clientId} answers Ask Grasp`),
+      events,
+    }).toStrictEqual({
+      chosen: { refused: null },
+      graspClientId: clientId,
+      shown: true,
+      events: [{ actor: staff.email }],
+    });
+  });
+
+  it("refuses an organization the admin doesn't have, or one offboarded, and keeps the one chosen", async () => {
+    const { clientId } = await liveClient();
+    const { clientId: offboarded } = await liveClient();
+    await callServerFn(setGraspClientFn, { clientId }, { email: staff.email });
+    await db
+      .update(clients)
+      .set({ status: "offboarded" })
+      .where(eq(clients.id, offboarded));
+
+    const refused = await Promise.all(
+      ["client-nobody", offboarded].map(
+        async (id) =>
+          await callServerFn(
+            setGraspClientFn,
+            { clientId: id },
+            { email: staff.email }
+          )
+      )
+    );
+    const settings = await callServerFn(fetchPlatformSettings);
+
+    expect({
+      refused,
+      graspClientId: settings.graspClientId,
+    }).toStrictEqual({
+      refused: [{ refused: "client_unknown" }, { refused: "client_unknown" }],
+      graspClientId: clientId,
+    });
+  });
+
+  it("is chosen only by staff Access vouches for, from the admin's own pages", async () => {
+    const { clientId } = await liveClient();
+    await callServerFn(
+      setGraspClientFn,
+      { clientId: null },
+      { email: staff.email }
+    );
+
+    const refusals = await Promise.allSettled([
+      callServerFn(setGraspClientFn, { clientId }, { email: null }),
+      callServerFn(
+        setGraspClientFn,
+        { clientId },
+        { email: staff.email, from: "https://elsewhere.test" }
+      ),
+    ]);
+    const settings = await callServerFn(fetchPlatformSettings);
+
+    expect({
+      refusals: refusals.map(({ status }) => status),
+      graspClientId: settings.graspClientId,
+    }).toStrictEqual({
+      refusals: ["rejected", "rejected"],
+      graspClientId: null,
     });
   });
 });
