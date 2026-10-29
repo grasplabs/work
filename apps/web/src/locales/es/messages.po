@@ -145,6 +145,14 @@ msgstr "{app} aún no está conectado."
 msgid "{app} needs someone to sign in again"
 msgstr "{app} necesita que alguien vuelva a iniciar sesión"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "{app}, {whose}'s own"
+msgstr "{app}, cuenta propia de {whose}"
+
+#: src/connections/revocations-by-hand.tsx
+msgid "{app}, shared: {whose}"
+msgstr "{app}, compartida: {whose}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Versión {version}"
@@ -2115,6 +2123,10 @@ msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Aceptado"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "Access to remove by hand"
+msgstr "Acceso que quitar a mano"
+
 #: src/engines/app-access-requests.tsx
 msgid "Access waiting for an admin"
 msgstr "Accesos a la espera de un administrador"
@@ -3101,6 +3113,14 @@ msgstr "Preguntar a {0}"
 msgid "Ask {name} in"
 msgstr "Invitar a {name}"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "Ask {owner} to remove Grasp at {link}."
+msgstr "Pide a {owner} que quite Grasp en {link}."
+
+#: src/connections/revocations-by-hand.tsx
+msgid "Ask {owner} to remove Grasp's access in {app}'s settings for connected apps."
+msgstr "Pide a {owner} que quite el acceso de Grasp en la configuración de aplicaciones conectadas de {app}."
+
 #: src/chat/thread.tsx
 msgid "Ask again"
 msgstr "Volver a preguntar"
@@ -3248,6 +3268,10 @@ msgstr "Solicitado el"
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "Pidió al agente que arreglara una ejecución"
+
+#: src/connections/revocations-by-hand.tsx
+msgid "Asked to connect again on {since}."
+msgstr "Se pidió volver a conectar el {since}."
 
 #: src/activity/audit-words.ts
 msgid "Asked to erase a removed member"
@@ -5124,6 +5148,10 @@ msgstr "Desconectada"
 msgid "Disconnected an account"
 msgstr "Desconectó una cuenta"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "Disconnected on {since}."
+msgstr "Desconectada el {since}."
+
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Cerrar"
@@ -6329,6 +6357,10 @@ msgstr "Dar el visto bueno"
 msgid "Give the go again"
 msgstr "Volver a dar el visto bueno"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "Given up {date}"
+msgstr "Abandonado el {date}"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Go live"
@@ -6454,6 +6486,10 @@ msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
 #: src/chat/failure.ts
 msgid "Grasp couldn't put this question to the model. Try again."
 msgstr "Grasp no pudo hacerle esta pregunta al modelo. Vuelve a intentarlo."
+
+#: src/connections/revocations-by-hand.tsx
+msgid "Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work."
+msgstr "Grasp no pudo quitar su propio acceso en estas aplicaciones. Hasta que alguien lo quite allí, puede que siga funcionando."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -7464,6 +7500,10 @@ msgstr "Espera a tu rol, {role}, desde las {since}."
 msgid "It waits on your team, {team}, since {since}."
 msgstr "Espera a tu equipo, {team}, desde las {since}."
 
+#: src/connections/revocations-by-hand.tsx
+msgid "It was a former member's account: remove Grasp's access in {app}'s admin settings."
+msgstr "Era la cuenta de un antiguo miembro: quita el acceso de Grasp en la configuración de administración de {app}."
+
 #: src/workflows/today-lanes.tsx
 msgid "It went through no other workflow today."
 msgstr "Hoy no pasó por ningún otro flujo."
@@ -8171,6 +8211,10 @@ msgstr "Londres"
 msgctxt "kind of finding"
 msgid "Lookalike name"
 msgstr "Nombre parecido"
+
+#: src/activity/audit-words.ts
+msgid "Looked at the access to remove by hand"
+msgstr "Consultó el acceso que quitar a mano"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -11574,6 +11618,14 @@ msgstr "¿Eliminar {what} del cerebro?"
 msgid "Remove from the brain"
 msgstr "Eliminar del cerebro"
 
+#: src/connections/revocations-by-hand.tsx
+msgid "Remove Grasp at {link}, signed in as {account}."
+msgstr "Quita Grasp en {link}, con la sesión iniciada como {account}."
+
+#: src/connections/revocations-by-hand.tsx
+msgid "Remove Grasp's access in {app}'s settings for connected apps, signed in as {account}."
+msgstr "Quita el acceso de Grasp en la configuración de aplicaciones conectadas de {app}, con la sesión iniciada como {account}."
+
 #: src/brain/forget.tsx
 msgid "Remove it"
 msgstr "Eliminar"
@@ -13421,6 +13473,10 @@ msgstr "Aún pendiente: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Aún pendiente: {question} {who} puede responderla."
+
+#: src/connections/revocations-by-hand.tsx
+msgid "Still trying · {tries} tries"
+msgstr "Aún intentándolo · {tries} intentos"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"

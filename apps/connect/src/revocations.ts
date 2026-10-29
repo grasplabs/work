@@ -13,7 +13,7 @@ import {
 } from "./db/schema.ts";
 import { revokeToken } from "./oauth-client.ts";
 import { endOwedRevoke, firstRevokeRetryMs } from "./owed-revokes.ts";
-import type { OwedEnd } from "./owed-revokes.ts";
+import type { GivenUpReason, OwedEnd } from "./owed-revokes.ts";
 import { providerFor } from "./providers.ts";
 import {
   owedRefreshToken,
@@ -95,8 +95,13 @@ export const owedForMs = 365 * 24 * 60 * 60 * 1000;
 const retryBatchSize = 50;
 const retriesAtOnce = 5;
 
-/** Failed tries after which an owed revoke is logged as stuck, every try. */
-const stuckAttempts = 8;
+/**
+ * Failed tries after which an owed revoke is stuck: logged at every try,
+ * and shown to the company's admins (src/revocations-by-hand.ts). About a
+ * day in, the waits doubling from ten minutes: a provider down that long
+ * isn't a blip.
+ */
+export const stuckAttempts = 8;
 
 /** How long to wait after `attempts` failed tries: doubling, up to a day. */
 const retryDelayMs = (attempts: number): number =>
@@ -352,13 +357,16 @@ const tryOwed = async (
   const attempts = owed.attempts + 1;
   const end = async (
     action: OwedEnd,
-    detail: Record<string, string | number>
+    detail: Record<string, string | number>,
+    givenUp?: GivenUpReason
   ): Promise<void> => {
-    await endOwedRevoke(env, owed, action, {
-      provider: connection.provider,
-      owedFor: owed.reason,
-      ...detail,
-    });
+    await endOwedRevoke(
+      env,
+      owed,
+      action,
+      { provider: connection.provider, owedFor: owed.reason, ...detail },
+      givenUp
+    );
   };
   const heldAgain = await liveOnSameGrant(env, connection);
   if (heldAgain.length > 0) {
@@ -370,10 +378,11 @@ const tryOwed = async (
       provider: connection.provider,
       attempts: owed.attempts,
     });
-    await end("connection.revoke_abandoned", {
-      attempts: owed.attempts,
-      reason: "expired",
-    });
+    await end(
+      "connection.revoke_abandoned",
+      { attempts: owed.attempts, reason: "expired" },
+      "expired"
+    );
     return;
   }
   // A sign-in for this connection on its way: its consent may hand back
@@ -411,10 +420,11 @@ const tryOwed = async (
       provider: connection.provider,
       attempts,
     });
-    await end("connection.revoke_abandoned", {
-      attempts,
-      reason: "unreadable",
-    });
+    await end(
+      "connection.revoke_abandoned",
+      { attempts, reason: "unreadable" },
+      "unreadable"
+    );
     return;
   }
   if (outcome !== "failed") {
@@ -511,9 +521,12 @@ export const resealOwedRevokes = async (env: Env): Promise<void> => {
       .select({ provider: connections.provider })
       .from(connections)
       .where(eq(connections.id, owed.connectionId));
-    await endOwedRevoke(env, owed, "connection.revoke_abandoned", {
-      provider: connection?.provider ?? "",
-      reason: "unreadable",
-    });
+    await endOwedRevoke(
+      env,
+      owed,
+      "connection.revoke_abandoned",
+      { provider: connection?.provider ?? "", reason: "unreadable" },
+      "unreadable"
+    );
   });
 };
