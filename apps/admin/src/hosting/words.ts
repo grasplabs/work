@@ -72,6 +72,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   foreign_resource:
     "A binding would reach a resource that isn't this client's own.",
   unsupported_binding: "The release has a binding the admin doesn't map.",
+  resource_unnamed:
+    "The release has a resource the client naming scheme doesn't name: add it to the names module first.",
   unknown_placeholder:
     "The release names a placeholder the admin doesn't fill.",
   destination_unsupported:
