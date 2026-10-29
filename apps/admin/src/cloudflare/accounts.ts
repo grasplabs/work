@@ -195,6 +195,25 @@ const readOnlyGatewayFields: ReadonlySet<string> = new Set([
   "internal_id",
 ]);
 
+/** The AI Gateway `id` at `path`, or undefined when there's none. */
+const gatewayNamed = async (
+  api: CloudflareApi,
+  path: string,
+  id: string
+): Promise<AiGatewayInfo | undefined> => {
+  try {
+    return await api.call(
+      { method: "GET", path: `${path}/${id}` },
+      gatewaySchema
+    );
+  } catch (error) {
+    if (isNotFound(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
 /**
  * The AI Gateway `id`, created if it's missing, and always authenticated:
  * the gateway holds the client's provider keys (BYOK), so without
@@ -214,35 +233,43 @@ export const ensureAiGateway = async (
   id: string
 ): Promise<AiGatewayInfo> => {
   const path = `/accounts/${accountId}/ai-gateway/gateways`;
-  let existing: AiGatewayInfo | undefined = undefined;
-  try {
-    existing = await api.call(
-      { method: "GET", path: `${path}/${id}` },
-      gatewaySchema
-    );
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
-  }
+  let existing = await gatewayNamed(api, path, id);
   if (existing === undefined) {
-    return await api.call(
-      {
-        method: "POST",
-        path,
-        json: {
-          id,
-          authentication: true,
-          cache_ttl: 0,
-          cache_invalidate_on_update: false,
-          collect_logs: true,
-          rate_limiting_interval: 0,
-          rate_limiting_limit: 0,
-          rate_limiting_technique: "fixed",
+    try {
+      return await api.call(
+        {
+          method: "POST",
+          path,
+          json: {
+            id,
+            authentication: true,
+            cache_ttl: 0,
+            cache_invalidate_on_update: false,
+            collect_logs: true,
+            rate_limiting_interval: 0,
+            rate_limiting_limit: 0,
+            rate_limiting_technique: "fixed",
+          },
         },
-      },
-      gatewaySchema
-    );
+        gatewaySchema
+      );
+    } catch (error) {
+      // Another run made it between the read and the create, as two
+      // clients first provisioned into one shared account at once do: the
+      // create is refused, and the one it made is taken as found below,
+      // its settings put right. Any other refusal stands, and a create
+      // with no answer at all isn't a refusal: it isn't read again here.
+      const made =
+        error instanceof CloudflareApiError &&
+        error.status >= 400 &&
+        error.status < 500
+          ? await gatewayNamed(api, path, id)
+          : undefined;
+      if (made === undefined) {
+        throw error;
+      }
+      existing = made;
+    }
   }
   if (existing.authentication === true) {
     return existing;
