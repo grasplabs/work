@@ -300,36 +300,25 @@ const deployerWaiting = (words: string): ReadinessCheck => ({
   words,
 });
 
-const deployerCheck = async (
+/** Whether the deployer reaches destination `id`'s namespace: null when it does, else why not. */
+const reachOf = async (
   envOf: Env,
-  destinationId: string | null,
-  tokenMissing: boolean
-): Promise<ReadinessCheck> => {
-  if (tokenMissing) {
-    return deployerWaiting(
-      "Checked once DEPLOYER_API_TOKEN is in Secrets Store."
-    );
-  }
-  if (destinationId === null) {
-    return deployerWaiting(
-      "Checked once a destination takes new organizations."
-    );
-  }
+  id: string
+): Promise<{
+  id: string;
+  namespace: string | null;
+  problem: string | null;
+}> => {
   const destination = await adminDatabase(envOf.DB)
     .select()
     .from(hostingDestinations)
-    .where(eq(hostingDestinations.id, destinationId))
+    .where(eq(hostingDestinations.id, id))
     .get();
-  if (
-    destination?.accountId === null ||
-    destination?.accountId === undefined ||
-    destination.namespace === null
-  ) {
-    return deployerWaiting(
-      `${destinationId} names no account and namespace to reach.`
-    );
+  const accountId = destination?.accountId ?? null;
+  const namespace = destination?.namespace ?? null;
+  if (accountId === null || namespace === null) {
+    return { id, namespace, problem: "no account and namespace recorded" };
   }
-  const { accountId, namespace } = destination;
   try {
     const api = await deployerApi(envOf, {
       waitBudgetMs: 0,
@@ -342,22 +331,53 @@ const deployerCheck = async (
       },
       z.unknown()
     );
+    return { id, namespace, problem: null };
+  } catch (error) {
+    return { id, namespace, problem: errorCode(error) };
+  }
+};
+
+/**
+ * Whether the deployer's token reaches a destination new organizations
+ * can go in: each eligible one's Workers for Platforms namespace, read as
+ * the deployer. Ready when any is reached, since staff can choose that one
+ * on an organization's Setup.
+ */
+const deployerCheck = async (
+  envOf: Env,
+  destinationIds: readonly string[],
+  tokenMissing: boolean
+): Promise<ReadinessCheck> => {
+  if (tokenMissing) {
+    return deployerWaiting(
+      "Checked once DEPLOYER_API_TOKEN is in Secrets Store."
+    );
+  }
+  if (destinationIds.length === 0) {
+    return deployerWaiting(
+      "Checked once a destination takes new organizations."
+    );
+  }
+  const reaches = await Promise.all(
+    destinationIds.map(async (id) => await reachOf(envOf, id))
+  );
+  const reached = reaches.find(({ problem }) => problem === null);
+  if (reached !== undefined) {
     return {
       id: "deployer",
       title: "Deployer token",
       required: true,
       status: "ready",
-      words: `The deployer's token reaches ${namespace} in ${destinationId}'s account.`,
-    };
-  } catch (error) {
-    return {
-      id: "deployer",
-      title: "Deployer token",
-      required: true,
-      status: "blocked",
-      words: `The deployer's token can't reach ${namespace} in ${destinationId}'s account (${errorCode(error)}). Give the token Workers for Platforms edit on that account, or put the right one in the stage's 1Password Environment as DEPLOYER_API_TOKEN, then run Deploy platform.`,
+      words: `The deployer's token reaches ${reached.namespace ?? ""} in ${reached.id}'s account.`,
     };
   }
+  return {
+    id: "deployer",
+    title: "Deployer token",
+    required: true,
+    status: "blocked",
+    words: `The deployer's token can't reach ${reaches.map(({ id, problem }) => `${id} (${problem ?? ""})`).join(", ")}. Give the token Workers for Platforms edit on that account, or put the right one in the stage's 1Password Environment as DEPLOYER_API_TOKEN, then run Deploy platform.`,
+  };
 };
 
 const alertsCheck = async (envOf: Env): Promise<ReadinessCheck> => {
@@ -450,12 +470,14 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
     missingSecrets(envOf, requiredSecrets),
   ]);
   const newestId = manifest?.releaseId ?? null;
-  // The one new organizations go in, or with several, the first of them.
+  // The one new organizations go in, or with several, each of them.
+  const automatic = automaticChoice(choices).destinationId;
   const placeable =
-    automaticChoice(choices).destinationId ??
-    choices.find(({ shared, problems }) => shared && problems.length === 0)
-      ?.id ??
-    null;
+    automatic === null
+      ? choices
+          .filter(({ shared, problems }) => shared && problems.length === 0)
+          .map(({ id }) => id)
+      : [automatic];
   const checks: ReadinessCheck[] = [
     stageCheck(envOf),
     domainCheck(envOf),

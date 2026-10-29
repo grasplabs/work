@@ -192,6 +192,27 @@ describe("Platform's Readiness", () => {
     });
   });
 
+  it("is ready when the deployer reaches any of several destinations that qualify, which staff can choose", async () => {
+    const theirs = cloudflare.addAccount("Not ours", "someone@else.test");
+    theirs.namespaces.set(clientsNamespace("production"), new Map());
+    const ours = cloudflare.addAccount("Grasp clients");
+    ours.namespaces.set(clientsNamespace("production"), new Map());
+    await destination({ accountId: theirs.id });
+    const reachable = await destination({ accountId: ours.id });
+
+    const read = await withVars(production, readiness);
+
+    expect({
+      destination: statuses(read).destination,
+      deployer: statuses(read).deployer,
+      words: wordsOf(read, "deployer"),
+    }).toStrictEqual({
+      destination: "ready",
+      deployer: "ready",
+      words: `The deployer's token reaches ${clientsNamespace("production")} in ${reachable}'s account.`,
+    });
+  });
+
   it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
     const read = await withVars(
       { ...production, DISCORD_PUBLIC_KEY: "" },
