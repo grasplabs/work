@@ -290,16 +290,24 @@ const reconcile = async (
             sql`NOT ${ownerErased(source.connectionId)}`
           ) ?? sql`0`,
       },
+      // Under the same condition in its own statement: the event's
+      // condition gates only the event, and a connection whose owner's
+      // erasure began starts listening nowhere (person-erasure.ts).
       [
         db
           .insert(eventSources)
-          .values({
-            id: crypto.randomUUID(),
-            ...source,
-            pollAt: now,
-            createdAt: now,
-            updatedAt: now,
-          })
+          .select(
+            sql`SELECT ${crypto.randomUUID()}, ${source.connectionId},
+              ${source.type}, ${source.resource}, NULL, ${now.getTime()}, 0,
+              NULL, NULL, ${now.getTime()}, ${now.getTime()}
+              WHERE NOT ${ownerErased(source.connectionId)}
+                AND NOT EXISTS (
+                  SELECT 1 FROM ${eventSources}
+                  WHERE ${eventSources.connectionId} = ${source.connectionId}
+                    AND ${eventSources.type} = ${source.type}
+                    AND ${eventSources.resource} = ${source.resource}
+                )`
+          )
           .onConflictDoNothing(),
       ]
     );

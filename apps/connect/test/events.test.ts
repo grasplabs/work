@@ -315,6 +315,25 @@ describe("connector events", () => {
     ]);
   });
 
+  it("start listening nowhere for someone whose erasure began after the sync read where to listen", async () => {
+    const outlook = await connected();
+    // Their erasure began (person-erasure.ts marks it first) as the sync
+    // went from reading where connect listens to listening there.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(outlook.person.userId, Date.now())
+      .run();
+
+    await sync([listener(outlook)]);
+
+    const started = await listening();
+    expect({
+      sources: await sources(),
+      started: started.filter(({ target }) => target === outlook.id),
+    }).toStrictEqual({ sources: [], started: [] });
+  });
+
   it("keep nothing a read finds for someone whose erasure began while the read was out", async () => {
     const outlook = await connected();
     await sync([listener(outlook)]);
