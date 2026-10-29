@@ -1,3 +1,4 @@
+import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import type {
   SteeredWrite,
   WorkflowDraft,
@@ -100,6 +101,30 @@ const ActionEffects = ({ actions }: { actions: WorkflowActionReview[] }) => {
   );
 };
 
+/**
+ * The version that went live, if one did, and whether whoever asked for
+ * it approved it themselves, as nobody else could (GRA-1227).
+ */
+const LiveBadges = ({ lifecycle }: { lifecycle: WorkflowLifecycle }) => {
+  const { live } = lifecycle;
+  if (live === null) {
+    return null;
+  }
+  const { version } = live;
+  return (
+    <>
+      <Badge variant="secondary">
+        <Trans>Live: version {version}</Trans>
+      </Badge>
+      {live.selfApproved ? (
+        <Badge variant="outline">
+          <Trans>Self-approved: nobody else could approve it</Trans>
+        </Badge>
+      ) : null}
+    </>
+  );
+};
+
 const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   const { t } = useLingui();
   const captionId = useId();
@@ -171,6 +196,7 @@ const WorkflowResourceView = ({
   params,
   runs,
   askable,
+  lifecycle,
   me,
 }: {
   resource: WorkflowResource;
@@ -179,6 +205,7 @@ const WorkflowResourceView = ({
   params: Loaded<WorkflowParams>;
   runs: Loaded<WorkflowResourceRun[]>;
   askable: Loaded<boolean>;
+  lifecycle: Loaded<WorkflowLifecycle>;
   me: string;
 }) => {
   const router = useRouter();
@@ -201,6 +228,9 @@ const WorkflowResourceView = ({
                 <Trans>Version {currentVersion}</Trans>
               )}
             </Badge>
+            {lifecycle.state === "ready" ? (
+              <LiveBadges lifecycle={lifecycle.data} />
+            ) : null}
             {/* Its approved packages, for its builders: read there, and
                 retired or revoked by whoever may approve packages. */}
             {resource.role === "builder" ? (
@@ -298,7 +328,7 @@ const WorkflowResourceView = ({
 };
 
 const WorkflowResourcePage = () => {
-  const { resource, draft, versions, params, runs, askable } =
+  const { resource, draft, versions, params, runs, askable, lifecycle } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
@@ -327,6 +357,7 @@ const WorkflowResourcePage = () => {
           key={resource.data.id}
           askable={askable}
           draft={draft}
+          lifecycle={lifecycle}
           me={identity.userId}
           params={params}
           resource={resource.data}
@@ -341,28 +372,34 @@ const WorkflowResourcePage = () => {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
-    const [resource, versions, params, runs, askable] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.get(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.versions(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.params(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.runs(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.askable(workflow)
-      ),
-    ]);
+    const [resource, versions, params, runs, askable, lifecycle] =
+      await Promise.all([
+        loadFromCore(
+          core,
+          async (session) => await session.workflowResources.get(workflow)
+        ),
+        loadFromCore(
+          core,
+          async (session) => await session.workflowResources.versions(workflow)
+        ),
+        loadFromCore(
+          core,
+          async (session) => await session.workflowResources.params(workflow)
+        ),
+        loadFromCore(
+          core,
+          async (session) => await session.workflowResources.runs(workflow)
+        ),
+        loadFromCore(
+          core,
+          async (session) => await session.workflowResources.askable(workflow)
+        ),
+        loadFromCore(
+          core,
+          async (session) =>
+            await session.workflowResources.lifecycle.get(workflow)
+        ),
+      ]);
     // Only its builders read its draft.
     const draft =
       resource.state === "ready" && resource.data.role === "builder"
@@ -371,7 +408,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
             async (session) => await session.workflowResources.draft(workflow)
           )
         : undefined;
-    return { resource, draft, versions, params, runs, askable };
+    return { resource, draft, versions, params, runs, askable, lifecycle };
   },
   component: WorkflowResourcePage,
 });

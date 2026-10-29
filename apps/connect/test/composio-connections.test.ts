@@ -212,6 +212,55 @@ const composioWrites = () =>
   composio.state.requests.filter(({ method }) => method !== "GET");
 
 describe("connecting a Composio toolkit", () => {
+  it("keeps no flow of someone whose erasure began as they connected, and deletes what it made at Composio", async () => {
+    const admin = someone("admin");
+    // Their erasure began (person-erasure.ts marks it first) while the
+    // start was under way at Composio.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(admin.userId, Date.now())
+      .run();
+
+    const started = await outcome(start(admin));
+
+    const flows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM composio_flows WHERE user_id = ?"
+    )
+      .bind(admin.userId)
+      .first<{ n: number }>();
+    // Nothing is lost on the way: what it made is gone at Composio, or
+    // its cleanup row is still there to delete it.
+    expect({
+      started,
+      flows: flows?.n,
+      gone:
+        JSON.stringify(heldAtComposio()) === JSON.stringify(nothingHeld) ||
+        (await cleanupsLeft()) > 0,
+    }).toStrictEqual({
+      started: "connection.flow_invalid",
+      flows: 0,
+      gone: true,
+    });
+  });
+
+  it("hands the unfinished flows of someone erased over to their cleanup, never just deletes them", async () => {
+    const admin = someone("admin");
+    await start(admin);
+
+    await exports.default.erasePersonal({ ownerUserId: admin.userId });
+
+    const flows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM composio_flows WHERE user_id = ?"
+    )
+      .bind(admin.userId)
+      .first<{ n: number }>();
+    expect({ flows: flows?.n, cleanups: await cleanupsLeft() }).toStrictEqual({
+      flows: 0,
+      cleanups: 1,
+    });
+  });
+
   it("sends the admin to Composio's auth link, to come back to this deployment's callback", async () => {
     const admin = someone("admin");
     const url = await start(admin);

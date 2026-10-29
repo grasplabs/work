@@ -19,23 +19,24 @@ import {
   setTeamsBotFn,
 } from "../src/clients/functions.ts";
 import { setSealedSecret, setTeamsBot } from "../src/clients/settings.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { targetClient } from "../src/rollout/targets.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import {
+  deployPlaced,
+  livePlacedClient,
+  placedRelease,
+  scriptsOf,
+} from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 import manifestSchema from "./teams-manifest-v1.19.schema.json" with { type: "json" };
 
 const token = "test-deployer-token-teams-bot-5c2e19";
-const tenantToken = "test-tenant-admin-token-teams-bot-a7d4f0";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -50,45 +51,26 @@ const newBot = () => ({
   secretExpiresOn: "2027-04-30",
 });
 
-/** An active client on a new account in the fake, running a new release as a deploy made it. */
+/** A live placed client in a destination of its own, running a new release as its operation made it. */
 const liveClient = async (name: string) => {
-  const release = await publishRelease({ notes: "feat(connect): its bot" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(connect): its bot");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount();
-  const now = new Date();
-  await act(
-    db,
-    setup,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, setup, clientId, release.id)
-  );
-  return { clientId, account, releaseId: release.id };
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
+  return {
+    clientId,
+    account,
+    releaseId: release,
+    scripts: await scriptsOf(clientId),
+  };
 };
 
-/** Deploys client `clientId`'s release again, as applying its settings does. */
+/** Runs client `clientId`'s release again, as applying its settings does. */
 const redeploy = async (clientId: string, releaseId: string) => {
-  const deployId = await startDeploy(
-    db,
-    setup,
-    clientId,
-    releaseId,
-    "settings"
-  );
-  await runDeploy(await deployContext(env), deployId);
+  await deployPlaced(clientId, releaseId);
 };
 
 /** The version all of `script`'s traffic goes to in `account`. */
@@ -105,9 +87,15 @@ const bindingSchema = z.object({
   json: z.unknown(),
 });
 
-/** The Teams bot's vars and secret on the live version of `script`, by name. */
-const botOn = (account: AccountState, script: string) => {
-  const version = liveVersionOf(account, script);
+/** The Teams bot's vars and secret on the live version of `client`'s `worker`, by name. */
+const botOn = (
+  {
+    account,
+    scripts,
+  }: { account: AccountState; scripts: { core: string; connect: string } },
+  worker: "core" | "connect"
+) => {
+  const version = liveVersionOf(account, scripts[worker]);
   const listed: unknown[] = z
     .array(z.unknown())
     .parse(version?.metadata.bindings ?? []);
@@ -179,7 +167,7 @@ const pngHeader = (bytes: Uint8Array) => {
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 describe("a client's Teams bot", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // An earlier test's clients are gone from the fake: offboarded, so
   // nothing reads their accounts.
   beforeEach(async () => {
@@ -207,12 +195,9 @@ describe("a client's Teams bot", () => {
 
     expect({
       pending: pending?.configPending,
-      connect: botOn(acme.account, "grasp-os-connect"),
-      core: botOn(acme.account, "grasp-os-core"),
-      other: [
-        botOn(other.account, "grasp-os-connect"),
-        botOn(other.account, "grasp-os-core"),
-      ],
+      connect: botOn(acme, "connect"),
+      core: botOn(acme, "core"),
+      other: [botOn(other, "connect"), botOn(other, "core")],
     }).toStrictEqual({
       pending: true,
       connect: {
@@ -246,8 +231,8 @@ describe("a client's Teams bot", () => {
 
     expect({
       removed,
-      connect: botOn(acme.account, "grasp-os-connect").vars,
-      core: botOn(acme.account, "grasp-os-core").vars,
+      connect: botOn(acme, "connect").vars,
+      core: botOn(acme, "core").vars,
       download: await downloaded(acme.clientId),
     }).toStrictEqual({ removed: true, connect: {}, core: {}, download: null });
   });

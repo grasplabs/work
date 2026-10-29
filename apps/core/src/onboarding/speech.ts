@@ -18,7 +18,7 @@ import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { gatewaySettings } from "../models.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
-import { keepLine, keptLine } from "../speech-cache.ts";
+import { keepLine, keptLine, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { gatewaySpeech } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
@@ -259,6 +259,28 @@ const keep = async (
   }
 };
 
+/**
+ * Keeps a line said, unless a content purge reached the onboarding since
+ * `purges` was taken (the store's `purgeMark`): then it is taken out again
+ * right after it was put, as an R2 put can't be conditional, and tried
+ * again by the store's alarm until it is gone. A purge that
+ * lands after this check finds the line kept, and takes it out itself
+ * (the store's `rewriteInterview`).
+ */
+const keepUnlessPurged = async (
+  env: Env,
+  key: SpokenKey,
+  answer: string,
+  purges: number,
+  requestId: string
+): Promise<void> => {
+  await keep(env, key, answer, requestId);
+  const store = onboardingStore(env);
+  if ((await store.purgeMark()) !== purges) {
+    await store.forgetSpoken(await storedKeysOf([key]));
+  }
+};
+
 /** The answer's shape, as the cache keeps it: checked again when read. */
 const keptAnswerSchema = z.object({
   audio: z.string().min(1),
@@ -313,6 +335,10 @@ const say = async (
   if (listener.said >= listener.budget) {
     return refused(429, speechErrors.create("speech.limited"), requestId);
   }
+  // A content purge that lands while the voice says the line may have
+  // taken it out of the cache already: taken before the request, the
+  // mark says whether one did (`keepUnlessPurged`).
+  const purges = await onboardingStore(env).purgeMark();
   let speech: Awaited<ReturnType<ReturnType<typeof gatewaySpeech>["speak"]>>;
   try {
     speech = await gatewaySpeech(env, {
@@ -331,7 +357,7 @@ const say = async (
   };
   const body = JSON.stringify(answer);
   await Promise.all([
-    keep(env, key, body, requestId),
+    keepUnlessPurged(env, key, body, purges, requestId),
     countSaid(env, listener, secondsOf(speech.words), requestId),
   ]);
   return answered(body);

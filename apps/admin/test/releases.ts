@@ -90,7 +90,7 @@ export const evidenceFor = (
   releaseId: release.id,
   profile,
   capacityRun: { jobId: 4242, commit: release.commit, profile },
-  securityReview: { pullRequest: 101, approvedBy: "nickruigrok" },
+  securityReviews: [{ pullRequest: 101, approvedBy: "nickruigrok" }],
 });
 
 /** What a test release's code works with unless its spec says otherwise. */

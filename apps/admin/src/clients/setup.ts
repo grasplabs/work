@@ -12,7 +12,6 @@ import { desc, eq, sql } from "drizzle-orm";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
-  clientDeploys,
   clients,
   clientSealedSecrets,
   clientWorkers,
@@ -21,7 +20,6 @@ import {
 } from "../db/schema.ts";
 import { clientGatewayId } from "../deploy/core-config.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
-import type { DeployKind } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { bucketNames, databaseNames } from "../deploy/resources.ts";
 import { getProvisioning } from "../provision/queries.ts";
@@ -33,26 +31,8 @@ import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";
 import { lastWatched } from "./watch.ts";
 
-/** How many of a client's deploys the section lists: the latest. */
-export const setupDeployLimit = 20;
-
 /** How many releases the section lists: the newest. */
 export const setupReleaseLimit = 10;
-
-/** One of a client's deploys. */
-export interface SetupDeploy {
-  id: string;
-  releaseId: string;
-  kind: DeployKind;
-  status: (typeof clientDeploys.status.enumValues)[number];
-  /** The last step that finished; null before the first. */
-  step: string | null;
-  /** Why it failed, as a code. */
-  error: string | null;
-  startedBy: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 /** A Worker the admin deployed to the client, and what it last made live there. */
 export interface SetupWorker {
@@ -84,8 +64,6 @@ export interface SetupEvent {
 export interface ClientSetup {
   provisioning: ProvisioningView;
   account: {
-    /** The account's workers.dev subdomain; null before the first deploy. */
-    workersSubdomain: string | null;
     generation: number;
     rotatedAt: Date | null;
     rotationLiveAt: Date | null;
@@ -110,10 +88,6 @@ export interface ClientSetup {
    * (src/clients/watch.ts), and when; null before it read any.
    */
   watched: { readAt: Date; signals: WatchedSignals } | null;
-  /** The newest first: its latest `setupDeployLimit`. */
-  deploys: SetupDeploy[];
-  /** Whether it has older deploys than those. */
-  moreDeploys: boolean;
   workers: SetupWorker[];
   /**
    * What the release it runs keeps in its account: its databases and
@@ -172,29 +146,6 @@ const byHand: ReadonlySet<string> = new Set([
   "client.rooms_project",
   "client.attio_company",
 ]);
-
-const deploysOf = async (
-  db: AdminDatabase,
-  clientId: string
-): Promise<SetupDeploy[]> =>
-  await db
-    .select({
-      id: clientDeploys.id,
-      releaseId: clientDeploys.releaseId,
-      kind: clientDeploys.kind,
-      status: clientDeploys.status,
-      step: clientDeploys.step,
-      error: clientDeploys.error,
-      startedBy: clientDeploys.startedBy,
-      createdAt: clientDeploys.createdAt,
-      updatedAt: clientDeploys.updatedAt,
-    })
-    .from(clientDeploys)
-    .where(eq(clientDeploys.clientId, clientId))
-    // Two deploys of one millisecond in the order they started.
-    .orderBy(desc(clientDeploys.createdAt), desc(sql`rowid`))
-    // One more than it lists, which says whether there are older ones.
-    .limit(setupDeployLimit + 1);
 
 const workersOf = async (
   db: AdminDatabase,
@@ -298,7 +249,6 @@ export const getClientSetup = async (
   const db = adminDatabase(env.DB);
   const [account] = await db
     .select({
-      workersSubdomain: clients.workersSubdomain,
       generation: clients.generation,
       rotatedAt: clients.rotatedAt,
       rotationLiveAt: clients.rotationLiveAt,
@@ -306,25 +256,16 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [
-    settings,
-    sealedSecrets,
-    deploys,
-    workers,
-    listed,
-    rollout,
-    history,
-    watched,
-  ] = await Promise.all([
-    clientSettings(db, clientId),
-    sealedSecretsOf(db, clientId),
-    deploysOf(db, clientId),
-    workersOf(db, clientId),
-    listReleases(db),
-    rolloutOf(db, clientId),
-    clientHistory(db, clientId),
-    lastWatched(env, clientId),
-  ]);
+  const [settings, sealedSecrets, workers, listed, rollout, history, watched] =
+    await Promise.all([
+      clientSettings(db, clientId),
+      sealedSecretsOf(db, clientId),
+      workersOf(db, clientId),
+      listReleases(db),
+      rolloutOf(db, clientId),
+      clientHistory(db, clientId),
+      lastWatched(env, clientId),
+    ]);
   // Core's release is the one its people meet.
   const runs =
     workers.find(({ worker }) => worker === "core")?.releaseId ?? null;
@@ -337,8 +278,6 @@ export const getClientSetup = async (
     configPending: settings?.configPending ?? false,
     sealedSecrets,
     watched,
-    deploys: deploys.slice(0, setupDeployLimit),
-    moreDeploys: deploys.length > setupDeployLimit,
     workers,
     resources: await resourcesOf(db, runs),
     releases: listed.releases
