@@ -21,7 +21,7 @@ import { thenRefresh, useAction } from "../use-action.ts";
 import {
   discardClientFn,
   offboardPlacedClientFn,
-  placeAndProvisionFn,
+  retryProvisioningFn,
   releasePlacedClientFn,
   rollbackPlacedClientFn,
 } from "./functions.ts";
@@ -403,13 +403,7 @@ export const ClientHosting = ({
       // Refreshed even when it fails: the client may be placed already.
       const result = await thenRefresh(
         async () =>
-          await placeAndProvisionFn({
-            data: {
-              clientId: view.clientId,
-              releaseId: null,
-              destinationId: null,
-            },
-          }),
+          await retryProvisioningFn({ data: { clientId: view.clientId } }),
         async () => {
           await router.invalidate({ sync: true });
         }

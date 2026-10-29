@@ -4,6 +4,7 @@
  * admin's own words (it's English only). Codes stay on screen beside
  * them, as staff search the audit log and the code by them.
  */
+import type { DeployErrorCode } from "../deploy/errors.ts";
 import type { DiscardErrorCode } from "./discard.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import type { OffboardingErrorCode } from "./offboarding.ts";
@@ -140,6 +141,124 @@ export const operationErrorWords = (code: string): string => {
   return code.startsWith("cloudflare_")
     ? "Cloudflare refused a call: its status and error codes are in the code."
     : "The deploy steps stopped it: the code says why.";
+};
+
+/**
+ * What a provisioning that stopped needs, by the code it stopped with
+ * (src/hosting/reconcile.ts):
+ * - `retry`: something passing (Cloudflare's lag or a 5xx, a run gone, a
+ *   core still starting): the admin resumes it by itself, backing off;
+ * - `release`: the release itself can't go there: the admin resumes it
+ *   once a newer release fits, and until then tells staff;
+ * - `staff`: a person must look first (a policy or hosting check that
+ *   didn't hold, the admin's own setup, a resource someone else has): the
+ *   admin tells staff and resumes nothing.
+ */
+export type FailureCause = "retry" | "release" | "staff";
+
+/** Every fixed code an operation can stop with, and what it needs. */
+const failureCauses = {
+  // The operation's own.
+  client_unknown: "staff",
+  release_not_imported: "release",
+  release_undeclared: "release",
+  release_incompatible: "release",
+  schema_incompatible: "release",
+  limit_evidence_missing: "release",
+  release_without_limits: "release",
+  release_history_incomplete: "release",
+  operation_release_changed: "release",
+  unknown_worker: "release",
+  wfp_binding_unqualified: "release",
+  destination_other_stage: "staff",
+  stage_unset: "staff",
+  wfp_schedule_unqualified: "release",
+  upload_unobserved: "retry",
+  secrets_unobserved: "retry",
+  secret_unrevoked: "retry",
+  probe_unqualified: "staff",
+  probe_unanswered: "retry",
+  probe_identity_mismatch: "retry",
+  probe_binding_unanswered: "retry",
+  probe_clock_unarmed: "retry",
+  runner_replaced: "retry",
+  operation_gone: "retry",
+  client_not_active: "staff",
+  operation_running: "retry",
+  nothing_to_roll_back: "staff",
+  rollback_past_migration: "staff",
+  release_behind_migration: "release",
+  release_rolled_back: "release",
+  // The inventory's.
+  destination_unknown: "staff",
+  placement_changed: "staff",
+  not_placed: "retry",
+  bucket_jurisdiction: "release",
+  unsupported_durable_object_migration: "release",
+  resource_conflict: "staff",
+  resource_missing: "retry",
+  foreign_resource: "staff",
+  unsupported_binding: "release",
+  resource_unnamed: "release",
+  durable_object_jurisdiction: "release",
+  unknown_placeholder: "release",
+  destination_unsupported: "staff",
+  unowned_resource: "staff",
+  resource_outside_jurisdiction: "staff",
+  // A deploy's.
+  release_blob_mismatch: "release",
+  migration_lists_differ: "release",
+  database_outside_eu: "staff",
+  bucket_outside_eu: "staff",
+  d1_migration_failed: "release",
+  unknown_migration_tag: "staff",
+  unknown_setting: "staff",
+  setting_invalid: "staff",
+  mail_sender_locked: "staff",
+  sign_in_incomplete: "staff",
+  binding_name_taken: "staff",
+  reserved_secret_name: "staff",
+  missing_secret: "staff",
+  sealed_secret_unreadable: "staff",
+  service_binding_cycle: "release",
+  subdomain_unavailable: "retry",
+  invalid_core_origin: "staff",
+  smoke_check_failed: "retry",
+  hostname_taken: "staff",
+  generation_behind: "retry",
+  router_entry_invalid: "staff",
+} as const satisfies Record<
+  ProvisionOperationErrorCode | InventoryErrorCode | DeployErrorCode,
+  FailureCause
+>;
+
+const causesByCode: ReadonlyMap<string, FailureCause> = new Map(
+  Object.entries(failureCauses)
+);
+
+/** A Cloudflare answer's code: `cloudflare_<status>`, then its error codes. */
+const cloudflareStatus = /^cloudflare_(?<status>\d{3})/u;
+
+/**
+ * What a provisioning that stopped with `code` needs (`FailureCause`).
+ * Beyond the fixed codes: a run that ended or is gone (`run_<status>`)
+ * and anything unexpected are retried; Cloudflare's 429 and 5xx answers
+ * are retried, its other refusals need a person, as do a secret missing
+ * from Secrets Store and an admin with no client domain.
+ */
+export const failureCause = (code: string): FailureCause => {
+  const known = causesByCode.get(code);
+  if (known !== undefined) {
+    return known;
+  }
+  if (code.startsWith("run_") || code === "unexpected") {
+    return "retry";
+  }
+  const status = cloudflareStatus.exec(code)?.groups?.status;
+  if (status !== undefined) {
+    return status === "429" || status.startsWith("5") ? "retry" : "staff";
+  }
+  return "staff";
 };
 
 /** What staff read when placing and provisioning is refused, by its code. */

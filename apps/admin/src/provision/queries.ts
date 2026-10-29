@@ -5,6 +5,8 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
+import { needsAttentionOf } from "../hosting/attention.ts";
+import type { NeedsAttention } from "../hosting/attention.ts";
 import { newestFittingRelease, provisionOf } from "../hosting/operation.ts";
 import { clientHostingOf } from "../hosting/organization.ts";
 import { startDestination } from "../hosting/placement.ts";
@@ -53,6 +55,12 @@ export interface ProvisioningView {
    * start it from Hosting. Null in every other phase.
    */
   notStarted: NotStarted | null;
+  /**
+   * While it's `failed`: whether the admin's own retries gave up and a
+   * person needs to look (src/hosting/attention.ts); null otherwise, and
+   * once staff retried it.
+   */
+  needsAttention: NeedsAttention | null;
   phase: ProvisioningPhase;
 }
 
@@ -105,7 +113,13 @@ export const getProvisioning = async (
     client,
   };
   if (client.status !== "provisioning") {
-    return { ...view, stopped: null, notStarted: null, phase: "active" };
+    return {
+      ...view,
+      stopped: null,
+      notStarted: null,
+      needsAttention: null,
+      phase: "active",
+    };
   }
   const operation = await provisionOf(db, clientId);
   if (operation === undefined) {
@@ -113,6 +127,7 @@ export const getProvisioning = async (
       ...view,
       stopped: null,
       notStarted: await notStartedOf(db, clientId),
+      needsAttention: null,
       phase: "placing",
     };
   }
@@ -124,13 +139,20 @@ export const getProvisioning = async (
         error: operation.error ?? "unknown",
       },
       notStarted: null,
+      needsAttention: await needsAttentionOf(db, clientId),
       phase: "failed",
     };
   }
   const run = await currentRun(env, clientId);
   const gone = run === null || isReplaceable(run.status);
   if (!gone || operation.status === "done") {
-    return { ...view, stopped: null, notStarted: null, phase: "provisioning" };
+    return {
+      ...view,
+      stopped: null,
+      notStarted: null,
+      needsAttention: null,
+      phase: "provisioning",
+    };
   }
   return {
     ...view,
@@ -140,6 +162,7 @@ export const getProvisioning = async (
       error: `run_${run?.status ?? "gone"}`,
     },
     notStarted: null,
+    needsAttention: await needsAttentionOf(db, clientId),
     phase: "failed",
   };
 };

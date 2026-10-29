@@ -17,7 +17,9 @@
  * vouches for, and only Grasp's staff; Access's application has a bypass
  * policy for this path alone.
  *
- * The cron imports newly published releases (src/releases/import.ts);
+ * The cron imports newly published releases (src/releases/import.ts),
+ * then resumes provisioning that isn't getting anywhere
+ * (src/hosting/reconcile.ts);
  * the digest's own cron posts the admin's morning digest to Discord
  * (src/admin/discord-digest.ts), and the watch's reads how Stephen fares
  * at every client every hour
@@ -46,6 +48,7 @@ import {
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
+import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
@@ -88,5 +91,7 @@ export default {
       return;
     }
     await importReleases(env.RELEASES, adminDatabase(env.DB));
+    // After the import: a client waiting for a newer release takes it.
+    await reconcileProvisioning(env, new Date(controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;

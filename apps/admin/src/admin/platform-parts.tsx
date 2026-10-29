@@ -8,6 +8,7 @@ import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
  * and `platform-words.ts`): how a company stands, the rollout's rings as
  * steps, and the admin's own records in words staff read.
  */
+import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
@@ -56,14 +57,25 @@ const notStartedLine: Record<NotStarted | "ready", string> = {
   ready: "Not started: provision it from its Setup.",
 };
 
+/** Why setting a company up needs a person, in a line with the next step. */
+export const attentionWords: Record<AttentionReason, string> = {
+  stuck:
+    "Needs attention: Grasp's automatic retries haven't finished setting it up. Retry now from its Setup once it's fixed.",
+  needs_person:
+    "Needs attention: setting it up stopped for something Grasp can't fix by itself. Retry now from its Setup once it's fixed.",
+};
+
 /** What a company needs, in a line. */
 export const needWords = (need: PlatformNeed): string => {
   switch (need.kind) {
     case "not_started": {
       return notStartedLine[need.why ?? "ready"];
     }
+    case "needs_attention": {
+      return attentionWords[need.reason];
+    }
     case "stopped": {
-      return "Stopped: resume it from its Setup.";
+      return "Stopped: Grasp is retrying it by itself.";
     }
     case "setup_unread": {
       return "Being set up: status unavailable just now. Its Setup reads it again.";

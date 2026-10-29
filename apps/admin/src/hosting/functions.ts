@@ -28,6 +28,7 @@ import {
   placeInputSchema,
 } from "./placement.ts";
 import type { PlaceRefusal } from "./placement.ts";
+import { resumeProvisioning } from "./reconcile.ts";
 import { releasePlacedClient } from "./workflow.ts";
 
 /** What placing and provisioning answers: the attempt it started, or why it was refused. */
@@ -114,6 +115,20 @@ export const placeAndProvisionFn = createServerFn({ method: "POST" })
       return refusal;
     }
   });
+
+/**
+ * Setup's "Retry now": resumes the client's provisioning as the signed-in
+ * staff member, as the reconciler would (`resumeProvisioning`), at once
+ * and starting its episode afresh, so its automatic retries count again.
+ */
+export const retryProvisioningFn = createServerFn({ method: "POST" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(
+    async ({ data, context }): Promise<PlaceResult> =>
+      await attempt(
+        async () => await resumeProvisioning(env, context.staff, data.clientId)
+      )
+  );
 
 /** What offboarding or deleting answers: what it did, or why it was refused. */
 export type OffboardResult =
