@@ -546,6 +546,27 @@ describe(describeWorkflow, () => {
     }
   });
 
+  it("names the Brain binding a step reads entities and relations through, and refuses any other member", () => {
+    const reads = [
+      `return await brain(env.BRAIN).entities.list({ query: "On" });`,
+      `return await brain(env.BRAIN).entities.sources({ entityId: "e" });`,
+      `return await brain(env.BRAIN).relations.get({ entityId: "e" });`,
+    ];
+    expect(
+      reads.map((code) => reviewedCalls(brainSource(code)).steps)
+    ).toStrictEqual(reads.map(() => ({ recall: ["BRAIN"] })));
+    for (const code of [
+      // Not one of its reads.
+      `return await brain(env.BRAIN).relations.delete({ entityId: "e" });`,
+      // Kept: its calls could be made anywhere.
+      `const relations = brain(env.BRAIN).relations; return await relations.get({ entityId: "e" });`,
+    ]) {
+      expect(() => describeWorkflow(brainSource(code))).toThrow(
+        "don't keep `env`"
+      );
+    }
+  });
+
   it("names a binding a step's option calls, such as a decision's ask", () => {
     const source = workflowSource(
       `await step.decision("approve", { description: "Approve", from: params.reviewer, timeout: "1 day", ask: async (request) => await env.MAIL.call("mail.send", request) });`,

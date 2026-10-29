@@ -7,6 +7,7 @@ import { brainMentions } from "../src/db/schema.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitiesWithSources,
   entityMatchProposals,
   entitySources,
   linkCoverage,
@@ -195,7 +196,9 @@ describe("entity linking", () => {
         label,
         sources,
       })),
-      sources: await entitySources(host.brain, reader, found[0]?.id ?? ""),
+      sources: await entitySources(host.brain, reader, {
+        entityId: found[0]?.id ?? "-",
+      }),
     }).toStrictEqual({
       before: { sources: 1, linked: 0, pending: 1, failed: 0, partial: 0 },
       after: { sources: 1, linked: 1, pending: 0, failed: 0, partial: 0 },
@@ -261,6 +264,46 @@ describe("entity linking", () => {
     });
   });
 
+  it("says which collections and documents named the entities it listed, and only those", async () => {
+    const anna = { kind: "person", name: `Anna ${word()}` };
+    const ben = { kind: "person", name: `Ben ${word()}` };
+    const host = testHost(gazetteer([anna, ben]));
+    const [handbook, wiki] = await Promise.all([
+      newCollection(host.brain, "Handbook"),
+      newCollection(host.brain, "Wiki"),
+    ]);
+    const reader: Caller = { userId: "reader", reads: [handbook.id, wiki.id] };
+    const named = await save(
+      host,
+      handbook,
+      "anna.md",
+      `${anna.name} owns it.`
+    );
+    await save(host, wiki, "ben.md", `${ben.name} owns it.`);
+    await settle(host, new Set());
+
+    const { entities, sources } = await entitiesWithSources(
+      host.brain,
+      reader,
+      {
+        query: anna.name,
+      }
+    );
+
+    expect({
+      labels: entities.map(({ label }) => label),
+      sources,
+    }).toStrictEqual({
+      labels: [anna.name],
+      sources: {
+        collections: [handbook.id],
+        documents: [
+          { documentId: named.id, collectionId: handbook.id, version: 1 },
+        ],
+      },
+    });
+  });
+
   it("links remembered statements by their identifier within the person's own memories, never to a collection's", async () => {
     const userId = `person-${word()}`;
     const address = email("anna");
@@ -289,7 +332,7 @@ describe("entity linking", () => {
     const found = await entitiesFor(host.brain, reader);
     const kinds = await Promise.all(
       found.map(async ({ id }) => {
-        const refs = await entitySources(host.brain, reader, id);
+        const refs = await entitySources(host.brain, reader, { entityId: id });
         return refs.map(({ kind }) => kind);
       })
     );
@@ -340,7 +383,9 @@ describe("entity linking", () => {
       label: after?.label,
       names: after?.names,
       others,
-      sources: await entitySources(host.brain, reader, after?.id ?? ""),
+      sources: await entitySources(host.brain, reader, {
+        entityId: after?.id ?? "-",
+      }),
     }).toStrictEqual({
       same: true,
       label: "Anna de Vries",
@@ -431,7 +476,9 @@ describe("entity linking", () => {
     gate.resolve(null);
     await late;
     const found = await entitiesFor(host.brain, reader);
-    const held = await entitySources(host.brain, reader, found[0]?.id ?? "");
+    const held = await entitySources(host.brain, reader, {
+      entityId: found[0]?.id ?? "-",
+    });
 
     expect({
       labels: found.map(({ label }) => label),

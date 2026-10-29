@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { brainErrors } from "../src/contract.ts";
 import { writeVersion } from "../src/documents.ts";
 import {
   entitiesFor,
+  entitySources,
+  relationsPerSource,
   runLinking,
   settleMs,
   sweepLinking,
@@ -11,7 +14,7 @@ import {
 import type { IndexStep } from "../src/indexing.ts";
 import { remember } from "../src/memories.ts";
 import { preparePurge, purge } from "../src/purge.ts";
-import { relationsFor } from "../src/relations.ts";
+import { relationsFor, relationsRead } from "../src/relations.ts";
 import type { Caller, StartedJob } from "./host.ts";
 import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
@@ -30,6 +33,16 @@ import { newCollection, noCopies, testHost, writerOf } from "./host.ts";
 
 /** A word no other test's text has. */
 const word = () => `w${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+
+/** What `promise` came to: "ok", or the Brain's code it was refused with. */
+const code = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "ok";
+  } catch (error) {
+    return brainErrors.codeOf(error) ?? String(error);
+  }
+};
 
 /** A step that runs once, as a run without retries would. */
 const once: IndexStep = { do: async (_name, _config, fn) => await fn() };
@@ -95,6 +108,10 @@ const entityOf = async (
   return found?.id ?? "";
 };
 
+/** The ISO date `index` days after 2025-01-01. */
+const day = (index: number): string =>
+  new Date(Date.UTC(2025, 0, 1 + index)).toISOString().slice(0, 10);
+
 /** Who `entityId` is related to by `owns`, as `reader` asks. */
 const owners = async (
   host: ReturnType<typeof testHost>,
@@ -102,7 +119,7 @@ const owners = async (
   entityId: string,
   asked: { at?: string; knownAt?: string } = {}
 ) => {
-  const found = await relationsFor(host.brain, reader, {
+  const { relations: found } = await relationsFor(host.brain, reader, {
     entityId,
     predicate: "owns",
     ...asked,
@@ -194,7 +211,7 @@ describe("typed relations", () => {
     await savedAndLinked(host, collection, "team.md", said);
     const anna = await entityOf(host, reader, "Anna");
     const asked = async (predicate: string) => {
-      const found = await relationsFor(host.brain, reader, {
+      const { relations: found } = await relationsFor(host.brain, reader, {
         entityId: anna,
         predicate,
       });
@@ -248,6 +265,159 @@ describe("typed relations", () => {
     expect(owned.map(({ owner }) => owner).toSorted()).toStrictEqual(
       people.toSorted()
     );
+  });
+
+  it("mark a relation conflicting with an older readable source past the answer's cap, and say the answer was cut", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source: Ben owns it, open-ended.
+    const ben = `Ben owns ${thing}.`;
+    // Then as many newer relations as an answer holds, and one more: each
+    // a person owning it for one day of their own, so none of them
+    // disagree with another, only with Ben.
+    const files = Array.from({ length: 5 }, (_file, batch) =>
+      Array.from({ length: relationsPerSource }, (_line, index) => {
+        const at = day(batch * relationsPerSource + index);
+        return {
+          name: `Person ${batch}-${index}`,
+          at,
+          line: `Person ${batch}-${index} owns ${thing} on ${at}.`,
+        };
+      })
+    );
+    const host = testHost(
+      modelOf({
+        [ben]: {
+          entities: [
+            { kind: "person", name: "Ben" },
+            { kind: "thing", name: thing },
+          ],
+          relations: [
+            { subject: "Ben", predicate: "owns", object: thing, evidence: ben },
+          ],
+        },
+        ...Object.fromEntries(
+          files.map((lines) => [
+            lines.map(({ line }) => line).join("\n"),
+            {
+              entities: [
+                ...lines.map(({ name }) => ({ kind: "person", name })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map(({ name, at, line }) => ({
+                subject: name,
+                predicate: "owns",
+                object: thing,
+                validFrom: at,
+                validTo: at,
+                evidence: line,
+              })),
+            },
+          ])
+        ),
+      })
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    await savedAndLinked(host, collection, "ben.md", ben);
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- newer than Ben's, in order
+      await scheduler.wait(2);
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.map(({ line }) => line).join("\n")
+      );
+    }
+    const answer = await relationsFor(host.brain, reader, {
+      entityId: await entityOf(host, reader, thing),
+      predicate: "owns",
+    });
+
+    expect({
+      answered: answer.relations.length,
+      benAnswered: answer.relations.some(
+        ({ subject }) => subject.name === "Ben"
+      ),
+      allConflicting: answer.relations.every(({ conflicting }) => conflicting),
+      truncated: answer.truncated,
+    }).toStrictEqual({
+      answered: 200,
+      benAnswered: false,
+      allConflicting: true,
+      truncated: true,
+    });
+  });
+
+  it("say where every claim it weighed came from, one past the answer's cap too", async () => {
+    const thing = `Rota ${word()}`;
+    // The oldest source first: its relation is weighed past the cap.
+    const files = Array.from({ length: 5 }, (_file, batch) =>
+      Array.from(
+        { length: batch === 0 ? 1 : relationsPerSource },
+        (_line, index) => `Person ${batch}-${index} owns ${thing}.`
+      )
+    );
+    const host = testHost(
+      modelOf(
+        Object.fromEntries(
+          files.map((lines) => [
+            lines.join("\n"),
+            {
+              entities: [
+                ...lines.map((line) => ({
+                  kind: "person",
+                  name: line.split(" owns ")[0] ?? "",
+                })),
+                { kind: "thing", name: thing },
+              ],
+              relations: lines.map((line) => ({
+                subject: line.split(" owns ")[0] ?? "",
+                predicate: "owns",
+                object: thing,
+                evidence: line,
+              })),
+            },
+          ])
+        )
+      )
+    );
+    const collection = await newCollection(host.brain, "Rotas");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const saved: string[] = [];
+    for (const [index, lines] of files.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- oldest first, in order
+      const doc = await savedAndLinked(
+        host,
+        collection,
+        `rota-${index}.md`,
+        lines.join("\n")
+      );
+      saved.push(doc.id);
+      // oxlint-disable-next-line no-await-in-loop -- apart in time
+      await scheduler.wait(2);
+    }
+    const { answer, considered } = await relationsRead(host.brain, reader, {
+      entityId: await entityOf(host, reader, thing),
+      predicate: "owns",
+    });
+    const [oldest] = saved;
+
+    expect({
+      answered: answer.relations.length,
+      oldestAnswered: answer.relations.some(
+        ({ sourceRef }) =>
+          sourceRef.kind === "document" && sourceRef.documentId === oldest
+      ),
+      oldestWeighed: considered.documentIds.includes(oldest ?? ""),
+      collections: considered.collectionIds,
+    }).toStrictEqual({
+      answered: 200,
+      oldestAnswered: false,
+      oldestWeighed: true,
+      collections: [collection.id],
+    });
   });
 
   it("keep what was known before a correction, which supersedes it without rewriting it", async () => {
@@ -401,7 +571,7 @@ describe("typed relations", () => {
     const collection = await newCollection(host.brain, "People");
     const reader: Caller = { userId: "reader", reads: [collection.id] };
     await savedAndLinked(host, collection, "hiring.md", text);
-    const found = await relationsFor(host.brain, reader, {
+    const { relations: found } = await relationsFor(host.brain, reader, {
       entityId: await entityOf(host, reader, thing),
     });
 
@@ -495,11 +665,72 @@ describe("typed relations", () => {
     const collection = await newCollection(host.brain, "Operations");
     const reader: Caller = { userId: "reader", reads: [collection.id] };
     await savedAndLinked(host, collection, "owner.md", `# Owner\n${said}\n`);
-    const [found] = await relationsFor(host.brain, reader, {
+    const {
+      relations: [found],
+    } = await relationsFor(host.brain, reader, {
       entityId: await entityOf(host, reader, thing),
     });
 
     expect(found?.evidence).toBe(said);
+  });
+
+  it("refuse a caller the host doesn't let read the Brain, and list no caller that isn't a person every name", async () => {
+    const host = testHost();
+    const collection = await newCollection(host.brain, "Desk");
+    const reader: Caller = { userId: "reader", reads: [collection.id] };
+    const { recall } = host.brain.ports;
+    const refused = {
+      ...host,
+      brain: {
+        ...host.brain,
+        ports: {
+          ...host.brain.ports,
+          recall: {
+            ...recall,
+            require: async () => {
+              await Promise.resolve();
+              throw new Error("no brain grant");
+            },
+            isRefusal: () => true,
+          },
+        },
+      },
+    };
+    const agent = {
+      ...host,
+      brain: {
+        ...host.brain,
+        ports: {
+          ...host.brain.ports,
+          ownerOf: (): string => {
+            throw brainErrors.create("brain.denied");
+          },
+        },
+      },
+    };
+    const id = crypto.randomUUID();
+
+    expect({
+      relations: await code(
+        relationsFor(refused.brain, reader, { entityId: id })
+      ),
+      entities: await code(entitiesFor(refused.brain, reader, { query: "An" })),
+      sources: await code(
+        entitySources(refused.brain, reader, { entityId: id })
+      ),
+      everyName: await code(entitiesFor(agent.brain, reader, {})),
+      oneLetter: await code(entitiesFor(agent.brain, reader, { query: "a" })),
+      byStart: await code(entitiesFor(agent.brain, reader, { query: "an" })),
+      person: await code(entitiesFor(host.brain, reader, {})),
+    }).toStrictEqual({
+      relations: "brain.denied",
+      entities: "brain.denied",
+      sources: "brain.denied",
+      everyName: "brain.invalid",
+      oneLetter: "brain.invalid",
+      byStart: "ok",
+      person: "ok",
+    });
   });
 });
 

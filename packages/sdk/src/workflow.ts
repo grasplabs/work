@@ -492,13 +492,23 @@ export type CollectionBinding = Readonly<Omit<CollectionReader, "recall">>;
 
 /**
  * The Brain, when the run's App holds the `brain` permission, by its
- * binding name: `await brain(env.BRAIN).recall({ query })`, and a skill's
- * selection and pinned read (`.skills.select`, `.skills.read`), the same
- * contract every caller of the Brain uses (`@grasp-os/sdk/brain`). Keep a
- * selection's pin in the step's result: a replay reads the same version.
+ * binding name: `await brain(env.BRAIN).recall({ query })`, a skill's
+ * selection and pinned read (`.skills.select`, `.skills.read`), and its
+ * entities and relations (`.entities.list`, `.entities.sources`,
+ * `.relations.get`), the same contract every caller of the Brain uses
+ * (`@grasp-os/sdk/brain`). Keep a selection's pin in the step's result: a
+ * replay reads the same version.
  */
 export type WorkflowBrainBinding = Required<
-  Pick<BrainBinding, "recall" | "skillsRead" | "skillsSelect">
+  Pick<
+    BrainBinding,
+    | "recall"
+    | "skillsRead"
+    | "skillsSelect"
+    | "entitiesList"
+    | "entitySources"
+    | "relationsGet"
+  >
 >;
 
 /**
