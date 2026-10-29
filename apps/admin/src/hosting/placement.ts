@@ -29,6 +29,7 @@ import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
 import {
+  checksItself,
   InventoryError,
   placeClient,
   placementOf,
@@ -42,8 +43,14 @@ import {
   hostingPolicies,
   hostingPolicyIdSchema,
   placementProblems,
+  selfCheckedCapabilities,
 } from "./policy.ts";
-import type { HostingPolicyId, PlacementProblem } from "./policy.ts";
+import type {
+  Capability,
+  DestinationCapabilities,
+  HostingPolicyId,
+  PlacementProblem,
+} from "./policy.ts";
 import { provisionPlacedClient } from "./workflow.ts";
 
 type DestinationKind = (typeof hostingDestinations.kind.enumValues)[number];
@@ -59,6 +66,49 @@ export type DestinationProblem =
   | PlacementProblem
   | { kind: "not_provisionable" };
 
+/**
+ * Where one requirement of a policy stands in a destination: checked and
+ * found so, or not; still to be checked by a person; or to be checked by
+ * provisioning itself, the first time it runs there.
+ */
+export interface CapabilityCheck {
+  capability: Capability;
+  state: "verified" | "unsupported" | "needs_checking" | "checked_on_provision";
+  /** Who observed it (a staff member's email, or `system`), when, how and where it is recorded; null until someone has. */
+  evidence: {
+    recordedBy: string;
+    observedAt: string;
+    procedure: string;
+    record: string;
+  } | null;
+}
+
+/** Every requirement of `policyId` in a destination of `kind` with `capabilities`, as a checklist. */
+export const capabilityChecks = (
+  policyId: HostingPolicyId,
+  kind: DestinationKind,
+  capabilities: DestinationCapabilities
+): CapabilityCheck[] =>
+  hostingPolicies[policyId].requires.map((capability) => {
+    const entry = capabilities[capability];
+    if (entry === undefined) {
+      return {
+        capability,
+        state:
+          checksItself(kind) && selfCheckedCapabilities.includes(capability)
+            ? "checked_on_provision"
+            : "needs_checking",
+        evidence: null,
+      };
+    }
+    const { recordedBy, observedAt, procedure, record } = entry.evidence;
+    return {
+      capability,
+      state: entry.status,
+      evidence: { recordedBy, observedAt, procedure, record },
+    };
+  });
+
 /** A destination as staff choose among them. */
 export interface DestinationChoice {
   id: string;
@@ -67,6 +117,8 @@ export interface DestinationChoice {
   shared: boolean;
   /** Empty when it can take the client. */
   problems: DestinationProblem[];
+  /** Each requirement of the policy, and where it stands. */
+  checks: CapabilityCheck[];
 }
 
 /**
@@ -197,10 +249,14 @@ export const destinationChoices = async (
     .all();
   return rows
     .map((row) => {
+      const capabilities = destinationCapabilitiesSchema.parse(
+        JSON.parse(row.capabilities)
+      );
       const problems: DestinationProblem[] = placementProblems(
         hostingPolicies[policyId],
         z.array(z.string()).parse(JSON.parse(row.policies)),
-        destinationCapabilitiesSchema.parse(JSON.parse(row.capabilities))
+        capabilities,
+        checksItself(row.kind)
       );
       if (!provisionable(row)) {
         problems.push({ kind: "not_provisionable" });
@@ -210,6 +266,74 @@ export const destinationChoices = async (
         kind: row.kind,
         shared: row.kind === "workers_for_platforms",
         problems,
+        checks: capabilityChecks(policyId, row.kind, capabilities),
+      };
+    })
+    .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
+};
+
+/** A destination as Platform's Destinations page shows it. */
+export interface DestinationOverview {
+  id: string;
+  kind: DestinationKind;
+  accountId: string | null;
+  namespace: string | null;
+  /** The policies it serves. */
+  policies: string[];
+  /** For each policy there is, what keeps it out, and each requirement's check. */
+  byPolicy: {
+    policyId: HostingPolicyId;
+    description: string;
+    problems: DestinationProblem[];
+    checks: CapabilityCheck[];
+  }[];
+}
+
+/**
+ * Every destination, with where each stands under every policy, for
+ * Platform's Destinations page: this admin's own recorded first, so a
+ * new admin's page shows it before any client is added.
+ */
+export const destinationsOverview = async (
+  env: Env
+): Promise<DestinationOverview[]> => {
+  const db = adminDatabase(env.DB);
+  await ensureStageDestination(env, db);
+  const rows = await db
+    .select()
+    .from(hostingDestinations)
+    .orderBy(asc(hostingDestinations.id))
+    .all();
+  const policyIds = hostingPolicyIdSchema.options;
+  return rows
+    .map((row) => {
+      const capabilities = destinationCapabilitiesSchema.parse(
+        JSON.parse(row.capabilities)
+      );
+      const policies = z.array(z.string()).parse(JSON.parse(row.policies));
+      return {
+        id: row.id,
+        kind: row.kind,
+        accountId: row.accountId,
+        namespace: row.namespace,
+        policies,
+        byPolicy: policyIds.map((policyId) => {
+          const problems: DestinationProblem[] = placementProblems(
+            hostingPolicies[policyId],
+            policies,
+            capabilities,
+            checksItself(row.kind)
+          );
+          if (!provisionable(row)) {
+            problems.push({ kind: "not_provisionable" });
+          }
+          return {
+            policyId,
+            description: hostingPolicies[policyId].description,
+            problems,
+            checks: capabilityChecks(policyId, row.kind, capabilities),
+          };
+        }),
       };
     })
     .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);

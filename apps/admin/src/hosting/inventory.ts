@@ -147,7 +147,7 @@ const destinationIdSchema = z
  * deploy sets `RUNTIME_PROFILE` (src/deploy/core-config.ts), or plain
  * workerd's, which its operator runs.
  */
-const runtimeProfiles = {
+export const runtimeProfiles = {
   workers_for_platforms: "cloudflare",
   dedicated: "cloudflare",
   workerd: "workerd",
@@ -373,7 +373,21 @@ export const destinationOf = async (db: AdminDatabase, id: string) => {
   };
 };
 
-/** Throws unless `destinationId` satisfies every requirement of `policyId`. */
+/**
+ * Whether provisioning checks a destination of `kind` itself
+ * (`selfCheckedCapabilities`): a Workers for Platforms destination, which
+ * is always this admin's own stage's namespace (`saveDestination`), where
+ * the admin creates every client's databases and buckets and reads back
+ * where Cloudflare put them.
+ */
+export const checksItself = (kind: DestinationKind): boolean =>
+  kind === "workers_for_platforms";
+
+/**
+ * Throws unless `destinationId` satisfies every requirement of `policyId`,
+ * one its provisioning checks itself and hasn't yet aside
+ * (`placementProblems`).
+ */
 export const assertPlaceable = async (
   db: AdminDatabase,
   destinationId: string,
@@ -383,7 +397,8 @@ export const assertPlaceable = async (
   const problems = placementProblems(
     hostingPolicies[policyId],
     destination.policies,
-    destination.capabilities
+    destination.capabilities,
+    checksItself(destination.kind)
   );
   if (problems.length > 0) {
     throw new InventoryError(
@@ -392,6 +407,65 @@ export const assertPlaceable = async (
       problems
     );
   }
+};
+
+/**
+ * Records what was observed of some of destination `destinationId`'s
+ * capabilities (`observed`), as `actor`, leaving the rest as they are:
+ * staff vouching for one through the Platform page, or provisioning's
+ * own check (`selfCheckedCapabilities`). Evidence must name a subject the
+ * admin knows, as `saveDestination`'s does; each is kept in the
+ * capability's history and audited.
+ */
+export const recordCapabilityEvidence = async (
+  db: AdminDatabase,
+  actor: Actor,
+  destinationId: string,
+  observed: DestinationCapabilities
+): Promise<void> => {
+  const parsed = destinationCapabilitiesSchema.parse(observed);
+  const destination = await destinationOf(db, destinationId);
+  await assertSubjectsKnown(db, destination.kind, parsed);
+  const now = new Date();
+  const merged = destinationCapabilitiesSchema.parse({
+    ...destination.capabilities,
+    ...parsed,
+  });
+  const declarations = Object.entries(parsed).flatMap(([capability, entry]) =>
+    entry === undefined
+      ? []
+      : [
+          db.insert(destinationCapabilityEvidence).values({
+            destinationId,
+            capability,
+            status: entry.status,
+            subjectKind: entry.evidence.subject.kind,
+            subjectId: entry.evidence.subject.id,
+            procedure: entry.evidence.procedure,
+            observedAt: new Date(entry.evidence.observedAt),
+            recordedBy: entry.evidence.recordedBy,
+            record: entry.evidence.record,
+            declaredBy: actor === "system" ? actor : actor.email,
+            declaredAt: now,
+          }),
+        ]
+  );
+  await act(
+    db,
+    actor,
+    [
+      db
+        .update(hostingDestinations)
+        .set({ capabilities: JSON.stringify(merged), updatedAt: now })
+        .where(eq(hostingDestinations.id, destinationId)),
+      ...declarations,
+    ],
+    {
+      action: "destination.evidence",
+      target: destinationId,
+      detail: evidenceDetail(parsed),
+    }
+  );
 };
 
 /** A new deployment id: random, lowercase, never derived from the client. */

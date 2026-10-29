@@ -36,6 +36,7 @@ import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
+import { CapabilityChecklist } from "./capability-checks.tsx";
 import {
   offboardPlacedClientFn,
   placeAndProvisionFn,
@@ -425,9 +426,40 @@ const NotStarted = ({ imported }: { imported: boolean }) => (
   <p className="text-sm">
     {imported
       ? "Nothing runs for it yet: provisioning starts only when you choose its release and start it here."
-      : "Nothing runs for it yet, and no release is imported to provision it with: the admin imports each one CI publishes, on its schedule. Once one is in, start it here."}
+      : "Nothing runs for it yet, and no release is imported to provision it with. CI publishes one on every merge to main, and the admin imports new ones every 5 minutes: once one is in, choose it here and start."}
   </p>
 );
+
+/**
+ * What the policy needs of each destination the client is in or could go
+ * to, as a checklist with the form to record a check: the one it's
+ * placed in, or every shared one while it isn't placed.
+ */
+const Requirements = ({ view }: { view: ClientHostingView }) => {
+  if (view.active) {
+    return null;
+  }
+  const shown = view.destinations.filter((choice) =>
+    view.placement === null
+      ? choice.shared
+      : choice.id === view.placement.destinationId
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {shown.map((choice) => (
+        <div className="flex flex-col gap-2" key={choice.id}>
+          <h3 className="text-sm font-medium">
+            {`What ${view.policy.id} needs of ${choice.id}`}
+          </h3>
+          <CapabilityChecklist
+            checks={choice.checks}
+            destinationId={choice.id}
+          />
+        </div>
+      ))}
+    </div>
+  );
+};
 
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
@@ -486,6 +518,7 @@ export const ClientHosting = ({
           {`Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
         </p>
       )}
+      <Requirements view={view} />
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
       )}

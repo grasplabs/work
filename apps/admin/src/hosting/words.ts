@@ -11,7 +11,7 @@ import type { DestinationProblem, PlaceRefusal } from "./placement.ts";
 import type { Capability } from "./policy.ts";
 
 /** Each capability a policy can require, as staff check it. */
-const capabilityWords: Readonly<Record<Capability, string>> = {
+export const capabilityWords: Readonly<Record<Capability, string>> = {
   "d1.eu_jurisdiction": "D1 databases are created in the EU jurisdiction",
   "r2.eu_jurisdiction":
     "R2 buckets, backups and workflow streams included, are in the EU jurisdiction",
@@ -50,7 +50,7 @@ export const problemWords = (problem: DestinationProblem): string => {
 };
 
 /** Why an operation stopped, by the inventory's code. */
-const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
+export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   destination_unknown: "There's no such destination.",
   destination_other_stage:
     "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
