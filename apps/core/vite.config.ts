@@ -406,9 +406,13 @@ export default coreProject({
     // The Brain baseline against a real model, which costs money, on
     // request only: vite.brain-model.config.ts.
     "test/brain-real-model.test.ts",
-    // The Brain baseline and its CI scale size, in a group of their own:
-    // vite.brain.config.ts.
+    // Experiment E02 against a real reranking model, likewise:
+    // vite.brain-recall-model.config.ts.
+    "test/brain-recall-real-model.test.ts",
+    // The Brain baseline, its CI scale size and experiment E02, in a group
+    // of their own: vite.brain.config.ts.
     "test/brain-baseline.test.ts",
+    "test/brain-recall-e02.test.ts",
     "test/brain-scale.test.ts",
     "test/brain-scale-agent.test.ts",
     "test/brain-scale-full-context.test.ts",
