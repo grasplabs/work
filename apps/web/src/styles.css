@@ -348,9 +348,24 @@
   margin: 16mm 16mm 18mm;
 }
 
+/*
+ * In every Markdown export, its first two levels of heading are in
+ * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts):
+ * the brand's title and heading, so a printed page reads as Grasp's. Only
+ * here: on screen, a document's headings stay in the product's sans
+ * (knowledge/markdown.tsx), which these outrank on the printed page.
+ */
 @utility page-export {
   page: export;
   print-color-adjust: exact;
+
+  & h1 {
+    @apply type-title;
+  }
+
+  & h2 {
+    @apply type-heading;
+  }
 }
 
 /*
