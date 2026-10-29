@@ -209,7 +209,7 @@ export type Coverage = z.infer<typeof coverageSchema>;
 export const memoryPackSchema = z.strictObject({
   id: idSchema,
   contractVersion: z.literal(brainContractVersion),
-  /** The retrieval policy that chose the evidence, such as `fulltext@2`. */
+  /** The retrieval policy that chose the evidence, such as `hybrid@1`. */
   retrievalPolicyVersion: z.string().min(1),
   items: z.array(memoryItemSchema).max(recallLimits.maxItems),
   /** Every source version the items cite, once each. */

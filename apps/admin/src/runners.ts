@@ -1,3 +1,4 @@
+import type { InstanceStatus as EngineStatus } from "@grasp-os/workerflow/contracts";
 /**
  * A client's runner: the one thing that may change what its account runs,
  * as `client_runs` names it. A provisioning attempt (a Workflow instance
@@ -37,12 +38,23 @@ import { clientRuns } from "./db/schema.ts";
 export type RunKind = (typeof clientRuns.kind.enumValues)[number];
 
 /**
- * Where a client's current run is: Workflows' status, `starting` for a run
- * claimed a moment ago that Workflows doesn't have yet (its creation is
- * under way), or `gone` for one Workflows doesn't have after that (its
- * retention passed, or its creation failed).
+ * Where a client's current run is: its engine's status, `starting` for a
+ * run claimed a moment ago that the engine doesn't have yet (its creation
+ * is under way), or `gone` for one the engine doesn't have after that
+ * (its retention passed, or its creation failed). Runs are on Cloudflare
+ * Workflows or on Workerflow (src/workflow-runs.ts) while the admin moves
+ * to Workerflow; Workerflow adds `rollingBack`.
  */
-export type RunStatus = InstanceStatus["status"] | "starting" | "gone";
+export type RunStatus =
+  | InstanceStatus["status"]
+  | EngineStatus["status"]
+  | "starting"
+  | "gone";
+
+/** A run, on either engine: what `instanceStatus` reads of it. */
+interface RunInstance {
+  status: () => Promise<{ status: RunStatus }>;
+}
 
 /** A client's current run. */
 export interface CurrentRun {
@@ -83,7 +95,7 @@ export const isReplaceable = (status: RunStatus): boolean =>
 export const hasEnded = (status: RunStatus): boolean =>
   status === "complete" || isReplaceable(status);
 
-/** Whether `error` is Workflows saying it has no instance of that id. */
+/** Whether `error` is the engine saying it has no instance of that id: both say it so. */
 const isMissingInstance = (error: unknown): boolean =>
   error instanceof Error && error.message.includes("instance.not_found");
 
@@ -97,14 +109,14 @@ const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
 
 /**
  * Where instance `id` of `workflow`, created (or about to be) at
- * `since`, is, and the instance when Workflows has it.
+ * `since`, is, and the instance when its engine has it.
  */
-export const instanceStatus = async (
-  workflow: Workflow,
+export const instanceStatus = async <Instance extends RunInstance>(
+  workflow: { get: (id: string) => Promise<Instance> },
   id: string,
   since: Date
-): Promise<{ status: RunStatus; instance: WorkflowInstance | null }> => {
-  let instance: WorkflowInstance;
+): Promise<{ status: RunStatus; instance: Instance | null }> => {
+  let instance: Instance;
   try {
     instance = await workflow.get(id);
   } catch (error) {

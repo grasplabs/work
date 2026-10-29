@@ -1,6 +1,6 @@
 /**
- * A build of an integration, as a Cloudflare Workflow: one instance per
- * build, started when a person confirms Build it (src/builds/builds.ts).
+ * A build of an integration, as a workflow (src/workflow-runs.ts): one
+ * run per build, started when a person confirms Build it (src/builds/builds.ts).
  * It follows the build through its stages and waits wherever the build
  * waits: for the agent's plan, a person's decision on it, the app's keys,
  * the agent's pull request and a person's merge. People and the agent
@@ -8,17 +8,19 @@
  * and reads the row again first, so a move it slept through is never
  * missed and an event for an older plan never passes for a newer one.
  *
- * Each wait reads the row again at least once a day (`leave`), and the
- * steps of all of them stay well under Workflows' 1,024 per instance:
- * at most `maxPlanRounds` plans, and a day's two steps for each day a
+ * Each wait reads the row again at least once a day (`leave`), so a
+ * run's steps stay few: at most `maxPlanRounds` plans, and a day's two steps for each day a
  * build waits. A wait that runs out stops the build for a person (`needs_person`),
  * and so does any failure of the run itself. The agent's sessions start
  * from here once they exist: research where the build starts
  * researching, writing where it starts writing.
  */
 import { log } from "@grasp-os/shared/log";
-import { WorkflowEntrypoint } from "cloudflare:workers";
-import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+import type {
+  WorkflowDefinition,
+  WorkflowStep,
+} from "@grasp-os/workerflow/contracts";
+import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
@@ -37,11 +39,9 @@ import {
 } from "./builds.ts";
 import type { BuildStage } from "./builds.ts";
 
-/** What a build's run is started with. */
-export interface BuildParams {
-  /** The app's connector name: the build's. */
-  app: string;
-}
+/** What a build's run is started with: the app's connector name, the build's. */
+const buildParamsSchema = z.object({ app: z.string() });
+export type BuildParams = z.infer<typeof buildParamsSchema>;
 
 /** How many days the agent may take over a stage before a person looks. */
 const agentDays = 1;
@@ -148,6 +148,14 @@ const writeAndMerge = async (
   return stage;
 };
 
+/** Stages a build reaches once a person approved its plan. */
+const pastPlan: ReadonlySet<string> = new Set<BuildStage>([
+  "credentials",
+  "writing",
+  "in_review",
+  "merged",
+]);
+
 /**
  * Follows the build of `app` from its first plan to its merge; returns
  * where it ended, or why it needs a person.
@@ -170,7 +178,13 @@ const follow = async (
       days: agentDays,
     });
     if (planned !== "plan_ready") {
-      return planned;
+      // A plan decided on before the run read the row again has moved past
+      // `plan_ready` already: the build goes on from where it is.
+      if (!pastPlan.has(planned)) {
+        return planned;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the last round
+      return await writeAndMerge(waited, planned);
     }
     // oxlint-disable-next-line no-await-in-loop -- one plan at a time
     const decided = await waited({
@@ -191,13 +205,10 @@ const follow = async (
  * The run: research started, then the build followed to its merge. One
  * that ends anywhere else stops the build for a person, with why.
  */
-export class IntegrationBuild extends WorkflowEntrypoint<Env, BuildParams> {
-  override async run(
-    event: WorkflowEvent<BuildParams>,
-    step: WorkflowStep
-  ): Promise<string> {
-    const { app } = event.payload;
-    const db = adminDatabase(this.env.DB);
+export const integrationBuild = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<string> => {
+    const { app } = buildParamsSchema.parse(event.payload);
+    const db = adminDatabase(env.DB);
     let ended: string;
     try {
       await step.do(
@@ -225,5 +236,5 @@ export class IntegrationBuild extends WorkflowEntrypoint<Env, BuildParams> {
       );
     }
     return ended;
-  }
-}
+  },
+});
