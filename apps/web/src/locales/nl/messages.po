@@ -2711,6 +2711,7 @@ msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Laat hem gelden als het domein van de afzender {domain} is."
 
 #: src/engines/screen-approval.tsx
+#: src/inbox/items.ts
 msgid "Approval"
 msgstr "Goedkeuring"
 
@@ -7715,6 +7716,10 @@ msgstr "Live, wordt gemeten"
 msgid "Live: {who}, version {version}."
 msgstr "Live: {who}, versie {version}."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Live: version {version}"
+msgstr "Live: versie {version}"
+
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Meer laden"
@@ -11711,6 +11716,14 @@ msgstr "In gebruik gezien: nog niet waargenomen via inloggen of Pulse"
 #: src/brain/brain.ts
 msgid "Seen, never mentioned"
 msgstr "Gezien, nooit genoemd"
+
+#: src/inbox/items.ts
+msgid "Self-approved"
+msgstr "Zelf goedgekeurd"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Self-approved: nobody else could approve it"
+msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 
 #: src/interview/composer.tsx
 msgid "Send"
@@ -16151,6 +16164,10 @@ msgstr "Daar keur je het goed. {app} laat zien wat Grasp vraagt."
 #: src/routes/_shell.settings.profile.tsx
 msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "Je bent aangemeld als medewerker van Grasp, voor beperkte tijd."
+
+#: src/inbox/items.ts
+msgid "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved."
+msgstr "Je hebt dit zelf aangevraagd en niemand anders mag het goedkeuren, dus jij beslist. Het wordt vastgelegd als zelf goedgekeurd."
 
 #: src/onboarding/setup-steps.tsx
 msgid "You can close this page now. Come back here to see how far I am."

@@ -65,12 +65,30 @@ export interface WorkflowLifecycle {
   draft: { revision: number; checkpoint: number | null } | null;
   /** The version published last; null before the first. */
   publishedVersion: number | null;
-  /** The version that went live last, through an approval; null until one did. */
-  live: { version: number; approvedBy: string; approvedAt: string } | null;
+  /**
+   * The version that went live last, through an approval; null until one
+   * did. `selfApproved` when whoever asked for it approved it, as nobody
+   * else could.
+   */
+  live: {
+    version: number;
+    approvedBy: string;
+    approvedAt: string;
+    selfApproved: boolean;
+  } | null;
   /** While paused it starts no runs; test runs of its draft still start. */
   paused: { by: string; at: string } | null;
-  /** The version asked to go live, waiting on the owner or an admin. */
-  goLive: { version: number; requestedBy: string; requestedAt: string } | null;
+  /**
+   * The version asked to go live, waiting on the owner or an admin.
+   * `onlyApprover` while nobody but whoever asked may approve it: they
+   * then approve it themselves, recorded as self-approved.
+   */
+  goLive: {
+    version: number;
+    requestedBy: string;
+    requestedAt: string;
+    onlyApprover: boolean;
+  } | null;
   /** Whether the caller may set its stage, pause, resume and ask to go live. */
   canChange: boolean;
   /** Whether the caller may approve or reject the version waiting. */
@@ -79,8 +97,8 @@ export interface WorkflowLifecycle {
 
 /**
  * A version waiting to go live that the caller may approve or reject: on
- * a workflow they own, or any for the organization's admins, never one
- * they asked for themselves.
+ * a workflow they own, or any for the organization's admins; one they
+ * asked for themselves only while nobody else may decide it.
  */
 export interface WorkflowGoLiveWaiting {
   workflowId: string;
@@ -92,6 +110,8 @@ export interface WorkflowGoLiveWaiting {
   revision: number;
   /** Whether it waits on the caller as the workflow's owner, rather than as an admin. */
   asOwner: boolean;
+  /** Whether the caller asked for it, and decides it as nobody else may. */
+  selfApproval: boolean;
 }
 
 /** An independent workflow's lifecycle over `/rpc` (`workflowResources.lifecycle`). */
@@ -107,8 +127,8 @@ export interface WorkflowLifecycleApi {
   requestGoLive: (id: string, input: unknown) => Promise<WorkflowLifecycle>;
   /**
    * Approves or rejects the version waiting
-   * (`workflowGoLiveDecisionSchema`); for its owner and admins, never who
-   * asked.
+   * (`workflowGoLiveDecisionSchema`); for its owner and admins, and for
+   * whoever asked only while nobody else may.
    */
   decideGoLive: (id: string, input: unknown) => Promise<WorkflowLifecycle>;
   /** Every version waiting to go live that the caller may decide, oldest request first. */

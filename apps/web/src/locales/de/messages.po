@@ -2711,6 +2711,7 @@ msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Lassen Sie sie greifen, wenn die Domain des Absenders {domain} ist."
 
 #: src/engines/screen-approval.tsx
+#: src/inbox/items.ts
 msgid "Approval"
 msgstr "Genehmigung"
 
@@ -7715,6 +7716,10 @@ msgstr "Live, wird gemessen"
 msgid "Live: {who}, version {version}."
 msgstr "Live: {who}, Version {version}."
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Live: version {version}"
+msgstr "Live: Version {version}"
+
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Mehr laden"
@@ -11711,6 +11716,14 @@ msgstr "In Nutzung erkannt: noch nicht über Anmeldung oder Pulse beobachtet"
 #: src/brain/brain.ts
 msgid "Seen, never mentioned"
 msgstr "Erkannt, nie erwähnt"
+
+#: src/inbox/items.ts
+msgid "Self-approved"
+msgstr "Selbst freigegeben"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Self-approved: nobody else could approve it"
+msgstr "Selbst freigegeben: Niemand sonst konnte sie freigeben"
 
 #: src/interview/composer.tsx
 msgid "Send"
@@ -16151,6 +16164,10 @@ msgstr "Dort stimmen Sie zu. {app} zeigt, worum Grasp bittet."
 #: src/routes/_shell.settings.profile.tsx
 msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "Sie sind als Grasp-Mitarbeiter angemeldet, für begrenzte Zeit."
+
+#: src/inbox/items.ts
+msgid "You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved."
+msgstr "Du hast das selbst angefragt, und niemand sonst darf es freigeben, also entscheidest du. Es wird als selbst freigegeben festgehalten."
 
 #: src/onboarding/setup-steps.tsx
 msgid "You can close this page now. Come back here to see how far I am."
