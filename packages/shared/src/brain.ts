@@ -17,6 +17,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
+import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
@@ -420,11 +421,22 @@ export interface BrainApi {
    * for the company's admins.
    */
   redactGapAnswer: (gapId: string) => Promise<Gap>;
+  /**
+   * What Grasp knows about a piece of work, in its own sentences, for
+   * everyone signed in (`WorkKnowledge`): never a quote, a name or a day.
+   */
+  work: (id: string) => Promise<WorkKnowledge>;
+  /**
+   * Asks to hear more people about a piece of work in Stephen's next
+   * interviews: for the company's admins.
+   */
+  askMorePeople: (id: string) => Promise<WorkKnowledge>;
 }
 
 /** Why a brain call was refused. */
 export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
+  "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
 
 /**

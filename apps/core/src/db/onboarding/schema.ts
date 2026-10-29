@@ -406,6 +406,17 @@ export const drawnWorks = sqliteTable("drawn_works", {
 });
 
 /**
+ * The pieces of work the company asked to hear more people about
+ * (GRA-1253, `brain.askMorePeople`): whoever is asked about a piece of
+ * work next is asked about these first. Who asked is the audit log's,
+ * never kept here.
+ */
+export const moreVoices = sqliteTable("more_voices", {
+  work: text().primaryKey(),
+  at: text().notNull(),
+});
+
+/**
  * How the company's admin settled a piece of work told two ways that
  * nobody could explain: both ways kept, or which way holds, the way most
  * told it (`first`) or the other. Apart from the drawing, so drawing it
