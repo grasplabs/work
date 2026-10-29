@@ -14,15 +14,15 @@ import {
   platformWorkerName,
   releasesBucketName,
   routerHostsName,
-  stageOf,
+  stageNamed,
   storeSecretName,
 } from "@grasp-os/shared/names";
 
 const [stageArg, name, secret] = process.argv.slice(2);
-if (stageArg !== "staging" && stageArg !== "production") {
+const stage = stageNamed(stageArg);
+if (stage === undefined) {
   throw new Error("Name a stage: staging or production");
 }
-const stage = stageOf(stageArg);
 const names: Record<string, string> = {
   admin: platformWorkerName("admin", stage),
   router: platformWorkerName("router", stage),

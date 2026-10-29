@@ -29,6 +29,7 @@ import {
   releases,
 } from "../src/db/schema.ts";
 import { appliedSchema } from "../src/deploy/compatibility.ts";
+import { deployContext } from "../src/deploy/context.ts";
 import {
   clientMailDomain,
   onboardingSender,
@@ -833,6 +834,36 @@ const attemptEnded = async (
 
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token });
+
+  it.each(["", "Production", "prod", "staging "])(
+    "runs no operation for an admin whose STAGE is %j, before any Cloudflare call",
+    async (stage) => {
+      const manifest = await importRelease("dedicated");
+      const { clientId, held } = await setUp("dedicated", manifest);
+      const before = cloudflare.calls.length;
+
+      // The admin as its deploy left it, its STAGE misconfigured: never
+      // taken for production. Set as a deploy could, past what the
+      // generated types allow.
+      const deployed = { ...env };
+      Reflect.set(deployed, "STAGE", stage);
+      const misconfigured = await deployContext(deployed);
+      const refused = await runClientProvision(misconfigured, held).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      expect({
+        refused: refused instanceof ProvisionOperationError && refused.code,
+        operation: await operationOf(clientId),
+        calls: cloudflare.calls.length - before,
+      }).toMatchObject({
+        refused: "stage_unset",
+        operation: { status: "failed", step: null, error: "stage_unset" },
+        calls: 0,
+      });
+    }
+  );
 
   it("provisions a fresh client end to end, its hostname published last", async () => {
     const manifest = await importRelease("dedicated");
