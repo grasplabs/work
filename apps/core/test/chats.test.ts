@@ -39,6 +39,9 @@ import { fullScan } from "./query-plans.ts";
 import { callAuth, openRpc, outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
+/** An ISO 8601 time, as a reply keeps when it was said. */
+const isoTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
+
 // People's chats, through `/rpc` as the frontend reaches them: each is its
 // person's alone, is kept in the workspace's object over a restart, and
 // streams to whoever follows it, who picks the stream up again after a
@@ -794,9 +797,17 @@ describe("chats", () => {
       { end: "failed", failure: "model.failed" },
       { end: "failed", failure: "model.rate_limited" },
     ]);
-    expect(JSON.stringify([refused, limited])).not.toMatch(
-      /invalid_request_error|rate_limit_error|400|429/u
+    // Its own times left out: one ending in .400Z or .429Z says nothing
+    // of the provider.
+    const said = JSON.stringify([refused, limited], (_key, value: unknown) =>
+      typeof value === "string" && isoTime.test(value) ? undefined : value
     );
+    expect({
+      said: /invalid_request_error|rate_limit_error|400|429/u.test(said),
+      error: [refused, limited].some(
+        (reply) => reply !== undefined && "error" in reply
+      ),
+    }).toStrictEqual({ said: false, error: false });
   });
 
   it("stream a reply as it is written: its code steps, their results, and the answer", async () => {
