@@ -13,6 +13,9 @@ import type {
   RecallBudget,
 } from "./contract.ts";
 import { toHex } from "./encoding.ts";
+import { exactTermsOf } from "./exact.ts";
+import { fused, fusionPolicy } from "./fusion.ts";
+import type { Lane, LaneRanking } from "./fusion.ts";
 import type { CollectionId } from "./ids.ts";
 import { knowledgeErrors, searchMaxLimit } from "./knowledge.ts";
 import type { Provenance } from "./knowledge.ts";
@@ -32,28 +35,27 @@ import { tokensOf } from "./tokens.ts";
 // memory pack of the sections that match, each cited at its exact
 // version, with how far the read got.
 //
-// This policy reads full text only, any of the question's words ranked by
-// BM25 (search.ts): document sections; and memory records (GRA-298) the
+// This policy (GRA-304) reads in lanes, in parallel, each bounded by the
+// recall's deadline: the exact lane, the sections that hold what the
+// question names exactly (identifiers, dates, phrases in quotes; exact.ts);
+// full text, any of the question's words in document sections, ranked by
+// the words each holds (search.ts), and memory records (GRA-298) the
 // host's memory audience may read, ranked by how many of the words each
 // holds, never by statistics over others' records (memories.ts), kept or
-// dropped by the host as a chat's memory is. A recall narrowed to collections, or bound to some, reads no
-// memory record: none is in a collection, so no narrowing widens into
-// memory. Semantic routes are reported as
-// not enabled, and no model is used, so no source text reaches one here;
-// the recheck before model use comes with reranking (GRA-304).
+// dropped by the host as a chat's memory is; and vectors, through the
+// store's `findSimilar` where one has it (none does yet, GRA-303: the
+// route is reported as not enabled). Every lane reads only what its
+// reader may read, and their candidates are fused by rank, each source
+// version once (fusion.ts). A recall narrowed to collections, or bound to
+// some, reads no memory record: none is in a collection, so no narrowing
+// widens into memory. No model is used, so no source text reaches one
+// here; the recheck before model use comes with reranking.
 
-/**
- * The retrieval policy this service follows: full text, version 3, which
- * matches any of a question's words rather than all of them, in document
- * sections and memory records.
- */
-export const recallPolicyVersion = "fulltext@3";
+/** The retrieval policy this service follows: lanes fused by rank (fusion.ts). */
+export const recallPolicyVersion = fusionPolicy.version;
 
 /** The search indexes a recall reads: Knowledge's and memory's FTS5 tables. */
 const indexGeneration = "knowledge-fts@2";
-
-/** Routes this policy doesn't read yet, and why. */
-const omittedRoutes = [{ route: "semantic", reason: "not_enabled" }];
 
 /** What a read of no collection read: nothing. */
 const noProvenance: Provenance = {
@@ -98,12 +100,10 @@ export const asBrainError = <C>(brain: Brain<C>, error: unknown): unknown => {
 };
 
 /** One section as a pack's item: its text, cited at its exact version. */
-const itemOf = ({
-  hit,
-  version,
-  updatedAt,
-  text,
-}: FoundSection): MemoryItem => {
+const itemOf = (
+  { hit, version, updatedAt, text }: FoundSection,
+  applicability: string
+): MemoryItem => {
   const ref: BrainSourceRef = {
     kind: "document",
     documentId: hit.documentId,
@@ -121,7 +121,7 @@ const itemOf = ({
     validFrom: null,
     validTo: null,
     recordedAt: new Date(updatedAt).toISOString(),
-    applicability: "Its words match the question's (full text).",
+    applicability,
     citationLocator: [hit.title, ...hit.headings].slice(0, 16),
   };
 };
@@ -135,18 +135,21 @@ type KeptMemory = Awaited<
  * One memory record as a pack's item, cited as itself at its revision:
  * where it is, for a person, its scope and who published it.
  */
-const memoryItemOf = ({
-  id,
-  revision,
-  kind,
-  scope,
-  statement,
-  state,
-  validFrom,
-  validTo,
-  recordedAt,
-  by,
-}: KeptMemory): MemoryItem => ({
+const memoryItemOf = (
+  {
+    id,
+    revision,
+    kind,
+    scope,
+    statement,
+    state,
+    validFrom,
+    validTo,
+    recordedAt,
+    by,
+  }: KeptMemory,
+  applicability: string
+): MemoryItem => ({
   id,
   revision,
   kind,
@@ -156,39 +159,84 @@ const memoryItemOf = ({
   validFrom,
   validTo,
   recordedAt,
-  applicability: "Its words match the question's (full text).",
+  applicability,
   citationLocator: [
     `Memory record (${scope})`,
     ...(by === null ? [] : [`by ${by}`]),
   ],
 });
 
-/**
- * Sections and memory records, best first in each, taken in turn: their
- * scores come from different indexes, so one is never ranked against the
- * other.
- */
-const alternated = (
-  sections: readonly FoundSection[],
-  memories: readonly KeptMemory[]
-): { item: MemoryItem; memory?: KeptMemory }[] => {
-  const taken: { item: MemoryItem; memory?: KeptMemory }[] = [];
-  for (
-    let index = 0;
-    index < Math.max(sections.length, memories.length);
-    index += 1
-  ) {
-    const section = sections[index];
-    const memory = memories[index];
-    if (section !== undefined) {
-      taken.push({ item: itemOf(section) });
-    }
-    if (memory !== undefined) {
-      taken.push({ item: memoryItemOf(memory), memory });
-    }
-  }
-  return taken;
+/** Why an item applies, in the words of each lane that found it. */
+const laneWords: Record<Lane, string> = {
+  exact: "It holds what the question names exactly.",
+  fulltext: "Its words match the question's (full text).",
+  semantic: "Its meaning is close to the question's (vectors).",
 };
+
+/** A candidate of a recall: a section, or a memory record. */
+type Candidate =
+  | { kind: "section"; section: FoundSection }
+  | { kind: "memory"; memory: KeptMemory };
+
+/** A section's candidate, by the source version it is. */
+const sectionCandidates = (
+  sections: readonly FoundSection[]
+): LaneRanking<Candidate>["candidates"] =>
+  sections.map((section) => ({
+    key: `section:${section.hit.documentId}@${section.version}#${section.hit.section}`,
+    value: { kind: "section", section },
+  }));
+
+/**
+ * The lanes' candidates fused (fusion.ts), as a pack's items, best first,
+ * each source version once, with the memory records among them. Sections
+ * and memory records of the full-text lane are ranked apart (their scores
+ * come from different indexes), so the fusion takes them in turn.
+ */
+const fusedItems = (
+  read: LanesRead
+): { item: MemoryItem; memory?: KeptMemory }[] =>
+  fused<Candidate>([
+    ...(read.exact.state === "read"
+      ? [
+          {
+            lane: "exact" as const,
+            candidates: sectionCandidates(read.exact.sections),
+          },
+        ]
+      : []),
+    ...(read.fulltext.state === "read"
+      ? [
+          {
+            lane: "fulltext" as const,
+            candidates: sectionCandidates(read.fulltext.sections),
+          },
+          {
+            lane: "fulltext" as const,
+            candidates: read.fulltext.memories.map((memory) => ({
+              key: `memory:${memory.id}@${memory.revision}`,
+              value: { kind: "memory" as const, memory },
+            })),
+          },
+        ]
+      : []),
+    ...(read.semantic.state === "read"
+      ? [
+          {
+            lane: "semantic" as const,
+            candidates: sectionCandidates(read.semantic.sections),
+          },
+        ]
+      : []),
+  ]).map(({ value, lanes }) => {
+    const applicability = lanes.map((lane) => laneWords[lane]).join(" ");
+    return value.kind === "section"
+      ? { item: itemOf(value.section, applicability) }
+      : {
+          item: memoryItemOf(value.memory, applicability),
+          memory: value.memory,
+        };
+  });
 
 /**
  * As many of `found`, in order, as the budget holds: no more items than it
@@ -230,25 +278,35 @@ const sourcesOf = (items: readonly MemoryItem[]): BrainSourceRef[] => {
 };
 
 /**
- * How far the read got: the full-text route timed out (`degraded`, which
- * proves nothing missing), a budget cut it (`bounded`), or it finished its
- * bounded read (`complete`, never exhaustive).
+ * How far the read got: a lane that timed out or failed (`degraded`, which
+ * proves nothing missing), a budget cut it (`bounded`), or every lane it
+ * asked finished its bounded read (`complete`, never exhaustive). The
+ * vector lane is reported as not enabled where the store has none.
  */
-const coverageOf = (timedOut: boolean, truncated: boolean): Coverage => {
-  if (timedOut) {
-    return {
-      state: "degraded",
-      queriedRoutes: [],
-      omittedRoutes: [
-        { route: "fulltext", reason: "deadline" },
-        ...omittedRoutes,
-      ],
-    };
+const coverageOf = (read: LanesRead, truncated: boolean): Coverage => {
+  const routes: [Lane, LaneRead][] = [
+    ["exact", read.exact],
+    ["fulltext", read.fulltext],
+    ["semantic", read.semantic],
+  ];
+  const omitted = routes.flatMap(([route, lane]) =>
+    lane.state === "read" || lane.state === "not_asked"
+      ? []
+      : [{ route, reason: lane.state }]
+  );
+  const failed = omitted.some(
+    ({ reason }) => reason === "deadline" || reason === "failed"
+  );
+  let state: Coverage["state"] = truncated ? "bounded" : "complete";
+  if (failed) {
+    state = "degraded";
   }
   return {
-    state: truncated ? "bounded" : "complete",
-    queriedRoutes: ["fulltext"],
-    omittedRoutes,
+    state,
+    queriedRoutes: routes.flatMap(([route, lane]) =>
+      lane.state === "read" ? [route] : []
+    ),
+    omittedRoutes: omitted,
   };
 };
 
@@ -327,33 +385,109 @@ const memoriesFound = async <C>(
     : await brain.ports.memories.keep(reader, readers.people, found);
 };
 
+/** What one lane read, or why it read nothing. */
+type LaneRead =
+  | {
+      state: "read";
+      sections: FoundSection[];
+      memories: KeptMemory[];
+      provenance: Provenance;
+    }
+  /** It had nothing to ask: no exact term in the question. */
+  | { state: "not_asked" }
+  /** The store has no such lane (vectors, until GRA-303). */
+  | { state: "not_enabled" }
+  | { state: "deadline" }
+  | { state: "failed" };
+
+/** What each lane of a recall read. */
+interface LanesRead {
+  exact: LaneRead;
+  fulltext: LaneRead;
+  semantic: LaneRead;
+}
+
+/** What `read` finds within `remaining` milliseconds, or that it ran out. */
+const inTime = async (
+  read: Promise<Omit<Extract<LaneRead, { state: "read" }>, "state">>,
+  remaining: number
+): Promise<LaneRead> => {
+  const found = await Promise.race([read, timeout(remaining)]);
+  return found === undefined
+    ? { state: "deadline" }
+    : { state: "read", ...found };
+};
+
 /**
- * What `store` finds for `query` in `remaining` milliseconds, and the
- * memory records `readers` may read, or undefined once they run out.
- * Bound to no collection it may read, it searches nothing and finds
- * nothing, as a search of them would answer.
+ * What each lane finds for `query` in `remaining` milliseconds, the
+ * memory records `readers` may read with the full text. A lane's refusal
+ * refuses the recall, as one read's would; the vector lane, an index
+ * outside the store, failing only degrades it. Bound to no collection it
+ * may read, it searches nothing and finds nothing, as a search of them
+ * would answer.
  */
-const evidenceWithin = async <C>(
+const lanesWithin = async <C>(
   brain: Brain<C>,
   store: BrainStore<C>,
   reader: C,
   readers: MemoryReaders | undefined,
   { remaining, ...query }: EvidenceQuery & { remaining: number }
-): Promise<
-  | { sections: FoundSection[]; memories: KeptMemory[]; provenance: Provenance }
-  | undefined
-> => {
-  if (query.collectionIds?.length === 0) {
-    return { sections: [], memories: [], provenance: noProvenance };
+): Promise<LanesRead> => {
+  const exactTerms = exactTermsOf(query.query);
+  if (query.collectionIds?.length === 0 || remaining <= 0) {
+    const none: LaneRead =
+      remaining <= 0
+        ? { state: "deadline" }
+        : {
+            state: "read",
+            sections: [],
+            memories: [],
+            provenance: noProvenance,
+          };
+    return {
+      exact: exactTerms.length === 0 ? { state: "not_asked" } : none,
+      fulltext: none,
+      semantic:
+        store.findSimilar === undefined ? { state: "not_enabled" } : none,
+    };
   }
-  const read = async () => {
-    const [{ sections, provenance }, memories] = await Promise.all([
-      store.findEvidence(reader, query),
-      memoriesFound(brain, reader, readers, query.query, query.limit),
-    ]);
-    return { sections, memories, provenance };
-  };
-  return await Promise.race([read(), timeout(remaining)]);
+  const similar = store.findSimilar;
+  const [exact, fulltext, semantic] = await Promise.all([
+    exactTerms.length === 0
+      ? ({ state: "not_asked" } as const)
+      : inTime(
+          store
+            .findEvidence(reader, { ...query, exact: exactTerms })
+            .then(({ sections, provenance }) => ({
+              sections,
+              memories: [],
+              provenance,
+            })),
+          remaining
+        ),
+    inTime(
+      Promise.all([
+        store.findEvidence(reader, query),
+        memoriesFound(brain, reader, readers, query.query, query.limit),
+      ]).then(([{ sections, provenance }, memories]) => ({
+        sections,
+        memories,
+        provenance,
+      })),
+      remaining
+    ),
+    similar === undefined
+      ? ({ state: "not_enabled" } as const)
+      : inTime(
+          similar(reader, query).then(({ sections, provenance }) => ({
+            sections,
+            memories: [],
+            provenance,
+          })),
+          remaining
+        ).catch((): LaneRead => ({ state: "failed" })),
+  ]);
+  return { exact, fulltext, semantic };
 };
 
 /**
@@ -380,18 +514,17 @@ const memoryReadersOf = async <C>(
 };
 
 /**
- * Whether a read stopped at a limit: the section search at its most, or
- * memory at the one more than asked for that tells a full pack from a cut
- * one. A cut there may have left out evidence that applied.
+ * Whether a lane's read stopped at a limit: a section search at its most,
+ * or memory at the one more than asked for that tells a full pack from a
+ * cut one. A cut there may have left out evidence that applied.
  */
-const readFull = (
-  read:
-    | { sections: readonly unknown[]; memories: readonly unknown[] }
-    | undefined,
-  limit: number
-): boolean =>
-  read !== undefined &&
-  (read.sections.length === searchMaxLimit || read.memories.length === limit);
+const readFull = (read: LanesRead, limit: number): boolean =>
+  [read.exact, read.fulltext, read.semantic].some(
+    (lane) =>
+      lane.state === "read" &&
+      (lane.sections.length === searchMaxLimit ||
+        lane.memories.length === limit)
+  );
 
 /**
  * Before memory records are handed over: a read of them, and of the
@@ -434,6 +567,17 @@ const joined = (
   sensitive: sections.sensitive || memories.sensitive,
   restricted: sections.restricted || memories.restricted,
 });
+
+/** The provenance of what every lane read. */
+const lanesProvenance = (read: LanesRead): Provenance => {
+  let all = noProvenance;
+  for (const lane of [read.exact, read.fulltext, read.semantic]) {
+    if (lane.state === "read") {
+      all = joined(all, lane.provenance, []);
+    }
+  }
+  return all;
+};
 
 /**
  * `recall`, with every collection it read from: those its search reported
@@ -493,23 +637,21 @@ export const recallWithSources = async <C>(
       limits.deadlineMs - (brain.ports.clock().getTime() - startedAt);
     // One more than asked, to tell a full pack from a cut one.
     const limit = Math.min(limits.maxItems + 1, searchMaxLimit);
-    const read =
-      remaining <= 0
-        ? undefined
-        : await evidenceWithin(brain, store, reader, readers, {
-            query,
-            limit,
-            remaining,
-            ...(collectionIds === undefined ? {} : { collectionIds }),
-          });
-    const found = alternated(read?.sections ?? [], read?.memories ?? []);
+    const read = await lanesWithin(brain, store, reader, readers, {
+      query,
+      limit,
+      remaining,
+      ...(collectionIds === undefined ? {} : { collectionIds }),
+    });
+    const found = fusedItems(read);
     const { items, memories, tokenCount } = packed(found, limits);
     const truncated = items.length < found.length || readFull(read, limit);
     const provenance = joined(
-      read?.provenance ?? noProvenance,
+      lanesProvenance(read),
       await memoriesRead(brain, reader, memories),
       collectionIds ?? []
     );
+    const coverage = coverageOf(read, truncated);
     const pack: MemoryPack = {
       id: crypto.randomUUID(),
       contractVersion: brainContractVersion,
@@ -517,13 +659,14 @@ export const recallWithSources = async <C>(
       items,
       sourceVersions: sourcesOf(items),
       conflicts: [],
-      // Only a finished read that matched nothing is a gap: one the
-      // deadline stopped proves nothing, and one a budget cut matched.
+      // Only finished reads that matched nothing are a gap: one the
+      // deadline stopped, or a lane that failed, proves nothing, and one a
+      // budget cut matched.
       gaps:
-        found.length === 0 && read !== undefined
+        found.length === 0 && coverage.state !== "degraded"
           ? [{ about: "No evidence the caller may read matched the question." }]
           : [],
-      coverage: coverageOf(read === undefined, truncated),
+      coverage,
       truncated,
       warnings: [],
       tokenCount,
