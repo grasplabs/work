@@ -6,6 +6,20 @@
  */
 import { parseJsonc } from "./wrangler-config-rules.ts";
 
+/**
+ * Secrets a Worker runs without, until someone puts them in the store: the
+ * admin's apps' OAuth clients, Stripe, Rooms, Attio and its Discord
+ * webhooks (apps/admin/wrangler.jsonc).
+ */
+export const optionalSecrets: ReadonlySet<string> = new Set([
+  "APP_OAUTH_CLIENTS",
+  "STRIPE_RESTRICTED_KEY",
+  "ROOMS_READ_TOKEN",
+  "ATTIO_READ_KEY",
+  "DISCORD_DIGEST_WEBHOOK",
+  "STAFF_ALERTS_WEBHOOK",
+]);
+
 /** The `store_id` a config names instead of a real one. */
 export const storePlaceholder = '"account-secrets-store"';
 /** The KV `id` a config names instead of the router's map's. */

@@ -439,9 +439,16 @@ jobs:
             - args: ["--frozen-lockfile"]
       - run: vp run release:build --out release-out
       # The admin isn't deployed from here (see Deploy platform): check that
-      # its build is a Worker wrangler would deploy. No credentials needed.
+      # it builds, for each stage, into a Worker cf would deploy
+      # (cloudflare.config.ts). Vite records the stage as its mode, which
+      # the deploy names again. No credentials needed.
       - if: github.event_name != 'push'
-        run: vp run build && vp exec wrangler deploy --dry-run
+        run: |
+          set -euo pipefail
+          for stage in staging production; do
+            vp build --mode "$stage"
+            vp exec cf deploy --prebuilt --mode "$stage" --dry-run
+          done
         working-directory: apps/admin
       # The builds above regenerate the route trees, which must be committed
       # (static checks the other generated files without building).
