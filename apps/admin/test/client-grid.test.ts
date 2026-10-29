@@ -1,4 +1,4 @@
-import { clientDispatchNamespace } from "@grasp-os/shared/router";
+import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
@@ -159,7 +159,7 @@ describe("the client grid", () => {
       throw new Error("The deploy left no core script");
     }
     acme.account.namespaces.set(
-      clientDispatchNamespace,
+      clientsNamespace("production"),
       new Map([[script, state]])
     );
     acme.account.scripts.delete(script);
@@ -169,7 +169,7 @@ describe("the client grid", () => {
     );
     const namespace = cloudflare.dispatcher(
       acme.account.id,
-      clientDispatchNamespace
+      clientsNamespace("production")
     );
     vi.spyOn(env.DISPATCHER, "get").mockImplementation(
       (name) =>
