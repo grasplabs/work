@@ -617,6 +617,13 @@ const sessionShape = {
        * makes such a call.
        */
       z.strictObject({ platform: z.literal("brain_recall") }),
+      /**
+       * Core's own reading of a policy the company uploaded (policies.ts):
+       * its text, judged as onboarding's is, as carrying sensitive data,
+       * made for the admin who uploaded it, on their budget. Only core's
+       * own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("policy_reading") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
