@@ -6,6 +6,7 @@ import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { newestFittingRelease, provisionOf } from "../hosting/operation.ts";
+import { clientHostingOf } from "../hosting/organization.ts";
 import { startDestination } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
@@ -56,14 +57,18 @@ export interface ProvisioningView {
 }
 
 /**
- * Why client `clientId`'s provisioning hasn't started: no shared
- * destination the admin picks by itself under the default policy, or no
+ * Why client `clientId`'s provisioning hasn't started: it runs on its own
+ * premises, no shared destination the admin picks by itself, or no
  * imported release that fits it; null when nothing keeps it.
  */
 export const notStartedOf = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<NotStarted | null> => {
+  const { hosting } = await clientHostingOf(db, clientId);
+  if (hosting !== "grasp_cloud") {
+    return "on_prem";
+  }
   const destination = await startDestination(db);
   if (destination.destinationId === null) {
     return "no_destination";

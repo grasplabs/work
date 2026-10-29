@@ -144,6 +144,21 @@ export const clients = sqliteTable(
       .notNull()
       .default(defaultModelSpendCeiling),
     /**
+     * Where it runs: Grasp's cloud, or its own premises
+     * (src/hosting/organization.ts). Fixed once it is provisioned.
+     */
+    hosting: text({ enum: ["grasp_cloud", "on_prem"] })
+      .notNull()
+      .default("grasp_cloud"),
+    /**
+     * Where Grasp Cloud keeps its data: the EU jurisdiction, or none. Every
+     * database, bucket and Durable Object is created there; fixed once it
+     * is provisioned.
+     */
+    jurisdiction: text({ enum: ["eu", "none"] })
+      .notNull()
+      .default("eu"),
+    /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name
      * or email, so the admin never shows one company another's invoices.
@@ -453,65 +468,13 @@ export const hostingDestinations = sqliteTable("hosting_destinations", {
   accountId: text("account_id"),
   /** Its Workers for Platforms dispatch namespace; null otherwise. */
   namespace: text(),
-  /** The hosting policies it may serve, by id: JSON (src/hosting/policy.ts). */
-  policies: text().notNull(),
-  /**
-   * What staff verified it does, each with its evidence: JSON
-   * (`destinationCapabilitiesSchema`, src/hosting/policy.ts). A capability
-   * it doesn't list is unknown, which no policy accepts.
-   */
-  capabilities: text().notNull(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 
 /**
- * Every capability of a destination as staff declared it, each time they
- * saved it (src/hosting/inventory.ts): written in the same batch as the
- * destination, never updated or deleted. A save records every capability,
- * the ones it doesn't list as `unknown`, so a destination's latest row per
- * capability is what its `capabilities` say. The evidence as it parsed
- * (`evidenceSchema`, src/hosting/policy.ts), flattened.
- */
-export const destinationCapabilityEvidence = sqliteTable(
-  "destination_capability_evidence",
-  {
-    /** Rising: the order the declarations were saved in. */
-    id: integer().primaryKey({ autoIncrement: true }),
-    destinationId: text("destination_id")
-      .notNull()
-      .references(() => hostingDestinations.id),
-    /** A capability (src/hosting/policy.ts). */
-    capability: text().notNull(),
-    /** `unknown`: the save didn't list it, and it has no evidence. */
-    status: text({ enum: ["verified", "unsupported", "unknown"] }).notNull(),
-    /** What the evidence was observed against; null when unknown. */
-    subjectKind: text("subject_kind", {
-      enum: ["source", "candidate", "release", "profile"],
-    }),
-    subjectId: text("subject_id"),
-    procedure: text(),
-    observedAt: timestamp("observed_at"),
-    /** Who the evidence says observed it. */
-    recordedBy: text("recorded_by"),
-    /** Where the full record is. */
-    record: text(),
-    /** Who saved it: a staff member's email, or `system`. */
-    declaredBy: text("declared_by").notNull(),
-    declaredAt: timestamp("declared_at").notNull(),
-  },
-  (table) => [
-    index("destination_capability_evidence_idx").on(
-      table.destinationId,
-      table.capability,
-      table.id
-    ),
-  ]
-);
-
-/**
- * The destination a client runs in and the policy it runs under, and the
- * opaque deployment id its resources' names are made from. Set once:
+ * The destination a client runs in, and the opaque deployment id its
+ * resources' names are made from. Set once:
  * moving a client elsewhere, or to another jurisdiction, is a migration
  * to new resources, never a change of this row (src/hosting/inventory.ts).
  */
@@ -524,7 +487,6 @@ export const clientPlacements = sqliteTable("client_placements", {
   destinationId: text("destination_id")
     .notNull()
     .references(() => hostingDestinations.id),
-  policyId: text("policy_id").notNull(),
   placedBy: text("placed_by").notNull(),
   placedAt: timestamp("placed_at").notNull(),
 });

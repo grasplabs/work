@@ -1,6 +1,6 @@
 /**
- * What staff read of a client's hosting: each requirement a destination
- * can miss, each refusal and each code an operation stops with, in the
+ * What staff read of a client's hosting: each refusal and each code an
+ * operation stops with, in the
  * admin's own words (it's English only). Codes stay on screen beside
  * them, as staff search the audit log and the code by them.
  */
@@ -8,64 +8,17 @@ import type { DiscardErrorCode } from "./discard.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import type { OffboardingErrorCode } from "./offboarding.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
-import type {
-  DestinationProblem,
-  NotStarted,
-  PlaceRefusal,
-} from "./placement.ts";
-import type { Capability } from "./policy.ts";
-
-/** Each capability a policy can require, as staff check it. */
-export const capabilityWords: Readonly<Record<Capability, string>> = {
-  "d1.eu_jurisdiction": "D1 databases are created in the EU jurisdiction",
-  "r2.eu_jurisdiction":
-    "R2 buckets, backups and workflow streams included, are in the EU jurisdiction",
-  "durable_objects.eu_jurisdiction":
-    "Durable Object ids come from the EU-restricted namespace",
-  "logs.payload_free": "Logs and analytics hold no payloads or secret values",
-  "models.approved_transport":
-    "Model calls go only through approved endpoints, without payload logging or shared caching",
-  "secrets.replication_recorded":
-    "How the provider replicates Worker code and secrets is recorded",
-  "execution.eu_ingress":
-    "Requests and the whole core and connect chain run in the EU",
-  "execution.eu_background":
-    "Clocks, alarms, dynamic execution and callbacks run in the EU",
-};
-
-/** What keeps a destination from taking the client, in words. */
-export const problemWords = (problem: DestinationProblem): string => {
-  switch (problem.kind) {
-    case "policy_not_allowed": {
-      return "It doesn't serve this policy.";
-    }
-    case "capability_unknown": {
-      return `Not verified: ${capabilityWords[problem.capability]} (${problem.capability}). Unknown counts as unsupported.`;
-    }
-    case "capability_unsupported": {
-      return `Found unsupported: ${capabilityWords[problem.capability]} (${problem.capability}).`;
-    }
-    case "not_provisionable": {
-      return "The admin doesn't provision here: it's workerd, set up by its operator, or has no Cloudflare account or dispatch namespace recorded.";
-    }
-    default: {
-      return "It can't take the client.";
-    }
-  }
-};
+import type { NotStarted, PlaceRefusal } from "./placement.ts";
 
 /** Why an operation stopped, by the inventory's code. */
 export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   destination_unknown: "There's no such destination.",
   destination_other_stage:
     "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
-  placement_refused:
-    "That destination misses a requirement of the policy: each is listed with it.",
   placement_changed:
-    "The client is placed elsewhere or under another policy already: moving it is a migration, not a placement.",
+    "The client is placed elsewhere already: moving it is a migration, not a placement.",
   not_placed: "The client isn't placed yet.",
-  bucket_jurisdiction:
-    "The release binds a bucket outside the policy's jurisdiction.",
+  bucket_jurisdiction: "The release binds a bucket without naming it.",
   unsupported_durable_object_migration:
     "The release renames or transfers a Durable Object class, which needs a decision first.",
   durable_object_jurisdiction:
@@ -88,8 +41,6 @@ export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   resource_outside_jurisdiction:
     "Cloudflare reports a resource outside the jurisdiction the inventory records.",
   runner_replaced: "Another attempt took the client over.",
-  evidence_subject_unknown:
-    "Evidence names a release, commit, candidate or runtime profile the admin can't check.",
 };
 
 /** Why an operation stopped, by its own code. */
@@ -199,6 +150,8 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
     "There's no one shared destination to pick by itself: choose one.",
   other_run_held:
     "Another kind of run last worked on the client: let it end first.",
+  hosted_on_prem:
+    "It runs on its own premises: Grasp's cloud sets nothing up for it.",
   no_fitting_release:
     "No imported release can provision it yet: CI publishes one per merge, and the admin imports it within 5 minutes. Look at Releases if none comes.",
   already_running:
@@ -244,8 +197,11 @@ export const offboardRefusals: Readonly<Record<OffboardingErrorCode, string>> =
 
 /** Why setting it up hasn't started, and the next step, in a sentence. */
 export const notStartedWords = (why: NotStarted | null): string => {
+  if (why === "on_prem") {
+    return "On-premises: Grasp's cloud sets nothing up for it. On-prem setup arrives with GRA-1291.";
+  }
   if (why === "no_destination") {
-    return "Not started: no hosting destination ready. Record a shared destination on Platform, or choose one below.";
+    return "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.";
   }
   if (why === "no_release") {
     return "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.";

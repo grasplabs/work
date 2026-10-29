@@ -267,6 +267,13 @@
       "when": 1793307148126,
       "tag": "0037_drop_integration_builds",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793311592362,
+      "tag": "0038_organization_jurisdiction",
+      "breakpoints": true
     }
   ]
 }

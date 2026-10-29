@@ -92,7 +92,6 @@ import {
   deploymentPrefix,
   placedModelGateway,
   platformWorkerName,
-  adminHost,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
@@ -508,10 +507,13 @@ const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
  */
 const renderOptionsOf = (loaded: Loaded): RenderOptions => {
   const stage = stageOfNamespace(loaded.ownNamespace);
-  return loaded.destination.kind === "workers_for_platforms" &&
+  return {
+    ...(loaded.destination.kind === "workers_for_platforms" &&
     stage !== undefined
-    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
-    : {};
+      ? { connectGateway: platformWorkerName("connect-gateway", stage) }
+      : {}),
+    durableObjects: loaded.client.jurisdiction,
+  };
 };
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
@@ -1049,6 +1051,8 @@ interface Loaded {
     rotationLiveAt: Date | null;
     signIn: string | null;
     teamsBot: string | null;
+    /** Where its data is kept: what its Durable Objects are made in. */
+    jurisdiction: "eu" | "none";
   };
   /**
    * When `client` and the settings were about to be read: what core runs
@@ -1634,6 +1638,7 @@ const load = async (
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
       teamsBot: clients.teamsBot,
+      jurisdiction: clients.jurisdiction,
     })
     .from(clients)
     .where(eq(clients.id, held.clientId))
@@ -2910,11 +2915,7 @@ const runOperation = async (
     await validate(context, loaded);
 
     step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held, {
-      releaseId: loaded.operation.releaseId,
-      runId: held.runId,
-      record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
-    });
+    const inventory = await ensureClientResources(api, db, "system", held);
     // Before core goes live naming it: the gateway its model calls take.
     if (bindsModels(loaded.manifest)) {
       await assertHolds(db, held);
@@ -2957,15 +2958,6 @@ const runOperation = async (
     return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
-    // Provisioning's own check found a resource outside the policy's
-    // jurisdiction: the destination is marked so (src/hosting/provision.ts),
-    // and a person needs to look before anyone is placed there again.
-    if (code === "resource_outside_jurisdiction") {
-      await tellStaff(context, {
-        clientId: held.clientId,
-        kind: "hosting_check_failed",
-      });
-    }
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,

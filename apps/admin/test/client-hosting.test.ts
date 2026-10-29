@@ -31,14 +31,7 @@ import { claimRun } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import {
-  client,
-  db,
-  destination,
-  release,
-  staff,
-  verified,
-} from "./hosting.ts";
+import { client, db, destination, release, staff } from "./hosting.ts";
 import { callServerFn, page } from "./pages.ts";
 import { ended, startsOf } from "./runs.ts";
 import type { Starts } from "./runs.ts";
@@ -51,8 +44,6 @@ mockAccess();
 
 /** Who places and provisions, through the admin's entry: the staff member Access vouches for. */
 const caller = "ops@grasp.test";
-
-const policyId = "eu-storage";
 
 /**
  * A release imported for a placed client. Its core has a cron trigger,
@@ -76,7 +67,7 @@ const importedRelease = async (): Promise<string> => {
 
 /** Client `clientId`'s hosting, as its page reads it. */
 const hostingOf = async (clientId: string) => {
-  const view = await getClientHosting(env, clientId, policyId);
+  const view = await getClientHosting(env, clientId);
   if (view === null) {
     throw new Error(`No client ${clientId}`);
   }
@@ -91,7 +82,7 @@ const place = async (
 ) =>
   await callServerFn(
     placeAndProvisionFn,
-    { clientId, releaseId, policyId, destinationId },
+    { clientId, releaseId, destinationId },
     { email }
   );
 
@@ -145,16 +136,13 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   // The database outlives each test: earlier tests' destinations stop
   // serving the policy, so each test chooses among its own alone.
   beforeEach(async () => {
-    await db.update(hostingDestinations).set({ policies: "[]" });
+    await db.update(hostingDestinations).set({ accountId: null });
     // Attempts log why they stopped.
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("picks the one shared destination that meets the policy, lists what blocks every other, and places the client there", async () => {
+  it("picks the one shared destination it provisions in, and places the client there", async () => {
     const shared = await destination();
-    const blocked = await destination({
-      capabilities: verified({ "logs.payload_free": "unknown" }),
-    });
     const dedicated = await destination({
       kind: "dedicated",
       namespace: null,
@@ -168,7 +156,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const releaseId = await importedRelease();
 
     const view = await hostingOf(clientId);
-    const mine = new Set([shared, blocked, dedicated, workerd]);
+    const mine = new Set([shared, dedicated, workerd]);
     const offered = view.destinations.filter(({ id }) => mine.has(id));
     expect({
       automatic: view.automatic,
@@ -179,17 +167,9 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({
       automatic: { destinationId: shared, reason: null },
       // Shared first, then dedicated, then workerd.
-      kinds: [
-        "workers_for_platforms",
-        "workers_for_platforms",
-        "dedicated",
-        "workerd",
-      ],
+      kinds: ["workers_for_platforms", "dedicated", "workerd"],
       problems: {
         [shared]: [],
-        [blocked]: [
-          { kind: "capability_unknown", capability: "logs.payload_free" },
-        ],
         [dedicated]: [],
         [workerd]: [{ kind: "not_provisionable" }],
       },
@@ -206,7 +186,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       placedBy: await actorsOf(clientId, "client.place"),
       startedBy: await actorsOf(clientId, "client.provision_placed"),
     }).toMatchObject({
-      result: { refused: null, problems: [] },
+      result: { refused: null },
       placement: { destinationId: shared },
       operation: {
         releaseId,
@@ -220,74 +200,21 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     expect(result.runId).toBeTypeOf("string");
   });
 
-  it("shows staff in the company's Setup the destination it would go in, and the requirement that blocks another", async () => {
-    const shared = await destination();
-    const blocked = await destination({
-      capabilities: verified({ "logs.payload_free": "unsupported" }),
-    });
-    const clientId = await client();
-
-    const { status, html } = await page(
-      `/organizations/${clientId}/setup`,
-      caller
-    );
-
-    expect(status).toBe(200);
-    expect(html).toContain(
-      `Automatic: ${shared}, the one shared destination that meets every requirement of ${policyId}.`
-    );
-    expect(html).toContain(blocked);
-    expect(html).toContain(
-      "Found unsupported: Logs and analytics hold no payloads or secret values (logs.payload_free)."
-    );
-    expect(html).toContain("Place and start provisioning");
-  });
-
-  it("refuses a destination that misses a requirement, naming it, and places nothing", async () => {
-    await destination();
-    const blocked = await destination({
-      capabilities: verified({
-        "d1.eu_jurisdiction": "unsupported",
-        "models.approved_transport": "unknown",
-      }),
-    });
-    const clientId = await client();
-    const releaseId = await importedRelease();
-
-    await expect(place(clientId, releaseId, blocked)).resolves.toStrictEqual({
-      runId: null,
-      refused: "placement_refused",
-      problems: [
-        { kind: "capability_unsupported", capability: "d1.eu_jurisdiction" },
-        { kind: "capability_unknown", capability: "models.approved_transport" },
-      ],
-    });
-    expect({
-      placement: await placementOf(clientId),
-      operation: await operationOf(clientId),
-    }).toStrictEqual({ placement: undefined, operation: undefined });
-  });
-
-  it("never falls back to a dedicated destination when no shared one qualifies", async () => {
-    const blocked = await destination({ policies: [] });
+  it("never falls back to a dedicated destination when no shared one can take it", async () => {
     await destination({ kind: "dedicated", namespace: null });
     const clientId = await client();
     const releaseId = await importedRelease();
+    // This admin's own shared destination isn't one it provisions in.
+    await db.update(hostingDestinations).set({ accountId: null });
 
     const view = await hostingOf(clientId);
     expect({
       automatic: view.automatic,
-      blocking: view.destinations.find(({ id }) => id === blocked)?.problems,
       refused: await place(clientId, releaseId, null),
       placement: await placementOf(clientId),
     }).toStrictEqual({
       automatic: { destinationId: null, reason: "none" },
-      blocking: [{ kind: "policy_not_allowed" }],
-      refused: {
-        runId: null,
-        refused: "no_automatic_destination",
-        problems: [],
-      },
+      refused: { runId: null, refused: "no_automatic_destination" },
       placement: undefined,
     });
   });
@@ -314,7 +241,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
         .from(clientRuns)
         .where(eq(clientRuns.clientId, clientId)),
     }).toStrictEqual({
-      refused: { runId: null, refused: "other_run_held", problems: [] },
+      refused: { runId: null, refused: "other_run_held" },
       placement: undefined,
       operation: undefined,
       run: [{ runId: `${clientId}-apply`, kind: "apply" }],
@@ -367,7 +294,6 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const { placement } = await hostingOf(clientId);
     expect(placement).toMatchObject({
       destinationId: dedicated,
-      policyId,
       placedBy: caller,
     });
   });
@@ -540,7 +466,6 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     await placeClient(db, staff, {
       clientId: placed,
       destinationId: shared,
-      policyId,
     });
     const busy = await client();
     await claimRun(
@@ -605,12 +530,12 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       "The server function answered 403"
     );
     await expect(
-      callServerFn(fetchClientHosting, { clientId, policyId }, { email: null })
+      callServerFn(fetchClientHosting, { clientId }, { email: null })
     ).rejects.toThrow("The server function answered 403");
     await expect(
       callServerFn(
         placeAndProvisionFn,
-        { clientId, releaseId, policyId, destinationId: null },
+        { clientId, releaseId, destinationId: null },
         { email: caller, from: "https://elsewhere.test" }
       )
     ).rejects.toThrow("The server function answered 403");
@@ -634,7 +559,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       await importedRelease(),
       await importedRelease(),
     ];
-    await placeClient(db, staff, { clientId, destinationId, policyId });
+    await placeClient(db, staff, { clientId, destinationId });
     const now = new Date();
     await db.insert(clientProvisions).values({
       id: crypto.randomUUID(),
@@ -701,7 +626,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("offers to offboard a placed client, then to delete its resources with no export confirmed, and refuses both to anyone Access doesn't vouch for", async () => {
     const destinationId = await destination();
     const clientId = await client();
-    await placeClient(db, staff, { clientId, destinationId, policyId });
+    await placeClient(db, staff, { clientId, destinationId });
     // Its resources, as provisioning records them before it makes them.
     await allocateClientResources(db, staff, {
       clientId,

@@ -10,10 +10,8 @@ import { eq, ne } from "drizzle-orm";
 
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { saveDestination } from "../src/hosting/inventory.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { evidence, verified } from "./hosting.ts";
 import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 
@@ -82,8 +80,6 @@ const fillStore = async (tokens: { deployer: string }): Promise<void> => {
   }
 };
 
-const staff = { email: "staff@grasp.test", sub: "" };
-
 /**
  * Seeds the admin: a new client in ring 0, placed in a dedicated
  * destination of its own on the fake's new account and provisioned on a
@@ -113,18 +109,19 @@ export const seed = async (
   return { clientId, releaseId: next, previousReleaseId: previous };
 };
 
-/** What a placed seed made, for the placed-client journey to choose on the admin's pages. */
+/** What a placed seed made, for the placed-client journey to find on the admin's pages. */
 export interface SeededPlaced {
-  /** A dedicated destination on a new account in the fake, every requirement verified. */
-  destinationId: string;
+  /** A client live on the first release, in a dedicated destination of its own. */
+  clientId: string;
   /** Two releases a placed client runs, oldest first. */
   releaseIds: [string, string];
 }
 
 /**
- * Seeds the admin for the placed-client journey: a dedicated destination
- * on the fake's new account, and two releases a placed client runs. The
- * journey adds the client itself, as staff do.
+ * Seeds the admin for the placed-client journey: a client placed in a
+ * dedicated destination on the fake's new account, as the admin can
+ * still place one though its pages offer only Grasp Cloud and
+ * on-premises, live on a first release, and a second to release it to.
  */
 export const seedPlaced = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -132,30 +129,17 @@ export const seedPlaced = async (
 ): Promise<SeededPlaced> => {
   await migrate(env.DB);
   await fillStore(tokens);
-  const account = cloudflare.addAccount();
-  const destinationId = `dedicated-${crypto.randomUUID().slice(0, 8)}`;
-  await saveDestination(
-    adminDatabase(env.DB),
-    staff,
-    {
-      id: destinationId,
-      kind: "dedicated",
-      accountId: account.id,
-      namespace: null,
-      policies: ["eu-storage"],
-      capabilities: verified({}, evidence),
-    },
-    "production"
-  );
   const first = await placedRelease("feat(core): what it starts on", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",
   });
+  const { clientId } = await placedClientRecord(cloudflare, 1);
+  await deployPlaced(clientId, first);
   const second = await placedRelease("feat(core): what it's released to", {
     core: "export default { core: 2 };",
     connect: "export default { connect: 2 };",
   });
-  return { destinationId, releaseIds: [first, second] };
+  return { clientId, releaseIds: [first, second] };
 };
 
 /** What the organizations seed made: a client whose core answers, and one not set up yet. */
