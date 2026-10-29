@@ -13,7 +13,18 @@
  * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
  *
  * A staging client is never placed beside a production one: each stage
- * has its own namespace. Package scopes (`@grasp-os/*`) and code
+ * has its own namespace. Each placed client's resources are named after
+ * its deployment id ({id}: 10 base32 characters the admin generates, never
+ * the client's name), by the release's names for them (`clientRoleNames`):
+ *
+ * | A client's                   | Name                                    |
+ * | ---------------------------- | --------------------------------------- |
+ * | core and connect Workers     | `grasp-{id}-core`, `grasp-{id}-connect` |
+ * | core's databases (D1)        | `grasp-{id}-core-db`, `-core-knowledge` |
+ * | core's buckets (R2)          | `grasp-{id}-core-files`, `-core-audit`, `-core-brain` |
+ * | connect's database (D1)      | `grasp-{id}-connect-db`                 |
+ * | Durable Object classes       | `<its script>:<class>`                  |
+ * Package scopes (`@grasp-os/*`) and code
  * identifiers aren't Cloudflare names and keep their own.
  */
 
@@ -102,3 +113,52 @@ export const resourceNamePattern = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/u;
 /** Whether `name` is one Cloudflare takes for every kind of resource above. */
 export const isResourceName = (name: string): boolean =>
   name.length <= maxResourceName && resourceNamePattern.test(name);
+
+/** How long a placement's deployment id is (the admin generates it). */
+export const deploymentIdLength = 10;
+
+/** What a deployment id is made of: lowercase base32. */
+export const deploymentIdAlphabet = "abcdefghijklmnopqrstuvwxyz234567";
+
+/** The start of every name placement `deploymentId`'s resources have. */
+export const deploymentPrefix = (deploymentId: string): string =>
+  `${namePrefix}${deploymentId}-`;
+
+/**
+ * What each resource a release names becomes in a client's names, by its
+ * inventory role (apps/admin/src/hosting/inventory.ts): its component,
+ * then its purpose for storage. The release keeps its own names; a
+ * resource not here isn't named, and the admin refuses to allocate it.
+ */
+export const clientRoleNames: Readonly<Record<string, string>> = {
+  "worker:grasp-os-core": "core",
+  "worker:grasp-os-connect": "connect",
+  "d1:grasp-os-core": "core-db",
+  "d1:grasp-os-knowledge": "core-knowledge",
+  "r2:grasp-os-files": "core-files",
+  "r2:grasp-os-audit-archive": "core-audit",
+  "r2:grasp-os-brain-objects": "core-brain",
+  "d1:grasp-os-connect": "connect-db",
+};
+
+/**
+ * Placement `deploymentId`'s name for the resource with inventory role
+ * `role`, or undefined for a role `clientRoleNames` doesn't name.
+ */
+export const clientResourceName = (
+  deploymentId: string,
+  role: string
+): string | undefined => {
+  const name = clientRoleNames[role];
+  return name === undefined
+    ? undefined
+    : `${deploymentPrefix(deploymentId)}${name}`;
+};
+
+const deploymentIdSource = `[${deploymentIdAlphabet}]{${deploymentIdLength}}`;
+
+/** A placed client's connect script: what the connect gateway may reach. */
+export const clientConnectScriptPattern = new RegExp(
+  `^${namePrefix}${deploymentIdSource}-connect$`,
+  "u"
+);

@@ -327,7 +327,7 @@ const failing = async (held: HeldClient): Promise<unknown> => {
 
 /** A core script's upload, wherever it's put. */
 const isCoreUpload = ({ method, path }: ApiCall): boolean =>
-  method === "PUT" && path.endsWith("-grasp-os-core");
+  method === "PUT" && path.endsWith("-core");
 
 /** The code an operation's failure carries, or what it was. */
 const codeFrom = (outcome: unknown): unknown =>
@@ -1930,8 +1930,7 @@ describe("provisioning a placed client", () => {
     // Connect's upload goes unanswered until the test ends.
     const answered = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       async () => {
         await answered.promise;
       }
@@ -2465,8 +2464,7 @@ describe("provisioning a placed client", () => {
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // The first attempt is refused connect's upload, and stops.
     cloudflare.failNext(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       400
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2984,7 +2982,7 @@ describe("provisioning a placed client", () => {
     });
     // Core's upload is refused: connect runs the later release already.
     cloudflare.failNext(
-      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      (call) => call.method === "PUT" && call.path.endsWith("-core"),
       400
     );
     await expect(failing(await attempt(clientId))).resolves.toMatchObject({

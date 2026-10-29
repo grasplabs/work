@@ -81,7 +81,11 @@
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
-import { platformWorkerName, stageOfNamespace } from "@grasp-os/shared/names";
+import {
+  deploymentPrefix,
+  platformWorkerName,
+  stageOfNamespace,
+} from "@grasp-os/shared/names";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -2437,11 +2441,11 @@ const route = async (
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
-  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
   if (
     target.kind === "dispatch" &&
-    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+    !target.script.startsWith(deploymentPrefix(loaded.placement.deploymentId))
   ) {
     throw new ProvisionOperationError(
       "probe_unqualified",

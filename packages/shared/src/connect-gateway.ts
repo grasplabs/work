@@ -9,27 +9,25 @@
 // keep their direct `CONNECT` service binding. Each stage has its own
 // gateway (`grasp-connect-gateway`, `-staging`, ./names.ts), which reaches
 // its stage's clients' dispatch namespace alone, the one its router binds.
+import { clientConnectScriptPattern } from "./names.ts";
 
 /** What the admin sets on a placed core's binding to the gateway. */
 export interface ConnectGatewayProps {
-  /** The client's connect script in the namespace: `g<deployment>-grasp-os-connect`. */
+  /** The client's connect script in the namespace: `grasp-<deployment id>-connect`. */
   readonly script: string;
 }
 
 /**
- * A client connect's script name, as the admin names it
- * (`g<deployment>-grasp-os-connect`, apps/admin/src/hosting/inventory.ts):
- * the only scripts the gateway ever reaches.
+ * The client connect `props` name, or undefined for props that name none:
+ * only a placed client's connect script, as the names module names it
+ * (`clientConnectScriptPattern`), is ever reached.
  */
-const clientConnectScript = /^g[a-z0-9][a-z0-9-]*-grasp-os-connect$/u;
-
-/** The client connect `props` name, or undefined for props that name none. */
 export const gatewayScriptOf = (props: unknown): string | undefined => {
   if (typeof props !== "object" || props === null) {
     return undefined;
   }
   const script: unknown = Reflect.get(props, "script");
-  return typeof script === "string" && clientConnectScript.test(script)
+  return typeof script === "string" && clientConnectScriptPattern.test(script)
     ? script
     : undefined;
 };
