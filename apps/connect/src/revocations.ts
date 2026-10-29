@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { mapConcurrently } from "@grasp-os/shared/release";
+import { and, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -7,60 +8,70 @@ import { recordEventIf } from "./audit.ts";
 import {
   connections,
   connectionTokens,
+  oauthFlows,
   tokenRevocations,
 } from "./db/schema.ts";
 import { revokeToken } from "./oauth-client.ts";
-import { endOwedRevoke } from "./owed-revokes.ts";
+import { endOwedRevoke, firstRevokeRetryMs } from "./owed-revokes.ts";
 import type { OwedEnd } from "./owed-revokes.ts";
 import { providerFor } from "./providers.ts";
-import { revocableToken } from "./tokens.ts";
+import {
+  owedRefreshToken,
+  resealOwedTokens,
+  revocableToken,
+} from "./tokens.ts";
 
-// Revoking a connection's grant at its provider until it goes (GRA-1191).
-// Disconnecting revokes the grant where the provider can (oauth.ts
-// `stop`); a provider that is down doesn't keep anyone from disconnecting
-// (CN14). What it can't revoke then is owed: the connection is
-// disconnected all the same, but its sealed tokens stay, with a
-// `token_revocations` row, and the cron trigger tries again until the
-// revoke goes through. From its threat model:
+// Revoking a connection's grant at its provider until it goes (GRA-1191,
+// GRA-1196). Disconnecting revokes the grant where the provider can
+// (oauth.ts `stop`); a provider that is down doesn't keep anyone from
+// disconnecting (CN14). A connection asked to connect again while its
+// grant is still valid (a class turned on, a scope its connector needs
+// now: class-rights.ts, tokens.ts `markDead`) gives its tokens up without
+// asking the provider at all. Either way the revoke is owed: a
+// `token_revocations` row with its own sealed copy of the tokens, written
+// with the change that gives them up, and the cron trigger revokes with it
+// until the revoke goes through. From its threat model:
 //
-// - A token kept longer than it must be: only while its revoke is owed,
-//   sealed as ever (src/vault.ts), and of a disconnected connection, which
-//   nothing calls with (tokens.ts `activeConnection`). It goes once the
-//   revoke does, once the provider no longer knows it, once there is
-//   nothing it could revoke (no refresh token), once its tokens won't open
-//   (given up, on record, never counted as revoked), and at the latest
-//   `owedForMs` after the disconnect, given up on record. A year: grants
-//   outlive 90 days at most providers (Google's unused refresh tokens last
-//   about six months, GitHub's a year, Slack's until revoked), so a
-//   shorter wait would give up on grants still live.
+// - A valid grant left live with nothing to revoke it: whatever gives up
+//   a grant the provider could revoke owes its revoke, in the same write,
+//   so a connection asked to connect again and never connected, or one
+//   disconnected while the provider was down, still has its grant revoked.
+// - A token kept longer than it must be, or used: the copy is sealed as
+//   ever (src/vault.ts), for its connection, and only this opens it, to
+//   revoke; the connection's own tokens go as they always did, so nothing
+//   calls with it. It goes once the revoke does, once the provider no
+//   longer knows it, once it holds nothing to revoke (no refresh token),
+//   once it won't open (given up, on record, never counted as revoked),
+//   and at the latest `owedForMs` after it was owed, given up on record.
+//   A year: grants outlive 90 days at most providers (Google's unused
+//   refresh tokens last about six months, GitHub's a year, Slack's until
+//   revoked), so a shorter wait would give up on grants still live.
 // - A retry loop against a provider that is down: each owed revoke waits
 //   longer after every failed try, doubling up to a day, a few a run, and
 //   a try under way holds its row (`underWayMs`) so two runs never ask at
 //   once.
-// - A revoke racing a reconnect: connecting the same account again makes
-//   a new connection. Where the provider's grant is the account's with
-//   Grasp's client (`accountWideGrant`: Google), revoking the old token
-//   would end the new connection's too, so while a live connection holds
-//   the same account (by its ID, or its email where an ID is missing) the
-//   owed revoke is dropped instead, with its token, on record: the grant is
-//   wanted again, and the new connection's own disconnect revokes it.
-//   Everywhere else each token is a grant of its own, and the old one is
-//   revoked as owed. A reconnect landing while a try is under way is
+// - A revoke racing a reconnect: where the provider's grant is the
+//   account's with one of Grasp's clients (`accountWideGrant`: each Google
+//   client), the account connected again (a new connection, or the same
+//   one connected again in place) holds the grant the owed copy would
+//   revoke, so while an active connection of that group holds the same
+//   account (by its ID, or its email where an ID is missing) the owed
+//   revoke is dropped instead, on record: the grant is wanted again, and
+//   that connection's own disconnect revokes it. Everywhere else each
+//   token is a grant of its own, and the old one is revoked as owed, the
+//   new one untouched. A reconnect landing while a try is under way is
 //   checked again after the provider revoked: its connection, whose grant
 //   just ended, is marked for signing in again at once, on record.
 // - An owed revoke nobody can see: the disconnect's event says it is owed
-//   (`revokePending`), and its end is on record (`connection.revoked`,
+//   (`revokePending`), the change that asked a connection to connect again
+//   is on record, and every end is too (`connection.revoked`,
 //   `connection.revoke_superseded`, `connection.revoke_abandoned`). An
-//   erasure of the connection's owner waits for it
-//   (person-erasure.ts).
+//   erasure of the connection's owner waits for it (person-erasure.ts).
 // - Providers without a revocation endpoint (Microsoft): nothing is owed,
-//   and their tokens go at the disconnect, as ever.
+//   and their tokens go, as ever.
 
 /** How a revoke at the provider went. */
 export type RevokeOutcome = "revoked" | "nothing" | "unreadable" | "failed";
-
-/** The first wait before trying an owed revoke again. */
-export const firstRevokeRetryMs = 5 * 60 * 1000;
 
 /** The longest wait between two tries. */
 const maxRetryMs = 24 * 60 * 60 * 1000;
@@ -71,8 +82,15 @@ const underWayMs = 5 * 60 * 1000;
 /** How long a revoke is owed at most before it is given up: a year. */
 export const owedForMs = 365 * 24 * 60 * 60 * 1000;
 
-/** Most owed revokes one cron run tries: one request each. */
-const retryBatchSize = 10;
+/**
+ * Most owed revokes one cron run tries, and how many at once: one provider
+ * request each, of at most ten seconds (oauth-client.ts). Fifty a minute
+ * clears a company-wide class turned on (a revoke owed per connection) of
+ * a few thousand people within the hour, and keeps a run well under a
+ * minute however slow the providers are.
+ */
+const retryBatchSize = 50;
+const retriesAtOnce = 5;
 
 /** Failed tries after which an owed revoke is logged as stuck, every try. */
 const stuckAttempts = 8;
@@ -83,24 +101,20 @@ const retryDelayMs = (attempts: number): number =>
 
 type ConnectionRow = typeof connections.$inferSelect;
 
-/**
- * Revokes `connection`'s grant at its provider: `revoked` once it did (or
- * no longer knows the token), `nothing` where there is nothing to revoke
- * (no grant, no revocation endpoint, no refresh token), `unreadable` where
- * a key that is held doesn't open the tokens, `failed` while the provider
- * won't, connect has no client to ask it with, or the tokens' key isn't
- * held.
- */
-export const revokeAtProvider = async (
+/** Revokes at `connection`'s provider with the token `tokenOf` gives. */
+const revokeWith = async (
   env: Env,
-  connection: ConnectionRow
+  connection: ConnectionRow,
+  tokenOf: () => Promise<
+    { refreshToken: string } | "none" | "unavailable" | "unreadable"
+  >
 ): Promise<RevokeOutcome> => {
   const provider = providerFor(connection.provider);
   // An API key has no grant to revoke: the app's own settings do that.
   if (provider?.kind !== "oauth" || provider.revocationEndpoint === undefined) {
     return "nothing";
   }
-  const token = await revocableToken(env, connection.id);
+  const token = await tokenOf();
   if (token === "none") {
     return "nothing";
   }
@@ -133,7 +147,25 @@ export const revokeAtProvider = async (
 };
 
 /**
- * The live connections that hold `connection`'s grant now, where its
+ * Revokes `connection`'s grant at its provider: `revoked` once it did (or
+ * no longer knows the token), `nothing` where there is nothing to revoke
+ * (no grant, no revocation endpoint, no refresh token), `unreadable` where
+ * a key that is held doesn't open the tokens, `failed` while the provider
+ * won't, connect has no client to ask it with, or the tokens' key isn't
+ * held.
+ */
+export const revokeAtProvider = async (
+  env: Env,
+  connection: ConnectionRow
+): Promise<RevokeOutcome> =>
+  await revokeWith(
+    env,
+    connection,
+    async () => await revocableToken(env, connection.id)
+  );
+
+/**
+ * The active connections that hold `connection`'s grant now, where its
  * provider's grant is the account's (`accountWideGrant`): connections of
  * the same account at a provider of the same group. By the account's ID,
  * or, where either side has none recorded, its email, so a Google account
@@ -171,7 +203,7 @@ const liveOnSameGrant = async (
   const live = await drizzle(env.DB)
     .select()
     .from(connections)
-    .where(and(sameAccount, ne(connections.status, "disconnected")));
+    .where(and(sameAccount, eq(connections.status, "active")));
   return live.filter((each) => {
     const theirs = providerFor(each.provider);
     return theirs?.kind === "oauth" && theirs.accountWideGrant === group;
@@ -216,6 +248,77 @@ const markGrantRevoked = async (
 };
 
 /**
+ * When the latest sign-in flow that could connect `connection` again
+ * lapses, if one is open: its owner's at its provider for a personal one,
+ * any at its provider for a shared one.
+ */
+const signInOpen = async (
+  env: Env,
+  connection: ConnectionRow,
+  now: number
+): Promise<number | undefined> => {
+  const [flow] = await drizzle(env.DB)
+    .select({ expiresAt: oauthFlows.expiresAt })
+    .from(oauthFlows)
+    .where(
+      and(
+        eq(oauthFlows.provider, connection.provider),
+        eq(oauthFlows.scope, connection.scope),
+        connection.ownerUserId === null
+          ? undefined
+          : eq(oauthFlows.userId, connection.ownerUserId),
+        sql`${oauthFlows.expiresAt} > ${now}`
+      )
+    )
+    .orderBy(desc(oauthFlows.expiresAt))
+    .limit(1);
+  return flow?.expiresAt.getTime();
+};
+
+/**
+ * Whether an active connection holds `refreshToken` now: the same
+ * connection connected again in place, or another of the same account at
+ * the same provider (by its ID, or its email where an ID is missing).
+ */
+const heldWithToken = async (
+  env: Env,
+  connection: ConnectionRow,
+  refreshToken: string
+): Promise<boolean> => {
+  const { accountId, accountEmail } = connection;
+  const live = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.status, "active"),
+        or(
+          eq(connections.id, connection.id),
+          and(
+            eq(connections.provider, connection.provider),
+            or(
+              accountId === null
+                ? undefined
+                : eq(connections.accountId, accountId),
+              accountEmail === null
+                ? undefined
+                : sql`lower(${connections.accountEmail}) = lower(${accountEmail})`
+            )
+          )
+        )
+      )
+    );
+  for (const { id } of live) {
+    // oxlint-disable-next-line no-await-in-loop -- one or two connections
+    const current = await revocableToken(env, id);
+    if (typeof current !== "string" && current.refreshToken === refreshToken) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * Tries the owed revoke `owed` once: claims it for a while, then drops it
  * where the account is connected again, gives it up past `owedForMs`,
  * settles it once the provider revoked, or waits longer after a failure.
@@ -232,30 +335,22 @@ const tryOwed = async (
     .set({ retryAt: new Date(now + underWayMs) })
     .where(
       and(
-        eq(tokenRevocations.connectionId, owed.connectionId),
+        eq(tokenRevocations.id, owed.id),
         eq(tokenRevocations.retryAt, owed.retryAt)
       )
     )
-    .returning({ id: tokenRevocations.connectionId });
+    .returning({ id: tokenRevocations.id });
   if (claimed.length === 0) {
     return;
   }
   const attempts = owed.attempts + 1;
-  if (connection.status !== "disconnected") {
-    // Never: a disconnected connection stays so. Its tokens are a live
-    // connection's, so only the row goes.
-    log.error("oauth.revoke_owed_for_live", { provider: connection.provider });
-    await db
-      .delete(tokenRevocations)
-      .where(eq(tokenRevocations.connectionId, owed.connectionId));
-    return;
-  }
   const end = async (
     action: OwedEnd,
     detail: Record<string, string | number>
   ): Promise<void> => {
-    await endOwedRevoke(env, connection.id, action, {
+    await endOwedRevoke(env, owed, action, {
       provider: connection.provider,
+      owedFor: owed.reason,
       ...detail,
     });
   };
@@ -275,7 +370,36 @@ const tryOwed = async (
     });
     return;
   }
-  const outcome = await revokeAtProvider(env, connection);
+  // A sign-in for this connection on its way: its consent may hand back
+  // the grant this would revoke. Asked again once the flow has lapsed,
+  // the try not counted.
+  const signingIn = await signInOpen(env, connection, now);
+  if (signingIn !== undefined) {
+    await db
+      .update(tokenRevocations)
+      .set({ retryAt: new Date(signingIn + underWayMs) })
+      .where(eq(tokenRevocations.id, owed.id));
+    return;
+  }
+  const copy = await owedRefreshToken(env, owed.connectionId, owed.sealed);
+  // The same refresh token is the live grant of a connection now: many
+  // providers hand the account the token it had already when it consents
+  // again, so revoking the copy would end it.
+  if (
+    typeof copy !== "string" &&
+    (await heldWithToken(env, connection, copy.refreshToken))
+  ) {
+    await end("connection.revoke_superseded", {
+      attempts: owed.attempts,
+      reason: "same_token",
+    });
+    return;
+  }
+  const outcome = await revokeWith(
+    env,
+    connection,
+    async () => await Promise.resolve(copy)
+  );
   if (outcome === "unreadable") {
     log.error("oauth.revoke_abandoned", {
       provider: connection.provider,
@@ -308,7 +432,7 @@ const tryOwed = async (
   await db
     .update(tokenRevocations)
     .set({ attempts, retryAt: new Date(now + retryDelayMs(attempts)) })
-    .where(eq(tokenRevocations.connectionId, owed.connectionId));
+    .where(eq(tokenRevocations.id, owed.id));
 };
 
 /** The owed revokes `where` picks, with their connections, a batch at most. */
@@ -331,14 +455,13 @@ export const retryRevocations = async (env: Env): Promise<void> => {
     env,
     lte(tokenRevocations.retryAt, new Date(now))
   );
-  for (const { owed, connection } of due) {
+  await mapConcurrently(due, retriesAtOnce, async ({ owed, connection }) => {
     try {
-      // oxlint-disable-next-line no-await-in-loop -- one provider request at a time
       await tryOwed(env, owed, connection, now);
     } catch (error) {
       log.error("oauth.revoke_retry_failed", errorFields(error));
     }
-  }
+  });
 };
 
 /**
@@ -364,9 +487,27 @@ export const revokeOwedOf = async (
     await tryOwed(env, each, connection, now);
   }
   const [left] = await drizzle(env.DB)
-    .select({ id: tokenRevocations.connectionId })
+    .select({ id: tokenRevocations.id })
     .from(tokenRevocations)
     .where(theirs)
     .limit(1);
   return left !== undefined;
+};
+
+/**
+ * Seals again with the current key what owed revokes hold under the
+ * previous one; one that won't open can never be revoked with, and is
+ * given up, on record. The cron trigger calls it.
+ */
+export const resealOwedRevokes = async (env: Env): Promise<void> => {
+  await resealOwedTokens(env, async (owed) => {
+    const [connection] = await drizzle(env.DB)
+      .select({ provider: connections.provider })
+      .from(connections)
+      .where(eq(connections.id, owed.connectionId));
+    await endOwedRevoke(env, owed, "connection.revoke_abandoned", {
+      provider: connection?.provider ?? "",
+      reason: "unreadable",
+    });
+  });
 };
