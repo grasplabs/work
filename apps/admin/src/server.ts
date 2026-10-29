@@ -23,14 +23,12 @@
  * bot secrets about to expire (src/clients/teams-bot-expiry.ts), and the
  * watch's reads how Stephen fares at every client every hour
  * (src/clients/watch.ts).
- * `Rollout` is the Workflow that rolls a release
- * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
- * fleet client of a rollout, `RollbackClient` rolls a
- * client back from one. `AdminRuns` holds the admin's runs on
- * Workerflow (src/workflow-runs.ts): builds of integrations, applying a
- * client's settings now (src/clients/apply.ts), and attempts at
- * provisioning a client placed in a hosting destination
- * (src/hosting/workflow.ts).
+ * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
+ * builds of integrations, applying a client's settings now
+ * (src/clients/apply.ts), attempts at provisioning a client placed in a
+ * hosting destination (src/hosting/workflow.ts), rollouts and the runs
+ * that deploy their fleet clients (src/rollout/workflow.ts,
+ * src/rollout/fleet-client.ts), and rollbacks (src/rollout/rollback.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
@@ -57,9 +55,6 @@ import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
-export { RollbackClient } from "./rollout/rollback.ts";
-export { RolloutClient } from "./rollout/fleet-client.ts";
-export { Rollout } from "./rollout/workflow.ts";
 export { AdminRuns } from "./run-object.ts";
 
 declare module "@tanstack/react-start" {

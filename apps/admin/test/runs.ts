@@ -3,6 +3,7 @@
  * each run's own object (Workerflow, src/workflow-runs.ts), as time
  * passing, a crash or a duplicate delivery would.
  */
+import { decode } from "@grasp-os/workerflow/codec";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { runObjectName } from "@grasp-os/workerflow/identity";
 import type { Journal, StartCommand } from "@grasp-os/workerflow/run";
@@ -50,16 +51,20 @@ const endedStatuses = new Set(["complete", "errored", "terminated"]);
 /** Once run `id` has ended, how it ended. */
 export const ended = async (
   workflow: AdminWorkflow,
-  id: string
+  id: string,
+  timeoutMs: number = waitFor.timeout
 ): Promise<InstanceStatus> => {
   const instance = await adminWorkflow(env, workflow).get(id);
-  return await vi.waitFor(async () => {
-    const status = await instance.status();
-    if (!endedStatuses.has(status.status)) {
-      throw new Error(`Run ${id} is ${status.status}`);
-    }
-    return status;
-  }, waitFor);
+  return await vi.waitFor(
+    async () => {
+      const status = await instance.status();
+      if (!endedStatuses.has(status.status)) {
+        throw new Error(`Run ${id} is ${status.status}`);
+      }
+      return status;
+    },
+    { ...waitFor, timeout: timeoutMs }
+  );
 };
 
 /**
@@ -292,3 +297,200 @@ export const startsOf = (
     },
   };
 };
+
+/**
+ * Makes run `id`'s due retries and sleeps due now, as Cloudflare
+ * Workflows' test pool did with `disableRetryDelays` and `disableSleeps`:
+ * a retry's time and a sleep's deadline moved to now, and the run's alarm
+ * set, when it moved one. Event waits keep their deadlines.
+ */
+export const hurry = async (
+  workflow: AdminWorkflow,
+  id: string
+): Promise<void> => {
+  await runInDurableObject(runObject(workflow, id), async (_object, state) => {
+    const { sql } = state.storage;
+    const now = Date.now();
+    const retries = sql.exec(
+      "UPDATE attempts SET retry_at = ? WHERE retry_at IS NOT NULL AND retry_at > ?",
+      now,
+      now
+    ).rowsWritten;
+    const sleeps = sql.exec(
+      "UPDATE steps SET deadline = ? WHERE type = 'sleep' AND state = 'waiting' AND deadline > ?",
+      now,
+      now
+    ).rowsWritten;
+    // Moved now, or before by an earlier call while an activation ran and
+    // then suspended until the old time: either way the run is due.
+    const [due] = sql
+      .exec<{ due: number }>(
+        "SELECT COUNT(*) AS due FROM steps WHERE (type = 'sleep' AND state = 'waiting' AND deadline <= ?) OR (state = 'retrying' AND EXISTS (SELECT 1 FROM attempts WHERE attempts.ordinal = steps.ordinal AND attempts.retry_at <= ?))",
+        now,
+        now
+      )
+      .toArray();
+    const [run] = sql
+      .exec<{ status: string; wake_at: number | null }>(
+        "SELECT status, wake_at FROM run"
+      )
+      .toArray();
+    const late =
+      run?.status === "waiting" &&
+      (run.wake_at === null || run.wake_at > now) &&
+      (due?.due ?? 0) > 0;
+    if (retries + sleeps > 0 || late) {
+      sql.exec(
+        "UPDATE run SET wake_at = ? WHERE wake_at IS NULL OR wake_at > ?",
+        now,
+        now
+      );
+      await state.storage.setAlarm(now);
+    }
+  });
+};
+
+/** A run of the admin's a test started. */
+export interface StartedRun {
+  workflow: AdminWorkflow;
+  id: string;
+}
+
+/** The admin's runs a test started, as `followAdminRuns` records them. */
+export interface FollowedRuns extends AsyncDisposable {
+  /** Every run started since, in order. */
+  readonly started: readonly StartedRun[];
+  /** The ids of the runs of `workflow` started since, in order. */
+  of: (workflow: AdminWorkflow) => string[];
+}
+
+/** How often followed runs are hurried (`hurry`). */
+const hurryEveryMs = 50;
+
+/**
+ * Records each run of any of the admin's workflows the engine creates
+ * from now on, and keeps their retries and sleeps due at once (`hurry`),
+ * until disposed: what a test of runs that start runs of their own (a
+ * rollout's fleet clients) follows them by.
+ */
+export const followAdminRuns = (): FollowedRuns => {
+  const started: StartedRun[] = [];
+  const done = new Set<string>();
+  const namespace = env.ADMIN_RUNS;
+  const get = namespace.get.bind(namespace);
+  const spy = vi.spyOn(namespace, "get").mockImplementation((id, options) => {
+    const stub = get(id, options);
+    return new Proxy(stub, {
+      get: (target, property): unknown => {
+        if (property === "start") {
+          return async (command: StartCommand) => {
+            const outcome = await target.start(command);
+            if (outcome === "created") {
+              started.push({
+                // SAFETY: only the admin's definitions start runs here.
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+                workflow: command.definition as AdminWorkflow,
+                id: command.instanceId,
+              });
+            }
+            return outcome;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return value;
+      },
+    });
+  });
+  // Each run hurried on its own: one whose object is busy (its activation
+  // held by the test) never holds up the others.
+  const busy = new Set<string>();
+  // Each hurry still running, so disposing waits for them: none outlives
+  // the test that started it.
+  const pending = new Set<Promise<void>>();
+  const hurryOne = async (run: StartedRun): Promise<void> => {
+    busy.add(run.id);
+    try {
+      await hurry(run.workflow, run.id);
+      const instance = await adminWorkflow(env, run.workflow).get(run.id);
+      const { status } = await instance.status();
+      if (endedStatuses.has(status)) {
+        done.add(run.id);
+      }
+    } catch {
+      // A run mid-activation, or gone: tried again next time.
+    } finally {
+      busy.delete(run.id);
+    }
+  };
+  const timer = setInterval(() => {
+    for (const run of started) {
+      if (!done.has(run.id) && !busy.has(run.id)) {
+        const hurried = (async () => {
+          await hurryOne(run);
+        })();
+        pending.add(hurried);
+        void (async () => {
+          await hurried;
+          pending.delete(hurried);
+        })();
+      }
+    }
+  }, hurryEveryMs);
+  return {
+    started,
+    of: (workflow) =>
+      started.filter((run) => run.workflow === workflow).map(({ id }) => id),
+    [Symbol.asyncDispose]: async () => {
+      clearInterval(timer);
+      await Promise.all(pending);
+      spy.mockRestore();
+    },
+  };
+};
+
+/**
+ * Once run `id` of `workflow` is in `status`; refused once it ended in
+ * another, which it can never leave.
+ */
+export const reached = async (
+  workflow: AdminWorkflow,
+  id: string,
+  status: InstanceStatus["status"]
+): Promise<void> => {
+  const instance = await adminWorkflow(env, workflow).get(id);
+  const final = await vi.waitFor(
+    async () => {
+      const now = await instance.status();
+      if (now.status === status || endedStatuses.has(now.status)) {
+        return now.status;
+      }
+      throw new Error(`Run ${id} is ${now.status}`);
+    },
+    { ...waitFor, timeout: 30_000 }
+  );
+  if (final !== status) {
+    throw new Error(
+      `Run ${id} has reached status '${final}', a finite status that prevents it from ever reaching '${status}'`
+    );
+  }
+};
+
+/** Once run `id` has a step named `name` that succeeded, what it returned. */
+export const stepResult = async (
+  workflow: AdminWorkflow,
+  id: string,
+  name: string
+): Promise<unknown> =>
+  await vi.waitFor(
+    async () => {
+      const { steps } = await journalOf(workflow, id);
+      const step = steps.find(
+        (row) => row.name === name && row.state === "succeeded"
+      );
+      if (step === undefined) {
+        throw new Error(`Run ${id} has no step ${name} that succeeded yet`);
+      }
+      return step.value === null ? undefined : decode(step.value);
+    },
+    { ...waitFor, timeout: 30_000 }
+  );

@@ -466,7 +466,15 @@ const assertHolds = async (
   db: AdminDatabase,
   held: HeldClient
 ): Promise<void> => {
-  if (!(await holdsClient(db, held.clientId, held.runId, held.attempt))) {
+  if (
+    !(await holdsClient(
+      db,
+      held.clientId,
+      held.runId,
+      held.attempt,
+      held.attemptKey
+    ))
+  ) {
     throw new ProvisionOperationError(
       "runner_replaced",
       `${held.runId} no longer holds ${held.clientId}`
@@ -513,7 +521,7 @@ export const startClientProvision = async (
     db
       .insert(clientProvisions)
       .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
       )
       .onConflictDoNothing(),
     {
@@ -780,7 +788,15 @@ export const startClientRelease = async (
       `${clientId} has no operation: it wasn't provisioned as a placement`
     );
   }
-  if (!(await holdsClient(db, clientId, held.runId, held.attempt))) {
+  if (
+    !(await holdsClient(
+      db,
+      clientId,
+      held.runId,
+      held.attempt,
+      held.attemptKey
+    ))
+  ) {
     throw new ProvisionOperationError(
       "operation_running",
       `${held.runId} doesn't hold ${clientId}`
@@ -1059,7 +1075,7 @@ const noteSuperseded = async (
  * How long after it was sent a call that changes a client's Workers is
  * taken to have landed or gone with the run that sent it. An upload
  * answers in seconds; a run whose isolate died holds no request open, and
- * its marker stays behind until then (`settledSends`).
+ * its mark stays behind until then (`sendsSettled`).
  *
  * What's left: Cloudflare may still apply a call whose sender died, or one
  * still unanswered past this bound, after a rollback that waited it out
@@ -1076,19 +1092,108 @@ const sendSettleMs = 5 * 60_000;
  */
 const defaultSendTimeoutMs = 150_000;
 
+/** One sender's mark: the change it sent for, and when (ms). */
+const sendMarkSchema = z.object({ change: z.int(), at: z.number() });
+
+/** The marks on an operation (`clientProvisions.sending`), by sender. */
+const sendMarksSchema = z.record(z.string(), sendMarkSchema);
+
+/** The marks in `stored`; none for what doesn't parse. */
+const sendMarksOf = (
+  stored: string | null
+): z.infer<typeof sendMarksSchema> => {
+  if (stored === null) {
+    return {};
+  }
+  try {
+    const parsed = sendMarksSchema.safeParse(JSON.parse(stored));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Whether a call marked in `marks` for change `change` by a sender other
+ * than `except` may still land: sent less than `sendSettleMs` ago.
+ */
+const othersSending = (
+  marks: z.infer<typeof sendMarksSchema>,
+  change: number,
+  except: string | null,
+  now: number
+): boolean =>
+  Object.entries(marks).some(
+    ([sender, mark]) =>
+      sender !== except &&
+      mark.change === change &&
+      now - mark.at < sendSettleMs
+  );
+
+/** The marks on client `clientId`'s operation, as stored now. */
+const sendMarks = async (db: AdminDatabase, clientId: string) => {
+  const row = await db
+    .select({ sending: clientProvisions.sending })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  return sendMarksOf(row?.sending ?? null);
+};
+
+/** Who marks a call `held` sends: its attempt at its step, or the runner. */
+const senderOf = (held: HeldClient): string =>
+  `${held.attemptKey ?? held.runId}#${String(held.attempt ?? 0)}`;
+
+/** `sender`'s path in an operation's marks, as SQLite's JSON functions take it. */
+const markPath = (sender: string): string =>
+  `$."${sender.replaceAll('"', "")}"`;
+
+/**
+ * Waits until no other sender (an attempt that timed out and went on) has
+ * a call to client `loaded.held.clientId`'s Workers on its way for this
+ * change: each mark cleared, or aged out under `sendSettleMs`. A step
+ * waits here before it reads what its call is built from, so a call that
+ * lands meanwhile is read, never sent over (`upload`), and again right
+ * before it sends (`sendHolding`).
+ */
+const othersSettled = async (
+  context: ProvisionContext,
+  { operation, held }: Pick<Loaded, "operation" | "held">
+): Promise<void> => {
+  const sender = senderOf(held);
+  const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
+  // oxlint-disable no-await-in-loop -- reads in turn, waiting between
+  while (
+    othersSending(
+      await sendMarks(context.db, held.clientId),
+      operation.change,
+      sender,
+      Date.now()
+    )
+  ) {
+    await scheduler.wait(delayMs);
+  }
+  // oxlint-enable no-await-in-loop
+};
+
 /**
  * Sends `send`, a call that changes client `loaded.held.clientId`'s
  * Workers, while `loaded.held` holds the client, marked on its operation
- * (`progress.sending`, outside `progressSchema`, so any later progress
- * write drops it) from before it's sent until Cloudflare answers it.
- * `send` is given the signal that aborts it after `sendTimeoutMs`.
+ * under its own sender (`clientProvisions.sending`: this attempt at its
+ * step) from before it's sent until Cloudflare answers it. `send` is given
+ * the signal that aborts it after `sendTimeoutMs`.
  *
- * A runner that takes the client over can't stop a call already sent: a
- * rollback waits for the mark to clear (`settledSends`), so the call lands
- * before the rollback's own and never after. Marked in the same statement
- * that checks the claim, so a call is sent only marked; cleared by the
- * change, not the claim, so a call answered after its runner lost the
- * client still clears it. A call with no answer (aborted, or the
+ * A call already sent can't be stopped, only waited for, so it lands
+ * before anything sent after it:
+ * - a rollback that took the client waits for every mark of the change it
+ *   took over (`sendsSettled`);
+ * - a retry of a step waits, before it sends, for any call another
+ *   attempt (one that timed out and went on) still has on its way.
+ *
+ * Marked in the same statement that checks the claim, so a call is sent
+ * only marked; cleared by the sender alone, and by the change, not the
+ * claim, so a call answered after its runner lost the client still clears
+ * its own mark, never another's. A call with no answer (aborted, or the
  * connection lost) may still land, so its mark stays until it ages out.
  */
 const sendHolding = async (
@@ -1097,10 +1202,12 @@ const sendHolding = async (
   send: (signal: AbortSignal) => Promise<void>
 ): Promise<void> => {
   const { db } = context;
+  const sender = senderOf(held);
+  await othersSettled(context, { operation, held });
   const marked = await db
     .update(clientProvisions)
     .set({
-      progress: sql`json_set(coalesce(${clientProvisions.progress}, '{}'), '$.sending', ${Date.now()})`,
+      sending: sql`json_set(coalesce(${clientProvisions.sending}, '{}'), ${markPath(sender)}, json(${JSON.stringify({ change: operation.change, at: Date.now() })}))`,
     })
     .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)))
     .returning({ id: clientProvisions.id });
@@ -1114,7 +1221,7 @@ const sendHolding = async (
     await db
       .update(clientProvisions)
       .set({
-        progress: sql`json_remove(${clientProvisions.progress}, '$.sending')`,
+        sending: sql`json_remove(${clientProvisions.sending}, ${markPath(sender)})`,
       })
       .where(
         and(
@@ -1138,41 +1245,18 @@ const sendHolding = async (
 };
 
 /**
- * Waits until no call sent for client `clientId`'s change `change` is
- * still on its way (`sendHolding`): none marked, or the one marked sent
- * at least `sendSettleMs` ago. What a runner that took the client over
- * waits for before it changes the client's Workers itself.
+ * Whether no call sent for client `clientId`'s change `change` is still
+ * on its way (`sendHolding`): none marked for it, or each marked at least
+ * `sendSettleMs` ago. What a runner that took the client over checks,
+ * step by step, before it changes the client's Workers itself
+ * (src/rollout/rollback.ts).
  */
-export const settledSends = async (
-  context: ProvisionContext,
+export const sendsSettled = async (
+  db: AdminDatabase,
   clientId: string,
   change: number
-): Promise<void> => {
-  const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
-  const sending = async (): Promise<boolean> => {
-    const row = await context.db
-      .select({
-        since: sql<
-          number | null
-        >`json_extract(${clientProvisions.progress}, '$.sending')`,
-      })
-      .from(clientProvisions)
-      .where(
-        and(
-          eq(clientProvisions.clientId, clientId),
-          eq(clientProvisions.change, change)
-        )
-      )
-      .get();
-    const since = row?.since ?? null;
-    return since !== null && Date.now() - since < sendSettleMs;
-  };
-  // oxlint-disable no-await-in-loop -- reads in turn, waiting between
-  while (await sending()) {
-    await scheduler.wait(delayMs);
-  }
-  // oxlint-enable no-await-in-loop
-};
+): Promise<boolean> =>
+  !othersSending(await sendMarks(db, clientId), change, null, Date.now());
 
 /** The release's Worker `app`. */
 const workerOf = (manifest: ReleaseManifest, app: App): WorkerEntry => {
@@ -1712,6 +1796,10 @@ const upload = async (
     }
   );
   const lastTag = worker.durableObjectMigrations.at(-1)?.tag;
+  // Another attempt's upload of this Worker may still be on its way: what
+  // the script runs, and so the migrations this one sends, is read once it
+  // landed.
+  await othersSettled(context, loaded);
   const progress = await progressNow(db, loaded.operation.id);
   const before = await targetMigrationState(api, target);
   const done =
@@ -2426,7 +2514,7 @@ const complete = async (db: AdminDatabase, loaded: Loaded): Promise<void> => {
         ),
       // Only while this attempt holds the client: one that timed out and
       // finishes late leaves its retry's claim be.
-      releaseRun(db, held.clientId, held.runId, held.attempt),
+      releaseRun(db, held.clientId, held.runId, held.attempt, held.attemptKey),
     ]
   );
   if (!finished) {

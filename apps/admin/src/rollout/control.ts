@@ -49,6 +49,7 @@ import { importedManifest } from "../deploy/release.ts";
 import { limitRaiseCheck } from "../releases/limits.ts";
 import type { LimitRaiseCheck } from "../releases/limits.ts";
 import { hasEnded, instanceStatus } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { RolloutError } from "./errors.ts";
 import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
@@ -134,7 +135,11 @@ const settleEnded = async (env: Env, db: AdminDatabase): Promise<void> => {
     .where(inArray(rollouts.status, [...activeStatuses]));
   for (const { id, createdAt } of active) {
     // oxlint-disable-next-line no-await-in-loop -- one, as a rule
-    const { status } = await instanceStatus(env.ROLLOUT, id, createdAt);
+    const { status } = await instanceStatus(
+      adminWorkflow(env, adminWorkflows.rollout),
+      id,
+      createdAt
+    );
     if (hasEnded(status)) {
       // oxlint-disable-next-line no-await-in-loop -- one, as a rule
       await failRollout(db, id, "run_ended");
@@ -279,7 +284,7 @@ export const startRollout = async (
       "No active client past ring 0 is in scope"
     );
   }
-  // Refused rather than left to stop part way at Workflows' step limit.
+  // Refused rather than left to grow past the step budget part way.
   const manifest =
     releaseId === null ? null : await importedManifest(db, releaseId);
   const internal = targets.filter(({ ring }) => ring === first.ring).length;
@@ -350,7 +355,10 @@ export const startRollout = async (
     startedBy: { email: staff.email, sub: staff.sub },
   };
   try {
-    await env.ROLLOUT.create({ id, params });
+    await adminWorkflow<RolloutParams>(env, adminWorkflows.rollout).create({
+      id,
+      params,
+    });
   } catch (error) {
     // Its run never started: it no longer holds the admin's one rollout.
     await failRollout(db, id, "run_not_created");
@@ -378,7 +386,7 @@ const resendApproval = async (
     .from(rolloutTargets)
     .where(eq(rolloutTargets.rolloutId, rollout.id));
   const { instance, status } = await instanceStatus(
-    env.ROLLOUT,
+    adminWorkflow(env, adminWorkflows.rollout),
     rollout.id,
     rollout.createdAt
   );
@@ -493,7 +501,9 @@ export const approveRollout = async (
   if (!approved) {
     throw notWaiting;
   }
-  const instance = await env.ROLLOUT.get(rolloutId);
+  const instance = await adminWorkflow(env, adminWorkflows.rollout).get(
+    rolloutId
+  );
   await instance.sendEvent({ type: approvalEvent(next), payload: {} });
 };
 
@@ -601,7 +611,9 @@ export const retryRollout = async (
   if (!retried) {
     throw notWaiting;
   }
-  const instance = await env.ROLLOUT.get(rolloutId);
+  const instance = await adminWorkflow(env, adminWorkflows.rollout).get(
+    rolloutId
+  );
   await instance.sendEvent({ type: retryEvent(round), payload: {} });
 };
 
@@ -616,7 +628,11 @@ const runOf = async (env: Env, db: AdminDatabase, rolloutId: string) => {
   }
   return {
     row,
-    ...(await instanceStatus(env.ROLLOUT, rolloutId, row.createdAt)),
+    ...(await instanceStatus(
+      adminWorkflow(env, adminWorkflows.rollout),
+      rolloutId,
+      row.createdAt
+    )),
   };
 };
 

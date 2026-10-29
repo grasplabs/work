@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
@@ -16,6 +15,7 @@ import { importReleases } from "../src/releases/import.ts";
 import { startRolloutFn } from "../src/rollout/functions.ts";
 import { startRequestOf } from "../src/rollout/start-request.ts";
 import type { StartChoices } from "../src/rollout/start-request.ts";
+import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { destination } from "./hosting.ts";
@@ -197,8 +197,6 @@ describe("the rollout pages", () => {
       .set({ status: "cancelled" })
       .where(inArray(rollouts.status, ["running", "waiting"]));
     const target = await recordClient(2);
-    // The runs it starts go nowhere: the test reads what was started.
-    await using runs = await introspectWorkflow(env.ROLLOUT);
     const choices: StartChoices = {
       what: "release",
       releaseId: release,
@@ -224,7 +222,11 @@ describe("the rollout pages", () => {
           eq(auditEvents.target, rolloutId)
         )
       );
-    const startedRuns = await runs.get();
+    // Its run, started with it: then ended, as the test reads no more of it.
+    const run = await adminWorkflow(env, adminWorkflows.rollout).get(rolloutId);
+    const { status: runStatus } = await run.status();
+    const runs = runStatus === undefined ? 0 : 1;
+    await run.terminate();
     const targets = await db
       .select({ clientId: rolloutTargets.clientId, ring: rolloutTargets.ring })
       .from(rolloutTargets)
@@ -238,7 +240,7 @@ describe("the rollout pages", () => {
       },
       // Past ring 0, only the client named.
       pastRingZero: targets.filter(({ ring }) => ring !== 0),
-      runs: startedRuns.length,
+      runs,
     }).toMatchObject({
       refused: null,
       started: { releaseId: release, kind: "release" },
