@@ -9556,6 +9556,10 @@ msgstr "Geen AI"
 msgid "No AI capabilities found in this app."
 msgstr "Geen AI-functies gevonden in deze app."
 
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "Er is nog geen AI-aanbieder gekoppeld. Vraag je beheerder er een te koppelen."
+
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."
 msgstr "Geen app overtreedt een actieve regel."
