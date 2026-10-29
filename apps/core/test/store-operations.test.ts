@@ -15,9 +15,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
+import type { StaffMarked } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { activeStaffRole } from "../src/auth/identity.ts";
 import { createStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { liveRuns } from "../src/live-runs.ts";
@@ -53,9 +55,10 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { outcome, signedIn, staffPerson, unique, whoami } from "./sign-in.ts";
 
 // A business store's public operations, shared with other Apps and with
 // independent workflows (store-operations.ts), from its threat model:
@@ -318,6 +321,8 @@ const nextVersion = async (
 
 type Person = Awaited<ReturnType<typeof person>>;
 
+const idp = mockIdp();
+
 /** `sealed`'s own authority, at version 1, as its restricted mode reads it. */
 const authorityOf = (sealed: Sealed): Authority => ({
   subject: { type: "app", appId: appIdSchema.parse(sealed.app) },
@@ -332,7 +337,7 @@ const contextOf = (sealed: Sealed) =>
 
 /** What `by` gets calling `path` of `sealed`'s current release, as a screen calls it. */
 const call = async (
-  by: Person,
+  by: StaffMarked,
   sealed: Sealed,
   path: string,
   input: unknown = {}
@@ -988,6 +993,33 @@ describe("an App calling another App's store", () => {
 });
 
 describe("a store operation's caller", () => {
+  it("serves work Grasp staff started while their staff session lasts, as theirs, and refuses it once it ended", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    await bind(admin, desk, await deskGrant(admin, desk, crm, crmActions));
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId } = await whoami(session);
+    const role = await activeStaffRole(env, userId);
+    if (role === undefined) {
+      throw new Error("A staff session");
+    }
+    // As core marks a staff member's own work: never a member.
+    const staff: StaffMarked = { userId, role, teams: [], staff: true };
+    const kept = await call(staff, desk, "desk.note", { text: "checked" });
+    const read = await call(staff, desk, "desk.mine");
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND staff = 1")
+      .bind(userId)
+      .run();
+    const ended = await call(staff, desk, "desk.note", { text: "later" });
+
+    expect({ kept, read, ended }).toStrictEqual({
+      kept: null,
+      read: ["checked"],
+      ended: "refused:permission.person_inactive",
+    });
+  });
+
   it("is refused, and recorded, once the person it acts for has left the organization", async () => {
     const admin = await person("admin");
     const crm = await sealedApp(crmFiles(), "CRM");
