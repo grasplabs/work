@@ -3793,6 +3793,7 @@ msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sen
 msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp en una y te enviará un enlace para vincular tu cuenta aquí. Desvincula la que ya no uses."
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Chat name"
 msgstr "Nombre del chat"
 
@@ -4355,6 +4356,7 @@ msgid "Copenhagen"
 msgstr "Copenhague"
 
 #: src/chat/answer-markdown.tsx
+#: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
@@ -4374,6 +4376,10 @@ msgstr "Copiar dirección"
 #: src/landscape/app-table.tsx
 msgid "Copy app ID"
 msgstr "Copiar el ID de la aplicación"
+
+#: src/chat/chat-more.tsx
+msgid "Copy as Markdown"
+msgstr "Copiar como Markdown"
 
 #: src/chat/answer-markdown.tsx
 msgid "Copy code"
@@ -4412,6 +4418,7 @@ msgid "Copy the link for {name}"
 msgstr "Copiar el enlace de {name}"
 
 #: src/chat/answer-markdown.tsx
+#: src/chat/chat-more.tsx
 msgid "Copying didn't work"
 msgstr "No se ha podido copiar"
 
@@ -4682,6 +4689,8 @@ msgid "Definition version"
 msgstr "Versión de la definición"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
+#: src/chat/delete-chat-dialog.tsx
 #: src/policies/policy-editing.tsx
 msgid "Delete"
 msgstr "Eliminar"
@@ -4691,7 +4700,7 @@ msgctxt "button: delete an interview for good"
 msgid "Delete"
 msgstr "Eliminar"
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
 
@@ -4750,6 +4759,10 @@ msgstr "Denegó paquetes"
 #: src/dashboard/dependency-requests.tsx
 msgid "Depends on"
 msgstr "Depende de"
+
+#: src/engines/new-app.tsx
+msgid "Describe the app: what it shows, and for whom"
+msgstr "Describe la aplicación: qué muestra y para quién"
 
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
@@ -5020,6 +5033,7 @@ msgstr "Accesos directos de dominios"
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -5081,6 +5095,10 @@ msgstr "Bien hecho"
 msgctxt "part of an interview"
 msgid "Done right"
 msgstr "Hacerlo bien"
+
+#: src/chat/chat-more.tsx
+msgid "Download"
+msgstr "Descargar"
 
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
@@ -5592,10 +5610,6 @@ msgstr "Exportar informe"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exportar el registro de auditoría"
-
-#: src/routes/_shell.index.tsx
-msgid "Export this chat"
-msgstr "Exportar este chat"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -7144,7 +7158,7 @@ msgstr "Sus enlaces salen el primer día"
 msgid "Its links wait for the day the interviews start."
 msgstr "Sus enlaces esperan al día en que empiezan las entrevistas."
 
-#: src/chat/chat-list.tsx
+#: src/chat/delete-chat-dialog.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Sus mensajes se eliminan para siempre y se rechaza cada cambio que su agente retiene para ti. Lo que hizo el agente queda en el registro de auditoría."
 
@@ -7849,6 +7863,7 @@ msgctxt "button: note the one reminder as sent"
 msgid "Mark reminded"
 msgstr "Marcar como recordado"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -8030,6 +8045,10 @@ msgstr "Más para {title}"
 msgid "More for the project {name}"
 msgstr "Más opciones del proyecto {name}"
 
+#: src/chat/chat-more.tsx
+msgid "More for this chat"
+msgstr "Más opciones de este chat"
+
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "Más pasos."
@@ -8087,6 +8106,7 @@ msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "Mover {title}: arrástralo o usa las teclas de flecha"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Move to project"
 msgstr "Mover a un proyecto"
 
@@ -8247,6 +8267,11 @@ msgstr "Nunca"
 msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nunca"
+
+#: src/routes/_shell.apps.new.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "New app"
+msgstr "Nueva aplicación"
 
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
@@ -10116,6 +10141,7 @@ msgstr "Método de pago"
 msgid "Payment receipts"
 msgstr "Recibos de pago"
 
+#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
@@ -10962,8 +10988,13 @@ msgid "Removed: it acts for whoever uses the domain, with everything the domain 
 msgstr "Eliminado: actúa en nombre de quien use el dominio, con todo lo que el dominio tiene"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Rename"
 msgstr "Cambiar nombre"
+
+#: src/chat/chat-more.tsx
+msgid "Rename chat"
+msgstr "Renombrar chat"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
@@ -11487,6 +11518,7 @@ msgid "Same version, different contents: {changed}"
 msgstr "Misma versión, contenido distinto: {changed}"
 
 #: src/brain/goals-editor.tsx
+#: src/chat/chat-more.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
 #: src/policies/policy-editing.tsx
@@ -12582,6 +12614,7 @@ msgid "Take off the list"
 msgstr "Quitar de la lista"
 
 #: src/chat/chat-list.tsx
+#: src/chat/chat-more.tsx
 msgid "Take out of the project"
 msgstr "Sacar del proyecto"
 
@@ -13073,6 +13106,10 @@ msgstr "No se pudo leer el catálogo de integraciones, así que esta página mue
 msgid "The change to the store {name} was abandoned"
 msgstr "Se abandonó el cambio en el almacén {name}"
 
+#: src/chat/chat-more.tsx
+msgid "The chat wasn't moved"
+msgstr "El chat no se ha movido"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "El código de la versión {version}"
@@ -13214,6 +13251,7 @@ msgstr "La redacción anterior queda en el historial del objetivo."
 msgid "the EU"
 msgstr "la UE"
 
+#: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
@@ -15285,6 +15323,10 @@ msgstr "¿Qué debería cambiar?"
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"
 msgstr "¿Qué debe hacer Grasp allí?"
+
+#: src/engines/new-app.tsx
+msgid "What should the app show, and for whom?"
+msgstr "¿Qué debe mostrar la aplicación y para quién?"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
