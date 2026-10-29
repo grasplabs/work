@@ -167,7 +167,7 @@ const linkResponse = async (
     return await guestResponse(request, env, requestId);
   }
   if (pathname === appVisitorApiPath) {
-    return await appVisitorResponse(request, env, requestId);
+    return await appVisitorResponse(request, env, requestId, ctx);
   }
   if (pathname === interviewApiPath) {
     return await interviewResponse(request, env, requestId);
