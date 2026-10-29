@@ -884,7 +884,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 500
+          "default": 250
         },
         "stripe_customer_id": {
           "name": "stripe_customer_id",

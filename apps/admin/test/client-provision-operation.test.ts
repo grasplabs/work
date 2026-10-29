@@ -1928,7 +1928,7 @@ describe("provisioning a placed client", () => {
         .filter(({ type }) => type === "ai")
         .map(({ name }) => name),
       // Through the destination's shared gateway, ensured before core went
-      // live, at the client's ceiling: €500 a month unless staff set another.
+      // live, at the client's ceiling: €250 a month unless staff set another.
       gateways: account.gateways.map(({ id }) => id),
       gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
       // Its core goes live without `EMAIL`, so it sends nothing and says
@@ -1944,7 +1944,7 @@ describe("provisioning a placed client", () => {
       gateways: [placedModelGateway("production")],
       gateway: {
         gateway: placedModelGateway("production"),
-        budgets: { deployment: { limit: 500, alertAt: 80 } },
+        budgets: { deployment: { limit: 250, alertAt: 80 } },
       },
       mail: [],
       zones: 0,

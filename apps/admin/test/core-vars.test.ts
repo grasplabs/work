@@ -238,7 +238,7 @@ describe("a hosted client's sign-in, in relay mode", () => {
 });
 
 describe("a client's model spend ceiling, as its gateway's budget", () => {
-  it("holds every client's core to €500 a month unless staff set another, audited, and no setting raises it", async () => {
+  it("holds every client's core to €250 a month unless staff set another, audited, and no setting raises it", async () => {
     const fresh = await clientWith({});
     const raised = await clientWith({
       MODEL_GATEWAY: JSON.stringify({
@@ -296,19 +296,19 @@ describe("a client's model spend ceiling, as its gateway's budget", () => {
       ),
       marked: record?.configChangedAt instanceof Date,
     }).toMatchObject({
-      before: { budgets: { deployment: { limit: 500, alertAt: 80 } } },
+      before: { budgets: { deployment: { limit: 250, alertAt: 80 } } },
       after: { budgets: { deployment: { limit: 1200, alertAt: 80 } } },
       // The setting's own budgets stay, its deployment one held to the ceiling.
       raised: {
         budgets: {
-          deployment: { limit: 500, alertAt: 90 },
+          deployment: { limit: 250, alertAt: 90 },
           user: { limit: 20 },
         },
       },
       lowered: { budgets: { deployment: { limit: 100, alertAt: 80 } } },
       changed: true,
       again: false,
-      audited: [{ from: 500, to: 1200 }],
+      audited: [{ from: 250, to: 1200 }],
       marked: true,
     });
   });
@@ -323,7 +323,7 @@ describe("a client's model spend ceiling, as its gateway's budget", () => {
       ).rejects.toThrow(/euros/u);
       const vars = await varsOf(clientId);
       expect(vars.MODEL_GATEWAY).toMatchObject({
-        budgets: { deployment: { limit: 500 } },
+        budgets: { deployment: { limit: 250 } },
       });
     }
   );
