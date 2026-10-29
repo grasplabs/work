@@ -317,6 +317,10 @@ msgstr "{count, plural, one {# bloqueo} other {# bloqueos}}"
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# cambio espera a que lo confirmes o lo rechaces.} other {# cambios esperan a que los confirmes o los rechaces.}}"
 
+#: src/chat/project-shelf.tsx
+msgid "{count, plural, one {# chat} other {# chats}}"
+msgstr "{count, plural, one {# chat} other {# chats}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# conversation came in: with the board, the teams and their people.} other {# conversations came in: with the board, the teams and their people.}}"
 msgstr "{count, plural, one {Llegó # conversación: con la dirección, los equipos y su gente.} other {Llegaron # conversaciones: con la dirección, los equipos y su gente.}}"
@@ -819,6 +823,7 @@ msgid "{moreFindings, plural, one {And # more finding: show every package to rea
 msgstr "{moreFindings, plural, one {Y # hallazgo más: muestra todos los paquetes para leerlo.} other {Y # hallazgos más: muestra todos los paquetes para leerlos.}}"
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "{most, plural, one {A project holds up to # document.} other {A project holds up to # documents.}}"
 msgstr "{most, plural, one {Un proyecto admite hasta # documento.} other {Un proyecto admite hasta # documentos.}}"
 
@@ -1100,6 +1105,10 @@ msgstr "{people}, o {fewer} y un documento"
 #: src/onboarding/about-story.tsx
 msgid "{percent}% known now"
 msgstr "Ahora, {percent} % conocido"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "{percent}% of the project’s room used"
+msgstr "{percent} % del espacio del proyecto en uso"
 
 #. Who connected the app, then the day they did.
 #: src/routes/_shell.integrations.$integration.tsx
@@ -1812,6 +1821,7 @@ msgid "A normal one takes {normal} minutes. The quickest took {least}, the longe
 msgstr "Uno normal lleva {normal} minutos. El más rápido llevó {least}, el más largo {most}."
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "A picked file couldn't be read. Pick it again."
 msgstr "No se pudo leer un archivo elegido. Vuelve a elegirlo."
 
@@ -1820,6 +1830,7 @@ msgid "A preview keeps no files."
 msgstr "Una vista previa no guarda archivos."
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
 msgstr "Un proyecto admite archivos Markdown, de texto, CSV y JSON."
 
@@ -2078,6 +2089,7 @@ msgid "Add an exception"
 msgstr "Añadir una excepción"
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Add documents"
 msgstr "Añadir documentos"
 
@@ -2375,6 +2387,10 @@ msgstr "Todas las llamadas"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Todas las llamadas juntas"
+
+#: src/chat/chat-switcher.tsx
+msgid "All chats"
+msgstr "Todos los chats"
 
 #: src/brain/brain-atlas.ts
 msgid "All interviewed"
@@ -3499,6 +3515,7 @@ msgstr "No se puede leer"
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 #: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -3779,6 +3796,7 @@ msgstr "¿Cobrar {amount} por esta llamada al modelo?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Chat"
 msgstr "Chat"
 
@@ -3800,19 +3818,16 @@ msgstr "Aplicaciones de chat"
 msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
 msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp en una y te enviará un enlace para vincular tu cuenta aquí. Desvincula la que ya no uses."
 
-#: src/chat/chat-list.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/chat-switcher.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Chat name"
 msgstr "Nombre del chat"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
+#: src/chat/chat-switcher.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
 msgstr "Chats"
-
-#: src/chat/chat-list.tsx
-msgid "Chats by date"
-msgstr "Chats por fecha"
 
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
@@ -4692,7 +4707,7 @@ msgstr "Definición"
 msgid "Definition version"
 msgstr "Versión de la definición"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/policies/policy-editing.tsx
@@ -4724,11 +4739,12 @@ msgstr "Eliminar"
 msgid "Delete my interview"
 msgstr "Eliminar mi entrevista"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Delete project"
 msgstr "Eliminar proyecto"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 msgid "Delete the project “{name}”?"
 msgstr "¿Eliminar el proyecto «{name}»?"
 
@@ -4922,7 +4938,12 @@ msgstr "Documento no encontrado"
 msgid "Documents"
 msgstr "Documentos"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Documents Grasp reads in every chat of this project. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
+msgstr "Documentos que Grasp lee en cada chat de este proyecto. Markdown, texto, CSV o JSON, de hasta {projectDocumentMaxKb} KB cada uno."
+
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Documents in this project"
 msgstr "Documentos de este proyecto"
 
@@ -5145,6 +5166,10 @@ msgstr "Sus propios borradores, eventos y archivos, después de pulsar una tarje
 msgid "Draw again"
 msgstr "Volver a dibujar"
 
+#: src/chat/suggestions.tsx
+msgid "Draw how supplier invoices are handled"
+msgstr "Dibuja cómo se tramitan las facturas de proveedores"
+
 #: src/onboarding/work-record.tsx
 msgid "Draw it again"
 msgstr "Dibujarlo de nuevo"
@@ -5198,6 +5223,7 @@ msgid "Dublin"
 msgstr "Dublín"
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Each document holds up to {maxKb} KB."
 msgstr "Cada documento puede tener hasta {maxKb} KB."
 
@@ -5233,7 +5259,7 @@ msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia"
 msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
 msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia, puede hacer como máximo 100 solicitudes al modelo, reintentos incluidos."
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Anteriores"
@@ -5254,8 +5280,13 @@ msgid "Edit"
 msgstr "Editar"
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit project"
 msgstr "Editar proyecto"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Edit the instructions"
+msgstr "Editar las instrucciones"
 
 #: src/policies/policy-editing.tsx
 msgid "Edit the rule"
@@ -5397,10 +5428,6 @@ msgstr "Todos los chats de este proyecto lo leen."
 #: src/chat/project-dialog.tsx
 msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
 msgstr "Todos los chats de este proyecto los leen. Markdown, texto, CSV o JSON, de hasta {projectDocumentMaxKb} KB cada uno."
-
-#: src/chat/chat-list.tsx
-msgid "Every chat is in a project."
-msgstr "Todos los chats están en un proyecto."
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Every day with any use, the newest first."
@@ -5566,10 +5593,6 @@ msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Excepciones"
 
-#: src/chat/chat-list.tsx
-msgid "Expand the chats"
-msgstr "Desplegar los chats"
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "Expand the filters"
 msgstr "Desplegar los filtros"
@@ -5715,6 +5738,7 @@ msgstr "Archivo"
 
 #: src/chat/builds.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Files"
 msgstr "Archivos"
 
@@ -5852,10 +5876,6 @@ msgstr "Marca o bloquea las aplicaciones que la incumplen."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Plegar el chat"
-
-#: src/chat/chat-list.tsx
-msgid "Fold the chats"
-msgstr "Plegar los chats"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Fold the filters"
@@ -6080,10 +6100,6 @@ msgstr "Ir a Grasp"
 msgid "Goal"
 msgstr "Objetivo"
 
-#: src/chat/chat-list.tsx
-msgid "Goal and documents"
-msgstr "Objetivo y documentos"
-
 #: src/brain/brain.ts
 msgid "Goals"
 msgstr "Objetivos"
@@ -6263,6 +6279,10 @@ msgstr "Grasp abre"
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp abre pronto para todos, en cuanto Stephen haya hablado con los equipos. Si tienes un enlace de entrevista, está en tu correo."
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Grasp reads these in every chat of the project."
+msgstr "Grasp las lee en cada chat del proyecto."
 
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -6811,6 +6831,18 @@ msgstr "Flujos de trabajo independientes"
 msgid "Input"
 msgstr "Entrada"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Instructions"
+msgstr "Instrucciones"
+
+#: src/chat/chat-switcher.tsx
+msgid "Instructions and files"
+msgstr "Instrucciones y archivos"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Instructions for {name}"
+msgstr "Instrucciones para {name}"
+
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
@@ -7143,7 +7175,7 @@ msgstr "Su versión actual no tiene parámetros."
 msgid "Its exceptions go with it. This can't be undone."
 msgstr "Sus excepciones se van con ella. No se puede deshacer."
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Se eliminan su objetivo y sus documentos. Sus chats se quedan, de vuelta entre los chats por fecha."
 
@@ -7427,7 +7459,7 @@ msgstr "Idiomas en los que entrevista"
 msgid "Last"
 msgstr "Última vez"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
@@ -8059,11 +8091,11 @@ msgstr "Más sobre estas conexiones"
 msgid "More about this connection"
 msgstr "Más sobre esta conexión"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Más para {title}"
 
-#: src/chat/chat-list.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "More for the project {name}"
 msgstr "Más opciones del proyecto {name}"
 
@@ -8127,7 +8159,7 @@ msgstr "Mover {label}, usa las flechas del teclado"
 msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "Mover {title}: arrástralo o usa las teclas de flecha"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 msgid "Move to project"
 msgstr "Mover a un proyecto"
@@ -8300,18 +8332,18 @@ msgid "New board goal"
 msgstr "Nuevo objetivo del consejo"
 
 #: src/chat/chat-dock.tsx
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nuevo chat"
 
+#: src/chat/chat-switcher.tsx
+msgid "New chat in {projectName}"
+msgstr "Nuevo chat en {projectName}"
+
 #: src/routes/_shell.index.tsx
 msgid "New chat in the project {projectName}"
 msgstr "Nuevo chat en el proyecto {projectName}"
-
-#: src/chat/chat-list.tsx
-msgid "New chat in this project"
-msgstr "Nuevo chat en este proyecto"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -8321,12 +8353,13 @@ msgstr "hechos nuevos en las últimas entrevistas"
 msgid "New note"
 msgstr "Nota nueva"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 #: src/chat/project-dialog.tsx
+#: src/chat/project-shelf.tsx
 msgid "New project"
 msgstr "Nuevo proyecto"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 msgid "New project…"
 msgstr "Nuevo proyecto…"
 
@@ -8469,9 +8502,17 @@ msgstr "No consta ninguna certificación"
 msgid "No chat app accounts are linked."
 msgstr "No hay cuentas de aplicaciones de chat vinculadas."
 
-#: src/chat/chat-list.tsx
-msgid "No chats yet. Drag one here, or move it from its menu."
-msgstr "Aún no hay chats. Arrastra uno aquí o muévelo desde su menú."
+#: src/chat/chat-switcher.tsx
+msgid "No chat has that."
+msgstr "Ningún chat contiene eso."
+
+#: src/chat/chat-switcher.tsx
+msgid "No chats here yet."
+msgstr "Aún no hay chats aquí."
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "No chats yet. What is asked above starts one, and it stays in this project."
+msgstr "Aún no hay chats. Lo que preguntes arriba empieza uno, y se queda en este proyecto."
 
 #: src/landscape/usage-tab.tsx
 msgid "No connected users"
@@ -10491,11 +10532,12 @@ msgstr "Acuerdo de encargo del tratamiento: {states}"
 msgid "Profile"
 msgstr "Perfil"
 
-#: src/chat/chat-list.tsx
-msgid "Project name"
-msgstr "Nombre del proyecto"
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Project"
+msgstr "Proyecto"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
+#: src/chat/project-shelf.tsx
 msgid "Projects"
 msgstr "Proyectos"
 
@@ -10613,6 +10655,10 @@ msgstr "Poniéndolo en tu panel…"
 #: src/dashboard/widget-progress.tsx
 msgid "Putting it right, try {attempt} of {attempts}…"
 msgstr "Corrigiéndolo, intento {attempt} de {attempts}…"
+
+#: src/chat/suggestions.tsx
+msgid "Questions to start with"
+msgstr "Preguntas para empezar"
 
 #: src/workflows/runs.tsx
 msgid "Queued"
@@ -10841,11 +10887,6 @@ msgstr "Razonamiento"
 msgid "Receipt"
 msgstr "Comprobante"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
-msgid "Recent chats"
-msgstr "Chats recientes"
-
 #: src/landscape/audit-trail.tsx
 msgid "Recorded by"
 msgstr "Registrado por"
@@ -10954,6 +10995,7 @@ msgid "Remove"
 msgstr "Quitar"
 
 #: src/chat/project-dialog.tsx
+#: src/routes/_shell.projects.$projectId.tsx
 msgid "Remove {documentName}"
 msgstr "Quitar {documentName}"
 
@@ -11010,7 +11052,7 @@ msgstr "Flujo de trabajo eliminado:"
 msgid "Removed: it acts for whoever uses the domain, with everything the domain holds"
 msgstr "Eliminado: actúa en nombre de quien use el dominio, con todo lo que el dominio tiene"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 msgid "Rename"
 msgstr "Cambiar nombre"
@@ -11313,6 +11355,10 @@ msgstr "Roles"
 msgid "Rome"
 msgstr "Roma"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Room used"
+msgstr "Espacio en uso"
+
 #: src/routes/_shell.landscape.index.tsx
 msgid "Row height"
 msgstr "Altura de las filas"
@@ -11568,6 +11614,10 @@ msgstr "Guardar como PDF"
 msgid "Save first"
 msgstr "Guardar primero"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Save instructions"
+msgstr "Guardar instrucciones"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
 msgstr "Guardar los acuerdos"
@@ -11641,6 +11691,10 @@ msgstr "Buscar por nombre"
 msgid "Search by name or kind"
 msgstr "Buscar por nombre o tipo"
 
+#: src/chat/chat-switcher.tsx
+msgid "Search chats and projects"
+msgstr "Buscar en chats y proyectos"
+
 #: src/landscape/audit-trail.tsx
 msgid "Search events"
 msgstr "Buscar eventos"
@@ -11677,6 +11731,10 @@ msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Buscar en la transcripción"
+
+#: src/chat/chat-switcher.tsx
+msgid "Search your chats and projects, and open one."
+msgstr "Busca en tus chats y proyectos, y abre uno."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -11834,6 +11892,10 @@ msgstr "Se fijó en {source}"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Se fija en el directorio de tu organización."
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Set instructions"
+msgstr "Definir instrucciones"
 
 #: src/workflows/resource-params.tsx
 msgid "Set. Type a new value to replace it."
@@ -12253,6 +12315,10 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Empezar"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Start a chat in {name}"
+msgstr "Empieza un chat en {name}"
+
 #: src/workflows/test-run.tsx
 msgid "Start a test run"
 msgstr "Iniciar una ejecución de prueba"
@@ -12640,7 +12706,7 @@ msgstr "Quitar del panel"
 msgid "Take off the list"
 msgstr "Quitar de la lista"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 msgid "Take out of the project"
 msgstr "Sacar del proyecto"
@@ -14123,6 +14189,10 @@ msgstr "Esta página no está aquí"
 msgid "This policy is not here any more"
 msgstr "Esta política ya no está aquí"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "This project isn't here any more."
+msgstr "Este proyecto ya no está aquí."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"
 msgstr "Esta regla ya no está aquí"
@@ -14280,7 +14350,7 @@ msgstr "A estos equipos"
 msgid "To use them again, someone who approves packages reviews them again."
 msgstr "Para volver a usarlos, alguien que aprueba paquetes los revisa de nuevo."
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Hoy"
@@ -15136,6 +15206,10 @@ msgstr "Lo que se le indica a {name} solo cambia a través del Stephen Lab, una 
 msgid "What appears on every invoice."
 msgstr "Lo que aparece en cada factura."
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "What are you trying to achieve, and how should Grasp answer?"
+msgstr "¿Qué quieres conseguir y cómo debe responder Grasp?"
+
 #: src/chat/project-dialog.tsx
 msgid "What are you trying to achieve?"
 msgstr "¿Qué quieres conseguir?"
@@ -15212,6 +15286,10 @@ msgstr "Lo que Grasp aún no sabe, y quién puede responderlo."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
 msgstr "Qué puede hacer Grasp"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "What Grasp reads in this project"
+msgstr "Lo que Grasp lee en este proyecto"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "What Grasp refuses to run"
@@ -15404,6 +15482,10 @@ msgstr "Lo que las acciones del dominio pueden gastar a través de esta vinculac
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Lo que cuestan este mes ({month}, UTC) los modelos que trabajan para ti en Grasp, en dólares estadounidenses, según su precio."
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "What the project is for, and how Grasp should answer in it."
+msgstr "Para qué es el proyecto y cómo debe responder Grasp en él."
+
 #: src/workflows/test-run.tsx
 msgid "What the run of version {traceVersion} did"
 msgstr "Lo que hizo la ejecución de la versión {traceVersion}"
@@ -15423,6 +15505,10 @@ msgstr "Lo que nos contaron"
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Qué corregir"
+
+#: src/chat/suggestions.tsx
+msgid "What waits on me today?"
+msgstr "¿Qué me espera hoy?"
 
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
@@ -15558,6 +15644,10 @@ msgstr "Cuándo parar"
 msgid "Where"
 msgstr "Dónde"
 
+#: src/chat/suggestions.tsx
+msgid "Where does the most time still go?"
+msgstr "¿Dónde se va todavía más tiempo?"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "¿Dónde queda escrito el trabajo?"
@@ -15625,6 +15715,10 @@ msgstr "Dónde se guardan tus datos y la zona horaria que usa Grasp."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Dónde, por ejemplo Dropbox"
+
+#: src/chat/suggestions.tsx
+msgid "Which AI tools do people use?"
+msgstr "¿Qué herramientas de IA usa la gente?"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
@@ -16267,10 +16361,6 @@ msgstr "Tu respuesta"
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Tu navegador no me deja usar el micrófono. Permítelo junto a la dirección y vuelve a intentarlo."
-
-#: src/chat/chat-list.tsx
-msgid "Your chats show up here."
-msgstr "Tus chats aparecen aquí."
 
 #: src/interview/before.tsx
 msgid "Your choice"

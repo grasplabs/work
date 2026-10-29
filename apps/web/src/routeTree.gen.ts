@@ -53,6 +53,7 @@ import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboar
 import { Route as ShellOnboardingOpenRouteImport } from './routes/_shell.onboarding.open'
 import { Route as ShellOnboardingStephenRouteImport } from './routes/_shell.onboarding.stephen'
 import { Route as ShellPoliciesIndexRouteImport } from './routes/_shell.policies.index'
+import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.settings.approvals'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
@@ -322,6 +323,11 @@ const ShellOnboardingStephenRoute = ShellOnboardingStephenRouteImport.update({
 const ShellPoliciesIndexRoute = ShellPoliciesIndexRouteImport.update({
   id: '/policies/',
   path: '/policies/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
@@ -619,6 +625,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -707,6 +714,7 @@ export interface FileRoutesByTo {
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
@@ -801,6 +809,7 @@ export interface FileRoutesById {
   '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/_shell/onboarding/open': typeof ShellOnboardingOpenRoute
   '/_shell/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
@@ -895,6 +904,7 @@ export interface FileRouteTypes {
     | '/onboarding/notes'
     | '/onboarding/open'
     | '/onboarding/stephen'
+    | '/projects/$projectId'
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
@@ -983,6 +993,7 @@ export interface FileRouteTypes {
     | '/onboarding/notes'
     | '/onboarding/open'
     | '/onboarding/stephen'
+    | '/projects/$projectId'
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
@@ -1076,6 +1087,7 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/notes'
     | '/_shell/onboarding/open'
     | '/_shell/onboarding/stephen'
+    | '/_shell/projects/$projectId'
     | '/_shell/settings/approvals'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
@@ -1458,6 +1470,13 @@ declare module '@tanstack/react-router' {
       path: '/policies'
       fullPath: '/policies/'
       preLoaderRoute: typeof ShellPoliciesIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/projects/$projectId': {
+      id: '/_shell/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ShellProjectsProjectIdRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings/': {
@@ -1935,6 +1954,7 @@ interface ShellRouteChildren {
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
+  ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellDomainsIndexRoute: typeof ShellDomainsIndexRoute
@@ -1974,6 +1994,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,
+  ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellDomainsIndexRoute: ShellDomainsIndexRoute,
