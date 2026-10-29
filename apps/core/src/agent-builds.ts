@@ -341,7 +341,7 @@ export interface DraftCheck {
   };
   /**
    * What the preview of the draft in the person's side panel ran into so
-   * far (preview-reports.ts): any problem fails the check. `seen` is
+   * far (preview-reports.ts): any problem but a `warning` fails the check. `seen` is
    * false when it reported nothing on this revision within
    * {@link previewWaitMs}. With the newest of what the draft's server
    * code wrote with `console` there, the agent's calls included, which
@@ -548,7 +548,8 @@ export const checkFiles = async (
     tests.status !== "failed";
   const preview = await previewOf(env, scope, app, revision, built);
   return {
-    passed: built && preview.problems.length === 0,
+    // A warning (React's development warnings, say) shows, never fails.
+    passed: built && preview.problems.every(({ kind }) => kind === "warning"),
     screens: reported(builds.screens),
     server: reported(builds.server),
     workflows: reported(builds.workflows),
@@ -1423,7 +1424,9 @@ build: {
     /**
      * What the draft ran into so far in the preview in the person's side
      * panel (empty while nobody has it open): any problem fails the check,
-     * so fix what it says and check again. A preview reaches nothing
+     * so fix what it says and check again, but a \`warning\` (React's
+     * development warnings, such as a list without keys), which fails
+     * nothing: fix it when you can. A preview reaches nothing
      * outside it: a function's resource call (a connection, another App,
      * Knowledge, a model) rejects with \`resource.unavailable\`, and a
      * screen's workflow run with \`app.preview_side_effect\`. Handle either

@@ -36,10 +36,11 @@ import { and, eq } from "drizzle-orm";
 import { adminDatabase } from "../db/act.ts";
 import { clients, settings } from "../db/schema.ts";
 import { clientDomain, deploySecrets } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import { within } from "../live-reads.ts";
 import { isConfigPending } from "../rollout/targets.ts";
+import type { CoreAddress } from "./core-address.ts";
 import { healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
 
 const encoder = new TextEncoder();
@@ -75,7 +76,7 @@ export interface ClientQuotaPolicy {
 
 /** What asking a client's core takes. */
 export interface QuotaPolicyRequest {
-  coreUrl: string;
+  core: CoreAddress;
   routerSecret: string;
   /** The client's core auth secret, the signing key's source. */
   authSecret: string;
@@ -88,7 +89,7 @@ export interface QuotaPolicyRequest {
  * that isn't one). Throws when the request fails without an answer.
  */
 export const quotaPolicyReportOf = async ({
-  coreUrl,
+  core,
   routerSecret,
   authSecret,
   signal,
@@ -98,7 +99,7 @@ export const quotaPolicyReportOf = async ({
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(`${coreUrl}${quotaPolicyReportPath}`, {
+  const response = await core.fetch(`${core.origin}${quotaPolicyReportPath}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -228,14 +229,15 @@ export const clientQuotaPolicy = async (
               env.ROUTER_HOSTS,
               secrets.routerKey,
               clientId,
-              `${clientId}.${domain}`
+              `${clientId}.${domain}`,
+              env.DISPATCHER
             );
             if (typeof route === "string") {
               return null;
             }
             try {
               return await quotaPolicyReportOf({
-                coreUrl: route.coreUrl,
+                core: route.core,
                 routerSecret: route.secret,
                 authSecret: await clientAuthSecret(
                   secrets,

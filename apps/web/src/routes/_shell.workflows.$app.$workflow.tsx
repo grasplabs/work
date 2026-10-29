@@ -61,6 +61,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
 import { RunsLog } from "../workflows/runs.tsx";
+import { WorkflowTeamPicker } from "../workflows/team-picker.tsx";
 import { WorkflowTriggers } from "../workflows/triggers.tsx";
 
 // One workflow: its steps in plain words, read from its code; what starts
@@ -608,7 +609,8 @@ const WorkflowView = ({
   return (
     <Tabs defaultValue="steps" spacing="none">
       {/* As the prototype's workflow page: the title with where it is and
-          who owns it, its one action beside it, and the tabs under them. */}
+          who owns it (and which team), its one action beside it, and the
+          tabs under them. */}
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="flex min-w-0 grow basis-96 flex-col gap-2">
@@ -636,6 +638,7 @@ const WorkflowView = ({
                   ? t`Owned by you`
                   : t`Owned by ${owner}`}
               </span>
+              <WorkflowTeamPicker workflow={summary} />
             </div>
             {summary.scheduleStopped ? (
               <p className="text-destructive">

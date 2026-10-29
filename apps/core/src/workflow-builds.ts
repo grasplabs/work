@@ -2,6 +2,7 @@ import {
   appModuleName,
   compilerVersion,
   openWorkflowEntry,
+  packageModulePrefix,
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import {
@@ -13,6 +14,7 @@ import {
   maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
+import { profileLimits } from "@grasp-os/open-workflow/limits";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
@@ -49,7 +51,7 @@ import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
-import { sealedPackagesSchema } from "./workflows/package-seal.ts";
+import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
@@ -305,7 +307,7 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
  * `GeneratedListen`): its event binding, its strategy, what of each event
  * it reads, and its filters, each a type and the CloudEvents attributes it
  * requires (by CloudEvents' rule for names), each a template the host
- * builds in the task's enter step.
+ * builds in the task's enter step, and its correlations.
  */
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
@@ -320,6 +322,21 @@ const sealedListenSchema = z.strictObject({
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
           )
           .max(16),
+        // Each correlation by name, and the inbox attribute it correlates
+        // on (generate.ts, `GeneratedCorrelation`): never an expression.
+        correlate: z
+          .array(
+            z.strictObject({
+              name: z
+                .string()
+                .min(1)
+                .max(profileLimits.maxCorrelationNameLength),
+              attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
+            })
+          )
+          .min(1)
+          .max(profileLimits.maxCorrelations)
+          .optional(),
       })
     )
     .min(1)
@@ -908,9 +925,6 @@ export interface LoadedBuild {
   readonly packages: { readonly graphHash: string } | undefined;
 }
 
-/** The prefix of an approved package's module (`packageModuleName`). */
-const packageModulePrefix = "pkg~";
-
 /**
  * Whether a build's compute modules hold exactly the package modules its
  * manifest seals (`entries`, by name): each one, no other (none for a
@@ -936,11 +950,6 @@ const packagesAgree = (
     chars <= packageLimits.workflowPackageChars
   );
 };
-
-/** Where a version's manifest seals the approved packages its modules import. */
-const manifestPackagesSchema = z.object({
-  packages: sealedPackagesSchema.optional(),
-});
 
 /** A version's compute modules, as sealed. */
 export interface LoadedModules {

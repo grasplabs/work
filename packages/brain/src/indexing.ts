@@ -7,6 +7,7 @@ import { z } from "zod";
 import { outboxedIfChanged } from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import { brainErrors } from "./contract.ts";
+import { insertChunks } from "./db/d1.ts";
 import { brainPayloads, documents, sections, versions } from "./db/schema.ts";
 import { parseBaseFields } from "./frontmatter.ts";
 import type { Json } from "./json.ts";
@@ -37,7 +38,7 @@ import { readPayload } from "./payloads.ts";
 // The workflow (`runIndexing`, once per document version and run) reads the
 // version's payload and publishes it, retrying with backoff; each failed
 // attempt marks the document `retrying`, and once the retries are spent it
-// is `failed`, with the code of why: the dead letter. The cron trigger
+// is `failed`, with the code of why: the dead letter. The clock
 // starts runs that never started and fails documents whose run ended
 // without indexing them (`sweepIndexing`), and starts a new run for a
 // failed document after a while, doubling, a bounded number of times.
@@ -46,9 +47,6 @@ import { readPayload } from "./payloads.ts";
 // its current version before the purge reports done
 // (`requireCurrentIndexed`), or the purge fails with
 // `knowledge.purge_index_pending` and its indexing run is started.
-
-/** D1 binds at most 100 parameters to one statement: a section binds 8. */
-const sectionsPerInsert = 10;
 
 /** How the host retries and times a step of an indexing job. */
 export interface StepConfig {
@@ -75,10 +73,10 @@ export interface IndexStep {
   ) => Promise<unknown>;
 }
 
-/** Documents the cron trigger looks at, each minute. */
+/** Documents the clock looks at, each minute. */
 const sweepBatch = 20;
 
-/** How long a document may stay queued before the cron trigger looks. */
+/** How long a document may stay queued before the clock looks. */
 const staleAfterMs = 2 * 60_000;
 
 /**
@@ -128,12 +126,10 @@ const publishStatements = (
     headings: JSON.stringify(section.headings),
     text: section.text,
   }));
-  const inserts: BatchItem<"sqlite">[] = [];
-  for (let start = 0; start < rows.length; start += sectionsPerInsert) {
-    inserts.push(
-      db.insert(sections).values(rows.slice(start, start + sectionsPerInsert))
-    );
-  }
+  const inserts = insertChunks(
+    rows,
+    (row) => db.insert(sections).values(row).toSQL().params.length
+  ).map((chunk) => db.insert(sections).values(chunk));
   return [
     db
       .delete(sections)
@@ -234,7 +230,7 @@ const stateOf = async (db: DrizzleD1Database, documentId: string) =>
 /**
  * Starts indexing `documentId`'s current version now, logging a failure:
  * its run, unless that one is still going; once that one has ended (failed),
- * the next run, whatever backoff the cron trigger would have kept.
+ * the next run, whatever backoff the clock would have kept.
  */
 const startCurrentRun = async <C>(
   brain: Brain<C>,
@@ -299,7 +295,7 @@ const refusePurgePending = async <C>(
   try {
     const state = await stateOf(db, documentId);
     // Only while search doesn't hold its current version; its audit event
-    // with it, in one batch, and drained with the cron trigger's next run.
+    // with it, in one batch, and drained with the clock's next run.
     await db.batch([
       db
         .update(documents)
@@ -407,7 +403,7 @@ export const requireCurrentIndexed = async <C>(
  * Publishes a save's version from the sections it split, right after its
  * batch. Resolves whether search holds it now. When it can't, the
  * document stays queued and its indexing run is started; that failing
- * too, the cron trigger starts it. A purge's (`purgeBy`), whose erasure
+ * too, the clock starts it. A purge's (`purgeBy`), whose erasure
  * mustn't wait on the index, makes sure search holds the current version,
  * whatever saved it (`requireCurrentIndexed`), or throws.
  */
@@ -497,7 +493,7 @@ export const runIndexing = async <C>(
 };
 
 /**
- * Runs the cron trigger starts again for a failed document, at most,
+ * Runs the clock starts again for a failed document, at most,
  * unless a purge is waiting on it (`indexPurgePending`): that one's go on,
  * a day apart, for as long as it takes.
  */

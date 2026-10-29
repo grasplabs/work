@@ -15,6 +15,7 @@ import {
   settledAs,
   sourcesFor,
   stepIndex,
+  suitesFor,
   steps,
   teamNumbersOf,
   teamsOf,
@@ -190,6 +191,32 @@ describe("the brain on each step", () => {
       "notion",
     ]);
   });
+
+  it("offers the places the kickoff named first, and no other suite's than the one it named, unless already noted", () => {
+    const named = { suites: ["google" as const], sources: ["notion" as const] };
+    expect({
+      sources: sourcesFor(["microsoft", "google"], named).map(({ id }) => id),
+      noted: sourcesFor(["microsoft", "google"], named, ["sharepoint"]).map(
+        ({ id }) => id
+      ),
+    }).toStrictEqual({
+      sources: ["notion", "drive", "confluence"],
+      noted: ["notion", "sharepoint", "drive", "confluence"],
+    });
+  });
+
+  it.each([
+    { named: ["google" as const], offered: ["google"] },
+    // Nothing named, or only what this deployment can't offer: all of them.
+    { named: [], offered: ["microsoft", "google"] },
+  ])(
+    "offers the sign-ins the kickoff named, or all ($named)",
+    ({ named, offered }) => {
+      expect(
+        suitesFor(["microsoft", "google"], { suites: named, sources: [] })
+      ).toStrictEqual(offered);
+    }
+  );
 
   it("has a figure for every step, as full as Grasp knows", () => {
     for (const step of steps) {

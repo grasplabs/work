@@ -219,6 +219,18 @@ const coreDb: D1State = {
   schema: `${core}db/core`,
   tables: {
     users: exported(auth),
+    person_erasures: exported(
+      `${core}person-erasure.ts`,
+      "Who was erased, and the keyed hash of their email that keeps them out until an admin releases it: a move must keep both."
+    ),
+    erased_subjects: exported(
+      `${core}person-erasure.ts`,
+      "Keyed hashes of an erased person's sign-in identities, which keep them out of Teams, the directory and sign-in: a move must keep them."
+    ),
+    person_erasure_areas: exported(
+      `${core}person-erasure.ts`,
+      "Each area of an erasure, pending until done: an obligation still owed, retried by the clock."
+    ),
     sessions: secret(
       auth,
       "Bearer tokens of signed-in browsers: people sign in again at the destination (46.2)."
@@ -230,6 +242,10 @@ const coreDb: D1State = {
       "App token signing keys, private keys encrypted with BETTER_AUTH_SECRET."
     ),
     organizations: exported(auth),
+    org_settings: exported(`${core}org-settings.ts`),
+    policy_documents: exported(`${core}policies.ts`),
+    policy_rules: exported(`${core}policies.ts`),
+    policy_exceptions: exported(`${core}policies.ts`),
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
@@ -282,6 +298,7 @@ const coreDb: D1State = {
     app_default_stores: exported(`${core}app-activation.ts`),
     app_test_fixtures: transient(`${core}app-tests.ts`),
     app_test_runs: transient(`${core}workflows/fixture-runs.ts`),
+    app_test_decisions: transient(`${core}workflows/fixture-decisions.ts`),
     screen_submissions: exported(`${core}screen-submissions.ts`),
     action_invocations: exported(`${core}action-invocation.ts`),
     preview_fixture_stores: transient(`${core}sealed-previews.ts`),
@@ -292,6 +309,14 @@ const coreDb: D1State = {
       `${core}brain-capture.ts`,
       "Settled runs' outcomes still owed to the Brain, and those it gave up on."
     ),
+    run_brain_evidence: transient(
+      `${core}workflows/host.ts`,
+      "What each run's latest recall cites, checked before its next calls."
+    ),
+    run_evidence_holds: transient(
+      `${core}workflows/resource-reads.ts`,
+      "The runs whose evidence a run holds, its children's whose output it took: checked with its own."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -301,6 +326,10 @@ const coreDb: D1State = {
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
     run_mail_stamps: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_calls: exported(`${core}workflows/mail-stamps.ts`),
+    resource_run_mail_calls: exported(
+      `${core}workflows/mail-stamps.ts`,
+      "As run_mail_calls, for independent workflow runs: what keeps a connector trigger's mail loop in its run's lineage."
+    ),
     run_mail_stamp_claims: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_stamp_refusals: exported(`${core}workflows/connector-events.ts`),
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
@@ -329,6 +358,7 @@ const coreDb: D1State = {
     dependency_admission_refusals: exported(`${core}dependencies/requests.ts`),
     workflow_param_values: exported(`${core}workflows/params.ts`),
     workflow_owners: exported(`${core}workflows/owners.ts`),
+    workflow_teams: exported(`${core}workflows/teams.ts`),
     hidden_connectors: exported(`${core}connections.ts`),
     tool_class_settings: exported(`${core}tool-classes.ts`),
     stephen_reach: exported(`${core}stephen-reach.ts`),
@@ -352,8 +382,17 @@ const coreDb: D1State = {
     workflow_resources: exported(`${core}workflow-resources.ts`),
     workflow_resource_versions: exported(`${core}workflow-resources.ts`),
     workflow_resource_members: exported(`${core}workflow-resources.ts`),
+    workflow_resource_processes: exported(`${core}workflow-resources.ts`),
     trigger_resources: exported(`${core}trigger-resources.ts`),
     trigger_resource_versions: exported(`${core}trigger-resources.ts`),
+    connector_trigger_holds: exported(
+      `${core}workflows/connector-triggers.ts`,
+      "Events a connector trigger held back at its hourly limit: still owed a run, or dropped after a day."
+    ),
+    trigger_schedules: exported(
+      `${core}trigger-resources.ts`,
+      "Schedule triggers' next ticks and failed starts: deadlines a move keeps (46.2 step 9)."
+    ),
     workflow_start_receipts: exported(`${core}workflow-starts.ts`),
     workflow_resource_runs: exported(`${core}workflows/resource-runs.ts`),
     workflow_emitted_events: exported(
@@ -373,8 +412,10 @@ const coreDb: D1State = {
     workflow_resource_drafts: exported(`${core}workflow-drafts.ts`),
     workflow_resource_draft_modules: exported(`${core}workflow-drafts.ts`),
     workflow_resource_draft_inspections: cache(`${core}workflow-drafts.ts`),
+    workflow_resource_lifecycles: exported(`${core}workflow-lifecycle.ts`),
     app_workflow_bindings: exported(`${core}app-workflow-bindings.ts`),
     workflow_candidate_runs: exported(`${core}workflows/candidate-runs.ts`),
+    workflow_item_tests: exported(`${core}workflows/item-tests.ts`),
     landscape_syncs: transient(`${core}landscape.ts`),
     landscape_apps: cache(
       `${core}landscape.ts`,
@@ -448,6 +489,10 @@ const knowledgeDb: D1State = {
     brain_entity_keys: exported(
       `${brain}entities.ts`,
       `The exact evidence each entity is known by, as deployment-keyed HMACs. ${brainPending}`
+    ),
+    brain_assertions: exported(
+      `${brain}entities.ts`,
+      `Relations the Brain's sources state between their entities, with their passages: derived, but only by model calls again. ${brainPending}`
     ),
     brain_mentions: exported(
       `${brain}entities.ts`,
@@ -534,6 +579,14 @@ const connectDb: D1State = {
     call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
+    token_revocations: exported(
+      `${connect}revocations.ts`,
+      "Revokes a provider still owes, the tokens kept until they go through: an obligation a move must keep."
+    ),
+    erased_people: exported(
+      `${connect}person-erasure.ts`,
+      "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
+    ),
   },
 };
 
@@ -575,6 +628,7 @@ const workspaces: DurableObjectState = {
     chat_build_jobs: exported(`${core}build-jobs.ts`),
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
+    custom_widgets: exported(`${core}workspace.ts`),
     email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),
@@ -721,6 +775,20 @@ const onboarding: DurableObjectState = {
     mail_outbox: exported(
       `${core}mail-outbox.ts`,
       "Holds no link secret: a link is filled in only as its mail is sent."
+    ),
+  },
+  kv: {
+    purges: exported(
+      `${core}onboarding/store.ts`,
+      "How often a content purge reached or rewrote the onboarding: a kickoff read, or a drawing drawn, before one keeps nothing."
+    ),
+    kickoff_records_owed: exported(
+      `${core}onboarding/store.ts`,
+      "The brain's records of the kickoff still owed, which the alarm keeps until done."
+    ),
+    kickoff_source_at: exported(
+      `${core}onboarding/store.ts`,
+      "When a kickoff a purge forgot came in: its source stays by title and day alone."
     ),
   },
 };
@@ -975,9 +1043,11 @@ export const clientStateRegistry: ClientStateRegistry = {
   },
   notClientState: {
     "apps/admin/wrangler.jsonc":
-      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+      "Grasp's admin runs once per stage, in Grasp's account: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+      "The router runs once per stage, in Grasp's account, and holds only hostnames the admin writes.",
+    "apps/gateway/wrangler.jsonc":
+      "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },
   d1: [coreDb, knowledgeDb, connectDb],
   durableObjects: [

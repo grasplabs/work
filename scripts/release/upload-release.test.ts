@@ -20,9 +20,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
-import { moduleKey } from "@grasp-os/shared/release";
+import {
+  limitEvidenceFile,
+  limitEvidenceKey,
+  moduleKey,
+} from "@grasp-os/shared/release";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { limitEvidenceFor } from "./evidence-lib.ts";
 import { builds, info } from "./fixture-release.ts";
 import { generateManifest, writeRelease } from "./manifest-lib.ts";
 
@@ -41,7 +46,17 @@ const run = async (args: string[], env: NodeJS.ProcessEnv): Promise<string> => {
   return stdout;
 };
 const SCRIPT = path.join(import.meta.dirname, "upload-release.ts");
-const BUCKET = "grasp-os-releases";
+
+/** How a run ended: "ok", or what it said on its way out. */
+const outcomeOf = async (running: Promise<unknown>): Promise<string> => {
+  try {
+    await running;
+    return "ok";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+const BUCKET = "grasp-releases-staging";
 const HTTP_OK = 200;
 const HTTP_NOT_FOUND = 404;
 const HTTP_PRECONDITION_FAILED = 412;
@@ -136,6 +151,10 @@ describe("publishing a release", () => {
   beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
     writeRelease(dir, manifest, fixture);
+    writeFileSync(
+      path.join(dir, limitEvidenceFile),
+      `${JSON.stringify(limitEvidenceFor(manifest, null))}\n`
+    );
     bucket = emptyBucket();
     const current = bucket;
     server = createServer((request, response) => {
@@ -166,7 +185,7 @@ describe("publishing a release", () => {
       R2_SECRET_ACCESS_KEY: "test-secret",
     });
 
-  it("uploads every blob, then the manifest last", async () => {
+  it("uploads every blob, then the limit evidence with its SHA-256, then the manifest last", async () => {
     await upload();
     const referenced = [
       ...Object.values(manifest.workers).flatMap((worker) => [
@@ -177,10 +196,54 @@ describe("publishing a release", () => {
       ]),
       ...Object.values(manifest.assets).map((asset) => asset.r2Key),
     ];
-    expect(bucket.puts.at(-1)).toBe(published);
-    expect(bucket.puts.slice(0, -1).toSorted()).toStrictEqual(
+    const evidence = limitEvidenceKey(manifest.releaseId);
+    expect(bucket.puts.slice(-2)).toStrictEqual([evidence, published]);
+    expect(bucket.checksums.get(evidence)).toBe(
+      sha256Base64(readFileSync(path.join(dir, limitEvidenceFile)))
+    );
+    expect(bucket.puts.slice(0, -2).toSorted()).toStrictEqual(
       [...new Set(referenced)].toSorted()
     );
+  });
+
+  it("publishes nothing without the release's own limit evidence, or with evidence for a raise it lacks", async () => {
+    const evidenceFile = path.join(dir, limitEvidenceFile);
+    rmSync(evidenceFile);
+    const missing = await outcomeOf(upload());
+    writeFileSync(
+      evidenceFile,
+      JSON.stringify({
+        ...limitEvidenceFor(manifest, null),
+        releaseId: "r999999-fffffff",
+      })
+    );
+    const another = await outcomeOf(upload());
+    // The release before had fewer workflow steps: a raise, with no evidence.
+    writeFileSync(
+      evidenceFile,
+      JSON.stringify({
+        ...limitEvidenceFor(manifest, null),
+        previousRelease: {
+          releaseId: "r000000-0000000",
+          platformLimits: { ...info.platformLimits, workflowSteps: 10 },
+        },
+      })
+    );
+    const unevidenced = await outcomeOf(upload());
+
+    expect({
+      missing: missing.includes("has no limit-evidence.json"),
+      another: another.includes("is for r999999-fffffff"),
+      unevidenced: unevidenced.includes(
+        "raises workflowSteps to 1000 without capacity and security evidence"
+      ),
+      published: bucket.objects.has(published),
+    }).toStrictEqual({
+      missing: true,
+      another: true,
+      unevidenced: true,
+      published: false,
+    });
   });
 
   it("skips blobs R2 has, and never replaces a published manifest", async () => {

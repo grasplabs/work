@@ -14,8 +14,8 @@ import { grantReviewed } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { connectionIn, envOf, reached } from "./contexts.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -195,7 +195,7 @@ describe("removing a member", () => {
       env.CONNECT.listConnections(asConnectPerson(person, "user"))
     ).resolves.toStrictEqual([]);
     // Connect's own events reach the same log once they're drained from its
-    // outbox, as core's cron trigger does (and `allEvents` does first).
+    // outbox, as core's clock does (and `allEvents` does first).
     const events = await allEvents();
     const disconnected = events.find(
       ({ action, target }) =>
@@ -456,7 +456,7 @@ describe("removing a member, while their OAuth flows are open", () => {
     await expect(outcome(finished)).resolves.toBe("connection.flow_invalid");
   });
 
-  it("disconnects a connection that finished anyway, on the next cron run", async () => {
+  it("disconnects a connection that finished anyway, on the next clock run", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     await admin.api.members.remove(person.userId);
@@ -484,7 +484,7 @@ describe("removing a member, while their OAuth flows are open", () => {
     });
     await expect(tokensHeld(connectionId)).resolves.toBeGreaterThan(0);
 
-    await runCron();
+    await runMinuteTasks();
 
     await expect(tokensHeld(connectionId)).resolves.toBe(0);
     await expect(env.CONNECT.listConnections(owner)).resolves.toStrictEqual([]);
@@ -501,7 +501,7 @@ const connectWith = (
         return call;
       }
       // Everything else as connect has it: its audit outbox, say, which
-      // the same cron run drains.
+      // the same clock run drains.
       const value: unknown = Reflect.get(target, key);
       return value;
     },
@@ -557,7 +557,7 @@ const removedLongAgo = async (count: number, removedAt: number) => {
   );
 };
 
-describe("the cron trigger's disconnect retry", () => {
+describe("the clock's disconnect retry", () => {
   it("retries every removal until its disconnect completes, however many and however old", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
@@ -569,7 +569,7 @@ describe("the cron trigger's disconnect retry", () => {
     await expect(
       outcome(core.authenticate().members.remove(person.userId))
     ).resolves.toBe("member.connections_pending");
-    await runCron({ CONNECT: connectDown });
+    await runMinuteTasks({ CONNECT: connectDown });
     await expect(tokensHeld(connectionId)).resolves.toBeGreaterThan(0);
     // As if all that was months ago, with more removals still pending
     // since than one call to connect takes.
@@ -584,14 +584,14 @@ describe("the cron trigger's disconnect retry", () => {
     );
 
     await afterFlowsExpire(async () => {
-      await runCron();
+      await runMinuteTasks();
     });
 
     await expect(tokensHeld(connectionId)).resolves.toBe(0);
     // Every one of them completed: the next run finds nothing to do.
     const { calls, connect } = countingConnect();
     await afterFlowsExpire(async () => {
-      await runCron({ CONNECT: connect });
+      await runMinuteTasks({ CONNECT: connect });
     });
     expect(calls).toStrictEqual([]);
   });
@@ -612,7 +612,7 @@ describe("the cron trigger's disconnect retry", () => {
       }
     });
 
-    await runCron({ CONNECT: connect });
+    await runMinuteTasks({ CONNECT: connect });
 
     expect(mostInFlight).toBeGreaterThan(1);
     expect(mostInFlight).toBeLessThanOrEqual(4);

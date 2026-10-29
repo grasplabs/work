@@ -8,6 +8,7 @@ import { defineErrorFamily } from "./errors.ts";
 import type { OnboardingHrApi } from "./hr.ts";
 import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
+import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   OrganizationChangeInput,
@@ -273,6 +274,12 @@ export interface OnboardingView {
    */
   sponsor: string | null;
   /**
+   * What the kickoff told about the company that the onboarding speaks
+   * of: its suites and places, and Stephen's words about its work. Empty
+   * before the kickoff is in, or where it said nothing of it.
+   */
+  context: OnboardingContext;
+  /**
    * How many who take part wait for the admin to confirm the organization
    * before their link can go out: new on a list saved while a plan was set.
    */
@@ -341,11 +348,32 @@ export interface LinkToSend {
 /** How many weeks the programme with Grasp runs. */
 export const programmeWeeks = 8;
 
+/** When the next weekly report is ready, and what it is about. */
+export interface NextReport {
+  /** Days from today until a report is ready; 0 on the day it is. */
+  inDays: number;
+  /** The week it is on: the one that just closed when it is ready, otherwise the one that runs. */
+  week: number;
+  /** How many of that week's seven days have passed, 0 to 7; 7 on the day it is ready. */
+  through: number;
+}
+
+/** The days a weekly report is about, as run activity reads them. */
+export interface ReportWindow {
+  /** Its last day, `YYYY-MM-DD`. */
+  to: string;
+  /** How many days, up to and with `to`. */
+  days: number;
+}
+
 /**
  * The programme with Grasp, as the dashboard shows it to everyone signed
- * in: when it began and where the onboarding stands, nothing more. It
- * begins on the Monday (UTC) of the week the interviews start, and runs in
- * weeks from there.
+ * in: when it began, where the onboarding stands, and where today falls
+ * in its weeks and its weekly reports, nothing more. It begins on the
+ * Monday (UTC) of the week the interviews start, and runs in weeks from
+ * there; a week's report is ready on the first day of the week after it.
+ * Core counts the days (onboarding/cadence.ts), so every page says the
+ * same week.
  */
 export interface Programme {
   /** Its first day, a Monday: `YYYY-MM-DD`. */
@@ -357,6 +385,16 @@ export interface Programme {
    * none has begun.
    */
   stage: Exclude<(typeof onboardingStages)[number], "none"> | null;
+  /** Today, as the programme counts days (UTC): `YYYY-MM-DD`. */
+  today: string;
+  /** The week today is in, from 1: week 1 before it begins, and on past its last. */
+  week: number;
+  /** Whether `week` is one of the programme's own, so the line counts it "of 8". */
+  inProgramme: boolean;
+  /** The next weekly report. */
+  nextReport: NextReport;
+  /** What the next weekly report is about: its week's days up to today. */
+  reportWindow: ReportWindow;
 }
 
 /**

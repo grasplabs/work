@@ -1,8 +1,7 @@
 /**
  * What someone at Grasp does to a company's own Grasp, in its Setup
  * (src/admin/setup.tsx), as the admin's own client page did before the
- * admin took it in: follow and steer setting it up (confirm Workers Paid,
- * resume), pin it to a release, move it to another ring, change how its
+ * admin took it in: pin it to a release, move it to another ring, change how its
  * people sign in, apply its settings now, rotate its secrets, roll it
  * back from the rollout that last reached it. Each is the same server
  * function, audited as the staff member Access vouches for, and each
@@ -39,7 +38,6 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 
 import type { AlertOutcome } from "../alerts.ts";
-import { usd } from "../clients/cost.tsx";
 import {
   applySettingsFn,
   fetchClientLive,
@@ -59,17 +57,13 @@ import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
 import type { ClientSignInRecord } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
-import {
-  confirmClientWorkersPaid,
-  retryClient,
-} from "../provision/functions.ts";
-import type { ProvisioningView } from "../provision/queries.ts";
-import { useProvisionAction } from "../provision/use-action.ts";
 import { formatTime } from "../releases/format.ts";
+import { releaseName } from "../releases/version.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
+import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
@@ -89,190 +83,7 @@ export const useRefreshSetup = (): Refresh => {
   };
 };
 
-const dashboard = (accountId: string): string =>
-  `https://dash.cloudflare.com/${accountId}`;
-
-// Setting it up.
-
-/** What someone at Grasp does while the run waits for Workers Paid. */
-const WorkersPaid = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const confirm = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () =>
-            await confirmClientWorkersPaid({
-              data: { clientId: view.clientId },
-            }),
-          refresh
-        )
-    );
-  };
-  return (
-    <>
-      <ol className="flex list-decimal flex-col gap-2 pl-5">
-        <li>
-          <a
-            className="underline underline-offset-4"
-            href={dashboard(view.client?.accountId ?? "")}
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            Open the account in the Cloudflare dashboard
-          </a>{" "}
-          and upgrade it to Workers Paid.
-        </li>
-        <li>Turn on R2 in the same account: the deploy creates buckets.</li>
-        <li>Confirm below; the deploy starts at once.</li>
-      </ol>
-      {view.workersPaidConfirmed ? (
-        // Confirmed already: the run goes on by itself, and the page follows.
-        <p>Confirmed, waiting for the run.</p>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={busy} onClick={confirm} size="sm">
-            Workers Paid is on
-          </Button>
-          <Failure failure={failure} />
-        </div>
-      )}
-    </>
-  );
-};
-
-/** Why the run stopped, and resuming it. */
-const Stopped = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  const { busy, failure, run } = useProvisionAction();
-  const resume = () => {
-    void run(
-      async () =>
-        await thenRefresh(
-          async () => await retryClient({ data: { clientId: view.clientId } }),
-          refresh
-        )
-    );
-  };
-  if (view.client === null) {
-    // It stopped before it recorded the company: nothing to resume.
-    return (
-      <>
-        <p>{`The run stopped: ${view.stopped?.error ?? "before it recorded the company"}.`}</p>
-        <p className="text-muted-foreground">
-          Fix what it says, or pick another account, and{" "}
-          <Link
-            className="hover:text-foreground underline underline-offset-4"
-            to="/new-organization"
-          >
-            add it again
-          </Link>{" "}
-          with the same address.
-        </p>
-      </>
-    );
-  }
-  let reason = "its run is gone (Workflows keeps a run for a while only)";
-  if (view.stopped !== null) {
-    reason = `${view.stopped.step} step: ${view.stopped.error}`;
-  } else if (view.run === "terminated") {
-    reason = "it was ended outside the admin";
-  } else if (view.run !== null && view.run !== "gone") {
-    reason = `it failed after its retries${
-      view.deploy === null || view.deploy.error === null
-        ? ""
-        : ` (${view.deploy.error})`
-    }`;
-  }
-  return (
-    <>
-      <p>{`The run stopped: ${reason}.`}</p>
-      <p className="text-muted-foreground">
-        Fix what it says, then resume: it picks up from the deploy if it got
-        that far, and makes nothing twice.
-      </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={busy} onClick={resume} size="sm">
-          Resume
-        </Button>
-        <Failure failure={failure} />
-      </div>
-    </>
-  );
-};
-
-/** Where setting a company up is now, and what someone at Grasp does there. */
-export const SettingUpNow = ({
-  view,
-  refresh,
-}: {
-  view: ProvisioningView;
-  refresh: Refresh;
-}) => {
-  switch (view.phase) {
-    case "account": {
-      return (
-        <Body>
-          <p>Setting up: its Cloudflare account, then its record.</p>
-        </Body>
-      );
-    }
-    case "workers_paid": {
-      return (
-        <Body>
-          <WorkersPaid refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "deploying": {
-      return (
-        <Body>
-          <p>
-            {`Deploying ${view.deploy?.releaseId ?? "the release"}: ${
-              view.deploy?.step === null || view.deploy === null
-                ? "starting"
-                : `${view.deploy.step} done`
-            }.`}
-          </p>
-        </Body>
-      );
-    }
-    case "failed": {
-      return (
-        <Body>
-          <Stopped refresh={refresh} view={view} />
-        </Body>
-      );
-    }
-    case "active": {
-      return (
-        <Body>
-          <p>{`Live at https://${view.hostname ?? ""}, and passed its smoke check.`}</p>
-        </Body>
-      );
-    }
-    default: {
-      return null;
-    }
-  }
-};
-
 // Its releases.
-
-/** A release in a line, for a list to choose from: its id, and its notes. */
-const releaseLine = ({ id, notes }: { id: string; notes: string }): string =>
-  notes === "" ? id : `${id} · ${notes}`;
 
 /** Pinning it to a release, and letting it follow the rollouts again. */
 export const PinRelease = ({
@@ -284,7 +95,12 @@ export const PinRelease = ({
   clientId: string;
   pinned: string | null;
   /** The imported releases, newest first. */
-  releases: readonly { id: string; notes: string }[];
+  releases: readonly {
+    id: string;
+    notes: string;
+    versionMajor?: number | null;
+    versionMinor?: number | null;
+  }[];
   refresh: Refresh;
 }) => {
   const { busy, failure, run } = useRolloutAction();
@@ -317,7 +133,7 @@ export const PinRelease = ({
         >
           {releases.map((release) => (
             <NativeSelectOption key={release.id} value={release.id}>
-              {releaseLine(release)}
+              {releaseName(release)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
@@ -382,20 +198,24 @@ export const RingChange = ({
     >
       <Field>
         <FieldLabel htmlFor="setup-ring">Ring</FieldLabel>
-        <Input
-          className="max-w-32"
-          defaultValue={ring}
+        <NativeSelect
+          className="max-w-48"
+          defaultValue={String(ring)}
           id="setup-ring"
           // Keyed by the ring: it starts again from the one read after each change.
           key={ring}
-          min={0}
           name="ring"
-          required
-          type="number"
-        />
+        >
+          {ringChoices(ring).map((choice) => (
+            <NativeSelectOption key={choice} value={String(choice)}>
+              {ringWords(choice)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
         <FieldDescription>
-          When rollouts reach it: ring 0 first. Rollouts started from now on use
-          it.
+          When rollouts reach it: Alpha (our own deployments) first, then Beta
+          (organisations that want the latest changes), then Production.
+          Rollouts started from now on use it.
         </FieldDescription>
       </Field>
       <div className="flex flex-wrap items-center gap-3">
@@ -1023,22 +843,6 @@ const liveDriftWords: Record<ClientDriftState, string> = {
   unknown: "Not known",
 };
 
-const percent = new Intl.NumberFormat("en", {
-  style: "percent",
-  maximumFractionDigits: 1,
-});
-
-/** The last day's errors, in words: unknown, none asked, or their share. */
-const errorsWords = (day: LiveStatus["day"]): string => {
-  if (day === null) {
-    return "Not known";
-  }
-  if (day.requests === 0) {
-    return "No requests";
-  }
-  return `${percent.format(day.errors / day.requests)} of ${day.requests}`;
-};
-
 /** Whether it runs the shared secrets in Secrets Store now, in words. */
 const sharedWords = (current: boolean | null): string => {
   if (current === null) {
@@ -1046,12 +850,6 @@ const sharedWords = (current: boolean | null): string => {
   }
   return current ? "Current" : "Behind: a secrets rollout brings it up";
 };
-
-/** What it cost this month so far, with its AI Gateway share. */
-const costWords = (cost: LiveStatus["costUsd"]): string =>
-  cost === null
-    ? "Not known"
-    : `${usd.format(cost.workers + cost.ai)} (AI ${usd.format(cost.ai)})`;
 
 /** Its account read live, or not: still reading (null), or it failed. */
 type LiveRead = LiveStatus | "failed" | null;
@@ -1065,7 +863,6 @@ const liveRows = (
     value: reachWords[live.reach],
     attention: live.reach === "unreachable" || live.reach === "no_route",
   },
-  { label: "Errors, last 24 h", value: errorsWords(live.day) },
   {
     label: "Drift",
     value: liveDriftWords[live.drift],
@@ -1076,7 +873,6 @@ const liveRows = (
     value: sharedWords(live.sharedSecretsCurrent),
     attention: live.sharedSecretsCurrent === false,
   },
-  { label: "Cost this month", value: costWords(live.costUsd) },
 ];
 
 /** Client `clientId`'s live numbers, or `failed` when they couldn't be read. Never throws. */

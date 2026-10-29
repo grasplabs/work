@@ -33,15 +33,13 @@ import {
 } from "../../admin/platform-parts.tsx";
 import {
   companiesOf,
-  errorRateLimit,
-  errorRateOf,
   nextRing,
   ringsOf,
   spreadOf,
 } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
 import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
-import { formatDate, formatPercent, whole } from "../../admin/words.ts";
+import { formatDate, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
@@ -50,17 +48,8 @@ import type { RolloutView } from "../../rollout/queries.ts";
 import { useRolloutAction } from "../../rollout/use-action.ts";
 import { thenRefresh } from "../../use-action.ts";
 
-const usd = new Intl.NumberFormat("en", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
 /** What the live reads gave for each company: null while reading, `failed` if they did. */
 type Live = Record<string, LiveStatus> | "failed" | null;
-
-/** A cell with nothing to say: a dash, never a made-up number. */
-const Nothing = () => <span className="text-muted-foreground">–</span>;
 
 /** A day, as the admin's pages say it. */
 const dayOf = (at: Date): string => formatDate(at.toISOString().slice(0, 10));
@@ -78,7 +67,7 @@ const rolloutBadgeWords = (
   }
   return next === null
     ? rolloutStatusWords[rollout.status]
-    : `Waits for ring ${next}`;
+    : `Waits for ${ringWords(next)}`;
 };
 
 /**
@@ -116,7 +105,7 @@ const ApproveRing = ({
         }}
         size="sm"
       >
-        {`Approve ring ${next}`}
+        {`Approve ${ringWords(next)}`}
       </Button>
       {failure === null ? null : (
         <p className="text-destructive text-sm" role="alert">
@@ -281,88 +270,55 @@ const WhoRunsWhat = ({
 /** A company's row: how it stands, then its figures; it opens its Setup. */
 const CompanyRow = ({
   row,
-  live,
   standing,
   needs,
 }: {
   row: GridRow;
-  live: LiveStatus | undefined;
   standing: Standing;
   needs: PlatformNeed[];
-}) => {
-  const rate = errorRateOf(live);
-  return (
-    <TableRow className="relative">
-      <TableCell variant="card">
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <Link
-            className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-            params={{ clientId: row.id }}
-            to="/organizations/$clientId/setup"
-          >
-            {row.name}
-          </Link>
-          <span className="text-xs">
-            <StandingMark standing={standing} />
-          </span>
-          {needs.map((need) => (
-            <span className="text-status-attention text-xs" key={need.kind}>
-              {needWords(need)}
-            </span>
-          ))}
+}) => (
+  <TableRow className="relative">
+    <TableCell variant="card">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <Link
+          className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
+          params={{ clientId: row.id }}
+          to="/organizations/$clientId/setup"
+        >
+          {row.name}
+        </Link>
+        <span className="text-xs">
+          <StandingMark standing={standing} />
         </span>
-      </TableCell>
-      <TableCell
-        className="hidden whitespace-normal @xl:table-cell"
-        variant="card"
-      >
-        {ringWords(row.ring)}
-      </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="card">
-        <span className="flex flex-col">
-          <span className="font-mono text-xs">{row.release ?? "–"}</span>
-          {row.pinnedReleaseId === null ? null : (
-            <span className="text-muted-foreground text-xs">Pinned</span>
-          )}
-        </span>
-      </TableCell>
-      <TableCell className="hidden text-right @3xl:table-cell" variant="card">
-        {live?.day ? (
-          <span className="tabular-nums">{whole(live.day.requests)}</span>
-        ) : (
-          <Nothing />
-        )}
-      </TableCell>
-      <TableCell className="hidden text-right @3xl:table-cell" variant="card">
-        {rate === null ? (
-          <Nothing />
-        ) : (
-          <span
-            className={cn(
-              "tabular-nums",
-              rate >= errorRateLimit && "text-status-attention"
-            )}
-          >
-            {formatPercent(rate)}
+        {needs.map((need) => (
+          <span className="text-status-attention text-xs" key={need.kind}>
+            {needWords(need)}
           </span>
+        ))}
+      </span>
+    </TableCell>
+    <TableCell
+      className="hidden whitespace-normal @xl:table-cell"
+      variant="card"
+    >
+      {ringWords(row.ring)}
+    </TableCell>
+    <TableCell className="hidden @2xl:table-cell" variant="card">
+      <span className="flex flex-col">
+        <span className="font-mono text-xs">{row.release ?? "–"}</span>
+        {row.pinnedReleaseId === null ? null : (
+          <span className="text-muted-foreground text-xs">Pinned</span>
         )}
-      </TableCell>
-      <TableCell className="hidden text-right @4xl:table-cell" variant="card">
-        {live?.costUsd ? (
-          <span className="tabular-nums">{usd.format(live.costUsd.ai)}</span>
-        ) : (
-          <Nothing />
-        )}
-      </TableCell>
-      <TableCell variant="card">
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground mx-auto size-4"
-        />
-      </TableCell>
-    </TableRow>
-  );
-};
+      </span>
+    </TableCell>
+    <TableCell variant="card">
+      <ChevronRightIcon
+        aria-hidden="true"
+        className="text-muted-foreground mx-auto size-4"
+      />
+    </TableCell>
+  </TableRow>
+);
 
 /** What the table says of where its figures come from. */
 const everyCompanyLine = (live: Live): string => {
@@ -398,24 +354,6 @@ const EveryCompany = ({
               <TableHead className="hidden w-36 @2xl:table-cell" variant="card">
                 Release
               </TableHead>
-              <TableHead
-                className="hidden w-32 text-right @3xl:table-cell"
-                variant="card"
-              >
-                Requests
-              </TableHead>
-              <TableHead
-                className="hidden w-24 text-right @3xl:table-cell"
-                variant="card"
-              >
-                Errors
-              </TableHead>
-              <TableHead
-                className="hidden w-28 text-right @4xl:table-cell"
-                variant="card"
-              >
-                Models
-              </TableHead>
               <TableHead className="w-9" variant="card">
                 <span className="sr-only">Open</span>
               </TableHead>
@@ -426,7 +364,6 @@ const EveryCompany = ({
               ({ row, standing, needs }) => (
                 <CompanyRow
                   key={row.id}
-                  live={read[row.id]}
                   needs={needs}
                   row={row}
                   standing={standing}

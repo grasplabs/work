@@ -1,5 +1,5 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import { ClockObject, tickClock as tick } from "@grasp-os/workerflow/clock";
+import { ClockObject } from "@grasp-os/workerflow/clock";
 import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
 import {
@@ -8,11 +8,14 @@ import {
 } from "./composio-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
 import { expireHeldActions } from "./pending.ts";
+import { retryRevocations } from "./revocations.ts";
 import { resealTokens } from "./tokens.ts";
 
 // The client's clock for connect (spec 43.5, @grasp-os/workerflow/clock):
 // connect's cleanup and rotation tasks, each run once a minute with its own
-// durable state, on the clock's alarm and on connect's cron while it lasts.
+// durable state, on the clock's alarm. Connect has no cron: a Workers for
+// Platforms user Worker can't. Core's clock arms this one every minute, if
+// nothing has (core's src/clock.ts).
 
 /** Every task connect's clock runs. */
 export const clockTasks: readonly ClockTask<Env>[] = [
@@ -29,6 +32,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryComposioCleanups,
   },
+  // Revokes at a provider a disconnect couldn't make (src/revocations.ts).
+  { name: "oauth.revocations", period: "minute", run: retryRevocations },
   // Held writes from a chat platform whose company's day is over.
   { name: "held.ended", period: "minute", run: expireHeldActions },
   // What a rotated key sealed, sealed again.
@@ -37,7 +42,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
 ];
 
 /** How connect logs a task that failed: its name and the error, nothing it worked on. */
-const report: ClockReport = (event, task, error) => {
+export const report: ClockReport = (event, task, error) => {
   log.error(event, { task, ...errorFields(error) });
 };
 
@@ -63,12 +68,3 @@ const clockNamespace = (
 export const clock = (
   env: Pick<Env, "CLOCK" | "DURABLE_OBJECT_JURISDICTION">
 ): DurableObjectStub<Clock> => clockNamespace(env).getByName("clock");
-
-/** The cron's explicit tick, for time `at`. */
-export const tickClock = async (
-  env: Env,
-  ctx: Pick<ExecutionContext, "waitUntil">,
-  at: number
-): Promise<void> => {
-  await tick(clock(env), clockTasks, report, env, ctx, "minute", at);
-};

@@ -1,17 +1,29 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
-import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
+import {
+  offeredWidgets,
+  standardWidgetIdSchema,
+} from "@grasp-os/shared/dashboard";
 import type {
-  OnboardingProgress,
-  Programme,
-} from "@grasp-os/shared/onboarding";
+  BoardReport,
+  DashboardWidgetId,
+  StandardWidgetId,
+} from "@grasp-os/shared/dashboard";
+import { expectedMessageOf } from "@grasp-os/shared/errors";
+import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
+import type { Programme } from "@grasp-os/shared/onboarding";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  WaitingFeed,
+  WaitingItem,
+  WaitingKind,
+  WaitingPart,
+} from "@grasp-os/shared/waiting";
+import { handledRunDays } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
-import { readPendingRequests } from "../activity/pending.tsx";
-import { integrationsOf } from "../connections/integrations.ts";
+import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
@@ -20,12 +32,9 @@ import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
-import { readNotifications } from "./failed-workflows.tsx";
-import { offeredWidgets } from "./layout.ts";
-import { loadEveryPage } from "./outcome-pages.ts";
-import { reportWindow, todayUtc } from "./programme.ts";
-import type { ReportReads } from "./report.ts";
-import { noReturns } from "./returns.ts";
+import { markShownRead } from "./failed-workflows.tsx";
+import { goalProgressOf, noReturns, teamProgressOf } from "./returns.ts";
+import type { GoalProgress, TeamsRead } from "./returns.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
@@ -35,62 +44,119 @@ import type { Board, EnginesRead } from "./widget-board.tsx";
 // What the dashboard reads, each part on its own so one that fails or
 // hangs leaves the rest: what waits on the person, the person's layout of
 // the widget board and what it shows (the workflows, the engines, the
-// runs over time, the signals), the programme with Grasp and what its
-// weekly report is made from, and, for admins, the latest of the audit
+// runs over time, the signals), the programme with Grasp and its weekly
+// report, both as core counts and reads them, and, for admins, the latest of the audit
 // trail.
 
-/** The catalog and connections, as integrations: those whose access ran out are on the list. */
-const readIntegrations = async (session: Session) => {
-  const [catalog, connections] = await Promise.all([
-    session.connections.catalog(),
-    session.connections.list(),
-  ]);
-  return integrationsOf(catalog.entries, connections);
+/** The items of the feed of one kind. */
+const ofKind = <Kind extends WaitingKind>(
+  feed: WaitingFeed,
+  kind: Kind
+): Extract<WaitingItem, { kind: Kind }>[] =>
+  feed.items.filter(
+    (item): item is Extract<WaitingItem, { kind: Kind }> => item.kind === kind
+  );
+
+/** One part of the feed: what it read of it, or why it couldn't. */
+const partOf = <T>(
+  feed: Loaded<WaitingFeed>,
+  part: WaitingPart,
+  read: (feed: WaitingFeed) => T
+): Loaded<T> => {
+  if (feed.state !== "ready") {
+    return feed;
+  }
+  const failed = feed.data.unread.find((unread) => unread.part === part);
+  // Core's own words for why: not translated.
+  return failed === undefined
+    ? { state: "ready", data: read(feed.data) }
+    : {
+        state: "refused",
+        message: expectedMessageOf(failed.code) ?? failed.code,
+      };
 };
 
-/** What waits on the person. Reading it marks the failed workflows it lists as read. */
+/**
+ * What waits on the person: core's feed of it, in one read, and the names
+ * permission requests are shown with. Reading it marks the failed
+ * workflows it lists as read.
+ */
 export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [
-    held,
-    outcomes,
-    failed,
-    integrations,
-    requests,
-    dependencies,
-    screens,
-    decisions,
-  ] = await Promise.all([
-    loadFromCore(core, async (session) => await session.pendingActions.list()),
-    loadEveryPage(
-      core,
-      async (session, before) => await session.unknownOutcomes.list(before)
+  const feed = await loadFromCore(
+    core,
+    async (session) => await session.waiting.list()
+  );
+  const failed = partOf(feed, "notifications", (read) => {
+    const notifications = read.items.flatMap((item) =>
+      item.kind === "failedRun" ||
+      item.kind === "openQuestion" ||
+      item.kind === "stoppedSchedule"
+        ? [item.notification]
+        : []
+    );
+    return {
+      page: {
+        notifications,
+        unread: read.unreadNotifications,
+        more: read.moreNotifications,
+      },
+      model: read.fixModel ?? undefined,
+    };
+  });
+  // Marked read as shown; one that couldn't be stays unread, and shows all the same.
+  if (failed.state === "ready") {
+    await loadFromCore(core, async (session) => {
+      await markShownRead(session, failed.data.page.notifications);
+    });
+  }
+  const asked = partOf(feed, "requests", (read) =>
+    ofKind(read, "permissionRequest").map(({ request }) => request)
+  );
+  // Only admins decide them: nobody else is shown any.
+  let requests: Waiting["requests"];
+  if (decidesRequests(identity)) {
+    requests =
+      asked.state === "ready"
+        ? await loadFromCore(
+            core,
+            async (session) => await readRequestNames(session, asked.data)
+          )
+        : asked;
+  }
+  return {
+    held: partOf(feed, "held", (read) =>
+      ofKind(read, "heldWrite").map(({ action }) => action)
     ),
-    loadFromCore(core, readNotifications),
-    loadFromCore(core, readIntegrations),
-    decidesRequests(identity)
-      ? loadFromCore(core, readPendingRequests)
-      : undefined,
-    loadFromCore(core, async (session) => await session.dependencies.waiting()),
-    decidesRequests(identity)
-      ? loadFromCore(
-          core,
-          async (session) => await session.screenTrust.waiting()
+    outcomes: partOf(feed, "outcomes", (read) =>
+      ofKind(read, "unknownOutcome").map(({ outcome }) => outcome)
+    ),
+    failed,
+    reconnect: partOf(feed, "connections", (read) =>
+      ofKind(read, "signInAgain")
+    ),
+    versions: partOf(feed, "versions", (read) => ofKind(read, "goLive")),
+    requests,
+    dependencies: partOf(feed, "packages", (read) => {
+      const items = ofKind(read, "packages");
+      return {
+        policyGeneration: items[0]?.policyGeneration ?? 0,
+        requests: items.map(({ request }) => request),
+      };
+    }),
+    screens: decidesRequests(identity)
+      ? partOf(feed, "screens", (read) =>
+          ofKind(read, "appApproval").map(({ waiting }) => waiting)
         )
       : undefined,
-    loadFromCore(core, async (session) => await session.decisions.waiting()),
-  ]);
-  return {
-    held,
-    outcomes,
-    failed,
-    integrations,
-    requests,
-    dependencies,
-    screens,
-    decisions,
+    decisions: partOf(feed, "decisions", (read) =>
+      ofKind(read, "decision").map(({ decision }) => decision)
+    ),
+    workflowGoLives: partOf(feed, "workflowGoLives", (read) =>
+      ofKind(read, "workflowGoLive")
+    ),
   };
 };
 
@@ -233,60 +299,64 @@ const readEngines = async (
 };
 
 /**
- * The runs the weekly report counts: those of its own week
- * (`reportWindow`), read once the programme is known, not the board's
- * days. Without a programme no report is offered: the board's runs.
+ * The goals widget's read: the board's goals, with the workflows read once
+ * for the board, to say how far each goal's are.
  */
-const readReportRuns = async (
+const readGoals = async (
   core: CoreConnection,
-  programme: Promise<Loaded<Programme | null>>,
-  board: Promise<Loaded<RunActivity>>,
-  today: string
-): Promise<Loaded<RunActivity>> => {
-  const loaded = await programme;
-  if (loaded.state !== "ready" || loaded.data === null) {
-    return await board;
-  }
-  const window = reportWindow(loaded.data.start, today);
-  return await loadFromCore(
-    core,
-    async (session) => await session.workflows.activity(window)
+  workflows: Promise<Loaded<WorkflowSummary[]>>
+): Promise<Loaded<GoalProgress[]>> => {
+  const both = await bothOf(
+    loadFromCore(core, async (session) => await session.brain.goals()),
+    workflows
   );
+  return both.state === "ready"
+    ? { state: "ready", data: goalProgressOf(both.data[0], both.data[1]) }
+    : both;
 };
 
 /**
- * What the weekly report is made from, once all of it came: the board's
- * reads, and, for admins, how many the interviews heard.
+ * The teams widget's read: the workflows read once for the board, each
+ * with the team that owns it, and what they handled this week.
  */
-const readReport = async (
-  board: Pick<Board, "workflows" | "runs" | "signals">,
-  people: Promise<Loaded<OnboardingProgress | null>> | undefined
-): Promise<ReportReads> => {
-  const [runs, workflows, signals, heard] = await Promise.all([
-    board.runs,
-    board.workflows,
-    board.signals,
-    people,
-  ]);
-  return { runs, workflows, signals, people: heard };
+const readTeams = async (
+  core: CoreConnection,
+  workflows: Promise<Loaded<WorkflowSummary[]>>
+): Promise<Loaded<TeamsRead>> => {
+  const both = await bothOf(
+    workflows,
+    loadFromCore(
+      core,
+      async (session) =>
+        await session.workflows.activity({ days: handledRunDays })
+    )
+  );
+  return both.state === "ready"
+    ? { state: "ready", data: teamProgressOf(both.data[0], both.data[1]) }
+    : both;
 };
 
 /**
  * The widgets on the person's board, in order: as they last saved it, or
  * as it begins when they never did. A read that fails gives the board as
- * it begins too, rather than no board. A widget no longer `offered` (an
- * admin's, saved before they stopped being one) is left out.
+ * it begins too, rather than no board. One of Grasp's own no longer
+ * `offered` (an admin's, saved before they stopped being one) is left out;
+ * a widget Grasp made for them is there while they have it (core says).
  */
 const readLayout = async (
   core: CoreConnection,
   offered: readonly StandardWidgetId[]
-): Promise<readonly StandardWidgetId[]> => {
+): Promise<readonly DashboardWidgetId[]> => {
   const loaded = await loadFromCore(
     core,
     async (session) => await session.dashboard.layout()
   );
   return loaded.state === "ready" && loaded.data !== null
-    ? loaded.data.widgets.filter((widget) => offered.includes(widget))
+    ? loaded.data.widgets.filter(
+        (widget) =>
+          !standardWidgetIdSchema.safeParse(widget).success ||
+          offered.some((each) => each === widget)
+      )
     : offered;
 };
 
@@ -300,10 +370,8 @@ export interface Dashboard {
   board: Board;
   /** The programme with Grasp; null without a plan. */
   programme: Loaded<Programme | null>;
-  /** The day it was read on, UTC, as the programme counts days. */
-  today: string;
-  /** What the weekly report is made from. */
-  report: Promise<ReportReads>;
+  /** The weekly report, as core reads it in one call: shown only with a programme. */
+  report: Promise<Loaded<BoardReport>>;
   /** Admins only. */
   activity: Promise<Loaded<LatestActivity>> | undefined;
 }
@@ -319,6 +387,8 @@ export const readDashboard = async (
     async (session) => await readSignals(session, identity)
   );
   const engines = readEngines(core, workflows);
+  const goals = readGoals(core, workflows);
+  const teams = readTeams(core, workflows);
   // The full view's days, once: the block shows the last week of them.
   const runs = loadFromCore(
     core,
@@ -335,33 +405,31 @@ export const readDashboard = async (
     core,
     async (session) => await session.onboarding.programme()
   );
-  const people = isAdmin(identity.role)
-    ? loadFromCore(core, async (session) => {
-        const { progress } = await session.onboarding.view();
-        return progress;
-      })
-    : undefined;
-  const today = todayUtc();
-  const report = readReport(
-    { workflows, runs: readReportRuns(core, programme, runs, today), signals },
-    people
+  // Not awaited: the report's dialog waits for it.
+  const report = loadFromCore(
+    core,
+    async (session) => await session.dashboard.report()
   );
   // The board's order and the page's heading are known before they show,
   // so nothing moves once it is there; read alongside what waits, which
   // the page waits for too.
-  const [waiting, layout, read] = await Promise.all([
+  const [waiting, layout, made, read] = await Promise.all([
     readWaiting(core, identity),
     readLayout(core, offered),
+    loadFromCore(core, async (session) => await session.dashboard.widgets()),
     programme,
   ]);
   return {
     waiting,
-    // Core keeps no hours, stages, goals or teams' work yet: the return,
-    // goals and teams widgets show they have nothing to count.
+    // Core keeps no hours or stages yet: the return widget shows it has
+    // nothing to count.
     board: {
       layout,
       offered,
+      made,
       returns: noReturns,
+      goals,
+      teams,
       workflows,
       engines,
       runs,
@@ -369,7 +437,6 @@ export const readDashboard = async (
       spend,
     },
     programme: read,
-    today,
     report,
     activity,
   };

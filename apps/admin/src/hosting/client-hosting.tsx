@@ -4,10 +4,13 @@
  * go (the destination the admin picks by itself, and what keeps every
  * other from taking it), dedicated hosting as an advanced choice, and
  * starting or resuming its provisioning there, with where its operation
- * is (src/hosting/placement.ts).
+ * is (src/hosting/placement.ts). Once it's live, releasing it to a later
+ * release and rolling it back to the one before, which run the same
+ * operation again.
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -33,13 +36,24 @@ import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
-import { placeAndProvisionFn } from "./functions.ts";
+import {
+  offboardPlacedClientFn,
+  placeAndProvisionFn,
+  releasePlacedClientFn,
+  rollbackPlacedClientFn,
+} from "./functions.ts";
+import type { OffboardResult, PlaceResult } from "./functions.ts";
 import type {
   ClientHostingView,
   DestinationChoice,
   DestinationProblem,
 } from "./placement.ts";
-import { operationErrorWords, placeRefusals, problemWords } from "./words.ts";
+import {
+  offboardRefusals,
+  operationErrorWords,
+  placeRefusals,
+  problemWords,
+} from "./words.ts";
 
 /** What the radio for the automatic destination is worth. */
 const automatic = "automatic";
@@ -240,6 +254,178 @@ const startWords = (view: ClientHostingView): string => {
     : "Start provisioning";
 };
 
+/**
+ * A live client's releases: a later one, the one a stopped release was
+ * of again (which resumes it), or back to the one before. Each runs its
+ * operation for that release, as provisioning did.
+ */
+const Releases = ({
+  view,
+  operation,
+  releases,
+}: {
+  view: ClientHostingView;
+  operation: NonNullable<ClientHostingView["operation"]>;
+  releases: readonly { id: string; notes: string }[];
+}) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(placeRefusals);
+  // Stopped: failed, or left running by a runner that has ended.
+  const stopped =
+    operation.status === "failed" ||
+    (operation.status === "running" && !view.going);
+  const others = releases.filter(({ id }) => id !== operation.releaseId);
+  const choices = stopped ? releases : others;
+  // Staff's pick while it's still offered; otherwise the first offered,
+  // so what's shown is what's sent after the page refreshes.
+  const [picked, setPicked] = useState<string | null>(null);
+  const fallback = stopped ? operation.releaseId : (others[0]?.id ?? "");
+  const releaseId =
+    picked !== null && choices.some(({ id }) => id === picked)
+      ? picked
+      : fallback;
+  const refreshing = async (task: () => Promise<PlaceResult>) => {
+    await run(
+      async () =>
+        await thenRefresh(task, async () => {
+          await router.invalidate({ sync: true });
+        })
+    );
+  };
+  const release = () => {
+    void refreshing(
+      async () =>
+        await releasePlacedClientFn({
+          data: { clientId: view.clientId, releaseId },
+        })
+    );
+  };
+  const rollBack = () => {
+    void refreshing(
+      async () =>
+        await rollbackPlacedClientFn({ data: { clientId: view.clientId } })
+    );
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <Field>
+        <FieldLabel htmlFor="hosting-next-release">
+          {stopped ? "Release it to" : "Release"}
+        </FieldLabel>
+        <NativeSelect
+          id="hosting-next-release"
+          onChange={(event) => {
+            setPicked(event.target.value);
+          }}
+          value={releaseId}
+        >
+          {choices.map((each) => (
+            <NativeSelectOption key={each.id} value={each.id}>
+              {each.id}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button
+          disabled={busy || view.going || releaseId === ""}
+          onClick={release}
+        >
+          {stopped && releaseId === operation.releaseId
+            ? "Resume the release"
+            : "Release it"}
+        </Button>
+        {operation.previousReleaseId === null ? null : (
+          <Button
+            disabled={busy || view.going}
+            onClick={rollBack}
+            variant="outline"
+          >
+            {`Roll back to ${operation.previousReleaseId}`}
+          </Button>
+        )}
+        {failure === null ? null : (
+          <p className="text-destructive text-sm" role="alert">
+            {failure}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Offboarding it: its address out of the router at once, nothing deleted
+ * (src/hosting/offboarding.ts). Deleting its resources is a second step,
+ * once their retention is over, on Platform's Offboarded page.
+ */
+const Offboarding = ({ view }: { view: ClientHostingView }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(offboardRefusals);
+  const [understood, setUnderstood] = useState(false);
+  const act = (task: () => Promise<OffboardResult>) => {
+    void run(
+      async () =>
+        await thenRefresh(task, async () => {
+          await router.invalidate({ sync: true });
+        })
+    );
+  };
+  const { offboardedAt } = view;
+  if (offboardedAt === null) {
+    return (
+      <div className="flex flex-col gap-3 border-t pt-4">
+        <p className="text-sm">
+          Offboarding takes its address out of the router at once: its people
+          reach it no more. Nothing is deleted.
+        </p>
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={understood}
+            id="offboard-understood"
+            onCheckedChange={setUnderstood}
+          />
+          <FieldLabel htmlFor="offboard-understood">
+            It stops serving its people now
+          </FieldLabel>
+        </Field>
+        <div className="flex flex-wrap items-center gap-4">
+          <Button
+            disabled={busy || !understood}
+            onClick={() => {
+              act(
+                async () =>
+                  await offboardPlacedClientFn({
+                    data: { clientId: view.clientId },
+                  })
+              );
+            }}
+            variant="destructive"
+          >
+            Offboard it
+          </Button>
+          {failure === null ? null : (
+            <p className="text-destructive text-sm" role="alert">
+              {failure}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <p className="border-t pt-4 text-sm">
+      {`Offboarded on ${formatTime(offboardedAt)} UTC: its resources are deleted, after their retention, from Platform's Offboarded page.`}
+    </p>
+  );
+};
+
+/** Whether it's still to provision: not live, done, or offboarded. */
+const provisionable = (view: ClientHostingView): boolean =>
+  view.operation?.status !== "done" &&
+  !view.active &&
+  view.offboardedAt === null;
+
 export const ClientHosting = ({
   view,
   releases,
@@ -278,7 +464,6 @@ export const ClientHosting = ({
       return result;
     });
   };
-  const done = view.operation?.status === "done";
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1 text-sm">
@@ -295,7 +480,11 @@ export const ClientHosting = ({
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
       )}
-      {done ? null : (
+      {view.active && view.operation !== null ? (
+        <Releases operation={view.operation} releases={releases} view={view} />
+      ) : null}
+      {view.placement === null ? null : <Offboarding view={view} />}
+      {provisionable(view) ? (
         <div className="flex flex-col gap-4">
           {view.operation === null ? (
             <Field>
@@ -332,7 +521,7 @@ export const ClientHosting = ({
             <Problems problems={blocking} />
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

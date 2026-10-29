@@ -36,6 +36,18 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`A connection needs signing in again`,
   },
   {
+    action: "connection.revoked",
+    text: msg`Revoked a disconnected account's access at its provider`,
+  },
+  {
+    action: "connection.revoke_superseded",
+    text: msg`Kept access at the provider for an account connected again`,
+  },
+  {
+    action: "connection.revoke_abandoned",
+    text: msg`Gave up revoking a disconnected account's access at its provider`,
+  },
+  {
     action: "connection.events.read",
     text: msg`Read what changed at a connection`,
   },
@@ -133,6 +145,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
+  {
+    action: "member.erasure.requested",
+    text: msg`Asked to erase a removed member`,
+  },
+  { action: "member.erased", text: msg`Erased a removed member` },
+  {
+    action: "member.address.released",
+    text: msg`Let an erased member's old address in again`,
+  },
   { action: "member.role", text: msg`Changed a member's role` },
   { action: "member.invited", text: msg`Invited someone` },
   {

@@ -38,16 +38,19 @@ import {
   deriveRouterSecret,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
+import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
+import { routeOf } from "../clients/grid.ts";
 import { audit } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, clientWorkers } from "../db/schema.ts";
+import { clients } from "../db/schema.ts";
 import { MissingStoreSecretError } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
-import { coreOrigin } from "../deploy/router.ts";
+import { errorCode } from "../deploy/errors.ts";
+import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import { coreOriginOf } from "./drift.ts";
 
 /** How long core may take to take a notice. */
 const noticeTimeoutMs = 10_000;
@@ -62,31 +65,67 @@ const encoder = new TextEncoder();
 export interface ActivityContext {
   db: AdminDatabase;
   secrets: () => Promise<Pick<DeploySecrets, "routerKey" | "clientKey">>;
+  /**
+   * How a core placed on Workers for Platforms is reached: its hostname's
+   * entry in the router's map, through the dispatch namespace the router
+   * binds (GRA-283). A core on its account's workers.dev doesn't need it.
+   */
+  router?: {
+    hosts: RouterHosts;
+    domain: string | null;
+    dispatcher: ClientDispatcher | undefined;
+  };
 }
 
 /**
- * Where client `clientId`'s core answers, and the generation of the
- * secrets it runs with; null before its first deploy recorded them.
+ * Where client `clientId`'s core answers, as its operation's probe passed
+ * at it, and the generation of the secrets it runs with; null before its
+ * operation recorded one.
  */
 const coreOf = async (db: AdminDatabase, clientId: string) => {
-  const [row] = await db
-    .select({
-      subdomain: clients.workersSubdomain,
-      generation: clients.generation,
-      scriptName: clientWorkers.scriptName,
-    })
-    .from(clients)
-    .innerJoin(
-      clientWorkers,
-      and(
-        eq(clientWorkers.clientId, clients.id),
-        eq(clientWorkers.worker, "core")
-      )
-    )
-    .where(eq(clients.id, clientId));
-  return row?.subdomain === null || row === undefined
+  const [client, origin] = await Promise.all([
+    db
+      .select({ generation: clients.generation })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get(),
+    coreOriginOf(db, clientId),
+  ]);
+  return client === undefined || origin === null
     ? null
-    : { ...row, subdomain: row.subdomain };
+    : { generation: client.generation, origin };
+};
+
+/**
+ * Where client `clientId`'s core answers: as its hostname's entry in the
+ * router's map names it (its account's workers.dev origin, or its script
+ * through the dispatch namespace the router binds), at the generation it
+ * runs; else, without the router's map, the origin its probe passed at.
+ * Null when neither is known.
+ */
+const addressOf = async (
+  context: ActivityContext,
+  clientId: string,
+  core: { generation: number; origin: string },
+  routerKey: string
+): Promise<CoreAddress | null> => {
+  const { router } = context;
+  if (router === undefined || router.domain === null) {
+    return {
+      origin: core.origin,
+      fetch: async (input, init) => await fetch(input, init),
+    };
+  }
+  const route = await routeOf(
+    router.hosts,
+    routerKey,
+    clientId,
+    `${clientId}.${router.domain}`,
+    router.dispatcher
+  );
+  return typeof route === "string" || route.generation !== core.generation
+    ? null
+    : route.core;
 };
 
 /** Whether `error` is `fetch` getting no answer: refused, cut off, or timed out. */
@@ -115,6 +154,10 @@ const send = async (
     return "core_unknown";
   }
   const secrets = await context.secrets();
+  const address = await addressOf(context, clientId, core, secrets.routerKey);
+  if (address === null) {
+    return "core_unknown";
+  }
   const body = JSON.stringify(notice);
   const key = await hkdfHmacKey(
     await clientAuthSecret(secrets, clientId, core.generation),
@@ -124,8 +167,8 @@ const send = async (
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(
-    `${coreOrigin(core.scriptName, core.subdomain)}${platformUpdatePath}`,
+  const response = await address.fetch(
+    `${address.origin}${platformUpdatePath}`,
     {
       method: "POST",
       headers: {

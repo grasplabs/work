@@ -58,12 +58,13 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientAdminReads } from "../db/schema.ts";
 import { deploySecrets } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited } from "../live-reads.ts";
 import { proposalOf, roomsAccess, roomsLinks } from "../proposal/proposal.ts";
 import type { Proposal } from "../proposal/proposal.ts";
+import type { CoreAddress } from "./core-address.ts";
 import { clientGrid, healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
 import type { GridRow } from "./grid.ts";
 
@@ -120,7 +121,7 @@ export type ClientAdmin =
 
 /** What asking a client's core for its snapshot takes. */
 export interface AdminSnapshotRequestOptions {
-  coreUrl: string;
+  core: CoreAddress;
   routerSecret: string;
   /** The client's core auth secret, the signing key's source. */
   authSecret: string;
@@ -146,7 +147,7 @@ const statusError = (status: number): AdminReadError => {
  * connection).
  */
 export const adminSnapshotOf = async ({
-  coreUrl,
+  core,
   routerSecret,
   authSecret,
   staff,
@@ -163,7 +164,7 @@ export const adminSnapshotOf = async ({
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await fetch(`${coreUrl}${adminSnapshotPath}`, {
+  const response = await core.fetch(`${core.origin}${adminSnapshotPath}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -229,7 +230,8 @@ const readClient = async (
           env.ROUTER_HOSTS,
           secrets.routerKey,
           row.id,
-          row.hostname
+          row.hostname,
+          env.DISPATCHER
         );
         if (route === "no_route") {
           return { error: "no_route" };
@@ -238,7 +240,7 @@ const readClient = async (
           return { error: "unconfigured" };
         }
         const read = await adminSnapshotOf({
-          coreUrl: route.coreUrl,
+          core: route.core,
           routerSecret: route.secret,
           authSecret: await clientAuthSecret(secrets, row.id, route.generation),
           staff,

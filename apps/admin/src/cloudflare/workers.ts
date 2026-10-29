@@ -496,13 +496,15 @@ export const setScriptSubdomain = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false }
+  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false },
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "POST",
       path: `${scriptPath(accountId, scriptName)}/subdomain`,
       json: { enabled, previews_enabled: previewsEnabled },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -636,13 +638,15 @@ export const putSchedules = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  crons: readonly string[]
+  crons: readonly string[],
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${scriptPath(accountId, scriptName)}/schedules`,
       json: crons.map((cron) => ({ cron })),
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -680,13 +684,15 @@ export const queryD1 = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  sql: string
+  sql: string,
+  beforeSend?: () => Promise<void>
 ): Promise<Record<string, unknown>[][]> => {
   const statements = await api.call(
     {
       method: "POST",
       path: `/accounts/${accountId}/d1/database/${databaseId}/query`,
       json: { sql },
+      ...(beforeSend === undefined ? {} : { beforeSend }),
     },
     queryResultSchema
   );
@@ -710,26 +716,36 @@ export interface D1Migration {
 const sqlText = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
 /**
+ * Before each send of a migration, its retries included: throws to stop
+ * it unsent, as a runner that no longer holds its client does.
+ */
+export type BeforeMigration = () => Promise<void>;
+
+/**
  * Applies `pending` in order, each with its record in one query, stopping
- * at the first that fails.
+ * at the first that fails, and checking `before` before each send of each.
  */
 const applyInOrder = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  pending: readonly D1Migration[]
+  pending: readonly D1Migration[],
+  before: BeforeMigration
 ): Promise<void> => {
   const [next, ...rest] = pending;
   if (next === undefined) {
     return;
   }
+  // Checked before each send of it, the API client's retries included: a
+  // 429 waited out must not let a runner that lost its client send it.
   await queryD1(
     api,
     accountId,
     databaseId,
-    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`
+    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`,
+    before
   );
-  await applyInOrder(api, accountId, databaseId, rest);
+  await applyInOrder(api, accountId, databaseId, rest, before);
 };
 
 /**
@@ -740,12 +756,17 @@ const applyInOrder = async (
  * query, as Wrangler sends them; the API doesn't document such a query as
  * atomic, so a failure part way could leave a migration half applied and
  * unrecorded (threat model CO13). The first that fails stops the rest.
+ * `before` is checked before each one: a runner's check that it still
+ * holds its client, so one that lost it applies nothing more.
  */
 export const applyD1Migrations = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  migrations: readonly D1Migration[]
+  migrations: readonly D1Migration[],
+  before: BeforeMigration = async () => {
+    await Promise.resolve();
+  }
 ): Promise<string[]> => {
   const [, applied = []] = await queryD1(
     api,
@@ -755,7 +776,7 @@ export const applyD1Migrations = async (
   );
   const done = new Set(applied.map(({ name }) => name));
   const pending = migrations.filter(({ name }) => !done.has(name));
-  await applyInOrder(api, accountId, databaseId, pending);
+  await applyInOrder(api, accountId, databaseId, pending, before);
   return pending.map(({ name }) => name);
 };
 
@@ -788,6 +809,27 @@ const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
     : `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
 
 /**
+ * Deletes the script `target` names with what it binds of its own (its
+ * Durable Object namespaces and their data: `force`). One that's gone
+ * already counts as deleted.
+ */
+export const deleteTargetScript = async (
+  api: CloudflareApi,
+  target: ScriptTarget
+): Promise<void> => {
+  try {
+    await api.call(
+      { method: "DELETE", path: targetPath(target), query: { force: "true" } },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+};
+
+/**
  * Uploads `upload` as the script `target` names, live at once (a dispatch
  * namespace has no gradual deployments), keeping the secrets its latest
  * version has (`keep_bindings`): a placed client's secrets are delivered
@@ -798,7 +840,8 @@ const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  upload: WorkerUpload
+  upload: WorkerUpload,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   const path = targetPath(target);
   await api.call(
@@ -807,13 +850,17 @@ export const uploadTargetScript = async (
       path,
       body: await uploadForm(api, target.accountId, path, upload, "keep"),
       idempotent: upload.metadata.migrations === undefined,
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
 };
 
+// A script the namespace hasn't got answers 200 with a null `script` (the
+// namespace's own details), not a 404, as a real namespace showed
+// (GRA-430, 28 Oct).
 const dispatchScriptSchema = z.object({
-  script: z.object({ migration_tag: z.string().nullish() }),
+  script: z.object({ migration_tag: z.string().nullish() }).nullable(),
 });
 
 /**
@@ -833,6 +880,9 @@ export const targetMigrationState = async (
       { method: "GET", path: targetPath(target) },
       dispatchScriptSchema
     );
+    if (script === null) {
+      return { exists: false };
+    }
     const tag = script.migration_tag;
     return {
       exists: true,
@@ -855,16 +905,44 @@ export const targetMigrationState = async (
 export const putTargetSecret = async (
   api: CloudflareApi,
   target: ScriptTarget,
-  secret: Secret
+  secret: Secret,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${targetPath(target)}/secrets`,
       json: { name: secret.name, text: secret.value, type: "secret_text" },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
+};
+
+/**
+ * Removes the secret `name` from the script `target` names. One that's
+ * already gone counts as removed, so a retried step succeeds.
+ */
+export const deleteTargetSecret = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  name: string,
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<void> => {
+  try {
+    await api.call(
+      {
+        method: "DELETE",
+        path: `${targetPath(target)}/secrets/${encodeURIComponent(name)}`,
+        ...(signal === undefined ? {} : { signal }),
+      },
+      z.unknown()
+    );
+  } catch (error) {
+    if (!isNotFound(error)) {
+      throw error;
+    }
+  }
 };
 
 /** The names of the secrets the script `target` names has; their values are never read. */

@@ -19,9 +19,10 @@ import { useState } from "react";
 import { AppLogo } from "../connections/app-logo.tsx";
 import {
   canConnect,
-  signInAgainTarget,
   ConnectDialog,
+  signInAgainTarget,
 } from "../connections/connect-dialog.tsx";
+import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { ConnectionList } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
@@ -35,6 +36,10 @@ import type {
   IntegrationState,
 } from "../connections/integrations.ts";
 import { OfferSwitch } from "../connections/offer-switch.tsx";
+import {
+  WorkflowsCount,
+  WorkflowsUsing,
+} from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
@@ -51,17 +56,20 @@ import type { Loaded } from "../load-from-core.tsx";
 
 // One integration, as in the prototype (`routes/integrations/$integrationId.tsx`):
 // its tile, name and what it is for, then Overview (where it stands, what
-// its tools can do, and, for admins, whether it is offered) and Account
-// (each connection made to it: who connected it, when, signing in again
-// and disconnecting). The prototype's Workflows tab is left out: core
-// can't tell yet which workflows use a connection. A flow comes back here
-// from the provider, through core's callback, with `connection=<id>`.
+// its tools can do, and, for admins, whether it is offered), Workflows
+// (those the person can open that use it) and Account (each connection
+// made to it: who connected it, when, signing in again and
+// disconnecting). A flow comes back here from the provider, through
+// core's callback, with `connection=<id>` (and `again=1` when it signed in
+// again), and opens the success screen.
 
-type Tab = "overview" | "account";
+type Tab = "overview" | "workflows" | "account";
 
 interface IntegrationSearch {
   tab?: Tab;
   connection?: string;
+  /** The flow that made `connection` signed in again (connect-dialog.tsx). */
+  again?: true;
 }
 
 const stateText: Record<
@@ -513,9 +521,9 @@ const WhyNoConnect = ({
 };
 
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
-  const { held, tools, catalog } = Route.useLoaderData();
+  const { held, tools, catalog, uses } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { tab = "overview", connection } = Route.useSearch();
+  const { tab = "overview", connection, again = false } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
   // One sign-in for the page, held here so it stays as the page changes.
@@ -526,8 +534,9 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
   };
   // Only a connection the page lists: anyone can put an ID in a link.
   const connected =
-    connection !== undefined &&
-    integration.connections.some(({ id }) => id === connection);
+    connection === undefined
+      ? undefined
+      : integration.connections.find(({ id }) => id === connection);
   const count = integration.connections.length;
   return (
     <>
@@ -569,11 +578,21 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </Trans>
           </p>
         )}
-        {connected ? (
-          <output>
-            <Trans>Connected.</Trans>
-          </output>
-        ) : null}
+        <ConnectedDialog
+          again={again}
+          app={integration.name}
+          connection={connected}
+          onClose={() => {
+            void navigate({
+              replace: true,
+              search: (last) => ({
+                ...last,
+                connection: undefined,
+                again: undefined,
+              }),
+            });
+          }}
+        />
         <Tabs
           onValueChange={(next: Tab) => {
             void navigate({
@@ -589,6 +608,10 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           <TabsList variant="line">
             <TabsTrigger value="overview">
               <Trans>Overview</Trans>
+            </TabsTrigger>
+            <TabsTrigger value="workflows">
+              <Trans>Workflows</Trans>
+              <WorkflowsCount integration={integration} uses={uses} />
             </TabsTrigger>
             <TabsTrigger value="account">
               <Trans>Account</Trans>
@@ -606,6 +629,11 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
                 integration={integration}
                 tools={integration.listed ? tools : undefined}
               />
+            </div>
+          </TabsContent>
+          <TabsContent value="workflows">
+            <div className="pt-4">
+              <WorkflowsUsing integration={integration} uses={uses} />
             </div>
           </TabsContent>
           <TabsContent value="account">
@@ -686,9 +714,13 @@ const IntegrationRoute = () => {
 
 export const Route = createFileRoute("/_shell/integrations/$integration")({
   validateSearch: (search: Record<string, unknown>): IntegrationSearch => ({
-    tab: search.tab === "account" ? "account" : undefined,
+    tab:
+      search.tab === "account" || search.tab === "workflows"
+        ? search.tab
+        : undefined,
     connection:
       typeof search.connection === "string" ? search.connection : undefined,
+    again: search.again === 1 || search.again === "1" ? true : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => {
     const parsed = parseIntegrationKey(params.integration);

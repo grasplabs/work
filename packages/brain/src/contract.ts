@@ -99,6 +99,13 @@ export const recallBudgetSchema = z.strictObject({
   maxItems: z.int().min(1).max(recallLimits.maxItems).optional(),
   maxTokens: z.int().min(1).max(recallLimits.maxTokens).optional(),
   deadlineMs: z.int().min(1).max(recallLimits.deadlineMs).optional(),
+  /**
+   * Whether the best of what the lanes found is ordered again by the
+   * deployment's model (GRA-304), on the caller's model budget and under
+   * the deployment's model rules, within the same deadline. Off unless
+   * asked: it spends a model call on every recall that asks.
+   */
+  rerank: z.boolean().optional(),
 });
 export type RecallBudget = z.infer<typeof recallBudgetSchema>;
 
@@ -209,7 +216,7 @@ export type Coverage = z.infer<typeof coverageSchema>;
 export const memoryPackSchema = z.strictObject({
   id: idSchema,
   contractVersion: z.literal(brainContractVersion),
-  /** The retrieval policy that chose the evidence, such as `fulltext@2`. */
+  /** The retrieval policy that chose the evidence, such as `hybrid@1`. */
   retrievalPolicyVersion: z.string().min(1),
   items: z.array(memoryItemSchema).max(recallLimits.maxItems),
   /** Every source version the items cite, once each. */
@@ -346,6 +353,12 @@ export const memoryRecordSchema = z.strictObject({
   validTo: instantSchema.nullable(),
   recordedAt: instantSchema,
   reviewAt: instantSchema.nullable(),
+  /**
+   * One of the reader's own that rests on a collection they can't read
+   * now (GRA-1177): shown without its statement or what it cites, only so
+   * they can retire it. Absent otherwise.
+   */
+  withheld: z.literal(true).optional(),
 });
 export type MemoryRecord = z.infer<typeof memoryRecordSchema>;
 
@@ -768,6 +781,8 @@ export const brainErrors = errorFamily({
   "brain.budget_exceeded": "This request is over the Brain's limits for it.",
   "brain.incompatible":
     "This request follows a contract version the Brain doesn't support.",
+  "brain.revoked":
+    "Evidence this run recalled can no longer be read. Recall again before using it.",
   "brain.unavailable":
     "The Brain can't answer just now. Try again in a moment.",
 });

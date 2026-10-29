@@ -11,6 +11,9 @@ import {
   workflowEmittedEvents,
   workflowStartReceipts,
   runLineageChildren,
+  runBrainEvidence,
+  runEvidenceHolds,
+  resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
   runMailStampRefusals,
@@ -37,7 +40,7 @@ import { runFilesRemoved } from "./run-files.ts";
 // - the engine's record, by the engine itself: every run is created with
 //   the retention as its instance's own (engine.ts), which covers every
 //   way an instance ends (completed, terminated, errored);
-// - the rest by the 15-minute cron trigger (`sweepRunDetails`): what the
+// - the rest by the 15-minute clock (`sweepRunDetails`): what the
 //   run's row and its decisions keep, and connect's held actions.
 //
 // The run's row stays, with what it was and how it went: its ID, App,
@@ -134,7 +137,7 @@ const dayMs = 24 * 60 * 60 * 1000;
  */
 export const sweptPerBatch = 50;
 
-/** Most batches one cron run sweeps: 500 runs every 15 minutes. */
+/** Most batches one clock run sweeps: 500 runs every 15 minutes. */
 export const batchesPerSweep = 10;
 
 /** The statuses of a run that has ended. */
@@ -262,6 +265,8 @@ const receiptsPruned = (
       )
     ),
     db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
+    // What their recalls cited (host.ts): no new call of theirs to gate.
+    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, runs)),
     // The children their keys admitted (quotas.ts): what a delivery this
     // late starts is admitted afresh, if its lineage has room.
     db.delete(runLineageChildren).where(
@@ -343,8 +348,20 @@ const pruneReceipts = async (
   }
 };
 
-/** Most start receipts, and parameter revisions, one cron run empties. */
+/** Most start receipts, and parameter revisions, one clock run empties. */
 export const startDetailsPerSweep = 500;
+
+/**
+ * That no run holding run `run`'s evidence keeps its own details at
+ * `before` (`runEvidenceHolds`), as SQL: a parent that took its output
+ * checks that evidence before each of its releases (resource-reads.ts),
+ * and a parent may outlive its child's retention by far.
+ */
+const unheldBy = (run: SQL, before: Date): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${runEvidenceHolds} AS hold
+    JOIN workflow_resource_runs AS holder ON holder.id = hold.run_id
+    WHERE hold.held_run_id = ${run}
+      AND (holder.ended_at IS NULL OR holder.ended_at >= ${before.getTime()}))`;
 
 /**
  * Removes the input and frozen parameter values of start receipts
@@ -353,7 +370,7 @@ export const startDetailsPerSweep = 500;
  * the values of parameter revisions replaced before it or of workflows
  * deleted before it, at most {@link startDetailsPerSweep} of each, oldest
  * first, marked at `now`: set to null once, which is all the database
- * lets anything change of them. The rest is left to the next cron run.
+ * lets anything change of them. The rest is left to the next clock run.
  * One batch, so the attempts go only with their start's details, and
  * those of every start marked are gone.
  */
@@ -387,15 +404,22 @@ export const sweepWorkflowStartDetails = async (
         // retention counts from its end, as an App run's does.
         sql`NOT EXISTS (SELECT 1 FROM workflow_resource_runs AS run
           WHERE run.id = ${receipts.id}
-            AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`
+            AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`,
+        // Nor while a run holding its evidence keeps its own: a parent
+        // that took its output checks its evidence before each release
+        // (resource-reads.ts), and a parent may outlive its child's
+        // retention by far.
+        unheldBy(sql`${receipts.id}`, before)
       )
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
-  // As one bound value, within D1's bound parameters however many.
-  const due = sql`(SELECT value FROM json_each(${JSON.stringify(
+  // As one bound value, within D1's bound parameters however many. Held
+  // again as the batch runs: a hold that landed since the read keeps its
+  // run's details (`unheldBy`), whatever this sweep read.
+  const due = sql`(SELECT due.value FROM json_each(${JSON.stringify(
     dueRows.map(({ id }) => id)
-  )}))`;
+  )}) AS due WHERE ${unheldBy(sql`due.value`, before)})`;
   // What connect still holds of their runs goes first, as an App run's
   // does (`removedElsewhere`): a run that ended while a side effect of it
   // was held leaves the action, with its exact input, until its person
@@ -434,9 +458,30 @@ export const sweepWorkflowStartDetails = async (
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
+    // What mail-stamps.ts keeps of its mail: its stamps' claims first,
+    // which name them, then its calls. A copy this late starts its runs
+    // as a root, as anyone's mail does.
+    db
+      .delete(runMailStampClaims)
+      .where(
+        inArray(
+          runMailStampClaims.stamp,
+          db
+            .select({ stamp: resourceRunMailCalls.stamp })
+            .from(resourceRunMailCalls)
+            .where(inArray(resourceRunMailCalls.runId, due))
+        )
+      ),
+    db
+      .delete(resourceRunMailCalls)
+      .where(inArray(resourceRunMailCalls.runId, due)),
     // Its own files go with its details (GRA-724): marked here, their
     // chunks deleted by `sweepRunFiles`.
     runFilesRemoved(db, due),
+    // What its recalls cited (resource-reads.ts): no new call of its to gate.
+    db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
+    // And whose evidence it held: no release of its left to check.
+    db.delete(runEvidenceHolds).where(inArray(runEvidenceHolds.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who
     // answered, when and how stay.
@@ -548,11 +593,11 @@ const removedElsewhere = async (
  * Removes the details core and connect keep of runs that ended more than
  * the retention before `now`, longest ended first, read by the index of
  * ended runs that still have theirs: at most `batchesPerSweep` batches of
- * `sweptPerBatch`, the rest left to the next cron run. For each batch,
+ * `sweptPerBatch`, the rest left to the next clock run. For each batch,
  * what is kept elsewhere goes first (`removedElsewhere`), then the rows
  * are marked and emptied in one batch (`marked`). Each batch starts past
  * the last run of the one before, by when it ended and its ID, so a run
- * left out stays due for the next cron run and holds up none behind it.
+ * left out stays due for the next clock run and holds up none behind it.
  *
  * On-prem has no runs, and so reaches neither the engine nor connect.
  */

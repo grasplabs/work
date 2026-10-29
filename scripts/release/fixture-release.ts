@@ -59,6 +59,7 @@ export const info: ReleaseInfo = {
     workflowJournal: { min: 8, max: 9 },
     sdkProtocols: { min: 2, max: 2 },
   },
+  platformLimits: { authoringFiles: 200, workflowSteps: 1000 },
 };
 
 export const builds = async (): Promise<WorkerBuild[]> =>

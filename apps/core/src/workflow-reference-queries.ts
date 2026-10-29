@@ -23,15 +23,20 @@ import {
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { Release } from "./app-releases.ts";
 import {
   appWorkflowBindings,
+  workflowDecisions,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
+import {
+  answerableByNow,
+  resourceDecisionPending,
+} from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
 import { windowPages } from "./query-windows.ts";
 import { followableOrigins } from "./screen-workflows.ts";
@@ -81,8 +86,24 @@ import { detailsRemoved } from "./workflows/retention.ts";
 //   contract, and a returned restricted run only through an App that is
 //   restricted itself. It tells nothing past the row: the caller already
 //   sees the run, and the list is read again as bindings and grants change.
-// - A decision's ID as an oracle: `decision` refuses alike, whatever the
-//   ID; there are no decisions of independent runs yet.
+// - Another person's decision, or an App's view of runs it didn't start
+//   (GRA-419): `decisions` lists, and `decision` reads, only decisions
+//   the caller may answer now, by the decision service's own rule
+//   (decisions.ts, `answerableByNow`: never a run's starter it excludes,
+//   never staff), of runs this App started (their start receipt), of
+//   exactly the version the release pins, while the binding names it.
+//   Both checks are in the statement that reads, so a decision nobody
+//   asks of them never shapes a page or a cursor. A restricted run's
+//   decision only through an App that is restricted itself.
+// - A decision's ID as an oracle: `decision` refuses alike
+//   (`workflow.decision_unavailable`) whatever makes it unreadable, before
+//   anything of it leaves; it answers null only for one the caller may
+//   answer that no longer takes answers.
+// - What a decision tells: its key (its task's decision binding, as the
+//   version's sealed build names it, and one the release's seal knows),
+//   its wait, its prompt and its context, checked by the binding's
+//   declared context schema on the way out. Never its deciders, its
+//   recipients, who answered nor the answer.
 // - Arguments or answers outside the contract: arguments are checked by
 //   the generated descriptor, answers too before they leave, projected
 //   field by field: a run row carries no input, output or error.
@@ -98,6 +119,12 @@ const queryPath =
 /** Whether `contractId` names one of a workflow reference's queries. */
 export const isWorkflowQueryPath = (contractId: string): boolean =>
   queryPath.test(contractId);
+
+/** Whether `contractId` names a workflow reference's decision queries. */
+export const isDecisionQueryPath = (contractId: string): boolean => {
+  const name = queryPath.exec(contractId)?.groups?.name;
+  return name === "decisions" || name === "decision";
+};
 
 const names: ReadonlySet<string> = new Set([
   "runs",
@@ -125,6 +152,8 @@ export interface ResolvedWorkflowQuery {
   readonly pinned: WorkflowPin | undefined;
   /** The release the reference was resolved in. */
   readonly release: Release;
+  /** The decision keys the release's seal resolved the alias's workflow to have. */
+  readonly decisionKeys: ReadonlySet<string>;
 }
 
 /**
@@ -173,6 +202,7 @@ export const workflowQueryOf = async (
     returns: operation.returns,
     pinned: bound?.pinned,
     release,
+    decisionKeys: new Set(Object.keys(bound?.decisions ?? {})),
   };
 };
 
@@ -180,6 +210,8 @@ export const workflowQueryOf = async (
 export interface WorkflowQueryCaller {
   readonly app: string;
   readonly userId: string;
+  /** Grasp staff: asked no client's decision, so listed none. */
+  readonly staff?: boolean;
 }
 
 /** A run's status as a screen sees it, from what core keeps of it. */
@@ -746,6 +778,297 @@ const historyWindow = async (
   throw operationErrors.create("operation.read_limit");
 };
 
+/** A decision task's call step, as its decision names it: in a loop's scope too. */
+const decisionStep =
+  /^task:(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@[a-z0-9.\-/]+)?$/u;
+
+/** The version the release pins, while the App's binding still names it. */
+const pinnedBound = (
+  query: ResolvedWorkflowQuery,
+  binding: WorkflowPin
+): WorkflowPin | undefined => {
+  const { pinned } = query;
+  return pinned !== undefined &&
+    binding.workflowId === pinned.workflowId &&
+    binding.version === pinned.version
+    ? pinned
+    : undefined;
+};
+
+/**
+ * The decision binding each decision task of version `pinned`'s sealed
+ * build asks through, by task ID: a decision's key; none if unreadable.
+ */
+const decisionTasksOf = async (
+  env: Env,
+  pinned: WorkflowPin,
+  manifestHash: string
+): Promise<ReadonlyMap<string, string> | undefined> => {
+  try {
+    const { tasks } = await loadWorkflowBuild(
+      env,
+      pinned.workflowId,
+      pinned.version,
+      manifestHash
+    );
+    return new Map(
+      tasks.flatMap((task) =>
+        task.kind === "call" && task.call.name === "grasp.decision"
+          ? [[task.id, task.call.binding] as const]
+          : []
+      )
+    );
+  } catch (error) {
+    // Logged where it loads (workflow-builds.ts): its decisions name no
+    // key, so none of them is shown.
+    log.error("workflow.decisions_build_unreadable", {
+      workflowId: pinned.workflowId,
+      version: pinned.version,
+      ...errorFields(error),
+    });
+    return undefined;
+  }
+};
+
+/** A decision as the reference's decision queries read it. */
+interface DecisionRow {
+  readonly id: string;
+  readonly step: string;
+  readonly description: string;
+  readonly input: Json | null;
+  readonly openedAt: Date;
+  readonly expiresAt: Date;
+  readonly runId: string;
+  readonly workflowId: string;
+  readonly version: number;
+  readonly manifestHash: string;
+  /** Whether it still takes answers (`resourceDecisionPending`). */
+  readonly pending: number;
+}
+
+/**
+ * The decisions `caller` may read through the reference, as a condition:
+ * of runs this App started, of exactly `pinned`, that the caller may
+ * answer now (`answerableByNow`), and of a restricted run only while the
+ * App is restricted itself (`appRestricted`).
+ */
+const decisionScope = (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  pinned: WorkflowPin,
+  appRestricted: boolean
+) => {
+  const db = drizzle(env.DB);
+  return and(
+    // Staff answer no client's decision (decisions.ts), members or not.
+    ...(caller.staff === true ? [sql`0`] : []),
+    eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
+    eq(workflowResourceRuns.version, pinned.version),
+    eq(workflowStartReceipts.invokerType, "app"),
+    eq(workflowStartReceipts.invokerId, caller.app),
+    answerableByNow(db, caller.userId),
+    ...(appRestricted ? [] : [eq(workflowResourceRuns.restricted, false)])
+  );
+};
+
+/** The decision rows `where` admits, with their run's, oldest first. */
+const decisionRows = (env: Env, where: ReturnType<typeof and>) =>
+  drizzle(env.DB)
+    .select({
+      id: workflowDecisions.id,
+      step: workflowDecisions.step,
+      description: workflowDecisions.description,
+      input: workflowDecisions.input,
+      openedAt: workflowDecisions.openedAt,
+      expiresAt: workflowDecisions.expiresAt,
+      runId: workflowResourceRuns.id,
+      workflowId: workflowResourceRuns.workflowResourceId,
+      version: workflowResourceRuns.version,
+      manifestHash: workflowResourceRuns.manifestHash,
+      pending: sql<number>`${resourceDecisionPending(new Date())}`,
+    })
+    .from(workflowDecisions)
+    .innerJoin(
+      workflowResourceRuns,
+      eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+    )
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(where);
+
+/** Whether the App the caller reads through is in restricted mode now. */
+const restrictedApp = async (
+  env: Env,
+  caller: WorkflowQueryCaller
+): Promise<boolean> =>
+  await appHost(env, appIdSchema.parse(caller.app)).isRestricted();
+
+/**
+ * Decision `row`'s key and task, from the build's decision tasks
+ * (`tasks`), when the release's seal knows that key; none otherwise.
+ */
+const keyOf = (
+  row: DecisionRow,
+  tasks: ReadonlyMap<string, string> | undefined,
+  keys: ReadonlySet<string>
+): { key: string; taskId: string } | undefined => {
+  const taskId = decisionStep.exec(row.step)?.groups?.id;
+  const key = taskId === undefined ? undefined : tasks?.get(taskId);
+  return taskId === undefined || key === undefined || !keys.has(key)
+    ? undefined
+    : { key, taskId };
+};
+
+/** Decision `row`'s wait, as its run snapshot names one (spec 10.7.2). */
+const decisionWaitOf = (
+  row: DecisionRow,
+  { key, taskId }: { key: string; taskId: string },
+  canRespond: boolean
+): Json => ({
+  kind: "decision",
+  id: row.id,
+  taskId,
+  key,
+  // As a timer's wait (run-waits.ts): its task's ID, never its prompt.
+  title: taskId,
+  openedAt: row.openedAt.getTime(),
+  deadline: row.expiresAt.getTime(),
+  canRespond,
+});
+
+/**
+ * One page of the decisions waiting for `caller` through the reference,
+ * oldest first (opened time, then ID), of run `runId` alone when given.
+ */
+const decisionsPage = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  options: {
+    runId?: string;
+    size: number;
+    after?: { at: number; id: string };
+  }
+): Promise<{ items: Json[]; hasMore: boolean; last?: string }> => {
+  const pinned = pinnedBound(query, binding);
+  if (pinned === undefined || query.decisionKeys.size === 0) {
+    return { items: [], hasMore: false };
+  }
+  const { after, runId } = options;
+  const rows: DecisionRow[] = await decisionRows(
+    env,
+    and(
+      decisionScope(env, caller, pinned, await restrictedApp(env, caller)),
+      resourceDecisionPending(new Date()),
+      ...(runId === undefined ? [] : [eq(workflowResourceRuns.id, runId)]),
+      ...(after === undefined
+        ? []
+        : [
+            or(
+              gt(workflowDecisions.openedAt, new Date(after.at)),
+              and(
+                eq(workflowDecisions.openedAt, new Date(after.at)),
+                gt(workflowDecisions.id, after.id)
+              )
+            ),
+          ])
+    )
+  )
+    .orderBy(asc(workflowDecisions.openedAt), asc(workflowDecisions.id))
+    .limit(options.size + 1);
+  const shown = rows.slice(0, options.size);
+  // One build a manifest: the pinned version's runs share it.
+  const manifests = [...new Set(shown.map((row) => row.manifestHash))];
+  const builds = new Map(
+    await Promise.all(
+      manifests.map(
+        async (hash) =>
+          [hash, await decisionTasksOf(env, pinned, hash)] as const
+      )
+    )
+  );
+  const items: Json[] = [];
+  for (const row of shown) {
+    const named = keyOf(row, builds.get(row.manifestHash), query.decisionKeys);
+    if (named !== undefined) {
+      items.push({
+        run: {
+          runId: row.runId,
+          workflowId: row.workflowId,
+          workflowVersion: row.version,
+          manifestHash: row.manifestHash,
+        },
+        // Listed only while the caller may answer it and it takes answers.
+        wait: decisionWaitOf(row, named, true),
+      });
+    }
+  }
+  const lastRow = shown.at(-1);
+  return {
+    items,
+    hasMore: rows.length > options.size,
+    ...(lastRow === undefined
+      ? {}
+      : { last: `${lastRow.openedAt.getTime()}:${lastRow.id}` }),
+  };
+};
+
+/**
+ * Decision `decisionId` of run `runId` as `caller` reviews it through the
+ * reference: its detail while it takes answers, null once it doesn't, and
+ * refused alike (`workflow.decision_unavailable`) when the caller may not
+ * read it through this reference, an unknown ID included.
+ */
+const decisionDetail = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  { query, binding }: { query: ResolvedWorkflowQuery; binding: WorkflowPin },
+  { runId, decisionId }: { runId: string; decisionId: string }
+): Promise<Json> => {
+  const refused = workflowResourceErrors.create(
+    "workflow.decision_unavailable"
+  );
+  const pinned = pinnedBound(query, binding);
+  if (pinned === undefined || query.decisionKeys.size === 0) {
+    throw refused;
+  }
+  const row: DecisionRow | undefined = await decisionRows(
+    env,
+    and(
+      eq(workflowDecisions.id, decisionId),
+      eq(workflowResourceRuns.id, runId),
+      decisionScope(env, caller, pinned, await restrictedApp(env, caller))
+    )
+  ).get();
+  const named =
+    row === undefined
+      ? undefined
+      : keyOf(
+          row,
+          await decisionTasksOf(env, pinned, row.manifestHash),
+          query.decisionKeys
+        );
+  if (row === undefined || named === undefined) {
+    throw refused;
+  }
+  // Closed, or gone with its run's details (workflows/retention.ts), which
+  // empties its description (a decision is never opened with none): an
+  // authorized decision that takes no answer. Its context may be JSON
+  // `null`, a value its contract can take, so that says nothing.
+  if (row.pending !== 1 || row.description === "") {
+    return null;
+  }
+  return {
+    key: named.key,
+    wait: decisionWaitOf(row, named, true),
+    prompt: row.description,
+    context: row.input,
+    canRespond: true,
+  };
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -817,12 +1140,35 @@ const answerOf = async (
         : { items: page.items, nextCursor: null, hasMore: false };
     }
     case "decisions": {
-      // No decision of an independent run exists yet: the inbox is empty.
-      return { items: [], nextCursor: null, hasMore: false };
+      const pagination = isObject(args.pagination) ? args.pagination : {};
+      const after = placeOf(pagination.cursor);
+      const page = await decisionsPage(
+        env,
+        caller,
+        { query, binding },
+        {
+          ...(typeof args.runId === "string" ? { runId: args.runId } : {}),
+          size:
+            typeof pagination.pageSize === "number"
+              ? Math.min(pagination.pageSize, maxPageSize)
+              : defaultPageSize,
+          ...(after === undefined ? {} : { after }),
+        }
+      );
+      return page.hasMore && page.last !== undefined
+        ? { items: page.items, nextCursor: page.last, hasMore: true }
+        : { items: page.items, nextCursor: null, hasMore: false };
     }
     case "decision": {
-      // Whatever the ID: an unknown decision and a denied one alike.
-      throw workflowResourceErrors.create("workflow.decision_unavailable");
+      if (typeof args.decisionId !== "string") {
+        throw operationErrors.create("contract.invalid_args");
+      }
+      return await decisionDetail(
+        env,
+        caller,
+        { query, binding },
+        { runId: runIdOf(args), decisionId: args.decisionId }
+      );
     }
     case "history": {
       const pagination = isObject(args.pagination) ? args.pagination : {};
@@ -874,8 +1220,8 @@ export const callWorkflowQuery = async (
  * whether more follow, from one read, charged as a window's pages are:
  * the caller paid `windowPages(extent)`, and `charge` is asked for any
  * page's worth of records past that. `runs` and `history` page through
- * records; `decisions` answers its empty inbox, and `decision` isn't
- * paginated.
+ * records, as `decisions` does through the caller's inbox; `decision`
+ * isn't paginated.
  */
 export const readWorkflowWindow = async (
   env: Env,
@@ -906,12 +1252,25 @@ export const readWorkflowWindow = async (
   }
   const binding = await bindingOf(env, caller.app, query.alias);
   const { workflowId } = binding;
-  if (query.name === "decisions") {
-    return { ok: true, value: { items: [], hasMore: false } };
-  }
   const size = Math.min(Math.max(window.extent, 1), liveWindowMaxItems);
   let page: { items: Json[]; hasMore: boolean };
-  if (query.name === "history") {
+  if (query.name === "decisions") {
+    page = await decisionsPage(
+      env,
+      caller,
+      { query, binding },
+      {
+        ...(typeof args.runId === "string" ? { runId: args.runId } : {}),
+        size,
+      }
+    );
+    const owed =
+      Math.ceil(page.items.length / queryMaxResults) -
+      windowPages(window.extent);
+    if (owed > 0) {
+      await window.charge(owed, windowPages(window.extent) + owed);
+    }
+  } else if (query.name === "history") {
     page = await historyWindow(
       env,
       caller,

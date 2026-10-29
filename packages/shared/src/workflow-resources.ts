@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { BusinessProcess } from "./business-processes.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
@@ -7,7 +8,12 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
-import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
+import type {
+  WorkflowCandidateTrace,
+  WorkflowDiagram,
+  WorkflowRunTrace,
+} from "./workflow-diagrams.ts";
+import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
 
@@ -214,6 +220,22 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone changed this draft since you read it. Read it again, then make your change.",
   "workflow.draft_unchecked":
     "Only the latest draft can be published, and only once it passes the profile.",
+  "workflow.paused":
+    "This workflow is paused, so it starts no runs. Someone who builds it can resume it.",
+  "workflow.lifecycle_conflict":
+    "Someone changed this workflow's stage, pause or go-live since you read it. Read it again, then make your change.",
+  "workflow.stage_invalid":
+    "A workflow is live or scaling only once a version went live, and stays one of the two from then on.",
+  "workflow.go_live_invalid":
+    "That version can't be asked to go live: name a published version that isn't live already.",
+  "workflow.go_live_not_pending":
+    "That version isn't the one waiting to go live.",
+  "workflow.go_live_own_request":
+    "Someone other than who asked for it approves a version going live: the workflow's owner or an admin.",
+  "workflow.step_not_found":
+    "There's no step there in this draft: read the draft again and pick the step, or the list to insert into, from its diagram.",
+  "workflow.draft_not_json":
+    "This draft isn't JSON, so a step can't be edited on the canvas. Fix its text first.",
   "workflow.action_failed":
     "A task's action threw, or the sandbox stopped it, so the run failed.",
   "workflow.action_restricted":
@@ -222,6 +244,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A task's action made as many calls as one attempt of it may, so the run failed.",
   "workflow.candidate_unfixtured":
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
+  "workflow.test_unfixtured":
+    "This test's run made a model or store call its fixture gives nothing for. A test's run never calls a real model or store: in the fixture's workflows, give each model binding it calls an answer, and each operation binding an operation of the App.",
   "workflow.candidate_unexecutable":
     "This checkpoint uses something a run can't do yet, so it can't be test-run.",
   "workflow.candidate_unavailable":
@@ -234,10 +258,16 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run went on longer than a test run may, so it failed. Shorten what it waits for to test it.",
   "workflow.candidate_wait_limit":
     "This test run would wait longer than a test run may, so it failed. Shorten the wait to test it.",
+  "workflow.item_test_empty":
+    "None of your recent runs of this workflow can be tested again: a test takes runs you can see the details of, whose input is still kept.",
+  "workflow.item_test_unavailable":
+    "This test doesn't exist, or isn't one you can see.",
   "workflow.failed_after_effect":
     "The task's call took effect, then the task failed. What the call did stands.",
   "workflow.raised":
     "The workflow raised an error of its own, and nothing in it caught that error.",
+  "workflow.creates_exhausted":
+    "This chat created as many Apps and workflows as one question may. Tell the person what you made.",
 });
 
 /**
@@ -654,6 +684,11 @@ export interface WorkflowResource {
   currentVersion: number | null;
   /** The caller's role in it. */
   role: WorkflowRole;
+  /**
+   * The business process it serves, if a builder set one: what the UI
+   * shows its icon for and groups it by. It grants nothing.
+   */
+  process: BusinessProcess | null;
   createdAt: string;
 }
 
@@ -819,6 +854,41 @@ export interface WorkflowMember {
  * An edit of a workflow's draft: its whole new text, and the revision it
  * read (0 before the first edit), which must still be the latest.
  */
+/**
+ * A JSON Pointer to a task in a draft, as the diagram names it
+ * (`DiagramTask.pointer`), or to a list of tasks (one ending in `do`,
+ * `try` or `branches`).
+ */
+const stepPointerSchema = z.string().startsWith("/").max(4096);
+
+/** A task's body: its single key's value, as the profile reads it. */
+const stepBodySchema = z.record(z.string(), z.json());
+
+/**
+ * One step of a draft edited from the canvas (`editStep`), as the next
+ * revision over `expectedRevision`: `change` replaces the body of the task
+ * at `pointer`, keeping its ID; `insert` puts task `id` with `body` at
+ * `index` of the task list at `list`. The draft is saved checked, as any
+ * edit, problems and all.
+ */
+export const workflowStepEditSchema = z.strictObject({
+  expectedRevision: z.int().min(0),
+  edit: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("change"),
+      pointer: stepPointerSchema,
+      body: stepBodySchema,
+    }),
+    z.strictObject({
+      kind: z.literal("insert"),
+      list: stepPointerSchema,
+      index: z.int().min(0),
+      id: z.string().min(1).max(128),
+      body: stepBodySchema,
+    }),
+  ]),
+});
+
 export const workflowDraftEditSchema = z.strictObject({
   expectedRevision: z.int().min(0),
   // The profile's own bound on a definition: 1 MiB of UTF-8, as stored.
@@ -922,6 +992,52 @@ export interface WorkflowCandidateRun {
 }
 
 /**
+ * Most recent runs one test over real items takes: one test run each, all
+ * going at once, so no more than a person may have going.
+ */
+export const maxItemTestItems = maxLiveCandidateRuns;
+
+/**
+ * A test of a draft's checkpoint over recent real items (GRA-513): the
+ * checkpoint's exact revision runs once on the input of each of the
+ * tester's most recent runs whose details they may see and whose input is
+ * still kept (`items` of them, at most `maxItemTestItems`), each as a test
+ * run (`workflowCandidateStartSchema`): with the parameters given here or
+ * their defaults, and every call answered from `fixtures`, never made.
+ */
+export const workflowItemTestStartSchema = workflowCandidateStartSchema
+  .omit({ input: true })
+  .extend({ items: z.int().min(1).max(maxItemTestItems).optional() });
+
+/** One real item of a test, and how the draft did on it. */
+export interface WorkflowItemTestItem {
+  /** The run whose input it is. */
+  sourceRunId: string;
+  /** The version that run ran, and how it stands now. */
+  sourceVersion: number;
+  sourceStatus: WorkflowRunStatus;
+  sourceCreatedAt: string;
+  /**
+   * The test run of the item, as `candidateRun` reads it; null when it
+   * never started (`refusal`), or once it was removed after a week.
+   */
+  run: WorkflowCandidateRun | null;
+  /** Why the item's test run never started (its input refused, a limit). */
+  refusal: string | null;
+}
+
+/** A test of a draft's checkpoint over recent real items, item by item. */
+export interface WorkflowItemTest {
+  id: string;
+  workflowId: string;
+  draftRevision: number;
+  principal: string;
+  createdAt: string;
+  /** Newest item first, as the runs were started. */
+  items: WorkflowItemTestItem[];
+}
+
+/**
  * A workflow's draft, for its builders: its latest text and revision (0
  * while nobody has edited it: then the current version's definition, or
  * a starting one), what the profile said of it, and its latest checkpoint,
@@ -954,18 +1070,87 @@ export interface WorkflowDefinitionProblem {
 }
 
 /** Independent workflows over `/rpc`. */
+/**
+ * A Knowledge collection a workflow may read itself, through a permission
+ * it holds (GRA-700): its name, what the permission allows, and the
+ * knowledge bindings of its versions that use it, by alias.
+ */
+export interface WorkflowKnowledge {
+  collectionId: string;
+  name: string;
+  actions: string[];
+  /** Its knowledge bindings' aliases, active ones only; none while no binding uses it. */
+  aliases: string[];
+}
+
+/**
+ * A file a run of a workflow wrote: what it is and which run wrote it,
+ * never its bytes. Seen as a run's results are: by the person the run
+ * acted for, and the organization's admins. Kept with its run, and gone
+ * when the run's details are.
+ */
+export interface WorkflowFile {
+  id: string;
+  runId: string;
+  name: string;
+  /** Its media type, as the run gave it. */
+  type: string;
+  /** In bytes. */
+  size: number;
+  /** When its run finished writing it (ISO 8601). */
+  writtenAt: string;
+}
+
+/** One thing that happened to a workflow, newest first in its activity. */
+export type WorkflowActivity =
+  /** A version was published, by its author. */
+  | { kind: "version"; at: string; by: string; version: number }
+  /** A binding of a version was approved or revoked, by whom. */
+  | {
+      kind: "binding";
+      at: string;
+      by: string;
+      alias: string;
+      bindingKind: string;
+      version: number;
+      change: "approved" | "revoked";
+    }
+  /**
+   * A run started, or ended with its status, for the person it acted for
+   * (`principal`): every run for its builders, a user's own for a user.
+   */
+  | {
+      kind: "run";
+      at: string;
+      runId: string;
+      principal: string;
+      version: number;
+      status: WorkflowRunStatus;
+      change: "started" | "ended";
+    };
+
 export interface WorkflowResourcesApi {
   /** Creates a workflow the caller owns, named `name`; for builders. */
   create: (name: string) => Promise<WorkflowResource>;
   /** The workflows the caller has a role in, by name. */
   list: () => Promise<WorkflowResource[]>;
   get: (id: string) => Promise<WorkflowResource>;
+  /**
+   * Sets the business process it serves (`businessProcessSchema`), or
+   * clears it with null; for its builders, audited.
+   */
+  setProcess: (id: string, process: unknown) => Promise<WorkflowResource>;
   /** Publishes a version from a workflow.json; for its builders. */
   publish: (id: string, input: unknown) => Promise<WorkflowResourceVersion>;
   /** Its draft, for its builders (`WorkflowDraft`). */
   draft: (id: string) => Promise<WorkflowDraft>;
   /** Saves an edit of its draft (`workflowDraftEditSchema`), checked. */
   editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
+  /**
+   * Inserts or changes one step of its draft (`workflowStepEditSchema`),
+   * saved as the draft's next revision, checked; for builders.
+   */
+  editStep: (id: string, input: unknown) => Promise<WorkflowDraft>;
   /** Publishes its draft's checkpoint (`workflowDraftPublishSchema`). */
   publishDraft: (
     id: string,
@@ -1012,6 +1197,20 @@ export interface WorkflowResourcesApi {
    * a user's own for a user; never what one returned or why it failed.
    */
   runs: (id: string) => Promise<WorkflowResourceRun[]>;
+  /** The Knowledge collections it may read itself, by name; for anyone with a role. */
+  knowledge: (id: string) => Promise<WorkflowKnowledge[]>;
+  /**
+   * The files its runs wrote, newest first, the latest page: what they are,
+   * never their bytes. For anyone with a role, of the runs that acted for
+   * them; every run's for the organization's admins, as a run's results are.
+   */
+  files: (id: string) => Promise<WorkflowFile[]>;
+  /**
+   * What happened to it, newest first, the latest page: versions,
+   * bindings approved and revoked, and runs, as `runs` shows them to the
+   * reader.
+   */
+  activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** What run `runId` did, over its version's diagram, for builders. */
@@ -1029,6 +1228,19 @@ export interface WorkflowResourcesApi {
     id: string,
     runId: string
   ) => Promise<WorkflowCandidateRun>;
+  /** What one of its test runs did, step by step, for builders. */
+  candidateRunTrace: (
+    id: string,
+    runId: string
+  ) => Promise<WorkflowCandidateTrace>;
+  /**
+   * Tests the draft's checkpoint at an exact revision over the caller's
+   * recent real runs, one test run each, every call answered from the
+   * start's fixtures; for builders (`workflowItemTestStartSchema`).
+   */
+  startItemTest: (id: string, input: unknown) => Promise<WorkflowItemTest>;
+  /** One of its tests over real items, item by item; for its tester. */
+  itemTest: (id: string, testId: string) => Promise<WorkflowItemTest>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
@@ -1050,4 +1262,6 @@ export interface WorkflowResourcesApi {
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
+  /** Its stage, draft and live versions, pause and go-live. */
+  readonly lifecycle: WorkflowLifecycleApi;
 }

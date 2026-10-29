@@ -6,19 +6,15 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-frame-3b7e21";
-const tenantToken = "test-tenant-admin-token-admin-frame-8d0f54";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -33,7 +29,7 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
 const recordClient = async (
-  status: "provisioning" | "active",
+  status: "provisioning",
   clientId = `client-${crypto.randomUUID().slice(0, 8)}`
 ) => {
   const account = cloudflare.addAccount(`Acme ${clientId}`);
@@ -45,7 +41,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        accountId: account.id,
         status,
         createdAt: now,
         updatedAt: now,
@@ -56,16 +51,13 @@ const recordClient = async (
   return { clientId, name: `Acme ${clientId}`, account };
 };
 
-/** An active client running a new release, as a deploy made it live. */
+/** A live placed client running a new release, as its operation made it. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): the frame" });
-  await importReleases(env.RELEASES, db);
-  const client = await recordClient("active");
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, client.clientId, release.id)
-  );
-  return client;
+  const release = await placedRelease("feat(core): the frame");
+  const { clientId, account } = await livePlacedClient(cloudflare, 1, release, {
+    signIn: null,
+  });
+  return { clientId, name: `Acme ${clientId}`, account };
 };
 
 /**
@@ -210,7 +202,7 @@ const integrationsOf = ({
 });
 
 describe("the admin's frame", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // Only each test's own clients are listed: an earlier test's accounts
   // are gone from the fake, and the overview counts every client.
   beforeEach(async () => {
@@ -235,7 +227,6 @@ describe("the admin's frame", () => {
       "Integrations to build",
       "Platform",
       "Ask Grasp",
-      "Sources",
       "Stephen Lab",
       "Organizations",
     ].map((text) => sidebar.indexOf(text));
@@ -391,61 +382,6 @@ describe("the admin's frame", () => {
       nothingToBuild: false,
       companyAsked: true,
       companyWords: true,
-    });
-  });
-
-  it("lays out the sources: the admin's own tools with no address until the admin serves them, today's digest, and every system to connect in order", async () => {
-    const acme = await liveClient();
-    acme.account.admin = readySnapshot("Acme");
-
-    const { status, html } = await page("/sources");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const parts = [
-      ">Sources</h1>",
-      ">Grasp admin</h2>",
-      ">The morning digest</h2>",
-      ">To connect, in this order</h2>",
-    ].map((part) => html.indexOf(part));
-    // The systems still to connect, in the order they come.
-    const order = [
-      "Grasp platform",
-      "Rooms",
-      "Attio",
-      "Stripe",
-      "Composio",
-      "Discord",
-    ].map((name) => text.indexOf(`${name} To come`));
-
-    expect({
-      status,
-      partsInOrder:
-        parts.every((at) => at >= 0) &&
-        parts.toSorted((a, b) => a - b).every((at, i) => at === parts[i]),
-      systemsInOrder:
-        order.every((at) => at >= 0) &&
-        order.toSorted((a, b) => a - b).every((at, i) => at === order[i]),
-      // Not served yet (GRA-656): nothing to copy, and its tools listed.
-      address: html.includes("/api/admin/mcp"),
-      ownToCome: html
-        .slice(
-          html.indexOf(">Grasp admin</h2>"),
-          html.indexOf(">The morning digest</h2>")
-        )
-        .includes(">To come</span>"),
-      tools: html.includes(">daily_digest</code>"),
-      // The digest is today's, from the organizations that answered.
-      digest: text.includes("Grasp, ") && text.includes("1 organization"),
-      // Rooms is read through its service route, so no MCP tools of its own.
-      roomsTools: html.includes(">get_signature_receipt</code>"),
-    }).toStrictEqual({
-      status: 200,
-      partsInOrder: true,
-      systemsInOrder: true,
-      address: false,
-      ownToCome: true,
-      tools: true,
-      digest: true,
-      roomsTools: false,
     });
   });
 
@@ -668,11 +604,7 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, on the newest release", async () => {
-    await publishRelease({ notes: "feat(core): older" });
-    const newest = await publishRelease({ notes: "feat(core): newest" });
-    await importReleases(env.RELEASES, db);
-
+  it("offers to add an organization from the overview: by hand, with Attio and Rooms shown but not yet to start from, and no account to adopt", async () => {
     const overview = await page("/");
     const { status, html } = await page("/new-organization");
     const main = html.slice(html.indexOf("<main"));
@@ -693,11 +625,6 @@ describe("the admin's frame", () => {
         disabled: choice.includes('aria-disabled="true"'),
       };
     });
-    const selected = main.slice(
-      main.lastIndexOf("<option", main.indexOf(" selected")),
-      main.indexOf("</option>", main.indexOf(" selected"))
-    );
-
     expect({
       link: overview.html.includes('href="/new-organization"'),
       status,
@@ -714,11 +641,12 @@ describe("the admin's frame", () => {
         "domains",
         "entraTenantId",
         "googleHostedDomain",
-        "releaseId",
         "ring",
-        "accountId",
       ].every((field) => main.includes(`name="${field}"`)),
-      newest: selected.includes(`value="${newest.id}"`),
+      // Its release and destination are chosen on its Setup, once added.
+      account: ["releaseId", "accountId"].some((field) =>
+        main.includes(`name="${field}"`)
+      ),
     }).toStrictEqual({
       link: true,
       status: 200,
@@ -730,7 +658,7 @@ describe("the admin's frame", () => {
       },
       why: [true, true],
       fields: true,
-      newest: true,
+      account: false,
     });
   });
 
@@ -1270,43 +1198,70 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
+  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
 
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
+    const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, why, and whether any section is there. */
+    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
     const pageOf = (
       { status, html }: { status: number; html: string },
-      name: string
+      name: string,
+      title = name
     ) => ({
       status,
-      title: html.includes(`${name}</h1>`),
-      column: columnOf(html, name) !== "",
-      sections: [
-        "Members</h1>",
-        "Needs Grasp",
-        "% known",
-        "From the company",
-      ].some((text) => html.includes(text)),
+      title: html.includes(`${title}</h1>`),
+      column:
+        columnOf(html, name).includes("Members") &&
+        columnOf(html, name).includes("Not read now"),
+      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
+        html.includes(text)
+      ),
+      toSetup: html.includes(
+        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
+      ),
     });
 
     expect({
       down: pageOf(downPage, down.name),
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name),
+      downMembers: pageOf(downMembers, down.name, "Members"),
+      membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
+      // Its Setup is the admin's own record, read whatever its core does.
+      setup: downSetup.html.includes("How it stands"),
       waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: { status: 200, title: true, column: false, sections: false },
+      down: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       downWhy: true,
-      downMembers: { status: 200, title: true, column: false, sections: false },
-      waiting: { status: 200, title: true, column: false, sections: false },
+      downMembers: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
+      membersWhy: true,
+      setup: true,
+      waiting: {
+        status: 200,
+        title: true,
+        column: true,
+        fromCore: false,
+        toSetup: true,
+      },
       waitingWhy: true,
     });
   });

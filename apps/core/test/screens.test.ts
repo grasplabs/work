@@ -119,10 +119,10 @@ const noBuilds: WorkerLoader = {
   },
 };
 
-/** Runs the cron's builds sweep at `at` until it has read every kind. */
+/** Runs the clock's builds sweep at `at` until it has read every kind. */
 const sweptAt = async (at: number): Promise<void> => {
   for (let run = 0; run < 24; run += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the cron runs
+    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the clock runs
     await sweepBuilds(env, new Date(at));
   }
 };

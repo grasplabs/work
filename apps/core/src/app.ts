@@ -531,11 +531,18 @@ export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
  * when the person's independent runs the App started changed
  * (`workflowRunsChanged`), so its workflow queries read again, and with
  * `false, false, true` when another version of the App was made current
- * (`versionChanged`), so its pages see it. It throws once the connection
- * no longer follows the App.
+ * (`versionChanged`), so its pages see it, and with `false, false, false,
+ * true` when a decision of a run the App started changed
+ * (`workflowDecisionsChanged`), so its decision queries read again. It
+ * throws once the connection no longer follows the App.
  */
 export type AccessWatcher = Rpc.Stub<
-  (revoked: boolean, runsChanged?: boolean, versionChanged?: boolean) => void
+  (
+    revoked: boolean,
+    runsChanged?: boolean,
+    versionChanged?: boolean,
+    decisionsChanged?: boolean
+  ) => void
 >;
 
 /**
@@ -772,8 +779,14 @@ export const loadServer = async (
       mainModule: build.mainModule,
       modules: build.modules,
       env: bindings,
-      // What its code writes with `console` goes to its error log.
-      tails: [exports.AppTail({ props: { app, version } })],
+      // What its code writes with `console` goes to its error log, on
+      // Cloudflare. Plain workerd would print it to the process's logs as
+      // well, so there it has no tail and prints nothing
+      // (@grasp-os/shared/quiet-loader, GRA-919): this facet goes with the
+      // v1 server (GRA-789), so it isn't captured as a sealed call is.
+      ...(env.RUNTIME_PROFILE === "cloudflare"
+        ? { tails: [exports.AppTail({ props: { app, version } })] }
+        : {}),
     }))
     .getDurableObjectClass("App");
 };
@@ -1681,6 +1694,32 @@ export class App extends DurableObject<Env> {
       void this.#tellRunsChanged(id, follower.onRevoked);
     }
     return this.#accessFollowers.size;
+  }
+
+  /**
+   * Tells every connection that follows the App's live queries that a
+   * decision of an independent run the App started opened, closed or was
+   * answered (run-changes.ts, `tellDecisionFollowers`): each reads its
+   * decision queries of the App again, as its person, since a decision
+   * asks people other than its run's. Nothing of the decision goes with
+   * it. Returns at once, with how many connections it told.
+   */
+  workflowDecisionsChanged(): number {
+    for (const [id, follower] of this.#accessFollowers) {
+      void this.#tellDecisionsChanged(id, follower.onRevoked);
+    }
+    return this.#accessFollowers.size;
+  }
+
+  async #tellDecisionsChanged(
+    id: string,
+    onRevoked: AccessWatcher
+  ): Promise<void> {
+    try {
+      await onRevoked(false, false, false, true);
+    } catch {
+      this.#dropFollower(id);
+    }
   }
 
   async #tellRunsChanged(id: string, onRevoked: AccessWatcher): Promise<void> {

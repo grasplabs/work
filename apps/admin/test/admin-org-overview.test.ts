@@ -1,54 +1,27 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { act, adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-org-overview-5c1a90";
-const tenantToken = "test-tenant-admin-token-org-overview-27e4bd";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
-const db = adminDatabase(env.DB);
-const staff = { email: "ops@grasp.test", sub: "sub-ops" };
-
 /** An active client running a new release, as a deploy made it live. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): the overview" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): the overview");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: `Acme ${clientId}`,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name: `Acme ${clientId}`,
+    signIn: null,
+  });
   return { clientId, account };
 };
 
@@ -177,7 +150,7 @@ const briefOf = (html: string): string => {
 };
 
 describe("an organization's overview", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
 
   it("says how the company is doing, each signal opening its section, and what core doesn't hold as not found yet rather than none", async () => {
     const acme = await liveClient();

@@ -18,6 +18,7 @@
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
+import { build as esbuild } from "esbuild-wasm/esm/browser.js";
 import { compile } from "tailwindcss";
 
 import kit from "#kit";
@@ -42,9 +43,15 @@ import {
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
-import { compileModule, stripTypes, transformModule } from "./compile.ts";
+import {
+  compileModule,
+  refreshNames,
+  stripTypes,
+  transformModule,
+} from "./compile.ts";
 import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
+import esbuildWasm from "./esbuild.wasm";
 import {
   collectDirectives,
   collectImports,
@@ -66,6 +73,22 @@ import type {
   ImportSite,
   ModuleImports,
 } from "./imports.ts";
+import {
+  checkKey,
+  checkRecordOf,
+  closureFingerprint,
+  hasGlobalEffects,
+  moduleKey,
+  moduleRecordOf,
+  noIncrements,
+  screenSources,
+} from "./increments.ts";
+import type {
+  BuildMetrics,
+  Handed,
+  IncrementalBuild,
+  Increments,
+} from "./increments.ts";
 import type { CodeFolder } from "./inputs.ts";
 import {
   appCodeLimitErrors,
@@ -89,17 +112,25 @@ import {
   kitModuleName,
   kitStylesheet,
   ownEntry,
+  previewRefresh,
+  previewRuntime,
   screenReferences,
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
+import { startEsbuild } from "./packages/build.ts";
+import { previewEntries } from "./preview-entry.ts";
+import type { Bundle } from "./preview-entry.ts";
 import {
   appCodeTarget,
   computeTarget,
+  diagnosticsInOrder,
   screenTarget,
   typeCheck,
+  typeProgram,
   workflowTarget,
 } from "./type-check.ts";
+import type { FileDiagnostics } from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -123,6 +154,12 @@ export type ScreenBuild =
       screens: Record<string, ScreenClosure>;
       css: string;
       diagnostics: Diagnostic[];
+      /**
+       * A preview build's (`preview-screens`): each screen's App modules
+       * put together into one entry (preview-entry.ts), by its module's
+       * name, which the preview frame evaluates for an update.
+       */
+      entries?: Record<string, string>;
     }
   | { ok: false; diagnostics: Diagnostic[] };
 
@@ -221,17 +258,31 @@ const strayProblems = (
 const messageIn = (path: string, error: unknown): string =>
   messageOf(error).replace(`/${path}: `, "").replace(`${path}: `, "");
 
-/** Compiles one App file, with what it imports, or says why it can't be. */
+/**
+ * What a preview build's module starts with (spec 19.2.1): the names the
+ * Refresh instrumentation calls (`refreshNames`), bound to the preview
+ * kit's registry, each component's family its file's path and its name.
+ */
+const refreshHeader = (path: string): string =>
+  `import{register as __graspRefreshRegister,signature as ${refreshNames.signature}}from${JSON.stringify(kitModuleName(previewRefresh))};const ${refreshNames.register}=(type,id)=>__graspRefreshRegister(type,${JSON.stringify(`${path} `)}+id);`;
+
+/**
+ * Compiles one App file, with what it imports, or says why it can't be:
+ * with `refresh`, for a preview, instrumented for React Fast Refresh.
+ */
 const compileFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
-  typeFiles: ReadonlySet<string>
+  typeFiles: ReadonlySet<string>,
+  refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   let compiled: string;
   try {
-    compiled = compileModule(source, path, [collectImports(imports)]);
+    compiled = compileModule(source, path, [collectImports(imports)], {
+      refresh,
+    });
   } catch (error) {
     const message = messageIn(path, error);
     return {
@@ -271,12 +322,14 @@ const compileFile = (
   }
   const imported: ModuleImports = { app: new Set(), kit: new Set() };
   try {
-    return {
-      code: transformModule(compiled, path, [
-        rewriteImports(path, files, kit, imported),
-      ]),
-      imported,
-    };
+    const code = transformModule(compiled, path, [
+      rewriteImports(path, files, kit, imported),
+    ]);
+    if (!refresh) {
+      return { code, imported };
+    }
+    imported.kit.add(kitModuleName(previewRefresh));
+    return { code: `${refreshHeader(path)}${code}`, imported };
   } catch (error) {
     return {
       errors: [problem("imports", messageIn(path, error), { file: path })],
@@ -336,11 +389,25 @@ const closureOf = (
  * The kit's modules these import, and every kit module those import. The
  * runtime renders the screens: a page needs it for any of them.
  */
-const kitModulesFor = (imported: Iterable<string>): string[] =>
-  closureOf(
-    [...imported, kitModuleName(screenRuntime)],
-    (name) => ownEntry(kit.moduleImports, name) ?? []
-  );
+const kitModulesFor = (
+  imported: Iterable<string>,
+  preview = false
+): string[] =>
+  preview
+    ? closureOf(
+        // The preview runtime loads the screen runtime by name, once
+        // React Fast Refresh is in (sdk/src/preview-runtime.ts).
+        [
+          ...imported,
+          kitModuleName(previewRuntime),
+          kitModuleName(screenRuntime),
+        ],
+        (name) => ownEntry(kit.previewModuleImports, name) ?? []
+      )
+    : closureOf(
+        [...imported, kitModuleName(screenRuntime)],
+        (name) => ownEntry(kit.moduleImports, name) ?? []
+      );
 
 /**
  * What a page loads for the screen in the module `entry`, given what each
@@ -349,13 +416,15 @@ const kitModulesFor = (imported: Iterable<string>): string[] =>
  */
 const screenClosure = (
   entry: string,
-  imports: ReadonlyMap<string, ModuleImports>
+  imports: ReadonlyMap<string, ModuleImports>,
+  preview = false
 ): ScreenClosure => {
   const modules = closureOf([entry], (name) => imports.get(name)?.app ?? []);
   return {
     modules,
     kitModules: kitModulesFor(
-      modules.flatMap((name) => [...(imports.get(name)?.kit ?? [])])
+      modules.flatMap((name) => [...(imports.get(name)?.kit ?? [])]),
+      preview
     ),
   };
 };
@@ -365,7 +434,7 @@ const screenClosure = (
  * kit modules it loads (`kitModules`).
  */
 const buildCss = async (
-  sources: string[],
+  candidates: string[],
   kitModules: string[]
 ): Promise<string> => {
   const tailwind = await compile(kit.stylesheets[kitStylesheet] ?? "", {
@@ -381,7 +450,7 @@ const buildCss = async (
   });
   return tailwind.build([
     ...kitModules.flatMap((name) => ownEntry(kit.moduleCandidates, name) ?? []),
-    ...sources.flatMap((source) => extractCandidates(source)),
+    ...candidates,
   ]);
 };
 
@@ -394,12 +463,23 @@ const screensTarget = screenTarget(
   new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
 );
 
+/** `record`'s own entry for `key`, never one it inherits. */
+const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
 /**
  * Type-checks the App's screens against the kit's types and lints them
  * against the kit's design system: `buildScreens`' last gate, once its
- * import checks pass.
+ * import checks pass. A file's check is reused from `reuse` only while
+ * every file it reads is as it was (increments.ts); each file checked now
+ * is kept in `fresh`. The lint runs over every file.
  */
-const checkScreens = (files: Record<string, string>): Diagnostic[] => {
+const checkScreens = async (
+  files: Record<string, string>,
+  reuse: Handed,
+  fresh: Increments,
+  metrics: BuildMetrics
+): Promise<Diagnostic[]> => {
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
@@ -409,40 +489,112 @@ const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  return [...typeCheck(app, kit.types, screensTarget), ...lint(own, kit)];
+  const program = typeProgram(app, kit.types, screensTarget);
+  const { imports } = program;
+  const kept = new Map<string, FileDiagnostics>();
+  const keys = new Map<string, { key: string; closure: string }>();
+  if (imports !== undefined && !hasGlobalEffects(app)) {
+    const declarations = Object.keys(app).filter((path) =>
+      path.endsWith(".d.ts")
+    );
+    await Promise.all(
+      Object.entries(app).map(async ([path, source]) => {
+        const [key, closure] = await Promise.all([
+          checkKey(path, source),
+          closureFingerprint(path, app, imports, declarations),
+        ]);
+        keys.set(path, { key, closure });
+        const record = checkRecordOf(ownRecord(reuse.checks, key), path);
+        if (record?.closure === closure) {
+          kept.set(path, record);
+        }
+      })
+    );
+  }
+  const { global, files: checked } = program.diagnose(
+    new Set(Object.keys(app).filter((path) => !kept.has(path)))
+  );
+  for (const [path, diagnostics] of checked) {
+    const keyed = keys.get(path);
+    if (keyed !== undefined) {
+      fresh.checks[keyed.key] = {
+        path,
+        closure: keyed.closure,
+        ...diagnostics,
+      };
+    }
+  }
+  metrics.checked = checked.size;
+  metrics.checksReused = kept.size;
+  return [
+    ...diagnosticsInOrder(
+      global,
+      program.order.flatMap((path) => checked.get(path) ?? kept.get(path) ?? [])
+    ),
+    ...lint(own, kit),
+  ];
+};
+
+/**
+ * esbuild, started on the WebAssembly module this isolate was loaded with
+ * (`esbuild.wasm`), once: what bundles a preview's entries
+ * (preview-entry.ts). Started on a preview's first build, so a build that
+ * bundles nothing never pays for it.
+ */
+const bundle: Bundle = async (options) => {
+  await startEsbuild(esbuildWasm);
+  return await esbuild(options);
 };
 
 /**
  * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
  * the declarations (`*.d.ts`) at the App's root and among its components,
  * which are types alone and never modules.
+ *
+ * With `preview`, for a chat's draft (spec 19.2.1): each module is
+ * instrumented for React Fast Refresh, what a screen loads of the kit is
+ * the preview kit's, and each screen's App modules are put together into
+ * one entry too (`ScreenBuild.entries`). Every gate is the same.
+ *
+ * With `reuse`, what earlier builds kept (increments.ts): a module's
+ * transform, and a file's type check, each only where its key says it
+ * stands for what this build would make. What it makes now it hands back
+ * (`fresh`) for core to keep, with how much it reused (`metrics`).
  */
-export const buildScreens = async (
-  files: Record<string, string>
-): Promise<ScreenBuild> => {
+export const buildScreensIncrementally = async (
+  files: Record<string, string>,
+  {
+    preview = false,
+    reuse = noIncrements(),
+  }: { preview?: boolean; reuse?: Handed } = {}
+): Promise<IncrementalBuild<ScreenBuild>> => {
+  const fresh = noIncrements();
+  const metrics: BuildMetrics = {
+    compiled: 0,
+    reused: 0,
+    checked: 0,
+    checksReused: 0,
+  };
+  const done = (built: ScreenBuild): IncrementalBuild<ScreenBuild> => ({
+    built,
+    fresh,
+    metrics,
+  });
   const app = buildFiles(files);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
-    return { ok: false, diagnostics: tooMuch };
+    return done({ ok: false, diagnostics: tooMuch });
   }
   const strays = strayProblems(app, [componentsFolder], "screens");
   if (strays.length > 0) {
-    return { ok: false, diagnostics: strays };
+    return done({ ok: false, diagnostics: strays });
   }
   // Only screens, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
-  const sources = Object.entries(app)
-    .filter(
-      ([path]) =>
-        screenFile.test(path) ||
-        componentsFolder.isFile(path) ||
-        path === screenReferences.path
-    )
-    .filter(([path]) => !declarationFile.test(path));
-  const paths = sources.map(([path]) => path);
+  const { sources, known: paths, typeFiles: typed } = screenSources(app);
   if (!paths.some((path) => screenFile.test(path))) {
-    return {
+    return done({
       ok: false,
       diagnostics: [
         problem(
@@ -450,23 +602,63 @@ export const buildScreens = async (
           "The App has no screens: add one as screens/<name>.tsx."
         ),
       ],
-    };
+    });
   }
   const clashes = nameClashes(paths);
   if (clashes.length > 0) {
-    return { ok: false, diagnostics: clashes };
+    return done({ ok: false, diagnostics: clashes });
   }
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
-  const typeFiles = new Set(Object.keys(app));
+  const typeFiles = new Set(typed);
   const modules: Record<string, string> = {};
   const imports = new Map<string, ModuleImports>();
+  const candidates: string[] = [];
   const errors: Diagnostic[] = [];
-  for (const [path, source] of sources) {
-    const result = compileFile(path, source, known, typeFiles);
+  const keyed = await Promise.all(
+    sources.map(
+      async ([path, source]) =>
+        [
+          path,
+          source,
+          await moduleKey({
+            path,
+            source,
+            known: paths,
+            typeFiles: typed,
+            preview,
+          }),
+        ] as const
+    )
+  );
+  for (const [path, source, key] of keyed) {
+    const name = appModuleName(path);
+    // A transform is reused only under the key this build works out for
+    // it: one handed over under another, or shaped otherwise, is not.
+    const kept = moduleRecordOf(ownRecord(reuse.modules, key), path);
+    if (kept !== undefined) {
+      modules[name] = kept.code;
+      imports.set(name, { app: new Set(kept.app), kit: new Set(kept.kit) });
+      candidates.push(...kept.candidates);
+      metrics.reused += 1;
+      continue;
+    }
+    const result = compileFile(path, source, known, typeFiles, preview);
     if ("code" in result) {
-      modules[appModuleName(path)] = result.code;
-      imports.set(appModuleName(path), result.imported);
+      // The references' classes are the host's, never a screen's.
+      const own =
+        path === screenReferences.path ? [] : extractCandidates(source);
+      modules[name] = result.code;
+      imports.set(name, result.imported);
+      candidates.push(...own);
+      fresh.modules[key] = {
+        path,
+        code: result.code,
+        app: [...result.imported.app],
+        kit: [...result.imported.kit],
+        candidates: own,
+      };
+      metrics.compiled += 1;
     } else {
       errors.push(...result.errors);
     }
@@ -481,33 +673,59 @@ export const buildScreens = async (
   }
   // The checks would only say it again, less clearly.
   if (errors.length > 0) {
-    return { ok: false, diagnostics: errors };
+    return done({ ok: false, diagnostics: errors });
   }
-  const diagnostics = checkScreens(files);
+  const diagnostics = await checkScreens(files, reuse, fresh, metrics);
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
-    return { ok: false, diagnostics };
+    return done({ ok: false, diagnostics });
   }
   const kitModules = kitModulesFor(
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
   );
-  const css = await buildCss(
-    sources
-      .filter(([path]) => path !== screenReferences.path)
-      .map(([, source]) => source),
-    kitModules
+  const css = await buildCss(candidates, kitModules);
+  const screens: Record<string, ScreenClosure> = Object.fromEntries(
+    paths
+      .filter((path) => screenFile.test(path))
+      .map((path) => appModuleName(path))
+      .map((entry) => [entry, screenClosure(entry, imports, preview)])
   );
-  return {
+  return done({
     ok: true,
     modules,
-    screens: Object.fromEntries(
-      paths
-        .filter((path) => screenFile.test(path))
-        .map((path) => appModuleName(path))
-        .map((entry) => [entry, screenClosure(entry, imports)])
-    ),
+    screens,
     css,
     diagnostics,
-  };
+    ...(preview
+      ? {
+          entries: await previewEntries(
+            {
+              screens: Object.fromEntries(
+                Object.entries(screens).map(([entry, closure]) => [
+                  entry,
+                  {
+                    closure: closure.modules,
+                    kitModules: closure.modules.flatMap((name) => [
+                      ...(imports.get(name)?.kit ?? []),
+                    ]),
+                  },
+                ])
+              ),
+              modules,
+            },
+            bundle
+          ),
+        }
+      : {}),
+  });
+};
+
+/** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
+export const buildScreens = async (
+  files: Record<string, string>,
+  { preview = false }: { preview?: boolean } = {}
+): Promise<ScreenBuild> => {
+  const { built } = await buildScreensIncrementally(files, { preview });
+  return built;
 };
 
 /**
@@ -710,7 +928,6 @@ const computePackagesOf = (
     ? value.filter(
         (entry): entry is string =>
           typeof entry === "string" &&
-          entry.length > 0 &&
           packageEntrySchema.safeParse(entry).success
       )
     : [];
@@ -1133,6 +1350,7 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
  */
 export type CompileTarget =
   | "screens"
+  | "preview-screens"
   | "server"
   | "app"
   | "app-tests"
@@ -1143,6 +1361,7 @@ export type CompileTarget =
 /** What a build of each target answers. */
 export interface TargetBuilds {
   screens: ScreenBuild;
+  "preview-screens": ScreenBuild;
   server: ServerBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
@@ -1161,7 +1380,11 @@ const targetBuilds: {
     files: Record<string, string>
   ) => TargetBuilds[Target] | Promise<TargetBuilds[Target]>;
 } = {
-  screens: buildScreens,
+  screens: async (files) => await buildScreens(files),
+  // A chat's draft (spec 19.2.1): every gate of `screens`, instrumented
+  // for React Fast Refresh, on the preview kit.
+  "preview-screens": async (files) =>
+    await buildScreens(files, { preview: true }),
   server: buildServer,
   app: checkAppCode,
   "app-tests": buildAppTests,
@@ -1211,6 +1434,32 @@ const knownTarget = <Target extends string>(
   return target as Target;
 };
 
+/** The targets built reusing earlier builds' parts, and whether each is a preview's. */
+const incrementalTargets = {
+  screens: false,
+  "preview-screens": true,
+} as const;
+
+/** What `buildIncrementally` builds. */
+export type IncrementalTarget = keyof typeof incrementalTargets;
+
+/**
+ * What core handed over of earlier builds, as records by key: anything
+ * else is nothing. Each record is checked again where it is used.
+ */
+const incrementsOf = (value: unknown): Handed => {
+  const records = (field: string): Record<string, unknown> => {
+    const found: unknown =
+      typeof value === "object" && value !== null && Object.hasOwn(value, field)
+        ? Reflect.get(value, field)
+        : undefined;
+    return typeof found === "object" && found !== null && !Array.isArray(found)
+      ? Object.fromEntries(Object.entries(found))
+      : {};
+  };
+  return { modules: records("modules"), checks: records("checks") };
+};
+
 /**
  * The App compiler, in an isolate of its own: it parses, checks and
  * transforms App code, and never runs it. Each method takes the target it
@@ -1231,6 +1480,26 @@ export default class AppCompiler extends WorkerEntrypoint {
     // SAFETY: `known` is `target`, which picks its own builder.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return (await targetBuilds[known](files)) as TargetBuilds[Target];
+  }
+
+  /**
+   * Builds the screens (`target`: `screens`, or a preview's) from `files`
+   * as `build` does, every gate the same, reusing what earlier builds
+   * kept (`reuse`, increments.ts) where its key says it is what this
+   * build would make; with what it makes now, for core to keep, and how
+   * much it reused.
+   */
+  async buildIncrementally(
+    target: IncrementalTarget,
+    files: Record<string, string>,
+    reuse: unknown
+  ): Promise<IncrementalBuild<ScreenBuild>> {
+    assertNoBindings(this.env, this.ctx.props, "The App compiler");
+    const known = knownTarget(incrementalTargets, target, "buildIncrementally");
+    return await buildScreensIncrementally(files, {
+      preview: incrementalTargets[known],
+      reuse: incrementsOf(reuse),
+    });
   }
 
   /**

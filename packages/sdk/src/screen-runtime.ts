@@ -24,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import { clientInternals, GraspClient } from "./client-core.ts";
 import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
+import { appModuleAddresses, calledByApp } from "./console-origin.ts";
 import { portFileTransport } from "./file-port.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import { portLinkTransport } from "./link-port.ts";
@@ -515,12 +516,24 @@ const reportProblems = (): void => {
     report({ kind: "rejection", ...describe(event.reason) });
   });
   const logError = console.error.bind(console);
+  // Read once: the App's modules are those the document's import map
+  // names (`app~…`); a preview's updates are `data:` modules.
+  const appModules = appModuleAddresses(
+    document.querySelector('script[type="importmap"]')?.textContent ?? undefined
+  );
   console.error = (...args: unknown[]) => {
     logError(...args);
     const [first] = args;
     const described = describe(first);
+    // The App's own call is a problem; React's development warnings in a
+    // preview, or a library's, only a warning (console-origin.ts).
+    const fromApp = calledByApp(
+      new Error("console.error called").stack ?? "",
+      import.meta.url,
+      appModules
+    );
     report({
-      kind: "console",
+      kind: fromApp ? "console" : "warning",
       ...described,
       message: args
         .map((arg) => describe(arg).message)
@@ -615,14 +628,17 @@ const isScreenModule = (
  * map), connected to the page through `port`, its files through
  * `filePort` (file-port.ts), its links through `linkPort` (link-port.ts),
  * and tells the page once it has rendered for the first time, as the
- * `start` the page named.
+ * `start` the page named. `onLoaded` is called once the screen's modules
+ * have evaluated, before it first renders: a preview registers their
+ * components with Fast Refresh there (preview-runtime.ts).
  */
 export const runScreen = async (
   port: MessagePort,
   screen: string,
   start: ScreenStart,
   filePort: MessagePort,
-  linkPort: MessagePort
+  linkPort: MessagePort,
+  onLoaded?: () => void
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -639,6 +655,7 @@ export const runScreen = async (
     if (!isScreenModule(loaded)) {
       throw new Error(`${screen} has no default export to render.`);
     }
+    onLoaded?.();
     // One client for the App session this frame runs, over the page's
     // bridge: every screen in it reads through the same queries and
     // submissions, and none makes its own (spec 10.7.1).

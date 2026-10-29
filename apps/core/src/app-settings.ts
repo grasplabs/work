@@ -2,6 +2,7 @@ import { appChangesSchema, appErrors } from "@grasp-os/shared/apps";
 import type { App, AppMemberRef } from "@grasp-os/shared/apps";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -17,7 +18,8 @@ import { requireNotStaff } from "./sharing.ts";
 import { openTo } from "./workflows/owners.ts";
 
 // An App's settings besides its code: its name and description, who
-// answers for it, and whom it is made for. Its builders change them, and
+// answers for it, whom it is made for, and the business process it serves
+// (GRA-511), which the UI shows its icon for and groups it by. Its builders change them, and
 // each change is audited as `app.updated`, naming what changed: the
 // people and teams by ID, the name and description only as changed, since
 // the log holds no content.
@@ -181,6 +183,25 @@ const planAudience = async (
 };
 
 /**
+ * The business process it serves, where that changes. Grasp's staff may
+ * set it too: it names nobody and grants nothing, and Grasp assigns it as
+ * it maps a client's work.
+ */
+const planProcess = (
+  plan: Plan,
+  row: Row,
+  process: BusinessProcess | null
+): void => {
+  if (process === row.process) {
+    return;
+  }
+  plan.set.process = process;
+  plan.guards.push(holds(apps.process, row.process));
+  plan.detail.process = process;
+  plan.detail.previousProcess = row.process;
+};
+
+/**
  * Changes App `app`'s settings, for its builders. Settings given as they
  * are already change and record nothing. The write goes through only
  * while what it changes is still what was read, and while whoever answers
@@ -212,6 +233,9 @@ export const updateApp = async (
   if (changes.audience !== undefined) {
     await planAudience(env, plan, row, changes.audience);
   }
+  if (changes.process !== undefined) {
+    planProcess(plan, row, changes.process);
+  }
   if (plan.guards.length === 0) {
     return toApp(row);
   }
@@ -233,7 +257,7 @@ export const updateApp = async (
     throw appErrors.create("app.conflict");
   }
   // Its entry in the Apps collection carries its name and description;
-  // a failed indexing is left to the cron trigger, which finds it stale.
+  // a failed indexing is left to the clock, which finds it stale.
   if (plan.set.name !== undefined || plan.set.description !== undefined) {
     await indexAppNow(env, after.id);
   }

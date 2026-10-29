@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { asc, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -17,6 +16,15 @@ import {
 import type { BuildPlan } from "../src/builds/plan.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, integrationBuilds } from "../src/db/schema.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
+import {
+  deliverAlarm,
+  ended,
+  holdFirstBatch,
+  journalOf,
+  stepSucceeded,
+  timedOut,
+} from "./runs.ts";
 
 // How a build can go wrong, and what each test holds it to:
 // - Two people press Build it for one app: one build, one run.
@@ -27,6 +35,8 @@ import { auditEvents, integrationBuilds } from "../src/db/schema.ts";
 // - The agent opens its pull request from another branch, or a merge of
 //   another pull request is reported: refused.
 // - Nobody acts: the wait runs out and the build stops for a person.
+// - The run loses a step's result after the step's write: the step runs
+//   again, and the build moves once.
 // - The audit log records identifiers and counts, never the plan's or a
 //   person's words.
 
@@ -87,38 +97,66 @@ const trailOf = async (app: string) => {
   }));
 };
 
-/** The builds' runs the test starts, retries going at once. */
-const followBuilds = async () => {
-  const runs = await introspectWorkflow(env.INTEGRATION_BUILD);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableRetryDelays();
-  });
-  return runs;
+const builds = adminWorkflows.integrationBuild;
+
+/** The run of the build of `app`. */
+const runOf = async (app: string): Promise<string> => {
+  const build = await buildOf(db, app);
+  if (build === null) {
+    throw new Error(`No build of ${app}`);
+  }
+  return build.runId;
 };
 
-/** The only run of `runs`. */
-const onlyRun = async (runs: Awaited<ReturnType<typeof followBuilds>>) => {
-  const all = await runs.get();
-  const [run] = all;
-  if (run === undefined || all.length !== 1) {
-    throw new Error(`Expected one build's run, got ${all.length}`);
-  }
-  return run;
+/** Once the run of the build of `app` has passed step `name`. */
+const passed = async (app: string, name: string): Promise<void> => {
+  await stepSucceeded(builds, await runOf(app), name);
+};
+
+/**
+ * Build it pressed for `app` while the engine can't be reached (the run's
+ * object refuses its start), long enough ago that a run the engine
+ * doesn't have isn't starting; returns how the press was refused.
+ */
+const requestedWithoutRun = async (app: string): Promise<unknown> => {
+  const get = env.ADMIN_RUNS.get.bind(env.ADMIN_RUNS);
+  const failing = vi.spyOn(env.ADMIN_RUNS, "get").mockImplementationOnce(
+    (id, options) =>
+      new Proxy(get(id, options), {
+        get: (target, property): unknown => {
+          if (property === "start") {
+            return async () => {
+              await Promise.resolve();
+              throw new Error("The engine is unavailable");
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          return value;
+        },
+      })
+  );
+  const refused = await codeOf(
+    requestBuild(env, staff, { app, name: "Example HR" })
+  );
+  failing.mockRestore();
+  await db
+    .update(integrationBuilds)
+    .set({ createdAt: new Date(Date.now() - 5 * 60_000) })
+    .where(eq(integrationBuilds.app, app));
+  return refused;
 };
 
 describe("integration builds", () => {
   it("follows a build from Build it to its merge, a sent-back plan included", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
 
     await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
     await recordPlan(env, app, {
       ...planFor(app),
       hosts: ["api.example-hr.test", "files.example-hr.test"],
     });
-    await run.waitForStepResult({ name: "decision 1 check" });
+    await passed(app, "decision 1 check");
     await sendBackPlan(
       env,
       staff,
@@ -126,7 +164,7 @@ describe("integration builds", () => {
       1,
       "Only what reads employees, please."
     );
-    await run.waitForStepResult({ name: "plan 2 check" });
+    await passed(app, "plan 2 check");
     const sentBack = await buildOf(db, app);
     await recordPlan(env, app, planFor(app));
     await approvePlan(env, staff, app, 2);
@@ -136,12 +174,12 @@ describe("integration builds", () => {
       branch: `feat/connector-${app}`,
     });
     await recordMerge(env, app, { number: 4242, commitSha: mergeSha });
-    await run.waitForStatus("complete");
+    const status = await ended(builds, await runOf(app));
 
     const build = await buildOf(db, app);
     expect({
       sentBack: { stage: sentBack?.stage, note: sentBack?.planNote },
-      output: await run.getOutput(),
+      status,
       build: {
         stage: build?.stage,
         planRound: build?.planRound,
@@ -157,7 +195,7 @@ describe("integration builds", () => {
         stage: "researching",
         note: "Only what reads employees, please.",
       },
-      output: "merged",
+      status: { status: "complete", output: "merged" },
       build: {
         stage: "merged",
         planRound: 2,
@@ -218,7 +256,6 @@ describe("integration builds", () => {
   });
 
   it("starts one build however many times Build it is pressed for an app", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
 
     const first = await requestBuild(env, staff, { app, name: "Example HR" });
@@ -228,13 +265,14 @@ describe("integration builds", () => {
       { app, name: "Example HR" }
     );
 
-    const all = await runs.get();
+    await passed(app, "plan 1 check");
     const trail = await trailOf(app);
     expect({
       again,
-      runs: all.length,
       requests: trail.filter(({ action }) => action === "build.request").length,
-    }).toStrictEqual({ again: first, runs: 1, requests: 1 });
+      researched: trail.filter(({ action }) => action === "build.research")
+        .length,
+    }).toStrictEqual({ again: first, requests: 1, researched: 1 });
   });
 
   it("refuses an app no connector can be named for", async () => {
@@ -258,24 +296,11 @@ describe("integration builds", () => {
   });
 
   it("starts a build's run on the next Build it when the first never started", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
-    const failing = vi
-      .spyOn(env.INTEGRATION_BUILD, "create")
-      .mockRejectedValueOnce(new Error("Workflows is unavailable"));
-    const first = await codeOf(
-      requestBuild(env, staff, { app, name: "Example HR" })
-    );
-    failing.mockRestore();
-    // Long enough ago that a run Workflows doesn't have isn't starting.
-    await db
-      .update(integrationBuilds)
-      .set({ createdAt: new Date(Date.now() - 5 * 60_000) })
-      .where(eq(integrationBuilds.app, app));
+    const first = await requestedWithoutRun(app);
 
     const runId = await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
 
     const build = await buildOf(db, app);
     expect({ first, runId, stage: build?.stage }).toStrictEqual({
@@ -286,16 +311,14 @@ describe("integration builds", () => {
   });
 
   it("goes straight to writing once a plan for an app's own API keys is approved", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
     await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
 
     await recordPlan(env, app, planFor(app, "api_key"));
     const next = await approvePlan(env, staff, app, 1);
     const credentials = await codeOf(confirmCredentials(env, staff, app));
-    await run.waitForStepResult({ name: "pull request check" });
+    await passed(app, "pull request check");
 
     const build = await buildOf(db, app);
     expect({
@@ -310,11 +333,9 @@ describe("integration builds", () => {
   });
 
   it("moves a build once and never back when an event comes twice, late or for an older plan", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
     await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
     await recordPlan(env, app, planFor(app));
     await sendBackPlan(env, staff, app, 1, "Fewer actions.");
     await recordPlan(env, app, planFor(app));
@@ -359,11 +380,9 @@ describe("integration builds", () => {
   });
 
   it("refuses a plan that reaches past its own hosts or is for another app", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
     await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
     const plan = planFor(app);
     const [action] = plan.actions;
     if (action === undefined) {
@@ -402,11 +421,9 @@ describe("integration builds", () => {
   });
 
   it("takes a pull request only from the build's own branch, and a merge only of it", async () => {
-    await using runs = await followBuilds();
     const app = newApp();
     await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStepResult({ name: "plan 1 check" });
+    await passed(app, "plan 1 check");
     await recordPlan(env, app, planFor(app, "api_key"));
     await approvePlan(env, staff, app, 1);
 
@@ -434,19 +451,15 @@ describe("integration builds", () => {
   });
 
   it("stops a build for a person when the agent never writes its plan", async () => {
-    await using runs = await followBuilds();
-    await runs.modifyAll(async (modifier) => {
-      await modifier.forceEventTimeout({ name: "plan 1" });
-    });
     const app = newApp();
-    await requestBuild(env, staff, { app, name: "Example HR" });
-    const run = await onlyRun(runs);
-    await run.waitForStatus("complete");
+    const runId = await requestBuild(env, staff, { app, name: "Example HR" });
+    await timedOut(builds, runId, "plan 1");
+    const status = await ended(builds, runId);
     const late = await codeOf(recordPlan(env, app, planFor(app)));
 
     const build = await buildOf(db, app);
     expect({
-      output: await run.getOutput(),
+      status,
       late,
       build: {
         stage: build?.stage,
@@ -454,7 +467,7 @@ describe("integration builds", () => {
         reason: build?.reason,
       },
     }).toStrictEqual({
-      output: "researching_timed_out",
+      status: { status: "complete", output: "researching_timed_out" },
       late: "wrong_stage",
       build: {
         stage: "needs_person",
@@ -462,5 +475,44 @@ describe("integration builds", () => {
         reason: "researching_timed_out",
       },
     });
+  });
+
+  it("moves a build once when its run loses a step's result after the step's write", async () => {
+    const app = newApp();
+    // The build asked for before its run starts, so the run's first write
+    // can be held.
+    await requestedWithoutRun(app);
+    const runId = await runOf(app);
+    const held = await holdFirstBatch(builds, runId);
+
+    // Released however the checks go: a held write left behind would block
+    // the run's object for the rest of the file.
+    try {
+      await requestBuild(env, staff, { app, name: "Example HR" });
+      // "researching" moved the build, and its activation is lost before
+      // the step's result is kept: a duplicate delivery takes the run over,
+      // and the step runs again.
+      await held.committed;
+      await deliverAlarm(builds, runId);
+      await passed(app, "plan 1 check");
+
+      const journal = await journalOf(builds, runId);
+      const trail = await trailOf(app);
+      const build = await buildOf(db, app);
+      expect({
+        researching: journal.steps
+          .filter(({ name }) => name === "researching")
+          .map(({ state, attempt }) => ({ state, attempt })),
+        researched: trail.filter(({ action }) => action === "build.research")
+          .length,
+        stage: build?.stage,
+      }).toStrictEqual({
+        researching: [{ state: "succeeded", attempt: 2 }],
+        researched: 1,
+        stage: "researching",
+      });
+    } finally {
+      held.lose();
+    }
   });
 });

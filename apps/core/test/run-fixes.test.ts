@@ -19,13 +19,13 @@ import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
   readCollection,
   storedGrant,
 } from "./knowledge.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -319,7 +319,7 @@ describe("asking the agent to fix a failed run", slow, () => {
     const failed = await endedRun(owner, app, "careless");
     // The cron, run as it will be once the run's retention is over.
     const day = 24 * 60 * 60 * 1000;
-    await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
+    await runQuarterHourTasks({}, new Date(Date.now() + 31 * day));
 
     const refused = await owner.api.chats
       .fixRun(failed, model)

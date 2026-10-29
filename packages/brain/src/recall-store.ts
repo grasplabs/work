@@ -1,7 +1,12 @@
+import { and, eq, sql } from "drizzle-orm";
+
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
 import { readableCollection } from "./collections.ts";
-import { collections } from "./db/schema.ts";
+import { brainErrors } from "./contract.ts";
+import { inList } from "./db/d1.ts";
+import { collections, documents, versions } from "./db/schema.ts";
+import { sha256Hex } from "./encoding.ts";
 import type { CollectionId } from "./ids.ts";
 import type { Provenance } from "./knowledge.ts";
 import { searchSections } from "./search.ts";
@@ -23,7 +28,93 @@ export interface EvidenceQuery {
   collectionIds?: readonly CollectionId[];
   /** Most sections to return, best first. */
   limit: number;
+  /**
+   * For the exact lane (exact.ts): only sections that hold one of these,
+   * each its words in a row, in place of `query`'s words.
+   */
+  exact?: readonly (readonly string[])[];
 }
+
+/** A document's version, as recalled evidence cites it. */
+export interface VersionRef {
+  documentId: string;
+  collectionId: string;
+  version: number;
+}
+
+/**
+ * A version as it was when recalled: `text` stands for its text, a hash
+ * of the payload the version was stored as. A purge points the version at
+ * a new payload (purge.ts rewrites a version in place), so `text` changes
+ * with it. The payload's key holds a random part, so `text` is no hash
+ * anyone could check a guess of the text against, and no key derived from
+ * a secret: rotating one leaves pins as they were.
+ */
+export interface PinnedVersion extends VersionRef {
+  text: string;
+}
+
+/** What one pin is known by. */
+export const pinKey = ({
+  documentId,
+  collectionId,
+  version,
+}: VersionRef): string => JSON.stringify([collectionId, documentId, version]);
+
+/**
+ * The versions of `refs` that `reader` may read now, each pinned as its
+ * text is now: one query, whatever their number.
+ */
+const readablePins = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  refs: readonly VersionRef[]
+): Promise<Map<string, PinnedVersion>> => {
+  if (refs.length === 0) {
+    return new Map();
+  }
+  const allowed = await allowedFor(brain.ports, reader);
+  const rows = await brain.db
+    .select({
+      documentId: documents.id,
+      collectionId: documents.collectionId,
+      version: versions.number,
+      payloadKey: versions.payloadKey,
+    })
+    .from(versions)
+    .innerJoin(documents, eq(documents.id, versions.documentId))
+    .innerJoin(collections, eq(collections.id, documents.collectionId))
+    .where(
+      and(
+        inList(documents.id, [
+          ...new Set(refs.map(({ documentId }) => documentId)),
+        ]),
+        sql`${versions.number} IN (SELECT value FROM json_each(${JSON.stringify(
+          [...new Set(refs.map(({ version }) => version))]
+        )}))`,
+        allowed.documents()
+      )
+    );
+  const pins = await Promise.all(
+    rows.map(async ({ payloadKey, ...ref }) => ({
+      ...ref,
+      text: await sha256Hex(payloadKey),
+    }))
+  );
+  return new Map(pins.map((pin) => [pinKey(pin), pin]));
+};
+
+/** `BrainStore.unchangedPins`, for `brain`. */
+const unchangedPins = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  pins: readonly PinnedVersion[]
+): Promise<PinnedVersion[]> => {
+  const readable = await readablePins(brain, reader, pins);
+  // Each pin by its own text: one pinned before a purge stays out though
+  // the same version, pinned again after it, is in.
+  return pins.filter((pin) => readable.get(pinKey(pin))?.text === pin.text);
+};
 
 /** The Brain's store, as recall reads it. */
 export interface BrainStore<C> {
@@ -42,6 +133,42 @@ export interface BrainStore<C> {
     reader: C,
     collectionIds: readonly CollectionId[]
   ) => Promise<void>;
+  /**
+   * Each of `refs`, a document version `reader` just recalled, pinned
+   * (`PinnedVersion`): refused, as `brain.not_found`, unless `reader` may
+   * read them all now.
+   */
+  pinsOf: (reader: C, refs: readonly VersionRef[]) => Promise<PinnedVersion[]>;
+  /**
+   * Refuses, as `brain.not_found`, any of `pins` that `reader` may not read
+   * now, or that is gone (a document deleted, or moved to another
+   * collection), or whose text changed since it was pinned (a purge
+   * rewrote it): one query, whatever their number.
+   */
+  requireDocumentsReadable: (
+    reader: C,
+    pins: readonly PinnedVersion[]
+  ) => Promise<void>;
+  /**
+   * Of `pins`, those `reader` may still read as they were pinned, text and
+   * all: one query, whatever their number. One gone, moved to another
+   * collection, or rewritten by a purge, is not, though the same version
+   * pinned again since is.
+   */
+  unchangedPins: (
+    reader: C,
+    pins: readonly PinnedVersion[]
+  ) => Promise<PinnedVersion[]>;
+  /**
+   * The vector lane (GRA-303), where the store has one: sections whose
+   * meaning is close to `query`'s, best first, of those `reader` may read,
+   * noted as read as `findEvidence` notes them. Absent until an index is
+   * kept; a recall then reports the route as not enabled.
+   */
+  findSimilar?: (
+    reader: C,
+    query: EvidenceQuery
+  ) => Promise<{ sections: FoundSection[]; provenance: Provenance }>;
   /** Sections that match `query`, best first, of those `reader` may read. */
   findEvidence: (
     reader: C,
@@ -70,15 +197,29 @@ export const d1BrainStore = <C>(brain: Brain<C>): BrainStore<C> => ({
       )
     );
   },
-  findEvidence: async (reader, { query, collectionIds, limit }) =>
-    await searchSections(
-      brain,
-      reader,
-      query,
-      { limit },
-      undefined,
-      collectionIds === undefined ? {} : { among: collectionIds }
-    ),
+  pinsOf: async (reader, refs) => {
+    const readable = await readablePins(brain, reader, refs);
+    return refs.map((ref) => {
+      const pin = readable.get(pinKey(ref));
+      if (pin === undefined) {
+        throw brainErrors.create("brain.not_found");
+      }
+      return pin;
+    });
+  },
+  requireDocumentsReadable: async (reader, pins) => {
+    const unchanged = await unchangedPins(brain, reader, pins);
+    if (unchanged.length !== pins.length) {
+      throw brainErrors.create("brain.not_found");
+    }
+  },
+  unchangedPins: async (reader, pins) =>
+    await unchangedPins(brain, reader, pins),
+  findEvidence: async (reader, { query, collectionIds, limit, exact }) =>
+    await searchSections(brain, reader, query, { limit }, undefined, {
+      ...(collectionIds === undefined ? {} : { among: collectionIds }),
+      ...(exact === undefined ? {} : { exact }),
+    }),
   accessKey: async (reader) => {
     // What may be read now: each collection the reader may read, with
     // what decides who reads it (its access, whether it is sensitive),

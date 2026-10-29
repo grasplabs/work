@@ -102,13 +102,13 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await page.goto("/");
 
   await page.getByLabel("Your question").fill(question);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   // No model answers here: the answer says so once the turn ends.
   await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
+    "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
   const chats = page.getByRole("navigation", { name: "Recent chats" });
@@ -125,7 +125,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
   await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
+    "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
   await box.fill("");
@@ -214,7 +214,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // granted this connection, so it's refused, and the write still waits.
   await waiting.getByRole("button", { name: `Confirm ${described}` }).click();
   await expect(waiting.getByRole("alert")).toHaveText(
-    "This App or agent has no permission to do that."
+    "This domain or agent has no permission to do that."
   );
   await expect(waiting).toContainText("cleo@acme.test");
   // Rejecting each drops it.
@@ -307,7 +307,7 @@ test("a person groups chats in a project with a goal and a document, moves them 
   const project = projects.getByRole("listitem", { name: projectName });
   const asked = async (question: string): Promise<void> => {
     await page.getByLabel("Your question").fill(question);
-    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page).toHaveURL(/[?&]chat=/u);
   };
   await asked(first);
@@ -421,7 +421,7 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
   await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   // The turn has ended (the local stack reaches no model), so nothing
   // else is on its way when the connection drops.
@@ -430,7 +430,7 @@ test("a followed chat says core can't be reached when it stays out of reach", as
     `Out of reach ${tag}.`
   );
   await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
+    "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
   await expect(
@@ -499,7 +499,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   const question = `Think hard ${tag}.`;
   await page.getByLabel("Your question").fill(question);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   await expect(
     page.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
@@ -537,7 +537,7 @@ test("the side panel opens in a sheet over the chat on a narrow screen, and besi
   const tag = crypto.randomUUID().slice(0, 8);
   await page.goto("/");
   await page.getByLabel("Your question").fill(`Panel ${tag}.`);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   const panel = page.getByRole("complementary", { name: "Side panel" });
 
@@ -580,7 +580,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const send = page
     .locator("form")
     .filter({ has: box })
-    .getByRole("button", { name: "Send" });
+    .getByRole("button", { name: "Send", exact: true });
   await box.fill(question);
   await expect(send).toBeEnabled();
   await box.press("Enter");
@@ -588,7 +588,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await expect(messages.getByRole("alert")).toHaveText(
-    "The model call failed.",
+    "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
   // The page stayed where it was.

@@ -9,6 +9,7 @@ import { recordEventIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
+import { endOwedRevoke } from "./owed-revokes.ts";
 import {
   bearer,
   grantedAsAsked,
@@ -21,7 +22,7 @@ import type {
   OAuthClientCredentials,
   OAuthProviderConfig,
 } from "./providers.ts";
-import { resealBatchSize, vaultFor } from "./vault.ts";
+import { resealBatchSize, VaultError, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
 // The token vault: each connection's tokens, or its API key, sealed
@@ -173,6 +174,22 @@ const isFresh = (row: TokenRow, now: number): boolean =>
 const unchanged = (row: TokenRow): SQL =>
   sql`${connectionTokens.connectionId} = ${row.connectionId} AND ${connectionTokens.generation} = ${row.generation}`;
 
+/** Whether connection `connectionId` is disconnected. */
+const disconnected = async (
+  db: D1Database,
+  connectionId: string
+): Promise<boolean> => {
+  const [row] = await drizzle(db)
+    .select({ status: connections.status })
+    .from(connections)
+    .where(eq(connections.id, connectionId));
+  return row?.status === "disconnected";
+};
+
+/** That `row`'s connection isn't disconnected, as SQL. */
+const notDisconnected = (row: TokenRow): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${row.connectionId} AND ${connections.status} <> 'disconnected')`;
+
 /** Takes the refresh lease on `row`, unless someone holds it. */
 const takeLease = async (
   db: D1Database,
@@ -225,7 +242,12 @@ const markDead = async (
       target: { type: "connection", id: row.connectionId },
       detail: { provider, reason },
     },
-    { from: connectionTokens, where: unchanged(row) },
+    // Never a disconnected connection's: its tokens are kept only for a
+    // revoke still owed (src/revocations.ts), which ends that itself.
+    {
+      from: connectionTokens,
+      where: sql`${unchanged(row)} AND ${notDisconnected(row)}`,
+    },
     [
       db
         .update(connections)
@@ -237,7 +259,9 @@ const markDead = async (
             exists(db.select().from(connectionTokens).where(unchanged(row)))
           )
         ),
-      db.delete(connectionTokens).where(unchanged(row)),
+      db
+        .delete(connectionTokens)
+        .where(and(unchanged(row), notDisconnected(row))),
     ]
   );
 };
@@ -289,9 +313,11 @@ interface RefreshContext {
 
 /**
  * Stores what a refresh got, only if `row` is still the current
- * generation. If a disconnect came first (the row is gone), the minted
- * tokens are revoked (threat model CN14); if another refresh did (its
- * lease had lapsed), they are dropped and the stored ones stand.
+ * generation of a connection not disconnected. If a disconnect came first
+ * (the row is gone, or kept for a revoke still owed, src/revocations.ts),
+ * the minted tokens are revoked (threat model CN14), and the call goes no
+ * further; if another refresh did (its lease had lapsed), they are dropped
+ * and the stored ones stand.
  */
 const storeRefreshed = async (
   { env, vault, provider, client }: RefreshContext,
@@ -313,12 +339,20 @@ const storeRefreshed = async (
       grantedScopes: minted.scope ?? row.grantedScopes,
       updatedAt: new Date(),
     })
-    .where(unchanged(row))
+    .where(
+      and(
+        unchanged(row),
+        sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${row.connectionId} AND ${connections.status} <> 'disconnected')`
+      )
+    )
     .returning({ connectionId: connectionTokens.connectionId });
   if (stored.length > 0) {
     return next.accessToken;
   }
-  if ((await readRow(env.DB, row.connectionId)) === undefined) {
+  if (
+    (await readRow(env.DB, row.connectionId)) === undefined ||
+    (await disconnected(env.DB, row.connectionId))
+  ) {
     await discardMint(provider, client, minted);
   }
   return undefined;
@@ -401,7 +435,12 @@ const refreshed = async (
   while (Date.now() < deadline) {
     // oxlint-disable-next-line no-await-in-loop -- waits for the lease holder
     const row = await readRow(context.env.DB, connectionId);
-    if (row === undefined) {
+    // Gone, or kept only for a revoke still owed (src/revocations.ts).
+    const stopped =
+      row === undefined ||
+      // oxlint-disable-next-line no-await-in-loop -- one of the loop's exits
+      (await disconnected(context.env.DB, connectionId));
+    if (stopped) {
       throw connectErrors.create("connect.connection_inactive");
     }
     const now = Date.now();
@@ -509,30 +548,44 @@ export const credentialFor = async (
 };
 
 /**
- * The connection's refresh token, for revoking it; `undefined` when it has
- * none or it doesn't open.
+ * The connection's refresh token, for revoking it: `none` when it has
+ * none; `unavailable` while the key it was sealed under isn't held (the
+ * vault unset, or its key not among the current and previous ones), which
+ * setting the key again mends, so the revoke is tried again; `unreadable`
+ * only when a key that is held fails to open it (changed at rest), which
+ * nothing mends.
  */
 export const revocableToken = async (
   env: Env,
   connectionId: string
-): Promise<string | undefined> => {
+): Promise<
+  { refreshToken: string } | "none" | "unavailable" | "unreadable"
+> => {
   const row = await readRow(env.DB, connectionId);
+  if (row === undefined) {
+    return "none";
+  }
   const vault = await vaultFor(env);
-  if (row === undefined || vault === undefined) {
-    return undefined;
+  if (vault === undefined) {
+    log.error("vault.unavailable", { connection: connectionId });
+    return "unavailable";
   }
   try {
     const tokens = await openTokens(vault, row);
-    return "refreshToken" in tokens ? tokens.refreshToken : undefined;
+    return "refreshToken" in tokens
+      ? { refreshToken: tokens.refreshToken }
+      : "none";
   } catch (error) {
     log.error("vault.open_failed", errorFields(error));
-    return undefined;
+    return error instanceof VaultError && error.reason === "unknown_key"
+      ? "unavailable"
+      : "unreadable";
   }
 };
 
 /**
  * Seals tokens still under the previous key again with the current one, a
- * batch per cron run, so the previous key can be removed once none is left
+ * batch per clock run, so the previous key can be removed once none is left
  * under it. A row changed meanwhile keeps its newer value. One that
  * doesn't open (changed at rest) can never be used: its connection is
  * marked for reconnecting, so it doesn't hold up the rest.
@@ -557,7 +610,21 @@ export const resealTokens = async (env: Env): Promise<void> => {
     } catch (error) {
       log.error("vault.open_failed", errorFields(error));
       // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
-      await markDead(env, provider, row, "unreadable");
+      const marked = await markDead(env, provider, row, "unreadable");
+      // A disconnected connection's, kept for a revoke still owed: it can
+      // never be revoked with, so the revoke is given up, on record.
+      if (!marked) {
+        // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+        await endOwedRevoke(
+          env,
+          row.connectionId,
+          "connection.revoke_abandoned",
+          {
+            provider,
+            reason: "unreadable",
+          }
+        );
+      }
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn

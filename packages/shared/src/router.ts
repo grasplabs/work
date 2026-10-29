@@ -50,26 +50,69 @@ const isWorkersDevOrigin = (value: string): boolean => {
 };
 
 /**
+ * A script's name in a Workers for Platforms dispatch namespace, as
+ * Cloudflare takes one: lowercase letters, digits, `-` and `_`, starting
+ * and ending with a letter or digit, at most 63 characters.
+ */
+export const dispatchScriptPattern = /^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$/u;
+
+/** A core's https `*.workers.dev` origin, as the map takes one. */
+const coreUrlSchema = z.string().refine(isWorkersDevOrigin, {
+  message: "Expected an https://*.workers.dev origin",
+});
+
+/**
  * One entry of the router's hostname map (KV, key: the hostname as
  * `routerHostKey` gives it), written by the admin. `generation` counts the
- * client's router secrets: raising it rotates the secret.
+ * client's router secrets: raising it rotates the secret. Where its core
+ * runs is exactly one of:
+ * - `script`: its core's user Worker in the dispatch namespace the router
+ *   binds (`DISPATCHER`, Workers for Platforms), reached through that
+ *   binding alone, never over the internet (GRA-283);
+ * - `coreUrl`: its core on its own account's workers.dev, for a client
+ *   placed in an account of its own, until that placement is retired.
+ *
+ * Either way core checks the router secret. Strict: an entry naming both,
+ * or neither, routes nowhere, so the router never picks between two.
  */
-export const routerHostSchema = z.object({
-  clientId: z.string().regex(clientIdPattern),
-  coreUrl: z.string().refine(isWorkersDevOrigin, {
-    message: "Expected an https://*.workers.dev origin",
+export const routerHostSchema = z.union([
+  z.strictObject({
+    clientId: z.string().regex(clientIdPattern),
+    script: z.string().regex(dispatchScriptPattern),
+    generation: z.int().nonnegative(),
   }),
-  generation: z.int().nonnegative(),
-});
+  z.strictObject({
+    clientId: z.string().regex(clientIdPattern),
+    coreUrl: coreUrlSchema,
+    generation: z.int().nonnegative(),
+  }),
+]);
 export type RouterHost = z.infer<typeof routerHostSchema>;
+
+/** Where an entry's core runs: its script in the namespace, or its origin. */
+export type RouterTarget =
+  | { kind: "dispatch"; script: string }
+  | { kind: "origin"; origin: string };
+
+/** `host`'s target, as the router and the admin both reach it. */
+export const routerTargetOf = (host: RouterHost): RouterTarget =>
+  "script" in host
+    ? { kind: "dispatch", script: host.script }
+    : { kind: "origin", origin: new URL(host.coreUrl).origin };
+
+/** Checks `origin` is a core's https `*.workers.dev` origin, as the map takes one. */
+export const isCoreOrigin = (origin: string): boolean =>
+  coreUrlSchema.safeParse(origin).success;
 
 /**
  * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
- * is the admin's own host (`ADMIN_HOST`); `console` stays reserved from
- * when the admin was called that.
+ * is the admin's own host (`ADMIN_HOST`), `auth` the auth relay's, and
+ * `staging` staging's domain below production's (@grasp-os/shared/names);
+ * `console` stays reserved from when the admin was called that.
  */
 export const reservedClientIds: ReadonlySet<string> = new Set([
   "admin",
+  "auth",
   "console",
   "internal",
   "staging",
@@ -98,7 +141,7 @@ export const routerHostKey = (hostname: string): string =>
  * as lowercase hex (`deriveClientSecret`). The router derives it on every
  * forward, the admin to set it on the client's core, so nothing per
  * client is stored anywhere. `routerKey` is the one `ROUTER_KEY` in
- * Secrets Store (grasp-os-ops).
+ * Secrets Store (Grasp's account).
  */
 export const deriveRouterSecret = async (
   routerKey: string,

@@ -1,0 +1,40 @@
+// The connect gateway (@grasp-os/shared/connect-gateway, GRA-1217).
+// Deployed by hand, with deploy-platform, to Grasp's account, next to the
+// router, in the account the clients' dispatch namespace is in. It has no
+// address of its own: only the placed cores the admin binds to it reach
+// it, each with props naming its own connect.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "grasp-connect-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "workers_dev": false,
+  "preview_urls": false,
+  // Which stage this Worker serves (@grasp-os/shared/names): production
+  // here, staging in `env.staging`.
+  "vars": { "STAGE": "production" },
+  // No platform line per invocation: the gateway logs nothing of what it
+  // forwards (threat model, GRA-1217).
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false },
+    "traces": { "enabled": true },
+  },
+  // The clients' dispatch namespace: the gateway reaches only the script
+  // each binding's props name in it.
+  "dispatch_namespaces": [
+    { "binding": "CLIENTS", "namespace": "grasp-clients" },
+  ],
+  // Staging (`--stage staging`): grasp-connect-gateway-staging, reaching
+  // only staging's clients' namespace.
+  "env": {
+    "staging": {
+      "name": "grasp-connect-gateway-staging",
+      "vars": { "STAGE": "staging" },
+      "dispatch_namespaces": [
+        { "binding": "CLIENTS", "namespace": "grasp-clients-staging" },
+      ],
+    },
+  },
+}

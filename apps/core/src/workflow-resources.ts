@@ -10,6 +10,11 @@ import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { workflowReferenceLimits } from "@grasp-os/sdk/host";
 import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import {
+  businessProcessSchema,
+  storedProcessOf,
+} from "@grasp-os/shared/business-processes";
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -71,6 +76,7 @@ import {
   workflowResourceDraftModules,
   workflowResourceDrafts,
   workflowResourceMembers,
+  workflowResourceProcesses,
   workflowResources,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
@@ -413,15 +419,57 @@ export const requireWorkflowRole = async (
   return { ...workflow, role };
 };
 
-const resourceOf = (workflow: Live, role: WorkflowRole): WorkflowResource => ({
+const resourceOf = (
+  workflow: Live,
+  role: WorkflowRole,
+  process: BusinessProcess | null
+): WorkflowResource => ({
   id: workflow.id,
   namespace: workflowNamespace,
   name: workflow.name,
   owner: workflow.owner,
   currentVersion: workflow.currentVersion,
   role,
+  process,
   createdAt: workflow.createdAt.toISOString(),
 });
+
+/**
+ * The business process each of `workflows` serves, by ID, in one read: a
+ * workflow none was set for has no entry.
+ */
+const processesOf = async (
+  env: Env,
+  workflows: readonly string[]
+): Promise<Map<string, BusinessProcess>> => {
+  if (workflows.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      id: workflowResourceProcesses.workflowResourceId,
+      process: workflowResourceProcesses.process,
+    })
+    .from(workflowResourceProcesses)
+    .where(
+      sql`${workflowResourceProcesses.workflowResourceId} IN ${jsonList(workflows)}`
+    );
+  return new Map(
+    rows.flatMap(({ id, process }) => {
+      const stored = storedProcessOf(process);
+      return stored === null ? [] : [[id, stored] as const];
+    })
+  );
+};
+
+/** The business process workflow `id` serves; null for none. */
+const processOf = async (
+  env: Env,
+  id: string
+): Promise<BusinessProcess | null> => {
+  const processes = await processesOf(env, [id]);
+  return processes.get(id) ?? null;
+};
 
 const entry = (
   by: Acting,
@@ -445,7 +493,9 @@ const entry = (
 export const createWorkflowResource = async (
   env: Env,
   by: Acting,
-  name: unknown
+  name: unknown,
+  /** Admits the write, right before it commits: throws to create nothing. */
+  admit?: () => Promise<void>
 ): Promise<WorkflowResource> => {
   requireBuilder(by);
   const parsed = workflowResourceErrors.parse(
@@ -470,6 +520,7 @@ export const createWorkflowResource = async (
     ]);
     throw workflowResourceErrors.create(reason);
   };
+  await admit?.();
   try {
     await auditedBatch(env, db, [
       db.insert(workflowResources).values({
@@ -494,7 +545,8 @@ export const createWorkflowResource = async (
   }
   return resourceOf(
     { id, name: parsed, owner: by.userId, currentVersion: null, createdAt },
-    ceilingOf(by)
+    ceilingOf(by),
+    null
   );
 };
 
@@ -505,7 +557,59 @@ export const getWorkflowResource = async (
   id: unknown
 ): Promise<WorkflowResource> => {
   const workflow = await requireWorkflowRole(env, by, id, "user");
-  return resourceOf(workflow, workflow.role);
+  return resourceOf(workflow, workflow.role, await processOf(env, workflow.id));
+};
+
+/**
+ * Sets the business process workflow `id` serves to `input`
+ * (`businessProcessSchema`), or clears it with null, for its builders: it
+ * names nobody and grants nothing, so Grasp's staff, who assign it as they
+ * map a client's work, may too. The change and its audit event are one
+ * batch; setting what is set changes and records nothing.
+ */
+export const setWorkflowProcess = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  input: unknown
+): Promise<WorkflowResource> => {
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const process = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    businessProcessSchema.nullable(),
+    input
+  );
+  const before = await processOf(env, workflow.id);
+  if (process !== before) {
+    const db = drizzle(env.DB);
+    const processes = workflowResourceProcesses;
+    await auditedBatch(env, db, [
+      process === null
+        ? db
+            .delete(processes)
+            .where(eq(processes.workflowResourceId, workflow.id))
+        : db
+            .insert(processes)
+            .values({
+              workflowResourceId: workflow.id,
+              process,
+              setBy: by.userId,
+              setAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: processes.workflowResourceId,
+              set: { process, setBy: by.userId, setAt: new Date() },
+            }),
+      outboxed(
+        db,
+        entry(by, "workflow.process_set", workflow.id, {
+          process,
+          previousProcess: before,
+        })
+      ),
+    ]);
+  }
+  return resourceOf(workflow, workflow.role, process);
 };
 
 /** The live workflows `by` has a role in, by name. */
@@ -536,9 +640,15 @@ export const listWorkflowResources = async (
     )
     .orderBy(asc(workflowResources.name));
   const roles = await rolesIn(env, by, rows);
+  const processes = await processesOf(
+    env,
+    rows.map(({ id }) => id)
+  );
   return rows.flatMap((row) => {
     const role = roles.get(row.id);
-    return role === undefined ? [] : [resourceOf(row, role)];
+    return role === undefined
+      ? []
+      : [resourceOf(row, role, processes.get(row.id) ?? null)];
   });
 };
 
@@ -1276,7 +1386,10 @@ type PinnedContract = Pick<
   "alias" | "kind" | "contractId" | "fingerprint"
 >;
 
-/** Where a version's manifest seals what its bindings pinned (`writeVersion`). */
+/**
+ * Where a version's manifest seals what its bindings pinned (`writeVersion`,
+ * `PinnedBinding`): read for its review and its export alike.
+ */
 const manifestBindingsSchema = z.object({
   bindings: z.array(
     z.object({
@@ -1284,6 +1397,8 @@ const manifestBindingsSchema = z.object({
       kind: z.enum(["workflow", ...catalogBindingKinds]),
       contractId: z.string().nullable(),
       fingerprint: z.string(),
+      resourceId: z.string().nullable(),
+      resourceVersion: z.int().nullable(),
     })
   ),
 });
@@ -1791,6 +1906,8 @@ interface Publication {
   actions: WorkflowVersionAction[];
   /** The approved packages its modules import, if any (GRA-665). */
   packages: SealedPackageManifest | undefined;
+  /** Admits the write, right before it commits: throws to write nothing. */
+  admit: (() => Promise<void>) | undefined;
 }
 
 /**
@@ -1814,6 +1931,7 @@ const writeVersion = async (
     modulesHash,
     actions,
     packages,
+    admit,
   } = publication;
   // Bounded when the definition was checked (`inspectDefinition`).
   const contractText = canonicalJson(contractOf(checked));
@@ -1873,6 +1991,9 @@ const writeVersion = async (
     // the row that names them; inside the cleanup, so a store that fails
     // halfway gives its reservations back too.
     await storeBuild(env, { id: owner, version }, compiled);
+    // After the slow work (compiling, storing the build), right before the
+    // row lands: refused, it gives its reservations back as below.
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
@@ -2091,7 +2212,8 @@ const publish = async (
   by: Acting,
   id: unknown,
   input: unknown,
-  sealer: PackageSealer | undefined
+  sealer: PackageSealer | undefined,
+  admit: (() => Promise<void>) | undefined
 ): Promise<WorkflowResourceVersion> => {
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const {
@@ -2189,6 +2311,7 @@ const publish = async (
       modulesHash,
       actions: versionActionsOf(checked.bindings, modules),
       packages: sealed?.manifest,
+      admit,
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
@@ -2316,9 +2439,15 @@ export const publishWorkflowVersion = async (
    * builder's own publication passes it; without it, a publication that
    * names packages is refused.
    */
-  sealer?: PackageSealer
+  sealer?: PackageSealer,
+  /**
+   * Admits the write, called right before the version is committed, after
+   * it was compiled and its build stored: throws to publish nothing (a
+   * chat's code run that ended meanwhile, agent-workflow-build.ts).
+   */
+  admit?: () => Promise<void>
 ): Promise<WorkflowResourceVersion> =>
-  await seenBy(env, by, await publish(env, by, id, input, sealer));
+  await seenBy(env, by, await publish(env, by, id, input, sealer, admit));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (
@@ -2443,18 +2572,6 @@ export const workflowSource = async (
   }
   return { files };
 };
-
-/** A version's bindings, as its manifest pins them (`writeVersion`). */
-const pinnedBindingsSchema = z.object({
-  bindings: z.array(
-    z.object({
-      alias: z.string(),
-      kind: z.string(),
-      resourceId: z.string().nullable(),
-      resourceVersion: z.int().nullable(),
-    })
-  ),
-});
 
 /** A binding of a version, as a definition export follows it. */
 export type ExportedBinding =
@@ -2623,7 +2740,7 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const pinned = pinnedBindingsSchema.safeParse(parsedJson(row.manifest));
+  const pinned = manifestBindingsSchema.safeParse(parsedJson(row.manifest));
   const packages = await exportedPackages(env, workflow.id, row.manifest);
   if (!pinned.success || packages === undefined) {
     throw corrupt(workflow.id, version);

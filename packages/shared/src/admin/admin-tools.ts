@@ -12,6 +12,7 @@ import {
   errorRateOf,
   needsOf,
   releaseOf,
+  ringName,
   ringsOf,
   standingOf,
 } from "./admin-platform.ts";
@@ -164,7 +165,7 @@ export const ADMIN_TOOLS = [
     name: "platforms",
     title: "Every company’s platform",
     description:
-      "Every company’s own Grasp as the console runs it: how it stands, its ring and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now, ring by ring.",
+      "Every company’s own Grasp as the console runs it: how it stands, its ring (Alpha, Beta or Production) and release, whether it runs what the console made live, yesterday’s requests and errors, and what needs a look; then the release going out now, ring by ring.",
     inputSchema: NOTHING,
     annotations: READS,
   },
@@ -242,6 +243,7 @@ const BUILD_STAGE: Record<BuildStage, string> = {
   rollout: "in a release, rolling out ring by ring",
   live: "live for every company that asked",
   declined: "Grasp does not build it",
+  needsPerson: "stopped, for a person at Grasp to look at",
 };
 
 const WAITER: Record<Waiter, string> = {
@@ -711,17 +713,18 @@ export const buildLine = (
   names: Names = newNames()
 ): string => {
   names.apps.set(build.id, build.app);
-  // Workflows by how many, never their names: a company wrote those.
-  const asked = askedBy(build).map(
-    (org) =>
-      `${nameOf(views, org, names)} (${many(
-        build.requests
-          .filter((request) => request.org === org)
-          .flatMap((request) => request.workflows).length,
-        "workflow",
-        "workflows"
-      )})`
-  );
+  // Workflows by how many, never their names: a company wrote those. A
+  // request that doesn't say which workflows asked (a core's app request)
+  // is the company alone.
+  const asked = askedBy(build).map((org) => {
+    const workflows = build.requests
+      .filter((request) => request.org === org)
+      .flatMap((request) => request.workflows).length;
+    const name = nameOf(views, org, names);
+    return workflows === 0
+      ? name
+      : `${name} (${many(workflows, "workflow", "workflows")})`;
+  });
   const pullRequest = build.work?.pr;
   const pr =
     pullRequest && (build.stage === "review" || build.stage === "merged")
@@ -736,11 +739,9 @@ export const buildLine = (
     build.stage === "rollout" && given(build.work?.release)
       ? ` Release ${build.work.release}, live at ${liveAt}.`
       : "";
-  const declined =
-    build.stage === "declined" && given(build.declined)
-      ? ` Why: ${build.declined}`
-      : "";
-  return `- app ${build.id}: ${BUILD_STAGE[build.stage]}; ${WAITER[waitsOn(build.stage)]}. Asked by ${asked.join("; ")}.${pr}${release}${declined}`;
+  // Why Grasp declined it is a person's words: data in the structured
+  // content (`integrations_to_build`), never this text.
+  return `- app ${build.id}: ${BUILD_STAGE[build.stage]}; ${WAITER[waitsOn(build.stage)]}. Asked by ${asked.join("; ")}.${pr}${release}`;
 };
 
 /** What the admin holds about every company's own platform, and the release going out: none until the admin reads it. */
@@ -769,19 +770,19 @@ const platformLine = (
   const needs = needsOf(platform, fleet.releases).map((need) => need.kind);
   const look = needs.length > 0 ? `; needs a look: ${needs.join(", ")}` : "";
   const pinned = given(platform.pinned) ? " (pinned)" : "";
-  return `- ${name}: ${standingOf(platform, fleet.releases)}; ring ${platform.ring}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
+  return `- ${name}: ${standingOf(platform, fleet.releases)}; in ${ringName(platform.ring)}; runs ${releaseOf(platform) ?? "nothing yet"}${pinned}; ${driftOf(platform).replace("_", " ")}; ${platform.usage.days.at(-1)?.requests ?? 0} requests yesterday, ${errors} errors${look}.`;
 };
 
 /** The release going out, ring by ring, in a line. */
 const rolloutLine = (rollout: Rollout): string => {
   const status =
     rollout.status === "waiting"
-      ? `waiting for someone at Grasp to approve ring ${Math.min(rollout.ring + 1, 2)}`
+      ? `waiting for someone at Grasp to approve ${ringName(Math.min(rollout.ring + 1, 2))}`
       : rollout.status;
   const rings = ringsOf(rollout)
     .map(
       (ring) =>
-        `Ring ${ring.ring}: ${ring.done} of ${ring.targets.length} on it`
+        `${ringName(ring.ring)}: ${ring.done} of ${ring.targets.length} on it`
     )
     .join("; ");
   return `Going out now: ${rollout.release}, ${status}. ${rings}.`;
@@ -1023,6 +1024,7 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
           id: build.id,
           stage: build.stage,
           waitsOn: waitsOn(build.stage),
+          ...(given(build.declined) ? { declined: build.declined } : {}),
           askedBy: build.requests.map((request) => ({
             organization: request.org,
             workflows: request.workflows.length,
@@ -1045,6 +1047,7 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
           organization: org,
           standing: standingOf(platform, fleet.releases),
           ring: platform.ring,
+          ringName: ringName(platform.ring),
           release: releaseOf(platform),
           pinned: platform.pinned,
           drift: driftOf(platform),

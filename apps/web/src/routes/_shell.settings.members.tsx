@@ -279,11 +279,11 @@ const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
     roles: ["admin", "builder", "user"],
   },
   {
-    label: msg`Build engines, their apps and workflows, and ask for the permissions they need`,
+    label: msg`Build domains, their apps and workflows, and ask for the permissions they need`,
     roles: ["admin", "builder"],
   },
   {
-    label: msg`Connect shared accounts and decide what engines may do`,
+    label: msg`Connect shared accounts and decide what domains may do`,
     roles: ["admin"],
   },
   {

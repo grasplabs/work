@@ -31,8 +31,8 @@ import {
   internalErrors,
   isExpectedError,
 } from "@grasp-os/shared/errors";
-import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
@@ -61,6 +61,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { relayPreviewStream } from "./preview-stream-relay.ts";
 import { previewLoadMsOf } from "./preview-updates.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
@@ -99,16 +100,10 @@ import { questionSchema } from "./workspace.ts";
  * admins grant to it once, whoever's chat it answers in. Named as agents
  * must be (`workspaceAgentIdSchema` in agent-scope.ts).
  */
-export const chatAgentId = organizationId;
+// Where it is: the leaf module, which what this module imports can import.
+export { personalWorkspaceId } from "./personal-workspace.ts";
 
-/**
- * The Workspace object that holds `userId`'s chats: each person's own, so
- * one person's chats, watches and turns never load, cap or restart
- * another's. A chat's context names it (`workspaceId`), and its agent is
- * still {@link chatAgentId}.
- */
-export const personalWorkspaceId = (userId: string): WorkspaceId =>
-  workspaceIdSchema.parse(`person:${userId}`);
+export const chatAgentId = organizationId;
 
 /**
  * Most chats one connection follows at once: a page shows one, and a page
@@ -352,6 +347,41 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         lastAt: chat.lastAt.toISOString(),
         running: false,
         projectId: chat.projectId,
+        appId: chat.appId,
+      };
+    });
+  }
+
+  async forApp(app: string): Promise<ChatSummary> {
+    return await withPerson(this.#check, async (person) => {
+      // A builder's, of an App that isn't archived: the chat changes it.
+      const { id, name } = await editableApp(this.#env, person, app);
+      const chats = this.#chatsOf(person.userId);
+      const kept = await chats.appChat(person.userId, id);
+      if (kept !== null) {
+        return kept;
+      }
+      // An App's name always fits a chat's title.
+      const title = chatTitleSchema.parse(name);
+      const chat = await chats.createChat(
+        title,
+        person.userId,
+        chatAgentId,
+        actorOf(person),
+        undefined,
+        undefined,
+        "web",
+        undefined,
+        id
+      );
+      return {
+        id: chat.id,
+        title: chat.title,
+        createdAt: chat.createdAt.toISOString(),
+        lastAt: chat.lastAt.toISOString(),
+        running: false,
+        projectId: chat.projectId,
+        appId: chat.appId,
       };
     });
   }
@@ -551,6 +581,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         createdAt: chat.createdAt.toISOString(),
         lastAt: chat.lastAt.toISOString(),
         projectId: chat.projectId,
+        appId: chat.appId,
       };
       try {
         await chats.send(chat.id, userId, {

@@ -4,6 +4,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { WorkflowCandidateTrace } from "@grasp-os/shared/workflow-diagrams";
 import {
   maxCandidateLifetimeMs,
   maxCandidateWaitMs,
@@ -19,7 +20,16 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
-import { and, eq, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -29,6 +39,7 @@ import {
   runLineageAttempts,
   runLineages,
   workflowCandidateRuns,
+  workflowItemTests,
   workflowResources,
 } from "../db/core/schema.ts";
 import { notNullFailed } from "../db/d1.ts";
@@ -49,9 +60,10 @@ import { acceptedInput } from "../workflow-starts.ts";
 import { runDequeued } from "./admission.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
+import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
 import type { HostedResourceRun } from "./resource-host.ts";
+import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
   keptFailureOf,
@@ -291,7 +303,18 @@ export const startCandidateRun = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /**
+   * Admits the start, right before its row commits, after its build was
+   * compiled and stored: throws to start nothing.
+   */
+  admit?: () => Promise<void>,
+  /**
+   * The item of a test over real items the run is (item-tests.ts), given
+   * its run's ID: written with its row, so the run is its tester's alone
+   * from the moment it exists (`candidateRunFor`).
+   */
+  item?: (runId: string) => typeof workflowItemTests.$inferInsert
 ): Promise<{ runId: string }> => {
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
@@ -361,6 +384,7 @@ export const startCandidateRun = async (
     // that names them; given back, as is any part stored, if the row
     // isn't written.
     await storeBuild(env, { id: reservation, version: 1 }, built.compiled);
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(workflowCandidateRuns).values({
         id: runId,
@@ -377,6 +401,9 @@ export const startCandidateRun = async (
         status: "starting",
         createdAt,
       }),
+      ...(item === undefined
+        ? []
+        : [db.insert(workflowItemTests).values(item(runId))]),
       outboxed(db, {
         actor: by.actor ?? actorOf(by),
         action: "workflow.candidate.started",
@@ -479,7 +506,9 @@ const loadedCandidateRun = async (
   const fixtures = z
     .record(z.string(), z.object({ output: z.json() }))
     .parse(JSON.parse(row.fixtures));
-  const { limits } = await quotaPolicy(env);
+  // Never an end of the run when the policy can't be read for a moment
+  // (`modelCallLimitOf`): its last read, else the platform's limit.
+  const modelCalls = await modelCallLimitOf(env);
   return {
     run: {
       runId,
@@ -517,8 +546,8 @@ const loadedCandidateRun = async (
         ),
       },
       maxModelCalls: Math.min(
-        limits.lineageModelRequests,
-        build.limits.maxModelCalls ?? limits.lineageModelRequests
+        modelCalls,
+        build.limits.maxModelCalls ?? modelCalls
       ),
       // A test run waits only briefly: one waiting longer fails.
       maxSleepMs: maxCandidateWaitMs,
@@ -613,10 +642,28 @@ export const projectCandidateRun = async (
 };
 
 /**
+ * Whether `by` may read test run `runId` as an item's: one that ran an
+ * item of a test over real items took a real run's input, so only its
+ * tester reads it (item-tests.ts); any other is its workflow's builders'.
+ */
+const readsItemRun = async (
+  env: Env,
+  by: Acting,
+  runId: string
+): Promise<boolean> => {
+  const item = await drizzle(env.DB)
+    .select({ principalId: workflowItemTests.principalId })
+    .from(workflowItemTests)
+    .where(eq(workflowItemTests.candidateRunId, runId))
+    .get();
+  return item === undefined || item.principalId === by.userId;
+};
+
+/**
  * Test run `runId` of workflow `id`, for its builders only: anyone else,
- * and a run of another workflow, is refused as one that doesn't exist
- * (`workflow.candidate_unavailable`). What it returned, or why it failed,
- * once it ended.
+ * a run of another workflow, and another tester's run of a real item, is
+ * refused as one that doesn't exist (`workflow.candidate_unavailable`).
+ * What it returned, or why it failed, once it ended.
  */
 export const candidateRunFor = async (
   env: Env,
@@ -627,7 +674,10 @@ export const candidateRunFor = async (
   requireNotStaff(by);
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const row = typeof runId === "string" ? await rowOf(env, runId) : undefined;
-  if (row?.workflowResourceId !== workflow.id) {
+  if (
+    row?.workflowResourceId !== workflow.id ||
+    !(await readsItemRun(env, by, row.id))
+  ) {
     throw workflowResourceErrors.create("workflow.candidate_unavailable");
   }
   const run: WorkflowCandidateRun = {
@@ -652,6 +702,36 @@ export const candidateRunFor = async (
     return { ...run, error: keptFailureOf(row.failureCode) };
   }
   return { ...run, ...result };
+};
+
+/**
+ * What test run `runId` of workflow `id` did, step by step, for its
+ * builders only, refused as `candidateRunFor` refuses: read from the
+ * engine's own journal, as a run's trace is (resource-run-trace.ts).
+ */
+export const candidateRunTrace = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  runId: unknown
+): Promise<WorkflowCandidateTrace> => {
+  requireNotStaff(by);
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const row = typeof runId === "string" ? await rowOf(env, runId) : undefined;
+  if (
+    row?.workflowResourceId !== workflow.id ||
+    !(await readsItemRun(env, by, row.id))
+  ) {
+    throw workflowResourceErrors.create("workflow.candidate_unavailable");
+  }
+  const { steps, complete } = await tracedSteps(env, row.id);
+  return {
+    runId: row.id,
+    draftRevision: row.draftRevision,
+    status: row.status,
+    steps,
+    complete,
+  };
 };
 
 /**
@@ -827,7 +907,10 @@ const endOverdue = async (env: Env, cutoff: Date): Promise<void> => {
   }
 };
 
-/** Removes ended test run `id`: its engine record, lineage and row. */
+/**
+ * Removes ended test run `id`: its engine record, lineage and row, and the
+ * item of a test it ran, if it ran one.
+ */
 const removed = async (env: Env, id: string): Promise<boolean> => {
   const db = drizzle(env.DB);
   try {
@@ -838,6 +921,11 @@ const removed = async (env: Env, id: string): Promise<boolean> => {
       db.delete(runLineageAttempts).where(eq(runLineageAttempts.rootRunId, id)),
       db.delete(runLineages).where(eq(runLineages.rootRunId, id)),
       db.delete(workflowCandidateRuns).where(eq(workflowCandidateRuns.id, id)),
+      // The item it ran goes with it, in the same batch: while the run is
+      // kept, so is what makes it its tester's alone (`readsItemRun`).
+      db
+        .delete(workflowItemTests)
+        .where(eq(workflowItemTests.candidateRunId, id)),
     ]);
     return true;
   } catch (error) {
@@ -856,7 +944,7 @@ const removed = async (env: Env, id: string): Promise<boolean> => {
  * first, batch after batch for as long as the sweep's time allows: each
  * with its engine record and lineage, and its row, whose build's
  * reservation goes with it (the release sweep takes the bytes nothing else
- * names, release-retention.ts). From the cron, for the time `at`.
+ * names, release-retention.ts). From the clock, for the time `at`.
  */
 export const sweepCandidateRuns = async (
   env: Env,
@@ -872,6 +960,16 @@ export const sweepCandidateRuns = async (
     new Date(at.getTime() - maxCandidateLifetimeMs - overdueGraceMs)
   );
   const db = drizzle(env.DB);
+  // An item no test run ran goes once it is as old; one that ran goes
+  // with its run (`removed`), never before it.
+  await db
+    .delete(workflowItemTests)
+    .where(
+      and(
+        isNull(workflowItemTests.candidateRunId),
+        lte(workflowItemTests.createdAt, cutoff)
+      )
+    );
   while (Date.now() < until) {
     // oxlint-disable-next-line no-await-in-loop -- batch after batch
     const batch = await db

@@ -1,12 +1,13 @@
 /** Reading rollouts, as the rollout pages show them. */
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, rollouts, rolloutTargets } from "../db/schema.ts";
-import { listReleases } from "../releases/queries.ts";
+import { clients, releases, rollouts, rolloutTargets } from "../db/schema.ts";
+import { listReleases, versionsOf } from "../releases/queries.ts";
 import { instanceStatus } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { firstRing } from "./targets.ts";
 
 /** How many rollouts the list shows: the latest. */
@@ -17,29 +18,71 @@ export interface RolloutSummary {
   id: string;
   kind: (typeof rollouts.kind.enumValues)[number];
   releaseId: string | null;
+  /** Its release as the lists name it (src/releases/version.ts), for a release rollout. */
+  release: {
+    notes: string;
+    versionMajor: number | null;
+    versionMinor: number | null;
+  } | null;
   status: (typeof rollouts.status.enumValues)[number];
   ring: number;
   startedBy: string;
   createdAt: Date;
 }
 
+/** A rollout's columns, with its release's note beside it. */
+const summaryColumns = {
+  id: rollouts.id,
+  kind: rollouts.kind,
+  releaseId: rollouts.releaseId,
+  status: rollouts.status,
+  ring: rollouts.ring,
+  startedBy: rollouts.startedBy,
+  createdAt: rollouts.createdAt,
+  notes: sql<string | null>`json_extract(${releases.manifest}, '$.notes')`,
+};
+
+/** A row of `summaryColumns`. */
+type SummaryRow = Omit<RolloutSummary, "release"> & { notes: string | null };
+
+/** Rows of `summaryColumns` as the pages take them, each release with its version. */
+const summariesOf = async (
+  db: AdminDatabase,
+  rows: readonly SummaryRow[]
+): Promise<RolloutSummary[]> => {
+  const versions = await versionsOf(
+    db,
+    rows.flatMap(({ releaseId }) => (releaseId === null ? [] : [releaseId]))
+  );
+  return rows.map(({ notes, ...rollout }) => {
+    const version =
+      rollout.releaseId === null ? undefined : versions.get(rollout.releaseId);
+    return {
+      ...rollout,
+      release:
+        rollout.releaseId === null
+          ? null
+          : {
+              notes: notes ?? "",
+              versionMajor: version?.versionMajor ?? null,
+              versionMinor: version?.versionMinor ?? null,
+            },
+    };
+  });
+};
+
 /** The latest rollouts, newest first. */
 export const listRollouts = async (
   db: AdminDatabase
-): Promise<RolloutSummary[]> =>
-  await db
-    .select({
-      id: rollouts.id,
-      kind: rollouts.kind,
-      releaseId: rollouts.releaseId,
-      status: rollouts.status,
-      ring: rollouts.ring,
-      startedBy: rollouts.startedBy,
-      createdAt: rollouts.createdAt,
-    })
+): Promise<RolloutSummary[]> => {
+  const rows = await db
+    .select(summaryColumns)
     .from(rollouts)
+    .leftJoin(releases, eq(releases.id, rollouts.releaseId))
     .orderBy(desc(rollouts.createdAt))
     .limit(listed);
+  return await summariesOf(db, rows);
+};
 
 /** One client in a rollout, as its page shows it. */
 export interface TargetView {
@@ -52,7 +95,7 @@ export interface TargetView {
 
 /** A rollout, as its page shows it. */
 export interface RolloutView extends RolloutSummary {
-  /** Its run's status, as Workflows has it: `paused` while staff paused it. */
+  /** Its run's status, as the engine has it: `paused` while staff paused it. */
   run: RunStatus;
   /** Its clients, ring by ring, then by id. */
   targets: TargetView[];
@@ -64,18 +107,15 @@ export const getRollout = async (
   id: string
 ): Promise<RolloutView | null> => {
   const db = adminDatabase(env.DB);
-  const [rollout] = await db
-    .select({
-      id: rollouts.id,
-      kind: rollouts.kind,
-      releaseId: rollouts.releaseId,
-      status: rollouts.status,
-      ring: rollouts.ring,
-      startedBy: rollouts.startedBy,
-      createdAt: rollouts.createdAt,
-    })
+  const [row] = await db
+    .select(summaryColumns)
     .from(rollouts)
+    .leftJoin(releases, eq(releases.id, rollouts.releaseId))
     .where(eq(rollouts.id, id));
+  if (row === undefined) {
+    return null;
+  }
+  const [rollout] = await summariesOf(db, [row]);
   if (rollout === undefined) {
     return null;
   }
@@ -89,7 +129,11 @@ export const getRollout = async (
     })
     .from(rolloutTargets)
     .where(eq(rolloutTargets.rolloutId, id));
-  const { status } = await instanceStatus(env.ROLLOUT, id, rollout.createdAt);
+  const { status } = await instanceStatus(
+    adminWorkflow(env, adminWorkflows.rollout),
+    id,
+    rollout.createdAt
+  );
   return {
     ...rollout,
     run: status,
@@ -102,7 +146,12 @@ export const getRollout = async (
 /** What the form to start a rollout offers. */
 export interface RolloutOptions {
   /** The imported releases, newest first. */
-  releases: { id: string; notes: string }[];
+  releases: {
+    id: string;
+    notes: string;
+    versionMajor: number | null;
+    versionMinor: number | null;
+  }[];
   /** The ring every rollout reaches first (`firstRing`). */
   firstRing: number;
   /** Each ring active clients are in, with how many, in order. */
@@ -115,7 +164,7 @@ export interface RolloutOptions {
 export const rolloutOptions = async (
   db: AdminDatabase
 ): Promise<RolloutOptions> => {
-  const { releases } = await listReleases(db);
+  const { releases: imported } = await listReleases(db);
   const active = await db
     .select({ id: clients.id, ring: clients.ring })
     .from(clients)
@@ -125,7 +174,12 @@ export const rolloutOptions = async (
     counts.set(ring, (counts.get(ring) ?? 0) + 1);
   }
   return {
-    releases: releases.map(({ id, notes }) => ({ id, notes })),
+    releases: imported.map(({ id, notes, versionMajor, versionMinor }) => ({
+      id,
+      notes,
+      versionMajor,
+      versionMinor,
+    })),
     firstRing,
     rings: [...counts]
       .map(([ring, count]) => ({ ring, clients: count }))

@@ -28,8 +28,10 @@ import {
   startRolloutId,
   useCompanyNames,
 } from "../../../admin/platform-nav.tsx";
+import { ringWords } from "../../../admin/platform-parts.tsx";
 import { Quiet } from "../../../admin/release-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
+import { releaseName } from "../../../releases/version.ts";
 import { fetchRollouts, startRolloutFn } from "../../../rollout/functions.ts";
 import type {
   RolloutOptions,
@@ -39,7 +41,7 @@ import { startRequestOf } from "../../../rollout/start-request.ts";
 import type { RolloutKind, ScopeKind } from "../../../rollout/start-request.ts";
 import { useRolloutAction } from "../../../rollout/use-action.ts";
 
-/** Whom a rollout reaches after ring 0, as the form offers it. */
+/** Whom a rollout reaches after Alpha, as the form offers it. */
 const scopes: { value: ScopeKind; label: string }[] = [
   { value: "ring", label: "One ring" },
   { value: "client", label: "One client" },
@@ -62,7 +64,7 @@ const textOf = (form: FormData, name: string): string => {
 const clientsOf = (count: number): string =>
   count === 1 ? "1 client" : `${count} clients`;
 
-/** Starting a rollout: a release or the secrets alone, and whom it reaches after ring 0. */
+/** Starting a rollout: a release or the secrets alone, and whom it reaches after Alpha. */
 const StartRollout = ({ options }: { options: RolloutOptions }) => {
   const navigate = useNavigate();
   const names = useCompanyNames();
@@ -76,7 +78,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
   const chosenRing = ring ?? later[0]?.ring ?? options.firstRing;
   const ringItems = later.map((each) => ({
     value: each.ring,
-    label: `Ring ${each.ring} (${clientsOf(each.clients)})`,
+    label: `${ringWords(each.ring)} (${clientsOf(each.clients)})`,
   }));
   const [newest] = options.releases;
   if (newest === undefined) {
@@ -138,7 +140,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
         <p className="text-muted-foreground">
           Each client gets the shared secrets in Secrets Store now, on the
           release it runs, all traffic at once. Copy a rotated secret there
-          first with the Deploy grasp-os-ops workflow, secrets only.
+          first with the Deploy platform workflow, secrets only.
         </p>
       ) : (
         <label htmlFor="rollout-release" className="flex flex-col gap-1">
@@ -153,7 +155,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
           <datalist id="release-ids">
             {options.releases.map((release) => (
               <option key={release.id} value={release.id}>
-                {release.notes}
+                {releaseName(release)}
               </option>
             ))}
           </datalist>
@@ -161,7 +163,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
       )}
       {later.length === 0 ? (
         <p className="text-muted-foreground">
-          {`Only ring ${options.firstRing} has active clients, so this reaches only our own deployments.`}
+          {`Only ${ringWords(options.firstRing)} has active clients, so this reaches only our own deployments.`}
         </p>
       ) : (
         <div className="flex flex-col gap-1">
@@ -189,7 +191,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
             </SelectContent>
           </Select>
           <span className="text-muted-foreground">
-            Ring {options.firstRing} comes first, then this once you approve it.
+            {`${ringWords(options.firstRing)} comes first, then this once you approve it.`}
           </span>
         </div>
       )}
@@ -197,7 +199,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
         <ul className="text-muted-foreground flex flex-col gap-1">
           {options.rings.map((each) => (
             <li key={each.ring}>
-              {`Ring ${each.ring}: ${clientsOf(each.clients)}`}
+              {`${ringWords(each.ring)}: ${clientsOf(each.clients)}`}
             </li>
           ))}
         </ul>
@@ -301,9 +303,19 @@ const EveryRollout = ({ rollouts }: { rollouts: RolloutSummary[] }) => (
                   {rollout.kind === "secrets" ? (
                     "Secrets only"
                   ) : (
-                    <span className="font-mono text-xs">
-                      {rollout.releaseId ?? ""}
-                    </span>
+                    <div className="flex flex-col gap-0.5 whitespace-normal">
+                      <span>
+                        {rollout.release === null
+                          ? (rollout.releaseId ?? "")
+                          : releaseName({
+                              id: rollout.releaseId ?? "",
+                              ...rollout.release,
+                            })}
+                      </span>
+                      <span className="text-muted-foreground font-mono text-xs">
+                        {rollout.releaseId ?? ""}
+                      </span>
+                    </div>
                   )}
                 </TableCell>
                 <TableCell variant="card">
@@ -316,7 +328,7 @@ const EveryRollout = ({ rollouts }: { rollouts: RolloutSummary[] }) => (
                   </span>
                 </TableCell>
                 <TableCell className="hidden @xl:table-cell" variant="card">
-                  <span className="tabular-nums">{rollout.ring}</span>
+                  {ringWords(rollout.ring)}
                 </TableCell>
                 <TableCell className="hidden @2xl:table-cell" variant="card">
                   <span className="text-muted-foreground">
@@ -341,7 +353,7 @@ const RolloutsPage = () => {
   const { rollouts, options } = Route.useLoaderData();
   return (
     <AdminPage
-      description="A rollout takes a release, or new shared secrets, to the companies: ring 0 first, then the rest once someone at Grasp approves it."
+      description="A rollout takes a release, or new shared secrets, to the companies: Alpha first, then the rest once someone at Grasp approves it."
       parents={[platformCrumb]}
       title="Rollouts"
     >
@@ -349,7 +361,7 @@ const RolloutsPage = () => {
       <div className="flex flex-col gap-6 text-sm">
         <div className="scroll-mt-20" id={startRolloutId}>
           <Panel
-            description="A release, or the shared secrets alone, and whom it reaches after ring 0."
+            description="A release, or the shared secrets alone, and whom it reaches after Alpha."
             title="Start a rollout"
           >
             <StartRollout options={options} />

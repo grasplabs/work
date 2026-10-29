@@ -32,11 +32,11 @@ export const executionErrors = defineErrorFamily({
 /** Why a workflow call was refused. */
 export const workflowErrors = defineErrorFamily({
   "workflow.invalid": "That isn't a valid request for a workflow.",
-  "workflow.not_found": "The App's current version has no such workflow.",
+  "workflow.not_found": "The domain's current version has no such workflow.",
   "workflow.run_not_found": "There's no such workflow run.",
   "workflow.run_details_removed":
     "This run's details were removed when its retention ended, so there is nothing left to work out a fix from.",
-  "workflow.build_failed": "The App's workflows don't build.",
+  "workflow.build_failed": "The domain's workflows don't build.",
   "workflow.model_undeclared":
     "A workflow's AI step goes through a model resource this version doesn't declare as a text model, so it can't be made current.",
   "workflow.tests_failed":
@@ -60,28 +60,29 @@ export const workflowErrors = defineErrorFamily({
   "workflow.lineage_busy":
     "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
   "workflow.queued":
-    "Workflow steps already running take this App's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
+    "Workflow steps already running take this domain's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
   "workflow.queue_timeout":
-    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this App busy throughout: try again later.",
+    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this domain busy throughout: try again later.",
   "workflow.queue_full":
-    "As many of this person's, or this App's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
+    "As many of this person's, or this domain's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
-    "The workflow has no such parameter in the App's current version.",
+    "The workflow has no such parameter in the domain's current version.",
   "workflow.param_invalid": "That isn't a valid value for this parameter.",
   "workflow.param_conflict":
-    "The App's current version changed while the value was set. Try again.",
+    "The domain's current version changed while the value was set. Try again.",
   "workflow.trigger_gone":
-    "The trigger belongs to a version of the App that is no longer current.",
+    "The trigger belongs to a version of the domain that is no longer current.",
   "workflow.owner_invalid":
-    "Only a current member of the organization who can open the App can own its workflow.",
+    "Only a current member of the organization who can open the domain can own its workflow.",
   "workflow.owner_conflict":
     "Someone changed the workflow's owner meanwhile. Try again.",
+  "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
-    "Another App's workflow already receives mail at this address.",
+    "Another domain's workflow already receives mail at this address.",
   "workflow.attachment_not_found":
-    "This App has no such attachment: the message isn't kept for it, or its 30 days have passed.",
+    "This domain has no such attachment: the message isn't kept for it, or its 30 days have passed.",
   "workflow.attachment_unreadable":
     "The kept message can't be read any more, so none of its attachments can.",
   "workflow.call_not_reviewed":
@@ -173,23 +174,47 @@ export interface CronSchedule {
 }
 
 /**
+ * How a schedule treats a local time the spring change skips (2:30 on the
+ * night clocks go from 2:00 to 3:00): App schedules fire it an hour later,
+ * at the same minute of the hour after; independent schedule triggers skip
+ * it (platform specification 15.2), so no run starts for a time that
+ * never was.
+ */
+export type SkippedTime = "shift" | "skip";
+
+/** Most skipped times in a row one call steps past before giving up. */
+const maxSkippedTimes = 1000;
+
+/**
  * When `schedule` next fires strictly after `after`, to the minute;
  * undefined for an expression that isn't five cron fields, a time zone the
  * runtime doesn't know, or an expression that names no time to come (the
- * 30th of February).
+ * 30th of February). A time the autumn change repeats fires once, the
+ * first time; one the spring change skips as `skipped` says.
  */
 export const nextScheduledRun = (
   { cron, timeZone }: CronSchedule,
-  after: Date
+  after: Date,
+  skipped: SkippedTime = "shift"
 ): Date | undefined => {
   if (!isTimeZone(timeZone)) {
     return undefined;
   }
   try {
-    return (
-      new Cron(cron, { timezone: timeZone, mode: "5-part" }).nextRun(after) ??
-      undefined
-    );
+    const schedule = new Cron(cron, { timezone: timeZone, mode: "5-part" });
+    let next = schedule.nextRun(after) ?? undefined;
+    if (skipped === "shift") {
+      return next;
+    }
+    // croner moves a skipped local time to the hour after; that moved time
+    // doesn't match the expression itself, which is how it is told apart.
+    for (let step = 0; step < maxSkippedTimes; step += 1) {
+      if (next === undefined || schedule.match(next)) {
+        return next;
+      }
+      next = schedule.nextRun(next) ?? undefined;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -414,6 +439,14 @@ export const triggerDeclarationsSchema = z
  * whose key is one core derived.
  */
 export const coreStepPrefix = "$grasp:";
+
+/**
+ * What a decision task's waits for its answer, and its looks after them,
+ * start with (core's workflows/resource-host.ts): core's steps, so they
+ * count against none of the run's steps however long it waits, each named
+ * `<prefix><its task's step>:wait:<round>` or `…:woken:<round>`.
+ */
+export const decisionPollStepPrefix = `${coreStepPrefix}decision:`;
 
 /**
  * The idempotency key of a run's step, as the SDK hands it to the step
@@ -1209,10 +1242,12 @@ export interface WorkflowSummary {
    */
   owner: { userId: string; name: string | null };
   /**
-   * Whether the person may change its owner (`setOwner`): an admin, or a
-   * builder of the App; never Grasp staff.
+   * Whether the person may change its owner (`setOwner`) and its team
+   * (`setTeam`): an admin, or a builder of the App; never Grasp staff.
    */
   changesOwner: boolean;
+  /** The organization's team that owns it (`setTeam`); null for none. */
+  team: { id: string; name: string } | null;
   /**
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
@@ -1342,6 +1377,11 @@ export interface RunActivityWorkflow {
   started: number;
   completed: number;
   failed: number;
+  /**
+   * Of those completed, the runs that asked no one for a decision: items
+   * it handled without a person.
+   */
+  completedAlone: number;
 }
 
 /**
@@ -1375,6 +1415,28 @@ export interface RunActivity {
   };
   /** Each workflow that ran, by App name, then workflow. */
   workflows: RunActivityWorkflow[];
+}
+
+/**
+ * A workflow that uses a connection, as Integrations names and links it:
+ * an App's (its App and its name in the App's code), or an independent
+ * workflow (its ID and name).
+ */
+export type ConnectionWorkflow =
+  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { kind: "independent"; id: string; name: string };
+
+/**
+ * The workflows a person can open that use one connection: an App's whose
+ * App holds an active permission on it and whose code calls that
+ * permission's binding, and an independent workflow whose current version
+ * declares a connector binding an active approval serves through the
+ * workflow's own active permission on it. App workflows first, by App name
+ * and workflow, then independent ones by name.
+ */
+export interface ConnectionWorkflows {
+  connectionId: string;
+  workflows: ConnectionWorkflow[];
 }
 
 /**
@@ -1413,11 +1475,11 @@ export interface WorkflowsApi {
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
-   * The workflows of the Apps the person can open that use `connection`:
-   * each one whose App holds an active permission on it and whose code
-   * calls that permission's binding, summed up as in `overview`.
+   * Every connection some workflow the person can open uses, with those
+   * workflows (`ConnectionWorkflows`); a connection none of them uses
+   * isn't listed.
    */
-  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
+  byConnection: () => Promise<ConnectionWorkflows[]>;
   /**
    * Runs of the Apps the person can open, as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended
@@ -1443,6 +1505,21 @@ export interface WorkflowsApi {
     workflow: string,
     owner: string
   ) => Promise<WorkflowSummary>;
+  /**
+   * Makes one of the organization's teams (by ID) the team that owns an
+   * App's workflow, or none with `null`; for admins and the App's
+   * builders, audited. Returns the workflow's summary as it is now.
+   */
+  setTeam: (
+    app: string,
+    workflow: string,
+    team: string | null
+  ) => Promise<WorkflowSummary>;
+  /**
+   * The organization's teams, by name, that a workflow's team may be set
+   * to (`setTeam`); for admins and builders, never Grasp staff.
+   */
+  teams: () => Promise<{ id: string; name: string }[]>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.

@@ -1,55 +1,28 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { formatDate } from "../src/admin/words.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-interviews-5c1a97";
-const tenantToken = "test-tenant-admin-token-admin-interviews-0e6b38";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
-const db = adminDatabase(env.DB);
-const staff = { email: "ops@grasp.test", sub: "sub-ops" };
-
 /** An active client running a new release, as a deploy made it live. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): interviews" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): interviews");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount(`Acme ${clientId}`);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: `Acme ${clientId}`,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name: `Acme ${clientId}`,
+    signIn: null,
+  });
   return { clientId, account };
 };
 
@@ -206,7 +179,7 @@ const interviewingSnapshot = (): AdminSnapshot => {
 };
 
 describe("an organization's interviews", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
 
   it("shows every team, everyone by name, every interview, and how Stephen and Claire did, in numbers only", async () => {
     const acme = await liveClient();
@@ -374,5 +347,49 @@ describe("an organization's interviews", () => {
       { label: "Left in", shown: [">–<"] },
       { label: "By voice", shown: [">–<"] },
     ]);
+  });
+
+  it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {
+    const interviewing = await liveClient();
+    interviewing.account.admin = interviewingSnapshot();
+    const quiet = await liveClient();
+    quiet.account.admin = emptyAdminSnapshot("Acme");
+
+    const { status, html } = await page("/lab");
+    const name = `Acme ${interviewing.clientId}`;
+    const row = html.slice(
+      html.indexOf(`>${name}</a>`),
+      html.indexOf("</tr>", html.indexOf(`>${name}</a>`))
+    );
+
+    expect({
+      status,
+      inAll: [
+        "Finished",
+        "What people thought",
+        "Left in",
+        "Stopped halfway",
+      ].map((label) => html.includes(`>${label}<`)),
+      // One row a company whose interviews started, opening its interviewers.
+      opens: html.includes(
+        `href="/organizations/${interviewing.clientId}/interviews?tab=interviewers"`
+      ),
+      // Ana gave Claire a 5; Ben stopped at the steps.
+      rated: row.includes("5.0 (1)"),
+      quietListed: html.includes(`>Acme ${quiet.clientId}</a>`),
+      quietCounted: html.includes("started interviews yet."),
+      // The practice benches aren't published to the admin: it says so.
+      benches: html.includes("Measured on practice companies"),
+      leaked: missingIn(html, [said, fact, linkCode]).length,
+    }).toStrictEqual({
+      status: 200,
+      inAll: [true, true, true, true],
+      opens: true,
+      rated: true,
+      quietListed: false,
+      quietCounted: true,
+      benches: true,
+      leaked: 3,
+    });
   });
 });

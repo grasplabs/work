@@ -33,7 +33,6 @@ const client = async (
   await db.insert(clients).values({
     id,
     name: id,
-    accountId: crypto.randomUUID(),
     status: "active",
     createdAt: now,
     updatedAt: now,

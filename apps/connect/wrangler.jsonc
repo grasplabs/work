@@ -57,14 +57,16 @@
       "migrations_dir": "src/db/migrations",
     },
   ],
-  // Drops OAuth and Composio flows nobody finished, deletes at Composio
-  // what earlier tries couldn't, and seals what a rotated key sealed again
-  // (src/index.ts).
-  "triggers": { "crons": ["* * * * *"] },
   // The client's clock for connect: its cleanup and rotation on its own
-  // alarm (src/clock.ts).
+  // alarm (src/clock.ts), as no cron can run them: drops OAuth and Composio
+  // flows nobody finished, deletes at Composio what earlier tries couldn't,
+  // and seals what a rotated key sealed again.
   "durable_objects": {
     "bindings": [{ "name": "CLOCK", "class_name": "Clock" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Clock"] }],
+  // The running version's ID, which connect names to core (`version`): how
+  // the admin reads which version a connect in a Workers for Platforms
+  // namespace runs, whose versions Cloudflare's API doesn't list.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
 }

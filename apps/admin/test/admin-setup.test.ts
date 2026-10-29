@@ -4,22 +4,20 @@ import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { setRing } from "../src/clients/settings.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
-import { clientDeploys, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
+import { adminDatabase } from "../src/db/act.ts";
+import { clients } from "../src/db/schema.ts";
 import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-setup-5c1e90";
-const tenantToken = "test-tenant-admin-token-admin-setup-2a7d63";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -31,31 +29,14 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
  * core answers the admin with `snapshot`.
  */
 const liveClient = async (snapshot: AdminSnapshot) => {
-  const release = await publishRelease({ notes: "feat(core): the setup" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): the setup");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Acme ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = snapshot;
   return { clientId, name, account, release };
 };
@@ -71,7 +52,7 @@ const textOf = (html: string): string =>
   html.replaceAll(/<[^>]+>/gu, "").replaceAll("&#x27;", "'");
 
 describe("an organization's Setup", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The newest release is each test's own: an earlier test's clients are
   // gone from the fake, and are offboarded so nothing counts them.
   beforeEach(async () => {
@@ -86,7 +67,7 @@ describe("an organization's Setup", () => {
     const base = `/organizations/${acme.clientId}/setup`;
 
     const status = await page(base);
-    const deploys = await page(`${base}?tab=deploys`);
+    const history = await page(`${base}?tab=history`);
     const resources = await page(`${base}?tab=resources`);
     const releases = await page(`${base}?tab=releases`);
     const settings = await page(`${base}?tab=settings`);
@@ -96,17 +77,16 @@ describe("an organization's Setup", () => {
     const quotaPolicy = textOf(sectionOf(status.html, "Quota policy"));
 
     expect({
-      statuses: [status, deploys, resources, releases, settings].map(
+      statuses: [status, history, resources, releases, settings].map(
         (each) => each.status
       ),
       header: [
         `${acme.clientId}.`,
         "Healthy",
-        acme.release.id,
-        "Ring 1",
+        acme.release,
+        "Beta",
         "Open its Grasp",
         "Its activity",
-        "Open in Cloudflare",
       ].map((text) => header.includes(text)),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
@@ -144,17 +124,11 @@ describe("an organization's Setup", () => {
       deployed: checklist.includes(
         "Its own platform is deployed, in its own Cloudflare account in the EU: done"
       ),
-      deploys: {
-        last: textOf(sectionOf(deploys.html, "The last deploy")).includes(
-          `Release · ${acme.release.id}`
-        ),
-        every: textOf(sectionOf(deploys.html, "Recent deploys")).includes(
-          "Done"
-        ),
-        settingUp: deploys.html.includes("Setting it up"),
+      history: {
+        kept: history.html.includes('aria-label="Its history"'),
+        settingUp: history.html.includes("Setting it up"),
       },
       resources: [
-        acme.account.id,
         "grasp-os-core",
         "grasp-os-connect",
         "grasp-os-knowledge",
@@ -164,7 +138,7 @@ describe("an organization's Setup", () => {
       releases: {
         follows: releases.html.includes("Follows the rollouts"),
         runs: textOf(sectionOf(releases.html, "Recent releases")).includes(
-          acme.release.id
+          acme.release
         ),
         runsThis: releases.html.includes("Runs this"),
         latestRollout: releases.html.includes("Not in one yet"),
@@ -178,7 +152,7 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
-      header: [true, true, true, true, true, true, true],
+      header: [true, true, true, true, true, true],
       toOldPages: false,
       needs: false,
       numbers: [true, true],
@@ -186,8 +160,8 @@ describe("an organization's Setup", () => {
       howItRuns: [true, true, true, true, true, true],
       checklist: [true, true, true],
       deployed: true,
-      deploys: { last: true, every: true, settingUp: false },
-      resources: [true, true, true, true, true, true],
+      history: { kept: true, settingUp: false },
+      resources: [true, true, true, true, true],
       releases: {
         follows: true,
         runs: true,
@@ -207,33 +181,17 @@ describe("an organization's Setup", () => {
     await importReleases(env.RELEASES, db);
     await rotateClientSecrets(db, staff, acme.clientId, new Date());
     await setRing(env, staff, { clientId: acme.clientId, ring: 2 });
-    // Its settings, deployed again, stopped at the smoke check.
-    const later = new Date(Date.now() + 1000);
-    await db.insert(clientDeploys).values({
-      id: crypto.randomUUID(),
-      clientId: acme.clientId,
-      releaseId: acme.release.id,
-      kind: "settings",
-      status: "failed",
-      step: "workers",
-      error: "smoke_check_failed",
-      startedBy: staff.email,
-      createdAt: later,
-      updatedAt: later,
-    });
     const base = `/organizations/${acme.clientId}/setup`;
 
     const status = await page(base);
-    const deploys = await page(`${base}?tab=deploys`);
+    const history = await page(`${base}?tab=history`);
     const settings = await page(`${base}?tab=settings`);
     const needs = textOf(sectionOf(status.html, "What needs a look"));
     const lines = [
-      "The last deploy failed (Settings): smoke_check_failed",
       "New secrets wait to reach it",
       "2 releases behind the newest.",
     ];
-    const done = textOf(sectionOf(deploys.html, "Done here"));
-    const last = textOf(sectionOf(deploys.html, "The last deploy"));
+    const done = textOf(sectionOf(history.html, "Done here"));
 
     expect({
       standing: textOf(sectionOf(status.html, "How it stands")).includes(
@@ -243,16 +201,14 @@ describe("an organization's Setup", () => {
       inOrder: lines
         .map((line) => needs.indexOf(line))
         .every((at, index, all) => index === 0 || at > (all[index - 1] ?? 0)),
-      ring: textOf(sectionOf(status.html, "How it stands")).includes("Ring 2"),
-      last: [
-        "Workers: done",
-        "Smoke check: failed",
-        "Address: to come",
-        "It stopped: smoke_check_failed",
-      ].map((text) => last.includes(text)),
-      done: ["Moved it to ring 2.", "Rotated its secrets.", staff.email].map(
-        (text) => done.includes(text)
+      ring: textOf(sectionOf(status.html, "How it stands")).includes(
+        "Production"
       ),
+      done: [
+        "Moved it to Production.",
+        "Rotated its secrets.",
+        staff.email,
+      ].map((text) => done.includes(text)),
       // What the system did itself isn't by hand.
       created: done.includes("client.create"),
       secretsLive: textOf(sectionOf(settings.html, "Its secrets")).includes(
@@ -263,10 +219,9 @@ describe("an organization's Setup", () => {
       ),
     }).toStrictEqual({
       standing: true,
-      needs: [true, true, true],
+      needs: [true, true],
       inOrder: true,
       ring: true,
-      last: [true, true, true, true],
       done: [true, true, true],
       created: false,
       secretsLive: true,
@@ -288,9 +243,7 @@ describe("an organization's Setup", () => {
     expect({
       status: odd.status,
       onStatus: odd.html.includes("From contract to go"),
-      ring: textOf(sectionOf(odd.html, "How it stands")).includes(
-        "Ring 0, first"
-      ),
+      ring: textOf(sectionOf(odd.html, "How it stands")).includes("Alpha"),
       unknown: unknown.status,
     }).toStrictEqual({
       status: 200,

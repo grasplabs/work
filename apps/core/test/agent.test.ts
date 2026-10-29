@@ -311,7 +311,7 @@ describe("chat agent", () => {
       JSON.stringify(body)
     );
     const info =
-      "info(): Promise<{ chatId: string; personId: string; now: string }>";
+      "info(): Promise<{ chatId: string; personId: string; app: string | null; now: string }>";
     expect({
       listed: first?.includes("- env.chat: "),
       declaredUpFront: first?.includes(info),
@@ -627,7 +627,7 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "memory", "brain"], imported: [], exports: [] })}`,
+      text: `Returned:\n${JSON.stringify({ given: ["chat", "knowledge", "connections", "apps", "build", "workflows", "workflowBuild", "memory", "brain", "dashboard"], imported: [], exports: [] })}`,
     });
   });
 
@@ -638,7 +638,7 @@ describe("chat agent sandbox", () => {
 
     expect(result?.isError).toBeTruthy();
     expect(result?.text).toContain(
-      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.memory, env.brain."
+      "This chat has no API named env.mailbox. It has: env.chat, env.knowledge, env.connections, env.apps, env.build, env.workflows, env.workflowBuild, env.memory, env.brain, env.dashboard."
     );
   });
 

@@ -19,7 +19,7 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients, hostingDestinations } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { ProvisionError } from "../provision/control.ts";
+import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
 import { InventoryError, placeClient, placementOf } from "./inventory.ts";
@@ -80,9 +80,15 @@ export interface ClientHostingView {
   /** Shared ones first, then dedicated, then the rest, each by id. */
   destinations: DestinationChoice[];
   automatic: AutomaticChoice;
+  /** Whether it's live: its later releases and rollbacks run the operation again. */
+  active: boolean;
+  /** When staff offboarded it; null while they haven't (src/hosting/offboarding.ts). */
+  offboardedAt: Date | null;
   /** Its provisioning operation (`client_provisions`), if it has one. */
   operation: {
     releaseId: string;
+    /** What it ran before its latest release or rollback started; null before its first. */
+    previousReleaseId: string | null;
     status: "running" | "failed" | "done";
     /** The last step that finished; null before the first. */
     step: string | null;
@@ -177,7 +183,11 @@ export const getClientHosting = async (
 ): Promise<ClientHostingView | null> => {
   const db = adminDatabase(env.DB);
   const client = await db
-    .select({ id: clients.id })
+    .select({
+      id: clients.id,
+      status: clients.status,
+      offboardedAt: clients.offboardedAt,
+    })
     .from(clients)
     .where(eq(clients.id, clientId))
     .get();
@@ -211,11 +221,14 @@ export const getClientHosting = async (
       placement === undefined
         ? automaticChoice(destinations)
         : { destinationId: placement.destinationId, reason: null },
+    active: client.status === "active",
+    offboardedAt: client.offboardedAt,
     operation:
       operation === undefined
         ? null
         : {
             releaseId: operation.releaseId,
+            previousReleaseId: operation.previousReleaseId,
             status: operation.status,
             step: operation.step,
             error: operation.error,

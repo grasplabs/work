@@ -32,6 +32,7 @@ import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
 import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
+import { Route as ShellAppsNewRouteImport } from './routes/_shell.apps.new'
 import { Route as ShellBrainIndexRouteImport } from './routes/_shell.brain.index'
 import { Route as ShellBrainNoteIdRouteImport } from './routes/_shell.brain.$noteId'
 import { Route as ShellBrainMemoryRouteImport } from './routes/_shell.brain.memory'
@@ -47,7 +48,6 @@ import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboar
 import { Route as ShellOnboardingAgreementsRouteImport } from './routes/_shell.onboarding.agreements'
 import { Route as ShellOnboardingAiUseRouteImport } from './routes/_shell.onboarding.ai-use'
 import { Route as ShellOnboardingInterviewersRouteImport } from './routes/_shell.onboarding.interviewers'
-import { Route as ShellOnboardingKickoffRouteImport } from './routes/_shell.onboarding.kickoff'
 import { Route as ShellOnboardingLogRouteImport } from './routes/_shell.onboarding.log'
 import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboarding.notes'
 import { Route as ShellOnboardingOpenRouteImport } from './routes/_shell.onboarding.open'
@@ -215,6 +215,11 @@ const ShellAppsAppRoute = ShellAppsAppRouteImport.update({
   path: '/apps/$app',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellAppsNewRoute = ShellAppsNewRouteImport.update({
+  id: '/apps/new',
+  path: '/apps/new',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellBrainIndexRoute = ShellBrainIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -294,11 +299,6 @@ const ShellOnboardingInterviewersRoute =
     path: '/interviewers',
     getParentRoute: () => ShellOnboardingRoute,
   } as any)
-const ShellOnboardingKickoffRoute = ShellOnboardingKickoffRouteImport.update({
-  id: '/kickoff',
-  path: '/kickoff',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
 const ShellOnboardingLogRoute = ShellOnboardingLogRouteImport.update({
   id: '/log',
   path: '/log',
@@ -606,6 +606,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
@@ -614,7 +615,6 @@ export interface FileRoutesByFullPath {
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
   '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
@@ -695,6 +695,7 @@ export interface FileRoutesByTo {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
@@ -702,7 +703,6 @@ export interface FileRoutesByTo {
   '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
   '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
@@ -788,6 +788,7 @@ export interface FileRoutesById {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/apps/$app': typeof ShellAppsAppRoute
+  '/_shell/apps/new': typeof ShellAppsNewRoute
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/_shell/brain/memory': typeof ShellBrainMemoryRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
@@ -796,7 +797,6 @@ export interface FileRoutesById {
   '/_shell/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
   '/_shell/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
   '/_shell/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/_shell/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/_shell/onboarding/log': typeof ShellOnboardingLogRoute
   '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/_shell/onboarding/open': typeof ShellOnboardingOpenRoute
@@ -882,6 +882,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/decisions/$decision'
     | '/apps/$app'
+    | '/apps/new'
     | '/brain/$noteId'
     | '/brain/memory'
     | '/integrations/$integration'
@@ -890,7 +891,6 @@ export interface FileRouteTypes {
     | '/onboarding/agreements'
     | '/onboarding/ai-use'
     | '/onboarding/interviewers'
-    | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
     | '/onboarding/open'
@@ -971,6 +971,7 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/'
     | '/apps/$app'
+    | '/apps/new'
     | '/brain/$noteId'
     | '/brain/memory'
     | '/integrations/$integration'
@@ -978,7 +979,6 @@ export interface FileRouteTypes {
     | '/onboarding/agreements'
     | '/onboarding/ai-use'
     | '/onboarding/interviewers'
-    | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
     | '/onboarding/open'
@@ -1063,6 +1063,7 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/_shell/'
     | '/_shell/apps/$app'
+    | '/_shell/apps/new'
     | '/_shell/brain/$noteId'
     | '/_shell/brain/memory'
     | '/_shell/integrations/$integration'
@@ -1071,7 +1072,6 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/agreements'
     | '/_shell/onboarding/ai-use'
     | '/_shell/onboarding/interviewers'
-    | '/_shell/onboarding/kickoff'
     | '/_shell/onboarding/log'
     | '/_shell/onboarding/notes'
     | '/_shell/onboarding/open'
@@ -1313,6 +1313,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellAppsAppRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/apps/new': {
+      id: '/_shell/apps/new'
+      path: '/apps/new'
+      fullPath: '/apps/new'
+      preLoaderRoute: typeof ShellAppsNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/brain/': {
       id: '/_shell/brain/'
       path: '/'
@@ -1416,13 +1423,6 @@ declare module '@tanstack/react-router' {
       path: '/interviewers'
       fullPath: '/onboarding/interviewers'
       preLoaderRoute: typeof ShellOnboardingInterviewersRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/kickoff': {
-      id: '/_shell/onboarding/kickoff'
-      path: '/kickoff'
-      fullPath: '/onboarding/kickoff'
-      preLoaderRoute: typeof ShellOnboardingKickoffRouteImport
       parentRoute: typeof ShellOnboardingRoute
     }
     '/_shell/onboarding/log': {
@@ -1814,7 +1814,6 @@ interface ShellOnboardingRouteChildren {
   ShellOnboardingAgreementsRoute: typeof ShellOnboardingAgreementsRoute
   ShellOnboardingAiUseRoute: typeof ShellOnboardingAiUseRoute
   ShellOnboardingInterviewersRoute: typeof ShellOnboardingInterviewersRoute
-  ShellOnboardingKickoffRoute: typeof ShellOnboardingKickoffRoute
   ShellOnboardingLogRoute: typeof ShellOnboardingLogRoute
   ShellOnboardingNotesRoute: typeof ShellOnboardingNotesRoute
   ShellOnboardingOpenRoute: typeof ShellOnboardingOpenRoute
@@ -1832,7 +1831,6 @@ const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
   ShellOnboardingAgreementsRoute: ShellOnboardingAgreementsRoute,
   ShellOnboardingAiUseRoute: ShellOnboardingAiUseRoute,
   ShellOnboardingInterviewersRoute: ShellOnboardingInterviewersRoute,
-  ShellOnboardingKickoffRoute: ShellOnboardingKickoffRoute,
   ShellOnboardingLogRoute: ShellOnboardingLogRoute,
   ShellOnboardingNotesRoute: ShellOnboardingNotesRoute,
   ShellOnboardingOpenRoute: ShellOnboardingOpenRoute,
@@ -1933,6 +1931,7 @@ interface ShellRouteChildren {
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
+  ShellAppsNewRoute: typeof ShellAppsNewRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
@@ -1971,6 +1970,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,
+  ShellAppsNewRoute: ShellAppsNewRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,

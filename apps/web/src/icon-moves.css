@@ -662,6 +662,14 @@
   --icon-time: 0.7s;
 }
 
+/* The stroke goes through it. */
+.lucide-calendar-off > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 29 100;
+  --icon-from: 30.5;
+  --icon-time: 0.55s;
+}
+
 /* The line is drawn from left to right. */
 .lucide-chart-line > :nth-child(2) {
   --icon-move: icon-draw;

@@ -4,6 +4,7 @@ import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
 import { newWebSocketRpcSession } from "capnweb";
+import { z } from "zod";
 
 /**
  * Signed-in people for end-to-end tests. They sign in through the product,
@@ -173,6 +174,35 @@ const rpcSocket = (person: Pick<Person, "cookie">): WebSocket => {
   return new WebSocket(url, { headers } as never);
 };
 
+/**
+ * A team of the organization, named `name`, made by `admin` as Better
+ * Auth's organization plugin makes one; its ID.
+ */
+export const teamMadeBy = async (
+  admin: Pick<Person, "cookie">,
+  name: string
+): Promise<string> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/create-team", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Making team ${name} failed (${response.status}): ${await response.text()}`
+    );
+  }
+  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  return id;
+};
+
 /** The person's API over `/rpc`, from Node, as their browser would open it. */
 export const apiOf = (person: Pick<Person, "cookie">) => {
   const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
@@ -305,6 +335,8 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  boardGoals: { admin: "admin", member: "user" },
+  workflowTeam: { admin: "admin", builder: "builder", member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
   staffInterviews: { admin: "admin" },

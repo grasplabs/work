@@ -6,8 +6,13 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { policyBook, policyToday } from "../policies/policies-data.ts";
-import { applyPolicy, findings } from "../policies/policy.ts";
+import {
+  bookOf,
+  findingsOfLoaded,
+  readPolicyBook,
+  readPolicyFindings,
+} from "../policies/policies-data.ts";
+import { applyPolicy, findingsWith } from "../policies/policy.ts";
 import { readAppAudit } from "./landscape-audit.ts";
 import type { AppAuditTrail } from "./landscape-audit.ts";
 import { landscapeAppsOf } from "./landscape-data.ts";
@@ -36,14 +41,15 @@ export const loadAppPage = async (
   identity: Identity,
   appId: string
 ): Promise<AppPage> => {
-  const { catalog, connections, held } = await loadIntegrations(
-    core,
-    identity,
-    { held: true }
-  );
+  const [{ catalog, connections, held }, loaded, found] = await Promise.all([
+    loadIntegrations(core, identity, { held: true }),
+    readPolicyBook(core),
+    readPolicyFindings(core),
+  ]);
   if (connections.state !== "ready") {
     return { app: connections, audit: Promise.resolve(connections) };
   }
+  const book = bookOf(loaded);
   const integration = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
     connections.data
@@ -60,7 +66,7 @@ export const loadAppPage = async (
   );
   const [app] = applyPolicy(
     apps,
-    findings(policyBook.rules, apps, policyBook.exceptions, policyToday())
+    findingsWith(book, findingsOfLoaded(found).findings)
   );
   // Not awaited: a slow read of the log shouldn't hold up the app's tabs.
   const audit = isAdmin(identity.role)

@@ -66,7 +66,7 @@ import type { Staff } from "../access.ts";
 import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
 import { audit, adminDatabase } from "../db/act.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { boundedText } from "../request-body.ts";
 import { discordCommandName, discordSubcommands } from "./discord-commands.ts";
 import { organizationsOf } from "./views.ts";

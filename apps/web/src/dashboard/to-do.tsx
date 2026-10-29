@@ -4,6 +4,11 @@ import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
+import type {
+  GoLiveItem,
+  SignInAgainItem,
+  WorkflowGoLiveItem,
+} from "@grasp-os/shared/waiting";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
@@ -11,8 +16,7 @@ import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { PendingRequests } from "../activity/pending.tsx";
-import { canReconnect } from "../connections/connect-dialog.tsx";
-import type { Integration } from "../connections/integrations.ts";
+import { integrationKey } from "../connections/integrations.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -40,13 +44,20 @@ import type { PileItem } from "./todo-pile.tsx";
 // run waits on aren't here: core can't list a person's decisions yet (they
 // come by mail and link).
 
-/** What the dashboard read of what waits on the person, each part on its own. */
+/**
+ * What the dashboard read of what waits on the person (core's feed of
+ * it, `session.waiting`), each part on its own: one core couldn't read
+ * says so in its place.
+ */
 export interface Waiting {
   held: Loaded<PendingAction[]>;
   /** Calls of the person's whose answer was lost, for them to say what became of each. */
   outcomes: Loaded<UnknownOutcome[]>;
   failed: Loaded<NotificationsPage>;
-  integrations: Loaded<Integration[]>;
+  /** Connections whose access ran out, among those the person may sign in to again. */
+  reconnect: Loaded<SignInAgainItem[]>;
+  /** Versions of Apps the person answers for, up for review. */
+  versions: Loaded<GoLiveItem[]>;
   /** Admins only. */
   requests: Loaded<PendingRequests> | undefined;
   /** Packages to approve: none for anyone without that permission. */
@@ -55,38 +66,19 @@ export interface Waiting {
   screens: Loaded<ScreensWaiting[]> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */
   decisions: Loaded<DecisionView[]>;
+  /** Versions of workflows asked to go live that the person may approve or send back. */
+  workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */
 export type Viewer = Pick<Identity, "role" | "staff">;
-
-/** An account whose access ran out, at its integration. */
-interface RanOut {
-  integration: Integration;
-  connection: Integration["connections"][number];
-}
-
-/** The accounts whose access ran out, among those this person can sign in to again: each one waits. */
-export const toReconnect = (
-  integrations: readonly Integration[],
-  identity: Viewer
-): RanOut[] =>
-  integrations.flatMap((integration) =>
-    integration.connections
-      .filter(
-        (connection) =>
-          connection.status === "needs_reauth" &&
-          canReconnect(connection, integration.offered, identity)
-      )
-      .map((connection) => ({ integration, connection }))
-  );
 
 /** Whether permission requests wait on this person: admins decide them; staff can't, and don't get them. */
 export const decidesRequests = (viewer: Viewer): boolean =>
   isMemberAdmin(viewer);
 
 /** An account to sign in to again: its next step opens its account on its integration's page. */
-const ReconnectRow = ({ ranOut }: { ranOut: RanOut }) => {
+const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
   const { t } = useLingui();
   const { integration, connection } = ranOut;
   // Named as its card on the integration's page is: the account too.
@@ -108,7 +100,9 @@ const ReconnectRow = ({ ranOut }: { ranOut: RanOut }) => {
       <Link
         aria-label={t`Sign in to ${app} again`}
         className={buttonVariants({ size: "xs" })}
-        params={{ integration: integration.key }}
+        params={{
+          integration: integrationKey(integration.source, integration.id),
+        }}
         search={{ tab: "account" }}
         to="/integrations/$integration"
       >
@@ -201,17 +195,15 @@ const FailedGroup = ({
 };
 
 const ReconnectGroup = ({
-  integrations,
-  identity,
+  reconnect,
 }: {
-  integrations: Loaded<Integration[]>;
-  identity: Identity;
+  reconnect: Loaded<SignInAgainItem[]>;
 }) => {
   const { t } = useLingui();
-  if (integrations.state !== "ready") {
-    return <PartNotLoaded part={integrations} />;
+  if (reconnect.state !== "ready") {
+    return <PartNotLoaded part={reconnect} />;
   }
-  const ranOut = toReconnect(integrations.data, identity);
+  const ranOut = reconnect.data;
   if (ranOut.length === 0) {
     return null;
   }
@@ -285,7 +277,7 @@ export const ToDo = ({
   }>();
   const older: OlderFailures =
     kept?.after === waiting.failed ? kept.older : { rows: [], more: undefined };
-  const { failed, integrations, screens } = waiting;
+  const { failed, reconnect, screens } = waiting;
   // A part of the pile that couldn't be read says so below it.
   const notLoaded = (
     [
@@ -301,8 +293,8 @@ export const ToDo = ({
     notLoaded.length > 0 ||
     failed.state !== "ready" ||
     failed.data.page.notifications.length > 0 ||
-    integrations.state !== "ready" ||
-    toReconnect(integrations.data, identity).length > 0 ||
+    reconnect.state !== "ready" ||
+    reconnect.data.length > 0 ||
     (screens !== undefined &&
       (screens.state !== "ready" || screens.data.length > 0));
   return (
@@ -330,7 +322,7 @@ export const ToDo = ({
               setKept({ after: failed, older: next });
             }}
           />
-          <ReconnectGroup identity={identity} integrations={integrations} />
+          <ReconnectGroup reconnect={reconnect} />
         </DashboardCard>
       ) : null}
     </>

@@ -14,9 +14,9 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
-import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
+import { Route as PlatformOffboardedRouteImport } from './routes/platform/offboarded'
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
 import { Route as OrganizationsClientIdAiUseRouteImport } from './routes/organizations/$clientId/ai-use'
 import { Route as OrganizationsClientIdBrainRouteImport } from './routes/organizations/$clientId/brain'
@@ -63,11 +63,6 @@ const NewOrganizationRoute = NewOrganizationRouteImport.update({
   path: '/new-organization',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SourcesRoute = SourcesRouteImport.update({
-  id: '/sources',
-  path: '/sources',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
   id: '/organizations/$clientId',
   path: '/organizations/$clientId',
@@ -76,6 +71,11 @@ const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
 const PlatformIndexRoute = PlatformIndexRouteImport.update({
   id: '/platform/',
   path: '/platform/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlatformOffboardedRoute = PlatformOffboardedRouteImport.update({
+  id: '/platform/offboarded',
+  path: '/platform/offboarded',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrganizationsClientIdIndexRoute =
@@ -202,8 +202,8 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
+  '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
@@ -232,7 +232,7 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
+  '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
@@ -262,8 +262,8 @@ export interface FileRoutesById {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/sources': typeof SourcesRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
+  '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
@@ -294,8 +294,8 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
     | '/organizations/$clientId'
+    | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
@@ -324,7 +324,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
+    | '/platform/offboarded'
     | '/platform'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
@@ -353,8 +353,8 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/sources'
     | '/organizations/$clientId'
+    | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
@@ -384,8 +384,8 @@ export interface RootRouteChildren {
   IntegrationsRoute: typeof IntegrationsRoute
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
-  SourcesRoute: typeof SourcesRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
+  PlatformOffboardedRoute: typeof PlatformOffboardedRoute
   PlatformIndexRoute: typeof PlatformIndexRoute
   PlatformReleasesReleaseIdRoute: typeof PlatformReleasesReleaseIdRoute
   PlatformReleasesDiffRoute: typeof PlatformReleasesDiffRoute
@@ -431,13 +431,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewOrganizationRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sources': {
-      id: '/sources'
-      path: '/sources'
-      fullPath: '/sources'
-      preLoaderRoute: typeof SourcesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/organizations/$clientId': {
       id: '/organizations/$clientId'
       path: '/organizations/$clientId'
@@ -450,6 +443,13 @@ declare module '@tanstack/react-router' {
       path: '/platform'
       fullPath: '/platform/'
       preLoaderRoute: typeof PlatformIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/platform/offboarded': {
+      id: '/platform/offboarded'
+      path: '/platform/offboarded'
+      fullPath: '/platform/offboarded'
+      preLoaderRoute: typeof PlatformOffboardedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/organizations/$clientId/': {
@@ -644,8 +644,8 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsRoute: IntegrationsRoute,
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
-  SourcesRoute: SourcesRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,
+  PlatformOffboardedRoute: PlatformOffboardedRoute,
   PlatformIndexRoute: PlatformIndexRoute,
   PlatformReleasesReleaseIdRoute: PlatformReleasesReleaseIdRoute,
   PlatformReleasesDiffRoute: PlatformReleasesDiffRoute,
