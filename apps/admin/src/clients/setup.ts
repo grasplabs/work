@@ -68,6 +68,8 @@ export interface ClientSetup {
     rotatedAt: Date | null;
     rotationLiveAt: Date | null;
     configChangedAt: Date | null;
+    /** The most its model calls may cost a month, in whole euros (GRA-141). */
+    modelSpendCeiling: number;
   } | null;
   /** How its people sign in, as its record has it; null without one. */
   signIn: ClientSignInRecord | null;
@@ -135,6 +137,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.place",
   "client.provision_placed",
   "client.ring",
+  "client.model_spend_ceiling",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
@@ -253,6 +256,7 @@ export const getClientSetup = async (
       rotatedAt: clients.rotatedAt,
       rotationLiveAt: clients.rotationLiveAt,
       configChangedAt: clients.configChangedAt,
+      modelSpendCeiling: clients.modelSpendCeiling,
     })
     .from(clients)
     .where(eq(clients.id, clientId));
