@@ -11,15 +11,21 @@
  *   a rollout run before it's done.
  * - Access: the dev bypass (`DEV_ACCESS_EMAIL`, src/access.ts), which holds
  *   only for requests to this machine.
- * - `POST /__e2e/seed` seeds what a journey starts from, and
- *   `POST /__e2e/seed-placed` the placed-client journey's (test/e2e-seed.ts).
+ * - `POST /__e2e/seed` seeds what a journey starts from,
+ *   `POST /__e2e/seed-placed` the placed-client journey's and
+ *   `POST /__e2e/seed-organizations` the organization sections'
+ *   (test/e2e-seed.ts). `POST /__e2e/core` holds a seeded core's snapshot
+ *   answer for a while, or lets it answer at once again, and answers how
+ *   many snapshots it answered so far.
  */
 import { loopbackHosts } from "@grasp-os/shared/router";
+import { z } from "zod";
 
 import server from "../src/server.ts";
 import { base } from "./cloudflare-api-kit.ts";
+import type { AccountState } from "./cloudflare-api-kit.ts";
 import { fakeCloudflareApi } from "./cloudflare-api.ts";
-import { seed, seedPlaced } from "./e2e-seed.ts";
+import { seed, seedOrganizations, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { AdminRuns } from "../src/run-object.ts";
@@ -69,6 +75,41 @@ if (held === undefined) {
   };
 }
 
+/** The organizations seed's cores, by client, kept as the fake is. */
+const coresKey = Symbol.for("grasp-os.admin-e2e.cores");
+const heldCores: unknown = Reflect.get(globalThis, coresKey);
+// SAFETY: only this module sets the key, to a map it made.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const cores = (heldCores ?? new Map()) as Map<string, AccountState>;
+Reflect.set(globalThis, coresKey, cores);
+
+/** What steering a seeded core takes: which, and how long it holds each answer, if that changes. */
+const steerSchema = z.object({
+  clientId: z.string(),
+  holdMs: z.number().int().nonnegative().optional(),
+});
+
+/**
+ * A seeded core, held for `holdMs` before each snapshot it answers (0
+ * answers at once), and how many it answered so far.
+ */
+const steerCore = async (request: Request): Promise<Response> => {
+  const { clientId, holdMs } = steerSchema.parse(await request.json());
+  const account = cores.get(clientId);
+  if (account === undefined) {
+    return new Response("No such core", { status: 404 });
+  }
+  if (holdMs !== undefined) {
+    account.adminHeld =
+      holdMs === 0
+        ? undefined
+        : async () => {
+            await scheduler.wait(holdMs);
+          };
+  }
+  return Response.json({ reads: account.adminReaders.length });
+};
+
 export default {
   ...server,
   fetch: async (request: Request, env: Env) => {
@@ -84,6 +125,26 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       return Response.json(await seedPlaced(cloudflare, tokens));
+    }
+    if (
+      url.pathname === "/__e2e/seed-organizations" &&
+      request.method === "POST"
+    ) {
+      if (!loopbackHosts.has(url.hostname)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const seeded = await seedOrganizations(cloudflare, tokens);
+      cores.set(seeded.answered.clientId, seeded.answered.account);
+      return Response.json({
+        answered: seeded.answered.clientId,
+        unset: seeded.unset.clientId,
+      });
+    }
+    if (url.pathname === "/__e2e/core" && request.method === "POST") {
+      if (!loopbackHosts.has(url.hostname)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return await steerCore(request);
     }
     return await server.fetch(request, env);
   },

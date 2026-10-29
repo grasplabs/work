@@ -6,11 +6,12 @@
  * on a release, with a newer release imported to roll out.
  */
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 
 import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import { saveDestination } from "../src/hosting/inventory.ts";
+import type { AccountState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { evidence, verified } from "./hosting.ts";
 import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
@@ -155,4 +156,42 @@ export const seedPlaced = async (
     connect: "export default { connect: 2 };",
   });
   return { destinationId, releaseIds: [first, second] };
+};
+
+/** What the organizations seed made: a client whose core answers, and one not set up yet. */
+export interface SeededOrganizations {
+  /** Live, its core answering the admin's snapshot. */
+  answered: { clientId: string; account: AccountState };
+  /** Added, never provisioned: it has no core to answer. */
+  unset: { clientId: string };
+}
+
+/**
+ * Seeds the admin for the organization sections' journey: every client an
+ * earlier seed made offboarded, then one client live on a release and one
+ * only added, as staff leave an organization before its Setup runs.
+ */
+export const seedOrganizations = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  tokens: { deployer: string }
+): Promise<SeededOrganizations> => {
+  await migrate(env.DB);
+  await fillStore(tokens);
+  await adminDatabase(env.DB)
+    .update(clients)
+    .set({ status: "offboarded" })
+    .where(ne(clients.status, "offboarded"));
+  const release = await placedRelease("feat(core): the sections", {
+    core: "export default { core: 1 };",
+    connect: "export default { connect: 1 };",
+  });
+  const answered = await placedClientRecord(cloudflare, 0, {
+    name: "Answering Acme",
+  });
+  await deployPlaced(answered.clientId, release);
+  const unset = await placedClientRecord(cloudflare, 0, { name: "Unset Acme" });
+  return {
+    answered: { clientId: answered.clientId, account: answered.account },
+    unset: { clientId: unset.clientId },
+  };
 };
