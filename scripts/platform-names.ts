@@ -1,5 +1,5 @@
 /**
- * Prints one of the platform's Cloudflare names for a stage, as the
+ * Prints one of the platform's Cloudflare names or ids for a stage, as the
  * shared names module (`@grasp-os/shared/names`) gives it, so a workflow
  * names nothing itself:
  *
@@ -11,6 +11,9 @@
 import {
   adminDatabaseName,
   clientsNamespace,
+  platformAccountId,
+  platformR2Endpoint,
+  platformSecretsStoreId,
   platformWorkerName,
   releasesBucketName,
   routerHostsName,
@@ -30,6 +33,9 @@ const names: Record<string, string> = {
   releasesBucket: releasesBucketName(stage),
   routerHosts: routerHostsName(stage),
   clientsNamespace: clientsNamespace(stage),
+  accountId: platformAccountId,
+  secretsStoreId: platformSecretsStoreId,
+  r2Endpoint: platformR2Endpoint,
 };
 const secretPattern = /^[A-Z][A-Z0-9_]*$/u;
 

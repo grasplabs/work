@@ -209,8 +209,8 @@ const varOf = (value: string | undefined): string | undefined => {
 };
 
 /**
- * Grasp's OAuth apps' client ids, from the admin's vars (deploy-platform sets
- * them): not secrets, their secrets are shared secrets above.
+ * Grasp's OAuth apps' client ids, from the admin's vars (wrangler.jsonc):
+ * not secrets, their secrets are shared secrets above.
  */
 export const signInApps = (env: Env): SignInApps => {
   const entraClientId = varOf(env.ENTRA_CLIENT_ID);

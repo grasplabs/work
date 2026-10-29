@@ -3,16 +3,25 @@ import path from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { adminSettings, cfWorker } from "../apps/admin/cf-worker.ts";
+import { cfWorker } from "../apps/admin/cf-worker.ts";
 
 // The admin's Worker as cf deploys it (apps/admin/cf-worker.ts), from the
 // real apps/admin/wrangler.jsonc: each stage's names, what a deploy
 // looked up filled in, optional secrets the store lacks left out, a
 // required one stopping it, and the settings keep_vars used to keep.
 
-const wranglerText = readFileSync(
+/** The admin's real wrangler.jsonc. */
+const realWranglerText = readFileSync(
   path.join(import.meta.dirname, "../apps/admin/wrangler.jsonc"),
   "utf-8"
+);
+/**
+ * The same, with an Access application's tag in both stages, as a
+ * deployable stage has: the Access apps don't exist yet.
+ */
+const wranglerText = realWranglerText.replaceAll(
+  '"CF_ACCESS_ISS":',
+  '"CF_ACCESS_AUD": "aud-1", "CF_ACCESS_ISS":'
 );
 
 /** A field of a binding, as cf's builders shape it. */
@@ -192,30 +201,43 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
-  it("takes each stage's Google client id from wrangler.jsonc, never from the deploy", () => {
-    const google = (stage: "production" | "staging") =>
-      bindingOf(
-        cfWorker(wranglerText, stage, {
-          ...deployed,
-          GOOGLE_CLIENT_ID: "from-the-deploy",
-        }),
-        "GOOGLE_CLIENT_ID"
+  it("takes every setting from the stage's vars in wrangler.jsonc", () => {
+    const settings = (stage: "production" | "staging") => {
+      const worker = cfWorker(wranglerText, stage, deployed);
+      return Object.fromEntries(
+        ["STAGE", "CF_ACCESS_ISS", "GOOGLE_CLIENT_ID", "CLIENT_DOMAIN"].map(
+          (name) => [name, bindingOf(worker, name)?.value]
+        )
       );
+    };
     expect({
-      production: google("production"),
-      staging: google("staging"),
+      production: settings("production"),
+      staging: settings("staging"),
     }).toStrictEqual({
       production: {
-        type: "text",
-        value:
+        STAGE: "production",
+        CF_ACCESS_ISS: "https://grasp-work.cloudflareaccess.com",
+        GOOGLE_CLIENT_ID:
           "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
+        CLIENT_DOMAIN: "ongrasp.app",
       },
       staging: {
-        type: "text",
-        value:
+        STAGE: "staging",
+        CF_ACCESS_ISS: "https://grasp-work.cloudflareaccess.com",
+        GOOGLE_CLIENT_ID:
           "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
+        CLIENT_DOMAIN: undefined,
       },
     });
+  });
+
+  it("stops a deploy of a stage without its Access application, but still builds it", () => {
+    expect(() => cfWorker(realWranglerText, "staging", deployed)).toThrow(
+      "Set CF_ACCESS_AUD in apps/admin/wrangler.jsonc for staging"
+    );
+    expect(cfWorker(realWranglerText, "staging", {}).name).toBe(
+      "grasp-admin-staging"
+    );
   });
 
   it("stops a staging deploy whose store lacks a required secret, naming its staging name", () => {
@@ -228,26 +250,6 @@ describe("the admin's Worker for cf", () => {
           .join(","),
       })
     ).toThrow("Secrets Store doesn't have GOOGLE_CLIENT_SECRET_STAGING");
-  });
-
-  it("adds the admin's settings from the deploy, each only when it's set", () => {
-    const worker = cfWorker(wranglerText, "staging", {
-      ...deployed,
-      CF_ACCESS_AUD: "aud-1",
-      CLIENT_DOMAIN: "",
-      NOT_A_SETTING: "kept out",
-    });
-    expect({
-      aud: bindingOf(worker, "CF_ACCESS_AUD"),
-      domain: bindingOf(worker, "CLIENT_DOMAIN"),
-      other: bindingOf(worker, "NOT_A_SETTING"),
-      settings: adminSettings.includes("CF_ACCESS_ISS"),
-    }).toStrictEqual({
-      aud: { type: "text", value: "aud-1" },
-      domain: undefined,
-      other: undefined,
-      settings: true,
-    });
   });
 });
 

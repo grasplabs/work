@@ -60,6 +60,18 @@ export const adminDatabaseName = (stage: Stage): string =>
 export const releasesBucketName = (stage: Stage): string =>
   staged(`${namePrefix}releases`, stage);
 
+/**
+ * Grasp's Cloudflare account, "Grasp Work", where both stages run: an id,
+ * not a credential.
+ */
+export const platformAccountId = "e8ff423bc46eb025fca37494777c1cc0";
+
+/** The account's one Secrets Store, which both stages share. */
+export const platformSecretsStoreId = "f134987a836f433abe211c817a51662e";
+
+/** The account's R2 S3 endpoint, in the EU, where the releases buckets are. */
+export const platformR2Endpoint = `https://${platformAccountId}.eu.r2.cloudflarestorage.com`;
+
 /** The router's hostname map (KV) in `stage`, by its title. */
 export const routerHostsName = (stage: Stage): string =>
   staged(`${namePrefix}router-hosts`, stage);

@@ -1,9 +1,7 @@
-// What the admin reads from its env besides wrangler.jsonc's bindings,
-// which `wrangler types` can't see. The Access settings come from each
-// deploy's `--var` (the deploy workflows; `keep_vars` keeps them across a
-// deploy that passes none); the admin refuses every request without them.
-// CLIENT_DOMAIN comes the same way. Merged into the interface
-// worker-configuration.d.ts generates.
+// The admin's settings, each a var in wrangler.jsonc per stage, typed here
+// as optional: a stage may leave one unset, and the tests set their own.
+// The admin refuses every request without the Access pair. Merged into the
+// interface worker-configuration.d.ts generates.
 interface __BaseEnv_Env {
   /** The Access application's AUD tag (src/access.ts). */
   CF_ACCESS_AUD?: string;

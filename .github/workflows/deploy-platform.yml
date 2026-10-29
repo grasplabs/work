@@ -13,7 +13,9 @@
 # secret lives (Grasp's OAuth app secrets, the Composio key and the rest,
 # each by its stage's name: `_STAGING` appended in staging, by
 # `storeSecretName`), set there from 1Password by hand; the stage's
-# 1Password Environment holds only what this workflow itself needs. A
+# 1Password Environment holds only its Cloudflare API token. The account
+# and store ids come from the names module, and the admin's settings are
+# its wrangler.jsonc vars, per stage. A
 # deploy that binds a required secret the store lacks stops, naming it.
 # After rotating one in the store, a secrets rollout from the admin takes
 # it to every client.
@@ -54,8 +56,7 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # The Cloudflare credentials and store, from the stage's 1Password
-      # Environment, as everything this workflow reads:
+      # The stage's Cloudflare API token, from its 1Password Environment:
       # OP_SERVICE_ACCOUNT_TOKEN, the environment's secret, is the only value
       # kept in GitHub.
       - uses: ./.github/actions/load-1password
@@ -63,8 +64,12 @@ jobs:
           environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: CLOUDFLARE_API_TOKEN
-          settings: CLOUDFLARE_ACCOUNT_ID SECRETS_STORE_ID
-          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SECRETS_STORE_ID
+          required: CLOUDFLARE_API_TOKEN
+      # Grasp Work's account and its one Secrets Store, by the names module.
+      - run: |
+          set -euo pipefail
+          echo "CLOUDFLARE_ACCOUNT_ID=$(vp exec node scripts/platform-names.ts "$STAGE" accountId)" >> "$GITHUB_ENV"
+          echo "SECRETS_STORE_ID=$(vp exec node scripts/platform-names.ts "$STAGE" secretsStoreId)" >> "$GITHUB_ENV"
       # A D1 database's jurisdiction is set only when it is created, and deploy
       # would auto-provision a missing one outside the EU: create the
       # admin's database before its first deploy. One that exists outside
@@ -108,46 +113,15 @@ jobs:
       # it, so deploying it changes nothing for anyone until it does.
       - working-directory: apps/gateway
         run: vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE"
-      # The admin verifies every request's Access JWT against its Access
-      # application (apps/admin/src/access.ts) and refuses everyone
-      # without these, so a deploy without them would lock staff out: stop
-      # before deploying. They're settings in the stage's 1Password
-      # Environment, not secrets: the AUD tag and the team URL
-      # identify the app, they grant nothing. So is CLIENT_DOMAIN, the
-      # domain clients are served under: without it the admin provisions
-      # and deploys no client, but works otherwise, so it's passed only when
-      # set. So is ENTRA_CLIENT_ID, Grasp's Entra app's client id, which
-      # each client's core signs people in with: a client whose sign-in
-      # names an IdP without one isn't deployed. GOOGLE_CLIENT_ID, public
-      # too, is in the admin's wrangler.jsonc, per stage.
-      # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
-      # Grasp with its model gateway: without it the chat isn't set up.
-      # So is ROOMS_ORIGIN, Grasp's Rooms' team origin, which the admin reads
-      # each company's proposal from with ROOMS_READ_TOKEN (Secrets Store):
-      # without it the proposal says Rooms isn't connected.
-      # So is ADMIN_HOST, Grasp's admin's own hostname (admin.<domain>,
-      # apps/admin/src/admin-host.ts): a route of the admin's Worker
-      # and a hostname of its Access application, both set by hand.
-      # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
-      # application's public key and the staff's Discord user ids
-      # (apps/admin/src/admin/discord.ts): without them the bot answers
-      # no one. Settings, not secrets, so not masked; one left out of the
-      # Environment is empty.
-      - uses: ./.github/actions/load-1password
-        with:
-          environment: ${{ inputs.stage }}
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          settings: CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS
-      - name: Deploy the admin with its Access settings
+      # The admin's settings are its wrangler.jsonc vars, per stage; a stage
+      # without its Access application (CF_ACCESS_AUD and CF_ACCESS_ISS),
+      # which would lock staff out, isn't deployed (apps/admin/cf-worker.ts).
+      - name: Deploy the admin
         run: |
           set -euo pipefail
-          if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
-            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the $STAGE 1Password Environment; nothing deployed"
-            exit 1
-          fi
           # What apps/admin/cf-worker.ts fills in: the store, the stage's
           # hostname map, and the secrets the store has (an optional one it
-          # lacks stays unbound). The settings above reach it from the env.
+          # lacks stays unbound).
           cd apps/admin
           hosts=$(vp exec node ../../scripts/platform-names.ts "$STAGE" routerHosts)
           ROUTER_HOSTS_ID=$(vp exec cf kv namespaces list --per-page 100 | jq -r --arg title "$hosts" '[.[] | select(.title == $title) | .id] | if length == 1 then .[0] else error("expected one KV namespace " + $title) end')

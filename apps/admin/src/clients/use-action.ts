@@ -17,7 +17,7 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
   client_busy:
     "Something else is deploying to this client right now: try again once it's done.",
   store_secret_missing:
-    "Secrets Store has no CLIENT_KEY, which the admin needs to record or seal the change: have deploy-platform write it, then try again.",
+    "Secrets Store has no CLIENT_KEY, which the admin needs to record or seal the change: put it in the store, then try again.",
   secret_invalid:
     "That isn't a secret: paste the client secret's value as Entra shows it, without spaces.",
   teams_bot_invalid:

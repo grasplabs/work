@@ -539,9 +539,13 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # Staging's releases bucket, by the names module, for every step
-      # after: the release before is read from it, and the release goes to it.
-      - run: echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
+      # Staging's releases bucket and the account's R2 endpoint, by the names
+      # module, for every step after: the release before is read from the
+      # bucket, and the release goes to it.
+      - run: |
+          set -euo pipefail
+          echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
+          echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts staging r2Endpoint)" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
@@ -550,8 +554,8 @@ jobs:
         with:
           environment: staging
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
       # What the release's platform limits are raised over: the release
       # published before it. Its limit evidence goes next to its manifest,
       # and a raise without evidence (a capacity run per profile and the
