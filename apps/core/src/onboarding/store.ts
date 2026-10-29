@@ -1522,14 +1522,98 @@ export class Onboarding extends DurableObject<Env> {
    * content purge looks in (interview-erasure.ts); never served otherwise.
    */
   interviewsSaid(): { person: string; progress: InterviewProgress }[] {
+    return this.interviewPeople().flatMap((person) => {
+      const stored = this.interviewStored(person);
+      return stored !== null && "progress" in stored
+        ? [{ person, progress: stored.progress }]
+        : [];
+    });
+  }
+
+  /**
+   * Whose interviews are kept: what a Knowledge content purge reads one at
+   * a time (interview-erasure.ts), so no one call carries them all.
+   */
+  interviewPeople(): string[] {
     return this.#db
-      .select({ person: interviews.person, progress: interviews.progress })
+      .select({ person: interviews.person })
       .from(interviews)
       .all()
-      .map(({ person, progress }) => ({
-        person,
-        progress: interviewProgressSchema.parse(JSON.parse(progress)),
-      }));
+      .map(({ person }) => person);
+  }
+
+  /**
+   * `person`'s interview as kept, for a Knowledge content purge
+   * (interview-erasure.ts): read as an interview, or, one that no longer
+   * reads as one, as stored (its words are still in it); null when none
+   * is kept. Never served otherwise.
+   */
+  interviewStored(
+    person: string
+  ): { progress: InterviewProgress } | { unreadable: string } | null {
+    const [row] = this.#db
+      .select({ progress: interviews.progress })
+      .from(interviews)
+      .where(eq(interviews.person, person))
+      .all();
+    if (row === undefined) {
+      return null;
+    }
+    const parsed = interviewProgressSchema.safeParse(parsedJson(row.progress));
+    return parsed.success
+      ? { progress: parsed.data }
+      : { unreadable: row.progress };
+  }
+
+  /**
+   * Keeps `person`'s interview that no longer reads as one as a Knowledge
+   * content purge rewrote it (`after`, its stored text), only if it is
+   * still as the purge read it (`before`): one saved since is left to the
+   * purge to read again. As `rewriteInterview`: under the brain lock, the
+   * link's version moved on, a drawing under way keeps nothing, and in the
+   * audit log without its words. Whether it was rewritten.
+   */
+  async rewriteUnreadableInterview(
+    person: string,
+    before: string,
+    after: string,
+    by: AuditActor
+  ): Promise<boolean> {
+    const rewritten = await this.#withBrain(async () => {
+      await Promise.resolve();
+      const [row] = this.#db
+        .select({ progress: interviews.progress })
+        .from(interviews)
+        .where(eq(interviews.person, person))
+        .all();
+      if (row?.progress !== before) {
+        return false;
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .update(interviews)
+          .set({ progress: after })
+          .where(eq(interviews.person, person))
+          .run();
+        this.#db
+          .update(links)
+          .set({ version: sql`${links.version} + 1` })
+          .where(eq(links.person, person))
+          .run();
+        this.#purged();
+        // Unlike `rewriteInterview`, no line of the voice's is queued to go
+        // from the speech cache: it can't be read out of what doesn't parse.
+        // Those lines expire from the cache within a month, the residual
+        // #1206 states for the cache.
+        this.#changed(by, "onboarding.interview.purged", { unreadable: 1 });
+      });
+      return true;
+    });
+    if (rewritten) {
+      this.#deliverAudit();
+      await this.#armDrawing();
+    }
+    return rewritten;
   }
 
   /** `person`'s interview as kept now, or null: what a purge reads again (interview-erasure.ts). */
@@ -1685,6 +1769,7 @@ export class Onboarding extends DurableObject<Env> {
    */
   drawingsSaid(): {
     drawings: { work: string; drawn: string }[];
+    differences: { work: string; way: string; other: string }[];
     teams: { id: string; does: string }[];
     works: {
       id: string;
@@ -1702,6 +1787,14 @@ export class Onboarding extends DurableObject<Env> {
         .flatMap(({ work, drawn }) =>
           drawn === null ? [] : [{ work, drawn }]
         ),
+      differences: this.#db
+        .select({
+          work: checkedDifferences.work,
+          way: checkedDifferences.way,
+          other: checkedDifferences.other,
+        })
+        .from(checkedDifferences)
+        .all(),
       teams: this.#db
         .select({ id: teams.id, does: teams.does })
         .from(teams)
@@ -1727,19 +1820,22 @@ export class Onboarding extends DurableObject<Env> {
    * write takes only where the row still holds what the purge read: one
    * drawn again since, from words the purge already left clean, stays as
    * it is. The brain's own records of them were rewritten by the same
-   * purge; each drawing drawn again is given as a new version. In the
-   * audit log by counts alone.
+   * purge; each drawing drawn again is given as a new version. A checked
+   * difference holding a purged word goes on its own (`differences`, as
+   * read), its drawing kept. In the audit log by counts alone.
    */
   async forgetDrawings(
     drawings: readonly { work: string; drawn: string }[],
     renamed: readonly { id: string; from: WorkNames; to: WorkNames }[],
     described: readonly { id: string; from: string; to: string }[],
+    differences: readonly { work: string; way: string; other: string }[],
     by: AuditActor
   ): Promise<void> {
     if (
       drawings.length === 0 &&
       renamed.length === 0 &&
-      described.length === 0
+      described.length === 0 &&
+      differences.length === 0
     ) {
       return;
     }
@@ -1771,6 +1867,22 @@ export class Onboarding extends DurableObject<Env> {
             )
             .run();
         }
+        // A checked difference holding a purged word goes on its own, if
+        // still as read: the review shows one again only once a drawing is
+        // checked anew.
+        const unchecked = differences.flatMap(({ work, way, other }) =>
+          this.#db
+            .delete(checkedDifferences)
+            .where(
+              and(
+                eq(checkedDifferences.work, work),
+                eq(checkedDifferences.way, way),
+                eq(checkedDifferences.other, other)
+              )
+            )
+            .returning({ work: checkedDifferences.work })
+            .all()
+        ).length;
         let named = 0;
         for (const { id, from, to } of renamed) {
           named += this.#db
@@ -1800,6 +1912,7 @@ export class Onboarding extends DurableObject<Env> {
         this.#purged();
         this.#changed(by, "onboarding.drawings.purged", {
           drawings: forgotten.length,
+          differences: unchecked,
           works: named,
           teams: rewritten,
         });
@@ -1807,6 +1920,80 @@ export class Onboarding extends DurableObject<Env> {
     });
     this.#deliverAudit();
     await this.#armDrawing();
+  }
+
+  /**
+   * Grasp's staff's own text, as a Knowledge term purge reaches it
+   * (staff-text-erasure.ts): their notes, and how Stephen is set up (JSON,
+   * as stored). Never served otherwise.
+   */
+  staffTextsSaid(): {
+    notes: { id: number; text: string }[];
+    setup: string | null;
+  } {
+    const [row] = this.#db
+      .select({ stephen: onboarding.stephen })
+      .from(onboarding)
+      .all();
+    return {
+      notes: this.#db
+        .select({ id: notes.id, text: notes.text })
+        .from(notes)
+        .all(),
+      setup: row?.stephen ?? null,
+    };
+  }
+
+  /**
+   * Keeps staff's own text as a Knowledge term purge rewrote it
+   * (`after`), only if what it rewrote is still as it read it (`before`):
+   * one saved since is left to the purge to read again. A note it leaves
+   * as it is isn't written. In the audit log by counts alone. Whether it
+   * was rewritten.
+   */
+  rewriteStaffTexts(
+    before: {
+      notes: readonly { id: number; text: string }[];
+      setup: string | null;
+    },
+    after: {
+      notes: readonly { id: number; text: string }[];
+      setup: string | null;
+    },
+    by: AuditActor
+  ): boolean {
+    const was = new Map(before.notes.map(({ id, text }) => [id, text]));
+    const changed = after.notes.filter(({ id, text }) => was.get(id) !== text);
+    const setupChanged = after.setup !== before.setup;
+    if (changed.length === 0 && !setupChanged) {
+      return true;
+    }
+    let landed = false;
+    this.ctx.storage.transactionSync(() => {
+      const now = this.staffTextsSaid();
+      const current = new Map(now.notes.map(({ id, text }) => [id, text]));
+      if (
+        changed.some(({ id }) => current.get(id) !== was.get(id)) ||
+        (setupChanged && now.setup !== before.setup)
+      ) {
+        return;
+      }
+      for (const { id, text } of changed) {
+        this.#db.update(notes).set({ text }).where(eq(notes.id, id)).run();
+      }
+      if (setupChanged) {
+        this.#db.update(onboarding).set({ stephen: after.setup }).run();
+      }
+      this.#changed(by, "onboarding.staff_text.purged", {
+        notes: changed.length,
+        setup: setupChanged ? 1 : 0,
+      });
+      landed = true;
+    });
+    if (landed) {
+      this.#deliverAudit();
+    }
+    return landed;
   }
 
   /**
@@ -4064,7 +4251,12 @@ export class Onboarding extends DurableObject<Env> {
     if (row === undefined) {
       return [];
     }
-    const texts: string[] = [row.transcript];
+    // Its file's name too: staff's upload may be named for what a purge
+    // takes out.
+    const texts: string[] = [
+      row.transcript,
+      ...(row.fileName === null ? [] : [row.fileName]),
+    ];
     const collect = (value: unknown): void => {
       if (typeof value === "string") {
         texts.push(value);
@@ -6348,16 +6540,15 @@ export class Onboarding extends DurableObject<Env> {
     return count <= linkCallsPerMinute;
   }
 
-  /** What someone's interview holds now; none before a save. */
+  /**
+   * What someone's interview holds now; none before a save, and none for
+   * one that no longer reads as an interview: it gives nothing to a
+   * drawing or a count, and a purge reaches it as stored
+   * (`interviewStored`), so nothing stops on it.
+   */
   #held(person: string): InterviewProgress | null {
-    const [row] = this.#db
-      .select({ progress: interviews.progress })
-      .from(interviews)
-      .where(eq(interviews.person, person))
-      .all();
-    return row === undefined
-      ? null
-      : interviewProgressSchema.parse(JSON.parse(row.progress));
+    const stored = this.interviewStored(person);
+    return stored !== null && "progress" in stored ? stored.progress : null;
   }
 
   /**
