@@ -33,6 +33,7 @@ import {
 } from "./workflow-catalog.ts";
 import {
   editWorkflowDraft,
+  editWorkflowStep,
   publishWorkflowDraft,
   workflowDraft,
 } from "./workflow-drafts.ts";
@@ -131,6 +132,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await editWorkflowDraft(this.#env, person, id, input)
+    );
+  }
+
+  async editStep(id: string, input: unknown): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await editWorkflowStep(this.#env, person, id, input)
     );
   }
 

@@ -227,6 +227,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "That version isn't the one waiting to go live.",
   "workflow.go_live_own_request":
     "Someone other than who asked for it approves a version going live: the workflow's owner or an admin.",
+  "workflow.step_not_found":
+    "There's no step there in this draft: read the draft again and pick the step, or the list to insert into, from its diagram.",
+  "workflow.draft_not_json":
+    "This draft isn't JSON, so a step can't be edited on the canvas. Fix its text first.",
   "workflow.action_failed":
     "A task's action threw, or the sandbox stopped it, so the run failed.",
   "workflow.action_restricted":
@@ -836,6 +840,41 @@ export interface WorkflowMember {
  * An edit of a workflow's draft: its whole new text, and the revision it
  * read (0 before the first edit), which must still be the latest.
  */
+/**
+ * A JSON Pointer to a task in a draft, as the diagram names it
+ * (`DiagramTask.pointer`), or to a list of tasks (one ending in `do`,
+ * `try` or `branches`).
+ */
+const stepPointerSchema = z.string().startsWith("/").max(4096);
+
+/** A task's body: its single key's value, as the profile reads it. */
+const stepBodySchema = z.record(z.string(), z.json());
+
+/**
+ * One step of a draft edited from the canvas (`editStep`), as the next
+ * revision over `expectedRevision`: `change` replaces the body of the task
+ * at `pointer`, keeping its ID; `insert` puts task `id` with `body` at
+ * `index` of the task list at `list`. The draft is saved checked, as any
+ * edit, problems and all.
+ */
+export const workflowStepEditSchema = z.strictObject({
+  expectedRevision: z.int().min(0),
+  edit: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("change"),
+      pointer: stepPointerSchema,
+      body: stepBodySchema,
+    }),
+    z.strictObject({
+      kind: z.literal("insert"),
+      list: stepPointerSchema,
+      index: z.int().min(0),
+      id: z.string().min(1).max(128),
+      body: stepBodySchema,
+    }),
+  ]),
+});
+
 export const workflowDraftEditSchema = z.strictObject({
   expectedRevision: z.int().min(0),
   // The profile's own bound on a definition: 1 MiB of UTF-8, as stored.
@@ -983,6 +1022,11 @@ export interface WorkflowResourcesApi {
   draft: (id: string) => Promise<WorkflowDraft>;
   /** Saves an edit of its draft (`workflowDraftEditSchema`), checked. */
   editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
+  /**
+   * Inserts or changes one step of its draft (`workflowStepEditSchema`),
+   * saved as the draft's next revision, checked; for builders.
+   */
+  editStep: (id: string, input: unknown) => Promise<WorkflowDraft>;
   /** Publishes its draft's checkpoint (`workflowDraftPublishSchema`). */
   publishDraft: (
     id: string,
