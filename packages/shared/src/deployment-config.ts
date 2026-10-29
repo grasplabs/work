@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { appIdSchema, connectionIdSchema, workflowIdSchema } from "./ids.ts";
+import { relayedClientOf } from "./oauth-relay.ts";
 import { roleSchema } from "./roles.ts";
 import { loopbackHosts } from "./router.ts";
 
@@ -49,6 +50,17 @@ export const signInConfigSchema = z
      * IdPs send people back, and the only page that may open `/rpc`.
      */
     origin: z.url().refine(isOrigin, "an https origin, without a path"),
+    /**
+     * Relay mode, for Grasp-hosted clients only: the OAuth relay's origin
+     * of the stage the deployment is hosted in (`https://auth.ongrasp.app`
+     * or `https://auth.staging.ongrasp.app`, @grasp-os/shared/names), where
+     * the IdPs send people back to instead of `origin`, for sign-in and
+     * connections alike (@grasp-os/shared/oauth-relay). Only with an
+     * `origin` under that stage's hosted domain. Absent, the default, the
+     * IdPs come back to `origin` itself, as on-prem, with its own OAuth
+     * apps, has it.
+     */
+    callbackOrigin: z.url().optional(),
     /** Email domains people may sign in with, exactly (no subdomains). */
     domains: z.array(domainSchema).min(1),
     /** Emails that get the admin role when they join. */
@@ -95,7 +107,17 @@ export const signInConfigSchema = z
   .refine(({ entra, google }) => entra !== undefined || google !== undefined, {
     message: "An Entra tenant or a Google Workspace",
     path: ["entra"],
-  });
+  })
+  .refine(
+    ({ origin, callbackOrigin }) =>
+      callbackOrigin === undefined ||
+      relayedClientOf(origin, callbackOrigin) !== null,
+    {
+      message:
+        "A stage's OAuth relay origin, for an origin under that stage's hosted domain",
+      path: ["callbackOrigin"],
+    }
+  );
 export type SignInConfig = z.infer<typeof signInConfigSchema>;
 
 /**
