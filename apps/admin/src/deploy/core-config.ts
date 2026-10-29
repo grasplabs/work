@@ -32,6 +32,9 @@ import type {
   SignInConfig,
 } from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
+import { clientDomain } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { RuntimeProfile } from "@grasp-os/shared/release";
 import { z } from "zod";
@@ -170,7 +173,8 @@ const signInOf = (
   clientId: string,
   signIn: string | null,
   domain: string,
-  apps: SignInApps
+  apps: SignInApps,
+  oauthRelay: Stage | undefined
 ): SignInConfig | undefined => {
   if (signIn === null) {
     return undefined;
@@ -203,8 +207,20 @@ const signInOf = (
   if (googleHostedDomain !== undefined && apps.googleClientId === undefined) {
     throw incomplete("GOOGLE_CLIENT_ID isn't set on the admin");
   }
+  // The relay sends browsers back only to its stage's hosted domain.
+  if (oauthRelay !== undefined && domain !== clientDomain(oauthRelay)) {
+    throw incomplete(
+      `the OAuth relay serves clients under ${clientDomain(oauthRelay)}, not ${domain}`
+    );
+  }
   const config = signInConfigSchema.safeParse({
     origin: `https://${clientId}.${domain}`,
+    // Relay mode: the client's IdPs send people back through the stage's
+    // OAuth relay (@grasp-os/shared/oauth-relay), so Grasp's shared OAuth
+    // apps name one redirect URI, not one per client.
+    ...(oauthRelay === undefined
+      ? {}
+      : { callbackOrigin: oauthRelayOrigin(oauthRelay) }),
     domains: record.data.domains,
     admins: record.data.admins,
     ...(entraTenantId === undefined
@@ -376,6 +392,13 @@ export interface CoreConfigInputs {
   /** The domain clients are served under. */
   domain: string;
   apps: SignInApps;
+  /**
+   * Relay mode (`OAUTH_RELAY`, src/deploy/context.ts): the stage whose
+   * OAuth relay the client's sign-in and connections come back through,
+   * as Grasp-hosted clients' do. Absent, they come back to the client's
+   * own origin, which needs its own OAuth apps.
+   */
+  oauthRelay?: Stage;
 }
 
 /**
@@ -391,8 +414,9 @@ export const derivedCoreConfig = ({
   signIn,
   domain,
   apps,
+  oauthRelay,
 }: CoreConfigInputs): Record<string, unknown> => {
-  const config = signInOf(clientId, signIn, domain, apps);
+  const config = signInOf(clientId, signIn, domain, apps, oauthRelay);
   return {
     MODEL_GATEWAY: { gateway: clientGatewayId, models: defaultGatewayModels },
     RUNTIME_PROFILE: clientRuntimeProfile,

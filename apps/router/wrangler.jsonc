@@ -7,6 +7,12 @@
   "compatibility_date": "2026-09-15",
   "workers_dev": false,
   "preview_urls": false,
+  // Every host below the stage's client domain: each client's, and the
+  // auth relay's (@grasp-os/shared/names, `platformRoutes`, which
+  // check:wrangler-configs holds this to). Staging's more specific route
+  // takes staging's hosts from this one, and the admin's exact route takes
+  // the admin's.
+  "routes": [{ "pattern": "*.ongrasp.app/*", "zone_name": "ongrasp.app" }],
   // No platform line per invocation, and query strings stay out of logs and
   // traces: the router sees every client's full URLs, OAuth callbacks'
   // code and state included (threat model R17, RT2).
@@ -108,6 +114,9 @@
   "env": {
     "staging": {
       "name": "grasp-router-staging",
+      "routes": [
+        { "pattern": "*.staging.ongrasp.app/*", "zone_name": "ongrasp.app" },
+      ],
       "vars": {
         "STAGE": "staging",
       },
