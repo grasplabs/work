@@ -67,6 +67,7 @@ import {
   findVersion,
   getApp,
   listApps,
+  screensIn,
   usableApp,
   versionFiles,
 } from "./apps.ts";
@@ -433,7 +434,7 @@ const resolvedRoute = (
 const routedOpen = (
   manifest: AppManifest | undefined,
   file: string,
-  asked: z.infer<typeof screenRouteRequestSchema> | undefined
+  asked?: z.infer<typeof screenRouteRequestSchema>
 ): { route: string | null; input: Json } => {
   if (asked !== undefined) {
     const named = resolvedRoute(manifest, asked);
@@ -551,6 +552,56 @@ const openScreen = async (
     artifact,
     frameToken: await frameAccess(env, artifact),
     lease: await leaseFor(env, by.userId, id, build),
+  };
+};
+
+/**
+ * The first screen of a published App's current version, for a visitor
+ * (app-visitors.ts): built and staged as `openScreen` does, once its build
+ * gets the App's data now, and leased to `visitor` (`visitor:<session>`),
+ * a name no member's session has, so the lease opens none of the App's
+ * functions (app-function-route.ts needs a member's session too). Null
+ * while the App runs no version or has no screen.
+ */
+export const visitorScreen = async (
+  env: Env,
+  found: Pick<App, "id" | "name" | "currentVersion">,
+  visitor: string
+): Promise<ScreenBundle | null> => {
+  const { id, name: appName, currentVersion: version } = found;
+  if (version === null) {
+    return null;
+  }
+  const raw = await versionFiles(env, id, version);
+  const [file] = screensIn(new Map(Object.entries(raw)));
+  if (file === undefined) {
+    return null;
+  }
+  const source = await routeSourceOf(env, id, version, raw);
+  const opened = routedOpen(source?.manifest, file);
+  const built = await (
+    await versionScreenCodes(env, id, version, raw, { unsealed: "refuse" })
+  )(file);
+  const { artifact } = built;
+  await recordBuilds(env, id, version, [built]);
+  const build = { artifact, version };
+  const delivery = deliveryOf(await standingOf(env, id, build));
+  if (delivery !== "open") {
+    throw screenErrors.create(
+      delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+    );
+  }
+  await stageFrame(env, artifact, built.code);
+  return {
+    app: id,
+    name: appName,
+    version,
+    screen: built.screen,
+    route: opened.route,
+    input: opened.input,
+    artifact,
+    frameToken: await frameAccess(env, artifact),
+    lease: await leaseFor(env, visitor, id, build),
   };
 };
 

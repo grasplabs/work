@@ -335,7 +335,8 @@ export const appAuditEventOf = (
   const person =
     event.actor.type === "person" ||
     event.actor.type === "staff" ||
-    event.actor.type === "guest";
+    event.actor.type === "guest" ||
+    event.actor.type === "visitor";
   return {
     id: String(record.seq),
     timestamp: record.receivedAt,

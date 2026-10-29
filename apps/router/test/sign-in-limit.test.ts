@@ -228,6 +228,30 @@ describe("guest chat rate limit", () => {
     ).toHaveLength(6);
   });
 
+  it("limits a visitor's endpoint, where codes are asked for and tried, per client address and by its own limit", async () => {
+    const limiter = limiterAllowing(2);
+    const visit = async (ip: string) =>
+      await worker.fetch(
+        new Request("https://acme.guest.test/api/app-visitor", {
+          method: "POST",
+          headers: { "cf-connecting-ip": ip },
+          body: "{}",
+        }),
+        {
+          ...env,
+          VISITOR_RATE_LIMIT: limiter,
+          GUEST_RATE_LIMIT: limiterAllowing(0),
+        }
+      );
+    const statuses = [
+      await visit("192.0.2.21"),
+      await visit("192.0.2.21"),
+      await visit("192.0.2.21"),
+      await visit("192.0.2.22"),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 200, 429, 200]);
+  });
+
   it("limits nothing else by it, and lets guests through when it fails", async () => {
     const none = limiterAllowing(0);
     const others = await Promise.all(

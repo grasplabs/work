@@ -1,3 +1,4 @@
+import type { AppVisitorEntry } from "@grasp-os/shared/app-visitors";
 import type {
   App,
   AppChanges,
@@ -19,6 +20,7 @@ import { updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
 import { AppVersionsRpc } from "./app-versions-rpc.ts";
+import { appVisitors, setAppVisitors } from "./app-visitors.ts";
 import {
   appContents,
   appExports,
@@ -132,6 +134,23 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await setAppLink(this.#env, by, app, link)
+    );
+  }
+
+  async visitors(app: string): Promise<AppVisitorEntry[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await appVisitors(this.#env, by, app)
+    );
+  }
+
+  async setVisitors(
+    app: string,
+    list: AppVisitorEntry[]
+  ): Promise<AppVisitorEntry[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setAppVisitors(this.#env, by, app, list)
     );
   }
 

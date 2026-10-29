@@ -72,6 +72,7 @@ export const familyNamespaces = [
   "transcription",
   "upload",
   "version",
+  "visitor",
   "waiting",
   "workflow",
 ] as const;
