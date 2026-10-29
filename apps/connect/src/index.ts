@@ -292,6 +292,16 @@ export default class Connect
     return await probeBindings(this.env);
   }
 
+  /**
+   * The version answering, from its version metadata; null where there is
+   * none (plain workerd). Core names it to the admin's signed requests
+   * alone (core's src/provision-probe.ts): in a Workers for
+   * Platforms namespace, how the admin reads which version connect runs.
+   */
+  version(): string | null {
+    return this.env.CF_VERSION_METADATA?.id ?? null;
+  }
+
   // The audit outbox (src/audit.ts). Core's clock takes the events
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
