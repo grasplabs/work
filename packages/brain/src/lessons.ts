@@ -1140,6 +1140,16 @@ export const forgetPersonLessons = (db: Brain<unknown>["db"], userId: string) =>
           scopeKeyOf({ scope: "person", scopeId: userId })
         )
       ),
+    // A job would clear their scope as having nothing to read, but not
+    // before the clock sweeps it: their ID goes now, with the rest.
+    db
+      .delete(brainConsolidationDue)
+      .where(
+        eq(
+          brainConsolidationDue.scopeKey,
+          scopeKeyOf({ scope: "person", scopeId: userId })
+        )
+      ),
   ] as const;
 
 /** How many lessons `scope` holds open. */
