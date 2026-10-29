@@ -741,7 +741,6 @@
   "admin test/deploy.test.ts": 9.7,
   "admin test/discord-digest.test.ts": 0.8,
   "admin test/discord.test.ts": 2.6,
-  "admin test/integration-builds.test.ts": 0.4,
   "admin test/moved-pages.test.ts": 2.7,
   "admin test/new-organization.test.ts": 0,
   "admin test/provision.test.ts": 7,
