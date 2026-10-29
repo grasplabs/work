@@ -49,7 +49,8 @@ import {
   platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
 import {
-  connectHealthPath,
+  connectVersionPath,
+  connectVersionPurpose,
   provisionProbePath,
   provisionProbePurpose,
   provisionProbeRequestSchema,
@@ -193,12 +194,18 @@ const connectOf = (
 /**
  * The version a core whose live version is `live` names for its connect:
  * the version all of its connect's traffic goes to (`connectOf`), unless
- * the account says otherwise (`connectAnswering`); null with no connect.
+ * the account says otherwise (`connectAnswersFirst`, `connectAnswering`);
+ * null with no connect.
  */
 const connectAnswering = (
   account: AccountState,
   live: VersionState
 ): string | null => {
+  const [early, ...later] = account.connectAnswersFirst ?? [];
+  if (early !== undefined) {
+    account.connectAnswersFirst = later;
+    return early;
+  }
   if (account.connectAnswering !== undefined) {
     return account.connectAnswering;
   }
@@ -280,6 +287,43 @@ const answerProbe = async (
     ),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
+};
+
+/**
+ * What a client's core answers the admin's signed request for its
+ * connect's version with, as core does (core's src/provision-probe.ts):
+ * the version its connect answers as (`connectAnswering`), or 503 when it
+ * names none, once the signature checks out with the key its live
+ * version's auth secret gives for this purpose and the request parses.
+ * Anything else, the router's secret alone included, gets its frontend's
+ * page, as any path core has no route for.
+ */
+const answerConnectVersion = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    connectVersionPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !provisionProbeRequestSchema.safeParse(JSON.parse(body)).success
+  ) {
+    return frontendPage();
+  }
+  const version = connectAnswering(account, live);
+  return version === null
+    ? Response.json({ ok: false }, { status: 503 })
+    : Response.json({ ok: true, version });
 };
 
 /** None begun: what a core answers that has no onboarding. */
@@ -620,6 +664,7 @@ const signedPosts: ReadonlyMap<
   [platformUpdatePath, takeNotice],
   [onboardingSummaryPath, answerSummary],
   [provisionProbePath, answerProbe],
+  [connectVersionPath, answerConnectVersion],
   [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
 ]);
@@ -1429,12 +1474,6 @@ export const fakeCloudflareApi = (
       } finally {
         adminReads.now -= 1;
       }
-    }
-    if (url.pathname === connectHealthPath) {
-      const version = connectAnswering(account, live);
-      return version === null
-        ? Response.json({ ok: false }, { status: 503 })
-        : Response.json({ ok: true, version });
     }
     return url.pathname === "/health"
       ? Response.json({

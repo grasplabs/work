@@ -6,7 +6,6 @@
  * dashboard); one whose traffic is split was left so.
  */
 import { log } from "@grasp-os/shared/log";
-import { connectHealthPath } from "@grasp-os/shared/provision-probe";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -24,7 +23,11 @@ import {
 import { errorCode } from "../deploy/deploy.ts";
 import type { importedManifest } from "../deploy/release.ts";
 import { answeringVersion } from "../deploy/router.ts";
+import { clientAuthSecret } from "../deploy/secrets.ts";
+import type { DeploySecrets } from "../deploy/secrets.ts";
 import { clientInventory, destinationOf } from "../hosting/inventory.ts";
+import { connectVersionOf } from "../hosting/probe.ts";
+import type { ProbeRequest } from "../hosting/probe.ts";
 
 /**
  * A Worker's drift: `in_sync` (all its traffic on the version the admin
@@ -96,27 +99,35 @@ export type ManifestOf = (
 ) => ReturnType<typeof importedManifest>;
 
 /**
- * How drift reads a Worker's version where only core's health tells it: in
- * a namespace, whose versions Cloudflare's API doesn't list.
+ * How drift reads a Worker's version where only core tells it: in a
+ * namespace, whose versions Cloudflare's API doesn't list.
  */
 export interface HealthReads {
   fetch: typeof fetch;
-  /** The router's key, which the client's router secret is derived from. */
-  routerKey: string;
+  /**
+   * The keys the client's router secret and auth secret are derived from:
+   * the router's, for every request to core, and the client key, which
+   * the admin signs its request for connect's version with.
+   */
+  secrets: Pick<DeploySecrets, "routerKey" | "clientKey">;
   timeoutMs?: number;
 }
 
-/** How long a health read of core may take. */
+/** How long a read of core may take. */
 const healthTimeoutMs = 5000;
 
 /**
- * Where core names each Worker's version in a namespace: its own at
- * `/health`, its connect's as connect names it over its binding (through
- * the connect gateway). Drift reads no other Worker there.
+ * How core names each Worker's version in a namespace: its own at its
+ * health (`answeringVersion`), its connect's, as connect names it over
+ * its binding (through the connect gateway), to the admin's signed request
+ * alone (`connectVersionOf`). Drift reads no other Worker there.
  */
-const healthPaths: Readonly<Record<string, string>> = {
-  core: "/health",
-  connect: connectHealthPath,
+const namespaceReads: Readonly<
+  Record<string, (request: ProbeRequest) => Promise<string | undefined>>
+> = {
+  core: async ({ fetch: fetchCore, origin, routerSecret, timeoutMs }) =>
+    await answeringVersion(fetchCore, origin, routerSecret, timeoutMs),
+  connect: connectVersionOf,
 };
 
 const originSchema = z.object({ origin: z.string().optional() }).loose();
@@ -136,7 +147,7 @@ const coreOriginOf = async (
 };
 
 /*
- * A Worker's drift where only core's health names its version. What it
+ * A Worker's drift where only core names its version. What it
  * decides: whether the secrets an operation delivered to that Worker are
  * still what it runs (src/rollout/shared-secrets.ts), so whether an old
  * shared secret can be revoked. Reading a Worker as in sync when it isn't
@@ -148,10 +159,11 @@ const coreOriginOf = async (
  *   set: App code runs sandboxed, with no route of core's. Connect's comes
  *   to core over its binding, which in a namespace is the connect gateway
  *   bound by the admin to this client's connect alone (GRA-1217); the
- *   gateway takes no script name from a caller. The answer is read through
- *   the client's hostname with its router secret, and only names a
- *   version, so whoever holds that secret can read it but not change what
- *   the admin reads. A connect deployed outside the admin answers as its
+ *   gateway takes no script name from a caller. Core names connect's
+ *   version only to the admin's signed request (the probe's model, with a
+ *   key of its own), never to the public: the router adds its secret to
+ *   every request it forwards, so that secret alone says nothing of who
+ *   asks. A connect deployed outside the admin answers as its
  *   own version, which differs from the one recorded: `drifted`, held.
  *   Code made to name the recorded version needs write access to the
  *   account, which can take the secrets anyway: out of scope.
@@ -166,20 +178,23 @@ const coreOriginOf = async (
  *   an earlier version still answering) names another version: `drifted`,
  *   held. Never cached: core answers `no-store`. The version recorded is
  *   the one connect named in the operation's probe, after its secrets were
- *   delivered (src/hosting/operation.ts); a probe answered by an isolate
- *   from before that delivery would record that earlier version, as it
- *   would for core (`versionUnchecked`). A namespace has no gradual
- *   deployments, so that window is the moments after an upload; qualifying
- *   it on a real account is GRA-430's.
+ *   delivered (src/hosting/operation.ts), and never the one recorded
+ *   before this run changed connect: an isolate of that version answering
+ *   the probe first is asked again until a new version answers, and if
+ *   none does, no version is recorded, which holds. A probe answered by
+ *   an isolate of a version this run made before its last secret (its
+ *   upload's, say) isn't told apart; a namespace has no gradual
+ *   deployments, so that window is the moments after a write, and a later
+ *   read naming the newest version reads as `drifted`, held.
  * - No answer: no version metadata (plain workerd), connect down, core
- *   down, too slow, or an older core without the path. `unknown`, which
+ *   down, too slow, or an older core without the request. `unknown`, which
  *   holds every secret the Worker holds.
  */
 
 /**
- * The drift of `worker` (core or connect) where only core's health names
- * its version: `in_sync` when it names the version recorded, `drifted`
- * when another, `unknown` when it can't be asked or doesn't answer.
+ * The drift of `worker` (core or connect) where only core names its
+ * version: `in_sync` when it names the version recorded, `drifted` when
+ * another, `unknown` when it can't be asked or doesn't answer.
  */
 const healthDrift = async (
   worker: { worker: string; scriptName: string; versionId: string | null },
@@ -194,21 +209,25 @@ const healthDrift = async (
     live: null,
     state: "unknown",
   };
-  const path = healthPaths[worker.worker];
-  if (origin === null || health === undefined || path === undefined) {
+  const read = namespaceReads[worker.worker];
+  if (origin === null || health === undefined || read === undefined) {
     return unknown;
   }
-  const version = await answeringVersion(
-    health.fetch,
+  const version = await read({
+    fetch: health.fetch,
     origin,
-    await deriveRouterSecret(
-      health.routerKey,
+    routerSecret: await deriveRouterSecret(
+      health.secrets.routerKey,
       client.clientId,
       client.generation
     ),
-    health.timeoutMs ?? healthTimeoutMs,
-    path
-  );
+    authSecret: await clientAuthSecret(
+      health.secrets,
+      client.clientId,
+      client.generation
+    ),
+    timeoutMs: health.timeoutMs ?? healthTimeoutMs,
+  });
   if (version === undefined) {
     return unknown;
   }
@@ -224,8 +243,8 @@ const healthDrift = async (
  * admin has no such client, or it isn't placed. Each Worker the admin
  * recorded is read: in an account's own Workers, from its deployments; in
  * a Workers for Platforms namespace, core and connect, from the version
- * core's health names for each through its origin (`health`), as its
- * probe found it, and `unknown` without `health`. A Worker of its inventory the admin has no
+ * core names for each through its origin (`health`), as its probe found
+ * it, and `unknown` without `health`. A Worker of its inventory the admin has no
  * record of (an operation that stopped part way) is never in sync. A
  * Worker that can't be read is `unknown`, and logged.
  */
@@ -273,9 +292,9 @@ export const driftOf = async (
       scriptName: physicalName,
       versionId: null,
     }));
-  // In a namespace the admin reads only what core's health names.
+  // In a namespace the admin reads only what core names.
   const read = [...recorded, ...unrecorded].filter(
-    ({ worker }) => !inNamespace || Object.hasOwn(healthPaths, worker)
+    ({ worker }) => !inNamespace || Object.hasOwn(namespaceReads, worker)
   );
   const origin = inNamespace ? await coreOriginOf(db, clientId) : null;
   const workers = await Promise.all(

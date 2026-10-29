@@ -294,8 +294,8 @@ export default class Connect
 
   /**
    * The version answering, from its version metadata; null where there is
-   * none (plain workerd). Core names it to the admin, as its own
-   * (core's src/entry.ts, src/provision-probe.ts): in a Workers for
+   * none (plain workerd). Core names it to the admin's signed requests
+   * alone (core's src/provision-probe.ts): in a Workers for
    * Platforms namespace, how the admin reads which version connect runs.
    */
   version(): string | null {

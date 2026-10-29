@@ -1,5 +1,6 @@
 import { log } from "@grasp-os/shared/log";
 import {
+  connectVersionPurpose,
   provisionProbeMaxBytes,
   provisionProbeMaxSkewMs,
   provisionProbePurpose,
@@ -88,24 +89,6 @@ export const connectVersion = async (env: Env): Promise<string | null> => {
     });
     return null;
   }
-};
-
-/**
- * Connect's version, as connect names it over its binding
- * (@grasp-os/shared/provision-probe `connectHealthPath`): how the admin
- * reads what a connect in a Workers for Platforms namespace runs. 503 when
- * it names none. Never cached: a stale answer would say connect still runs
- * what it ran. Behind the router-secret check, as every route is.
- */
-export const connectHealthResponse = async (
-  _request: Request,
-  env: Env
-): Promise<Response> => {
-  const version = await connectVersion(env);
-  const headers = { "cache-control": "no-store" };
-  return version === null
-    ? Response.json({ ok: false }, { status: 503, headers })
-    : Response.json({ ok: true, version }, { headers });
 };
 
 /** A clock's registration, or null when it didn't answer. */
@@ -295,4 +278,37 @@ export const provisionProbeResponse = async (
   return Response.json(await probed(env), {
     headers: { "cache-control": "no-store" },
   });
+};
+
+/**
+ * The admin's signed request for connect's version
+ * (@grasp-os/shared/provision-probe `connectVersionPath`): how it reads
+ * what a connect in a Workers for Platforms namespace runs. 200 with the
+ * version connect names over its binding, 503 when it names none, once
+ * the request is signed with this purpose's key, fresh and well formed;
+ * undefined for anything else, as the probe. Never cached: a stale answer
+ * would say connect still runs what it ran.
+ */
+export const connectVersionResponse = async (
+  request: Request,
+  env: Env
+): Promise<Response | undefined> => {
+  if (request.method !== "POST") {
+    return undefined;
+  }
+  const asked = await consoleSigned(request.clone(), env, {
+    purpose: connectVersionPurpose,
+    schema: provisionProbeRequestSchema,
+    maxBytes: provisionProbeMaxBytes,
+    maxSkewMs: provisionProbeMaxSkewMs,
+  });
+  if (typeof asked === "string") {
+    log.info("connect_version.refused", { reason: asked });
+    return undefined;
+  }
+  const version = await connectVersion(env);
+  const headers = { "cache-control": "no-store" };
+  return version === null
+    ? Response.json({ ok: false }, { status: 503, headers })
+    : Response.json({ ok: true, version }, { headers });
 };

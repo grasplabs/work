@@ -1,12 +1,11 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { connectHealthPath } from "@grasp-os/shared/provision-probe";
+import { connectVersionPath } from "@grasp-os/shared/provision-probe";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import worker from "../src/index.ts";
-import { connectVersionMetadata } from "./connect-providers.ts";
 import { routed } from "./sign-in.ts";
 
 const requestIdHeader = "x-request-id";
@@ -46,7 +45,7 @@ describe("router secret", () => {
       "/",
       "/index.html",
       "/health",
-      connectHealthPath,
+      connectVersionPath,
       "/rpc",
       "/api/x",
     ];
@@ -98,56 +97,6 @@ describe("router secret", () => {
       ok: true,
       version: env.CF_VERSION_METADATA.id,
     });
-  });
-
-  it("names the version its connect answers as, as connect names it, never cached", async () => {
-    const response = await routed(connectHealthPath);
-    expect({
-      status: response.status,
-      cache: response.headers.get("cache-control"),
-      body: await response.json(),
-    }).toStrictEqual({
-      status: 200,
-      cache: "no-store",
-      body: { ok: true, version: connectVersionMetadata.id },
-    });
-  });
-
-  it("names no version for a connect that doesn't answer, or has none", async () => {
-    const real = env.CONNECT;
-    // Connect as core's binding reaches it, but with `version` answering
-    // as `version` does here.
-    const connectWhose = (version: () => Promise<string | null>) =>
-      new Proxy(real, {
-        get: (target, property): unknown =>
-          property === "version" ? version : Reflect.get(target, property),
-      });
-    const connects = [
-      connectWhose(
-        async () => await Promise.reject(new Error("connect unavailable"))
-      ),
-      connectWhose(async () => await Promise.resolve(null)),
-    ];
-    const responses = await Promise.all(
-      connects.map(
-        async (connect) =>
-          await worker.fetch(
-            presenting(`https://core${connectHealthPath}`, env.ROUTER_SECRET),
-            { ...env, CONNECT: connect },
-            createExecutionContext()
-          )
-      )
-    );
-    await expect(
-      Promise.all(
-        responses.map(async (response) => ({
-          status: response.status,
-          body: await response.json(),
-        }))
-      )
-    ).resolves.toStrictEqual(
-      connects.map(() => ({ status: 503, body: { ok: false } }))
-    );
   });
 
   it("refuses everything while no secret is configured", async () => {

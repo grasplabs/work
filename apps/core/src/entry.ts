@@ -22,7 +22,7 @@ import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
-  connectHealthPath,
+  connectVersionPath,
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import { quotaPolicyReportPath } from "@grasp-os/shared/quota-policy-report";
@@ -73,7 +73,7 @@ import {
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
-  connectHealthResponse,
+  connectVersionResponse,
   provisionProbeResponse,
 } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
@@ -307,7 +307,18 @@ const pathHandlers: ReadonlyMap<
   [adminKickoffPath, adminKickoffResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
-  [connectHealthPath, connectHealthResponse],
+]);
+
+/**
+ * The admin's signed requests, by path: each answers only a request the
+ * admin signed, and undefined for anything else.
+ */
+const adminSignedHandlers: ReadonlyMap<
+  string,
+  (request: Request, env: Env) => Promise<Response | undefined>
+> = new Map([
+  [provisionProbePath, provisionProbeResponse],
+  [connectVersionPath, connectVersionResponse],
 ]);
 
 /** Routes a request that has passed the router-secret check. */
@@ -331,12 +342,14 @@ const route = async (
   if (pathname === "/rpc") {
     return await rpcResponse(request, env, requestId);
   }
-  // The admin's alone: anyone else's request goes on as one to a path
-  // core has no route for (src/provision-probe.ts).
-  if (pathname === provisionProbePath) {
-    const probe = await provisionProbeResponse(request, env);
-    if (probe !== undefined) {
-      return probe;
+  // The admin's alone, the probe and connect's version: anyone else's
+  // request goes on as one to a path core has no route for
+  // (src/provision-probe.ts).
+  const signed = adminSignedHandlers.get(pathname);
+  if (signed !== undefined) {
+    const answer = await signed(request, env);
+    if (answer !== undefined) {
+      return answer;
     }
   }
   if (pathname === screenFramePath) {

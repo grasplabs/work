@@ -17,13 +17,21 @@ import { z } from "zod";
 export const provisionProbePath = "/platform/probe";
 
 /**
- * Where core names the version its connect answers as, as `/health` names
- * its own: `{ ok: true, version }`, or 503 when connect doesn't answer or
- * has no version metadata. Behind the router-secret check. How the admin
- * reads which version a connect in a Workers for Platforms namespace runs
- * (its rollout/drift.ts), as Cloudflare's API lists none there.
+ * Where the admin asks core which version its connect answers as: how it
+ * reads what a connect in a Workers for Platforms namespace runs (its
+ * rollout/drift.ts), as Cloudflare's API lists none there. The admin's
+ * alone, as the probe: signed with the key both derive from the client's
+ * auth secret for this purpose (`connectVersionPurpose`), with the probe's
+ * request (`provisionProbeRequestSchema`), and behind the router-secret
+ * check, which says nothing of who asks (the router adds its secret to
+ * every public request). Answered `{ ok: true, version }`, or 503 when
+ * connect doesn't answer or names none; anything not the admin's is
+ * answered as a path core has no route for.
  */
-export const connectHealthPath = "/health/connect";
+export const connectVersionPath = "/platform/connect-version";
+
+/** The purpose the connect-version request's signing key is derived for (`hkdfHmacKey`). */
+export const connectVersionPurpose = "grasp-os connect version key";
 
 /** The purpose the request's signing key is derived for (`hkdfHmacKey`). */
 export const provisionProbePurpose = "grasp-os provisioning probe key";

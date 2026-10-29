@@ -173,7 +173,7 @@ const liveMatches = async (
       };
     })
   );
-  // A Worker drift doesn't read (in a namespace, one core's health names
+  // A Worker drift doesn't read (in a namespace, one core names
   // no version for) runs none: what its operation delivered doesn't say
   // what it runs now, and a secret it still runs must never read as
   // revocable.
@@ -214,7 +214,7 @@ export const storeCheck = async (
  * it; null when that can't be told: its drift is unknown (nothing
  * recorded, or its account didn't answer), or a Worker's live versions
  * weren't read, or drift doesn't read a Worker holding one (in a
- * namespace, one core's health names no version for). Only what was read
+ * namespace, one core names no version for). Only what was read
  * and differs is behind.
  */
 export const sharedSecretsStatus = async (
@@ -374,7 +374,7 @@ export const checkRevocation = async (
               db,
               await driftOf(api, db, id, {
                 fetch,
-                routerKey: secrets.routerKey,
+                secrets,
               }),
               holders,
               now

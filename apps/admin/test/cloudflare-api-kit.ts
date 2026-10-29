@@ -114,6 +114,12 @@ export interface AccountState {
    */
   connectAnswering?: string | null;
   /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
+  /**
    * Where its Workers redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
    * follows the redirect as fetch does, unless the request says
