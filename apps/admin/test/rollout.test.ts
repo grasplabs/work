@@ -2000,66 +2000,125 @@ describe("a client's changes, counted", () => {
     });
   });
 
-  it("holds a shared secret's revocation while a Worker holding it isn't read, whatever its operation delivered", async () => {
-    const release = await placedRelease("feat(core): runs");
-    const internal = await live(0, release);
-    const { clientId } = internal;
-    const operation = await db
-      .select({ progress: clientProvisions.progress })
-      .from(clientProvisions)
-      .where(eq(clientProvisions.clientId, clientId))
-      .get();
-    const { shared } = z
-      .object({
-        shared: z.record(z.string(), z.record(z.string(), z.string())),
-      })
-      .parse(JSON.parse(operation?.progress ?? "{}"));
-    // Its connect in a namespace: drift reads only its core, through core's
-    // health, never connect's live version.
-    const placement = await db
-      .select({ destinationId: clientPlacements.destinationId })
-      .from(clientPlacements)
-      .where(eq(clientPlacements.clientId, clientId))
-      .get();
-    await db
-      .update(hostingDestinations)
-      .set({ kind: "workers_for_platforms", namespace: "production" })
-      .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
-    // A secrets rollout that rotated connect's Composio key: its operation
-    // delivered the store's value, as on record.
-    const rolloutId = crypto.randomUUID();
-    const at = longAgo();
-    await db.insert(rollouts).values({
-      id: rolloutId,
-      kind: "secrets",
-      releaseId: null,
-      status: "done",
-      ring: 0,
-      startedBy: staff.email,
-      sharedSecrets: JSON.stringify({ ...shared.core, ...shared.connect }),
-      createdAt: at,
-      updatedAt: at,
-    });
-    await db.insert(rolloutTargets).values({
-      rolloutId,
-      clientId,
-      ring: 0,
-      status: "done",
-      previous: JSON.stringify({
-        release,
-        generation: 1,
-        versions: {},
-        shared: { connect: { ...shared.connect, COMPOSIO_API_KEY: "before" } },
-      }),
-      updatedAt: at,
-    });
+  it.each([
+    {
+      connect: "names the version its operation recorded",
+      answering: "recorded" as const,
+      held: false,
+    },
+    {
+      connect: "answers as an earlier version, its upload's",
+      answering: "earlier" as const,
+      held: true,
+    },
+    {
+      // What the probe recorded was an isolate of a version made before
+      // the run's last secret: a later read names the newest.
+      connect: "names a newer version than its operation recorded",
+      answering: "newer" as const,
+      held: true,
+    },
+    {
+      connect: "names no version (down, or no version metadata)",
+      answering: null,
+      held: true,
+    },
+  ])(
+    "revokes a namespace connect's rotated secret only while core's health says connect $connect",
+    async ({ answering, held }) => {
+      const release = await placedRelease("feat(core): runs");
+      const internal = await live(0, release);
+      const { clientId } = internal;
+      const operation = await db
+        .select({ progress: clientProvisions.progress })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      const { shared } = z
+        .object({
+          shared: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(JSON.parse(operation?.progress ?? "{}"));
+      // Its connect in a namespace: drift reads it, as its core, through
+      // core's health, which names the version connect answers as.
+      const placement = await db
+        .select({ destinationId: clientPlacements.destinationId })
+        .from(clientPlacements)
+        .where(eq(clientPlacements.clientId, clientId))
+        .get();
+      await db
+        .update(hostingDestinations)
+        .set({ kind: "workers_for_platforms", namespace: "production" })
+        .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
+      // A secrets rollout that rotated connect's Composio key: its operation
+      // delivered the store's value, as on record.
+      const rolloutId = crypto.randomUUID();
+      const at = longAgo();
+      await db.insert(rollouts).values({
+        id: rolloutId,
+        kind: "secrets",
+        releaseId: null,
+        status: "done",
+        ring: 0,
+        startedBy: staff.email,
+        sharedSecrets: JSON.stringify({ ...shared.core, ...shared.connect }),
+        createdAt: at,
+        updatedAt: at,
+      });
+      await db.insert(rolloutTargets).values({
+        rolloutId,
+        clientId,
+        ring: 0,
+        status: "done",
+        previous: JSON.stringify({
+          release,
+          generation: 1,
+          versions: {},
+          shared: {
+            connect: { ...shared.connect, COMPOSIO_API_KEY: "before" },
+          },
+        }),
+        updatedAt: at,
+      });
 
-    await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({
-      rotated: ["COMPOSIO_API_KEY"],
-      revocable: [],
-      behind: { COMPOSIO_API_KEY: [clientId] },
-    });
-  });
+      if (answering === "earlier" || answering === "newer") {
+        const connect = await db
+          .select({ scriptName: clientWorkers.scriptName })
+          .from(clientWorkers)
+          .where(
+            and(
+              eq(clientWorkers.clientId, clientId),
+              eq(clientWorkers.worker, "connect")
+            )
+          )
+          .get();
+        const [first] =
+          internal.account.scripts.get(connect?.scriptName ?? "")?.versions ??
+          [];
+        if (answering === "earlier") {
+          internal.account.connectAnswering = first?.id ?? null;
+        } else {
+          await db
+            .update(clientWorkers)
+            .set({ versionId: first?.id ?? null })
+            .where(
+              and(
+                eq(clientWorkers.clientId, clientId),
+                eq(clientWorkers.worker, "connect")
+              )
+            );
+        }
+      } else if (answering === null) {
+        internal.account.connectAnswering = null;
+      }
+
+      await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({
+        rotated: ["COMPOSIO_API_KEY"],
+        revocable: held ? [] : ["COMPOSIO_API_KEY"],
+        behind: { COMPOSIO_API_KEY: held ? [clientId] : [] },
+      });
+    }
+  );
 
   it("rolls a client back past a call marked sent long ago by a run that died with it", async () => {
     const before = await placedRelease("feat(core): before");
