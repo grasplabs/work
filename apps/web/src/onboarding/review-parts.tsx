@@ -260,3 +260,18 @@ export const MailItem = ({
     </ReviewItem>
   );
 };
+
+/**
+ * Where Grasp sends no mail, as on hosting where mail isn't available yet:
+ * nothing to let through, so nothing to settle. Says so, and that the
+ * links go out by hand.
+ */
+export const NoMailItem = () => {
+  const { t } = useLingui();
+  return (
+    <div className="flex flex-col border-t py-4 text-left last:border-b">
+      <span className="font-medium">{t`Mail isn’t available on this hosting yet`}</span>
+      <span className="text-muted-foreground">{t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}</span>
+    </div>
+  );
+};
