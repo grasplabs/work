@@ -1744,6 +1744,13 @@ const purgeContent = async <C>(
         onErase,
         purgeId
       );
+      // Again once its text is rewritten: a decision made from it while it
+      // was rewritten landed before the rewrite (one after is refused, as
+      // it reads the evidence it cites again, entities.ts).
+      // oxlint-disable-next-line no-await-in-loop -- one document at a time
+      await db
+        .delete(brainEntityMatches)
+        .where(eq(brainEntityMatches.evidenceDocumentId, one.document.id));
       done.push(counts);
     }
   } finally {
