@@ -16,9 +16,12 @@
  *   `POST /__e2e/seed-organizations` the organization sections'
  *   (test/e2e-seed.ts). `POST /__e2e/core` holds a seeded core's snapshot
  *   answer for a while, or lets it answer at once again, and answers how
- *   many snapshots it answered so far.
+ *   many snapshots it answered so far. `POST /__e2e/fault` makes one of
+ *   the admin's server functions fail, or answer what its page can't
+ *   show, until it is cleared.
  */
 import { loopbackHosts } from "@grasp-os/shared/router";
+import { toCrossJSONAsync } from "seroval";
 import { z } from "zod";
 
 import server from "../src/server.ts";
@@ -110,6 +113,53 @@ const steerCore = async (request: Request): Promise<Response> => {
   return Response.json({ reads: account.adminReaders.length });
 };
 
+/** What makes a server function fail: its name, and whether it fails or answers garbage. */
+const faultSchema = z.object({
+  fn: z.string().min(1).nullable(),
+  mode: z.enum(["error", "garbled"]).default("error"),
+});
+const faultKey = Symbol.for("grasp-os.admin-e2e.fault");
+
+/** The fault set, kept as the fake is, or null. */
+const faultNow = (): z.infer<typeof faultSchema> | null => {
+  const parsed = faultSchema.safeParse(Reflect.get(globalThis, faultKey));
+  return parsed.success && parsed.data.fn !== null ? parsed.data : null;
+};
+
+/** Server function `id`'s name: in dev, its id is its module and export, base64url-encoded. */
+const serverFnName = (id: string): string => {
+  try {
+    return atob(id.replaceAll("-", "+").replaceAll("_", "/"));
+  } catch {
+    return id;
+  }
+};
+
+/**
+ * What a server function the fault names answers: an error, or a result
+ * its page can't render (a number where a list belongs). Null for any
+ * other request.
+ */
+const faulted = async (url: URL): Promise<Response | null> => {
+  const fault = faultNow();
+  const [, prefix, id = ""] = url.pathname.split("/");
+  if (
+    fault?.fn === undefined ||
+    fault.fn === null ||
+    prefix !== "_serverFn" ||
+    !serverFnName(id).includes(fault.fn)
+  ) {
+    return null;
+  }
+  if (fault.mode === "error") {
+    return new Response("Failed, as the journey asked", { status: 500 });
+  }
+  return Response.json(
+    await toCrossJSONAsync({ result: 42 }, { refs: new Map() }),
+    { headers: { "x-tss-serialized": "true" } }
+  );
+};
+
 export default {
   ...server,
   fetch: async (request: Request, env: Env) => {
@@ -139,6 +189,21 @@ export default {
         answered: seeded.answered.clientId,
         unset: seeded.unset.clientId,
       });
+    }
+    if (url.pathname === "/__e2e/fault" && request.method === "POST") {
+      if (!loopbackHosts.has(url.hostname)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      Reflect.set(
+        globalThis,
+        faultKey,
+        faultSchema.parse(await request.json())
+      );
+      return new Response(null, { status: 204 });
+    }
+    const fault = await faulted(url);
+    if (fault !== null) {
+      return fault;
     }
     if (url.pathname === "/__e2e/core" && request.method === "POST") {
       if (!loopbackHosts.has(url.hostname)) {

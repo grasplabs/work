@@ -111,3 +111,107 @@ test("every section of an organization not set up yet says so, moving between th
   }
   expect(failures).toStrictEqual([]);
 });
+
+/** Makes the admin's server function `fn` fail as `mode` says, or none with null. */
+const fault = async (
+  request: APIRequestContext,
+  fn: string | null,
+  mode: "error" | "garbled" = "error"
+): Promise<void> => {
+  const response = await request.post("/__e2e/fault", { data: { fn, mode } });
+  expect(response.status()).toBe(204);
+};
+
+/** The section's failure in its place, and Try again bringing the section back once its cause is gone. */
+const failsThenRecovers = async (
+  page: Page,
+  request: APIRequestContext,
+  clientId: string
+): Promise<void> => {
+  const main = page.getByRole("main");
+  await openSection(page, "Answering Acme", clientId, "log");
+  await expect(main.getByText("This couldn’t be shown")).toBeVisible();
+  await expect(main.getByText("Something went wrong")).toHaveCount(0);
+
+  await fault(request, null);
+  await main.getByRole("button", { name: "Try again" }).click();
+  await expect(main.getByLabel("Search the log")).toBeVisible();
+  await expect(main.getByText("This couldn’t be shown")).toHaveCount(0);
+};
+
+// The Log's loader reads the admin's trail (`fetchOrganizationTrail`).
+test("a section whose read fails says so in its place, the column and sidebar still work, and Try again brings it back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, "members"), {
+    waitUntil: "networkidle",
+  });
+  await fault(request, "fetchOrganizationTrail");
+
+  const main = page.getByRole("main");
+  await openSection(page, "Answering Acme", answered, "log");
+  await expect(main.getByText("This couldn’t be shown")).toBeVisible();
+  // The organization's column still moves between its sections.
+  await openSection(page, "Answering Acme", answered, "members");
+  await expect(main.getByText("Nobody has made an account yet.")).toBeVisible();
+  // And the admin's sidebar still goes elsewhere.
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Answering Acme" })
+    .click();
+  await expect(
+    main.getByRole("heading", { level: 1, name: "Answering Acme" })
+  ).toBeVisible();
+
+  await fault(request, "fetchOrganizationTrail");
+  await failsThenRecovers(page, request, answered);
+});
+
+test("a section that can't render what it read says so in its place, and Try again brings it back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, "members"), {
+    waitUntil: "networkidle",
+  });
+  // A trail that isn't one: the Log throws rendering it.
+  await fault(request, "fetchOrganizationTrail", "garbled");
+  await failsThenRecovers(page, request, answered);
+});
+
+// The frame's loader reads the platform's counts (`fetchPlatformSidebar`).
+test("a frame that can't be read says so with Try again, which brings the admin back", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, "members"), {
+    waitUntil: "networkidle",
+  });
+  await fault(request, "fetchPlatformSidebar");
+  // The frame read again, as it is once its read went stale, and failing.
+  await page.evaluate(async () => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const invalidate: unknown = Reflect.get(router, "invalidate");
+    if (typeof invalidate !== "function") {
+      throw new TypeError("The page's router can't be read again");
+    }
+    await Reflect.apply(invalidate, router, []);
+  });
+  await expect(page.getByText("The admin couldn’t be read")).toBeVisible();
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+
+  await fault(request, null);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Nobody has made an account yet.")).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Organizations" })
+  ).toBeVisible();
+});
