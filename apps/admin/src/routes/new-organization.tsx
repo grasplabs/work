@@ -39,6 +39,7 @@ import { formatDate } from "../admin/words.ts";
 import { signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { WonDeal } from "../crm/attio.ts";
 import { fetchWonDeals } from "../crm/functions.ts";
+import { fetchRoomsConnected } from "../proposal/functions.ts";
 import { clientIdProblem } from "../provision/client-id.ts";
 import { startClient } from "../provision/functions.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
@@ -140,18 +141,18 @@ const DealChoice = ({
  * the admin's own: who it is, who goes through the onboarding (its first
  * admin, who the prototype sent a link and who here signs in with the
  * company's own Microsoft or Google), and the ring rollouts reach it in.
- * Adding it records it, with no account of its own (`client.create`); its
- * Setup then places it in a hosting destination and provisions it there,
- * on the release staff choose.
+ * Adding it records it, with no account of its own (`client.create`), and
+ * starts nothing: on its Setup, staff choose its release and start it,
+ * which places it in a hosting destination and provisions it there.
  *
  * Left out, as the admin keeps nowhere to put them yet: its website,
  * what it is, its language, who decided on Grasp, and marking it a test.
  */
 const NewOrganization = () => {
-  const { won } = Route.useLoaderData();
+  const { won, roomsConnected } = Route.useLoaderData();
   const router = useRouter();
   const navigate = useNavigate();
-  const starts = startingPointsOf(won);
+  const starts = startingPointsOf(won, roomsConnected);
   const deals = won.state === "read" ? won.deals : [];
   // A deal won and not added yet is what an organization most likely
   // starts from: the latest is chosen, to change or put right.
@@ -304,9 +305,9 @@ const NewOrganization = () => {
           <FieldSet>
             <FieldLegend variant="label">Where its Grasp runs</FieldLegend>
             <FieldDescription>
-              Its Setup places it in a hosting destination, the one that meets
-              its hosting policy, and provisions it there on the release you
-              choose.
+              Adding it starts nothing yet: on its Setup, you choose the release
+              it runs, and it is placed in the hosting destination that meets
+              its hosting policy and provisioned there.
             </FieldDescription>
             <Field>
               <FieldLabel htmlFor="org-ring">Ring</FieldLabel>
@@ -356,7 +357,13 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/new-organization")({
-  loader: async () => ({ won: await fetchWonDeals() }),
+  loader: async () => {
+    const [won, roomsConnected] = await Promise.all([
+      fetchWonDeals(),
+      fetchRoomsConnected(),
+    ]);
+    return { won, roomsConnected };
+  },
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
 });

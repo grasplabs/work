@@ -12,6 +12,7 @@ import {
   clientDomain,
   clientsNamespace,
   isResourceName,
+  platformRoutes,
   platformWorkerName,
   platformWorkers,
   releasesBucketName,
@@ -119,16 +120,46 @@ describe("the platform's names", () => {
   it("serve staging below production's domain, and give every host to exactly one stage", () => {
     expect({
       domains: stages.map((stage) => clientDomain(stage)),
+      relays: stages.map((stage) => authRelayHost(stage)),
       production: hostsOf("production").map((host) => stageOfHost(host)),
       staging: hostsOf("staging").map((host) => stageOfHost(host)),
       stagingDomainItself: stageOfHost(clientDomain("staging")),
       lookalike: stageOfHost("acme.notstaging.ongrasp.app"),
     }).toStrictEqual({
       domains: ["ongrasp.app", "staging.ongrasp.app"],
+      // What Grasp's Google and Entra apps name as their redirect URIs' host.
+      relays: ["auth.ongrasp.app", "auth.staging.ongrasp.app"],
       production: ["production", "production", "production", "production"],
       staging: ["staging", "staging", "staging", "staging"],
       stagingDomainItself: "staging",
       lookalike: "production",
+    });
+  });
+
+  it("put the admin on a route for its own host, the router on every host below the stage's domain, and the gateway nowhere", () => {
+    expect(
+      Object.fromEntries(
+        stages.map((stage) => [
+          stage,
+          platformWorkers.map((worker) => platformRoutes(worker, stage)),
+        ])
+      )
+    ).toStrictEqual({
+      production: [
+        [{ pattern: "admin.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [{ pattern: "*.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [],
+      ],
+      staging: [
+        [
+          {
+            pattern: "admin.staging.ongrasp.app/*",
+            zone_name: "ongrasp.app",
+          },
+        ],
+        [{ pattern: "*.staging.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [],
+      ],
     });
   });
 });
