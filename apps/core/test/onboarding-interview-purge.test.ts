@@ -9,7 +9,10 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { interviewErasure } from "../src/onboarding/interview-erasure.ts";
+import {
+  drawingErasure,
+  interviewErasure,
+} from "../src/onboarding/interview-erasure.ts";
 import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
@@ -289,5 +292,69 @@ describe("a content purge of the interviews", () => {
       purged: await keptLine(env, spokenKey(line?.text ?? "")),
       elsewhere: await keptLine(env, spokenKey(elsewhere)),
     }).toStrictEqual({ purged: undefined, elsewhere: answer });
+  });
+
+  it("leaves what a team does as drawn again from clean words between the purge's read and its write", async () => {
+    const term = `Zq${unique()}`;
+    await talking(term, `Sells ${term} to the north.`);
+    const store = onboardingStore(env);
+    const fresh = "Sells to the south.";
+    let redrawn = false;
+    /** The store, but what the team does is drawn again before the purge writes. */
+    const racing = (stub: typeof store): typeof store =>
+      new Proxy(stub, {
+        get: (target, name, receiver): unknown => {
+          if (name !== "forgetDrawings") {
+            return Reflect.get(target, name, receiver);
+          }
+          return async (
+            ...args: Parameters<typeof store.forgetDrawings>
+          ): Promise<void> => {
+            if (!redrawn) {
+              redrawn = true;
+              const { roster } = await store.view();
+              if (roster !== null) {
+                await store.saveRoster(
+                  {
+                    ...roster,
+                    teams: roster.teams.map((team) => ({
+                      ...team,
+                      does: fresh,
+                    })),
+                  },
+                  { type: "system" }
+                );
+              }
+            }
+            await target.forgetDrawings(...args);
+          };
+        },
+      });
+    const namespace = (real: typeof env.ONBOARDING): typeof env.ONBOARDING =>
+      new Proxy(real, {
+        get: (target, name, receiver): unknown => {
+          if (name === "getByName") {
+            return (id: string) => racing(target.getByName(id));
+          }
+          if (name === "jurisdiction") {
+            return (where: DurableObjectJurisdiction) =>
+              namespace(target.jurisdiction(where));
+          }
+          return Reflect.get(target, name, receiver);
+        },
+      });
+
+    await drawingErasure({
+      DURABLE_OBJECT_JURISDICTION: env.DURABLE_OBJECT_JURISDICTION,
+      ONBOARDING: namespace(env.ONBOARDING),
+    }).rewrite({ actor: { type: "system" }, userId: "system" }, (text) =>
+      text.replaceAll(term, "(removed)")
+    );
+    const { roster } = await store.view();
+
+    expect({
+      redrawn,
+      does: roster?.teams.map((team) => team.does),
+    }).toStrictEqual({ redrawn: true, does: [fresh] });
   });
 });
