@@ -25,6 +25,7 @@ import {
   listWorkflowResources,
   publishWorkflowVersion,
   releaseWorkflowName,
+  setWorkflowProcess,
   shareWorkflowResource,
   unshareWorkflowResource,
   workflowDefinition,
@@ -1117,6 +1118,73 @@ describe("role ceilings", () => {
         },
       ],
       ada: child.id,
+    });
+  });
+});
+
+describe("the business process a workflow serves", () => {
+  it("is set and cleared by its builders, Grasp staff among them, shown to everyone with a role, audited, and only one of the list", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const staff = await person("admin", [], true);
+    const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+
+    const before = await getWorkflowResource(env, bob, workflow.id);
+    const set = await setWorkflowProcess(env, ada, workflow.id, "p2p");
+    const listed = await listWorkflowResources(env, bob);
+    const again = await setWorkflowProcess(env, ada, workflow.id, "p2p");
+    const refused = {
+      user: await outcome(setWorkflowProcess(env, bob, workflow.id, "o2c")),
+      unknown: await outcome(setWorkflowProcess(env, ada, workflow.id, "x2y")),
+    };
+    const byStaff = await setWorkflowProcess(env, staff, workflow.id, "r2r");
+    const cleared = await setWorkflowProcess(env, ada, workflow.id, null);
+    const after = await getWorkflowResource(env, bob, workflow.id);
+    const events = await allEvents();
+
+    expect({
+      before: before.process,
+      set: set.process,
+      listed: listed.find(({ id }) => id === workflow.id)?.process,
+      again: again.process,
+      refused,
+      byStaff: byStaff.process,
+      cleared: cleared.process,
+      after: after.process,
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.process_set" && target?.id === workflow.id
+        )
+        .map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      before: null,
+      set: "p2p",
+      listed: "p2p",
+      again: "p2p",
+      refused: { user: "role.forbidden", unknown: "workflow.resource_invalid" },
+      byStaff: "r2r",
+      cleared: null,
+      after: null,
+      audited: [
+        {
+          actor: { type: "person", userId: ada.userId },
+          detail: { process: "p2p", previousProcess: null },
+        },
+        {
+          actor: { type: "staff", userId: staff.userId },
+          detail: { process: "r2r", previousProcess: "p2p" },
+        },
+        {
+          actor: { type: "person", userId: ada.userId },
+          detail: { process: null, previousProcess: "r2r" },
+        },
+      ],
     });
   });
 });

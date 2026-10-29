@@ -26,6 +26,7 @@ import type {
 } from "@grasp-os/shared/apps";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
@@ -175,6 +176,7 @@ export const toApp = (row: AppRow): App => ({
   pendingVersion: row.pendingVersion,
   status: row.status,
   link: row.link,
+  process: storedProcessOf(row.process),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -581,6 +583,7 @@ export const createApp = async (
     responsibleId: null,
     audienceType: null,
     audienceId: null,
+    process: null,
     blueprint: blueprint ?? null,
     currentVersion: null,
     pendingVersion: null,
