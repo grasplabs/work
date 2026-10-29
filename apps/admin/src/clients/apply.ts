@@ -19,11 +19,13 @@ import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
+import type { DeployContext } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   ProvisionOperationError,
   provisionOf,
+  recordUnstarted,
   runClientProvision,
   startClientRelease,
 } from "../hosting/operation.ts";
@@ -192,8 +194,19 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
             attempt,
             attemptKey: idempotencyKey,
           };
+          let context: DeployContext;
           try {
-            const context = await deployContext(env);
+            context = await deployContext(env);
+          } catch (error) {
+            // Recorded on the operation, for staff to read on its Setup.
+            await recordUnstarted(
+              db,
+              { clientId, runId: held.runId },
+              errorCode(error)
+            );
+            throw error;
+          }
+          try {
             // An earlier try finished the operation, and gave the client
             // back, but its result was lost before the engine kept it:
             // done already, so this try succeeds at once.

@@ -2664,6 +2664,33 @@ const recordFailure = async (
   }
 };
 
+/**
+ * Records client `held.clientId`'s operation failed with `code` at its
+ * first step, audited, when runner `held` stopped before it could run it:
+ * what it works with couldn't be read (a secret missing from Secrets
+ * Store, no client domain). Only while the runner still holds the client
+ * and the operation is running: never over another runner's, nor over
+ * what a run recorded. Staff then read why on its Setup, rather than an
+ * operation left running by a run that's gone.
+ */
+export const recordUnstarted = async (
+  db: AdminDatabase,
+  held: HeldClient,
+  code: string
+): Promise<void> => {
+  const operation = await provisionOf(db, held.clientId);
+  if (operation?.status !== "running") {
+    return;
+  }
+  log.error("provision.failed", {
+    operation: operation.id,
+    clientId: held.clientId,
+    step: "validated",
+    error: code,
+  });
+  await recordFailure(db, { operation, held }, "validated", code);
+};
+
 /** Where a run of the operation stopped, recorded, and what stopped it. */
 interface Stopped {
   operation: Operation;
