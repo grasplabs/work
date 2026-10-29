@@ -20,7 +20,7 @@ import {
   clients,
   clientWorkers,
 } from "../db/schema.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import type { importedManifest } from "../deploy/release.ts";
 import { answeringVersion } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
@@ -133,7 +133,7 @@ const namespaceReads: Readonly<
 const originSchema = z.object({ origin: z.string().optional() }).loose();
 
 /** Core's origin, as its operation's probe passed at; null before it did. */
-const coreOriginOf = async (
+export const coreOriginOf = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<string | null> => {

@@ -41,8 +41,7 @@ import type { Starts } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-hosting-3c81d2";
-const tenantToken = "test-tenant-admin-token-hosting-77a0e4";
-mockCloudflareApi(token, tenantToken);
+mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -137,7 +136,7 @@ const latestStopped = async ({ started }: Starts): Promise<void> => {
 };
 
 describe("placing a client and provisioning it, through the admin's entry", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // The database outlives each test: earlier tests' destinations stop
   // serving the policy, so each test chooses among its own alone.
   beforeEach(async () => {

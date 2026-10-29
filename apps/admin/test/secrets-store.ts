@@ -37,12 +37,9 @@ export const emptyStoreSecret = async (
 
 /**
  * Puts every secret the admin reads in the store before each test, the
- * deployer's and tenant admin's tokens as given, and takes them out after.
+ * deployer's token as given, and takes them out after.
  */
-export const useStoreSecrets = (tokens: {
-  deployer: string;
-  tenant: string;
-}): void => {
+export const useStoreSecrets = (tokens: { deployer: string }): void => {
   const stored: { admin: SecretsStoreAdmin; id: string }[] = [];
   beforeEach(async () => {
     for (const [binding, value] of adminSecrets(tokens)) {

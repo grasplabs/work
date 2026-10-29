@@ -845,52 +845,8 @@ const accountRoutes: Route[] = [
   },
 ];
 
-/** The roles every account has, as the API lists them. */
-const accountRoles = [
-  { id: "role-admin", name: "Administrator" },
-  { id: "role-read", name: "Administrator Read Only" },
-];
-
-/** An account's members and roles, as a tenant admin manages them, and its scripts. */
+/** An account's scripts, as the API lists them. */
 const memberRoutes: Route[] = [
-  {
-    method: "GET",
-    path: /^\/members$/u,
-    answer: ({ account, call }) =>
-      paged(
-        [...account.members].map(([email, status]) => ({
-          id: `member-${email}`,
-          status,
-          user: { email },
-        })),
-        call.query
-      ),
-  },
-  {
-    method: "POST",
-    path: /^\/members$/u,
-    answer: ({ account, json }) => {
-      const email = text(json, "email");
-      const { roles } = json;
-      if (
-        !Array.isArray(roles) ||
-        !roles.every((role) => accountRoles.some(({ id }) => id === role))
-      ) {
-        return refusal(400, 1003, "Invalid roles");
-      }
-      // An existing user added as accepted is a member at once; otherwise
-      // it's an invitation.
-      const status =
-        text(json, "status") === "accepted" ? "accepted" : "pending";
-      account.members.set(email, status);
-      return envelope({ id: `member-${email}`, status, user: { email } });
-    },
-  },
-  {
-    method: "GET",
-    path: /^\/roles$/u,
-    answer: ({ call }) => paged(accountRoles, call.query),
-  },
   {
     method: "GET",
     path: /^\/workers\/scripts$/u,
@@ -910,9 +866,8 @@ const routes = [
 const isMember = (account: AccountState, caller: string | undefined) =>
   caller !== undefined && account.members.get(caller) === "accepted";
 
-/** Who the deployer's token and the tenant admin's belong to. */
+/** Who the deployer's token belongs to. */
 export const deployerEmail = "deployer@grasp.test";
-export const tenantEmail = "tenant@grasp.test";
 
 /** The route that serves `call`, with its path's named parts. */
 const routeOf = (
@@ -1021,56 +976,13 @@ const readBody = async (request: Request): Promise<unknown> => {
   return request.body === null ? undefined : await request.text();
 };
 
-/** A day, in ms. */
-const dayMs = 24 * 60 * 60 * 1000;
-
 /**
- * Why the admin's usage query (src/cloudflare/analytics.ts) isn't one
- * the fake answers: a dataset, field or filter it doesn't read as the
- * schema names them, or a window that isn't the month so far and the last
- * day, or another gateway than the client's; null when it is. So a typo
- * fails the tests rather than reads nothing.
- */
-const analyticsMisread = (
-  query: string,
-  variables: Record<string, unknown>
-): string | null => {
-  const expected = [
-    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now }) { sum { requests cpuTimeUs } }",
-    "workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $dayStart, datetime_leq: $now }) { sum { requests errors } }",
-    "aiGatewayRequestsAdaptiveGroups(limit: 1, filter: { datetime_geq: $monthStart, datetime_leq: $now, gateway: $gateway }) { sum { cost } }",
-    "accounts(filter: { accountTag: $a0 })",
-  ];
-  const missing = expected.find((part) => !query.includes(part));
-  if (missing !== undefined) {
-    return `The query doesn't read ${missing}`;
-  }
-  const now = Date.parse(String(variables.now));
-  const month = new Date(now);
-  const monthStart = Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1);
-  if (
-    Number.isNaN(now) ||
-    Date.parse(String(variables.monthStart)) !== monthStart ||
-    Date.parse(String(variables.dayStart)) !== now - dayMs
-  ) {
-    return "The query's window isn't the month so far and the last day";
-  }
-  return variables.gateway === "grasp-os"
-    ? null
-    : "The query doesn't filter the client's AI Gateway";
-};
-
-/**
- * A fake Cloudflare API that lets `token` (the deployer's) and
- * `tenantToken` (a tenant admin's, which alone creates accounts) in, each
- * to the accounts its user is an accepted member of. It answers what it's
+ * A fake Cloudflare API that lets `token` (the deployer's) in, to the
+ * accounts its user is an accepted member of. It answers what it's
  * sent in place of `fetch` (`fetch`), until it's emptied (`reset`). Add
  * accounts with `addAccount`; plan failures with `failCall`.
  */
-export const fakeCloudflareApi = (
-  token: string,
-  tenantToken = `${token}-tenant-admin`
-) => {
+export const fakeCloudflareApi = (token: string) => {
   const accounts = new Map<string, AccountState>();
   const calls: ApiCall[] = [];
   const planned = new Map<number, Failure>();
@@ -1141,89 +1053,16 @@ export const fakeCloudflareApi = (
   const redirected: { url: string; routerSecret: string | null }[] = [];
   const dispatched: { namespace: string; script: string; url: string }[] = [];
 
-  /** Whose token a call carries: the deployer's or the tenant admin's. */
-  const callers = new Map([
-    [`Bearer ${token}`, deployerEmail],
-    [`Bearer ${tenantToken}`, tenantEmail],
-  ]);
+  /** Whose token a call carries: the deployer's. */
+  const callers = new Map([[`Bearer ${token}`, deployerEmail]]);
   /**
-   * What the analytics API answers the admin's usage query with: for each
-   * account the query names (variables `a0`, `a1`, ...), what the account
-   * reports, as GraphQL groups; an error for one the caller isn't a member
-   * of, as the API answers it, with the rest of the data.
-   */
-  const answerAnalytics = (body: unknown, caller: string): Response => {
-    const parsed = z
-      .object({
-        query: z.string(),
-        variables: z.record(z.string(), z.unknown()),
-      })
-      .safeParse(body);
-    const query = parsed.success ? parsed.data.query : "";
-    const variables = parsed.success ? parsed.data.variables : {};
-    const misread = analyticsMisread(query, variables);
-    if (misread !== null) {
-      // As the API answers a query it can't run: errors, and no data.
-      return Response.json({ data: null, errors: [{ message: misread }] });
-    }
-    const errors: { message: string }[] = [];
-    const viewer = Object.fromEntries(
-      Object.entries(variables)
-        .filter(([name]) => /^a\d+$/u.test(name))
-        .map(([name, tag]) => {
-          const account = accounts.get(typeof tag === "string" ? tag : "");
-          if (account === undefined || !isMember(account, caller)) {
-            errors.push({ message: `not authorized for ${String(tag)}` });
-            return [name, null];
-          }
-          const { usage } = account;
-          return [
-            name,
-            usage === undefined
-              ? []
-              : [
-                  {
-                    month: [
-                      {
-                        sum: {
-                          requests: usage.monthRequests,
-                          cpuTimeUs: usage.monthCpuTimeUs,
-                        },
-                      },
-                    ],
-                    day: [
-                      {
-                        sum: {
-                          requests: usage.dayRequests,
-                          errors: usage.dayErrors,
-                        },
-                      },
-                    ],
-                    ai: [{ sum: { cost: usage.monthAiCost } }],
-                  },
-                ],
-          ];
-        })
-    );
-    return Response.json({
-      data: { viewer },
-      errors: errors.length === 0 ? null : errors,
-    });
-  };
-
-  /**
-   * Answers a call that names no account (`/user`, `/accounts`,
-   * `/graphql`), or undefined for any other.
+   * Answers a call that names no account (`/user`, `/accounts`), or
+   * undefined for any other.
    */
   const answerUnscoped = (
     call: ApiCall,
     caller: string | undefined
   ): Response | undefined => {
-    if (call.path === "/graphql" && call.method === "POST") {
-      return caller === undefined
-        ? refusal(403, 10_000, "Authentication error")
-        : answerAnalytics(call.body, caller);
-    }
     if (call.path !== "/user" && call.path !== "/accounts") {
       return undefined;
     }
@@ -1233,17 +1072,8 @@ export const fakeCloudflareApi = (
     if (call.path === "/user") {
       return envelope({ email: caller });
     }
-    if (call.method === "POST") {
-      if (caller !== tenantEmail) {
-        return refusal(403, 10_000, "Only a tenant admin creates accounts");
-      }
-      // The tenant admin who creates one is its only member.
-      const body: Json =
-        typeof call.body === "object" && call.body !== null
-          ? { ...call.body }
-          : {};
-      const created = addAccount(text(body, "name"), tenantEmail);
-      return envelope({ id: created.id, name: created.name });
+    if (call.method !== "GET") {
+      return undefined;
     }
     // The API matches `name` loosely; the fake as a substring.
     const name = call.query.get("name") ?? "";
@@ -1673,9 +1503,6 @@ export const fakeCloudflareApi = (
     abortedCalls: () => aborted.count,
     /** Adds an account the token is a member of, and returns what it holds. */
     addAccount,
-    /** The accounts named `name`, as the fake holds them. */
-    accountsNamed: (name: string): AccountState[] =>
-      [...accounts.values()].filter((account) => account.name === name),
     /** Fails the `n`th call from now as `failure` says, whatever it asks. */
     failCall: (n: number, failure: Failure) => {
       planned.set(calls.length + n, failure);

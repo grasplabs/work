@@ -496,13 +496,15 @@ export const setScriptSubdomain = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false }
+  { enabled, previewsEnabled }: { enabled: boolean; previewsEnabled: false },
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "POST",
       path: `${scriptPath(accountId, scriptName)}/subdomain`,
       json: { enabled, previews_enabled: previewsEnabled },
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
@@ -636,13 +638,15 @@ export const putSchedules = async (
   api: CloudflareApi,
   accountId: string,
   scriptName: string,
-  crons: readonly string[]
+  crons: readonly string[],
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   await api.call(
     {
       method: "PUT",
       path: `${scriptPath(accountId, scriptName)}/schedules`,
       json: crons.map((cron) => ({ cron })),
+      ...(signal === undefined ? {} : { signal }),
     },
     z.unknown()
   );
