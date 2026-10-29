@@ -99,6 +99,13 @@ export const recallBudgetSchema = z.strictObject({
   maxItems: z.int().min(1).max(recallLimits.maxItems).optional(),
   maxTokens: z.int().min(1).max(recallLimits.maxTokens).optional(),
   deadlineMs: z.int().min(1).max(recallLimits.deadlineMs).optional(),
+  /**
+   * Whether the best of what the lanes found is ordered again by the
+   * deployment's model (GRA-304), on the caller's model budget and under
+   * the deployment's model rules, within the same deadline. Off unless
+   * asked: it spends a model call on every recall that asks.
+   */
+  rerank: z.boolean().optional(),
 });
 export type RecallBudget = z.infer<typeof recallBudgetSchema>;
 

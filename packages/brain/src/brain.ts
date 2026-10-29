@@ -55,6 +55,18 @@ export interface LinkJob {
   version: number;
 }
 
+/** What a recall hands its host's reranker (`BrainPorts.rerank`). */
+export interface RerankRequest {
+  /** The question, in the caller's words. */
+  question: string;
+  /** The best of what the lanes found, in fused order, each by its item's ID. */
+  candidates: { id: string; text: string }[];
+  /** The collections the candidates come from, for the model rules. */
+  provenance: string[];
+  /** How long the reranker may take. */
+  deadlineMs: number;
+}
+
 /**
  * What the Brain asks of its host, in one place: the Brain reaches the
  * host's people, roles, teams and Apps, its buckets, audit log, secrets,
@@ -103,6 +115,15 @@ export interface BrainPorts<C> {
      */
     key: (reader: C) => Promise<string>;
   };
+  /**
+   * The deployment's reranker (GRA-304), where the host has one: orders
+   * `request`'s candidates by how well each answers its question, through
+   * the host's model gateway, on `reader`'s budget and under the model
+   * rules for what `request.provenance` names, within `deadlineMs`. Its
+   * answer is untrusted: the IDs in order, checked by the recall. Absent:
+   * no recall reranks.
+   */
+  rerank?: (reader: C, request: RerankRequest) => Promise<unknown>;
   /**
    * The audiences `reader` is in now, by the host's IDs for them (core's:
    * the chats others share that count them, while they are a member): a

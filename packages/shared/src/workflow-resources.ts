@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { BusinessProcess } from "./business-processes.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
@@ -670,6 +671,11 @@ export interface WorkflowResource {
   currentVersion: number | null;
   /** The caller's role in it. */
   role: WorkflowRole;
+  /**
+   * The business process it serves, if a builder set one: what the UI
+   * shows its icon for and groups it by. It grants nothing.
+   */
+  process: BusinessProcess | null;
   createdAt: string;
 }
 
@@ -1116,6 +1122,11 @@ export interface WorkflowResourcesApi {
   /** The workflows the caller has a role in, by name. */
   list: () => Promise<WorkflowResource[]>;
   get: (id: string) => Promise<WorkflowResource>;
+  /**
+   * Sets the business process it serves (`businessProcessSchema`), or
+   * clears it with null; for its builders, audited.
+   */
+  setProcess: (id: string, process: unknown) => Promise<WorkflowResource>;
   /** Publishes a version from a workflow.json; for its builders. */
   publish: (id: string, input: unknown) => Promise<WorkflowResourceVersion>;
   /** Its draft, for its builders (`WorkflowDraft`). */
