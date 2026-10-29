@@ -134,38 +134,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("asks who an organization is, its sign-in, its ring and where it runs on adding it, and no account to adopt or release", async () => {
-    const { status, html } = await page("/new-organization");
-
-    expect({
-      status,
-      form: html.includes('name="clientId"') && html.includes('name="ring"'),
-      account: html.includes('name="accountId"'),
-      release: html.includes('name="releaseId"'),
-      signIn: [
-        'name="entraTenantId"',
-        'name="googleHostedDomain"',
-        'name="domains"',
-        'name="admins"',
-      ].every((field) => html.includes(field)),
-      // Grasp Cloud with its data in the EU unless staff choose otherwise.
-      hosting: [
-        'id="org-hosting"',
-        "Grasp Cloud",
-        "On its own premises",
-        "Keep its data in the EU",
-      ].every((text) => html.includes(text)),
-    }).toStrictEqual({
-      status: 200,
-      form: true,
-      account: false,
-      release: false,
-      signIn: true,
-      hosting: true,
-    });
-  });
-
-  it("shows a company just added its Hosting read-only, with nothing to choose: Grasp places and provisions it by itself", async () => {
+  it("shows a company just added its setting up step by step, and its Hosting folded away with nothing to choose", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
@@ -174,18 +143,25 @@ describe("the company pages, in the admin", () => {
 
     expect({
       status,
+      steps: [
+        `Reserving ${client.id}.grasp.test`,
+        "Setting up AI",
+        "Installing Grasp",
+        "Inviting admins",
+      ].every((line) => html.includes(line)),
+      folded: hosting.includes("Show hosting details"),
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
       where: hosting.includes("Grasp Cloud, data kept in the EU"),
       account: html.includes("Account id"),
-      hostname: html.includes(`${client.id}.grasp.test`),
     }).toStrictEqual({
       status: 200,
+      steps: true,
+      folded: true,
       place: false,
       release: false,
       where: true,
       account: false,
-      hostname: true,
     });
   });
 
@@ -208,7 +184,7 @@ describe("the company pages, in the admin", () => {
     const { html } = await setupOf(client.id);
 
     expect({
-      stopped: html.includes("Stopped after its resources step"),
+      stopped: html.includes("Setting it up needs a look"),
       code: html.includes("probe_unanswered"),
       resume: sectionOf(html, "Hosting").includes("Retry now"),
     }).toStrictEqual({ stopped: true, code: true, resume: true });
