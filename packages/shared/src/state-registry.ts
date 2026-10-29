@@ -575,6 +575,10 @@ const connectDb: D1State = {
     call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
+    erased_people: exported(
+      `${connect}person-erasure.ts`,
+      "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
+    ),
   },
 };
 
