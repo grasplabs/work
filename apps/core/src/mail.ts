@@ -78,6 +78,11 @@ const transportOf = (
   env: Partial<Pick<Env, "EMAIL">>
 ): MailTransport | undefined => env.EMAIL;
 
+/** Whether the deployment can send mail at all: something bound to send it, and a sender. */
+export const mailSends = (
+  env: Partial<Pick<Env, "EMAIL">> & Pick<Env, "MAIL_FROM">
+): boolean => transportOf(env) !== undefined && mailFrom(env) !== undefined;
+
 /**
  * Sends `mail` once, and says what became of it. Throws nothing: what the
  * binding threw is sorted into `retry` or `failed`, and an error without

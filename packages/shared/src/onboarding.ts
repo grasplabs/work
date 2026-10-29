@@ -284,6 +284,12 @@ export interface OnboardingView {
    * before their link can go out: new on a list saved while a plan was set.
    */
   waiting: number;
+  /**
+   * Whether the deployment sends mail: false where nothing is bound to
+   * send it, as on hosting where mail isn't available yet, or where it has
+   * no sender. Links then go out by hand alone.
+   */
+  mailSends: boolean;
 }
 
 /**
