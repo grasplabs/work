@@ -63,43 +63,133 @@ const wordsOf = (progress: InterviewProgress): string[] => [
   ...progress.facts.flatMap(({ text, record }) => [text, record]),
 ];
 
+/** Every string `value` holds, at any depth: a JSON value's leaves. */
+export const stringsOf = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(stringsOf);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).flatMap(stringsOf);
+  }
+  return [];
+};
+
+/** `value` with each string rewritten: its shape kept. */
+const withStrings = (
+  value: unknown,
+  rewrite: (text: string) => string
+): unknown => {
+  if (typeof value === "string") {
+    return rewrite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((each) => withStrings(each, rewrite));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, each]) => [
+        key,
+        withStrings(each, rewrite),
+      ])
+    );
+  }
+  return value;
+};
+
+/** `stored` as JSON, or undefined when it isn't. */
+export const jsonOf = (stored: string): unknown => {
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The texts a stored JSON value holds (its strings), or the stored text
+ * itself when it isn't JSON: where a purge looks in something that no
+ * longer reads as what it was.
+ */
+export const storedTexts = (stored: string): string[] => {
+  const json = jsonOf(stored);
+  return json === undefined ? [stored] : stringsOf(json);
+};
+
+/** `stored` with each of its texts (`storedTexts`) rewritten. */
+export const rewrittenStored = (
+  stored: string,
+  rewrite: (text: string) => string
+): string => {
+  const json = jsonOf(stored);
+  return json === undefined
+    ? rewrite(stored)
+    : JSON.stringify(withStrings(json, rewrite));
+};
+
 /** How often a purge reads an interview again that was saved as it rewrote it. */
 const rewriteAttempts = 5;
 
+/** An interview as a purge reads it (the store's `interviewStored`). */
+type Stored = { progress: InterviewProgress } | { unreadable: string } | null;
+
+/** Every word a purge looks in of `stored`. */
+const wordsIn = (stored: Stored): string[] => {
+  if (stored === null) {
+    return [];
+  }
+  return "progress" in stored
+    ? wordsOf(stored.progress)
+    : storedTexts(stored.unreadable);
+};
+
 /**
- * Rewrites `person`'s interview, read as `progress`: kept only if it is
- * still as read (`rewriteInterview`). One saved meanwhile is read again and
- * rewritten as it is then, a few times; if it still won't land, the purge
- * fails here, so it is run again, and never reports done with the words
- * left.
+ * Rewrites `person`'s interview, read as `stored`: kept only if it is
+ * still as read (`rewriteInterview`; for one that no longer reads as an
+ * interview, `rewriteUnreadableInterview`, every string it holds). One
+ * saved meanwhile is read again and rewritten as it is then, a few times;
+ * if it still won't land, the purge fails here, so it is run again, and
+ * never reports done with the words left.
  */
 const rewriteOne = async (
   store: ReturnType<typeof onboardingStore>,
   person: string,
-  read: InterviewProgress,
+  read: Stored,
   rewrite: (text: string) => string,
   actor: AuditActor
 ): Promise<void> => {
-  let progress: InterviewProgress | null = read;
+  let stored = read;
   for (let attempt = 0; attempt < rewriteAttempts; attempt += 1) {
     if (
-      progress === null ||
-      !wordsOf(progress).some((text) => rewrite(text) !== text)
+      stored === null ||
+      !wordsIn(stored).some((text) => rewrite(text) !== text)
     ) {
       return;
     }
-    // oxlint-disable-next-line no-await-in-loop -- read again only when it lost
-    const landed = await store.rewriteInterview(
-      person,
-      progress,
-      rewritten(progress, rewrite),
-      actor
-    );
+    const landed =
+      "progress" in stored
+        ? // oxlint-disable-next-line no-await-in-loop -- read again only when it lost
+          await store.rewriteInterview(
+            person,
+            stored.progress,
+            rewritten(stored.progress, rewrite),
+            actor
+          )
+        : // oxlint-disable-next-line no-await-in-loop -- read again only when it lost
+          await store.rewriteUnreadableInterview(
+            person,
+            stored.unreadable,
+            rewrittenStored(stored.unreadable, rewrite),
+            actor
+          );
     if (landed) {
       return;
     }
     // oxlint-disable-next-line no-await-in-loop -- read again only when it lost
-    progress = await store.interviewSaid(person);
+    stored = await store.interviewStored(person);
   }
   throw new Error("An interview kept changing while the purge rewrote it");
 };
@@ -108,7 +198,9 @@ const rewriteOne = async (
  * The interviews' words as a content purge reaches them: run before the
  * brain's records are rewritten, so an intake after it reads the words as
  * the purge left them (the store's brain lock keeps one from landing
- * between). They name no one by their words: a personal purge has no one
+ * between). Read one at a time, so no one call carries them all; one that
+ * no longer reads as an interview still holds its words, and is looked in
+ * as stored. They name no one by their words: a personal purge has no one
  * to forget here.
  */
 export const interviewErasure = (
@@ -117,16 +209,23 @@ export const interviewErasure = (
   const store = onboardingStore(env);
   return {
     count: async (holds) => {
-      const said = await store.interviewsSaid();
-      return said.filter(({ progress }) => wordsOf(progress).some(holds))
-        .length;
+      let holding = 0;
+      for (const person of await store.interviewPeople()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview after another
+        const stored = await store.interviewStored(person);
+        if (wordsIn(stored).some(holds)) {
+          holding += 1;
+        }
+      }
+      return holding;
     },
     rewrite: async (by, rewrite) => {
-      const said = await store.interviewsSaid();
       const actor = auditActorSchema.parse(by.actor);
-      for (const { person, progress } of said) {
+      for (const person of await store.interviewPeople()) {
         // oxlint-disable-next-line no-await-in-loop -- one interview after another
-        await rewriteOne(store, person, progress, rewrite, actor);
+        const stored = await store.interviewStored(person);
+        // oxlint-disable-next-line no-await-in-loop -- one interview after another
+        await rewriteOne(store, person, stored, rewrite, actor);
       }
     },
     forgetActor: async () => {
@@ -139,8 +238,9 @@ export const interviewErasure = (
  * What was drawn from the interviews, as a content purge reaches it: a
  * drawing holding a purged word is forgotten, to be drawn again from the
  * words as the purge left them, and a piece of work's names and what a
- * team does (drawn from its lead's interview) are rewritten. Run right
- * after the interviews, before the brain's records (knowledge/rpc.ts). A
+ * team does (drawn from its lead's interview) are rewritten. A checked
+ * difference holding one goes, its drawing kept. Run right after the
+ * interviews, before the brain's records (knowledge/rpc.ts). A
  * drawing under way as the purge ran keeps nothing (the store's
  * `purgeMark`).
  */
@@ -150,9 +250,12 @@ export const drawingErasure = (
   const store = onboardingStore(env);
   return {
     count: async (holds) => {
-      const { drawings, teams, works } = await store.drawingsSaid();
+      const { drawings, differences, teams, works } =
+        await store.drawingsSaid();
       return (
         drawings.filter(({ drawn }) => holds(drawn)).length +
+        differences.filter(({ way, other }) => [way, other].some(holds))
+          .length +
         teams.filter(({ does }) => holds(does)).length +
         works.filter(({ name, local, one, many }) =>
           [name, local, one, many].some(holds)
@@ -160,27 +263,31 @@ export const drawingErasure = (
       );
     },
     rewrite: async (by, rewrite) => {
-      const { drawings, teams, works } = await store.drawingsSaid();
+      const { drawings, differences, teams, works } =
+        await store.drawingsSaid();
       const changes = (text: string) => rewrite(text) !== text;
       await store.forgetDrawings(
-        drawings.flatMap(({ work, drawn }) => (changes(drawn) ? [work] : [])),
-        works.flatMap((work) => {
-          const { id, ...names } = work;
-          return Object.values(names).some(changes)
+        drawings.filter(({ drawn }) => changes(drawn)),
+        works.flatMap(({ id, ...from }) =>
+          Object.values(from).some(changes)
             ? [
                 {
                   id,
-                  name: rewrite(work.name),
-                  local: rewrite(work.local),
-                  one: rewrite(work.one),
-                  many: rewrite(work.many),
+                  from,
+                  to: {
+                    name: rewrite(from.name),
+                    local: rewrite(from.local),
+                    one: rewrite(from.one),
+                    many: rewrite(from.many),
+                  },
                 },
               ]
-            : [];
-        }),
-        teams.flatMap(({ id, does }) =>
-          changes(does) ? [{ id, does: rewrite(does) }] : []
+            : []
         ),
+        teams.flatMap(({ id, does }) =>
+          changes(does) ? [{ id, from: does, to: rewrite(does) }] : []
+        ),
+        differences.filter(({ way, other }) => [way, other].some(changes)),
         auditActorSchema.parse(by.actor)
       );
     },

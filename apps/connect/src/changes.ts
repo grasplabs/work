@@ -2,12 +2,14 @@ import { maxChangeBytes } from "@grasp-os/connector-kit/manifest";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import type { ConnectCall } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Connection } from "./connections.ts";
 import { callChanges } from "./db/schema.ts";
+import { ownerErased } from "./erased-people.ts";
 import type { McpToolResult } from "./mcp.ts";
 
 // The old and new values of what a side effect changed (an Excel row's
@@ -54,7 +56,9 @@ export const changeOf = (
  */
 export const keptChange = async (
   env: Env,
-  claims: CapabilityClaims,
+  claims: Pick<CapabilityClaims, "jti"> & {
+    authority: Pick<CapabilityClaims["authority"], "onBehalfOf">;
+  },
   call: Pick<ConnectCall, "connectionId" | "action" | "resource">,
   change: CallChange | undefined
 ): Promise<{ hash?: string; writes: BatchItem<"sqlite">[] }> => {
@@ -66,19 +70,16 @@ export const keptChange = async (
   return {
     hash,
     writes: [
+      // Never for a connection whose owner's erasure began: a call still
+      // under way as it did keeps nothing of theirs after it.
       drizzle(env.DB)
         .insert(callChanges)
-        .values({
-          id: crypto.randomUUID(),
-          requestId: claims.jti,
-          connectionId: call.connectionId,
-          action: call.action,
-          resource: call.resource ?? null,
-          onBehalfOf: claims.authority.onBehalfOf,
-          change: text,
-          hash,
-          createdAt: new Date(),
-        }),
+        .select(
+          sql`SELECT ${crypto.randomUUID()}, ${claims.jti}, ${call.connectionId},
+            ${call.action}, ${call.resource ?? null},
+            ${claims.authority.onBehalfOf}, ${text}, ${hash}, ${Date.now()}
+            WHERE NOT ${ownerErased(call.connectionId)}`
+        ),
     ],
   };
 };

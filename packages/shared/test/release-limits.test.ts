@@ -22,7 +22,7 @@ const evidence = (
   releaseId,
   profile: "cloudflare",
   capacityRun: { jobId: 1, commit, profile: overrides.profile ?? "cloudflare" },
-  securityReview: { pullRequest: 7, approvedBy: "nickruigrok" },
+  securityReviews: [{ pullRequest: 7, approvedBy: "nickruigrok" }],
   ...overrides,
 });
 

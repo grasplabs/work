@@ -299,9 +299,7 @@ export const startsOf = (
 };
 
 /**
- * Makes run `id`'s due retries and sleeps due now, as Cloudflare
- * Workflows' test pool did with `disableRetryDelays` and `disableSleeps`:
- * a retry's time and a sleep's deadline moved to now, and the run's alarm
+ * Makes run `id`'s due retries and sleeps due now: a retry's time and a sleep's deadline moved to now, and the run's alarm
  * set, when it moved one. Event waits keep their deadlines.
  */
 export const hurry = async (
