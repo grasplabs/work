@@ -22,10 +22,7 @@ import { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { seed, seedPlaced } from "./e2e-seed.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
-export { RolloutClient } from "../src/rollout/fleet-client.ts";
-export { RollbackClient } from "../src/rollout/rollback.ts";
 export { AdminRuns } from "../src/run-object.ts";
-export { Rollout } from "../src/rollout/workflow.ts";
 
 /** The tokens the fake lets in, which the seed puts in Secrets Store. */
 const tokens = {
