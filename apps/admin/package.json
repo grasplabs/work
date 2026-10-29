@@ -8,7 +8,6 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
-    "deploy": "vp build --mode production && cf deploy --prebuilt --mode production",
     "typegen": "wrangler types --include-runtime=false",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply DB --remote"
