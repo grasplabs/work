@@ -1,6 +1,6 @@
 import { defineConfig } from "vite-plus";
 
-import { adminPlugins } from "./vite.config.ts";
+import { adminPlugins, localVars } from "./vite.config.ts";
 
 /** How many client databases the fake Cloudflare API holds at once. */
 const clientDatabases = 24;
@@ -19,6 +19,7 @@ export default defineConfig({
       main: "./test/e2e-worker.ts",
       vars: {
         ...worker.vars,
+        ...localVars,
         // Who every request comes from: the dev bypass (src/access.ts).
         DEV_ACCESS_EMAIL: "staff@grasp.test",
         // Where provisioned clients are served (src/deploy/context.ts).

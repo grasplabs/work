@@ -742,6 +742,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    */
   signal?: AbortSignal;
   /**
+   * Told the answer's text so far each time it grows, as it streams in:
+   * for a caller that shows it being written (dashboard-widgets.ts). An
+   * answer asked for again starts afresh. A failure of it never fails the
+   * call.
+   */
+  onText?: (text: string) => void;
+  /**
    * Whether a request the provider refused for a moment (429 or 5xx), or
    * that didn't connect, is sent again (the default, `maxRetries`). False
    * where one call must be one request: a workflow run's model call, which
@@ -1004,6 +1011,8 @@ interface Route extends Admitted {
   reauthorize?: () => Promise<void>;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
   onQueued?: QueuedHook;
+  /** Told the answer's text as it streams (`ModelCall.onText`). */
+  onText?: (text: string) => void;
   /** The call's notes of its wait, one after another (`told`). */
   notes: Promise<void>;
   /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
@@ -1960,6 +1969,18 @@ const send = async (request: Request): Promise<Sent> => {
     normalizeContext({ systemPrompt: system, messages }),
     { signal, endsAt }
   );
+  const { onText } = request;
+  if (onText !== undefined) {
+    for await (const event of events) {
+      if (event.type === "text_delta") {
+        try {
+          onText(answerText(event.partial));
+        } catch (error) {
+          log.warn("model.on_text_failed", errorFields(error));
+        }
+      }
+    }
+  }
   const answer = await events.result();
   return { answer, ...response };
 };
@@ -2855,6 +2876,7 @@ const callModel = async <Output>(
     beforeSend,
     reauthorize,
     onQueued,
+    onText,
     signal,
     providerRetries = true,
     ...fields
@@ -2866,6 +2888,7 @@ const callModel = async <Output>(
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
+    ...(onText === undefined ? {} : { onText }),
     providerRetries,
   };
   const { model } = route;
