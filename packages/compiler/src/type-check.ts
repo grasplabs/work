@@ -309,16 +309,51 @@ const referenceErrors = (
   ];
 };
 
+/** An App file's path in a check (`/screens/desk.tsx`) as the App names it. */
+const relative = (path: string): string => path.slice(1);
+
+/** One App file's diagnostics, as a check found them: TypeScript's, then its references'. */
+export interface FileDiagnostics {
+  found: Diagnostic[];
+  references: Diagnostic[];
+}
+
 /**
- * Type-checks App files (paths relative to the App, e.g.
- * `screens/desk.tsx`) against the kit and the App's own declaration files
- * among them (e.g. its server's types), which are checked too.
+ * A type check whose program is made, before any file is checked: what
+ * each App file's imports resolve to among the App's files, as TypeScript
+ * resolved them, and its diagnostics, for every App file or only some.
  */
-export const typeCheck = (
+export interface TypeProgram {
+  /**
+   * The App files each App file's imports and references resolve to
+   * (paths relative to the App); `undefined` where the check doesn't
+   * trace them (a target that resolves as TypeScript does, `allowed`
+   * unset), so no file's dependencies are known.
+   */
+  readonly imports: ReadonlyMap<string, ReadonlySet<string>> | undefined;
+  /** The App files, in the order the check reports them. */
+  readonly order: readonly string[];
+  /**
+   * The program's own diagnostics, and those of each App file in `only`
+   * (every App file without it), by its path.
+   */
+  diagnose: (only?: ReadonlySet<string>) => {
+    global: Diagnostic[];
+    files: Map<string, FileDiagnostics>;
+  };
+}
+
+/**
+ * Makes the program that type-checks App files (paths relative to the
+ * App, e.g. `screens/desk.tsx`) against the kit and the App's own
+ * declaration files among them (e.g. its server's types), which are
+ * checked too. Nothing is checked until `diagnose` asks.
+ */
+export const typeProgram = (
   appFiles: Record<string, string>,
   kitTypes: Record<string, string>,
   target: TypeTarget = generatedTarget
-): Diagnostic[] => {
+): TypeProgram => {
   const { options: targetOptions, allowed } = target;
   const kit = kitOf(kitTypes);
   let kitResolutions = kit.resolutions.get(targetOptions);
@@ -330,6 +365,11 @@ export const typeCheck = (
     Object.entries(appFiles).map(([path, source]) => [`/${path}`, source])
   );
   const appDirectories = directoriesOf(app.keys());
+  // What each App file's imports resolve to among the App's files, as the
+  // check resolves them: only where it resolves them itself (`allowed`).
+  const traced = new Map(
+    [...app.keys()].map((path) => [path, new Set<string>()])
+  );
   // This check's own: App files' resolutions never outlive it.
   const appResolutions = resolutionCache(targetOptions);
   // The kit's cache holds only the kit's files' resolutions: should any
@@ -394,12 +434,19 @@ export const typeCheck = (
                 fromKit && kitShared ? kitResolutions : appResolutions,
                 redirectedReference
               );
-              return {
-                resolvedModule:
-                  fromKit || resolvesWithin(text, resolvedModule, app, target)
-                    ? resolvedModule
-                    : undefined,
-              };
+              const within =
+                fromKit || resolvesWithin(text, resolvedModule, app, target);
+              if (
+                within &&
+                resolvedModule !== undefined &&
+                app.has(containingFile) &&
+                app.has(resolvedModule.resolvedFileName)
+              ) {
+                traced
+                  .get(containingFile)
+                  ?.add(resolvedModule.resolvedFileName);
+              }
+              return { resolvedModule: within ? resolvedModule : undefined };
             }),
         }),
   };
@@ -407,16 +454,76 @@ export const typeCheck = (
   const checked = program
     .getSourceFiles()
     .filter((file) => app.has(file.fileName));
-  const references = checked.flatMap((file) => referenceErrors(file, app));
-  const found = [
-    ...program.getOptionsDiagnostics(),
-    ...program.getGlobalDiagnostics(),
-    ...checked.flatMap((file) => [
-      ...program.getSyntacticDiagnostics(file),
-      ...program.getSemanticDiagnostics(file),
-    ]),
-  ]
-    .map((diagnostic) => toDiagnostic(diagnostic))
-    .filter((diagnostic) => diagnostic !== undefined);
-  return [...found, ...references];
+  const diagnosticsOf = (diagnostics: readonly ts.Diagnostic[]) =>
+    diagnostics
+      .map((diagnostic) => toDiagnostic(diagnostic))
+      .filter((diagnostic) => diagnostic !== undefined);
+  // A file's references reach the App files they name, for its types too.
+  for (const file of checked) {
+    for (const { fileName } of file.referencedFiles) {
+      const referenced = referencedPath(file.fileName, fileName);
+      if (app.has(referenced)) {
+        traced.get(file.fileName)?.add(referenced);
+      }
+    }
+  }
+  return {
+    imports:
+      allowed === undefined
+        ? undefined
+        : new Map(
+            [...traced].map(([path, reached]) => [
+              relative(path),
+              new Set([...reached].map(relative)),
+            ])
+          ),
+    order: checked.map((file) => relative(file.fileName)),
+    diagnose: (only) => ({
+      global: diagnosticsOf([
+        ...program.getOptionsDiagnostics(),
+        ...program.getGlobalDiagnostics(),
+      ]),
+      files: new Map(
+        checked
+          .filter((file) => only?.has(relative(file.fileName)) ?? true)
+          .map((file) => [
+            relative(file.fileName),
+            {
+              found: diagnosticsOf([
+                ...program.getSyntacticDiagnostics(file),
+                ...program.getSemanticDiagnostics(file),
+              ]),
+              references: referenceErrors(file, app),
+            },
+          ])
+      ),
+    }),
+  };
+};
+
+/** Every diagnostic of `files`, in the order a check reports them: the program's, each file's own, then their references'. */
+export const diagnosticsInOrder = (
+  global: readonly Diagnostic[],
+  files: Iterable<FileDiagnostics>
+): Diagnostic[] => {
+  const each = [...files];
+  return [
+    ...global,
+    ...each.flatMap(({ found }) => found),
+    ...each.flatMap(({ references }) => references),
+  ];
+};
+
+/**
+ * Type-checks App files (paths relative to the App, e.g.
+ * `screens/desk.tsx`) against the kit and the App's own declaration files
+ * among them (e.g. its server's types), which are checked too.
+ */
+export const typeCheck = (
+  appFiles: Record<string, string>,
+  kitTypes: Record<string, string>,
+  target: TypeTarget = generatedTarget
+): Diagnostic[] => {
+  const { global, files } = typeProgram(appFiles, kitTypes, target).diagnose();
+  return diagnosticsInOrder(global, files.values());
 };
