@@ -106,11 +106,10 @@ import {
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
   guarded,
-  isEngineAbort,
   quickStep,
   stop,
   stopReason,
-  workerflowDeployStep,
+  deployStepConfig,
 } from "../workflow-steps.ts";
 import { ClientEndedError } from "./client-ended.ts";
 import {
@@ -876,7 +875,7 @@ const clientStep = async <T>(
   db: AdminDatabase,
   { rolloutId, clientId }: { rolloutId: string; clientId: string },
   name: string,
-  config: typeof quickStep | typeof workerflowDeployStep,
+  config: typeof quickStep | typeof deployStepConfig,
   work: (attempted: { attempt: number; attemptKey: string }) => Promise<T>
 ): Promise<T> => {
   const done = await step.do(
@@ -922,7 +921,7 @@ const deployClaimed = async (
     db,
     client,
     `${label} run`,
-    workerflowDeployStep,
+    deployStepConfig,
     async (attempted) => {
       await markStarted(db, rolloutId, clientId);
       await runOperation(env, params, clientId, attempted);
@@ -1350,11 +1349,9 @@ const deployFleet = async (
         type: clientEndedEvent,
         timeout: fleetWaitTimeout,
       });
-    } catch (error) {
-      // Timed out: checked all the same. Paused or ended, the run stops.
-      if (isEngineAbort(error)) {
-        throw error;
-      }
+    } catch {
+      // Timed out: checked all the same. Paused or ended, the run stops
+      // there: the engine never settles its activation's calls.
     }
   }
 };
@@ -1599,12 +1596,10 @@ export const rolloutRun = (env: Env): WorkflowDefinition => ({
       );
       return result;
     } catch (error) {
-      // Paused, the run carries on where it was once resumed; terminated
-      // (a cancel, or from the dashboard), the admin settles it
+      // Paused or terminated, the run never gets here: the engine never
+      // settles its activation's calls. Paused, it carries on where it was
+      // once resumed; terminated (a cancel), the admin settles it
       // (src/rollout/control.ts).
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       const failed = current;
       await step.do("record stop", quickStep, async () => {
         await recordStop(db, rolloutId, failed, stopReason(error));

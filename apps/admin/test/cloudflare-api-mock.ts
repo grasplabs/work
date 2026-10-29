@@ -9,7 +9,7 @@ import { fakeCloudflareApi } from "./cloudflare-api.ts";
 /**
  * A fake Cloudflare API that lets `token` (the deployer's) in, for each
  * test in the file: it answers `fetch` in the tests' isolate, which
- * is also where the admin's Workflow steps run.
+ * is also where the admin's runs' steps run.
  */
 export const mockCloudflareApi = (token: string) => {
   const fake = fakeCloudflareApi(token);

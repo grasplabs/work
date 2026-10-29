@@ -78,11 +78,10 @@ import type { HeldClient } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
   guarded,
-  isEngineAbort,
   quickStep,
   stop,
   stopReason,
-  workerflowDeployStep,
+  deployStepConfig,
 } from "../workflow-steps.ts";
 import { tellCore } from "./activity.ts";
 import { RolloutError } from "./errors.ts";
@@ -98,7 +97,7 @@ const reached = ["deploying", "done", "failed", "stopped"] as const;
 const wasReached = (status: string): boolean =>
   reached.some((each) => each === status);
 
-/** A new rollback's runner id: its Workflow instance's. */
+/** A new rollback's runner id: its run's. */
 const newRollbackId = (): string =>
   `rollback-${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
@@ -682,7 +681,7 @@ export const rollbackClientRun = (env: Env): WorkflowDefinition => ({
       // oxlint-enable no-await-in-loop
       await step.do(
         "run",
-        workerflowDeployStep,
+        deployStepConfig,
         guarded(async ({ attempt, idempotencyKey }) => {
           // Finished by this rollback already: an earlier try completed its
           // operation, giving the claim back as an operation does, and its
@@ -749,9 +748,6 @@ export const rollbackClientRun = (env: Env): WorkflowDefinition => ({
         );
       });
     } catch (error) {
-      if (isEngineAbort(error)) {
-        throw error;
-      }
       await step.do("release", quickStep, async () => {
         log.warn("rollback.stopped", { clientId, error: stopReason(error) });
         await releaseQuietly(db, clientId, held.runId);

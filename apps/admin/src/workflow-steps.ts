@@ -6,7 +6,7 @@
  * way nothing a step returns or throws carries a token or a response body:
  * a run's journal keeps both (threat model R17, CO3).
  */
-import { NonRetryableError } from "cloudflare:workflows";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
 
 import { CloudflareApiError, isRefused } from "./cloudflare/api.ts";
 import { MissingStoreSecretError } from "./deploy/context.ts";
@@ -22,23 +22,13 @@ export const quickStep = {
 /**
  * A deploy, or a phase of one: uploads, migrations and a smoke check of
  * up to about 80 s. A retry resumes the same deploy, so it's retried less
- * often, and later. For a host whose attempts may run longer than
- * Workerflow's (`workerflowDeployStep` on Workerflow).
+ * often, and later. Its timeout is the longest a Workerflow attempt runs
+ * (its 14-minute handler budget). An attempt that runs out goes on beside
+ * its retry, so each attempt takes the client for itself first
+ * (src/runners.ts, `takeAttempt`), and one that timed out acts no more.
  */
 export const deployStepConfig = {
   retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
-  timeout: "30 minutes",
-} as const;
-
-/**
- * `deployStepConfig` for a run on Workerflow (src/workflow-runs.ts): its
- * timeout is the longest a Workerflow attempt runs (its 14-minute handler
- * budget). An attempt that runs out goes on beside its retry, so each
- * attempt takes the client for itself first (src/runners.ts,
- * `takeAttempt`), and one that timed out acts no more.
- */
-export const workerflowDeployStep = {
-  ...deployStepConfig,
   timeout: "14 minutes",
 } as const;
 
@@ -105,17 +95,6 @@ export const guarded =
  * (`NonRetryableError: <code>: ...`), left off what's recorded.
  */
 const errorNamePrefix = /^\w*Error: /u;
-
-/**
- * The prefix of what the Workflows engine throws into a run it stops
- * itself (a pause, a terminate, a restart): the run isn't failing, so it
- * rethrows it at once and records nothing.
- */
-const engineAbortPrefix = "Aborting engine:";
-
-/** Whether `error` is the Workflows engine stopping the run (`engineAbortPrefix`). */
-export const isEngineAbort = (error: unknown): boolean =>
-  error instanceof Error && error.message.startsWith(engineAbortPrefix);
 
 /** What a run records of the failure that stopped it: its code and our words. */
 export const stopReason = (error: unknown): string =>
