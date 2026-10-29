@@ -9,12 +9,20 @@
 # requires a second person to approve every run; staging, which CI also
 # publishes releases from on every merge, doesn't.
 #
-# Every run also copies the shared secrets (Grasp's OAuth app secrets and
-# Composio key) from 1Password into the account's Secrets Store, where
-# the admin reads them to set on each client's Workers. The admin never
-# holds a 1Password credential. Run it with "secrets only" after rotating one
-# in 1Password to copy it without deploying; a secrets-only rollout from the
-# admin then takes it to every client.
+# Every secret lives in the stage's 1Password Environment, by its plain
+# name. Every run first copies the runtime secrets the stage's admin and
+# router bind into the account's Secrets Store (scripts/store-secrets.ts),
+# each under its stage's name (`storeSecretName`: `_STAGING` appended in
+# staging, so a staging run never writes what production reads); the
+# admin and router read them there, and the admin sets them on each
+# client's Workers. Run it with "secrets only" after rotating one in
+# 1Password to copy it without deploying; a secrets rollout from the admin
+# then takes it to every client. The master keys (ROUTER_KEY, CLIENT_KEY)
+# are the exception: a copy creates them but never replaces them, and
+# stops when 1Password's value no longer matches the store's, since
+# rotating one is a procedure of its own (scripts/store-secrets-lib.ts). The account and store ids come from the
+# names module, and the admin's settings are its wrangler.jsonc vars, per
+# stage.
 name: Deploy platform
 
 on:
@@ -26,7 +34,7 @@ on:
         options: [staging, production]
         default: staging
       secrets-only:
-        description: Only copy the shared secrets to Secrets Store; deploy nothing
+        description: Only copy the secrets from 1Password to Secrets Store; deploy nothing
         type: boolean
         default: false
 
@@ -56,8 +64,7 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # The Cloudflare credentials and store, from the stage's 1Password
-      # Environment, as everything this workflow reads:
+      # The stage's Cloudflare API token, from its 1Password Environment:
       # OP_SERVICE_ACCOUNT_TOKEN, the environment's secret, is the only value
       # kept in GitHub.
       - uses: ./.github/actions/load-1password
@@ -65,73 +72,33 @@ jobs:
           environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: CLOUDFLARE_API_TOKEN
-          settings: CLOUDFLARE_ACCOUNT_ID SECRETS_STORE_ID
-          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SECRETS_STORE_ID
-      # The shared secrets, loaded right before the step that copies them
-      # and cleared from the job's env right after, so no deploy sees them.
-      # Each is named in 1Password as the Worker secret it becomes, in both
-      # stages; the store names it for its stage (below).
+          required: CLOUDFLARE_API_TOKEN
+      # Grasp Work's account and its one Secrets Store, by the names module.
+      - run: |
+          set -euo pipefail
+          echo "CLOUDFLARE_ACCOUNT_ID=$(vp exec node scripts/platform-names.ts "$STAGE" accountId)" >> "$GITHUB_ENV"
+          echo "SECRETS_STORE_ID=$(vp exec node scripts/platform-names.ts "$STAGE" secretsStoreId)" >> "$GITHUB_ENV"
+      # Every secret the stage's admin and router bind, by the name
+      # 1Password keeps: what's loaded right below, and cleared after.
+      - id: secrets
+        run: echo "names=$(vp exec node scripts/store-secrets.ts names "$STAGE")" >> "$GITHUB_OUTPUT"
+      # Loaded right before the copy and cleared right after, so no deploy
+      # sees them. Not required here: the copy itself stops on a required
+      # one that's missing, naming it, before it writes anything, and skips
+      # an optional one, leaving the store's as it is.
       - uses: ./.github/actions/load-1password
         with:
           environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY
-      # Secrets Store keeps each secret by an ID of its own: an existing one
-      # is updated by that ID, a missing one created. Values go to wrangler
-      # on stdin, never as an argument or in a log line, and are written
-      # every run: Secrets Store never reads a value back to compare.
-      # The API token reaches curl through its config on stdin, not argv.
-      # Both stages share the account's one store, so each secret is
-      # written under its stage's name from the names module
-      # (`storeSecretName`: `_STAGING` appended in staging), the name the
-      # stage's admin binds: a staging run, which needs no reviewer, never
-      # writes a secret production reads.
-      # The store holds only fixed secrets (these, the deployer token, the
-      # router key and the client key, per stage), never one per client, so
-      # one page normally covers it; the list is still read page by page up
-      # to `total_pages`.
-      - name: Copy the shared secrets to Secrets Store
-        run: |
-          set -euo pipefail
-          names=(ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY)
-          # Every value is checked before any is written, so an empty field
-          # never leaves the store half updated. Only names are reported.
-          empty=()
-          for name in "${names[@]}"; do
-            if [ -z "${!name}" ]; then
-              empty+=("$name")
-            fi
-          done
-          if [ "${#empty[@]}" -gt 0 ]; then
-            echo "::error::Empty in the $STAGE 1Password Environment, nothing written: ${empty[*]}"
-            exit 1
-          fi
-          existing='[]'
-          page=1
-          while :; do
-            response=$(printf 'header = "Authorization: Bearer %s"\n' "$CLOUDFLARE_API_TOKEN" |
-              curl --silent --show-error --fail-with-body --config - \
-                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/secrets_store/stores/$SECRETS_STORE_ID/secrets?per_page=100&page=$page")
-            existing=$(jq -c --argjson page "$(jq -c '[.result[] | {name, id}]' <<< "$response")" '. + $page' <<< "$existing")
-            total=$(jq -r '.result_info.total_pages // 1' <<< "$response")
-            if [ "$page" -ge "$total" ]; then
-              break
-            fi
-            page=$((page + 1))
-          done
-          for name in "${names[@]}"; do
-            stored=$(vp exec node scripts/platform-names.ts "$STAGE" storeSecret "$name")
-            id=$(jq -r --arg name "$stored" '.[] | select(.name == $name) | .id' <<< "$existing")
-            if [ -z "$id" ]; then
-              printf '%s' "${!name}" | vp exec wrangler secrets-store secret create "$SECRETS_STORE_ID" --name "$stored" --scopes workers --remote
-            else
-              printf '%s' "${!name}" | vp exec wrangler secrets-store secret update "$SECRETS_STORE_ID" --secret-id "$id" --remote
-            fi
-          done
-      - name: Clear the shared secrets from the job's env
+          secrets: ${{ steps.secrets.outputs.names }}
+      - name: Copy the secrets to Secrets Store
+        run: vp exec node scripts/store-secrets.ts copy "$STAGE"
+      - name: Clear the secrets from the job's env
         if: always()
+        env:
+          NAMES: ${{ steps.secrets.outputs.names }}
         run: |
-          for name in ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY; do
+          for name in $NAMES; do
             echo "$name=" >> "$GITHUB_ENV"
           done
       # A D1 database's jurisdiction is set only when it is created, and deploy
@@ -140,26 +107,30 @@ jobs:
       # the EU stops the deploy; it has to be recreated.
       - name: Create the admin database in the EU
         if: ${{ !inputs.secrets-only }}
+        # The admin's database, deploy and migrations go through Cloudflare's
+        # cf CLI (the admin's dev dependency, apps/admin/cloudflare.config.ts),
+        # with the job's token.
+        working-directory: apps/admin
         run: |
-          db=$(vp exec node scripts/platform-names.ts "$STAGE" adminDatabase)
-          existing=$(vp exec wrangler d1 list --json)
-          jurisdiction=$(jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"' <<< "$existing")
+          set -euo pipefail
+          db=$(vp exec node ../../scripts/platform-names.ts "$STAGE" adminDatabase)
+          jurisdiction=$(vp exec cf d1 list --name "$db" | jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"')
           if [ -z "$jurisdiction" ]; then
-            vp exec wrangler d1 create "$db" --jurisdiction eu
+            vp exec cf d1 create --name "$db" --jurisdiction eu > /dev/null
           elif [ "$jurisdiction" != "eu" ]; then
             echo "::error::D1 database $db is not in the EU jurisdiction ($jurisdiction)"
             exit 1
           fi
       # D1 migrations are additive, so the running admin keeps working on
-      # the new schema until the deploy after them replaces it.
+      # the new schema until the deploy after them replaces it. Recorded in
+      # d1_migrations, as Wrangler records them.
       - if: ${{ !inputs.secrets-only }}
         working-directory: apps/admin
         run: |
-          if [ "$STAGE" = staging ]; then
-            vp exec wrangler d1 migrations apply DB --remote --env staging
-          else
-            vp exec wrangler d1 migrations apply DB --remote
-          fi
+          set -euo pipefail
+          db=$(vp exec node ../../scripts/platform-names.ts "$STAGE" adminDatabase)
+          id=$(vp exec cf d1 list --name "$db" | jq -r --arg db "$db" '.[] | select(.name == $db) | .uuid')
+          vp exec cf d1 migrations apply "$id" --dir src/db/migrations --table d1_migrations > /dev/null
       # Router first: both bind the stage's hostname map, which
       # scripts/cloudflare-account-setup.ts creates, and the account's Secrets Store
       # (scripts/wrangler-deploy.ts fills in both ids). So a router deploy
@@ -177,56 +148,22 @@ jobs:
       - if: ${{ !inputs.secrets-only }}
         working-directory: apps/gateway
         run: vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE"
-      # The admin verifies every request's Access JWT against its Access
-      # application (apps/admin/src/access.ts) and refuses everyone
-      # without these, so a deploy without them would lock staff out: stop
-      # before deploying. They're settings in the stage's 1Password
-      # Environment, not secrets: the AUD tag and the team URL
-      # identify the app, they grant nothing. So is CLIENT_DOMAIN, the
-      # domain clients are served under: without it the admin provisions
-      # and deploys no client, but works otherwise, so it's passed only when
-      # set (keep_vars keeps the last one). So are ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID, Grasp's
-      # OAuth apps' client ids, which each client's core signs people in
-      # with: a client whose sign-in names an IdP without one isn't deployed.
-      # So is GRASP_CLIENT_ID, Grasp's own client, whose core answers Ask
-      # Grasp with its model gateway: without it the chat isn't set up.
-      # So is ROOMS_ORIGIN, Grasp's Rooms' team origin, which the admin reads
-      # each company's proposal from with ROOMS_READ_TOKEN (Secrets Store):
-      # without it the proposal says Rooms isn't connected.
-      # So is ADMIN_HOST, Grasp's admin's own hostname (admin.<domain>,
-      # apps/admin/src/admin-host.ts): a route of the admin's Worker
-      # and a hostname of its Access application, both set by hand.
-      # So are DISCORD_PUBLIC_KEY and DISCORD_STAFF_IDS, Grasp's Discord
-      # application's public key and the staff's Discord user ids
-      # (apps/admin/src/admin/discord.ts): without them the bot answers
-      # no one. Settings, not secrets, so not masked; one left out of the
-      # Environment is empty.
-      - if: ${{ !inputs.secrets-only }}
-        uses: ./.github/actions/load-1password
-        with:
-          environment: ${{ inputs.stage }}
-          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          settings: CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS
-      - name: Deploy the admin with its Access settings
+      # The admin's settings are its wrangler.jsonc vars, per stage; a stage
+      # without its Access application (CF_ACCESS_AUD and CF_ACCESS_ISS),
+      # which would lock staff out, isn't deployed (apps/admin/cf-worker.ts).
+      - name: Deploy the admin
         if: ${{ !inputs.secrets-only }}
         run: |
           set -euo pipefail
-          if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
-            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the $STAGE 1Password Environment; nothing deployed"
-            exit 1
-          fi
-          vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")
-          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS; do
-            if [ -n "${!name}" ]; then
-              vars+=(--var "$name:${!name}")
-            fi
-          done
-          # The build resolves the stage's config (the Vite plugin's
-          # CLOUDFLARE_ENV); production is the top level, so no env.
-          if [ "$STAGE" = staging ]; then
-            CLOUDFLARE_ENV=staging vp run --filter @grasp-os/admin build
-          else
-            vp run --filter @grasp-os/admin build
-          fi
+          # What apps/admin/cf-worker.ts fills in: the store, the stage's
+          # hostname map, and the secrets the store has (an optional one it
+          # lacks stays unbound).
           cd apps/admin
-          vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE" "${vars[@]}"
+          hosts=$(vp exec node ../../scripts/platform-names.ts "$STAGE" routerHosts)
+          ROUTER_HOSTS_ID=$(vp exec cf kv namespaces list --per-page 100 | jq -r --arg title "$hosts" '[.[] | select(.title == $title) | .id] | if length == 1 then .[0] else error("expected one KV namespace " + $title) end')
+          STORED_SECRETS=$(vp exec cf secrets-store secrets list --store-id "$SECRETS_STORE_ID" --per-page 100 | jq -r '[.[].name] | join(",")')
+          export ROUTER_HOSTS_ID STORED_SECRETS
+          # Built for the stage (Vite's mode, which cloudflare.config.ts
+          # reads), then that build deployed with cf, naming the same mode.
+          vp build --mode "$STAGE"
+          vp exec cf deploy --prebuilt --mode "$STAGE" --message "deploy-platform $GITHUB_SHA"

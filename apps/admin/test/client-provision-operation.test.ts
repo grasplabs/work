@@ -9,13 +9,14 @@ import {
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { moduleKey } from "@grasp-os/shared/release";
+import { moduleKey, releaseManifestSchema } from "@grasp-os/shared/release";
 import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
 import type { StaffAlert } from "../src/alerts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
@@ -29,6 +30,7 @@ import {
   releases,
 } from "../src/db/schema.ts";
 import { appliedSchema } from "../src/deploy/compatibility.ts";
+import { deployContext } from "../src/deploy/context.ts";
 import {
   clientMailDomain,
   onboardingSender,
@@ -51,6 +53,7 @@ import {
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import { operationErrorWords } from "../src/hosting/words.ts";
 import {
   provisionPlacedClient,
   releasePlacedClient,
@@ -165,6 +168,52 @@ const importRelease = async (
       }),
     },
   };
+  await putBlobs(built);
+  const now = new Date();
+  await db.insert(releases).values({
+    id: manifest.releaseId,
+    commitSha: manifest.commit,
+    manifest: JSON.stringify(manifest),
+    manifestSha256: "0".repeat(64),
+    limitEvidence: built.limitEvidenceText ?? null,
+    builtAt: now,
+    importedAt: now,
+  });
+  return manifest;
+};
+
+/**
+ * The release as `release:build` makes it from the real wrangler.jsonc of
+ * core and connect (its golden test, scripts/release/manifest-lib.test.ts,
+ * keeps it theirs): every binding, cron and Durable Object migration of
+ * theirs, on the modules, assets and migrations of a test release, which
+ * the bucket holds. Imported; `adjust` changes each Worker first.
+ */
+const importRealRelease = async (
+  adjust: (worker: WorkerEntry) => WorkerEntry = (worker) => worker
+): Promise<ReleaseManifest> => {
+  const real = releaseManifestSchema.parse(golden);
+  const built = await buildRelease({ notes: "feat(core): the real one" });
+  const workers = Object.fromEntries(
+    Object.entries(built.manifest.workers).map(([name, worker]) => {
+      const own = real.workers[name];
+      if (own === undefined) {
+        throw new Error(`The real release has no ${name}`);
+      }
+      return [
+        name,
+        adjust({
+          ...worker,
+          bindings: own.bindings,
+          crons: own.crons,
+          durableObjectMigrations: own.durableObjectMigrations,
+          requiredSecrets: own.requiredSecrets,
+          compatibilityFlags: own.compatibilityFlags,
+        }),
+      ];
+    })
+  );
+  const manifest: ReleaseManifest = { ...built.manifest, workers };
   await putBlobs(built);
   const now = new Date();
   await db.insert(releases).values({
@@ -326,7 +375,7 @@ const failing = async (held: HeldClient): Promise<unknown> => {
 
 /** A core script's upload, wherever it's put. */
 const isCoreUpload = ({ method, path }: ApiCall): boolean =>
-  method === "PUT" && path.endsWith("-grasp-os-core");
+  method === "PUT" && path.endsWith("-core");
 
 /** The code an operation's failure carries, or what it was. */
 const codeFrom = (outcome: unknown): unknown =>
@@ -714,12 +763,11 @@ const refusals: Refusal[] = [
     code: "model_spend_undecided",
   },
   {
-    // Whether a user Worker can send mail at all is a spike of its own.
-    name: "a release that sends mail into Workers for Platforms",
+    name: "a release with a binding Workers for Platforms doesn't document",
     kind: "workers_for_platforms",
     adjust: (core) => ({
       ...core,
-      bindings: [...core.bindings, { type: "send_email", name: "EMAIL" }],
+      bindings: [...core.bindings, { type: "kv_namespace", name: "CACHE" }],
     }),
     code: "wfp_binding_unqualified",
   },
@@ -833,6 +881,36 @@ const attemptEnded = async (
 
 describe("provisioning a placed client", () => {
   useStoreSecrets({ deployer: token });
+
+  it.each(["", "Production", "prod", "staging "])(
+    "runs no operation for an admin whose STAGE is %j, before any Cloudflare call",
+    async (stage) => {
+      const manifest = await importRelease("dedicated");
+      const { clientId, held } = await setUp("dedicated", manifest);
+      const before = cloudflare.calls.length;
+
+      // The admin as its deploy left it, its STAGE misconfigured: never
+      // taken for production. Set as a deploy could, past what the
+      // generated types allow.
+      const deployed = { ...env };
+      Reflect.set(deployed, "STAGE", stage);
+      const misconfigured = await deployContext(deployed);
+      const refused = await runClientProvision(misconfigured, held).then(
+        () => null,
+        (error: unknown) => error
+      );
+
+      expect({
+        refused: refused instanceof ProvisionOperationError && refused.code,
+        operation: await operationOf(clientId),
+        calls: cloudflare.calls.length - before,
+      }).toMatchObject({
+        refused: "stage_unset",
+        operation: { status: "failed", step: null, error: "stage_unset" },
+        calls: 0,
+      });
+    }
+  );
 
   it("provisions a fresh client end to end, its hostname published last", async () => {
     const manifest = await importRelease("dedicated");
@@ -1819,6 +1897,86 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it("takes the real release into Workers for Platforms as far as model spend, and, once Workers AI is out of it, live without mail", async () => {
+    const real = await importRealRelease();
+    const stopped = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+
+    // Its core binds Workers AI: it stops there, in words staff act on,
+    // before anything is created or uploaded, and never at its mail.
+    await expect(failing(stopped.held)).resolves.toMatchObject({
+      code: "model_spend_undecided",
+    });
+    const operation = await operationOf(stopped.clientId);
+    expect({
+      operation,
+      uploads: stopped.account.scriptUploads.length,
+    }).toMatchObject({
+      operation: {
+        status: "failed",
+        step: null,
+        error: "model_spend_undecided",
+      },
+      uploads: 0,
+    });
+    expect(operationErrorWords(operation?.error ?? "")).toMatch(
+      /^Model spend isn't decided yet \(GRA-141\): provisioning stops here\./u
+    );
+
+    // The same release without Workers AI, as once model spend is decided.
+    const decided = await importRealRelease((worker) => ({
+      ...worker,
+      bindings: worker.bindings.filter(({ type }) => type !== "ai"),
+    }));
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      decided,
+      clientDispatchNamespace
+    );
+    await runClientProvision(
+      {
+        ...context,
+        router: {
+          ...context.router,
+          namespace: clientDispatchNamespace,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+
+    const { core } = await scriptsOf(clientId);
+    const coreBindings = z
+      .array(z.object({ type: z.string(), name: z.string() }).loose())
+      .parse(
+        account.namespaces
+          .get(clientDispatchNamespace)
+          ?.get(core)
+          ?.versions.at(-1)?.metadata.bindings ?? []
+      );
+    expect({
+      operation: await operationOf(clientId),
+      // Its core goes live without `EMAIL`, so it sends nothing and says
+      // so, and no sending domain is set up for it.
+      mail: coreBindings.filter(
+        ({ type, name }) => type === "send_email" || name === "EMAIL"
+      ),
+      zones: account.zones.length,
+      routed: await routed(clientId),
+    }).toMatchObject({
+      operation: { status: "done" },
+      mail: [],
+      zones: 0,
+      routed: true,
+    });
+  });
+
   it("uploads into a Workers for Platforms namespace, and stops at the probe it can't qualify", async () => {
     const manifest = await importRelease("workers_for_platforms");
     const { account, clientId, held } = await setUp(
@@ -1899,8 +2057,7 @@ describe("provisioning a placed client", () => {
     // Connect's upload goes unanswered until the test ends.
     const answered = Promise.withResolvers<boolean>();
     cloudflare.beforeAnswering(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       async () => {
         await answered.promise;
       }
@@ -2434,8 +2591,7 @@ describe("provisioning a placed client", () => {
     using attempts = startsOf(adminWorkflows.provisionPlacedClient);
     // The first attempt is refused connect's upload, and stops.
     cloudflare.failNext(
-      (call) =>
-        call.method === "PUT" && call.path.endsWith("-grasp-os-connect"),
+      (call) => call.method === "PUT" && call.path.endsWith("-connect"),
       400
     );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2953,7 +3109,7 @@ describe("provisioning a placed client", () => {
     });
     // Core's upload is refused: connect runs the later release already.
     cloudflare.failNext(
-      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      (call) => call.method === "PUT" && call.path.endsWith("-core"),
       400
     );
     await expect(failing(await attempt(clientId))).resolves.toMatchObject({

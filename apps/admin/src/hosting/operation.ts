@@ -67,9 +67,12 @@
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
- *   (`wfp_binding_unqualified`): a release that sends mail among them, as
- *   whether a user Worker can send through a `send_email` binding at all
- *   is a spike of its own. The admin probes a user Worker in the
+ *   (`wfp_binding_unqualified`). Mail is the exception: whether a user
+ *   Worker can send through a `send_email` binding at all is a spike of
+ *   its own (GRA-965), so there a release's `send_email` bindings are left
+ *   out (`withoutMail`) rather than refused. Its core then sends no mail,
+ *   and says so (core's src/mail.ts), and no sending domain is set up. The
+ *   admin probes a user Worker in the
  *   namespace it and the router bind (`router.namespace`) through
  *   that binding, as the router then reaches it (GRA-283); one in any
  *   other namespace stops at the probe (`probe_unqualified`), its
@@ -82,10 +85,12 @@
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import {
-  clientsNamespace,
+  deploymentPrefix,
   platformWorkerName,
+  adminHost,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -233,6 +238,12 @@ export const provisionOperationErrorCodes = [
   "wfp_binding_unqualified",
   /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
   "destination_other_stage",
+  /**
+   * The admin's STAGE is neither staging nor production: it names no
+   * clients' namespace of its own, so it runs no operation, never taking
+   * itself for production.
+   */
+  "stage_unset",
   /** Cron triggers, which Workers for Platforms doesn't document for user Workers. */
   "wfp_schedule_unqualified",
   /** A script isn't at the release's Durable Object migration after its upload. */
@@ -336,9 +347,12 @@ export interface ProvisionContext {
     /**
      * The namespace `dispatcher` binds: its stage's
      * (@grasp-os/shared/names, `clientsNamespace`). A core in any other
-     * isn't reachable through it.
+     * isn't reachable through it. Without it, or with one that is neither
+     * stage's, no operation runs (`stage_unset`).
      */
     namespace?: string;
+    /** Relay mode for its core's sign-in (src/deploy/context.ts, `oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
@@ -449,7 +463,7 @@ const appSchema = z.enum(apps);
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
  * `send_email` binding uploads, but whether it delivers is GRA-965's
- * spike, still open. The vars and secrets the admin adds go in the
+ * spike, still open: it's left out there (`withoutMail`). The vars and secrets the admin adds go in the
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
@@ -463,19 +477,38 @@ const wfpBindings: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `manifest` as a Workers for Platforms namespace runs it: every Worker
+ * without its `send_email` bindings, as whether a user Worker can send
+ * mail at all is GRA-965's spike, still open. Its core then has no `EMAIL`
+ * and sends nothing, saying why (core's src/mail.ts), and the operation
+ * sets up no sending domain (`setUpMail`). A dedicated destination keeps
+ * its mail.
+ */
+const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
+  ...manifest,
+  workers: Object.fromEntries(
+    Object.entries(manifest.workers).map(([name, worker]) => [
+      name,
+      {
+        ...worker,
+        bindings: worker.bindings.filter(({ type }) => type !== "send_email"),
+      },
+    ])
+  ),
+});
+
+/**
  * How `loaded`'s destination takes a Worker's bindings: in a Workers for
  * Platforms namespace, a service binding binds the connect gateway, with
  * props naming the client's own script (GRA-1217).
  */
-const renderOptionsOf = (loaded: Loaded): RenderOptions =>
-  loaded.destination.kind === "workers_for_platforms"
-    ? {
-        connectGateway: platformWorkerName(
-          "connect-gateway",
-          stageOfNamespace(loaded.ownNamespace) ?? "production"
-        ),
-      }
+const renderOptionsOf = (loaded: Loaded): RenderOptions => {
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  return loaded.destination.kind === "workers_for_platforms" &&
+    stage !== undefined
+    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
     : {};
+};
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
 const assertHolds = async (
@@ -1349,8 +1382,9 @@ const targetOf = (
 
 /**
  * Throws unless the destination can run `worker` as the release declares
- * it: no Workers AI anywhere (`model_spend_undecided`), and in a Workers
- * for Platforms namespace only documented bindings and no cron triggers.
+ * it: no Workers AI anywhere (`model_spend_undecided`, until GRA-141
+ * decides model spend), and in a Workers for Platforms namespace only
+ * documented bindings and no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
   const ai = worker.bindings.find(({ type }) => type === "ai");
@@ -1405,6 +1439,9 @@ const coreVarsOf = async (
     signIn: loaded.client.signIn,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
+    ...(context.router.oauthRelay === undefined
+      ? {}
+      : { oauthRelay: context.router.oauthRelay }),
   });
   return await configuredCoreVars(
     context.db,
@@ -1522,7 +1559,10 @@ const load = async (
   return {
     operation,
     held,
-    manifest,
+    manifest:
+      destination.kind === "workers_for_platforms"
+        ? withoutMail(manifest)
+        : manifest,
     placement,
     destination,
     accountId: destination.accountId,
@@ -2436,11 +2476,11 @@ const route = async (
 ): Promise<void> => {
   const { held } = loaded;
   const { generation } = loaded.client;
-  // Only a script of this client's own placement (`g<deploymentId>-…`,
+  // Only a script of this client's own placement (`deploymentPrefix`,
   // inventory.ts): a mis-recorded inventory never publishes another's.
   if (
     target.kind === "dispatch" &&
-    !target.script.startsWith(`g${loaded.placement.deploymentId}-`)
+    !target.script.startsWith(deploymentPrefix(loaded.placement.deploymentId))
   ) {
     throw new ProvisionOperationError(
       "probe_unqualified",
@@ -2609,6 +2649,25 @@ interface Stopped {
 }
 
 /**
+ * Sends `alert` to staff, a failure logged and not thrown: an alert that
+ * can't be sent never hides what the operation did, or why it stopped.
+ */
+const tellStaff = async (
+  context: ProvisionContext,
+  alert: StaffAlert
+): Promise<void> => {
+  try {
+    await context.alert?.(alert);
+  } catch (error) {
+    log.error("provision.alert_unsent", {
+      clientId: alert.clientId,
+      kind: alert.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+};
+
+/**
  * Runs client `held.clientId`'s operation once from its first step, as
  * runner `held`, and records it done; one done already is left as it is.
  * A failure is recorded (its step and code, audited) and answered.
@@ -2627,15 +2686,31 @@ const runOperation = async (
   }
   let step: ProvisionStep = "validated";
   try {
+    // Before anything is read or asked of Cloudflare: an admin whose
+    // STAGE names no stage has no namespace of its own to hold a client
+    // to, and never takes itself for production.
+    const ownNamespace = context.router.namespace;
+    const ownStage =
+      ownNamespace === undefined ? undefined : stageOfNamespace(ownNamespace);
+    if (ownNamespace === undefined || ownStage === undefined) {
+      throw new ProvisionOperationError(
+        "stage_unset",
+        "This admin's STAGE is neither staging nor production: it runs no operation"
+      );
+    }
     await assertHolds(db, held);
     const loaded: Loaded = {
       ...(await load(db, held, operation)),
-      ownNamespace: context.router.namespace ?? clientsNamespace("production"),
+      ownNamespace,
     };
     await validate(context, loaded);
 
     step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held);
+    const inventory = await ensureClientResources(api, db, "system", held, {
+      releaseId: loaded.operation.releaseId,
+      runId: held.runId,
+      record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
+    });
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
@@ -2673,6 +2748,15 @@ const runOperation = async (
     return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
+    // Provisioning's own check found a resource outside the policy's
+    // jurisdiction: the destination is marked so (src/hosting/provision.ts),
+    // and a person needs to look before anyone is placed there again.
+    if (code === "resource_outside_jurisdiction") {
+      await tellStaff(context, {
+        clientId: held.clientId,
+        kind: "hosting_check_failed",
+      });
+    }
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,
@@ -2713,25 +2797,6 @@ const rollsBack = async (
     .where(eq(clients.id, operation.clientId))
     .get();
   return client?.status === "active";
-};
-
-/**
- * Sends `alert` to staff, a failure logged and not thrown: an alert that
- * can't be sent never hides what the operation did, or why it stopped.
- */
-const tellStaff = async (
-  context: ProvisionContext,
-  alert: StaffAlert
-): Promise<void> => {
-  try {
-    await context.alert?.(alert);
-  } catch (error) {
-    log.error("provision.alert_unsent", {
-      clientId: alert.clientId,
-      kind: alert.kind,
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
 };
 
 /**

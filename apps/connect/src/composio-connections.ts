@@ -501,6 +501,10 @@ export const startToolkitConnection = async (
       })
     );
   const storedTools = JSON.stringify(tools);
+  // On the client's own origin even in relay mode
+  // (@grasp-os/shared/oauth-relay): the provider returns to Composio's own
+  // redirect URI, and Composio sends the browser on to this URL, which no
+  // OAuth app needs to list, so there is nothing to relay.
   const callback = new URL(connectionCallbackPath, origin);
   callback.searchParams.set("state", state);
   const marker = markerOf(flowId);

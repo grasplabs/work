@@ -89,6 +89,30 @@ describe("the definition's structure", () => {
     await expect(codesOf(plain(tasks))).resolves.toContain("task.too_many");
   });
 
+  it("bounds a fork's branches to 1 through the most a fork takes, as the sealed build does", async () => {
+    const forkOf = (count: number) =>
+      plain([
+        {
+          split: {
+            fork: {
+              branches: tasksOf(count, () => ({ set: { a: 1 } })),
+            },
+          },
+        },
+      ]);
+    expect({
+      none: await codesOf(forkOf(0)),
+      one: await codesOf(forkOf(1)),
+      most: await codesOf(forkOf(profileLimits.maxForkBranches)),
+      past: await codesOf(forkOf(profileLimits.maxForkBranches + 1)),
+    }).toStrictEqual({
+      none: ["task.empty_list"],
+      one: [],
+      most: [],
+      past: ["profile.too_many"],
+    });
+  });
+
   it("counts a task before its children, nested or reusable", async () => {
     const leaves = (count: number) => tasksOf(count, () => ({ set: { a: 1 } }));
     // A do of 499 leaves is 500 tasks: at the limit, not over it.

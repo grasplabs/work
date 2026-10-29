@@ -86,7 +86,7 @@ import { LanguageChoice } from "./language-choice.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
 import { useReveal, useWayIn } from "./platform-reveal.tsx";
-import { DifferenceItem, MailItem } from "./review-parts.tsx";
+import { DifferenceItem, MailItem, NoMailItem } from "./review-parts.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
@@ -285,7 +285,7 @@ const useHeadlines = ({
   const talked = (progress?.talked ?? 0) + (progress?.leadsTalked ?? 0);
   const { differences, mapped } = data.review;
   const openCount =
-    openItems(settled).length +
+    openItems(settled, data.view.mailSends).length +
     differences.filter(({ holds }) => holds === null).length;
   // A sign-in to connect where the deployment signs in with one; else a staff list.
   const [onlySuite, ...otherSuites] = data.suites;
@@ -1803,16 +1803,22 @@ const Team = (props: StepProps) => {
   );
 };
 
-/** Letting Grasp's mail through, as one of what needs the admin. */
-const Mail = ({ data, settled, onSettle }: StepProps) => (
-  <MailItem
-    domain={data.sendingDomain}
-    onSettle={(done) => {
-      onSettle("mail", done);
-    }}
-    settled={settled.includes("mail")}
-  />
-);
+/**
+ * Letting Grasp's mail through, as one of what needs the admin; where
+ * Grasp sends no mail, that it doesn't, and nothing to settle.
+ */
+const Mail = ({ data, settled, onSettle }: StepProps) =>
+  data.view.mailSends ? (
+    <MailItem
+      domain={data.sendingDomain}
+      onSettle={(done) => {
+        onSettle("mail", done);
+      }}
+      settled={settled.includes("mail")}
+    />
+  ) : (
+    <NoMailItem />
+  );
 
 /**
  * The weeks Stephen talks to the team: where the interviews stand
@@ -1940,7 +1946,7 @@ const Review = (props: StepProps) => {
   const [changing, setChanging] = useState<string[]>([]);
   const { differences } = props.data.review;
   const open =
-    openItems(props.settled).length +
+    openItems(props.settled, props.data.view.mailSends).length +
     differences.filter(
       ({ work, holds }) => holds === null || changing.includes(work)
     ).length;

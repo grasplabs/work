@@ -2,8 +2,7 @@
 // Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-platform passes them from the stage's 1Password Environment
-// with `--var`, and stops if either is missing.
+// everything, so a deploy of a stage missing either stops (cf-worker.ts).
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
 {
@@ -15,16 +14,40 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  // The Access vars come from each deploy's `--var`, not from here
-  // (src/env.d.ts); this keeps them too on a deploy that passes none, such
-  // as `wrangler deploy` by hand.
-  "keep_vars": true,
+  // The admin's own hostname, as a route: more specific than the router's
+  // for every host below the stage's client domain, so it wins over it,
+  // where a Custom Domain wouldn't, as routes run first
+  // (@grasp-os/shared/names, `platformRoutes`, which check:wrangler-configs
+  // holds this to). Deployed by cf as a fetch trigger (cf-worker.ts).
+  "routes": [{ "pattern": "admin.ongrasp.app/*", "zone_name": "ongrasp.app" }],
+  // Every setting of the admin's, none of them secret (src/env.d.ts says
+  // what each does): production here, staging in `env.staging`, which
+  // repeats every binding under its staging name, as wrangler inherits none
+  // of them. STAGE is the stage this Worker serves (@grasp-os/shared/names);
+  // CF_ACCESS_ISS is Grasp Work's Access team, and CF_ACCESS_AUD its
+  // application's tag; ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID are Grasp's
+  // Entra and Google OAuth apps, which each client's core and connect sign
+  // in with; CLIENT_DOMAIN is where
+  // clients are served, and ADMIN_HOST the admin's own hostname, both as the
+  // names module gives them (check:wrangler-configs holds them to it);
+  // OAUTH_RELAY "on" sends every client's sign-in and connections back
+  // through the stage's OAuth relay, as every client this admin deploys is
+  // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
+  // each client's own origin. One that's unset is a setting the admin
+  // works without, as src/env.d.ts says, except the Access pair, without
+  // which nothing is deployed.
+  "vars": {
+    "STAGE": "production",
+    "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
+    "CF_ACCESS_ISS": "https://grasp-work.cloudflareaccess.com",
+    "ENTRA_CLIENT_ID": "01228906-bd5b-488e-b7c1-720f4dc12dc2",
+    "GOOGLE_CLIENT_ID": "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
+    "CLIENT_DOMAIN": "ongrasp.app",
+    "ADMIN_HOST": "admin.ongrasp.app",
+    "OAUTH_RELAY": "on",
+  },
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
-  // Which stage this Worker serves (@grasp-os/shared/names): production
-  // here, staging in `env.staging`, which repeats every binding under its
-  // staging name, as wrangler inherits none of them.
-  "vars": { "STAGE": "production" },
   "observability": {
     "enabled": true,
     "redact_query_string": true,
@@ -111,8 +134,9 @@
   // them: provisioning makes each client's gateway; and Zone and Email
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
-  // are derived from; and the secrets every client shares, which
-  // deploy-platform copies in from 1Password. The store id is the account's own: `deploy` fills it in
+  // are derived from; and the secrets every client shares. Deploy platform
+  // copies every one of them in from the stage's 1Password Environment
+  // (scripts/store-secrets.ts). The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [
@@ -214,8 +238,21 @@
   "env": {
     "staging": {
       "name": "grasp-admin-staging",
+      "routes": [
+        {
+          "pattern": "admin.staging.ongrasp.app/*",
+          "zone_name": "ongrasp.app",
+        },
+      ],
       "vars": {
         "STAGE": "staging",
+        "CF_ACCESS_AUD": "d9c971fada72b860273c91d805c70f07a73ccf1596aa81ff986ff3141d36619d",
+        "CF_ACCESS_ISS": "https://grasp-work.cloudflareaccess.com",
+        "ENTRA_CLIENT_ID": "01228906-bd5b-488e-b7c1-720f4dc12dc2",
+        "GOOGLE_CLIENT_ID": "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
+        "CLIENT_DOMAIN": "staging.ongrasp.app",
+        "ADMIN_HOST": "admin.staging.ongrasp.app",
+        "OAUTH_RELAY": "on",
       },
       "d1_databases": [
         {
