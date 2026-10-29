@@ -11,6 +11,10 @@ import type {
   AdminKickoffView,
 } from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type {
+  ModelTransportReport,
+  ModelTransportReportRequest,
+} from "@grasp-os/shared/model-transport-report";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
 export const base = "https://api.cloudflare.com/client/v4";
@@ -196,6 +200,17 @@ export interface AccountState {
   ask?: AdminAskAnswer | "no_model";
   /** The questions its core took, as each signed request sent them. */
   asked: AdminAskRequest[];
+  /**
+   * What its core's model gateway works out of its transport, which its
+   * model transport report says: the route each allowed model takes, how
+   * each transport fared, and a probe's outcome when one is asked for.
+   * None unless set.
+   */
+  modelTransport?: Partial<
+    Pick<ModelTransportReport, "routes" | "health" | "probe">
+  >;
+  /** What each model transport report request its core took asked. */
+  modelTransportAsks: ModelTransportReportRequest[];
   /**
    * What its core answers the admin's signed kickoff request with
    * (@grasp-os/shared/admin-kickoff): the kickoff as the admin shows it,

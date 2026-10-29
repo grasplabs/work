@@ -7,6 +7,7 @@ import {
   platformTransports,
   setPlatformModelTransport,
 } from "../src/admin/platform-ai.ts";
+import { clientModelTransport } from "../src/clients/model-transport.ts";
 import { setModelTransport } from "../src/clients/settings.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
@@ -18,14 +19,14 @@ import {
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
+import { page } from "./pages.ts";
 import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // How a client's core reaches its models, from the admin: the provider
 // keys a deploy gives it (only those its own transport names, from the
-// store's), what staff set, where its Setup says its AI runs, and the
-// hosting policy's check that its AI stays within the policy, from what
-// its core reports.
+// store's), what staff set, and where its Setup says its AI runs, from
+// what its core reports.
 
 const token = "test-deployer-token-transport-4b8e17";
 const cloudflare = mockCloudflareApi(token);
@@ -42,6 +43,16 @@ const coreSecret = (account: AccountState, name: string): unknown => {
   const value = core?.versions.at(-1)?.secrets.get(name);
   return value === undefined ? undefined : JSON.parse(value);
 };
+
+/** The part of a page titled `title`: from its label to its end. */
+const sectionOf = (html: string, title: string): string => {
+  const at = html.indexOf(`aria-label="${title}"`);
+  return at === -1 ? "" : html.slice(at, html.indexOf("</section>", at));
+};
+
+/** `html` without its tags, so words split by markup read as one line. */
+const textOf = (html: string): string =>
+  html.replaceAll(/<[^>]+>/gu, "").replaceAll("&#x27;", "'");
 
 /** Sets client `clientId`'s `MODEL_TRANSPORT` as stored. */
 const storeTransport = async (
@@ -316,6 +327,36 @@ describe("a client's model transport, as staff set it", () => {
 });
 
 describe("the platform's default model transport", () => {
+  useStoreSecrets({ deployer: token });
+
+  it("shows each residency's default on Platform's AI page, the built-in one where staff set none", async () => {
+    await db.delete(platformSettings);
+    await setPlatformModelTransport(env, staff, {
+      residency: "global",
+      transport: {
+        primary: { kind: "openrouter", key: "openrouter" },
+        failover: [{ kind: "cloudflare-ai-gateway" }],
+      },
+    });
+
+    const shown = await page("/platform/ai");
+    const eu = textOf(sectionOf(shown.html, "EU organizations"));
+    const global = textOf(
+      sectionOf(shown.html, "Organizations whose AI may run anywhere")
+    );
+    await db.delete(platformSettings);
+
+    expect({
+      status: shown.status,
+      eu: eu.includes(
+        "The built-in default: The providers' own APIs: Claude in Amazon Bedrock, EU."
+      ),
+      global: global.includes(
+        "OpenRouter. Fails over to Cloudflare AI Gateway."
+      ),
+    }).toStrictEqual({ status: 200, eu: true, global: true });
+  });
+
   it("sets each residency's default audited once with what it replaced, and takes it away again", async () => {
     await db.delete(platformSettings);
     const earlier = await eventsOf("platform.model_transport");
@@ -378,6 +419,136 @@ describe("the platform's default model transport", () => {
             to: "built-in",
           },
         },
+      ],
+    });
+  });
+});
+
+/** Bedrock in Frankfurt, reached directly: an EU route. */
+const bedrockRoute = {
+  model: "bedrock-eu/claude-sonnet-5-5",
+  transport: "direct",
+  provider: "bedrock-eu",
+  host: "bedrock-mantle.eu-central-1.api.aws",
+  route: "direct/bedrock-eu",
+  region: "eu-central-1",
+  allowed: true,
+} as const;
+
+/** Bedrock reached through AI Gateway, which isn't pinned to the EU. */
+const gatewayRoute = {
+  model: "bedrock-eu/claude-sonnet-5-5",
+  transport: "cloudflare-ai-gateway",
+  provider: "bedrock-eu",
+  host: "workers-binding.ai",
+  route: "cloudflare-ai-gateway/bedrock-eu",
+  region: "eu-central-1",
+  allowed: false,
+} as const;
+
+describe("where a client's AI runs, as its Setup says", () => {
+  useStoreSecrets({ deployer: token });
+
+  it("says its AI runs in the EU when its core reaches its models in Bedrock's EU profile", async () => {
+    const release = await placedRelease("feat(core): EU AI");
+    const { clientId, account } = await livePlacedClient(
+      cloudflare,
+      1,
+      release
+    );
+    account.modelTransport = {
+      routes: [bedrockRoute],
+      health: [
+        {
+          transport: "direct",
+          lastOkAt: Date.parse("2026-10-29T08:00:00Z"),
+          lastFailedAt: null,
+          lastFailure: null,
+          lastStatus: null,
+        },
+      ],
+    };
+
+    const status = await page(`/organizations/${clientId}/setup`);
+    const ai = textOf(sectionOf(status.html, "AI"));
+
+    expect({
+      ai: [
+        "AI runs in the EU (Amazon Bedrock in the EU (Frankfurt, EU inference profile)).",
+        "The built-in default for EU organizations",
+        "Only in the EU",
+        "Amazon Web Services: Amazon Bedrock: runs Claude",
+        "direct: last worked 2026-10-29 08:00 UTC, never failed.",
+      ].map((text) => ai.includes(text)),
+      missingKeys: ai.includes("Missing keys"),
+    }).toStrictEqual({
+      ai: [true, true, true, true, true],
+      missingKeys: false,
+    });
+  });
+
+  it("says an EU organization's AI can't run through AI Gateway, and names the keys its core lacks", async () => {
+    const release = await placedRelease("feat(core): AI Gateway in the EU");
+    const { clientId, account } = await livePlacedClient(
+      cloudflare,
+      1,
+      release
+    );
+    await setModelTransport(env, staff, {
+      clientId,
+      transport: {
+        primary: { kind: "cloudflare-ai-gateway" },
+        failover: [{ kind: "direct", anthropic: { key: "acme-anthropic" } }],
+      },
+    });
+    await deployPlaced(clientId, release);
+    account.modelTransport = { routes: [gatewayRoute] };
+
+    const status = await page(`/organizations/${clientId}/setup`);
+    const ai = textOf(sectionOf(status.html, "AI"));
+
+    expect({
+      ai: [
+        "AI can't run: no allowed model is reached in the EU (Amazon Bedrock in the EU, reached through AI Gateway, which isn't pinned to the EU).",
+        "Its own setting",
+        "acme-anthropic: not in MODEL_PROVIDER_KEYS",
+      ].map((text) => ai.includes(text)),
+    }).toStrictEqual({ ai: [true, true, true] });
+  });
+
+  it("asks its core for a probe as the staff member checking, and shows its metadata", async () => {
+    const release = await placedRelease("feat(core): AI probe");
+    const { clientId, account } = await livePlacedClient(
+      cloudflare,
+      1,
+      release
+    );
+    const probe = {
+      model: "bedrock-eu/claude-sonnet-5-5",
+      ok: true,
+      error: null,
+      transport: "direct",
+      region: "eu-central-1",
+      ms: 812,
+    };
+    account.modelTransport = { routes: [bedrockRoute], probe };
+
+    const read = await clientModelTransport(env, clientId);
+    const checked = await clientModelTransport(env, clientId, staff);
+
+    expect({
+      read: read?.report?.probe,
+      checked: checked?.report?.probe,
+      asked: account.modelTransportAsks.map(({ probe: probed, staff: by }) => ({
+        probed,
+        by,
+      })),
+    }).toStrictEqual({
+      read: null,
+      checked: probe,
+      asked: [
+        { probed: false, by: undefined },
+        { probed: true, by: staff.email },
       ],
     });
   });

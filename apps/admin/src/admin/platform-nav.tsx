@@ -1,7 +1,8 @@
 /**
  * Platform's own places, as its pages link them: its overview (the
  * Platform page), every release the admin imported, every rollout, the
- * offboarded clients and the hosting destinations,
+ * offboarded clients, the hosting destinations and the default ways
+ * clients reach their models (AI),
  * each a page of its own under Platform, as the admin's Releases and
  * Rollouts pages were before the admin took them in.
  */
@@ -73,6 +74,13 @@ export const PlatformNav = () => (
       to="/platform/destinations"
     >
       Destinations
+    </Link>
+    <Link
+      activeProps={{ className: activeTab }}
+      inactiveProps={{ className: tab }}
+      to="/platform/ai"
+    >
+      AI
     </Link>
   </nav>
 );

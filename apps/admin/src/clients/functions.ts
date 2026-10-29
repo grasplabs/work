@@ -19,6 +19,7 @@ import { applySettings } from "./apply.ts";
 import { clientGrid, defaultLiveOptions, gridLive } from "./grid.ts";
 import type { LiveStatus } from "./grid.ts";
 import { clientModelSpend } from "./model-spend.ts";
+import { clientModelTransport } from "./model-transport.ts";
 import { clientQuotaPolicy } from "./quota-policy.ts";
 import {
   modelSpendCeilingInputSchema,
@@ -116,6 +117,26 @@ export const fetchClientQuotaPolicy = createServerFn({ method: "GET" })
 export const fetchClientModelSpend = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }) => await clientModelSpend(env, data.clientId));
+
+/**
+ * A client's AI: how its core reaches its models and where they run,
+ * its core read live; null when there's no such client.
+ */
+export const fetchClientModelTransport = createServerFn({ method: "GET" })
+  .validator(clientSchema)
+  .handler(async ({ data }) => await clientModelTransport(env, data.clientId));
+
+/**
+ * A client's AI as its core reports it now, after one small model call
+ * through its gateway made for the staff member asking, whom core's audit
+ * log names; null when there's no such client.
+ */
+export const checkModelTransportFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await clientModelTransport(env, data.clientId, context.staff)
+  );
 
 export const setRingFn = createServerFn({ method: "POST" })
   .validator(ringInputSchema)

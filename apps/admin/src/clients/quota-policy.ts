@@ -86,15 +86,24 @@ export interface QuotaPolicyRequest {
 
 /**
  * What client core answers at `report.path`, signed for with a key derived
- * for `report.purpose` alone; null when its core didn't give it (refused
- * it, a release from before the report, or an answer that isn't one).
- * Throws when the request fails without an answer.
+ * for `report.purpose` alone, asked with `report.body` besides when it was
+ * sent; null when its core didn't give it (refused it, a release from
+ * before the report, or an answer that isn't one). Throws when the
+ * request fails without an answer.
  */
 export const signedCoreReport = async <T>(
   { core, routerSecret, authSecret, signal }: QuotaPolicyRequest,
-  report: { path: string; purpose: string; schema: z.ZodType<T> }
+  report: {
+    path: string;
+    purpose: string;
+    schema: z.ZodType<T>;
+    body?: Readonly<Record<string, unknown>>;
+  }
 ): Promise<T | null> => {
-  const body = JSON.stringify({ sentAt: new Date().toISOString() });
+  const body = JSON.stringify({
+    ...report.body,
+    sentAt: new Date().toISOString(),
+  });
   const key = await hkdfHmacKey(authSecret, report.purpose, ["sign"]);
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
@@ -136,7 +145,8 @@ export const quotaPolicyReportOf = async (
 
 /**
  * Asks active client `clientId`'s core through the router's route, as
- * `ask` does, within the grid's deadline; null when it can't be asked
+ * `ask` does, within the grid's deadline unless `timeoutMs` gives another;
+ * null when it can't be asked
  * (no domain, a secret missing, no route) or doesn't answer, logged as
  * `<what>.unread`. Never throws for its core.
  */
@@ -144,14 +154,15 @@ export const askClientCore = async <T>(
   env: Env,
   clientId: string,
   what: string,
-  ask: (request: QuotaPolicyRequest) => Promise<T | null>
+  ask: (request: QuotaPolicyRequest) => Promise<T | null>,
+  timeoutMs = healthTimeoutMs
 ): Promise<T | null> => {
   const domain = clientDomain(env);
   if (domain === null) {
     return null;
   }
   return await within(
-    healthTimeoutMs,
+    timeoutMs,
     async (signal) => {
       const secrets = await ifStored(async () => await deploySecrets(env));
       if (secrets === null) {

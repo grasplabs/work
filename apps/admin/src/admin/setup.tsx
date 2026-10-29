@@ -49,6 +49,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
+import type { ClientModelTransport } from "../clients/model-transport.ts";
 import { QuotaPolicyCard } from "../clients/quota-policy-card.tsx";
 import type { ClientQuotaPolicy } from "../clients/quota-policy.ts";
 import type { ClientSetup } from "../clients/setup.ts";
@@ -63,6 +64,7 @@ import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
+import { AiSection } from "./ai-section.tsx";
 import { ringWords } from "./platform-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
@@ -826,6 +828,7 @@ const Status = ({
   view,
   quotaPolicy,
   modelSpend,
+  ai,
   hosting,
   releases,
   refresh,
@@ -839,6 +842,8 @@ const Status = ({
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
   modelSpend: Promise<ModelSpendReport | null>;
+  /** Its AI, its core read live and not awaited; null when it couldn't be read. */
+  ai: Promise<ClientModelTransport | null>;
   hosting: ClientHostingView | null;
   releases: readonly { id: string; notes: string }[];
   refresh: Refresh;
@@ -870,6 +875,16 @@ const Status = ({
       </SetupSection>
     ) : null}
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
+    {setup.provisioning.client === null ? null : (
+      <AiSection
+        active={setup.provisioning.client.status === "active"}
+        ai={ai}
+        clientId={clientId}
+        configPending={setup.configPending}
+        pinned={setup.provisioning.client.pinnedReleaseId}
+        refresh={refresh}
+      />
+    )}
     {setup.account === null ? null : (
       <ModelSpend
         ceiling={setup.account.modelSpendCeiling}
@@ -1813,6 +1828,7 @@ export const OrgSetup = ({
   view,
   quotaPolicy,
   modelSpend,
+  ai,
   releases,
   hosting,
 }: {
@@ -1824,6 +1840,8 @@ export const OrgSetup = ({
   quotaPolicy: Promise<ClientQuotaPolicy | null>;
   /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
   modelSpend: Promise<ModelSpendReport | null>;
+  /** Its AI, its core read live and not awaited; null when it couldn't be read. */
+  ai: Promise<ClientModelTransport | null>;
   /** Every imported release, newest first. */
   releases: readonly { id: string; notes: string }[];
   hosting: ClientHostingView | null;
@@ -1853,6 +1871,7 @@ export const OrgSetup = ({
       <TabsContent value="status">
         <div className="flex flex-col gap-6 pt-4">
           <Status
+            ai={ai}
             clientId={clientId}
             hosting={hosting}
             needs={needs}

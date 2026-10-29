@@ -34,6 +34,17 @@ import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
+  modelProviderKeysSchema,
+  modelTransportConfigSchema,
+  providerKeysNamed,
+} from "@grasp-os/shared/model-transport";
+import {
+  modelTransportReportPath,
+  modelTransportReportPurpose,
+  modelTransportReportRequestSchema,
+} from "@grasp-os/shared/model-transport-report";
+import type { ModelTransportReport } from "@grasp-os/shared/model-transport-report";
+import {
   clientsNamespace,
   platformWorkerName,
   stages,
@@ -335,6 +346,82 @@ const answerConnectVersion = async (
   return version === null
     ? Response.json({ ok: false }, { status: 503 })
     : Response.json({ ok: true, version });
+};
+
+/** The JSON var `name` a version was deployed with, if it has one. */
+const jsonVarOf = (version: VersionState, name: string): unknown => {
+  const bindings = z
+    .array(
+      z
+        .object({
+          type: z.string(),
+          name: z.string(),
+          json: z.unknown().optional(),
+        })
+        .loose()
+    )
+    .safeParse(version.metadata.bindings);
+  return bindings.success
+    ? bindings.data.find(
+        (binding) => binding.type === "json" && binding.name === name
+      )?.json
+    : undefined;
+};
+
+/**
+ * What a client's core answers the admin's model transport report request
+ * with, as core does (core's src/model-transport-report.ts): the
+ * transport its live version was deployed with, the keys it names that
+ * its `MODEL_PROVIDER_KEYS` secret lacks, and the routes, health and probe
+ * the account's `modelTransport` says (each the gateway's to work out,
+ * from catalogs the fake doesn't have). 403 unless the signature, with the
+ * key its live version's auth secret gives, checks out and the request
+ * parses. Records what each request asked (`modelTransportAsks`).
+ */
+const answerModelTransport = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    modelTransportReportPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = modelTransportReportRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  account.modelTransportAsks.push(asked.data);
+  const config = modelTransportConfigSchema.safeParse(
+    jsonVarOf(live, "MODEL_TRANSPORT")
+  );
+  const keys = modelProviderKeysSchema.safeParse(
+    JSON.parse(live.secrets.get("MODEL_PROVIDER_KEYS") ?? "{}")
+  );
+  const held = keys.success ? Object.keys(keys.data) : [];
+  const shown = account.modelTransport ?? {};
+  return Response.json({
+    valid: config.success,
+    residency: config.data?.residency ?? "global",
+    primary: config.data?.primary.kind ?? null,
+    failover: config.data?.failover.map(({ kind }) => kind) ?? [],
+    routes: shown.routes ?? [],
+    missingKeys: config.success
+      ? providerKeysNamed(config.data).filter((name) => !held.includes(name))
+      : [],
+    health: shown.health ?? [],
+    probe: asked.data.probe ? (shown.probe ?? null) : null,
+  } satisfies ModelTransportReport);
 };
 
 /** None begun: what a core answers that has no onboarding. */
@@ -678,6 +765,7 @@ const signedPosts: ReadonlyMap<
   [connectVersionPath, answerConnectVersion],
   [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
+  [modelTransportReportPath, answerModelTransport],
 ]);
 
 /**
@@ -1044,6 +1132,7 @@ export const fakeCloudflareApi = (token: string) => {
       adminReaders: [],
       asked: [],
       kickoffAsks: [],
+      modelTransportAsks: [],
     };
     accounts.set(account.id, account);
     return account;
