@@ -17,3 +17,6 @@ test-results/
 release-out/
 wrangler.deploy.jsonc
 scripts/lab/out/
+
+# Cloudflare cf CLI build output and generated types (apps/admin)
+.cloudflare/

@@ -13,6 +13,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, isRemoved, notRemoved } from "./auth/auth.ts";
 import { directoryProviderId } from "./auth/config.ts";
+import { personalWorkspaceId } from "./chats-rpc.ts";
 import {
   accounts,
   erasedSubjects,
@@ -22,12 +23,14 @@ import {
   chatWorkflowOffers,
   invitations,
   notifications,
+  chatAudiences,
   personErasureAreas,
   personErasures,
   sessions,
   teamMembers,
   users,
 } from "./db/core/schema.ts";
+import { workspace } from "./durable-objects.ts";
 import {
   emailHashOf,
   emailKeyVersion,
@@ -253,10 +256,56 @@ const channels: ErasureStep = {
 };
 
 /**
+ * Their personal connections, in connect, the only place tokens live
+ * (GRA-1183): disconnected again, each grant revoked at its provider, then
+ * emptied of who their accounts were and of what calls through them
+ * returned (connect's person-erasure.ts). Connect erases once, however
+ * often it is asked; the area is complete once it answered.
+ */
+const connect: ErasureStep = {
+  area: "connect",
+  erase: async (env, userId) => {
+    await env.CONNECT.erasePersonal({ ownerUserId: userId });
+    await completed(drizzle(env.DB), userId, "connect");
+  },
+};
+
+/**
+ * Their workspace (GRA-1181): the object that holds their chats, their
+ * messages, drafts and attachments, their projects, dashboard and email
+ * settings, with what the Brain captured of their chats, any connection
+ * granted in them, and the stores their drafts' previews wrote to. It is
+ * theirs alone (`personalWorkspaceId`), and empties itself
+ * (`Workspace.erasePerson`); the area is complete once it did, and its
+ * chats' audiences are gone.
+ */
+const workspaceArea: ErasureStep = {
+  area: "workspace",
+  erase: async (env, userId) => {
+    await workspace(env, personalWorkspaceId(userId)).erasePerson(userId);
+    const db = drizzle(env.DB);
+    // Who was in their chats, kept for each chat's agent (knowledge/
+    // access.ts), goes with the chats. Shared chats elsewhere keep them in
+    // their audience: those are the company's.
+    await db.batch([
+      db
+        .delete(chatAudiences)
+        .where(eq(chatAudiences.workspaceId, personalWorkspaceId(userId))),
+      completed(db, userId, "workspace"),
+    ]);
+  },
+};
+
+/**
  * The erasure's areas, in the order they run. Each area's own leaf of
  * GRA-903 adds its step here.
  */
-const steps: readonly ErasureStep[] = [identity, channels];
+const steps: readonly ErasureStep[] = [
+  identity,
+  channels,
+  connect,
+  workspaceArea,
+];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */
 const requireMemberAdmin = (by: Identity): void => {

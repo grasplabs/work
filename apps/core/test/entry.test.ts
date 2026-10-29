@@ -1,4 +1,5 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { connectVersionPath } from "@grasp-os/shared/provision-probe";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { createExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
@@ -40,7 +41,14 @@ const assetsThat = (handle: (request: Request) => Response): Fetcher => ({
 
 describe("router secret", () => {
   it("refuses every path without the secret, static files included", async () => {
-    const paths = ["/", "/index.html", "/health", "/rpc", "/api/x"];
+    const paths = [
+      "/",
+      "/index.html",
+      "/health",
+      connectVersionPath,
+      "/rpc",
+      "/api/x",
+    ];
     const errors = await Promise.all(
       paths.map(
         async (path) =>

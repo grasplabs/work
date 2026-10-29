@@ -126,6 +126,7 @@
     "./release": "./src/release.ts",
     "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",
+    "./names": "./src/names.ts",
     "./router": "./src/router.ts",
     "./rpc": "./src/rpc.ts",
     "./rpc-accounting": "./src/rpc-accounting.ts",
@@ -155,6 +156,7 @@
     "./waiting": "./src/waiting.ts",
     "./widgets": "./src/widgets.ts",
     "./workflow-diagrams": "./src/workflow-diagrams.ts",
+    "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflows": "./src/workflows.ts"

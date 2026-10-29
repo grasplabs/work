@@ -4,6 +4,8 @@ import { requestIdHeader } from "@grasp-os/shared/http";
 import { onboardingSummaryPurpose } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import {
+  connectVersionPath,
+  connectVersionPurpose,
   provisionProbePath,
   provisionProbePurpose,
   provisionProbeSchema,
@@ -19,6 +21,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { clock, clockTasks } from "../src/clock.ts";
 import worker from "../src/index.ts";
+import { connectVersionMetadata } from "./connect-providers.ts";
 import { coreOrigin } from "./sign-in.ts";
 
 // The admin's provisioning probe (src/provision-probe.ts). The ways it
@@ -162,6 +165,8 @@ describe("the console's provisioning probe", () => {
       cache: "no-store",
       answer: {
         version: env.CF_VERSION_METADATA.id,
+        // Connect's, as connect named it over its binding.
+        connectVersion: connectVersionMetadata.id,
         clientId,
         bindings: {
           DB: true,
@@ -311,5 +316,103 @@ describe("the console's provisioning probe", () => {
     expect(provisionProbeSchema.parse(await response.json())).toMatchObject({
       clientId: null,
     });
+  });
+});
+
+/** Connect as core's binding reaches it, with `version` answering as given. */
+const connectWhose = (version: () => Promise<string | null>) =>
+  new Proxy(env.CONNECT, {
+    get: (target, property): unknown =>
+      property === "version" ? version : Reflect.get(target, property),
+  });
+
+// The admin's request for connect's version (connectVersionResponse), on
+// the probe's model: only the admin's, signed for this purpose, answers;
+// anyone else, the router's secret alone included, is answered as a path
+// core has no route for.
+describe("the admin's request for connect's version", () => {
+  /** The admin's request, signed with this purpose's key, to core with `coreEnv`. */
+  const asked = async (coreEnv = deployed): Promise<Response> => {
+    const body = bodyAt();
+    return await send({
+      path: connectVersionPath,
+      body,
+      signature: await signatureOf(
+        body,
+        env.BETTER_AUTH_SECRET,
+        connectVersionPurpose
+      ),
+      coreEnv,
+    });
+  };
+
+  it("names the version connect answers as, as connect names it, never cached", async () => {
+    const response = await asked();
+    expect({
+      status: response.status,
+      cache: response.headers.get("cache-control"),
+      body: await response.json(),
+    }).toStrictEqual({
+      status: 200,
+      cache: "no-store",
+      body: { ok: true, version: connectVersionMetadata.id },
+    });
+  });
+
+  it("answers the public, and anything the admin didn't sign for it, as a path core has no route for", async () => {
+    const fresh = bodyAt();
+    const old = bodyAt(new Date(Date.now() - 10 * 60 * 1000).toISOString());
+    const refused: Sent[] = [
+      // Through the router, as anyone's request comes: its secret alone.
+      { body: fresh },
+      { method: "GET" },
+      { body: fresh, signature: "0".repeat(64) },
+      // The probe's signature: this client's key for another purpose.
+      { body: fresh, signature: await signatureOf(fresh) },
+      // Caught on its way and sent again later.
+      {
+        body: old,
+        signature: await signatureOf(
+          old,
+          env.BETTER_AUTH_SECRET,
+          connectVersionPurpose
+        ),
+      },
+    ];
+
+    const answers = await Promise.all(
+      refused.map(async (request) => [
+        await seen(await send({ ...request, path: connectVersionPath })),
+        await seen(await send({ ...request, path: "/platform/nothing" })),
+      ])
+    );
+
+    for (const [askedFor, unknown] of answers) {
+      expect(askedFor).toStrictEqual(unknown);
+    }
+  });
+
+  it("names no version for a connect that doesn't answer, or has none", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const responses = await Promise.all(
+      [
+        connectWhose(
+          async () => await Promise.reject(new Error("connect unavailable"))
+        ),
+        connectWhose(async () => await Promise.resolve(null)),
+      ].map(async (connect) => await asked({ ...deployed, CONNECT: connect }))
+    );
+    warnings.mockRestore();
+    await expect(
+      Promise.all(
+        responses.map(async (response) => ({
+          status: response.status,
+          body: await response.json(),
+        }))
+      )
+    ).resolves.toStrictEqual([
+      { status: 503, body: { ok: false } },
+      { status: 503, body: { ok: false } },
+    ]);
   });
 });

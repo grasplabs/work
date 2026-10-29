@@ -214,6 +214,30 @@ const eventsFor = async (connectionId: string) => {
 };
 
 describe("a side effect from chat", () => {
+  it("isn't held for someone whose erasure began as it was asked, on a shared connection too", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Their erasure began (connect's person-erasure.ts marks it first)
+    // while the call was on its way: nothing is held for them.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(anna.userId, Date.now())
+      .run();
+
+    const asked = await outcome(hold(inChat(anna), mail(connectionId)));
+
+    expect({
+      asked,
+      ran: server.ran,
+      held: await waitingFor(anna),
+    }).toStrictEqual({
+      asked: "capability.invalid",
+      ran: [],
+      held: [],
+    });
+  });
+
   it("is held, not run, and its person sees the exact call", async () => {
     const anna = someone();
     const connectionId = await addConnection();

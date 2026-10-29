@@ -30,6 +30,7 @@ import type {
   Disconnect,
   RequireClassRights,
   DisconnectPersonal,
+  ErasePersonal,
   FinishConnection,
   HeldCall,
   HeldOutcome,
@@ -151,6 +152,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
+import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -292,6 +294,16 @@ export default class Connect
     return await probeBindings(this.env);
   }
 
+  /**
+   * The version answering, from its version metadata; null where there is
+   * none (plain workerd). Core names it to the admin's signed requests
+   * alone (core's src/provision-probe.ts): in a Workers for
+   * Platforms namespace, how the admin reads which version connect runs.
+   */
+  version(): string | null {
+    return this.env.CF_VERSION_METADATA?.id ?? null;
+  }
+
   // The audit outbox (src/audit.ts). Core's clock takes the events
   // connect recorded, appends them to the audit log, then acknowledges them,
   // with those the log can't take, which connect moves aside.
@@ -372,6 +384,12 @@ export default class Connect
     request: DisconnectPersonal
   ): Promise<{ disconnected: number }> {
     return await disconnectPersonal(this.env, request);
+  }
+
+  async erasePersonal(
+    request: ErasePersonal
+  ): Promise<{ connections: number }> {
+    return await erasePersonal(this.env, request);
   }
 
   async abandonFlow(state: string): Promise<void> {

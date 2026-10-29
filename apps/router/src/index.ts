@@ -19,6 +19,7 @@ import {
   mailIngressRequest,
   mailRejectedStatus,
 } from "@grasp-os/shared/mail-ingress";
+import { stageNamed, stageOfHost } from "@grasp-os/shared/names";
 import {
   deriveRouterSecret,
   routerHostKey,
@@ -78,7 +79,18 @@ const loadRoute = async (host: string, env: Env): Promise<Route | null> => {
   };
 };
 
+/**
+ * The route of `host`, or null for none. A host of the other stage is
+ * never this router's, whatever its map holds: staging's clients are
+ * below production's domain (@grasp-os/shared/names, `stageOfHost`). A
+ * router whose STAGE names neither stage routes nothing: it never takes
+ * itself for production's.
+ */
 const routeFor = async (host: string, env: Env): Promise<Route | null> => {
+  const stage = stageNamed(env.STAGE);
+  if (stage === undefined || stageOfHost(host) !== stage) {
+    return null;
+  }
   const cached = routes.get(host, Date.now());
   if (cached !== undefined) {
     return cached.value;

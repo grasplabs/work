@@ -6,19 +6,15 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-frame-3b7e21";
-const tenantToken = "test-tenant-admin-token-admin-frame-8d0f54";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -33,7 +29,7 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
 const recordClient = async (
-  status: "provisioning" | "active",
+  status: "provisioning",
   clientId = `client-${crypto.randomUUID().slice(0, 8)}`
 ) => {
   const account = cloudflare.addAccount(`Acme ${clientId}`);
@@ -45,7 +41,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        accountId: account.id,
         status,
         createdAt: now,
         updatedAt: now,
@@ -56,16 +51,13 @@ const recordClient = async (
   return { clientId, name: `Acme ${clientId}`, account };
 };
 
-/** An active client running a new release, as a deploy made it live. */
+/** A live placed client running a new release, as its operation made it. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): the frame" });
-  await importReleases(env.RELEASES, db);
-  const client = await recordClient("active");
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, client.clientId, release.id)
-  );
-  return client;
+  const release = await placedRelease("feat(core): the frame");
+  const { clientId, account } = await livePlacedClient(cloudflare, 1, release, {
+    signIn: null,
+  });
+  return { clientId, name: `Acme ${clientId}`, account };
 };
 
 /**
@@ -210,7 +202,7 @@ const integrationsOf = ({
 });
 
 describe("the admin's frame", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // Only each test's own clients are listed: an earlier test's accounts
   // are gone from the fake, and the overview counts every client.
   beforeEach(async () => {
