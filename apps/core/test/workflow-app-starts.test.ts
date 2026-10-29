@@ -81,6 +81,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // Starting independent workflows from an App's server functions
@@ -686,6 +687,9 @@ const ended = async (
   );
 
 const hour = 3_600_000;
+
+/** The sleep step a waiting fixture's run sleeps in. */
+const sleepStep = "task:pause";
 
 /** The outbox's entries as settled: whether they are, and as what. */
 const settledOf = async (store: OpenStore) => {
@@ -1326,6 +1330,52 @@ const agentOf = async (
   return { agent, permissionId: asked.id };
 };
 
+/**
+ * A real chat of Bob's whose code read an everyone handbook, and its
+ * agent, granted `write` on the fixture's App and `read` on the handbook
+ * (`readId`).
+ */
+const chatThatRead = async (fx: Fixture) => {
+  const { agent: granted } = await agentOf(fx);
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const stub = workspace(env, workspaceId);
+  const created = await stub.createChat(
+    "Questions",
+    fx.bob.userId,
+    workspaceId
+  );
+  const agent: CallingAgent = { ...granted, workspaceId, chatId: created.id };
+  const handbook = await createCollection(env, fx.admin, {
+    name: `Handbook ${unique()}`,
+    access: "everyone",
+  });
+  await runInDurableObject(stub, (_object, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+      created.id,
+      handbook.id
+    );
+  });
+  const asked = await requestPermission(
+    env,
+    fx.ada,
+    {
+      subject: { type: "agent", agentId: agent.agentId },
+      object: { type: "collection", collectionId: handbook.id },
+      actions: ["read"],
+      binding: "HANDBOOK",
+    },
+    rolesOf(fx.ada)
+  );
+  await grantPermission(env, fx.admin, asked.id, { version: null });
+  return {
+    agent,
+    stub,
+    chat: { id: created.id, read: handbook.id },
+    readId: asked.id,
+  };
+};
+
 describe("what a start rechecks, and records", () => {
   it("starts a restricted App's runs restricted, now and from its outbox, and its unrestricted starts not", async () => {
     const fx = await fixture();
@@ -1421,35 +1471,7 @@ describe("what a start rechecks, and records", () => {
 
   it("holds the run an agent's call started to what its chat had read: refused once the agent may no longer read it", async () => {
     const fx = await fixture();
-    const { agent: granted } = await agentOf(fx);
-    // A real chat of Bob's, whose code read the handbook.
-    const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
-    const stub = workspace(env, workspaceId);
-    const chat = await stub.createChat("Questions", fx.bob.userId, workspaceId);
-    const agent: CallingAgent = { ...granted, workspaceId, chatId: chat.id };
-    const handbook = await createCollection(env, fx.admin, {
-      name: `Handbook ${unique()}`,
-      access: "everyone",
-    });
-    await runInDurableObject(stub, (_object, state) => {
-      state.storage.sql.exec(
-        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
-        chat.id,
-        handbook.id
-      );
-    });
-    const asked = await requestPermission(
-      env,
-      fx.ada,
-      {
-        subject: { type: "agent", agentId: agent.agentId },
-        object: { type: "collection", collectionId: handbook.id },
-        actions: ["read"],
-        binding: "HANDBOOK",
-      },
-      rolesOf(fx.ada)
-    );
-    await grantPermission(env, fx.admin, asked.id, { version: null });
+    const { agent, stub, chat, readId } = await chatThatRead(fx);
     /** A run of the App's follow-up, as the agent's call starts it. */
     const ranFor = async () => {
       const started = await call(
@@ -1472,7 +1494,7 @@ describe("what a start rechecks, and records", () => {
     };
 
     const kept = await ranFor();
-    await revokePermission(env, fx.admin, asked.id);
+    await revokePermission(env, fx.admin, readId);
     const revoked = await ranFor();
     // A concurrent turn of the chat sees the revoke and withholds the
     // handbook, after the agent's call already took what it read.
@@ -1498,7 +1520,43 @@ describe("what a start rechecks, and records", () => {
       revoked: { status: "failed", code: "brain.revoked" },
       // Withheld from its chat since: still held to it, so refused too.
       withheld: { status: "failed", code: "brain.revoked" },
-      pinned: [{ source: handbook.id, chat: chat.id }],
+      pinned: [{ source: chat.read, chat: chat.id }],
+    });
+  });
+
+  it("refuses a run an agent's call started once its chat's read is revoked while it waits, before its output leaves", async () => {
+    const fx = await fixture(true);
+    const { agent, readId } = await chatThatRead(fx);
+    const started = await call(
+      fx,
+      fx.bob,
+      "requests.kickOff",
+      { who: "Bob" },
+      { agent }
+    );
+    const handle = started.ok
+      ? handleSchema["~standard"].validate(started.value)
+      : undefined;
+    const runId =
+      handle !== undefined && "value" in handle ? handle.value.runId : null;
+    if (runId === null) {
+      throw new Error("No run");
+    }
+    // Admitted and asleep, its source still readable.
+    await sleeping(runId, sleepStep);
+    await revokePermission(env, fx.admin, readId);
+    await woken(runId, sleepStep);
+    const run = await ended(fx, runId);
+
+    expect({
+      status: run.status,
+      code: run.status === "failed" ? (run.error?.code ?? null) : null,
+      output: run.output ?? null,
+    }).toStrictEqual({
+      // Revoked mid-run: what its input may carry never leaves it.
+      status: "failed",
+      code: "brain.revoked",
+      output: null,
     });
   });
 
