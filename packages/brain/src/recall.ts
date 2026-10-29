@@ -863,6 +863,109 @@ const usedAgain = async <C>(
 };
 
 /**
+ * The answer kept under `cacheKey`, as a new pack of `accessRevision`, once
+ * its use is checked again (`usedAgain`); nothing when none is kept or it
+ * no longer holds, which then goes.
+ */
+const answeredFromCache = async <C>(
+  brain: Brain<C>,
+  store: BrainStore<C>,
+  reader: C,
+  readers: MemoryReaders | undefined,
+  question: string,
+  told: readonly CollectionId[],
+  {
+    cacheKey,
+    accessRevision,
+    startedAt,
+  }: { cacheKey: string; accessRevision: string; startedAt: number }
+): Promise<
+  | { pack: MemoryPack; sources: CollectionId[]; provenance: Provenance }
+  | undefined
+> => {
+  const cached = answers.lookUp(cacheKey, brain.ports.clock().getTime());
+  if (cached === undefined) {
+    return undefined;
+  }
+  const provenance = await usedAgain(
+    brain,
+    store,
+    reader,
+    readers,
+    question,
+    told,
+    cached
+  );
+  if (provenance === undefined) {
+    answers.forget(cacheKey);
+    return undefined;
+  }
+  log.info("brain.recall", {
+    cache: "hit",
+    policy: cached.policy,
+    ms: brain.ports.clock().getTime() - startedAt,
+  });
+  return {
+    pack: {
+      id: crypto.randomUUID(),
+      contractVersion: brainContractVersion,
+      retrievalPolicyVersion: cached.policy,
+      items: cached.items,
+      sourceVersions: sourcesOf(cached.items),
+      conflicts: [],
+      gaps: cached.gaps,
+      coverage: cached.coverage,
+      truncated: cached.truncated,
+      warnings: [],
+      tokenCount: cached.tokenCount,
+      accessRevision,
+      indexGeneration,
+      createdAt: brain.ports.clock().toISOString(),
+    },
+    sources: provenance.collectionIds,
+    provenance,
+  };
+};
+
+/**
+ * Keeps `pack`'s answer under `cacheKey` at `now`: never a degraded read,
+ * nor a rerank asked for that didn't happen, so the next recall reads, or
+ * reranks, again.
+ */
+const keepAnswer = (
+  cacheKey: string,
+  pack: MemoryPack,
+  read: LanesRead,
+  memories: readonly KeptMemory[],
+  outcome: RerankOutcome,
+  now: Date
+): void => {
+  const rerankStands =
+    outcome === "reranked" || outcome === "not_asked" || outcome === "unneeded";
+  if (pack.coverage.state === "degraded" || !rerankStands) {
+    return;
+  }
+  const inPack = new Set(memories.map(memoryKey));
+  answers.keep(
+    cacheKey,
+    {
+      items: pack.items,
+      tokenCount: pack.tokenCount,
+      truncated: pack.truncated,
+      coverage: pack.coverage,
+      gaps: pack.gaps,
+      policy: pack.retrievalPolicyVersion,
+      memoryFound: (read.fulltext.state === "read"
+        ? (read.fulltext.memoryFound ?? [])
+        : []
+      ).filter((each) => inPack.has(memoryKey(each))),
+    },
+    pack.items.reduce((sum, { statement }) => sum + statement.length, 0),
+    now.getTime()
+  );
+};
+
+/**
  * `recall`, with every collection it read from: those its search reported
  * (a search records the collections it searched, found or not) and every
  * one it was told to read, so a caller that labels what it was handed
@@ -924,49 +1027,23 @@ export const recallWithSources = async <C>(
       indexGeneration,
       accessRevision,
       await recallGeneration(brain),
+      // The lanes the store reads: a vector index added changes answers.
+      store.findSimilar === undefined ? "no-vectors" : "vectors",
       query,
       collectionIds?.toSorted() ?? null,
       limits,
     ]);
-    const cached = answers.lookUp(cacheKey, brain.ports.clock().getTime());
-    if (cached !== undefined) {
-      const provenance = await usedAgain(
-        brain,
-        store,
-        reader,
-        readers,
-        query,
-        collectionIds ?? [],
-        cached
-      );
-      if (provenance !== undefined) {
-        log.info("brain.recall", {
-          cache: "hit",
-          policy: cached.policy,
-          ms: brain.ports.clock().getTime() - startedAt,
-        });
-        return {
-          pack: {
-            id: crypto.randomUUID(),
-            contractVersion: brainContractVersion,
-            retrievalPolicyVersion: cached.policy,
-            items: cached.items,
-            sourceVersions: sourcesOf(cached.items),
-            conflicts: [],
-            gaps: cached.gaps,
-            coverage: cached.coverage,
-            truncated: cached.truncated,
-            warnings: [],
-            tokenCount: cached.tokenCount,
-            accessRevision,
-            indexGeneration,
-            createdAt: brain.ports.clock().toISOString(),
-          },
-          sources: provenance.collectionIds,
-          provenance,
-        };
-      }
-      answers.forget(cacheKey);
+    const hit = await answeredFromCache(
+      brain,
+      store,
+      reader,
+      readers,
+      query,
+      collectionIds ?? [],
+      { cacheKey, accessRevision, startedAt }
+    );
+    if (hit !== undefined) {
+      return hit;
     }
     const remaining =
       limits.deadlineMs - (brain.ports.clock().getTime() - startedAt);
@@ -1023,27 +1100,7 @@ export const recallWithSources = async <C>(
       indexGeneration,
       createdAt: brain.ports.clock().toISOString(),
     };
-    // A degraded read isn't kept: the next recall reads again.
-    if (coverage.state !== "degraded") {
-      const inPack = new Set(memories.map(memoryKey));
-      answers.keep(
-        cacheKey,
-        {
-          items,
-          tokenCount,
-          truncated,
-          coverage,
-          gaps: pack.gaps,
-          policy: pack.retrievalPolicyVersion,
-          memoryFound: (read.fulltext.state === "read"
-            ? (read.fulltext.memoryFound ?? [])
-            : []
-          ).filter((each) => inPack.has(memoryKey(each))),
-        } satisfies KeptAnswer,
-        items.reduce((sum, { statement }) => sum + statement.length, 0),
-        brain.ports.clock().getTime()
-      );
-    }
+    keepAnswer(cacheKey, pack, read, memories, outcome, brain.ports.clock());
     log.info("brain.recall", {
       cache: "miss",
       policy: pack.retrievalPolicyVersion,
