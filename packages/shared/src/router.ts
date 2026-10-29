@@ -50,15 +50,6 @@ const isWorkersDevOrigin = (value: string): boolean => {
 };
 
 /**
- * The Workers for Platforms dispatch namespace the router and the admin
- * bind (`DISPATCHER`, both wrangler.jsonc files), in the account they run
- * in: every client placed on Workers for Platforms has its core's user
- * Worker there. A destination naming another namespace isn't reachable
- * through the binding, so the admin places no client in one.
- */
-export const clientDispatchNamespace = "grasp-os-clients";
-
-/**
  * A script's name in a Workers for Platforms dispatch namespace, as
  * Cloudflare takes one: lowercase letters, digits, `-` and `_`, starting
  * and ending with a letter or digit, at most 63 characters.

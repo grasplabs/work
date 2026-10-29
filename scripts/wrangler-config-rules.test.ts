@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { wranglerConfigErrors } from "./wrangler-config-rules.ts";
+import {
+  platformNameErrors,
+  sharedRateLimitIds,
+  wranglerConfigErrors,
+} from "./wrangler-config-rules.ts";
 
 const file = "apps/example/wrangler.jsonc";
 
@@ -94,5 +98,75 @@ describe("wrangler config rules", () => {
     ).toStrictEqual([
       "apps/example/wrangler.toml: use wrangler.jsonc, as every Worker here does.",
     ]);
+  });
+});
+
+/** A router config in both stages, with `overrides` merged over each. */
+const router = (overrides: { production?: object; staging?: object } = {}) =>
+  JSON.stringify({
+    name: "grasp-router",
+    vars: { STAGE: "production" },
+    ratelimits: [{ name: "A", namespace_id: "1001" }],
+    dispatch_namespaces: [
+      { binding: "DISPATCHER", namespace: "grasp-clients" },
+    ],
+    ...overrides.production,
+    env: {
+      staging: {
+        name: "grasp-router-staging",
+        vars: { STAGE: "staging" },
+        ratelimits: [{ name: "A", namespace_id: "2001" }],
+        dispatch_namespaces: [
+          { binding: "DISPATCHER", namespace: "grasp-clients-staging" },
+        ],
+        ...overrides.staging,
+      },
+    },
+  });
+const routerFile = "apps/router/wrangler.jsonc";
+
+describe("platform names", () => {
+  it("accept a platform config named as @grasp-os/shared/names does, in both stages", () => {
+    expect({
+      errors: platformNameErrors(routerFile, router()),
+      shared: sharedRateLimitIds([{ file: routerFile, text: router() }]),
+      other: platformNameErrors(file, router({ production: { name: "x" } })),
+    }).toStrictEqual({ errors: [], shared: [], other: [] });
+  });
+
+  it("refuse a staging Worker named or placed like production, and a rate limit id both stages share", () => {
+    const placedInProduction = router({
+      staging: {
+        dispatch_namespaces: [
+          { binding: "DISPATCHER", namespace: "grasp-clients" },
+        ],
+      },
+    });
+    const sharedLimit = router({
+      staging: { ratelimits: [{ name: "A", namespace_id: "1001" }] },
+    });
+    expect({
+      named: platformNameErrors(
+        routerFile,
+        router({ staging: { name: "grasp-router" } })
+      ),
+      placed: platformNameErrors(routerFile, placedInProduction),
+      shared: sharedRateLimitIds([{ file: routerFile, text: sharedLimit }]),
+      noStaging: platformNameErrors(
+        routerFile,
+        JSON.stringify({ name: "grasp-router", vars: { STAGE: "production" } })
+      ),
+    }).toStrictEqual({
+      named: [
+        `${routerFile} (env staging): name is grasp-router, not grasp-router-staging.`,
+      ],
+      placed: [
+        `${routerFile} (env staging): the dispatch namespace is grasp-clients, not grasp-clients-staging.`,
+      ],
+      shared: ["1001"],
+      noStaging: [
+        `${routerFile}: add env.staging, the staging platform's names.`,
+      ],
+    });
   });
 });

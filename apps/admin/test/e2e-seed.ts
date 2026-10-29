@@ -133,14 +133,19 @@ export const seedPlaced = async (
   await fillStore(tokens);
   const account = cloudflare.addAccount();
   const destinationId = `dedicated-${crypto.randomUUID().slice(0, 8)}`;
-  await saveDestination(adminDatabase(env.DB), staff, {
-    id: destinationId,
-    kind: "dedicated",
-    accountId: account.id,
-    namespace: null,
-    policies: ["eu-storage"],
-    capabilities: verified({}, evidence),
-  });
+  await saveDestination(
+    adminDatabase(env.DB),
+    staff,
+    {
+      id: destinationId,
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+      policies: ["eu-storage"],
+      capabilities: verified({}, evidence),
+    },
+    "production"
+  );
   const first = await placedRelease("feat(core): what it starts on", {
     core: "export default { core: 1 };",
     connect: "export default { connect: 1 };",

@@ -6,12 +6,9 @@
 // binds, with `props: { script }` the admin sets from the client's
 // inventory as it uploads core. The gateway forwards every method core
 // calls to that script alone. Account-per-client deployments and on-prem
-// keep their direct `CONNECT` service binding. The gateway reaches the
-// clients' dispatch namespace alone, the one the router binds
-// (`clientDispatchNamespace`, ./router.ts).
-
-/** The gateway Worker's script name, in the account the namespace is in. */
-export const connectGatewayScript = "grasp-os-connect-gateway";
+// keep their direct `CONNECT` service binding. Each stage has its own
+// gateway (`grasp-connect-gateway`, `-staging`, ./names.ts), which reaches
+// its stage's clients' dispatch namespace alone, the one its router binds.
 
 /** What the admin sets on a placed core's binding to the gateway. */
 export interface ConnectGatewayProps {

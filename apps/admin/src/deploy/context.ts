@@ -8,6 +8,8 @@
  * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
+import { clientsNamespace, stageOf } from "@grasp-os/shared/names";
+
 import type { ClientDispatcher } from "../clients/core-address.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
 import type { CloudflareApi, CloudflareApiOptions } from "../cloudflare/api.ts";
@@ -248,6 +250,8 @@ export interface DeployContext {
      * placed on Workers for Platforms is reached (hosting/operation.ts).
      */
     dispatcher?: ClientDispatcher;
+    /** The namespace `dispatcher` binds: its stage's (`clientsNamespace`). */
+    namespace?: string;
   };
 }
 
@@ -262,6 +266,11 @@ export const deployContext = async (env: Env): Promise<DeployContext> => {
     store: env.RELEASES,
     secrets: await deploySecrets(env),
     signInApps: signInApps(env),
-    router: { hosts: env.ROUTER_HOSTS, domain, dispatcher: env.DISPATCHER },
+    router: {
+      hosts: env.ROUTER_HOSTS,
+      domain,
+      dispatcher: env.DISPATCHER,
+      namespace: clientsNamespace(stageOf(env.STAGE)),
+    },
   };
 };

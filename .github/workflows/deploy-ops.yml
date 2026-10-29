@@ -1,8 +1,12 @@
-# Deploys the admin, router and connect gateway to Grasp's Cloudflare account, the one
-# staging's core and connect run in too: the admin holds a token for every
-# client, so it never changes on a merge. Run it by hand from main once
-# the change works in staging. Require a reviewer on the grasp-os-ops
-# environment in GitHub so a second person approves every run.
+# Deploys the admin, router and connect gateway to Grasp's Cloudflare
+# account: the admin holds a token for every client, so it never changes on
+# a merge. Run it by hand from main, once with stage "staging"
+# (grasp-admin-staging, grasp-router-staging and
+# grasp-connect-gateway-staging, serving grasp-clients-staging), then with
+# "production" once the change works there. Every name comes from
+# @grasp-os/shared/names. Require a reviewer on the grasp-os-ops and
+# grasp-os-ops-staging environments in GitHub so a second person approves
+# every run.
 #
 # Every run also copies the shared secrets (Grasp's OAuth app secrets and
 # Composio key) from 1Password into the ops account's Secrets Store, where
@@ -15,6 +19,11 @@ name: Deploy grasp-os-ops
 on:
   workflow_dispatch:
     inputs:
+      stage:
+        description: Which platform to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
       secrets-only:
         description: Only copy the shared secrets to Secrets Store; deploy nothing
         type: boolean
@@ -24,7 +33,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-grasp-os-ops
+  group: deploy-grasp-os-ops-${{ inputs.stage }}
   cancel-in-progress: false
 
 jobs:
@@ -33,7 +42,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: grasp-os-ops
+    environment: ${{ inputs.stage == 'production' && 'grasp-os-ops' || 'grasp-os-ops-staging' }}
+    env:
+      STAGE: ${{ inputs.stage }}
+      # The stage's 1Password Environment: ops, or ops-staging.
+      OPS: ${{ inputs.stage == 'production' && 'ops' || 'ops-staging' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,7 +63,7 @@ jobs:
       # kept in GitHub.
       - uses: ./.github/actions/load-1password
         with:
-          environment: ops
+          environment: ${{ env.OPS }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: CLOUDFLARE_API_TOKEN
           settings: CLOUDFLARE_ACCOUNT_ID SECRETS_STORE_ID
@@ -60,7 +73,7 @@ jobs:
       # Each is named as the Worker secret it becomes.
       - uses: ./.github/actions/load-1password
         with:
-          environment: ops
+          environment: ${{ env.OPS }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY
       # Secrets Store keeps each secret by an ID of its own: an existing one
@@ -123,33 +136,42 @@ jobs:
       - name: Create the admin database in the EU
         if: ${{ !inputs.secrets-only }}
         run: |
+          db=$(vp exec node scripts/platform-names.ts "$STAGE" adminDatabase)
           existing=$(vp exec wrangler d1 list --json)
-          jurisdiction=$(jq -r '.[] | select(.name == "grasp-os-admin") | .jurisdiction // "none"' <<< "$existing")
+          jurisdiction=$(jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"' <<< "$existing")
           if [ -z "$jurisdiction" ]; then
-            vp exec wrangler d1 create grasp-os-admin --jurisdiction eu
+            vp exec wrangler d1 create "$db" --jurisdiction eu
           elif [ "$jurisdiction" != "eu" ]; then
-            echo "::error::D1 database grasp-os-admin is not in the EU jurisdiction ($jurisdiction)"
+            echo "::error::D1 database $db is not in the EU jurisdiction ($jurisdiction)"
             exit 1
           fi
       # D1 migrations are additive, so the running admin keeps working on
       # the new schema until the deploy after them replaces it.
       - if: ${{ !inputs.secrets-only }}
-        run: vp run --filter @grasp-os/admin db:migrate
-      # Router first: the admin binds its hostname map, which the router's
-      # first deploy creates, and both need the account's Secrets Store
+        working-directory: apps/admin
+        run: |
+          if [ "$STAGE" = staging ]; then
+            vp exec wrangler d1 migrations apply DB --remote --env staging
+          else
+            vp exec wrangler d1 migrations apply DB --remote
+          fi
+      # Router first: both bind the stage's hostname map, which
+      # scripts/cloudflare-account-setup.ts creates, and the account's Secrets Store
       # (scripts/wrangler-deploy.ts fills in both ids). So a router deploy
       # that fails stops the admin's too. Besides Workers Scripts, D1 and
       # Secrets Store, the job's token needs Workers KV Storage (read, to
       # find the map) and Workflows (edit: the admin's deploy registers
       # its provisioning Workflow).
       - if: ${{ !inputs.secrets-only }}
-        run: vp run --filter @grasp-os/router deploy
+        working-directory: apps/router
+        run: vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE"
       # The connect gateway (apps/gateway, GRA-1217), next to the router:
-      # every placed client's core reaches its own connect in the clients'
+      # every placed client's core reaches its own connect in its stage's
       # dispatch namespace through it. The admin only binds placed cores to
       # it, so deploying it changes nothing for anyone until it does.
       - if: ${{ !inputs.secrets-only }}
-        run: vp run --filter @grasp-os/gateway deploy
+        working-directory: apps/gateway
+        run: vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE"
       # The admin verifies every request's Access JWT against its Access
       # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop
@@ -177,7 +199,7 @@ jobs:
       - if: ${{ !inputs.secrets-only }}
         uses: ./.github/actions/load-1password
         with:
-          environment: ops
+          environment: ${{ env.OPS }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           settings: CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS
       - name: Deploy the admin with its Access settings
@@ -194,6 +216,12 @@ jobs:
               vars+=(--var "$name:${!name}")
             fi
           done
-          vp run --filter @grasp-os/admin build
+          # The build resolves the stage's config (the Vite plugin's
+          # CLOUDFLARE_ENV); production is the top level, so no env.
+          if [ "$STAGE" = staging ]; then
+            CLOUDFLARE_ENV=staging vp run --filter @grasp-os/admin build
+          else
+            vp run --filter @grasp-os/admin build
+          fi
           cd apps/admin
-          vp exec node ../../scripts/wrangler-deploy.ts "${vars[@]}"
+          vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE" "${vars[@]}"

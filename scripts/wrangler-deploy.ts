@@ -1,5 +1,6 @@
 /**
- * Deploys the Worker in the current directory with the ids wrangler can't
+ * Deploys the Worker in the current directory, for the stage `--stage`
+ * names (staging or production, by the shared names module), with the ids wrangler can't
  * look up filled in: its Secrets Store bindings pointed at the account's
  * own store, and a binding to the router's hostname map at that
  * namespace. Both ids differ per account,
@@ -9,9 +10,9 @@
  * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
  *   (deploy-ops does), otherwise from the Cloudflare API, as the
  *   account's only store;
- * - `"router-hosts-namespace"`: the KV namespace the router's first deploy
- *   created, `grasp-os-router-hosts`, from the Cloudflare API. The router
- *   deploys first (deploy-ops).
+ * - `"router-hosts-namespace"`: the router's hostname map, which
+ *   scripts/cloudflare-account-setup.ts creates as `grasp-router-hosts`
+ *   (`-staging` for staging), from the Cloudflare API.
  *
  * Cloudflare refuses a deploy that binds a secret the store doesn't have,
  * and Secrets Store keeps no empty values. So a binding to one of the
@@ -31,10 +32,23 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { routerHostsName, stageOf } from "@grasp-os/shared/names";
+
 import { filledConfig } from "./wrangler-deploy-config.ts";
 
-/** The title the router's first deploy gives its map (wrangler's `<worker>-<binding>`). */
-const hostsTitle = "grasp-os-router-hosts";
+/**
+ * The stage `--stage` names (production unless it says staging), and the
+ * arguments for wrangler without it.
+ */
+const stageAt = process.argv.indexOf("--stage");
+const stage = stageOf(stageAt === -1 ? undefined : process.argv[stageAt + 1]);
+const wranglerArgs = process.argv
+  .slice(2)
+  .filter(
+    (_arg, at) => stageAt === -1 || (at !== stageAt - 2 && at !== stageAt - 1)
+  );
+/** The title of the stage's hostname map. */
+const hostsTitle = routerHostsName(stage);
 /** Where the Cloudflare Vite plugin's build says its config is. */
 const buildRedirect = ".wrangler/deploy/config.json";
 /**
@@ -197,7 +211,7 @@ const hostsId = async (): Promise<string> =>
       await listAll("/storage/kv/namespaces"),
       (namespace) => field(namespace, "title") === hostsTitle
     ),
-    `one KV namespace ${hostsTitle} (deploy the router first)`
+    `one KV namespace ${hostsTitle} (run scripts/cloudflare-account-setup.ts first)`
   );
 
 /** The config to deploy: the build's, if the Vite plugin wrote one. */
@@ -227,7 +241,17 @@ writeFileSync(deployConfig, text);
 try {
   execFileSync(
     "wrangler",
-    ["deploy", "--config", deployConfig, ...process.argv.slice(2)],
+    [
+      "deploy",
+      "--config",
+      deployConfig,
+      // A built config is the stage's already (the Vite plugin's
+      // CLOUDFLARE_ENV); wrangler.jsonc picks it with --env.
+      ...(stage === "staging" && config === "wrangler.jsonc"
+        ? ["--env", "staging"]
+        : []),
+      ...wranglerArgs,
+    ],
     { stdio: "inherit" }
   );
 } finally {

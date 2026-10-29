@@ -15,9 +15,10 @@
  * (src/deploy/), which doesn't read it yet: the real-account qualification
  * comes first.
  */
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
 import { toHex } from "@grasp-os/shared/encoding";
+import { clientsNamespace } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
@@ -54,6 +55,8 @@ export const inventoryErrorCodes = [
   "destination_unknown",
   /** The destination doesn't satisfy the policy, or doesn't serve it. */
   "placement_refused",
+  /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
+  "destination_other_stage",
   /**
    * The client is placed elsewhere or under another policy: moving it is a
    * migration onto new resources, never a relabel.
@@ -259,14 +262,27 @@ const evidenceDetail = (
  * client checks them again, so a capability withdrawn here stops the next
  * allocation for every client in it. Evidence must name a subject the
  * admin knows, and every capability's declaration, the unlisted ones as
- * unknown, is kept (`capabilityEvidence`).
+ * unknown, is kept (`capabilityEvidence`). A Workers for Platforms
+ * destination must be in the admin's own `stage`'s clients' namespace
+ * (`destination_other_stage`): a staging admin never records one among
+ * production's clients, nor production's among staging's.
  */
 export const saveDestination = async (
   db: AdminDatabase,
   actor: Actor,
-  input: DestinationInput
+  input: DestinationInput,
+  stage: Stage
 ): Promise<void> => {
   destinationIdSchema.parse(input.id);
+  if (
+    input.kind === "workers_for_platforms" &&
+    input.namespace !== clientsNamespace(stage)
+  ) {
+    throw new InventoryError(
+      "destination_other_stage",
+      `${input.id}'s namespace ${String(input.namespace)} isn't this admin's own, ${clientsNamespace(stage)}`
+    );
+  }
   const policies = z.array(hostingPolicyIdSchema).parse(input.policies);
   const verified = destinationCapabilitiesSchema.parse(input.capabilities);
   await assertSubjectsKnown(db, input.kind, verified);
@@ -843,9 +859,10 @@ export interface RenderOptions {
    * A Workers for Platforms namespace: a user Worker can't bind another
    * by a service binding (10143, GRA-430), so each service binding binds
    * the connect gateway instead, its props naming the client's own script
-   * (@grasp-os/shared/connect-gateway, GRA-1217).
+   * (@grasp-os/shared/connect-gateway, GRA-1217): this one, the gateway of
+   * the namespace's stage (@grasp-os/shared/names). Unset elsewhere.
    */
-  connectGateway?: boolean;
+  connectGateway?: string;
 }
 
 /** One of `worker`'s Workers as the destination takes it. */
@@ -869,7 +886,7 @@ export const renderClientWorker = (
   worker: WorkerEntry,
   placement: ClientPlacement,
   inventory: readonly ClientResource[],
-  { connectGateway = false }: RenderOptions = {}
+  { connectGateway }: RenderOptions = {}
 ): RenderedWorker => {
   const byRole = new Map(inventory.map((row) => [row.role, row]));
   const resource = (
@@ -960,7 +977,7 @@ export const renderClientWorker = (
           `worker:${String(binding.service)}`,
           "worker_script"
         ).physicalName;
-        if (!connectGateway) {
+        if (connectGateway === undefined) {
           rendered.service = script;
           break;
         }
@@ -976,7 +993,7 @@ export const renderClientWorker = (
         return {
           type: "service",
           name: binding.name,
-          service: connectGatewayScript,
+          service: connectGateway,
           props: { script } satisfies ConnectGatewayProps,
         };
       }

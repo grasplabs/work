@@ -679,4 +679,4 @@ jobs:
       - if: env.PUBLISH_RELEASES == 'true'
         run: vp run release:upload --release release-out
         env:
-          R2_BUCKET: grasp-os-releases
+          R2_BUCKET: grasp-releases

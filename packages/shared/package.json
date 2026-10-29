@@ -126,6 +126,7 @@
     "./release": "./src/release.ts",
     "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",
+    "./names": "./src/names.ts",
     "./router": "./src/router.ts",
     "./rpc": "./src/rpc.ts",
     "./rpc-accounting": "./src/rpc-accounting.ts",
