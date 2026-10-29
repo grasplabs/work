@@ -3,7 +3,7 @@ import type { App, AppStatus } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
@@ -236,7 +236,10 @@ export const changeStatus = async (
         and(
           eq(apps.id, found.id),
           eq(apps.status, found.status),
-          sql`${apps.statusChangedAt} IS ${fence}`
+          sql`${apps.statusChangedAt} IS ${fence}`,
+          // Removed meanwhile (app-removal.ts), it stays removed: a
+          // removal changes neither its status nor when that changed.
+          isNull(apps.removedAt)
         )
       )
       .returning(),

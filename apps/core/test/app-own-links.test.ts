@@ -143,6 +143,10 @@ describe("an App's link", () => {
     const kept = await opening(user, moved);
     await builder.api.apps.archive(other);
     const ofArchived = await outcome(builder.api.apps.setLink(other, null));
+    // Removed, an App no longer holds its link.
+    await builder.api.apps.remove(other);
+    await builder.api.apps.setLink(app, link);
+    const freed = await opening(user, link);
 
     expect({
       refused,
@@ -152,6 +156,7 @@ describe("an App's link", () => {
       taken,
       kept,
       ofArchived,
+      freed,
     }).toStrictEqual({
       refused: [
         "role.forbidden",
@@ -181,6 +186,7 @@ describe("an App's link", () => {
       // Taken off, a link opens nothing.
       kept: "app.not_found",
       ofArchived: "app.archived",
+      freed: app,
     });
   });
 });
