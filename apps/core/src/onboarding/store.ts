@@ -278,6 +278,14 @@ const kickoffOwedKey = "kickoff_records_owed";
  */
 const kickoffSourceKey = "kickoff_source_at";
 
+/** A piece of work's names, as a content purge reads and rewrites them. */
+export interface WorkNames {
+  name: string;
+  local: string;
+  one: string;
+  many: string;
+}
+
 export const onboardingStore = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
 ) => inJurisdiction(env, env.ONBOARDING).getByName(storeName);
@@ -1712,27 +1720,27 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Forgets the drawings of `named` works for good, as a Knowledge content
-   * purge reached them, to be drawn again from what their people agreed
-   * to as the purge left it; and keeps the works' names, and what teams
-   * do, as the purge rewrote them (`renamed`, `described`). The brain's
-   * own records of them were rewritten by the same purge; each drawing
-   * drawn again is given as a new version. In the audit log by counts
-   * alone.
+   * Forgets the drawings a Knowledge content purge reached (`drawings`, as
+   * it read them) for good, to be drawn again from what their people
+   * agreed to as the purge left it; and keeps the works' names, and what
+   * teams do, as the purge rewrote them (`renamed`, `described`). Each
+   * write takes only where the row still holds what the purge read: one
+   * drawn again since, from words the purge already left clean, stays as
+   * it is. The brain's own records of them were rewritten by the same
+   * purge; each drawing drawn again is given as a new version. In the
+   * audit log by counts alone.
    */
   async forgetDrawings(
-    named: readonly string[],
-    renamed: readonly {
-      id: string;
-      name: string;
-      local: string;
-      one: string;
-      many: string;
-    }[],
-    described: readonly { id: string; does: string }[],
+    drawings: readonly { work: string; drawn: string }[],
+    renamed: readonly { id: string; from: WorkNames; to: WorkNames }[],
+    described: readonly { id: string; from: string; to: string }[],
     by: AuditActor
   ): Promise<void> {
-    if (named.length === 0 && renamed.length === 0 && described.length === 0) {
+    if (
+      drawings.length === 0 &&
+      renamed.length === 0 &&
+      described.length === 0
+    ) {
       return;
     }
     // Under the brain lock, as forgetting a document's readings is: no
@@ -1740,36 +1748,60 @@ export class Onboarding extends DurableObject<Env> {
     await this.#withBrain(async () => {
       await Promise.resolve();
       this.ctx.storage.transactionSync(() => {
-        if (named.length > 0) {
+        const forgotten = drawings.flatMap(({ work, drawn }) =>
           this.#db
             .delete(drawnWorks)
-            .where(inList(drawnWorks.work, named))
-            .run();
+            .where(and(eq(drawnWorks.work, work), eq(drawnWorks.drawn, drawn)))
+            .returning({ work: drawnWorks.work })
+            .all()
+            .map((row) => row.work)
+        );
+        if (forgotten.length > 0) {
           this.#db
             .delete(checkedDifferences)
-            .where(inList(checkedDifferences.work, named))
+            .where(inList(checkedDifferences.work, forgotten))
             .run();
           this.#db
             .delete(drawFailures)
             .where(
               inList(
                 drawFailures.item,
-                named.map((work) => `work:${work}`)
+                forgotten.map((work) => `work:${work}`)
               )
             )
             .run();
         }
-        for (const { id, ...names } of renamed) {
-          this.#db.update(works).set(names).where(eq(works.id, id)).run();
+        let named = 0;
+        for (const { id, from, to } of renamed) {
+          named += this.#db
+            .update(works)
+            .set(to)
+            .where(
+              and(
+                eq(works.id, id),
+                eq(works.name, from.name),
+                eq(works.local, from.local),
+                eq(works.one, from.one),
+                eq(works.many, from.many)
+              )
+            )
+            .returning({ id: works.id })
+            .all().length;
         }
-        for (const { id, does } of described) {
-          this.#db.update(teams).set({ does }).where(eq(teams.id, id)).run();
+        let rewritten = 0;
+        for (const { id, from, to } of described) {
+          rewritten += this.#db
+            .update(teams)
+            .set({ does: to })
+            .where(and(eq(teams.id, id), eq(teams.does, from)))
+            .returning({ id: teams.id })
+            .all().length;
         }
         this.#purged();
         this.#changed(by, "onboarding.drawings.purged", {
-          drawings: named.length,
-          works: renamed.length,
-          teams: described.length,
+          drawings: forgotten.length,
+          works: named,
+          teams: rewritten,
         });
       });
     });

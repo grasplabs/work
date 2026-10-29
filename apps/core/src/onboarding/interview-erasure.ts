@@ -163,23 +163,25 @@ export const drawingErasure = (
       const { drawings, teams, works } = await store.drawingsSaid();
       const changes = (text: string) => rewrite(text) !== text;
       await store.forgetDrawings(
-        drawings.flatMap(({ work, drawn }) => (changes(drawn) ? [work] : [])),
-        works.flatMap((work) => {
-          const { id, ...names } = work;
-          return Object.values(names).some(changes)
+        drawings.filter(({ drawn }) => changes(drawn)),
+        works.flatMap(({ id, ...from }) =>
+          Object.values(from).some(changes)
             ? [
                 {
                   id,
-                  name: rewrite(work.name),
-                  local: rewrite(work.local),
-                  one: rewrite(work.one),
-                  many: rewrite(work.many),
+                  from,
+                  to: {
+                    name: rewrite(from.name),
+                    local: rewrite(from.local),
+                    one: rewrite(from.one),
+                    many: rewrite(from.many),
+                  },
                 },
               ]
-            : [];
-        }),
+            : []
+        ),
         teams.flatMap(({ id, does }) =>
-          changes(does) ? [{ id, does: rewrite(does) }] : []
+          changes(does) ? [{ id, from: does, to: rewrite(does) }] : []
         ),
         auditActorSchema.parse(by.actor)
       );
