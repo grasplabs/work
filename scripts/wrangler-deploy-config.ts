@@ -4,7 +4,7 @@
  * against the store, kept apart from the deploy so it can be tested
  * without an account.
  */
-import { parseJsonc } from "./wrangler-config-rules.ts";
+import { parseJsonc } from "./jsonc.ts";
 
 /** The `store_id` a config names instead of a real one. */
 export const storePlaceholder = '"account-secrets-store"';

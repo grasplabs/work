@@ -140,26 +140,30 @@ jobs:
       # the EU stops the deploy; it has to be recreated.
       - name: Create the admin database in the EU
         if: ${{ !inputs.secrets-only }}
+        # The admin's database, deploy and migrations go through Cloudflare's
+        # cf CLI (the admin's dev dependency, apps/admin/cloudflare.config.ts),
+        # with the job's token.
+        working-directory: apps/admin
         run: |
-          db=$(vp exec node scripts/platform-names.ts "$STAGE" adminDatabase)
-          existing=$(vp exec wrangler d1 list --json)
-          jurisdiction=$(jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"' <<< "$existing")
+          set -euo pipefail
+          db=$(vp exec node ../../scripts/platform-names.ts "$STAGE" adminDatabase)
+          jurisdiction=$(vp exec cf d1 list --name "$db" | jq -r --arg db "$db" '.[] | select(.name == $db) | .jurisdiction // "none"')
           if [ -z "$jurisdiction" ]; then
-            vp exec wrangler d1 create "$db" --jurisdiction eu
+            vp exec cf d1 create --name "$db" --jurisdiction eu > /dev/null
           elif [ "$jurisdiction" != "eu" ]; then
             echo "::error::D1 database $db is not in the EU jurisdiction ($jurisdiction)"
             exit 1
           fi
       # D1 migrations are additive, so the running admin keeps working on
-      # the new schema until the deploy after them replaces it.
+      # the new schema until the deploy after them replaces it. Recorded in
+      # d1_migrations, as Wrangler records them.
       - if: ${{ !inputs.secrets-only }}
         working-directory: apps/admin
         run: |
-          if [ "$STAGE" = staging ]; then
-            vp exec wrangler d1 migrations apply DB --remote --env staging
-          else
-            vp exec wrangler d1 migrations apply DB --remote
-          fi
+          set -euo pipefail
+          db=$(vp exec node ../../scripts/platform-names.ts "$STAGE" adminDatabase)
+          id=$(vp exec cf d1 list --name "$db" | jq -r --arg db "$db" '.[] | select(.name == $db) | .uuid')
+          vp exec cf d1 migrations apply "$id" --dir src/db/migrations --table d1_migrations > /dev/null
       # Router first: both bind the stage's hostname map, which
       # scripts/cloudflare-account-setup.ts creates, and the account's Secrets Store
       # (scripts/wrangler-deploy.ts fills in both ids). So a router deploy
@@ -215,18 +219,15 @@ jobs:
             echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the $STAGE 1Password Environment; nothing deployed"
             exit 1
           fi
-          vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")
-          for name in CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS; do
-            if [ -n "${!name}" ]; then
-              vars+=(--var "$name:${!name}")
-            fi
-          done
-          # The build resolves the stage's config (the Vite plugin's
-          # CLOUDFLARE_ENV); production is the top level, so no env.
-          if [ "$STAGE" = staging ]; then
-            CLOUDFLARE_ENV=staging vp run --filter @grasp-os/admin build
-          else
-            vp run --filter @grasp-os/admin build
-          fi
+          # What apps/admin/cf-worker.ts fills in: the store, the stage's
+          # hostname map, and the secrets the store has (an optional one it
+          # lacks stays unbound). The settings above reach it from the env.
           cd apps/admin
-          vp exec node ../../scripts/wrangler-deploy.ts --stage "$STAGE" "${vars[@]}"
+          hosts=$(vp exec node ../../scripts/platform-names.ts "$STAGE" routerHosts)
+          ROUTER_HOSTS_ID=$(vp exec cf kv namespaces list --per-page 100 | jq -r --arg title "$hosts" '[.[] | select(.title == $title) | .id] | if length == 1 then .[0] else error("expected one KV namespace " + $title) end')
+          STORED_SECRETS=$(vp exec cf secrets-store secrets list --store-id "$SECRETS_STORE_ID" --per-page 100 | jq -r '[.[].name] | join(",")')
+          export ROUTER_HOSTS_ID STORED_SECRETS
+          # Built for the stage (Vite's mode, which cloudflare.config.ts
+          # reads), then that build deployed with cf, naming the same mode.
+          vp build --mode "$STAGE"
+          vp exec cf deploy --prebuilt --mode "$STAGE" --message "deploy-platform $GITHUB_SHA"
