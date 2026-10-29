@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "471eeb01-a8d3-44d9-b4ba-d5182e6d9ba2",
+  "id": "b16b36d4-2b37-4540-a1da-78e898bbd65e",
   "prevId": "c5c238ab-ef36-483b-93e6-115eb0776209",
   "tables": {
     "access_revocations": {
@@ -1745,242 +1745,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "app_webhook_deliveries": {
-      "name": "app_webhook_deliveries",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "webhook_id": {
-          "name": "webhook_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event": {
-          "name": "event",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "dedupe": {
-          "name": "dedupe",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "submission": {
-          "name": "submission",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "values": {
-          "name": "values",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "values_left_out": {
-          "name": "values_left_out",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "delivery_at": {
-          "name": "delivery_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "app_webhook_deliveries_dedupe": {
-          "name": "app_webhook_deliveries_dedupe",
-          "columns": [
-            "webhook_id",
-            "dedupe"
-          ],
-          "isUnique": true
-        },
-        "app_webhook_deliveries_due": {
-          "name": "app_webhook_deliveries_due",
-          "columns": [
-            "delivery_at"
-          ],
-          "isUnique": false,
-          "where": "delivered_at IS NULL"
-        }
-      },
-      "foreignKeys": {
-        "app_webhook_deliveries_webhook_id_app_webhooks_id_fk": {
-          "name": "app_webhook_deliveries_webhook_id_app_webhooks_id_fk",
-          "tableFrom": "app_webhook_deliveries",
-          "tableTo": "app_webhooks",
-          "columnsFrom": [
-            "webhook_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "app_webhooks": {
-      "name": "app_webhooks",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "events": {
-          "name": "events",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "app_webhooks_app": {
-          "name": "app_webhooks_app",
-          "columns": [
-            "app_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "app_webhooks_app_id_apps_id_fk": {
-          "name": "app_webhooks_app_id_apps_id_fk",
-          "tableFrom": "app_webhooks",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "app_workflow_bindings": {
       "name": "app_workflow_bindings",
       "columns": {
@@ -2153,6 +1917,13 @@
         },
         "audience_id": {
           "name": "audience_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "process": {
+          "name": "process",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -10716,7 +10487,7 @@
             "created_at"
           ],
           "isUnique": false,
-          "where": "delivered_at IS NULL"
+          "where": "\"workflow_emitted_events\".\"delivered_at\" IS NULL"
         }
       },
       "foreignKeys": {
@@ -11422,6 +11193,58 @@
           "name": "workflow_resource_params_workflow_resource_id_revision_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resource_processes": {
+      "name": "workflow_resource_processes",
+      "columns": {
+        "workflow_resource_id": {
+          "name": "workflow_resource_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "process": {
+          "name": "process",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "set_by": {
+          "name": "set_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "set_at": {
+          "name": "set_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workflow_resource_processes_workflow_resource_id_workflow_resources_id_fk": {
+          "name": "workflow_resource_processes_workflow_resource_id_workflow_resources_id_fk",
+          "tableFrom": "workflow_resource_processes",
+          "tableTo": "workflow_resources",
+          "columnsFrom": [
+            "workflow_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
