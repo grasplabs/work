@@ -8,8 +8,8 @@ import type {
 // one per interviewer, kind of interview and language: the text on the
 // prototype's main at 48534d4 (grasplabs/prototype, packages/grasp), after
 // the lab's round of 5 October and the interview's audit of the same day,
-// with the handover to a named colleague (8c7e1ff4, 15 October) and the
-// promise about whose words are seen (af8e34c1, 16 October).
+// then the handover to a named colleague and the promise about whose words
+// are seen (GRA-1285, GRA-1286), marked from core's text without a lab round.
 // Core speaks only a text whose mark is here, and a test holds it to that:
 // a text changes only through the lab, one change at a time, and its new
 // marks come in with the change the lab kept.
