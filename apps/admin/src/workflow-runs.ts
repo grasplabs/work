@@ -18,6 +18,8 @@ import type { AdminRuns } from "./run-object.ts";
 export const adminWorkflows = {
   /** A build of an integration (src/builds/workflow.ts). */
   integrationBuild: "integration-build",
+  /** Applying a client's settings now (src/clients/apply.ts). */
+  applyClient: "apply-client",
   /** An attempt at provisioning a placed client (src/hosting/workflow.ts). */
   provisionPlacedClient: "provision-placed-client",
 } as const;
