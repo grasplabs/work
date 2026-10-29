@@ -30,7 +30,7 @@
  * - Anyone but staff: the server functions are behind Access.
  */
 import { deploymentPrefix } from "@grasp-os/shared/names";
-import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -587,17 +587,19 @@ const emptiedBucketOf = (detail: string | null): string | null => {
 };
 
 /**
- * The buckets of `clientIds` a deletion emptied and that are still
+ * The buckets of offboarded clients a deletion emptied and that are still
  * recorded in their destination, by client: each with when its objects
  * have expired, from the latest time it was emptied.
  */
 const emptyingBuckets = async (
-  db: AdminDatabase,
-  clientIds: readonly string[]
+  db: AdminDatabase
 ): Promise<Map<string, EmptyingBucket[]>> => {
-  if (clientIds.length === 0) {
-    return new Map();
-  }
+  // Joined to the offboarded clients rather than binding each one's id:
+  // D1 takes at most 100 bound values, and offboarded clients only grow.
+  const offboarded = and(
+    eq(clients.status, "offboarded"),
+    isNotNull(clients.offboardedAt)
+  );
   const [events, buckets] = await Promise.all([
     db
       .select({
@@ -606,23 +608,20 @@ const emptyingBuckets = async (
         detail: auditEvents.detail,
       })
       .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.action, "client.empty_bucket"),
-          inArray(auditEvents.clientId, [...clientIds])
-        )
-      ),
+      .innerJoin(clients, eq(clients.id, auditEvents.clientId))
+      .where(and(eq(auditEvents.action, "client.empty_bucket"), offboarded)),
     db
       .select({
         clientId: clientResources.clientId,
         physicalName: clientResources.physicalName,
       })
       .from(clientResources)
+      .innerJoin(clients, eq(clients.id, clientResources.clientId))
       .where(
         and(
           eq(clientResources.kind, "r2_bucket"),
           isNull(clientResources.deletedAt),
-          inArray(clientResources.clientId, [...clientIds])
+          offboarded
         )
       ),
   ]);
@@ -677,10 +676,7 @@ export const offboardedClients = async (
     .where(isNull(clientResources.deletedAt))
     .groupBy(clientResources.clientId);
   const left = new Map(remaining.map(({ clientId, left: n }) => [clientId, n]));
-  const emptying = await emptyingBuckets(
-    db,
-    rows.map(({ clientId }) => clientId)
-  );
+  const emptying = await emptyingBuckets(db);
   return rows.flatMap(({ offboardedAt, ...row }) => {
     if (offboardedAt === null) {
       return [];
