@@ -9560,6 +9560,10 @@ msgstr "No AI"
 msgid "No AI capabilities found in this app."
 msgstr "No AI capabilities found in this app."
 
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "No AI provider is connected yet. Ask your admin to connect one."
+
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."
 msgstr "No app breaks an active rule."

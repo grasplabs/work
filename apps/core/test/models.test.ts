@@ -1012,7 +1012,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     expect(event).toMatchObject({ action: "model.call", actor: trigger });
   });
 
-  it("refuses every call on a deployment without the AI binding, such as plain workerd", async () => {
+  it("refuses every call as having no provider on a deployment without the AI binding, such as plain workerd, until the organization connects one", async () => {
     const { gatewayEnv } = withGateway([answer("Hi.")]);
     const { AI: _, ...withoutAi } = gatewayEnv;
 
@@ -1026,7 +1026,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
           work: work(),
         })
       )
-    ).resolves.toBe("model.unconfigured");
+    ).resolves.toBe("model.no_provider");
   });
 });
 

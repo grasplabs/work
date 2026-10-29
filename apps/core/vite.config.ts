@@ -22,6 +22,7 @@ import {
   gmailPush,
   googleConnectClient,
   landscapeClient,
+  platformOpenAiKey,
   slackApp,
   teamsBot,
   telegramBot,
@@ -366,6 +367,9 @@ export const coreProject = (
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
                 TELEGRAM_BOT_TOKEN: telegramBot.token,
+                // Grasp's own key at OpenAI for platform features, which
+                // the fake OpenAI there takes once a test plans for it.
+                OPENAI_API_KEY: platformOpenAiKey,
                 // Stephen's Gmail mailbox, which the fake Google there knows.
                 GMAIL_MAILBOX: gmailAccount.mailbox,
                 GMAIL_CLIENT_ID: gmailAccount.clientId,
