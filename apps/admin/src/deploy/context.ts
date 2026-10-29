@@ -51,15 +51,19 @@ const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
 };
 
 /** The admin's Secrets Store bindings (wrangler.jsonc). */
-type StoreSecret = {
+export type StoreSecret = {
   [Name in keyof Env]-?: Env[Name] extends SecretsStoreSecret ? Name : never;
 }[keyof Env];
 
 /** A Secrets Store secret the admin needs isn't there. */
 export class MissingStoreSecretError extends Error {
+  /** The secret that isn't there: its name, never a value. */
+  readonly secret: StoreSecret;
+
   constructor(name: StoreSecret) {
     super(`${name} is missing from Secrets Store`);
     this.name = "MissingStoreSecretError";
+    this.secret = name;
   }
 }
 
