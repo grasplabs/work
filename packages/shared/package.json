@@ -122,6 +122,7 @@
     "./quiet-isolate": "./src/quiet-isolate.ts",
     "./quiet-loader": "./src/quiet-loader.ts",
     "./quota-policy": "./src/quota-policy.ts",
+    "./model-spend-report": "./src/model-spend-report.ts",
     "./quota-policy-report": "./src/quota-policy-report.ts",
     "./record-ids": "./src/record-ids.ts",
     "./redact": "./src/redact.ts",
