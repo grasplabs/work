@@ -1696,6 +1696,18 @@ export const workflowRuns = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     version: integer().notNull(),
     startedBy: text("started_by"),
+    /**
+     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
+     * then their user ID, not a member's. Written once, by `startRun`,
+     * from the starter's own session, never from what it was asked; never
+     * for a run another run, a trigger or an agent started. The run's
+     * authority carries it, so its person passes the active-member gate
+     * only while they are still staff, and what it does is audited as
+     * started by "(Grasp staff)".
+     */
+    startedByStaff: integer("started_by_staff", { mode: "boolean" })
+      .notNull()
+      .default(false),
     status: text({
       // `starting`: written, its engine instance not yet known to exist
       // (src/workflows/runs.ts, `startRun`).

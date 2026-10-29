@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e35c4e4b-f40a-4678-8dc2-103984d5fc09",
+  "id": "d7239fbb-85fd-4ce8-9dcd-5104d3d97ec7",
   "prevId": "c3ee8e31-b84f-42b4-a727-738325b5f75d",
   "tables": {
     "access_revocations": {
@@ -2400,13 +2400,6 @@
         },
         "retired_at": {
           "name": "retired_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "forgotten_at": {
-          "name": "forgotten_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -12725,6 +12718,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "started_by_staff": {
+          "name": "started_by_staff",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "status": {
           "name": "status",
