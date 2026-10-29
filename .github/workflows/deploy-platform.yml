@@ -17,7 +17,10 @@
 # admin and router read them there, and the admin sets them on each
 # client's Workers. Run it with "secrets only" after rotating one in
 # 1Password to copy it without deploying; a secrets rollout from the admin
-# then takes it to every client. The account and store ids come from the
+# then takes it to every client. The master keys (ROUTER_KEY, CLIENT_KEY)
+# are the exception: a copy creates them but never replaces them, and
+# stops when 1Password's value no longer matches the store's, since
+# rotating one is a procedure of its own (scripts/store-secrets-lib.ts). The account and store ids come from the
 # names module, and the admin's settings are its wrangler.jsonc vars, per
 # stage.
 name: Deploy platform
