@@ -9,3 +9,10 @@ GMAIL_MAILBOX=
 GMAIL_CLIENT_ID=
 GMAIL_CLIENT_SECRET=
 GMAIL_REFRESH_TOKEN=
+# Optional: Grasp's own keys at the AI providers, for platform features
+# (src/ai-providers.ts). A provider whose key is unset isn't offered for
+# them; an organization's own keys are added in the product, not here.
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+MISTRAL_API_KEY=
+OPENROUTER_API_KEY=

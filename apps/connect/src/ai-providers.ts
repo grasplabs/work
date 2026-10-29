@@ -1,0 +1,531 @@
+import {
+  aiCredentialPlaceholder,
+  aiKeyErrors,
+  aiProviderHost,
+  aiProviderIdSchema,
+  aiProviderIds,
+  aiProviderKeySaveSchema,
+  aiProviders,
+  aiRefusedHeader,
+} from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderId,
+  AiProviderKey,
+  AiProviderRoutes,
+  AiRefusal,
+} from "@grasp-os/shared/ai-providers";
+import { verifyModelGrant } from "@grasp-os/shared/capability";
+import type { ModelGrantClaims } from "@grasp-os/shared/capability";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { and, eq, like } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+import { checkEndpoint } from "./ai-endpoint-guard.ts";
+import type { EndpointPolicy } from "./ai-endpoint-guard.ts";
+import { aiProviderKeys } from "./db/schema.ts";
+import { resealBatchSize, vaultFor } from "./vault.ts";
+
+// The AI providers' credentials, and the one place a model request leaves
+// for a provider with one. Core's model gateway decides each call, has the
+// model ledger admit each provider request and audits it (core's
+// models.ts); it runs pi's adapter for the provider's API with a fetch that
+// hands each request here (`modelFetch`), with a grant it signed for that
+// request (@grasp-os/shared/capability, `signModelGrant`). Connect adds the
+// key and sends it. Core never holds a key.
+//
+// Two credentials, one path: the organization's own key per provider
+// (sealed in `ai_provider_keys`, src/vault.ts), and Grasp's own keys for
+// platform features, as connect Worker secrets (`OPENAI_API_KEY` and the
+// like, @grasp-os/shared/ai-providers). Threat model, and how each is
+// closed:
+//
+// - A key leaks to core, the logs or the database: a key is sealed as soon
+//   as it arrives, bound to its provider and, for a custom endpoint, its
+//   base URL (a key moved to another row or another base URL doesn't
+//   open), and never answered back: listings carry only a mask
+//   (`sk-…a3f2`). Nothing here logs a header, a body, a URL's query, or a
+//   fetch error's message, only identifiers, statuses and timings.
+// - A key sent somewhere else: only to its provider's own host, or the
+//   organization's registered base URL for a custom endpoint (checked by
+//   src/ai-endpoint-guard.ts when it is saved and again on every request),
+//   over HTTPS, and only to the provider's model paths, never its files,
+//   fine-tuning or account endpoints. The grant names the host too, so a
+//   request core didn't decide for that host is refused. Redirects are
+//   never followed (one would take the key along).
+// - The key in more than one place, or core's own: the request must carry
+//   `aiCredentialPlaceholder` exactly where the key goes, or it is refused
+//   before anything is sent; nothing else of core's headers goes on but
+//   what the API needs (content type, the Messages API's version and
+//   betas), and the key goes in that one header.
+// - A request core's gateway didn't decide: each needs a grant, made with
+//   the capability key only core and connect hold, for a few seconds, for
+//   that credential, provider and host; a grant never passes for a
+//   connector capability, nor one for a grant.
+// - A provider's answer read as connect's: connect's own refusals carry
+//   `aiRefusedHeader`, which is never passed back from a provider, nor any
+//   other header but the content type, the request's ID and a rate
+//   limit's wait.
+// - A request that streams forever: the grant names the call's deadline,
+//   which cuts the provider's request off here too.
+
+/** The vault context a provider's key is sealed under: its row and destination. */
+const contextOf = (provider: AiProviderId, baseUrl: string | null): string =>
+  `ai-provider-key\n${provider}\n${baseUrl ?? ""}`;
+
+/** The shortest key whose ends a mask shows. */
+const maskedFrom = 12;
+
+/** A key's first three and last four characters, or nothing of a short one. */
+const maskOf = (key: string): string =>
+  key.length < maskedFrom ? "…" : `${key.slice(0, 3)}…${key.slice(-4)}`;
+
+/** Where a custom endpoint may point, for this deployment. */
+const policyOf = (env: Env): EndpointPolicy => ({
+  onPrem: env.RUNTIME_PROFILE === "workerd",
+  privateHosts: (env.AI_PRIVATE_HOSTS ?? "")
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => host !== ""),
+});
+
+/**
+ * A custom endpoint's base URL as kept: checked by the endpoint guard,
+ * without a query, fragment or trailing slash; or why it is refused.
+ */
+const baseUrlOf = (
+  value: string,
+  policy: EndpointPolicy
+): string | undefined => {
+  const checked = checkEndpoint(value, policy);
+  if (
+    "refused" in checked ||
+    checked.url.search !== "" ||
+    checked.url.hash !== ""
+  ) {
+    return undefined;
+  }
+  return `${checked.url.origin}${checked.url.pathname.replace(/\/+$/u, "")}`;
+};
+
+/** A row as core may see it: never the key. */
+const keyOf = (row: typeof aiProviderKeys.$inferSelect): AiProviderKey => ({
+  provider: aiProviderIdSchema.parse(row.provider),
+  mask: row.mask,
+  baseUrl: row.baseUrl,
+  addedAt: row.createdAt.getTime(),
+  updatedAt: row.updatedAt.getTime(),
+});
+
+/**
+ * Seals and keeps the organization's key for a provider, replacing the one
+ * it had; for an OpenAI-compatible endpoint, with the base URL it goes to.
+ */
+export const saveAiProviderKey = async (
+  env: Env,
+  request: unknown
+): Promise<AiProviderKey> => {
+  const parsed = aiProviderKeySaveSchema.safeParse(request);
+  if (!parsed.success) {
+    throw aiKeyErrors.create("ai_key.invalid");
+  }
+  const { provider, key } = parsed.data;
+  const custom = provider === "openai-compatible";
+  if (custom !== (parsed.data.baseUrl !== undefined)) {
+    throw aiKeyErrors.create("ai_key.invalid");
+  }
+  let baseUrl: string | null = null;
+  if (parsed.data.baseUrl !== undefined) {
+    baseUrl = baseUrlOf(parsed.data.baseUrl, policyOf(env)) ?? null;
+    if (baseUrl === null) {
+      log.warn("ai.key_refused", { provider, reason: "endpoint" });
+      throw aiKeyErrors.create("ai_key.endpoint_refused");
+    }
+  }
+  const vault = await vaultFor(env);
+  if (vault === undefined) {
+    throw aiKeyErrors.create("ai_key.vault_unavailable");
+  }
+  const sealed = await vault.seal(key, contextOf(provider, baseUrl));
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const [row] = await db
+    .insert(aiProviderKeys)
+    .values({
+      provider,
+      sealed,
+      mask: maskOf(key),
+      baseUrl,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: aiProviderKeys.provider,
+      set: { sealed, mask: maskOf(key), baseUrl, updatedAt: now },
+    })
+    .returning();
+  if (row === undefined) {
+    throw new Error("The key's row wasn't written");
+  }
+  log.info("ai.key_saved", { provider });
+  return keyOf(row);
+};
+
+/** Deletes the organization's key for a provider; whether it had one. */
+export const removeAiProviderKey = async (
+  env: Env,
+  provider: unknown
+): Promise<boolean> => {
+  const parsed = aiProviderIdSchema.safeParse(provider);
+  if (!parsed.success) {
+    throw aiKeyErrors.create("ai_key.invalid");
+  }
+  const removed = await drizzle(env.DB)
+    .delete(aiProviderKeys)
+    .where(eq(aiProviderKeys.provider, parsed.data))
+    .returning({ provider: aiProviderKeys.provider });
+  log.info("ai.key_removed", {
+    provider: parsed.data,
+    removed: removed.length,
+  });
+  return removed.length > 0;
+};
+
+/** The organization's keys, as masks, in the providers' order. */
+export const listAiProviderKeys = async (
+  env: Env
+): Promise<AiProviderKey[]> => {
+  const rows = await drizzle(env.DB).select().from(aiProviderKeys);
+  return rows
+    .filter((row) => aiProviderIdSchema.safeParse(row.provider).success)
+    .map(keyOf)
+    .toSorted(
+      (one, other) =>
+        aiProviderIds.indexOf(one.provider) -
+        aiProviderIds.indexOf(other.provider)
+    );
+};
+
+/** Grasp's own key for `provider`, if this deployment has one. */
+const platformKeyOf = (
+  env: Env,
+  provider: AiProviderId
+): string | undefined => {
+  const name = aiProviders[provider].platformSecret;
+  const key = name === undefined ? undefined : env[name];
+  return typeof key === "string" && key.trim() !== "" ? key.trim() : undefined;
+};
+
+/** What core routes by: never a key. */
+export const aiProviderRoutes = async (env: Env): Promise<AiProviderRoutes> => {
+  const keys = await listAiProviderKeys(env);
+  return {
+    organization: keys.map(({ provider, baseUrl }) => ({ provider, baseUrl })),
+    platform: aiProviderIds.filter(
+      (provider) => platformKeyOf(env, provider) !== undefined
+    ),
+  };
+};
+
+/**
+ * The organization's key for `provider`, opened, with the base URL it may
+ * go to; none without one, or when it doesn't open.
+ */
+const organizationKeyOf = async (
+  env: Env,
+  provider: AiProviderId
+): Promise<{ key: string; baseUrl: string | null } | undefined> => {
+  const [row] = await drizzle(env.DB)
+    .select()
+    .from(aiProviderKeys)
+    .where(eq(aiProviderKeys.provider, provider));
+  const vault = row === undefined ? undefined : await vaultFor(env);
+  if (row === undefined || vault === undefined) {
+    return undefined;
+  }
+  try {
+    return {
+      key: await vault.open(row.sealed, contextOf(provider, row.baseUrl)),
+      baseUrl: row.baseUrl,
+    };
+  } catch (error) {
+    log.error("ai.key_unreadable", { provider, ...errorFields(error) });
+    return undefined;
+  }
+};
+
+/** Connect's refusal of a model request: it never reached the provider. */
+const refused = (
+  reason: AiRefusal,
+  claims?: Pick<ModelGrantClaims, "provider" | "credential">
+): Response => {
+  log.warn("ai.refused", {
+    reason,
+    provider: claims?.provider,
+    credential: claims?.credential,
+  });
+  // A request that may have reached the provider without an answer is a
+  // failure core can't call refused: never sent again, nor billed as nothing.
+  const status = reason === "unreachable" ? 502 : 400;
+  return Response.json(
+    { error: { type: `grasp_${reason}` } },
+    { status, headers: { [aiRefusedHeader]: reason } }
+  );
+};
+
+/** The request headers a provider's API needs, and nothing else of core's. */
+const forwardedHeaders = [
+  "content-type",
+  "accept",
+  "anthropic-version",
+  "anthropic-beta",
+  "x-request-id",
+] as const;
+
+/** The response headers core may read: never a cookie, nor a refusal's. */
+const answeredHeaders = [
+  "content-type",
+  "retry-after",
+  "retry-after-ms",
+  "request-id",
+  "x-request-id",
+] as const;
+
+/** Whether `request` carries the placeholder, exactly, where the key goes. */
+const carriesPlaceholder = (
+  request: Request,
+  provider: AiProviderId
+): boolean =>
+  aiProviders[provider].keyHeader === "x-api-key"
+    ? request.headers.get("x-api-key") === aiCredentialPlaceholder
+    : request.headers.get("authorization") ===
+      `Bearer ${aiCredentialPlaceholder}`;
+
+/** Whether `url` is one of the provider's model endpoints, at `base`. */
+const isModelEndpoint = (
+  url: URL,
+  provider: AiProviderId,
+  base: URL
+): boolean => {
+  const prefix = base.pathname.replace(/\/+$/u, "");
+  // A fixed provider's paths are whole; a custom endpoint's sit below its
+  // base URL's own path.
+  const custom = provider === "openai-compatible";
+  return aiProviders[provider].paths.some(
+    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
+  );
+};
+
+/** Where the credential for `claims` may be sent, and the key. */
+interface Destination {
+  key: string;
+  base: URL;
+}
+
+/** The key and where it may go, for `claims`; none when there is no key. */
+const destinationOf = async (
+  env: Env,
+  { provider, credential }: ModelGrantClaims
+): Promise<Destination | undefined> => {
+  if (credential === "platform") {
+    const key = platformKeyOf(env, provider);
+    const host = aiProviderHost(provider);
+    return key === undefined || host === undefined
+      ? undefined
+      : { key, base: new URL(`https://${host}`) };
+  }
+  const found = await organizationKeyOf(env, provider);
+  if (found === undefined) {
+    return undefined;
+  }
+  if (found.baseUrl !== null) {
+    return { key: found.key, base: new URL(found.baseUrl) };
+  }
+  const host = aiProviderHost(provider);
+  return host === undefined
+    ? undefined
+    : { key: found.key, base: new URL(`https://${host}`) };
+};
+
+/**
+ * The query a model request may carry: none, or the one Anthropic's SDK
+ * puts on its beta Messages API (`?beta=true`), which names no data.
+ */
+const allowedQueries: ReadonlySet<string> = new Set(["", "?beta=true"]);
+
+/**
+ * How long past the call's deadline connect still lets a request run: core
+ * cuts it off at its deadline itself; this is the backstop should core's
+ * cut never reach here.
+ */
+const deadlineBackstopMs = 5000;
+
+/** Whether `url` may be sent to, `base`'s origin, checked again as it is sent. */
+const sendsToBase = (url: URL, base: URL, policy: EndpointPolicy): boolean => {
+  const checked = checkEndpoint(url.href, policy);
+  return (
+    !("refused" in checked) &&
+    url.origin === base.origin &&
+    allowedQueries.has(url.search) &&
+    url.hash === ""
+  );
+};
+
+/** The request's headers for the provider, the key in its one header. */
+const headersFor = (
+  request: Request,
+  provider: AiProviderId,
+  key: string
+): Headers => {
+  const headers = new Headers();
+  for (const name of forwardedHeaders) {
+    const value = request.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  if (aiProviders[provider].keyHeader === "x-api-key") {
+    headers.set("x-api-key", key);
+  } else {
+    headers.set("authorization", `Bearer ${key}`);
+  }
+  return headers;
+};
+
+/** The provider's response as core may read it: its status, body and few headers. */
+const passedBack = (answered: Response): Response => {
+  const headers = new Headers();
+  for (const name of answeredHeaders) {
+    const value = answered.headers.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  return new Response(answered.body, { status: answered.status, headers });
+};
+
+/** Whether an HTTP status sends the client elsewhere. */
+const isRedirect = (status: number): boolean => status >= 300 && status < 400;
+
+/**
+ * Sends one provider request of a model call core's gateway decided, with
+ * the credential its grant names, or refuses it (`aiRefusedHeader`).
+ */
+export const modelFetch = async (
+  env: Env,
+  signingKeys: readonly string[],
+  request: unknown,
+  grant: unknown
+): Promise<Response> => {
+  if (!(request instanceof Request)) {
+    return refused("method");
+  }
+  let claims: ModelGrantClaims;
+  try {
+    claims = await verifyModelGrant(signingKeys, grant);
+  } catch {
+    return refused("grant");
+  }
+  if (request.method !== "POST") {
+    return refused("method", claims);
+  }
+  if (!carriesPlaceholder(request, claims.provider)) {
+    return refused("credential_header", claims);
+  }
+  const destination = await destinationOf(env, claims);
+  if (destination === undefined) {
+    return refused("no_credential", claims);
+  }
+  const { key, base } = destination;
+  // A Request's URL is always absolute and parsed.
+  const url = new URL(request.url);
+  if (url.hostname !== claims.host || !sendsToBase(url, base, policyOf(env))) {
+    return refused("endpoint", claims);
+  }
+  if (!isModelEndpoint(url, claims.provider, base)) {
+    return refused("path", claims);
+  }
+  const startedAt = Date.now();
+  const body = await request.arrayBuffer();
+  let answered: Response;
+  try {
+    answered = await fetch(url, {
+      method: "POST",
+      headers: headersFor(request, claims.provider, key),
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(
+        Math.max(1, claims.notAfter - startedAt + deadlineBackstopMs)
+      ),
+    });
+  } catch (error) {
+    // Never the error's message, which may name the URL: its kind only.
+    log.warn("ai.unanswered", {
+      provider: claims.provider,
+      credential: claims.credential,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return refused("unreachable", claims);
+  }
+  log.info("ai.request", {
+    provider: claims.provider,
+    credential: claims.credential,
+    request: claims.request,
+    status: answered.status,
+    ms: Date.now() - startedAt,
+  });
+  if (isRedirect(answered.status)) {
+    // Never followed: an endpoint that moves is refused, its body unread.
+    await answered.body?.cancel();
+    return refused("redirect", claims);
+  }
+  return passedBack(answered);
+};
+
+/**
+ * Seals again, with the current key, the organization's AI keys the
+ * previous key sealed, a batch at a time (src/clock.ts).
+ */
+export const resealAiProviderKeys = async (env: Env): Promise<void> => {
+  const vault = await vaultFor(env);
+  if (vault?.sealedWithPrevious === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select()
+    .from(aiProviderKeys)
+    .where(like(aiProviderKeys.sealed, vault.sealedWithPrevious))
+    .limit(resealBatchSize);
+  for (const row of rows) {
+    const parsed = aiProviderIdSchema.safeParse(row.provider);
+    if (!parsed.success) {
+      continue;
+    }
+    const context = contextOf(parsed.data, row.baseUrl);
+    let key: string;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+      key = await vault.open(row.sealed, context);
+    } catch (error) {
+      // Left as it is: it goes on failing its provider's calls as
+      // `no_credential`, and an admin adds the key again.
+      log.error("ai.key_unreadable", {
+        provider: parsed.data,
+        ...errorFields(error),
+      });
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+    const sealed = await vault.seal(key, context);
+    // oxlint-disable-next-line no-await-in-loop -- a small batch, in turn
+    await db
+      .update(aiProviderKeys)
+      .set({ sealed })
+      .where(
+        and(
+          eq(aiProviderKeys.provider, row.provider),
+          eq(aiProviderKeys.sealed, row.sealed)
+        )
+      );
+  }
+};
