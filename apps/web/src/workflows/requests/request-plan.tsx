@@ -43,6 +43,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import { useEffect, useRef, useState } from "react";
 
 import { formatDay, formatMonth, formatNumber } from "../../format.ts";
 
@@ -52,9 +53,9 @@ import { formatDay, formatMonth, formatNumber } from "../../format.ts";
 // figure with one line under it; over twelve months a bar a month. Beside
 // it, the time those requests saved, by the minutes a request of each kind
 // saves, which owners set to their own. A change of filter or span eases
-// the chart's marks to their new place in 300 ms, and not at all for
-// whoever asked for less motion (recharts reads it from the media query
-// through `isAnimationActive`).
+// the chart's marks to their new place and counts both figures to their new
+// value in 300 ms, and not at all for whoever asked for less motion
+// (recharts reads it from the media query through `isAnimationActive`).
 
 const rangeLabels = {
   month: msg`This month`,
@@ -73,6 +74,36 @@ const kindLabels = {
 const stillWanted = (): boolean =>
   typeof window !== "undefined" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** How long a figure takes to count to its new value, as the chart's marks. */
+const easeMs = 300;
+
+/** A figure counting from what it showed to `value`, easing out; at once for whoever asked for less motion. */
+const useEased = (value: number): number => {
+  const [shown, setShown] = useState(value);
+  const from = useRef(value);
+  useEffect(() => {
+    const start = from.current;
+    // For whoever asked for less motion, the first frame is the last.
+    const duration = stillWanted() ? 0 : easeMs;
+    const began = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const done = duration === 0 ? 1 : Math.min(1, (now - began) / duration);
+      const at = start + (value - start) * (1 - (1 - done) ** 3);
+      from.current = at;
+      setShown(Math.round(at));
+      if (done < 1) {
+        frame = requestAnimationFrame(step);
+      }
+    };
+    frame = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [value]);
+  return shown;
+};
 
 /** The minutes a request of each kind saves: to change for owners, to read for everyone else. */
 const Saved = ({
@@ -154,9 +185,9 @@ export const RequestPlan = ({
   const { t, i18n } = useLingui();
   const { report, range, today, settings, pace } = page;
   const included = narrowed ? null : settings.requestsIncluded;
-  const billed = formatNumber(report.total.billed);
+  const billed = formatNumber(useEased(report.total.billed));
   const hours = formatNumber(
-    Math.round(minutesSaved(report, settings.minutesSaved) / 60)
+    useEased(Math.round(minutesSaved(report, settings.minutesSaved) / 60))
   );
   const of = included === null ? "" : formatNumber(included);
   const ahead = pace === null ? "" : formatNumber(pace);

@@ -1574,6 +1574,10 @@ msgstr "{unnamed} van {total} in gebruik gezien, nooit genoemd"
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} van {total} genoemd, niet in gebruik gezien"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "{used} of {of}"
+msgstr "{used} van {of}"
+
 #: src/landscape/app-table.tsx
 msgid "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
 msgstr "{users, plural, one {{appName} · # gebruiker} other {{appName} · # gebruikers}}"
@@ -9209,7 +9213,6 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nee: de hash of de koppeling naar de gebeurtenis ervoor klopt niet."
 
 #: src/brain/brain.ts
-#: src/settings/stephen-audience.tsx
 msgid "Nobody"
 msgstr "Niemand"
 
@@ -9331,6 +9334,10 @@ msgstr "Niemand met die naam."
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
 msgstr "Via deze link is niemand gekoppeld aan {appName}."
+
+#: src/settings/stephen-audience.tsx
+msgid "Nobody yet"
+msgstr "Nog niemand"
 
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
@@ -10394,6 +10401,14 @@ msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig.
 #: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Uitvoer"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month, against what the plan includes."
+msgstr "Buiten Grasp deze maand, tegenover wat het abonnement omvat."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month."
+msgstr "Buiten Grasp deze maand."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Over {from} minutes"
@@ -12198,6 +12213,10 @@ msgstr "Interview van {name} bekijken"
 msgid "See the models, AI spend and the audit trail"
 msgstr "De modellen, AI-uitgaven en de audittrail zien"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "See usage"
+msgstr "Gebruik bekijken"
+
 #: src/onboarding/setup-steps.tsx
 msgid "See what needs you"
 msgstr "Bekijk wat je nodig heeft"
@@ -12962,6 +12981,10 @@ msgstr "Stephen praat met niemand totdat je de dag kiest waarop de interviews be
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, getekend in stippen."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Stephen’s requests"
+msgstr "Verzoeken aan Stephen"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Steps"

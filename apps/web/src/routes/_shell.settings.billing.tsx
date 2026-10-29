@@ -1,4 +1,5 @@
 import { noBilling } from "@grasp-os/shared/org-settings";
+import type { RequestsPage } from "@grasp-os/shared/stephen-requests";
 import {
   Alert,
   AlertDescription,
@@ -7,10 +8,11 @@ import {
 import { Button } from "@grasp-os/ui/components/button";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLinkIcon, InfoIcon } from "lucide-react";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatNumber } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
@@ -28,7 +30,9 @@ import {
 // emails go out (`orgSettings.billing()`), which the organization's own
 // admins change here, each field saved as it is left. No payment provider
 // is linked yet, so there is no plan, card or invoice, and every way into
-// Stripe is shown but not usable.
+// Stripe is shown but not usable. Beside the plan, Stephen's requests
+// outside Grasp this month, which the plan bills, with the way to how they
+// are used; left out when core doesn't give them to the viewer.
 
 /** A way into Stripe's billing portal; shown but not usable without the link. */
 const StripeButton = ({ label }: { label: string }) => (
@@ -45,11 +49,43 @@ const Nothing = () => (
   </span>
 );
 
+/** Stephen's requests outside Grasp this month, against what the plan includes when it says. */
+const RequestsRow = ({ requests }: { requests: RequestsPage }) => {
+  const { t } = useLingui();
+  const used = formatNumber(requests.report.total.billed);
+  const included = requests.settings.requestsIncluded;
+  const of = included === null ? "" : formatNumber(included);
+  return (
+    <SettingsRow
+      description={
+        included === null
+          ? t`Outside Grasp this month.`
+          : t`Outside Grasp this month, against what the plan includes.`
+      }
+      label={t`Stephen’s requests`}
+    >
+      <span className="flex items-center gap-3">
+        <span className="tabular-nums">
+          {included === null ? used : t`${used} of ${of}`}
+        </span>
+        <Button
+          nativeButton={false}
+          render={<Link to="/workflows/requests" />}
+          size="sm"
+          variant="outline"
+        >
+          {t`See usage`}
+        </Button>
+      </span>
+    </SettingsRow>
+  );
+};
+
 const BillingPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const billing = page.state === "ready" ? page.data : noBilling;
+  const billing = page.state === "ready" ? page.data.billing : noBilling;
   const { failure, save } = useQueuedSave(
     billing,
     async (session, next) => await session.orgSettings.updateBilling(next)
@@ -96,6 +132,9 @@ const BillingPage = () => {
         >
           <Nothing />
         </SettingsRow>
+        {page.data.requests === null ? null : (
+          <RequestsRow requests={page.data.requests} />
+        )}
       </SettingsSection>
 
       <SettingsSection
@@ -221,8 +260,22 @@ export const Route = createFileRoute("/_shell/settings/billing")({
   errorComponent: SettingsError,
   component: BillingPage,
   loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.orgSettings.billing()
-    ),
+    await loadFromCore(core, async (session) => {
+      const [billing, requests] = await Promise.all([
+        session.orgSettings.billing(),
+        // Its own read, so the page stands without it.
+        (async () => {
+          try {
+            return await session.stephenRequests.report({
+              range: "month",
+              place: null,
+              team: null,
+            });
+          } catch {
+            return null;
+          }
+        })(),
+      ]);
+      return { billing, requests };
+    }),
 });

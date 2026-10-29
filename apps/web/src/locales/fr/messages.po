@@ -1574,6 +1574,10 @@ msgstr "{unnamed} sur {total} vues en usage, jamais citées"
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} sur {total} citées, pas vues en usage"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "{used} of {of}"
+msgstr "{used} sur {of}"
+
 #: src/landscape/app-table.tsx
 msgid "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
 msgstr "{users, plural, one {{appName} · # utilisateur} other {{appName} · # utilisateurs}}"
@@ -9209,7 +9213,6 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Non : son hachage ou son lien avec l’événement précédent ne correspond pas."
 
 #: src/brain/brain.ts
-#: src/settings/stephen-audience.tsx
 msgid "Nobody"
 msgstr "Personne"
 
@@ -9331,6 +9334,10 @@ msgstr "Personne de ce nom."
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
 msgstr "Aucune personne connectée à {appName} ne correspond à ce lien."
+
+#: src/settings/stephen-audience.tsx
+msgid "Nobody yet"
+msgstr "Personne pour l’instant"
 
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
@@ -10394,6 +10401,14 @@ msgstr "Notre premier échange m’a donné une vue d’ensemble. J’ai mainten
 #: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Sortie"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month, against what the plan includes."
+msgstr "En dehors de Grasp ce mois-ci, par rapport à ce que comprend l’abonnement."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month."
+msgstr "En dehors de Grasp ce mois-ci."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Over {from} minutes"
@@ -12198,6 +12213,10 @@ msgstr "Voir l’entretien de {name}"
 msgid "See the models, AI spend and the audit trail"
 msgstr "Voir les modèles, les dépenses d’IA et le journal d’audit"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "See usage"
+msgstr "Voir l’utilisation"
+
 #: src/onboarding/setup-steps.tsx
 msgid "See what needs you"
 msgstr "Voir ce qui a besoin de vous"
@@ -12962,6 +12981,10 @@ msgstr "Stephen ne parle à personne tant que vous n’avez pas choisi le jour o
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, en points."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Stephen’s requests"
+msgstr "Demandes à Stephen"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Steps"

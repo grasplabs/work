@@ -1574,6 +1574,10 @@ msgstr "{unnamed} of {total} seen in use, never named"
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} of {total} named, not seen in use"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "{used} of {of}"
+msgstr "{used} of {of}"
+
 #: src/landscape/app-table.tsx
 msgid "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
 msgstr "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
@@ -9209,7 +9213,6 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "No: its hash or its link to the event before it doesn't match."
 
 #: src/brain/brain.ts
-#: src/settings/stephen-audience.tsx
 msgid "Nobody"
 msgstr "Nobody"
 
@@ -9331,6 +9334,10 @@ msgstr "Nobody with that name."
 #: src/routes/_shell.landscape.$appId.usage.$userId.tsx
 msgid "Nobody with this link is connected to {appName}."
 msgstr "Nobody with this link is connected to {appName}."
+
+#: src/settings/stephen-audience.tsx
+msgid "Nobody yet"
+msgstr "Nobody yet"
 
 #: src/onboarding/work-record.tsx
 msgid "Nobody yet."
@@ -10394,6 +10401,14 @@ msgstr "Our first conversation gave me the big picture. Now I need the details."
 #: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Output"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month, against what the plan includes."
+msgstr "Outside Grasp this month, against what the plan includes."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Outside Grasp this month."
+msgstr "Outside Grasp this month."
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Over {from} minutes"
@@ -12198,6 +12213,10 @@ msgstr "See the interview of {name}"
 msgid "See the models, AI spend and the audit trail"
 msgstr "See the models, AI spend and the audit trail"
 
+#: src/routes/_shell.settings.billing.tsx
+msgid "See usage"
+msgstr "See usage"
+
 #: src/onboarding/setup-steps.tsx
 msgid "See what needs you"
 msgstr "See what needs you"
@@ -12962,6 +12981,10 @@ msgstr "Stephen talks to nobody until you pick the day the interviews start."
 #: src/routes/interview.tsx
 msgid "Stephen, drawn in dots."
 msgstr "Stephen, drawn in dots."
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Stephen’s requests"
+msgstr "Stephen’s requests"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Steps"
