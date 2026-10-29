@@ -4,6 +4,7 @@ import { kickoffErrors, visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -1139,6 +1140,103 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       kickoff: null,
       // Nothing to answer: the kickoff is gone.
       answered: ["rejected", "rejected"],
+      holds: false,
+    });
+  });
+
+  it("keeps the kickoff's records once their write failed, from the store's alarm", async () => {
+    const member = await signedInApi(idp, "user");
+    const staff = await staffApi();
+    await bringInKickoff();
+    const pain = `Late reports ${unique()}.`;
+    // The brain's first write of records fails, as D1 can.
+    const database = env.DB;
+    let records = false;
+    let failed = false;
+    env.DB = new Proxy(database, {
+      get: (target, name, receiver): unknown => {
+        if (name === "prepare") {
+          return (query: string) => {
+            records ||= query.includes("brain_records");
+            return target.prepare(query);
+          };
+        }
+        if (name === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            // The first batch once the records are reached: their write.
+            if (!failed && records) {
+              failed = true;
+              throw new Error("D1 is unavailable");
+            }
+            return await target.batch(statements);
+          };
+        }
+        return Reflect.get(target, name, receiver);
+      },
+    });
+    let answered: unknown;
+    try {
+      answered = await staff.onboardingStaff.answerKickoff("pain", pain);
+    } finally {
+      env.DB = database;
+    }
+    const before = JSON.stringify(await member.api.brain.read());
+    await runInDurableObject(onboardingStore(env), async (store) => {
+      await store.alarm();
+    });
+    const after = JSON.stringify(await member.api.brain.read());
+
+    expect({
+      failed,
+      answered: answered !== undefined,
+      before: before.includes(pain),
+      after: after.includes(pain),
+    }).toStrictEqual({
+      failed: true,
+      answered: true,
+      before: false,
+      after: true,
+    });
+  });
+
+  it("still names the kickoff as the source of its records after a purge forgot it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const term = `Zq${unique()}`;
+    await bringInKickoff({ pain: `Clients wait for ${term}.` });
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Purged ${unique()}`,
+      access: "everyone",
+    });
+    const document = await admin.api.knowledge.saveDocument({
+      collectionId,
+      path: "note.md",
+      text: `# Note\n${term} was named.`,
+      ifVersion: 0,
+    });
+    const input: PurgeInput = {
+      type: "content",
+      documentIds: [document.id],
+      terms: [term],
+      reason: "erasure_request",
+    };
+    const plan = await admin.api.knowledge.preparePurge(input);
+    await admin.api.knowledge.purge(input, plan.token);
+    const read = await member.api.brain.read();
+    const kickoff = await onboardingStore(env).kickoff();
+
+    expect({
+      kickoff: kickoff.transcript,
+      cites: read.vision?.sourceId,
+      // Earlier tests' interviews are sources too: the kickoff's alone here.
+      source: read.sources
+        .filter(({ id }) => id === "src-kickoff")
+        .map(({ id, title }) => ({ id, title })),
+      holds: JSON.stringify(read).includes(term),
+    }).toStrictEqual({
+      kickoff: null,
+      cites: "src-kickoff",
+      source: [{ id: "src-kickoff", title: "Kickoff" }],
       holds: false,
     });
   });

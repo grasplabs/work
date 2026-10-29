@@ -171,6 +171,8 @@ const slugOf = (name: string): string =>
 interface OnboardingFacts {
   view: OnboardingView;
   kickoff: KickoffView;
+  /** When the kickoff the brain names came in, a forgotten one's too (the store's `kickoffSourceAt`). */
+  kickoffSourceAt: string | null;
   rosterSavedAt: string | null;
   sentLinks: { person: string; sentAt: string }[];
   /** Who talked as each roster team's lead, and the day they finished, as the view counts them. */
@@ -222,6 +224,7 @@ const onboardingFacts = async (
   const [
     view,
     kickoff,
+    kickoffSourceAt,
     rosterSavedAt,
     sentLinks,
     leadsTalked,
@@ -230,6 +233,7 @@ const onboardingFacts = async (
   ] = await Promise.all([
     store.view(),
     store.kickoff(),
+    store.kickoffSourceAt(),
     store.rosterSavedAt(),
     store.sentLinks(),
     store.leadsTalked(),
@@ -239,6 +243,7 @@ const onboardingFacts = async (
   return {
     view,
     kickoff,
+    kickoffSourceAt,
     rosterSavedAt,
     sentLinks,
     leadsTalked,
@@ -437,7 +442,9 @@ const onboardingSources = (
   facts: OnboardingFacts | null,
   today: string = dayOf(new Date().toISOString())
 ): CameIn[] => {
-  const kickoffAt = facts?.kickoff.transcript?.at;
+  // A kickoff a purge forgot stays a source by its title and day alone:
+  // the records the purge rewrote still name it.
+  const kickoffAt = facts?.kickoffSourceAt ?? undefined;
   return [
     ...(kickoffAt === undefined
       ? []
@@ -497,15 +504,18 @@ const sourcesForRecords = async (
     return [];
   }
   const store = onboardingStore(env);
-  const [kickoff, view, rosterSavedAt, interviews] = await Promise.all([
-    store.kickoff(),
-    store.view(),
-    store.rosterSavedAt(),
-    [...named].some(isTeamInterviews) ? teamInterviews(env) : [],
-  ]);
+  const [kickoff, kickoffSourceAt, view, rosterSavedAt, interviews] =
+    await Promise.all([
+      store.kickoff(),
+      store.kickoffSourceAt(),
+      store.view(),
+      store.rosterSavedAt(),
+      [...named].some(isTeamInterviews) ? teamInterviews(env) : [],
+    ]);
   const facts: OnboardingFacts = {
     view,
     kickoff,
+    kickoffSourceAt,
     rosterSavedAt,
     sentLinks: [],
     leadsTalked: [],
@@ -857,15 +867,15 @@ export const brainGaps = async (
  */
 const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
   const store = onboardingStore(env);
-  const [kickoff, view, rosterSavedAt] = await Promise.all([
-    store.kickoff(),
+  const [kickoffSourceAt, view, rosterSavedAt] = await Promise.all([
+    store.kickoffSourceAt(),
     store.view(),
     store.rosterSavedAt(),
   ]);
   const rosterTeams = view.roster?.teams ?? [];
   return {
     sources: new Set([
-      ...(kickoff.transcript === null ? [] : [kickoffSourceId]),
+      ...(kickoffSourceAt === null ? [] : [kickoffSourceId]),
       ...(view.roster === null || rosterSavedAt === null
         ? []
         : [rosterSourceId]),

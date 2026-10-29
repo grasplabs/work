@@ -263,6 +263,21 @@ const storeName = "onboarding";
  */
 const purgesKey = "purges";
 
+/**
+ * The brain's records of the kickoff still owed (kickoff-records.ts):
+ * `replaced` when a new kickoff's records must also retire the last
+ * one's, `answered` when only an answer changed it. Set with the kickoff
+ * in one transaction, cleared once the records are kept; the alarm keeps
+ * them until then.
+ */
+const kickoffOwedKey = "kickoff_records_owed";
+
+/**
+ * When the kickoff a purge forgot came in: its source stays, by title and
+ * day alone, so the records the purge rewrote still name it.
+ */
+const kickoffSourceKey = "kickoff_source_at";
+
 export const onboardingStore = (
   env: Pick<Env, "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">
 ) => inJurisdiction(env, env.ONBOARDING).getByName(storeName);
@@ -3879,6 +3894,54 @@ export class Onboarding extends DurableObject<Env> {
     };
   }
 
+  /**
+   * When the kickoff the brain names as a source came in: the kickoff's,
+   * or one a purge forgot (`kickoffSourceKey`), whose records the purge
+   * rewrote and still name it. Null when there was none.
+   */
+  kickoffSourceAt(): string | null {
+    const [row] = this.#db.select({ at: kickoff.at }).from(kickoff).all();
+    if (row !== undefined) {
+      return row.at;
+    }
+    const forgotten = this.ctx.storage.kv.get(kickoffSourceKey);
+    return typeof forgotten === "string" ? forgotten : null;
+  }
+
+  /**
+   * Gives the brain the kickoff's records still owed (`kickoffOwedKey`),
+   * under the brain lock it is called in, and clears what it kept. A
+   * failure leaves them owed, for the alarm to keep.
+   */
+  async #keepOwedKickoffRecords(): Promise<void> {
+    const owed = this.ctx.storage.kv.get(kickoffOwedKey);
+    if (owed !== "replaced" && owed !== "answered") {
+      return;
+    }
+    try {
+      await keepKickoffRecords(this.env, this.kickoff(), {
+        replaced: owed === "replaced",
+      });
+    } catch (error) {
+      log.error("onboarding.kickoff_records_owed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      await this.#alarmBy(Date.now() + purgeRetryMs);
+      return;
+    }
+    // Kept as it was when read: an answer meanwhile owes its own.
+    if (this.ctx.storage.kv.get(kickoffOwedKey) === owed) {
+      this.ctx.storage.kv.delete(kickoffOwedKey);
+    }
+  }
+
+  /** The kickoff's records still owed, kept now: what the alarm runs. */
+  async keepKickoffRecordsNow(): Promise<void> {
+    await this.#withBrain(async () => {
+      await this.#keepOwedKickoffRecords();
+    });
+  }
+
   /** Notes that a purge reached, or rewrote, what the onboarding holds (`purgesKey`). */
   #purged(): void {
     this.ctx.storage.kv.put(purgesKey, this.purgeMark() + 1);
@@ -3950,11 +4013,11 @@ export class Onboarding extends DurableObject<Env> {
           characters: kept.transcript.length,
           said: Object.keys(kept.reading.fields).length,
         });
+        this.ctx.storage.kv.put(kickoffOwedKey, "replaced");
       });
       this.#deliverAudit();
-      const view = this.kickoff();
-      await keepKickoffRecords(this.env, view, { replaced: true });
-      return view;
+      await this.#keepOwedKickoffRecords();
+      return this.kickoff();
     });
   }
 
@@ -4001,12 +4064,19 @@ export class Onboarding extends DurableObject<Env> {
     // first (and the same purge rewrites what it kept); one after finds
     // no kickoff, and keeps nothing.
     return await this.#withBrain(async () => {
-      const [row] = this.#db.select({ id: kickoff.id }).from(kickoff).all();
+      const [row] = this.#db
+        .select({ id: kickoff.id, at: kickoff.at })
+        .from(kickoff)
+        .all();
       if (row === undefined) {
         return false;
       }
       this.ctx.storage.transactionSync(() => {
         this.#db.delete(kickoff).where(eq(kickoff.id, row.id)).run();
+        // Its source stays, by its title and day alone: the records the
+        // purge rewrote still name it. Nothing is owed of what's gone.
+        this.ctx.storage.kv.put(kickoffSourceKey, row.at);
+        this.ctx.storage.kv.delete(kickoffOwedKey);
         this.#changed(by, "onboarding.kickoff.purged", {});
       });
       this.#deliverAudit();
@@ -4048,9 +4118,13 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(kickoff.id, 1))
           .run();
         this.#changed(by, "onboarding.kickoff.answered", { field });
+        // A new kickoff's records not kept yet still retire the last one's.
+        if (this.ctx.storage.kv.get(kickoffOwedKey) !== "replaced") {
+          this.ctx.storage.kv.put(kickoffOwedKey, "answered");
+        }
       });
       this.#deliverAudit();
-      await keepKickoffRecords(this.env, this.kickoff(), { replaced: false });
+      await this.#keepOwedKickoffRecords();
       return true;
     });
   }
@@ -4466,6 +4540,7 @@ export class Onboarding extends DurableObject<Env> {
         });
       }
       await this.forgetLinesNow();
+      await this.keepKickoffRecordsNow();
       await this.#drainAudit();
       await this.releaseDue();
       // A team's map opens its links.
@@ -5924,7 +5999,8 @@ export class Onboarding extends DurableObject<Env> {
         .select({ key: linesToForget.key })
         .from(linesToForget)
         .limit(1)
-        .all().length > 0
+        .all().length > 0 ||
+      this.ctx.storage.kv.get(kickoffOwedKey) !== undefined
         ? [now + purgeRetryMs]
         : []),
     ];
