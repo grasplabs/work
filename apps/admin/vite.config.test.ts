@@ -30,7 +30,7 @@ const envOf = (
 };
 
 describe("the admin's Worker as Vite runs it", () => {
-  it("is reached outside any jurisdiction and on localhost locally, keeping the other vars, and never in a build", () => {
+  it("is reached outside any jurisdiction, on localhost and without the OAuth relay locally, keeping the other vars, and never in a build", () => {
     const env = { CLIENT_DOMAIN: bindings.text("grasp.test") };
 
     expect({
@@ -41,6 +41,7 @@ describe("the admin's Worker as Vite runs it", () => {
         CLIENT_DOMAIN: { type: "text", value: "grasp.test" },
         DURABLE_OBJECT_JURISDICTION: { type: "text", value: "none" },
         ADMIN_HOST: { type: "text", value: "" },
+        OAUTH_RELAY: { type: "text", value: "off" },
       },
       build: { CLIENT_DOMAIN: { type: "text", value: "grasp.test" } },
     });

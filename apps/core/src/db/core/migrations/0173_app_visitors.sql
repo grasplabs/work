@@ -34,7 +34,8 @@ CREATE TABLE `app_visitor_sessions` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `app_visitor_sessions_token_idx` ON `app_visitor_sessions` (`token_hash`);--> statement-breakpoint
-CREATE INDEX `app_visitor_sessions_expires_idx` ON `app_visitor_sessions` (`expires_at`);--> statement-breakpoint
+CREATE INDEX `app_visitor_sessions_expires_idx` ON `app_visitor_sessions` (`expires_at`);
+--> statement-breakpoint
 CREATE TRIGGER `app_visitor_codes_removed_app_insert` BEFORE INSERT ON `app_visitor_codes`
 WHEN EXISTS (SELECT 1 FROM `apps` WHERE `id` = NEW.`app_id` AND `removed_at` IS NOT NULL)
 BEGIN

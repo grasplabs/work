@@ -41,7 +41,8 @@ import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, versionFiles } from "../apps.ts";
-import { memberRole, teamsOf } from "../auth/identity.ts";
+import { teamsOf } from "../auth/identity.ts";
+import { personRole, requireActivePerson } from "../permissions.ts";
 import { isRestricted } from "../restricted.ts";
 import type { WorkContext } from "../restricted.ts";
 import {
@@ -210,18 +211,20 @@ interface Found {
 }
 
 /**
- * The files of `wanted` that exist and that the person `userId` may read,
+ * The files of `wanted` that exist and that the person `authority` acts
+ * for may read,
  * with their versions now, in `wanted`'s order; working in a chat others
  * share, only those every one of them may read. An App's AGENTS.md needs
  * the person to be able to read the App's code: one of its builders.
  */
 const findFiles = async (
   env: Env,
-  userId: string,
+  authority: Authority,
   work: WorkContext,
   wanted: Wanted[]
 ): Promise<Found[]> => {
-  const role = await memberRole(env.DB, userId);
+  const userId = authority.onBehalfOf;
+  const role = await personRole(env, userId, authority.staff);
   if (!role) {
     throw permissionErrors.create("permission.person_inactive");
   }
@@ -454,9 +457,7 @@ export const forContext = async (
   }
   const wanted = await wantedFor(authority, context);
   const found =
-    wanted.length === 0
-      ? []
-      : await findFiles(env, authority.onBehalfOf, work, wanted);
+    wanted.length === 0 ? [] : await findFiles(env, authority, work, wanted);
   const key = await sha256Hex(
     JSON.stringify(
       found.map(({ wanted: { source, name, at }, documentId, version }) => [
@@ -687,9 +688,7 @@ export const saveUserMemory = async (
   ) {
     throw permissionErrors.create("permission.denied", { action: "write" });
   }
-  if (!(await memberRole(env.DB, authority.onBehalfOf))) {
-    throw permissionErrors.create("permission.person_inactive");
-  }
+  await requireActivePerson(env, authority);
   if (await isRestricted(env, authority, work)) {
     throw permissionErrors.create("permission.restricted");
   }

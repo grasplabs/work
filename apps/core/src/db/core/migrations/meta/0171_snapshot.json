@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3f9edf69-2ae4-4dbe-b29b-7af4b1546285",
+  "id": "d7239fbb-85fd-4ce8-9dcd-5104d3d97ec7",
   "prevId": "c3ee8e31-b84f-42b4-a727-738325b5f75d",
   "tables": {
     "access_revocations": {
@@ -1986,13 +1986,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "link": {
-          "name": "link",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "removed_at": {
           "name": "removed_at",
           "type": "integer",
@@ -2008,15 +2001,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "apps_link": {
-          "name": "apps_link",
-          "columns": [
-            "link"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -12733,6 +12718,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "started_by_staff": {
+          "name": "started_by_staff",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "status": {
           "name": "status",
