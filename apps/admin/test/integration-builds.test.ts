@@ -512,7 +512,7 @@ describe("integration builds", () => {
         stage: "researching",
       });
     } finally {
-      held.release();
+      held.lose();
     }
   });
 });

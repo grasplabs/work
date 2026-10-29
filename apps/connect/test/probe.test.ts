@@ -37,4 +37,12 @@ describe("connect's provisioning probe", () => {
     expect(logged).not.toContain("7e21c0");
     expect(logged).not.toContain("3a9f44");
   });
+
+  it("names the version answering, from its version metadata", async () => {
+    const version = await exports.default.version();
+    expect({ version, named: typeof version }).toStrictEqual({
+      version: env.CF_VERSION_METADATA.id,
+      named: "string",
+    });
+  });
 });

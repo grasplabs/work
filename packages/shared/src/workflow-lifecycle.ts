@@ -77,6 +77,23 @@ export interface WorkflowLifecycle {
   canDecide: boolean;
 }
 
+/**
+ * A version waiting to go live that the caller may approve or reject: on
+ * a workflow they own, or any for the organization's admins, never one
+ * they asked for themselves.
+ */
+export interface WorkflowGoLiveWaiting {
+  workflowId: string;
+  name: string;
+  version: number;
+  requestedBy: string;
+  requestedAt: string;
+  /** The lifecycle revision it was read at, which a decision names. */
+  revision: number;
+  /** Whether it waits on the caller as the workflow's owner, rather than as an admin. */
+  asOwner: boolean;
+}
+
 /** An independent workflow's lifecycle over `/rpc` (`workflowResources.lifecycle`). */
 export interface WorkflowLifecycleApi {
   get: (id: string) => Promise<WorkflowLifecycle>;
@@ -94,4 +111,6 @@ export interface WorkflowLifecycleApi {
    * asked.
    */
   decideGoLive: (id: string, input: unknown) => Promise<WorkflowLifecycle>;
+  /** Every version waiting to go live that the caller may decide, oldest request first. */
+  waiting: () => Promise<WorkflowGoLiveWaiting[]>;
 }

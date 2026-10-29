@@ -107,6 +107,25 @@ export interface AccountState {
   /** The version its Workers' health checks name, as an old version still answering would. */
   answeringVersion?: string;
   /**
+   * What its Workers' health checks name first, one answer per check,
+   * before their live version (or `answeringVersion`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  healthAnswersFirst?: string[];
+  /**
+   * The version its cores name for their connect instead of its live one
+   * (@grasp-os/shared/provision-probe), as an isolate of an old version
+   * still answering would; null as a connect that doesn't answer, or has
+   * no version metadata.
+   */
+  connectAnswering?: string | null;
+  /**
+   * What its cores name for their connect first, one answer per ask, before
+   * they name its live one (or `connectAnswering`): as isolates of an
+   * earlier version still answering just after a write would.
+   */
+  connectAnswersFirst?: (string | null)[];
+  /**
    * Where its Workers redirect every request (307, to the same path), as a
    * core or a hop in front of it gone wrong or hostile would. The fake
    * follows the redirect as fetch does, unless the request says
@@ -127,6 +146,8 @@ export interface AccountState {
         asClient?: string;
         down?: readonly string[];
         clocksDown?: readonly ("core" | "connect")[];
+        /** As a core from before connect's version: neither in its probe nor asked for. */
+        noConnectVersion?: boolean;
       };
   /**
    * The platform update notices its core took, signed with the key its
