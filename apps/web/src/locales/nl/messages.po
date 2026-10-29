@@ -6117,6 +6117,18 @@ msgstr "Grasp heeft een widget aan je dashboard toegevoegd."
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
+#: src/chat/failure.ts
+msgid "Grasp can't count model spend right now. Try again later."
+msgstr "Grasp kan de modelkosten nu niet bijhouden. Probeer het later opnieuw."
+
+#: src/chat/failure.ts
+msgid "Grasp can't read your organization's model limits right now. Try again later."
+msgstr "Grasp kan de modellimieten van je organisatie nu niet lezen. Probeer het later opnieuw."
+
+#: src/chat/failure.ts
+msgid "Grasp can't tell what this model would cost. Pick another one."
+msgstr "Grasp weet niet wat dit model zou kosten. Kies een ander model."
+
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
 msgstr "Grasp heeft een widget op je dashboard gewijzigd."
@@ -6125,6 +6137,10 @@ msgstr "Grasp heeft een widget op je dashboard gewijzigd."
 msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp zoekt uit wat er nodig is om hem te koppelen. Je vindt hem onder Aangevraagd."
+
+#: src/chat/failure.ts
+msgid "Grasp could not be reached. Try again."
+msgstr "Grasp was niet bereikbaar. Probeer het opnieuw."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not finish reading it. Read it again."
@@ -6137,6 +6153,10 @@ msgstr "Grasp kon van wat het las geen regels maken. Laat het opnieuw lezen, of 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp could not read this policy"
 msgstr "Grasp kon dit beleid niet lezen"
+
+#: src/chat/failure.ts
+msgid "Grasp couldn't put this question to the model. Try again."
+msgstr "Grasp kon deze vraag niet aan het model stellen. Probeer het opnieuw."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -6165,6 +6185,10 @@ msgstr "Grasp in jouw taal. Getallen, datums en bedragen volgen die ook."
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp is busy right now. Read it again in a minute."
 msgstr "Grasp is nu even bezet. Laat het over een minuut opnieuw lezen."
+
+#: src/chat/failure.ts
+msgid "Grasp is busy with other questions. Try again in a minute."
+msgstr "Grasp is bezig met andere vragen. Probeer het over een minuut opnieuw."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -7953,6 +7977,10 @@ msgstr "Modellen"
 #: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Er zijn nog geen modellen ingesteld voor deze omgeving, dus er kan geen model worden aangeroepen. Grasp stelt ze in."
+
+#: src/chat/failure.ts
+msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
+msgstr "Er zijn nog geen modellen ingesteld. Vraag je beheerder om Grasp ze te laten instellen."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9874,6 +9902,10 @@ msgstr "Andere domeinen mogen nu {name} aanroepen"
 #: src/chat/builds-state.ts
 msgid "Other domains may now call {name}, which {does}"
 msgstr "Andere domeinen mogen nu {name} aanroepen, dat {does}"
+
+#: src/chat/failure.ts
+msgid "Other questions are using what's left of the model budget. Try again in a minute."
+msgstr "Andere vragen gebruiken wat er over is van het modelbudget. Probeer het over een minuut opnieuw."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -13330,14 +13362,25 @@ msgstr "De migratie {migration} van de tabel {table} is mislukt bij het record {
 msgid "the migration threw an error"
 msgstr "de migratie gaf een fout"
 
-#: src/chat/chat-markdown.ts
-#: src/chat/thread.tsx
-msgid "The model call failed."
-msgstr "De modelaanroep is mislukt."
+#: src/chat/failure.ts
+msgid "The model budget is used up. Ask your admin to have Grasp raise it."
+msgstr "Het modelbudget is op. Vraag je beheerder om Grasp het te laten verhogen."
+
+#: src/chat/failure.ts
+msgid "The model couldn't answer. Try again."
+msgstr "Het model kon geen antwoord geven. Probeer het opnieuw."
+
+#: src/chat/failure.ts
+msgid "The model is busy. Try again in a minute."
+msgstr "Het model is bezet. Probeer het over een minuut opnieuw."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The model key does not work. Check it in Settings, under Models."
 msgstr "De modelsleutel werkt niet. Controleer hem in Instellingen, onder Modellen."
+
+#: src/chat/failure.ts
+msgid "The model's answer came back in the wrong shape. Try again."
+msgstr "Het antwoord van het model kwam in de verkeerde vorm terug. Probeer het opnieuw."
 
 #: src/brain/brain-atlas.ts
 msgid "The monthly budget for AI is not set yet."
@@ -13828,9 +13871,17 @@ msgstr "Deze chat is gesloten door wie je de link stuurde."
 msgid "This chat has reached its length. Press Finish to end it."
 msgstr "Deze chat heeft zijn maximale lengte bereikt. Klik op Afronden om hem te beëindigen."
 
+#: src/chat/failure.ts
+msgid "This chat holds sensitive data this model may not see. Pick another one."
+msgstr "Deze chat bevat gevoelige gegevens die dit model niet mag zien. Kies een ander model."
+
 #: src/chat/held-writes.tsx
 msgid "This chat read restricted data: this may send it out"
 msgstr "Deze chat heeft beperkte gegevens gelezen: dit kan ze naar buiten sturen"
+
+#: src/chat/failure.ts
+msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
+msgstr "Deze chat blijft in de EU, en dit model draait daar niet. Kies een ander model."
 
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "This collection has no files yet."
@@ -13958,6 +14009,10 @@ msgstr "Deze link opent de app met iets wat ze niet aanneemt. Open de app in pla
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
 msgstr "Deze lijst is te groot. Ik kan tot {peopleMost} mensen in maximaal {teamsMost} teams aan."
 
+#: src/chat/failure.ts
+msgid "This model can't give an answer that long. Pick another model, or ask for less."
+msgstr "Dit model kan geen antwoord geven dat zo lang is. Kies een ander model, of vraag om minder."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"
 msgstr "Deze maand"
@@ -13993,6 +14048,10 @@ msgstr "Dit beleid is er niet meer"
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"
 msgstr "Deze regel is er niet meer"
+
+#: src/chat/failure.ts
+msgid "This run has made all the model calls it may make."
+msgstr "Deze run heeft alle modelaanroepen gedaan die hij mag doen."
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "This run's details were removed once its retention was over, and its history with them."
@@ -16167,6 +16226,10 @@ msgstr "Jouw onboarding"
 msgid "your organization"
 msgstr "je organisatie"
 
+#: src/chat/failure.ts
+msgid "Your organization doesn't allow this model. Pick another one."
+msgstr "Je organisatie staat dit model niet toe. Kies een ander model."
+
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
 msgstr "Je organisatie gebruikt het via de toestemmingen die je geeft."
@@ -16174,6 +16237,10 @@ msgstr "Je organisatie gebruikt het via de toestemmingen die je geeft."
 #: src/routes/_shell.settings.security.tsx
 msgid "Your organization’s account"
 msgstr "Het account van je organisatie"
+
+#: src/chat/failure.ts
+msgid "Your organization's model limits need a check. Ask your admin to have Grasp look at them."
+msgstr "De modellimieten van je organisatie moeten worden nagekeken. Vraag je beheerder om Grasp ernaar te laten kijken."
 
 #: src/onboarding/about-story.tsx
 msgid "Your people, documents and tools first. Then two weeks of short conversations with your team. At {threshold}%, your team can start."
