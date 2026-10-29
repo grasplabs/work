@@ -48,7 +48,8 @@ import {
 import { appFor } from "../src/apps.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { appHost } from "../src/durable-objects.ts";
+import { appHost, workspace } from "../src/durable-objects.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Runner } from "../src/operations.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
@@ -1415,6 +1416,77 @@ describe("what a start rechecks, and records", () => {
         { settled: true, undeliverable: "workflow.start_denied" },
       ],
       receipts: 1,
+    });
+  });
+
+  it("holds the run an agent's call started to what its chat had read: refused once the agent may no longer read it", async () => {
+    const fx = await fixture();
+    const { agent: granted } = await agentOf(fx);
+    // A real chat of Bob's, whose code read the handbook.
+    const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+    const stub = workspace(env, workspaceId);
+    const chat = await stub.createChat("Questions", fx.bob.userId, workspaceId);
+    const agent: CallingAgent = { ...granted, workspaceId, chatId: chat.id };
+    const handbook = await createCollection(env, fx.admin, {
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+        chat.id,
+        handbook.id
+      );
+    });
+    const asked = await requestPermission(
+      env,
+      fx.ada,
+      {
+        subject: { type: "agent", agentId: agent.agentId },
+        object: { type: "collection", collectionId: handbook.id },
+        actions: ["read"],
+        binding: "HANDBOOK",
+      },
+      rolesOf(fx.ada)
+    );
+    await grantPermission(env, fx.admin, asked.id, { version: null });
+    /** A run of the App's follow-up, as the agent's call starts it. */
+    const ranFor = async () => {
+      const started = await call(
+        fx,
+        fx.bob,
+        "requests.kickOff",
+        { who: "Bob" },
+        { agent }
+      );
+      const handle = started.ok
+        ? handleSchema["~standard"].validate(started.value)
+        : undefined;
+      const runId =
+        handle !== undefined && "value" in handle ? handle.value.runId : null;
+      const run = await ended(fx, runId);
+      return {
+        status: run.status,
+        code: run.status === "failed" ? (run.error?.code ?? null) : null,
+      };
+    };
+
+    const kept = await ranFor();
+    await revokePermission(env, fx.admin, asked.id);
+    const revoked = await ranFor();
+    const pinned = await env.DB.prepare(
+      "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(agent.agentId)
+      .all<{ source: string; chat: string }>();
+
+    expect({ kept, revoked, pinned: pinned.results }).toStrictEqual({
+      // Its chat's reads still readable: it runs to its end.
+      kept: { status: "completed", code: null },
+      // The agent's grant on what its chat read revoked: its output, which
+      // its input may have carried, never leaves it.
+      revoked: { status: "failed", code: "brain.revoked" },
+      pinned: [{ source: handbook.id, chat: chat.id }],
     });
   });
 

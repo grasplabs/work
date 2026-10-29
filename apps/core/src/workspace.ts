@@ -2662,6 +2662,25 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * What chat `chatId` has read that its model may still be sent: each
+   * source of its code runs not withheld (`#withheldRuns`), once. What a
+   * run its agent had started copies (GRA-1093, workflow-starts.ts), as
+   * whatever its input carries came from those.
+   */
+  heldSourcesOf(chatId: unknown): string[] {
+    // A chat this object doesn't hold has read nothing here.
+    const id = chatIdSchema.parse(chatId);
+    return this.#db
+      .selectDistinct({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(
+        and(eq(chatRunSources.chatId, id), isNull(chatRunSources.withheldAt))
+      )
+      .all()
+      .map(({ sourceId }) => sourceId);
+  }
+
+  /**
    * Records with the run alone what an API call of it read (an App's
    * answer or files, the Knowledge catalog), before the call hands it
    * over: what the run's result rests on (`#withheldRuns`), never the
