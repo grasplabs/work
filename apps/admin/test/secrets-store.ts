@@ -1,6 +1,6 @@
 /**
- * The admin's Secrets Store in the test pool, filled for each test as
- * deploy-platform fills it (wrangler.jsonc), and emptied after.
+ * The admin's Secrets Store in the test pool, filled for each test with
+ * every secret it binds (wrangler.jsonc), and emptied after.
  */
 import { afterEach, beforeEach } from "vite-plus/test";
 
@@ -8,8 +8,8 @@ import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 import type { SecretsStoreAdmin } from "./secrets-store-admin.ts";
 
 /**
- * Sets the secret `binding` names, `name` in the store, to `value`, as
- * deploy-platform does after a rotation in 1Password: kept under its id, so
+ * Sets the secret `binding` names, `name` in the store, to `value`, as a
+ * rotation in the store does: kept under its id, so
  * it's taken out after the test as usual.
  */
 export const setStoreSecret = async (
