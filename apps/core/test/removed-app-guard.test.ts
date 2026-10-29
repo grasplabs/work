@@ -1,14 +1,14 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-// What a removed App takes (migration 0155, app-removal.ts): every table of
+// What a removed App takes (migration 0170, app-removal.ts): every table of
 // core's database that names an App either refuses a new row naming a
 // removed one (its `<table>_removed_app_insert` trigger) or is left open on
 // purpose, for the reason the migration gives. A new table that names an
 // App, classified neither way, fails here, so the guard keeps up with the
 // schema.
 
-/** Open on purpose: see migration 0155 for why each one is. */
+/** Open on purpose: see migration 0170 for why each one is. */
 const leftOpen = new Set([
   "access_revocations",
   "notifications",

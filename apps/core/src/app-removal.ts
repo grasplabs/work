@@ -55,7 +55,7 @@ import {
 //   it is archived, which already serves nobody.
 // - A write that read it before its removal and lands after (a grant, a
 //   request, a binding, a member, a version, a run, a change to the App
-//   itself): refused by the database (migration 0155's triggers), in one
+//   itself): refused by the database (migration 0170's triggers), in one
 //   place for every writer, now and later, and answered `app.not_found`
 //   (`auditedBatch`). Every table naming an App is classified there,
 //   refusing or open on purpose (removed-app-guard.test.ts). Only ending
