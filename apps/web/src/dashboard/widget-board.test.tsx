@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { customWidgetIdSchema } from "@grasp-os/shared/widgets";
-import type { CustomWidget } from "@grasp-os/shared/widgets";
+import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -68,8 +68,10 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** What core answers a request for a widget with. */
-type Answer = () => Promise<{ widget: CustomWidget; note: string | null }>;
+/** What core answers a request for a widget with, telling the page how it goes on `told`. */
+type Answer = (
+  told: (progress: WidgetProgress) => void
+) => Promise<{ widget: CustomWidget; note: string | null }>;
 
 /**
  * A board with the widgets Grasp made on it (`made`; none by default),
@@ -78,13 +80,20 @@ type Answer = () => Promise<{ widget: CustomWidget; note: string | null }>;
 const shown = async (answer: Answer, made: readonly CustomWidget[] = []) => {
   const asked: string[] = [];
   const dashboard = {
-    makeWidget: async (request: string) => {
+    makeWidget: async (
+      request: string,
+      onProgress: (progress: WidgetProgress) => void
+    ) => {
       asked.push(request);
-      return await answer();
+      return await answer(onProgress);
     },
-    changeWidget: async (id: string, request: string) => {
+    changeWidget: async (
+      id: string,
+      request: string,
+      onProgress: (progress: WidgetProgress) => void
+    ) => {
       asked.push(`${id}: ${request}`);
-      return await answer();
+      return await answer(onProgress);
     },
   };
   const core = {
@@ -162,6 +171,11 @@ const ask = async (request: string, opens = "Add a widget"): Promise<void> => {
     await Promise.resolve();
   });
   await settled();
+};
+
+/** Where core tells how it goes before anything was asked. */
+const notAskedYet = (): never => {
+  throw new Error("Not asked yet");
 };
 
 /** The titles of the board's blocks, in order. */
@@ -303,6 +317,66 @@ describe(WidgetBoard, () => {
     }).toStrictEqual({
       making: { busy: 1, dots: 1 },
       made: { busy: 0, dots: 0 },
+    });
+  });
+
+  it("says over the dots how Grasp gets on, stage by stage, as core tells it", async () => {
+    const { promise: answered, resolve } = Promise.withResolvers<boolean>();
+    let tell: (progress: WidgetProgress) => void = notAskedYet;
+    await shown(async (told) => {
+      tell = told;
+      await answered;
+      return { widget, note: null };
+    });
+    /** What the line over the dots says once core told the page `progress`. */
+    const after = async (progress: WidgetProgress) => {
+      await act(async () => {
+        tell(progress);
+        await Promise.resolve();
+      });
+      return document.querySelector("output")?.textContent;
+    };
+    const stage = { attempt: 1, attempts: 3 };
+
+    await ask("Which workflows failed?");
+    const before = document.querySelector("output")?.textContent;
+    const lines = [
+      await after({
+        stage: "writing",
+        ...stage,
+        draft: { title: null, parts: [] },
+      }),
+      await after({
+        stage: "writing",
+        ...stage,
+        draft: { title: "Failures this week", parts: ["number", "bars"] },
+      }),
+      await after({ stage: "checking", ...stage }),
+      await after({
+        stage: "writing",
+        attempt: 2,
+        attempts: 3,
+        draft: { title: null, parts: [] },
+      }),
+      await after({ stage: "keeping" }),
+    ];
+    resolve(true);
+    await settled();
+
+    expect({
+      before,
+      lines,
+      made: document.querySelector("output") === null,
+    }).toStrictEqual({
+      before: "Grasp is starting on the widget…",
+      lines: [
+        "Writing the widget…",
+        "Writing “Failures this week”…2 parts so far",
+        "Checking it against your numbers…",
+        "Putting it right, try 2 of 3…",
+        "Putting it on your board…",
+      ],
+      made: true,
     });
   });
 });
