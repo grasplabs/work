@@ -139,8 +139,8 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
       {what === "secrets" ? (
         <p className="text-muted-foreground">
           Each client gets the shared secrets in Secrets Store now, on the
-          release it runs, all traffic at once. Copy a rotated secret there
-          first with the Deploy platform workflow, secrets only.
+          release it runs, all traffic at once. Put a rotated secret there
+          first.
         </p>
       ) : (
         <label htmlFor="rollout-release" className="flex flex-col gap-1">

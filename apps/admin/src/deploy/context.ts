@@ -65,8 +65,8 @@ export class MissingStoreSecretError extends Error {
 /**
  * The value of the Secrets Store secret `name`. One that's missing or
  * empty stops the caller (`MissingStoreSecretError`), naming the secret
- * and nothing of its value: deploy-platform writes every one of them, so a gap
- * is a store to fix, not a secret to leave off.
+ * and nothing of its value: the store is where every one of them is set,
+ * so a gap is a store to fix, not a secret to leave off.
  */
 export const storeSecret = async (
   env: Env,

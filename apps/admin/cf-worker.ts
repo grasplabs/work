@@ -29,7 +29,6 @@ export const adminSettings = [
   "CF_ACCESS_ISS",
   "CLIENT_DOMAIN",
   "ENTRA_CLIENT_ID",
-  "GOOGLE_CLIENT_ID",
   "GRASP_CLIENT_ID",
   "ROOMS_ORIGIN",
   "ADMIN_HOST",

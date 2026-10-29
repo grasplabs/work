@@ -2,8 +2,8 @@
 // Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-platform passes them from the stage's 1Password Environment
-// with `--var`, and stops if either is missing.
+// everything. Deploy-platform passes them from the stage's 1Password
+// Environment, and stops if either is missing.
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
 {
@@ -24,7 +24,13 @@
   // Which stage this Worker serves (@grasp-os/shared/names): production
   // here, staging in `env.staging`, which repeats every binding under its
   // staging name, as wrangler inherits none of them.
-  "vars": { "STAGE": "production" },
+  // GOOGLE_CLIENT_ID is Grasp's Google OAuth app's client id, which each
+  // client's core and connect sign in with: public, and Grasp's own, so it
+  // lives here per stage, not in a deploy's settings.
+  "vars": {
+    "STAGE": "production",
+    "GOOGLE_CLIENT_ID": "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
+  },
   "observability": {
     "enabled": true,
     "redact_query_string": true,
@@ -112,7 +118,7 @@
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
   // are derived from; and the secrets every client shares, which
-  // deploy-platform copies in from 1Password. The store id is the account's own: `deploy` fills it in
+  // are set in the store by hand, from 1Password. The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [
@@ -216,6 +222,7 @@
       "name": "grasp-admin-staging",
       "vars": {
         "STAGE": "staging",
+        "GOOGLE_CLIENT_ID": "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
       },
       "d1_databases": [
         {

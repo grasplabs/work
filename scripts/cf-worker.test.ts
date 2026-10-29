@@ -192,6 +192,44 @@ describe("the admin's Worker for cf", () => {
     });
   });
 
+  it("takes each stage's Google client id from wrangler.jsonc, never from the deploy", () => {
+    const google = (stage: "production" | "staging") =>
+      bindingOf(
+        cfWorker(wranglerText, stage, {
+          ...deployed,
+          GOOGLE_CLIENT_ID: "from-the-deploy",
+        }),
+        "GOOGLE_CLIENT_ID"
+      );
+    expect({
+      production: google("production"),
+      staging: google("staging"),
+    }).toStrictEqual({
+      production: {
+        type: "text",
+        value:
+          "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
+      },
+      staging: {
+        type: "text",
+        value:
+          "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
+      },
+    });
+  });
+
+  it("stops a staging deploy whose store lacks a required secret, naming its staging name", () => {
+    expect(() =>
+      cfWorker(wranglerText, "staging", {
+        ...deployed,
+        STORED_SECRETS: everySecret
+          .split(",")
+          .filter((name) => name !== "GOOGLE_CLIENT_SECRET_STAGING")
+          .join(","),
+      })
+    ).toThrow("Secrets Store doesn't have GOOGLE_CLIENT_SECRET_STAGING");
+  });
+
   it("adds the admin's settings from the deploy, each only when it's set", () => {
     const worker = cfWorker(wranglerText, "staging", {
       ...deployed,
