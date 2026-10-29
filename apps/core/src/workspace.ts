@@ -2662,10 +2662,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * What chat `chatId` has read that its model may still be sent: each
-   * source of its code runs not withheld (`#withheldRuns`), once. What a
+   * What chat `chatId` has read: each source of its code runs, once. What a
    * run its agent had started copies (GRA-1093, workflow-starts.ts), as
-   * whatever its input carries came from those.
+   * whatever its input carries came from those. Withheld ones too
+   * (`#withheldRuns`): a concurrent turn may withhold one after the agent's
+   * call already carried it, and one withheld is unreadable now, so the
+   * run is refused at once. Fail closed: a chat with a source it can't read
+   * starts runs that release nothing until it can read it again.
    */
   heldSourcesOf(chatId: unknown): string[] {
     // A chat this object doesn't hold has read nothing here.
@@ -2673,9 +2676,7 @@ export class Workspace extends DurableObject<Env> {
     return this.#db
       .selectDistinct({ sourceId: chatRunSources.sourceId })
       .from(chatRunSources)
-      .where(
-        and(eq(chatRunSources.chatId, id), isNull(chatRunSources.withheldAt))
-      )
+      .where(eq(chatRunSources.chatId, id))
       .all()
       .map(({ sourceId }) => sourceId);
   }

@@ -1059,8 +1059,8 @@ const restrictedStart = async (
 };
 
 /**
- * What the chat behind a start by `invoker` has read that its model may
- * still be sent (GRA-1093): an App's start an agent's call made, the
+ * What the chat behind a start by `invoker` has read, withheld or not
+ * (GRA-1093): an App's start an agent's call made, the
  * agent's chat's. Its run is held to them (workflows/resource-reads.ts),
  * as its input may carry any. None for any other start. More than a run
  * keeps is refused (`brain.budget_exceeded`), never cut short.

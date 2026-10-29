@@ -1474,18 +1474,30 @@ describe("what a start rechecks, and records", () => {
     const kept = await ranFor();
     await revokePermission(env, fx.admin, asked.id);
     const revoked = await ranFor();
+    // A concurrent turn of the chat sees the revoke and withholds the
+    // handbook, after the agent's call already took what it read.
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        "UPDATE chat_run_sources SET withheld_at = ? WHERE chat_id = ?",
+        Date.now(),
+        chat.id
+      );
+    });
+    const withheld = await ranFor();
     const pinned = await env.DB.prepare(
       "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
     )
       .bind(agent.agentId)
       .all<{ source: string; chat: string }>();
 
-    expect({ kept, revoked, pinned: pinned.results }).toStrictEqual({
+    expect({ kept, revoked, withheld, pinned: pinned.results }).toStrictEqual({
       // Its chat's reads still readable: it runs to its end.
       kept: { status: "completed", code: null },
       // The agent's grant on what its chat read revoked: its output, which
       // its input may have carried, never leaves it.
       revoked: { status: "failed", code: "brain.revoked" },
+      // Withheld from its chat since: still held to it, so refused too.
+      withheld: { status: "failed", code: "brain.revoked" },
       pinned: [{ source: handbook.id, chat: chat.id }],
     });
   });
