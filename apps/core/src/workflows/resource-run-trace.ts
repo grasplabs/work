@@ -1,8 +1,11 @@
 import { workflowDiagram } from "@grasp-os/open-workflow/diagram";
+import { isExpectedCode } from "@grasp-os/shared/errors";
 import type {
   TraceState,
+  TraceStep,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
+import type { ReadableHistoryRecord } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -25,8 +28,11 @@ import { detailsRemoved } from "./retention.ts";
 // `item:<id>` or `catch:<id>`, inside a loop with the item after `@`
 // (@grasp-os/sdk open-workflow), and only those names are read; any other
 // step adds nothing. A failure a catch took still shows as its task's: it
-// happened. Records are metadata: no value of the run's reaches
-// the trace. For the workflow's builders, who read its definitions.
+// happened. Each step is shown too, in the order the run reached it, with
+// its loop item, attempts and times (GRA-513): a run's step detail.
+// Records are metadata: no value of the run's reaches the trace, and a
+// failure only by a code the platform defines. For the workflow's
+// builders, who read its definitions.
 
 /** How many history records one trace reads at most. */
 const maxRecords = 2000;
@@ -38,7 +44,7 @@ const pageRecords = 500;
 // (`task:<id>@<for>.<index>/…`), and a loop's check of its `while` is an
 // `item:` step: each item's steps count as their task's.
 const stepName =
-  /^(?:task|enter|leave|item|catch):(?<task>[a-z][a-z0-9-]{0,63})(?:@[a-z0-9./-]{1,600})?$/u;
+  /^(?:task|enter|leave|item|catch):(?<task>[a-z][a-z0-9-]{0,63})(?:@(?<item>[a-z0-9./-]{1,600}))?$/u;
 
 /** The more telling of two states of one task's steps. */
 const rank: Readonly<Record<TraceState, number>> = {
@@ -57,21 +63,59 @@ const stateAfter: Readonly<Partial<Record<string, TraceState>>> = {
   sleep_completed: "reached",
 };
 
-interface TracedStep {
-  task: string;
-  state: TraceState;
-  attempts: number;
+/** The steps of tasks one trace read, in the order the run reached them. */
+interface TracedSteps {
+  steps: TraceStep[];
+  /** False when the journal held more than one trace reads. */
+  complete: boolean;
 }
 
 /**
- * The steps of tasks that run `id`'s journal holds, by their ordinal, as
- * far as one trace reads it, and whether it read all of it.
+ * A failed step's code as a trace shows it: only a code the platform
+ * defines. One a workflow raises, or one merely in a platform namespace,
+ * can be made of what the run read.
  */
-const tracedSteps = async (
+const shownCodeOf = (code: string | undefined): string =>
+  code !== undefined && isExpectedCode(code) ? code : "workflow.step_failed";
+
+/**
+ * The step `known` (of task `task`, in loop item `item`) as `record`, one
+ * of its events, leaves it: its state, its attempts, and, once it ended
+ * for good, when and, for a failure, by which code.
+ */
+const steppedBy = (
+  known: TraceStep | undefined,
+  record: ReadableHistoryRecord & { step: object },
+  task: string,
+  item: string | null
+): TraceStep => {
+  const state = stateAfter[record.type] ?? known?.state ?? "running";
+  const ended = state === "reached" || state === "failed";
+  return {
+    ordinal: record.step.ordinal,
+    task,
+    item,
+    state,
+    attempts: Math.max(known?.attempts ?? 0, record.attempt ?? 0),
+    startedAt: known?.startedAt ?? new Date(record.at).toISOString(),
+    endedAt: ended ? new Date(record.at).toISOString() : null,
+    errorCode:
+      state === "failed"
+        ? shownCodeOf(record.error?.code ?? known?.errorCode ?? undefined)
+        : null,
+  };
+};
+
+/**
+ * The steps of tasks that run `id`'s journal holds, in the order it
+ * reached them, as far as one trace reads it, and whether it read all of
+ * it. Read from the engine's own history, so a test run's as a run's.
+ */
+export const tracedSteps = async (
   env: Env,
   id: string
-): Promise<{ steps: Map<number, TracedStep>; complete: boolean }> => {
-  const steps = new Map<number, TracedStep>();
+): Promise<TracedSteps> => {
+  const steps = new Map<number, TraceStep>();
   const stub = runObjectOf(env, id);
   let after = 0;
   let read = 0;
@@ -81,7 +125,7 @@ const tracedSteps = async (
     const page = await stub.history({ after, limit: pageRecords });
     if (page === undefined) {
       // Still starting: the engine has no record of it yet.
-      return { steps, complete: true };
+      return { steps: [], complete: true };
     }
     ({ more } = page);
     // A page that says there is more but holds nothing would ask again
@@ -92,20 +136,29 @@ const tracedSteps = async (
     for (const record of page.records) {
       read += 1;
       after = record.eventId;
-      const step = record.unreadable ? null : record.step;
-      const task =
-        step === null ? undefined : stepName.exec(step.name)?.groups?.task;
-      if (step !== null && task !== undefined && !record.unreadable) {
-        const known = steps.get(step.ordinal);
-        steps.set(step.ordinal, {
-          task,
-          state: stateAfter[record.type] ?? known?.state ?? "running",
-          attempts: Math.max(known?.attempts ?? 0, record.attempt ?? 0),
-        });
+      if (record.unreadable || record.step === null) {
+        continue;
+      }
+      const named = stepName.exec(record.step.name)?.groups;
+      if (named?.task !== undefined) {
+        const { ordinal } = record.step;
+        steps.set(
+          ordinal,
+          steppedBy(
+            steps.get(ordinal),
+            { ...record, step: record.step },
+            named.task,
+            named.item ?? null
+          )
+        );
       }
     }
   }
-  return { steps, complete: !more };
+  return {
+    // A step's ordinal is its place in the run.
+    steps: [...steps.values()].toSorted((a, b) => a.ordinal - b.ordinal),
+    complete: !more,
+  };
 };
 
 /**
@@ -146,6 +199,7 @@ export const resourceRunTrace = async (
       status: run.status,
       diagram,
       tasks: [],
+      steps: [],
       complete: true,
       detailsRemoved: true,
     };
@@ -153,8 +207,8 @@ export const resourceRunTrace = async (
   const { steps, complete } = await tracedSteps(env, run.id);
   // A task's steps together: the most telling of their states, the most
   // attempts any made.
-  const tasks = new Map<string, TracedStep>();
-  for (const step of steps.values()) {
+  const tasks = new Map<string, WorkflowRunTrace["tasks"][number]>();
+  for (const step of steps) {
     const known = tasks.get(step.task);
     tasks.set(step.task, {
       task: step.task,
@@ -171,6 +225,7 @@ export const resourceRunTrace = async (
     status: run.status,
     diagram,
     tasks: [...tasks.values()],
+    steps,
     complete,
     detailsRemoved: false,
   };
