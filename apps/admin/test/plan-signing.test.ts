@@ -83,7 +83,7 @@ const awaitingPlan = async () => {
 };
 
 describe("an approved plan, signed", () => {
-  useStoreSecrets({ deployer: "deployer-token", tenant: "tenant-token" });
+  useStoreSecrets({ deployer: "deployer-token" });
 
   it("is signed only once a person approved it, and passes for nothing else", async () => {
     const { privateKey, publicKey } = await keyPair();

@@ -4,12 +4,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   auditEvents,
-  clientDeploys,
   clientProvisions,
   clients,
   releases,
 } from "../src/db/schema.ts";
-import { startDeploy } from "../src/deploy/deploy.ts";
 import { placeAndProvisionFn } from "../src/hosting/functions.ts";
 import { createClient } from "../src/provision/control.ts";
 import type { ProvisionInput } from "../src/provision/control.ts";
@@ -34,7 +32,7 @@ import { startsOf } from "./runs.ts";
 // - Anyone but staff adding one: the server function is behind Access.
 
 const token = "test-deployer-token-add-client-5e2b91";
-mockCloudflareApi(token, `${token}-tenant`);
+mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -118,7 +116,6 @@ describe("adding a client", () => {
       result,
       row: {
         name: row?.name,
-        accountId: row?.accountId,
         status: row?.status,
         ring: row?.ring,
         attio: row?.attioCompanyId,
@@ -130,7 +127,6 @@ describe("adding a client", () => {
       result: { clientId: input.clientId, refused: null },
       row: {
         name: "Acme",
-        accountId: null,
         status: "provisioning",
         ring: 2,
         attio: companyId,
@@ -174,24 +170,6 @@ describe("adding a client", () => {
       operation: { releaseId },
       attempts: 1,
     });
-  });
-
-  it("is never deployed by the account-per-client path, placed or not", async () => {
-    const releaseId = await importedRelease();
-    const input = inputOf();
-    await createClient(env, staff, input);
-
-    const refused = await codeOf(
-      startDeploy(db, staff, input.clientId, releaseId)
-    );
-
-    expect({
-      refused,
-      deploys: await db
-        .select({ id: clientDeploys.id })
-        .from(clientDeploys)
-        .where(eq(clientDeploys.clientId, input.clientId)),
-    }).toStrictEqual({ refused: "client_placed", deploys: [] });
   });
 
   it("records one client however many adds of its id race, and refuses the rest", async () => {

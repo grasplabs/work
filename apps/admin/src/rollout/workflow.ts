@@ -81,7 +81,7 @@ import {
   rolloutTargets,
 } from "../db/schema.ts";
 import { deployContext } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import type { DeployErrorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {

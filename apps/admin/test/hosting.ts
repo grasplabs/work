@@ -76,7 +76,6 @@ export const client = async (): Promise<string> => {
   await db.insert(clients).values({
     id,
     name: id,
-    accountId: crypto.randomUUID(),
     createdAt: now,
     updatedAt: now,
   });
