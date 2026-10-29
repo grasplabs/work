@@ -1,4 +1,5 @@
 import type {
+  WorkflowGoLiveWaiting,
   WorkflowLifecycle,
   WorkflowLifecycleApi,
 } from "@grasp-os/shared/workflow-lifecycle";
@@ -8,6 +9,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
   decideGoLive,
+  goLivesWaiting,
   pauseWorkflow,
   requestGoLive,
   resumeWorkflow,
@@ -71,6 +73,13 @@ export class WorkflowLifecycleRpc
     return await withPerson(
       this.#check,
       async (person) => await decideGoLive(this.#env, person, id, input)
+    );
+  }
+
+  async waiting(): Promise<WorkflowGoLiveWaiting[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await goLivesWaiting(this.#env, person)
     );
   }
 }
