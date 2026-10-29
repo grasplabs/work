@@ -1,4 +1,3 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
@@ -15,10 +14,12 @@ import { placeAndProvisionFn } from "../src/hosting/functions.ts";
 import { createClient } from "../src/provision/control.ts";
 import type { ProvisionInput } from "../src/provision/control.ts";
 import { startClient } from "../src/provision/functions.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, release, staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
+import { startsOf } from "./runs.ts";
 
 // Adding a client (src/provision/control.ts): staff record it with no
 // account of its own, then place it in a hosting destination and
@@ -145,7 +146,7 @@ describe("adding a client", () => {
     const releaseId = await importedRelease();
     const input = inputOf();
     await createClient(env, staff, input);
-    await using runs = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const placed = await callServerFn(
       placeAndProvisionFn,
@@ -158,7 +159,7 @@ describe("adding a client", () => {
       { email: staff.email }
     );
 
-    const attempts = await runs.get();
+    const attempts = runs.started;
     const operation = await db
       .select({ releaseId: clientProvisions.releaseId })
       .from(clientProvisions)

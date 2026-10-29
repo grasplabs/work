@@ -27,8 +27,10 @@
  * out to clients (src/rollout/workflow.ts), `RolloutClient` deploys one
  * fleet client of a rollout, `RollbackClient` rolls a
  * client back from one, and `ApplyClient` applies a client's settings
- * now (src/clients/apply.ts). `ProvisionPlacedClient` provisions a client
- * placed in a hosting destination (src/hosting/workflow.ts).
+ * now (src/clients/apply.ts). `AdminRuns` holds the admin's runs on
+ * Workerflow (src/workflow-runs.ts): builds of integrations, and attempts
+ * at provisioning a client placed in a hosting destination
+ * (src/hosting/workflow.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
@@ -56,7 +58,6 @@ import { importReleases } from "./releases/import.ts";
 
 export { ChatState } from "@grasp-os/chat/state";
 export { ApplyClient } from "./clients/apply.ts";
-export { ProvisionPlacedClient } from "./hosting/workflow.ts";
 export { RollbackClient } from "./rollout/rollback.ts";
 export { RolloutClient } from "./rollout/fleet-client.ts";
 export { Rollout } from "./rollout/workflow.ts";

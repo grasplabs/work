@@ -449,7 +449,7 @@ const assertHolds = async (
   db: AdminDatabase,
   held: HeldClient
 ): Promise<void> => {
-  if (!(await holdsClient(db, held.clientId, held.runId))) {
+  if (!(await holdsClient(db, held.clientId, held.runId, held.attempt))) {
     throw new ProvisionOperationError(
       "runner_replaced",
       `${held.runId} no longer holds ${held.clientId}`
@@ -763,7 +763,7 @@ export const startClientRelease = async (
       `${clientId} has no operation: it wasn't provisioned as a placement`
     );
   }
-  if (!(await holdsClient(db, clientId, held.runId))) {
+  if (!(await holdsClient(db, clientId, held.runId, held.attempt))) {
     throw new ProvisionOperationError(
       "operation_running",
       `${held.runId} doesn't hold ${clientId}`
@@ -1539,12 +1539,17 @@ const migrate = async (
   if (schema !== progress.schema) {
     await recordProgress(context.db, loaded, { ...progress, schema });
   }
+  // Checked before each migration too: an attempt that timed out, and goes
+  // on beside its retry (src/runners.ts, `takeAttempt`), applies nothing.
   const applied = await migrateDatabases(
     context.api,
     loaded.accountId,
     databases,
     loaded.manifest,
-    context.store
+    context.store,
+    async () => {
+      await assertHolds(context.db, loaded.held);
+    }
   );
   await recordStep(context.db, loaded, "migrations", {
     applied: [...applied.values()].reduce((sum, count) => sum + count, 0),
@@ -2236,7 +2241,9 @@ const complete = async (db: AdminDatabase, loaded: Loaded): Promise<void> => {
             stillHolds(held)
           )
         ),
-      releaseRun(db, held.clientId, held.runId),
+      // Only while this attempt holds the client: one that timed out and
+      // finishes late leaves its retry's claim be.
+      releaseRun(db, held.clientId, held.runId, held.attempt),
     ]
   );
   if (!finished) {
