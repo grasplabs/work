@@ -3,7 +3,6 @@ import {
   signedPlanSchema,
   verifyPlanSignature,
 } from "@grasp-os/connector-kit/plan-signature";
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -15,6 +14,8 @@ import {
 } from "../src/builds/builds.ts";
 import { signedPlan } from "../src/builds/plan-signing.ts";
 import type { BuildPlan } from "../src/builds/plan.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
+import { stepSucceeded } from "./runs.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 // The approved plan of a build, signed (src/builds/plan-signing.ts), from
@@ -75,18 +76,10 @@ const codeOf = async (promise: Promise<unknown>): Promise<unknown> => {
 
 /** A build of a new app whose run is waiting for its first plan. */
 const awaitingPlan = async () => {
-  const runs = await introspectWorkflow(env.INTEGRATION_BUILD);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableRetryDelays();
-  });
   const app = newApp();
-  await requestBuild(env, staff, { app, name: "Example HR" });
-  const [run] = await runs.get();
-  if (run === undefined) {
-    throw new Error("Expected the build's run");
-  }
-  await run.waitForStepResult({ name: "plan 1 check" });
-  return { app, run, runs };
+  const runId = await requestBuild(env, staff, { app, name: "Example HR" });
+  await stepSucceeded(adminWorkflows.integrationBuild, runId, "plan 1 check");
+  return { app, runId };
 };
 
 describe("an approved plan, signed", () => {
@@ -96,16 +89,20 @@ describe("an approved plan, signed", () => {
     const { privateKey, publicKey } = await keyPair();
     const other = await keyPair();
     await setStoreSecret(env.PLAN_SIGNING_KEY, "PLAN_SIGNING_KEY", privateKey);
-    const { app, run, runs } = await awaitingPlan();
-    await using _runs = runs;
+    const { app, runId } = await awaitingPlan();
 
     const unknown = await codeOf(signedPlan(env, newApp()));
     const asked = await codeOf(signedPlan(env, app));
     await recordPlan(env, app, planFor(app));
     const waiting = await codeOf(signedPlan(env, app));
+    await stepSucceeded(
+      adminWorkflows.integrationBuild,
+      runId,
+      "decision 1 check"
+    );
     await sendBackPlan(env, staff, app, 1, "Only what reads employees.");
     const sentBack = await codeOf(signedPlan(env, app));
-    await run.waitForStepResult({ name: "plan 2 check" });
+    await stepSucceeded(adminWorkflows.integrationBuild, runId, "plan 2 check");
     await recordPlan(env, app, planFor(app));
     await approvePlan(env, staff, app, 2);
     const { text, signature } = await signedPlan(env, app);
@@ -149,8 +146,7 @@ describe("an approved plan, signed", () => {
   });
 
   it("signs nothing while the admin has no key", async () => {
-    const { app, runs } = await awaitingPlan();
-    await using _runs = runs;
+    const { app } = await awaitingPlan();
     await recordPlan(env, app, planFor(app));
     await approvePlan(env, staff, app, 1);
 

@@ -1,6 +1,6 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { offeredWidgets } from "@grasp-os/shared/dashboard";
-import type { WidgetSpec } from "@grasp-os/shared/widgets";
+import type { WidgetProgress, WidgetSpec } from "@grasp-os/shared/widgets";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -279,6 +279,73 @@ describe("widgets Grasp makes from what a person asks", () => {
       tooBig: true,
       note: "Shown for the week, not the month.",
       kept: [result.widget.id],
+    });
+  });
+
+  it("tells the page that asked how it goes, each attempt as it is written, checked, put right and kept, and makes it whatever the page does", async () => {
+    const { owner, app } = await engines();
+    const told: WidgetProgress[] = [];
+    const { result } = await answering(
+      [
+        // A part the dashboard doesn't have: sent back to be put right.
+        answer({
+          title: "Script",
+          days: 7,
+          parts: [{ type: "html", html: "<b>hi</b>" }],
+        }),
+        answer(failures(app)),
+        answer({ ...failures(app), title: "Failed again" }),
+      ],
+      async () => {
+        const made = await owner.api.dashboard.makeWidget(
+          "Failures this week",
+          (progress) => {
+            told.push(progress);
+          }
+        );
+        // A page whose callback fails still gets its widget.
+        const anyway = await owner.api.dashboard.makeWidget(
+          "Failures again",
+          () => {
+            throw new Error("The page went away");
+          }
+        );
+        return { made, anyway };
+      }
+    );
+    // Stages in order, each once however often its draft grew.
+    const stages = told
+      .map((each) =>
+        each.stage === "keeping" ? each.stage : `${each.stage} ${each.attempt}`
+      )
+      .filter((each, at, all) => each !== all[at - 1]);
+    const lastDrafts = told.flatMap((each, at) =>
+      each.stage === "writing" && told[at + 1]?.stage !== "writing"
+        ? [each.draft]
+        : []
+    );
+
+    expect({
+      stages,
+      lastDrafts,
+      firstDraft: told[0],
+      made: result.made.widget.view.title,
+      anyway: result.anyway.widget.view.title,
+    }).toStrictEqual({
+      stages: ["writing 1", "checking 1", "writing 2", "checking 2", "keeping"],
+      lastDrafts: [
+        // A part the dashboard doesn't have isn't one.
+        { title: "Script", parts: [] },
+        { title: "Failures this week", parts: ["number", "bars"] },
+      ],
+      firstDraft: {
+        stage: "writing",
+        attempt: 1,
+        attempts: 3,
+        draft: { title: null, parts: [] },
+      },
+      made: "Failures this week",
+      anyway: "Failed again",
     });
   });
 

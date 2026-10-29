@@ -7,7 +7,12 @@ import type {
   DashboardApi,
   DashboardLayout,
 } from "@grasp-os/shared/dashboard";
-import type { CustomWidget, WidgetMade } from "@grasp-os/shared/widgets";
+import { errorFields, log } from "@grasp-os/shared/log";
+import type {
+  CustomWidget,
+  WidgetMade,
+  WidgetProgress,
+} from "@grasp-os/shared/widgets";
 
 import { boardReportOf } from "./board-report.ts";
 import type { BoardReportSources } from "./board-report.ts";
@@ -18,6 +23,7 @@ import {
   removeWidget,
 } from "./dashboard-widgets.ts";
 import { workspace } from "./durable-objects.ts";
+import { isStub } from "./page-callbacks.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -31,7 +37,50 @@ import type { SessionCheck } from "./session-check.ts";
 // layout isn't audited: it changes what one person sees of what they may
 // already see, as marking notifications read does. Making, changing and
 // removing a widget is, with each model call. Its weekly report is read
-// through the session's other namespaces (board-report.ts).
+// through the session's other namespaces (board-report.ts). While Grasp
+// makes or changes a widget, the page that asked is told how it goes
+// (`progressTo`), as a chat streams its answer.
+
+/**
+ * The page's `onProgress`, as a function the widget's making can call for
+ * as long as the call lasts, and let go of once it ends: it passes on
+ * progress only, never waits for the page, and stops telling once the
+ * page didn't take it. Anything but a function of the page's is none.
+ */
+const progressTo = (
+  onProgress: unknown
+):
+  | {
+      tell: (progress: WidgetProgress) => void;
+      [Symbol.dispose]: () => void;
+    }
+  | undefined => {
+  if (!isStub(onProgress)) {
+    return undefined;
+  }
+  const toPage = onProgress.dup();
+  let live = true;
+  return {
+    tell: (progress) => {
+      if (!live) {
+        return;
+      }
+      // In order, as Cap'n Web sends calls; nothing waits for the page.
+      void (async () => {
+        try {
+          await toPage(progress);
+        } catch (error) {
+          live = false;
+          log.info("dashboard.progress_dropped", errorFields(error));
+        }
+      })();
+    },
+    [Symbol.dispose]: () => {
+      live = false;
+      toPage[Symbol.dispose]();
+    },
+  };
+};
 
 /** The signed-in person's dashboard. */
 export class DashboardRpc extends CoreRpcTarget implements DashboardApi {
@@ -84,39 +133,47 @@ export class DashboardRpc extends CoreRpcTarget implements DashboardApi {
     );
   }
 
-  async makeWidget(request: string): Promise<WidgetMade> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await makeWidget(
-          this.#env,
-          {
-            member: person,
-            trigger: { type: "person", userId: person.userId },
-            work: dashboardWork,
-            requestId: crypto.randomUUID(),
-          },
-          request
-        )
-    );
+  async makeWidget(
+    request: string,
+    onProgress?: (progress: WidgetProgress) => void
+  ): Promise<WidgetMade> {
+    return await withPerson(this.#check, async (person) => {
+      using progress = progressTo(onProgress);
+      return await makeWidget(
+        this.#env,
+        {
+          member: person,
+          trigger: { type: "person", userId: person.userId },
+          work: dashboardWork,
+          requestId: crypto.randomUUID(),
+        },
+        request,
+        undefined,
+        progress?.tell
+      );
+    });
   }
 
-  async changeWidget(id: string, request: string): Promise<WidgetMade> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await makeWidget(
-          this.#env,
-          {
-            member: person,
-            trigger: { type: "person", userId: person.userId },
-            work: dashboardWork,
-            requestId: crypto.randomUUID(),
-          },
-          request,
-          id
-        )
-    );
+  async changeWidget(
+    id: string,
+    request: string,
+    onProgress?: (progress: WidgetProgress) => void
+  ): Promise<WidgetMade> {
+    return await withPerson(this.#check, async (person) => {
+      using progress = progressTo(onProgress);
+      return await makeWidget(
+        this.#env,
+        {
+          member: person,
+          trigger: { type: "person", userId: person.userId },
+          work: dashboardWork,
+          requestId: crypto.randomUUID(),
+        },
+        request,
+        id,
+        progress?.tell
+      );
+    });
   }
 
   async removeWidget(id: string): Promise<void> {
