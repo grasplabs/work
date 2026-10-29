@@ -142,12 +142,12 @@ const secret = (name: string) => [
 
 const gatewayFile = "apps/gateway/wrangler.jsonc";
 
-/** A connect gateway config in both stages, with `routes` in production. */
-const gateway = (routes?: object) =>
+/** A connect gateway config in both stages, with `routing` (`routes` or `route`) in production. */
+const gateway = (routing?: object) =>
   JSON.stringify({
     name: "grasp-connect-gateway",
     vars: { STAGE: "production" },
-    ...(routes === undefined ? {} : { routes }),
+    ...routing,
     env: {
       staging: {
         name: "grasp-connect-gateway-staging",
@@ -216,7 +216,14 @@ describe("platform names", () => {
         router({ staging: { routes: productionRoutes } })
       ),
       gatewayUnrouted: platformNameErrors(gatewayFile, gateway()),
-      gatewayRouted: platformNameErrors(gatewayFile, gateway(productionRoutes)),
+      gatewayRouted: platformNameErrors(
+        gatewayFile,
+        gateway({ routes: productionRoutes })
+      ),
+      gatewaySingular: platformNameErrors(
+        gatewayFile,
+        gateway({ route: "gateway.ongrasp.app/*" })
+      ),
     }).toStrictEqual({
       unrouted: [
         `${routerFile} (env staging): routes is none, not *.staging.ongrasp.app/* zone ongrasp.app.`,
@@ -227,6 +234,9 @@ describe("platform names", () => {
       gatewayUnrouted: [],
       gatewayRouted: [
         `${gatewayFile}: routes is *.ongrasp.app/* zone ongrasp.app, not none.`,
+      ],
+      gatewaySingular: [
+        `${gatewayFile}: routes is gateway.ongrasp.app/*, not none.`,
       ],
     });
   });

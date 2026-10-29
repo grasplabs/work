@@ -89,9 +89,17 @@ const platformConfigs: Readonly<Record<string, PlatformWorker>> = {
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-/** `routes` as one line to compare and show: each pattern, its zone, and whether it's a Custom Domain. */
-const routesText = (routes: unknown): string =>
-  list(routes)
+/**
+ * Every route `config` declares, under `routes` or wrangler's singular
+ * `route`, as one line to compare and show: each pattern, its zone, and
+ * whether it's a Custom Domain. A route given as a string is its pattern.
+ */
+const routesText = (config: unknown): string =>
+  [
+    ...list(field(config, "routes")),
+    ...[field(config, "route")].filter((route) => route !== undefined),
+  ]
+    .map((route) => (typeof route === "string" ? { pattern: route } : route))
     .map((route) =>
       [
         String(field(route, "pattern")),
@@ -122,8 +130,8 @@ const stageNameErrors = (
   // nowhere; with another stage's, it takes that stage's traffic.
   expect(
     "routes",
-    routesText(field(config, "routes")),
-    routesText(platformRoutes(worker, stage))
+    routesText(config),
+    routesText({ routes: platformRoutes(worker, stage) })
   );
   for (const binding of list(field(config, "dispatch_namespaces"))) {
     expect(

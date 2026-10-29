@@ -136,7 +136,7 @@ describe("the platform's names", () => {
     });
   });
 
-  it("put the admin on its own Custom Domain, the router on every host below the stage's domain, and the gateway nowhere", () => {
+  it("put the admin on a route for its own host, the router on every host below the stage's domain, and the gateway nowhere", () => {
     expect(
       Object.fromEntries(
         stages.map((stage) => [
@@ -146,12 +146,17 @@ describe("the platform's names", () => {
       )
     ).toStrictEqual({
       production: [
-        [{ pattern: "admin.ongrasp.app", custom_domain: true }],
+        [{ pattern: "admin.ongrasp.app/*", zone_name: "ongrasp.app" }],
         [{ pattern: "*.ongrasp.app/*", zone_name: "ongrasp.app" }],
         [],
       ],
       staging: [
-        [{ pattern: "admin.staging.ongrasp.app", custom_domain: true }],
+        [
+          {
+            pattern: "admin.staging.ongrasp.app/*",
+            zone_name: "ongrasp.app",
+          },
+        ],
         [{ pattern: "*.staging.ongrasp.app/*", zone_name: "ongrasp.app" }],
         [],
       ],

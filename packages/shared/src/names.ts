@@ -104,25 +104,27 @@ export const platformZone = productionDomain;
  * Where a platform Worker answers in `stage`, as its wrangler.jsonc
  * declares it (`routes`), so every deploy applies it:
  *
- * - the admin, on a custom domain of its own: `adminHost`;
+ * - the admin, on a route for its own hostname, `adminHost`;
  * - the router, on a route for every host below `clientDomain` (each
- *   client's, and the auth relay's), in `platformZone`;
+ *   client's, and the auth relay's);
  * - the connect gateway, nowhere: it is reached by service binding alone.
  *
- * Production's route, `*.ongrasp.app/*`, matches staging's hosts too, as
- * Cloudflare's `*` takes any number of labels. Cloudflare sends a request
- * to the most specific route that matches it, so staging's own
- * `*.staging.ongrasp.app/*` takes staging's hosts, and a Custom Domain
- * takes precedence over any route, so the admin's hosts never reach a
- * router. Each router still refuses another stage's host itself
- * (`stageOfHost`), should a route ever send it one.
+ * All in `platformZone`, whose proxied wildcard DNS records cover them.
+ * The admin's is a route, not a Custom Domain: Cloudflare runs a zone's
+ * routes before a Custom Domain's Worker, so the router's wildcard would
+ * take the admin's hostname from one. Among routes, the most specific
+ * that matches wins: the admin's exact host beats the router's wildcard,
+ * and staging's `*.staging.ongrasp.app/*` beats production's
+ * `*.ongrasp.app/*`, which matches staging's hosts too, as `*` takes any
+ * number of labels. Each router still refuses another stage's host
+ * itself (`stageOfHost`), should a route ever send it one.
  */
 export const platformRoutes = (
   worker: PlatformWorker,
   stage: Stage
-): { pattern: string; custom_domain?: true; zone_name?: string }[] => {
+): { pattern: string; zone_name: string }[] => {
   if (worker === "admin") {
-    return [{ pattern: adminHost(stage), custom_domain: true }];
+    return [{ pattern: `${adminHost(stage)}/*`, zone_name: platformZone }];
   }
   if (worker === "router") {
     return [{ pattern: `*.${clientDomain(stage)}/*`, zone_name: platformZone }];

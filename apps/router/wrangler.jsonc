@@ -10,8 +10,8 @@
   // Every host below the stage's client domain: each client's, and the
   // auth relay's (@grasp-os/shared/names, `platformRoutes`, which
   // check:wrangler-configs holds this to). Staging's more specific route
-  // takes staging's hosts from this one, and the admin's Custom Domain
-  // takes the admin's.
+  // takes staging's hosts from this one, and the admin's exact route takes
+  // the admin's.
   "routes": [{ "pattern": "*.ongrasp.app/*", "zone_name": "ongrasp.app" }],
   // No platform line per invocation, and query strings stay out of logs and
   // traces: the router sees every client's full URLs, OAuth callbacks'
