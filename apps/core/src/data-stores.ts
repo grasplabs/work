@@ -4,7 +4,12 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
+import {
+  canBuild,
+  isAdmin,
+  isMemberAdmin,
+  requireBuilder,
+} from "@grasp-os/shared/roles";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import {
@@ -243,6 +248,8 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
 /** The App a default store serves: whose roles decide who manages it. */
 type DefaultStoreApp = Pick<App, "id" | "owner" | "status"> & {
   createdAt: Date;
+  /** Whether the App was removed (app-removal.ts): its admins' alone then. */
+  removed: boolean;
 };
 
 /**
@@ -262,6 +269,7 @@ const defaultStoreApp = async (
       owner: apps.ownerId,
       status: apps.status,
       createdAt: apps.createdAt,
+      removedAt: apps.removedAt,
     })
     .from(appDefaultStores)
     .leftJoin(apps, eq(apps.id, appDefaultStores.appId))
@@ -283,6 +291,7 @@ const defaultStoreApp = async (
     owner: row.owner,
     status: row.status,
     createdAt: row.createdAt,
+    removed: row.removedAt !== null,
   };
 };
 
@@ -311,7 +320,16 @@ const managedBy = async (
   }
   const db = drizzle(env.DB);
   const app = await defaultStoreApp(env, parsed.data);
-  if (app !== undefined) {
+  // A removed App's default store has no builders left: the
+  // organization's own admins, never Grasp staff, read, export, change
+  // (`requireStoreChangeable` lets them too: nobody can restore the App)
+  // and delete it, so its records are never
+  // stuck (erasure, GRA-335).
+  if (app?.removed === true) {
+    if (!isMemberAdmin(by)) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+  } else if (app !== undefined) {
     try {
       await requireAppRole(env, by, app, "builder");
     } catch (error) {
@@ -607,14 +625,16 @@ const sharingRules = (owner: string) => ({
  * Refuses a change to store `id` while it is the default store of an
  * archived App (`app.archived`): read-only, as the App is, until a builder
  * restores it (app-status.ts). For changes made by admins without a role
- * check of their own on the App (backfills, migration samples).
+ * check of their own on the App (backfills, migration samples). A removed
+ * App's default store isn't refused: nobody can restore the App, and its
+ * admins manage the store from then on (`managedBy`).
  */
 export const requireStoreChangeable = async (
   env: Env,
   id: StoreId
 ): Promise<void> => {
   const app = await defaultStoreApp(env, id);
-  if (app !== undefined) {
+  if (app !== undefined && !app.removed) {
     requireNotArchived(app);
   }
 };
@@ -716,7 +736,9 @@ export const unshareStore = async (
 /**
  * Whom store `id` is shared with to manage it, for `by`, who must manage
  * it: the people still in the organization and the teams that still
- * exist, in the order they were shared.
+ * exist, in the order they were shared. A removed App's default store
+ * lists nobody: its builders are gone, and only the organization's admins
+ * manage it (`managedBy`), never its former owner.
  */
 export const storeManagers = async (
   env: Env,
@@ -724,6 +746,9 @@ export const storeManagers = async (
   id: string
 ): Promise<StoreManager[]> => {
   const store = await managedBy(env, by, id, false);
+  if (store.defaultOf?.removed === true) {
+    return [];
+  }
   if (store.defaultOf !== undefined) {
     return await appBuilders(env, store.defaultOf);
   }
