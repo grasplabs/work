@@ -1952,6 +1952,55 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it("takes two clients first provisioned into one shared account at once live, through the one gateway either of them made", async () => {
+    const real = await importRealRelease();
+    const first = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+    const second = await placedOperation(first.destinationId, real);
+    const wfp = {
+      ...context,
+      router: {
+        ...context.router,
+        namespace: clientDispatchNamespace,
+        dispatcher: cloudflare.dispatcher(
+          first.account.id,
+          clientDispatchNamespace
+        ),
+      },
+    };
+    const gateway = placedModelGateway("production");
+    // The first finds no gateway, and before it creates one the second
+    // provisions all the way, making it: the first's create is refused.
+    let secondRan: Promise<unknown> = Promise.resolve();
+    cloudflare.afterAnswering(
+      ({ method, path }) =>
+        method === "GET" && path.endsWith(`/ai-gateway/gateways/${gateway}`),
+      async () => {
+        secondRan = runClientProvision(wfp, second.held);
+        await secondRan;
+      }
+    );
+
+    await runClientProvision(wfp, first.held);
+    await secondRan;
+
+    expect({
+      first: await operationOf(first.clientId),
+      second: await operationOf(second.clientId),
+      gateways: first.account.gateways.map(({ id, authentication }) => ({
+        id,
+        authentication,
+      })),
+    }).toMatchObject({
+      first: { status: "done" },
+      second: { status: "done" },
+      gateways: [{ id: gateway, authentication: true }],
+    });
+  });
+
   it("uploads into a Workers for Platforms namespace, and stops at the probe it can't qualify", async () => {
     const manifest = await importRelease("workers_for_platforms");
     const { account, clientId, held } = await setUp(
