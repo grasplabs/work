@@ -5,6 +5,7 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
+import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
 import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
@@ -971,6 +972,17 @@ const createAuth = (
           },
         })),
         providersLimit: 0,
+        // In relay mode every IdP sends people back to the OAuth relay,
+        // which sends them on to this deployment's
+        // `/sso/callback/<provider>`, the one the signed state names
+        // (@grasp-os/shared/oauth-relay, routes.ts); the code is
+        // exchanged with this same redirect URI, the one it was given
+        // for. Otherwise IdPs send people straight to that callback.
+        ...(config.callbackOrigin === undefined
+          ? {}
+          : {
+              redirectURI: relayRedirectUri(config.callbackOrigin, "sign-in"),
+            }),
       }),
       // Signs App tokens (app-tokens.ts) with its own keys, and nothing
       // else: its `/token` and `/jwks` routes are off (routes.ts), and it

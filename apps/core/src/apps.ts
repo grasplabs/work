@@ -38,7 +38,7 @@ import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -215,14 +215,17 @@ export const changeEntry = (
   detail,
 });
 
-/** The App `input` names, which must exist. */
+/**
+ * The App `input` names, which must exist and not be removed: a removed
+ * App (app-removal.ts) is answered as one that isn't there.
+ */
 export const findApp = async (env: Env, input: unknown): Promise<App> => {
   const id = appIdSchema.safeParse(input);
   const row = id.success
     ? await drizzle(env.DB)
         .select()
         .from(apps)
-        .where(eq(apps.id, id.data))
+        .where(and(eq(apps.id, id.data), isNull(apps.removedAt)))
         .get()
     : undefined;
   if (!row) {
@@ -590,6 +593,8 @@ export const createApp = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: new Date(),
+    removedAt: null,
+    removedBy: null,
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
