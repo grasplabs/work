@@ -2012,6 +2012,13 @@ describe("a client's changes, counted", () => {
       held: true,
     },
     {
+      // What the probe recorded was an isolate of a version made before
+      // the run's last secret: a later read names the newest.
+      connect: "names a newer version than its operation recorded",
+      answering: "newer" as const,
+      held: true,
+    },
+    {
       connect: "names no version (down, or no version metadata)",
       answering: null,
       held: true,
@@ -2074,7 +2081,7 @@ describe("a client's changes, counted", () => {
         updatedAt: at,
       });
 
-      if (answering === "earlier") {
+      if (answering === "earlier" || answering === "newer") {
         const connect = await db
           .select({ scriptName: clientWorkers.scriptName })
           .from(clientWorkers)
@@ -2088,7 +2095,19 @@ describe("a client's changes, counted", () => {
         const [first] =
           internal.account.scripts.get(connect?.scriptName ?? "")?.versions ??
           [];
-        internal.account.connectAnswering = first?.id ?? null;
+        if (answering === "earlier") {
+          internal.account.connectAnswering = first?.id ?? null;
+        } else {
+          await db
+            .update(clientWorkers)
+            .set({ versionId: first?.id ?? null })
+            .where(
+              and(
+                eq(clientWorkers.clientId, clientId),
+                eq(clientWorkers.worker, "connect")
+              )
+            );
+        }
       } else if (answering === null) {
         internal.account.connectAnswering = null;
       }

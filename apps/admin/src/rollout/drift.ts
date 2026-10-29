@@ -185,7 +185,11 @@ const coreOriginOf = async (
  *   stays noted until a version is recorded, so a retry refuses it too. A
  *   version is recorded only when two reads a moment apart name it, so an
  *   isolate of a version this run made before its last secret (its
- *   upload's, say) answering once isn't taken for the latest. Core's in a
+ *   upload's, say) answering once isn't taken for the latest. One
+ *   answering both reads still can be: the namespace's writes don't say
+ *   which version they made (an upload answers with the script, a secret
+ *   with its name and type), so there is no id to wait for. A later read
+ *   naming the newest version then reads as `drifted`, which holds. Core's in a
  *   namespace likewise: never the superseded one, and its health and its
  *   probe naming the same.
  * - No answer: no version metadata (plain workerd), connect down, core
