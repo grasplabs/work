@@ -66,6 +66,7 @@ import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
+import { addSecretStep } from "./words.ts";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -503,8 +504,7 @@ export const ApplySettings = ({
 const alertOutcomeWords: Readonly<Record<AlertOutcome, string>> = {
   sent: "Sent: it should be in the alerts' channel now.",
   held: "Held back: one went out less than a minute ago.",
-  no_channel:
-    "Not sent: Secrets Store has no STAFF_ALERTS_WEBHOOK, or it isn't a Discord webhook.",
+  no_channel: `Not sent: there's no staff alerts channel, or STAFF_ALERTS_WEBHOOK isn't a Discord webhook. ${addSecretStep("STAFF_ALERTS_WEBHOOK")}`,
   failed: "Not sent: the channel refused it. Try again in a moment.",
 };
 
