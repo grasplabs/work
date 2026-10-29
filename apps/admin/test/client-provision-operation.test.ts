@@ -374,6 +374,11 @@ const zonesOf = (account: AccountState) =>
     })),
   }));
 
+/** A migration sent, with its record (`applyD1Migrations`). */
+const isMigration = (call: ApiCall): boolean =>
+  call.path.endsWith("/query") &&
+  JSON.stringify(call.body).includes("INSERT INTO d1_migrations");
+
 /** A read of which migrations a database has had (`applyD1Migrations`). */
 const readMigrations = (call: ApiCall): boolean =>
   call.path.endsWith("/query") &&
@@ -2053,6 +2058,58 @@ describe("provisioning a placed client", () => {
       );
     } finally {
       held?.lose();
+    }
+  });
+
+  it("sends no migration again from an attempt that timed out while it waited out a 429", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    // The first attempt's first migration is refused with a 429, and the
+    // attempt is held as it gets it back: its step times out meanwhile,
+    // and the retry migrates the client.
+    cloudflare.failNext(isMigration, { retryAfter: "0" });
+    const refused = heldAfter(isMigration);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+      const [timingOut] = attempts.started;
+      if (timingOut === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await refused.read();
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.provisionPlacedClient,
+        timingOut
+      );
+      await retried;
+      await attemptEnded(timingOut, "complete");
+      // The attempt that timed out waits out the 429, and would send the
+      // migration again.
+      refused.release();
+      await vi.waitFor(() => {
+        const stopped = errors.mock.calls.some((logged) =>
+          JSON.stringify(logged).includes("runner_replaced")
+        );
+        if (!stopped) {
+          throw new Error("The attempt that timed out hasn't stopped yet");
+        }
+      });
+
+      expect({
+        // The refused one, then the retry's three.
+        sent: cloudflare.calls.filter(isMigration).length,
+        provisioned: await provisioned(account, clientId),
+      }).toMatchObject({ sent: 4, provisioned: once(clientId) });
+    } finally {
+      refused.release();
+      errors.mockRestore();
     }
   });
 

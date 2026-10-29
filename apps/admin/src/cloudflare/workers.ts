@@ -680,13 +680,15 @@ export const queryD1 = async (
   api: CloudflareApi,
   accountId: string,
   databaseId: string,
-  sql: string
+  sql: string,
+  beforeSend?: () => Promise<void>
 ): Promise<Record<string, unknown>[][]> => {
   const statements = await api.call(
     {
       method: "POST",
       path: `/accounts/${accountId}/d1/database/${databaseId}/query`,
       json: { sql },
+      ...(beforeSend === undefined ? {} : { beforeSend }),
     },
     queryResultSchema
   );
@@ -710,14 +712,14 @@ export interface D1Migration {
 const sqlText = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 
 /**
- * Before each migration is applied: throws to stop before it, as a runner
- * that no longer holds its client does.
+ * Before each send of a migration, its retries included: throws to stop
+ * it unsent, as a runner that no longer holds its client does.
  */
 export type BeforeMigration = () => Promise<void>;
 
 /**
  * Applies `pending` in order, each with its record in one query, stopping
- * at the first that fails, and checking `before` first each time.
+ * at the first that fails, and checking `before` before each send of each.
  */
 const applyInOrder = async (
   api: CloudflareApi,
@@ -730,12 +732,14 @@ const applyInOrder = async (
   if (next === undefined) {
     return;
   }
-  await before();
+  // Checked before each send of it, the API client's retries included: a
+  // 429 waited out must not let a runner that lost its client send it.
   await queryD1(
     api,
     accountId,
     databaseId,
-    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`
+    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`,
+    before
   );
   await applyInOrder(api, accountId, databaseId, rest, before);
 };

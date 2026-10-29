@@ -1322,17 +1322,19 @@ export const fakeCloudflareApi = (
     const match = matched.findIndex(({ matches }) => matches(call));
     const [picked] = match === -1 ? [] : matched.splice(match, 1);
     const failure = planned.get(calls.length) ?? picked?.failure;
+    let response: Response;
     if (failure === "lost") {
       await respond(request, call);
-      return lostConnection();
+      response = lostConnection();
+    } else if (failure === undefined) {
+      const between = interleaved.findIndex(({ matches }) => matches(call));
+      const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
+      await meanwhile?.meanwhile();
+      response = await respond(request, call);
+    } else {
+      response = failed(failure);
     }
-    if (failure !== undefined) {
-      return failed(failure);
-    }
-    const between = interleaved.findIndex(({ matches }) => matches(call));
-    const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
-    await meanwhile?.meanwhile();
-    const response = await respond(request, call);
+    // Answered, a failure too: the caller holds what it got back.
     const after = answeredThen.findIndex(({ matches }) => matches(call));
     const [then] = after === -1 ? [] : answeredThen.splice(after, 1);
     await then?.meanwhile();
