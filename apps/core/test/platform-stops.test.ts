@@ -144,7 +144,10 @@ const compilerOf = (body: string): WorkerLoaderWorkerCode => ({
     "compiler.js": `import { WorkerEntrypoint } from "cloudflare:workers";
 export default class extends WorkerEntrypoint {
   async build() { ${body} }
-  async buildIncrementally() { ${body} }
+  async buildIncrementally() {
+    const built = await this.build();
+    return { built, fresh: { modules: {}, checks: {} }, metrics: {} };
+  }
 }`,
   },
 });
