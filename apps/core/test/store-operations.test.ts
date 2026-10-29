@@ -1065,6 +1065,57 @@ describe("a store operation's caller", () => {
   });
 });
 
+describe("a store operation's caller from work a Grasp staff member started", () => {
+  it("is the staff member while their staff session lasts, only on work marked as theirs", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const consumer: StoreConsumer = {
+      subject: { type: "app", id: desk.app },
+      version: 1,
+      permissionId: await deskGrant(admin, desk, crm, crmActions),
+    };
+    const served = await storeOperationFor(env, consumer, "contacts.add");
+    if (served === undefined) {
+      throw new Error("Expected the operation to be served");
+    }
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId } = await whoami(session);
+    const add = async (staff: boolean) =>
+      await outcome(
+        callStoreOperation(
+          env,
+          consumer,
+          served,
+          { name: `Staff ${unique()}` },
+          {
+            actor: { type: "person", userId },
+            principal: userId,
+            ...(staff ? { staff: true } : {}),
+            requestId: crypto.randomUUID(),
+            deadline: Date.now() + 30_000,
+            idempotencyKey: `key-${unique()}`,
+            runId: null,
+          }
+        )
+      );
+
+    const marked = await add(true);
+    // Staff on work no mark names count as no one, as a departed member.
+    const unmarked = await add(false);
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND staff = 1")
+      .bind(userId)
+      .run();
+    const sessionEnded = await add(true);
+
+    expect({ marked, unmarked, sessionEnded }).toStrictEqual({
+      marked: "ok",
+      unmarked: "resource.unavailable",
+      sessionEnded: "resource.unavailable",
+    });
+  });
+});
+
 describe("a store operation's receipts", () => {
   it("refuse a key used again with other arguments as the consumer's conflict", async () => {
     const admin = await person("admin");
