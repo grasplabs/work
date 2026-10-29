@@ -1,5 +1,6 @@
 import { log } from "@grasp-os/shared/log";
 import {
+  connectVersionPurpose,
   provisionProbeMaxBytes,
   provisionProbeMaxSkewMs,
   provisionProbePurpose,
@@ -37,8 +38,8 @@ import { callSandboxed } from "./sandboxed.ts";
 // - Making core work for nobody: nothing is read, armed or called before
 //   the signature verifies.
 // - Leaking what the answer is about: binding and task names from core's
-//   own code, each with a yes or no, the version id and the client id the
-//   admin deployed. No resource id, no error message, no secret and
+//   own code, each with a yes or no, core's and connect's version ids and
+//   the client id the admin deployed. No resource id, no error message, no secret and
 //   nothing a client's people entered.
 
 /** What a bucket is asked for: a key nothing writes, so the answer is "none". */
@@ -74,6 +75,19 @@ const connectProbe = async (env: Env): Promise<Record<string, boolean>> => {
       errorName: error instanceof Error ? error.name : typeof error,
     });
     return {};
+  }
+};
+
+/** The version connect answers as; null when it has none or didn't answer. */
+export const connectVersion = async (env: Env): Promise<string | null> => {
+  try {
+    const version: unknown = await env.CONNECT.version();
+    return typeof version === "string" && version !== "" ? version : null;
+  } catch (error) {
+    log.warn("probe.connect_version_failed", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
   }
 };
 
@@ -190,6 +204,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     brainObjects,
     loader,
     connectBindings,
+    connectAnswering,
     connect,
     core,
     ...namespaced
@@ -201,6 +216,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
     answers("BRAIN_OBJECTS", r2(env.BRAIN_OBJECTS)),
     answers("LOADER", sandbox(env)),
     connectProbe(env),
+    connectVersion(env),
     registration("connect", async () => await env.CONNECT.ensureClock()),
     registration("core", async () => await clock(env).ensureRegistered()),
     ...namespaces.map(
@@ -209,6 +225,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
   ]);
   return {
     version: env.CF_VERSION_METADATA?.id ?? null,
+    connectVersion: connectAnswering,
     clientId: env.CLIENT_ID ?? null,
     bindings: {
       DB: db,
@@ -261,4 +278,37 @@ export const provisionProbeResponse = async (
   return Response.json(await probed(env), {
     headers: { "cache-control": "no-store" },
   });
+};
+
+/**
+ * The admin's signed request for connect's version
+ * (@grasp-os/shared/provision-probe `connectVersionPath`): how it reads
+ * what a connect in a Workers for Platforms namespace runs. 200 with the
+ * version connect names over its binding, 503 when it names none, once
+ * the request is signed with this purpose's key, fresh and well formed;
+ * undefined for anything else, as the probe. Never cached: a stale answer
+ * would say connect still runs what it ran.
+ */
+export const connectVersionResponse = async (
+  request: Request,
+  env: Env
+): Promise<Response | undefined> => {
+  if (request.method !== "POST") {
+    return undefined;
+  }
+  const asked = await consoleSigned(request.clone(), env, {
+    purpose: connectVersionPurpose,
+    schema: provisionProbeRequestSchema,
+    maxBytes: provisionProbeMaxBytes,
+    maxSkewMs: provisionProbeMaxSkewMs,
+  });
+  if (typeof asked === "string") {
+    log.info("connect_version.refused", { reason: asked });
+    return undefined;
+  }
+  const version = await connectVersion(env);
+  const headers = { "cache-control": "no-store" };
+  return version === null
+    ? Response.json({ ok: false }, { status: 503, headers })
+    : Response.json({ ok: true, version }, { headers });
 };

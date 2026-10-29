@@ -207,7 +207,7 @@ export const fetchDrift = createServerFn({ method: "GET" })
       await deployerApi(env),
       db,
       data.clientId,
-      store === null ? undefined : { fetch, routerKey: store.routerKey }
+      store === null ? undefined : { fetch, secrets: store }
     );
     if (drift === null) {
       return null;

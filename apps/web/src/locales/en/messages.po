@@ -1661,6 +1661,10 @@ msgstr "5, very good"
 msgid "50 to 99 users"
 msgstr "50 to 99 users"
 
+#: src/inbox/items.ts
+msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
+msgstr "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -7531,6 +7535,14 @@ msgstr "Let people ask Stephen to start it"
 msgid "Let the interviews run again"
 msgstr "Let the interviews run again"
 
+#: src/inbox/items.ts
+msgid "Let version {version} of {name} go live?"
+msgstr "Let version {version} of {name} go live?"
+
+#: src/inbox/item-detail.tsx
+msgid "Let version {version} of {who} go live"
+msgstr "Let version {version} of {who} go live"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
 msgstr "Let’s start"
@@ -7652,6 +7664,10 @@ msgstr "Live"
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "Live, being measured"
+
+#: src/inbox/item-detail.tsx
+msgid "Live: {who}, version {version}."
+msgstr "Live: {who}, version {version}."
 
 #: src/workflows/history-view.tsx
 msgid "Load more"
@@ -11633,6 +11649,10 @@ msgstr "Send"
 msgid "Send answer"
 msgstr "Send answer"
 
+#: src/inbox/item-detail.tsx
+msgid "Send back"
+msgstr "Send back"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Send request"
 msgstr "Send request"
@@ -11640,6 +11660,10 @@ msgstr "Send request"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Send the link now"
 msgstr "Send the link now"
+
+#: src/inbox/item-detail.tsx
+msgid "Send version {version} of {who} back"
+msgstr "Send version {version} of {who} back"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11659,6 +11683,10 @@ msgstr "Sent"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Sent <0>{sent}</0>"
+
+#: src/inbox/item-detail.tsx
+msgid "Sent back: {who}, version {version}."
+msgstr "Sent back: {who}, version {version}."
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"

@@ -1661,6 +1661,10 @@ msgstr "5, heel goed"
 msgid "50 to 99 users"
 msgstr "50 tot en met 99 gebruikers"
 
+#: src/inbox/items.ts
+msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
+msgstr "Een builder vroeg om deze versie van {name} live te zetten: goedgekeurd is het de versie waarmee het bedrijf werkt. Stuur hem terug om de versie te houden die nu draait."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -7531,6 +7535,14 @@ msgstr "Laat mensen Stephen vragen om hem te starten"
 msgid "Let the interviews run again"
 msgstr "De interviews weer laten lopen"
 
+#: src/inbox/items.ts
+msgid "Let version {version} of {name} go live?"
+msgstr "Versie {version} van {name} live zetten?"
+
+#: src/inbox/item-detail.tsx
+msgid "Let version {version} of {who} go live"
+msgstr "Versie {version} van {who} live zetten"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"
 msgstr "Laten we beginnen"
@@ -7652,6 +7664,10 @@ msgstr "Live"
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "Live, wordt gemeten"
+
+#: src/inbox/item-detail.tsx
+msgid "Live: {who}, version {version}."
+msgstr "Live: {who}, versie {version}."
 
 #: src/workflows/history-view.tsx
 msgid "Load more"
@@ -11633,6 +11649,10 @@ msgstr "Versturen"
 msgid "Send answer"
 msgstr "Antwoord versturen"
 
+#: src/inbox/item-detail.tsx
+msgid "Send back"
+msgstr "Terugsturen"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Send request"
 msgstr "Aanvraag versturen"
@@ -11640,6 +11660,10 @@ msgstr "Aanvraag versturen"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Send the link now"
 msgstr "Link nu versturen"
+
+#: src/inbox/item-detail.tsx
+msgid "Send version {version} of {who} back"
+msgstr "Versie {version} van {who} terugsturen"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -11659,6 +11683,10 @@ msgstr "Verstuurd"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Verstuurd <0>{sent}</0>"
+
+#: src/inbox/item-detail.tsx
+msgid "Sent back: {who}, version {version}."
+msgstr "Teruggestuurd: {who}, versie {version}."
 
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"
