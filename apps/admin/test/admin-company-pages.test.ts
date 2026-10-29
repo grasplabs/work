@@ -30,8 +30,6 @@ const recordClient = async (
   pinnedReleaseId: string | null = null
 ) => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const accountId =
-    status === "active" ? crypto.randomUUID().replaceAll("-", "") : null;
   const now = new Date();
   await act(
     db,
@@ -40,7 +38,6 @@ const recordClient = async (
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        accountId,
         ring: 3,
         status,
         pinnedReleaseId,
@@ -51,7 +48,7 @@ const recordClient = async (
     ],
     { action: "client.create", clientId: id }
   );
-  return { id, accountId };
+  return { id };
 };
 
 /** A release, published and imported. */
@@ -247,11 +244,11 @@ describe("the company pages, in the admin", () => {
 
     const releases = await setupOf(client.id, "releases");
     const settings = await setupOf(client.id, "settings");
-    const deploys = await setupOf(client.id, "deploys");
-    const history = sectionOf(deploys.html, "Its history");
+    const historyTab = await setupOf(client.id, "history");
+    const history = sectionOf(historyTab.html, "Its history");
 
     expect({
-      statuses: [releases.status, settings.status, deploys.status],
+      statuses: [releases.status, settings.status, historyTab.status],
       ring:
         releases.html.includes('name="ring"') &&
         releases.html.includes('value="3"'),

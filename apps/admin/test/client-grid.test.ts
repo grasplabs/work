@@ -18,8 +18,7 @@ import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-grid-4b7d21";
-const tenantToken = "test-tenant-admin-token-grid-8e1c53";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 
@@ -41,7 +40,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        accountId: account.id,
         ring: 2,
         status,
         createdAt: now,
@@ -61,10 +59,6 @@ const liveClient = async (releaseId: string) =>
 const rowOf = (grid: GridRow[], clientId: string): GridRow | undefined =>
   grid.find(({ id }) => id === clientId);
 
-/** How many analytics requests the fake got in this test. */
-const analyticsCalls = (): number =>
-  cloudflare.calls.filter(({ path }) => path === "/graphql").length;
-
 /** How many calls the fake got for `account`'s Workers in this test. */
 const callsFor = (account: AccountState): number =>
   cloudflare.calls.filter(({ path }) =>
@@ -77,17 +71,8 @@ const uncached: LiveOptions = { ...defaultLiveOptions, cache: false };
 /** The account a call to the API is about, from its path. */
 const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
 
-/** Some usage, for an account the analytics report. */
-const someUsage = {
-  monthRequests: 100,
-  monthCpuTimeUs: 1000,
-  monthAiCost: 0,
-  dayRequests: 0,
-  dayErrors: 0,
-};
-
 describe("the client grid", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // Only each test's own clients are live: an earlier test's accounts are
   // gone from the fake.
   beforeEach(async () => {
@@ -127,20 +112,16 @@ describe("the client grid", () => {
     const acme = await liveClient(release);
     const waiting = await recordClient("provisioning");
 
-    const live = await gridLive(env, new Date(), uncached);
+    const live = await gridLive(env, uncached);
 
     expect({
       acme: live[acme.clientId],
       waiting: live[waiting.clientId],
-      // A placed client has no account of its own to read usage from.
-      analyticsCalls: analyticsCalls(),
     }).toStrictEqual({
       acme: {
         drift: "in_sync",
         sharedSecretsCurrent: true,
         reach: "reachable",
-        day: null,
-        costUsd: null,
         onboarding: {
           stage: "none",
           day: null,
@@ -150,7 +131,6 @@ describe("the client grid", () => {
         },
       },
       waiting: undefined,
-      analyticsCalls: 0,
     });
   });
 
@@ -188,7 +168,7 @@ describe("the client grid", () => {
         namespace.get(name) as Fetcher
     );
 
-    const reached = await gridLive(env, new Date(), uncached);
+    const reached = await gridLive(env, uncached);
     // Then its entry names a script the namespace doesn't have.
     await env.ROUTER_HOSTS.put(
       host,
@@ -198,7 +178,7 @@ describe("the client grid", () => {
         generation,
       })
     );
-    const gone = await gridLive(env, new Date(), uncached);
+    const gone = await gridLive(env, uncached);
 
     const dispatched = cloudflare.dispatched();
     expect({
@@ -217,57 +197,12 @@ describe("the client grid", () => {
     });
   });
 
-  it("reads every live client's usage in as few analytics requests as it can, and keeps an account left out, or a failed request, to its own clients", async () => {
-    // Recorded as active, never deployed: analytics read accounts, not deploys.
-    const recorded = [];
-    for (let index = 0; index < 21; index += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      recorded.push(await recordClient("active"));
-    }
-    // The grid reads clients by id: 10 accounts to a request, then 10, then 1.
-    const byId = recorded.toSorted((a, b) =>
-      a.clientId.localeCompare(b.clientId)
-    );
-    const [unreported, idle] = byId;
-    const alone = byId.at(-1);
-    for (const { account } of byId.slice(1)) {
-      account.usage = someUsage;
-    }
-    // The request for the last account alone fails outright.
-    cloudflare.failNext(
-      ({ path, body }) =>
-        path === "/graphql" &&
-        JSON.stringify(body).includes(alone?.account.id ?? "none"),
-      400
-    );
-
-    const live = await gridLive(env, new Date(), uncached);
-
-    expect({
-      analyticsCalls: analyticsCalls(),
-      unreported: live[unreported?.clientId ?? ""]?.costUsd,
-      idle: live[idle?.clientId ?? ""],
-      alone: live[alone?.clientId ?? ""]?.costUsd,
-      others: byId
-        .slice(1, -1)
-        .every(({ clientId }) => live[clientId]?.costUsd !== null),
-    }).toMatchObject({
-      analyticsCalls: 3,
-      unreported: null,
-      // Asked of, answered none: no requests, which isn't unknown.
-      idle: { day: { requests: 0, errors: 0 }, costUsd: { workers: 5, ai: 0 } },
-      alone: null,
-      others: true,
-    });
-  });
-
   it("reads a few clients at a time, stops one that takes too long, aborting its requests, keeps each whole answer a minute, and reads one with anything unknown again", async () => {
     const release = await importedRelease("feat(core): many live");
     const all = [];
     for (let index = 0; index < 4; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one deploy at a time
       const client = await liveClient(release);
-      client.account.usage = someUsage;
       all.push(client);
     }
     const [slow, unread, ...whole] = all;
@@ -282,8 +217,6 @@ describe("the client grid", () => {
           drift: "unknown",
           sharedSecretsCurrent: null,
           reach: "unknown",
-          day: null,
-          costUsd: null,
           onboarding: null,
         },
         { headers: { "cache-control": "max-age=60" } }
@@ -347,13 +280,13 @@ describe("the client grid", () => {
       cache: true,
     };
 
-    const first = await gridLive(env, new Date(), options);
+    const first = await gridLive(env, options);
     const peak = cloudflare.peakAccounts();
     const aborted = cloudflare.abortedCalls();
     // Both accounts answer from here on.
     held.resolve(true);
     const callsBefore = whole.map(({ account }) => callsFor(account));
-    const again = await gridLive(env, new Date(), options);
+    const again = await gridLive(env, options);
     const callsAfter = whole.map(({ account }) => callsFor(account));
 
     expect({
@@ -383,8 +316,6 @@ describe("the client grid", () => {
           drift: "unknown",
           sharedSecretsCurrent: null,
           reach: "unknown",
-          day: null,
-          costUsd: null,
           onboarding: null,
         },
         unread: { drift: "unknown", reach: "reachable" },
@@ -399,58 +330,10 @@ describe("the client grid", () => {
     });
   });
 
-  it("keeps the usage of analytics requests that answered when another stalls past the deadline, aborting only that one", async () => {
-    // Recorded as active, never deployed: analytics read accounts, not deploys.
-    const recorded = [];
-    for (let index = 0; index < 11; index += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      recorded.push(await recordClient("active"));
-    }
-    for (const { account } of recorded) {
-      account.usage = someUsage;
-    }
-    // By id, 10 accounts to the first request and the last one alone to
-    // the second, which never answers.
-    const byId = recorded.toSorted((a, b) =>
-      a.clientId.localeCompare(b.clientId)
-    );
-    const alone = byId.at(-1);
-    const held = Promise.withResolvers<boolean>();
-    cloudflare.beforeAnswering(
-      ({ path, body }) =>
-        path === "/graphql" &&
-        JSON.stringify(body).includes(alone?.account.id ?? "none"),
-      async () => {
-        await held.promise;
-      }
-    );
-
-    const live = await gridLive(env, new Date(), {
-      ...uncached,
-      rowDeadlineMs: 200,
-    });
-    const aborted = cloudflare.abortedCalls();
-    held.resolve(true);
-
-    expect({
-      answered: byId
-        .slice(0, -1)
-        .map(({ clientId }) => live[clientId]?.costUsd),
-      stalled: live[alone?.clientId ?? ""]?.costUsd,
-      aborted,
-    }).toStrictEqual({
-      answered: byId.slice(0, -1).map(() => ({ workers: 5, ai: 0 })),
-      stalled: null,
-      aborted: 1,
-    });
-  });
-
   it("reads the deployer's token once, so Secrets Store failing after that still leaves every client's live answers", async () => {
     const release = await importedRelease("feat(core): one token read");
     const acme = await liveClient(release);
     const globex = await liveClient(release);
-    acme.account.usage = someUsage;
-    globex.account.usage = someUsage;
     let reads = 0;
     // The first read answers as the store does; any after it fails, as a
     // store gone bad would.
@@ -461,7 +344,7 @@ describe("the client grid", () => {
         : await Promise.reject(new Error("store unavailable"));
     });
 
-    const live = await gridLive(env, new Date(), uncached);
+    const live = await gridLive(env, uncached);
 
     expect({
       reads,
@@ -496,7 +379,7 @@ describe("the client grid", () => {
     };
     older.account.onboarding = "absent";
 
-    const live = await gridLive(env, new Date(), uncached);
+    const live = await gridLive(env, uncached);
 
     expect({
       onboarding: live[onboarding.clientId]?.onboarding,
@@ -526,7 +409,7 @@ describe("the client grid", () => {
     vi.spyOn(broken, "put").mockRejectedValue(new Error("cache down"));
     vi.spyOn(caches, "open").mockResolvedValue(broken);
 
-    const live = await gridLive(env, new Date(), defaultLiveOptions);
+    const live = await gridLive(env, defaultLiveOptions);
 
     expect(live[acme.clientId]).toMatchObject({
       drift: "in_sync",
@@ -557,7 +440,7 @@ describe("the client grid", () => {
       400
     );
 
-    const live = await gridLive(env, new Date(), uncached);
+    const live = await gridLive(env, uncached);
 
     expect({
       down: live[down.clientId],

@@ -29,14 +29,12 @@ export const adminOf = async (
 };
 
 /**
- * Every secret the admin reads, with its value: the deployer's and
- * tenant admin's tokens as given.
+ * Every secret the admin reads, with its value: the deployer's token as
+ * given.
  */
 export const adminSecrets = (tokens: {
   deployer: string;
-  tenant: string;
 }): [SecretsStoreSecret, string][] => [
-  [env.TENANT_ADMIN_TOKEN, tokens.tenant],
   [env.DEPLOYER_API_TOKEN, tokens.deployer],
   [env.ROUTER_KEY, "test-router-key"],
   [env.CLIENT_KEY, "test-client-key"],

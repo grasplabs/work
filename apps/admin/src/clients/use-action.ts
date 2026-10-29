@@ -16,8 +16,6 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
     "Its Workers don't run one release the admin made live: roll a release out to it instead.",
   client_busy:
     "Something else is deploying to this client right now: try again once it's done.",
-  client_placed:
-    "This client is placed in a hosting destination, which applying settings doesn't reach yet.",
   store_secret_missing:
     "Secrets Store has no CLIENT_KEY, which the admin needs to record or seal the change: have deploy-ops write it, then try again.",
   secret_invalid:

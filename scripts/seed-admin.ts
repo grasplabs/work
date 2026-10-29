@@ -5,13 +5,16 @@
  * Platform page shows what the prototype's does: four releases, four
  * companies on rings 0 to 2 (one still being provisioned, one whose last
  * deploy failed), and the rollout of the newest release, waiting for
- * approval of ring 2 or, with `running`, rolling it out.
+ * approval of ring 2 or, with `running`, rolling it out. Each company is
+ * placed in one made-up dedicated destination, its release recorded as
+ * its operation (src/hosting/operation.ts) left it: done, failed, or still
+ * provisioning.
  *
  * It writes only the admin's local D1, applying its migrations first,
  * through Wrangler's local mode: it never reaches an account. It can run
  * again: each run replaces what the last one wrote, and nothing else.
- * Every company's account is made up, so the page's live reads find none
- * of them; the page says so.
+ * The destination's account is made up, so the page's live reads find
+ * none of the companies; the page says so.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -63,7 +66,7 @@ const companies = [
     ring: 0,
     status: "active",
     release: "r000418-3f9c2ab",
-    // Its last deploy, of its settings and new secrets, failed.
+    // Its last change, its settings and new secrets, failed at its probe.
     lastDeploy: { status: "failed", kind: "settings_and_secrets", day: 15 },
   },
   {
@@ -92,6 +95,12 @@ const companies = [
   },
 ] as const;
 
+/** The release a company still being provisioned is provisioned with. */
+const provisioning = "r000418-3f9c2ab";
+
+/** The made-up dedicated destination every company is placed in. */
+const destinationId = "seed-eu-dedicated";
+
 const staff = "nick@grasp.test";
 const rolloutId = "00000000-0000-4000-8000-000000000418";
 
@@ -105,18 +114,17 @@ const row = (values: (string | number | null)[]): string =>
     )
     .join(", ")})`;
 
-// Only the deploys the seed wrote: anything else a local admin deployed
-// for these companies, and the rollouts that name it, stay.
-const deployIds = companies
-  .map(({ id }) => sqlString(`seed-deploy-${id}`))
-  .join(", ");
+// The seed's own companies: each has one operation and one placement,
+// which the seed replaces.
+const companyIds = companies.map(({ id }) => sqlString(id)).join(", ");
 
 const statements = [
   // What the last run wrote, children first.
   `DELETE FROM audit_events WHERE id LIKE 'seed-%'`,
   `DELETE FROM rollout_targets WHERE rollout_id = ${sqlString(rolloutId)}`,
   `DELETE FROM rollouts WHERE id = ${sqlString(rolloutId)}`,
-  `DELETE FROM client_deploys WHERE id IN (${deployIds})`,
+  `DELETE FROM client_provisions WHERE client_id IN (${companyIds})`,
+  `DELETE FROM client_placements WHERE client_id IN (${companyIds})`,
   // The companies, releases and workers in place, as anything else a local
   // admin made of them (another rollout's targets, say) may name them.
   `INSERT INTO releases (id, commit_sha, manifest, manifest_sha256, built_at, imported_at) VALUES ${releases
@@ -133,13 +141,30 @@ const statements = [
     .join(
       ", "
     )} ON CONFLICT(id) DO UPDATE SET commit_sha = excluded.commit_sha, manifest = excluded.manifest, manifest_sha256 = excluded.manifest_sha256, built_at = excluded.built_at, imported_at = excluded.imported_at`,
-  `INSERT INTO clients (id, name, account_id, ring, status, created_by, created_at, updated_at) VALUES ${companies
+  `INSERT INTO hosting_destinations (id, kind, account_id, namespace, policies, capabilities, created_at, updated_at) VALUES ${row(
+    [
+      destinationId,
+      "dedicated",
+      "seed-account",
+      null,
+      JSON.stringify(["eu-storage"]),
+      JSON.stringify({}),
+      at(1),
+      at(1),
+    ]
+  )} ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, account_id = excluded.account_id, namespace = excluded.namespace, policies = excluded.policies, capabilities = excluded.capabilities, updated_at = excluded.updated_at`,
+  `INSERT INTO clients (id, name, ring, status, created_by, created_at, updated_at) VALUES ${companies
     .map(({ id, name, ring, status }) =>
-      row([id, name, `seed-account-${id}`, ring, status, staff, at(1), at(1)])
+      row([id, name, ring, status, staff, at(1), at(1)])
     )
     .join(
       ", "
-    )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, account_id = excluded.account_id, ring = excluded.ring, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, workers_subdomain = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
+    )} ON CONFLICT(id) DO UPDATE SET name = excluded.name, ring = excluded.ring, status = excluded.status, created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at, generation = 1, rotated_at = NULL, rotation_live_at = NULL, sign_in = NULL, config_changed_at = NULL, pinned_release_id = NULL`,
+  `INSERT INTO client_placements (client_id, deployment_id, destination_id, policy_id, placed_by, placed_at) VALUES ${companies
+    .map(({ id }) =>
+      row([id, `seed${id}`, destinationId, "eu-storage", staff, at(1)])
+    )
+    .join(", ")}`,
   ...companies.flatMap(({ id, release }) =>
     release === null
       ? []
@@ -163,26 +188,43 @@ const statements = [
             )} ON CONFLICT(client_id, worker) DO UPDATE SET script_name = excluded.script_name, release_id = excluded.release_id, version_id = excluded.version_id, deployed_at = excluded.deployed_at`,
         ]
   ),
-  ...companies.flatMap(({ id, release, lastDeploy }) =>
-    lastDeploy === null || release === null
-      ? []
-      : [
-          `INSERT INTO client_deploys (id, client_id, release_id, kind, status, step, error, started_by, created_at, updated_at) VALUES ${row(
-            [
-              `seed-deploy-${id}`,
-              id,
-              release,
-              lastDeploy.kind,
-              lastDeploy.status,
-              lastDeploy.status === "failed" ? "workers" : "router",
-              lastDeploy.status === "failed" ? "smoke_check_failed" : null,
-              staff,
-              at(lastDeploy.day),
-              at(lastDeploy.day, "08:10"),
-            ]
-          )}`,
-        ]
-  ),
+  // Each company's operation, as it left the company: its last change
+  // done or failed, or, still being provisioned, at its migrations.
+  `INSERT INTO client_provisions (id, client_id, release_id, status, step, error, change, what, run_id, started_by, created_at, updated_at) VALUES ${companies
+    .map(({ id, release, lastDeploy }) => {
+      if (lastDeploy === null || release === null) {
+        return row([
+          `seed-operation-${id}`,
+          id,
+          provisioning,
+          "running",
+          "migrations",
+          null,
+          1,
+          "release",
+          `seed-run-${id}`,
+          staff,
+          at(1),
+          at(1, "08:10"),
+        ]);
+      }
+      const failed = lastDeploy.status === "failed";
+      return row([
+        `seed-operation-${id}`,
+        id,
+        release,
+        lastDeploy.status,
+        failed ? "secrets" : "route",
+        failed ? "probe_unanswered" : null,
+        2,
+        lastDeploy.kind,
+        `seed-run-${id}`,
+        staff,
+        at(lastDeploy.day),
+        at(lastDeploy.day, "08:10"),
+      ]);
+    })
+    .join(", ")}`,
   `INSERT INTO rollouts (id, kind, release_id, status, ring, started_by, created_at, updated_at) VALUES ${row(
     [
       rolloutId,
