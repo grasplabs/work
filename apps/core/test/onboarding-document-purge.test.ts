@@ -334,6 +334,27 @@ const answeringWith = async <T>(
   }
 };
 
+/**
+ * A reply naming the purged word for the first request only, the drawing
+ * already under way as the purge lands; `clean` for every one after. Any
+ * drawing after the purge (the store's own alarm, which the purge arms,
+ * may draw again while the test still answers the gateway) reads what the
+ * purge left, so a model would never give the word back: answering it
+ * with the word would put it back in the store, and the test would race
+ * that alarm.
+ */
+const namingFirst = (
+  naming: () => GatewayReply,
+  clean: () => GatewayReply
+): (() => GatewayReply) => {
+  let asked = false;
+  return () => {
+    const first = !asked;
+    asked = true;
+    return first ? naming() : clean();
+  };
+};
+
 /** Draws whatever is due, the tickets with `tool`, until nothing is; whether a request carried `word`. */
 const drawAll = async (ids: Ids, tool: string, word: string) => {
   const store = onboardingStore(env);
@@ -697,13 +718,17 @@ describe(
         if (when === "brief") {
           env.DB = withHook(database, "organizations", purgeOnce);
         }
+        const reply = namingFirst(
+          () => ticketsReply(ids, word),
+          () => ticketsReply(ids, "Zendesk")
+        );
         try {
           const drew = await answeringWith(
             async () => {
               if (when === "drawing") {
                 await purgeOnce();
               }
-              return ticketsReply(ids, word);
+              return reply();
             },
             async () => await store.drawNext()
           );
@@ -743,6 +768,10 @@ describe(
       const ids = await team();
       await toldAll(ids);
       let forgotten: number | undefined;
+      const reply = namingFirst(
+        () => ticketsReply(ids, word),
+        () => ticketsReply(ids, "Zendesk")
+      );
       // The document goes while the tickets are drawn with it: as the
       // drawing's request reaches the gateway, inside the store's call.
       const drew = await answeringWith(
@@ -752,7 +781,7 @@ describe(
             [shared.upload],
             { type: "system" }
           );
-          return ticketsReply(ids, word);
+          return reply();
         },
         async () => await store.drawNext()
       );
@@ -819,10 +848,14 @@ const writers: Writer[] = [
     run: async (word, landing) => {
       const ids = await team();
       await toldAll(ids, `Tickets arrive in Zendesk and ${word}.`);
+      const reply = namingFirst(
+        () => ticketsReply(ids, word),
+        () => ticketsReply(ids, "Zendesk")
+      );
       await answeringWith(
         async () => {
           await landing.once();
-          return ticketsReply(ids, word);
+          return reply();
         },
         async () => await onboardingStore(env).drawNext()
       );
@@ -838,10 +871,14 @@ const writers: Writer[] = [
       await agree(ids.lea, [
         fact("l1", "work", `Max, Mia and Mo handle tickets about ${word}.`),
       ]);
+      const reply = namingFirst(
+        () => mapReply(ids, `Answers questions about ${word}`),
+        () => mapReply(ids, "Answers questions")
+      );
       await answeringWith(
         async () => {
           await landing.once();
-          return mapReply(ids, `Answers questions about ${word}`);
+          return reply();
         },
         async () => await store.drawNext()
       );
