@@ -6,10 +6,10 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
+import { dropToolkitFlowsOf } from "./composio-connections.ts";
 import {
   callChanges,
   composioCleanups,
-  composioFlows,
   connectionTokens,
   connections,
   connectorEvents,
@@ -158,6 +158,9 @@ export const erasePersonal = async (
   ) {
     throw pending();
   }
+  // Their Composio flows, handed over to cleanup rows, never deleted: what
+  // each made at Composio is deleted there by the clock.
+  await dropToolkitFlowsOf(env, [ownerUserId]);
   const db = drizzle(env.DB);
   const [owned] = await db
     .select({ count: sql<number>`count(*)` })
@@ -218,7 +221,6 @@ export const erasePersonal = async (
         .delete(pendingActions)
         .where(eq(pendingActions.onBehalfOf, ownerUserId)),
       db.delete(oauthFlows).where(eq(oauthFlows.userId, ownerUserId)),
-      db.delete(composioFlows).where(eq(composioFlows.userId, ownerUserId)),
     ]
   );
   // A flow that finished as this ran: refused, and stopped on the next try.

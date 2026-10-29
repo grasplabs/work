@@ -185,6 +185,32 @@ const pkceChallenge = async (verifier: string): Promise<string> =>
 
 const flowContext = (stateHash: string): string => `flow:${stateHash}`;
 
+/**
+ * `write`, refused as an attempt that is no longer valid when it failed
+ * because the person it is for is being erased (`column` NULL then).
+ */
+const refusingErased = async <T>(
+  write: Promise<T>,
+  column: string
+): Promise<T> => {
+  try {
+    return await write;
+  } catch (error) {
+    // The driver's error, or the one it wraps (drizzle names the query).
+    const cause: unknown = error instanceof Error ? error.cause : undefined;
+    const failed = [error, cause].some(
+      (each) =>
+        each instanceof Error &&
+        each.message.includes("NOT NULL") &&
+        each.message.includes(column)
+    );
+    if (failed) {
+      throw connectionErrors.create("connection.flow_invalid");
+    }
+    throw error;
+  }
+};
+
 /** Starts a flow: the provider URL to send the person's browser to. */
 export const startConnection = async (
   env: Env,
@@ -231,19 +257,24 @@ export const startConnection = async (
   const verifier = randomToken();
   const stateHash = await sha256Hex(state);
   const redirectUri = new URL(connectionCallbackPath, origin).href;
-  await drizzle(env.DB)
-    .insert(oauthFlows)
-    .values({
-      stateHash,
-      userId: person.userId,
-      provider: provider.id,
-      scope,
-      tenant,
-      redirectUri,
-      returnTo,
-      verifier: await vault.seal(verifier, flowContext(stateHash)),
-      expiresAt: new Date(Date.now() + oauthFlowLifetimeMs),
-    });
+  await refusingErased(
+    drizzle(env.DB)
+      .insert(oauthFlows)
+      .values({
+        stateHash,
+        // NULL, which fails the insert, for someone whose erasure began: a
+        // start already under way leaves no flow of theirs behind it.
+        userId: sql`(SELECT ${person.userId} WHERE NOT ${erasureBegan(person.userId)})`,
+        provider: provider.id,
+        scope,
+        tenant,
+        redirectUri,
+        returnTo,
+        verifier: await vault.seal(verifier, flowContext(stateHash)),
+        expiresAt: new Date(Date.now() + oauthFlowLifetimeMs),
+      }),
+    "oauth_flows.user_id"
+  );
 
   const url = new URL(provider.authorizationEndpoint(tenant));
   const params = {
@@ -773,7 +804,7 @@ const replaceKey = async (
     { apiKey: key, expiresAt: apiKeyExpiresAt },
     now
   );
-  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active'`;
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
   const db = drizzle(env.DB);
   const replaced = await recordEventIf(
     env,

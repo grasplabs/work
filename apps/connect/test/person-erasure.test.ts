@@ -17,8 +17,8 @@ import {
   idempotentCalls,
 } from "../src/db/schema.ts";
 import { idempotencyStore } from "../src/idempotency.ts";
-import { connectApp, fakeApps } from "./app-provider.ts";
-import { auditEvents, outcome, someone } from "./connect.ts";
+import { connectApp, fakeApps, startApp } from "./app-provider.ts";
+import { auditEvents, outcome, someone, stateOf } from "./connect.ts";
 import { sampleOAuthAuthHost } from "./fixtures/sample-oauth-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
@@ -151,6 +151,36 @@ const changesOf = async (id: string): Promise<number> => {
     .where(eq(callChanges.connectionId, id));
   return kept.length;
 };
+
+/** That `person`'s erasure began: the mark connect makes before anything. */
+const markErasure = async (person: ConnectionPerson): Promise<void> => {
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO erased_people (user_id, began_at) VALUES (?, ?)"
+  )
+    .bind(person.userId, Date.now())
+    .run();
+};
+
+/** How many rows of `table` match `where`, with `value` bound. */
+const countWhere = async (
+  table: string,
+  where: string,
+  value: string
+): Promise<number> => {
+  const row = await env.DB.prepare(
+    `SELECT count(*) AS count FROM ${table} WHERE ${where}`
+  )
+    .bind(value)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
+/** How many rows of `table` hold `value` in `column`. */
+const countOf = async (
+  table: string,
+  column: string,
+  value: string
+): Promise<number> => await countWhere(table, `${column} = ?`, value);
 
 describe("erasing a person in connect", () => {
   it("revokes a grant still live at its provider before anything is emptied, and empties their connection", async () => {
@@ -326,12 +356,20 @@ describe("erasing a person in connect", () => {
   it("connects nothing of theirs once their erasure began, even from a sign-in already under way, and drops its grant", async () => {
     const person = someone();
     const account = apps.account("sample-oauth", person.email);
-    // Their erasure began as the sign-in came back: the mark it makes first.
+    // Started before their erasure began, back after it: the mark it
+    // makes first lands in between.
+    const url = await startApp(person);
     await drizzle(env.DB)
       .insert(erasedPeople)
       .values({ userId: person.userId, beganAt: new Date() });
 
-    const refused = await outcome(connectApp(apps, person, account));
+    const refused = await outcome(
+      exports.default.finishConnection({
+        person,
+        state: stateOf(url),
+        code: apps.authorize(url.href, account),
+      })
+    );
 
     const theirs = await drizzle(env.DB)
       .select({ id: connections.id })
@@ -449,4 +487,138 @@ describe("erasing a person in connect", () => {
       kept: [],
     });
   });
+
+  /**
+   * Every writer of something of a person's that a request already under
+   * way may reach after their erasure began, each with what of theirs it
+   * would leave: in flight as the erasure's mark lands, it leaves nothing.
+   * (A read of their mailbox: events.test.ts; a held action on a shared
+   * connection: pending.test.ts; a Composio flow: composio-connections.test.ts.)
+   */
+  const inFlight: {
+    writer: string;
+    act: (person: ConnectionPerson) => Promise<unknown>;
+    left: (person: ConnectionPerson) => Promise<number>;
+  }[] = [
+    {
+      writer: "starting a sign-in",
+      act: async (person) => {
+        await markErasure(person);
+        return await startApp(person);
+      },
+      left: async (person) =>
+        await countOf("oauth_flows", "user_id", person.userId),
+    },
+    {
+      writer: "finishing a sign-in",
+      act: async (person) => {
+        // Started before the erasure began, back after.
+        const url = await startApp(person);
+        await markErasure(person);
+        return await exports.default.finishConnection({
+          person,
+          state: stateOf(url),
+          code: apps.authorize(
+            url.href,
+            apps.account("sample-oauth", person.email)
+          ),
+        });
+      },
+      left: async (person) =>
+        await countOf("connections", "owner_user_id", person.userId),
+    },
+    {
+      writer: "signing in again to a connection that needs it",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await env.DB.prepare(
+          "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+        )
+          .bind(connectionId)
+          .run();
+        await markErasure(person);
+        return await connectApp(
+          apps,
+          person,
+          apps.account("sample-oauth", person.email)
+        );
+      },
+      left: async (person) =>
+        await countWhere(
+          "connections",
+          "owner_user_id = ? AND status != 'needs_reauth'",
+          person.userId
+        ),
+    },
+    {
+      writer: "a call claiming its key",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await markErasure(person);
+        return await idempotencyStore(
+          env.DB,
+          {
+            subject: {
+              type: "agent",
+              agentId: agentIdSchema.parse(crypto.randomUUID()),
+            },
+            onBehalfOf: person.userId,
+            connectionId,
+            action: "items.update",
+            idempotencyKey: crypto.randomUUID(),
+            resource: null,
+          },
+          "input-hash"
+        ).claim();
+      },
+      left: async (person) =>
+        await countWhere(
+          "idempotent_calls",
+          "connection_id IN (SELECT id FROM connections WHERE owner_user_id = ?)",
+          person.userId
+        ),
+    },
+    {
+      writer: "a call keeping what it changed",
+      act: async (person) => {
+        const { connectionId } = await liveConnection(person);
+        await markErasure(person);
+        const { writes } = await keptChange(
+          env,
+          {
+            jti: crypto.randomUUID(),
+            authority: { onBehalfOf: person.userId },
+          },
+          {
+            connectionId: connectionIdSchema.parse(connectionId),
+            action: "items.update",
+            resource: "item-1",
+          },
+          { before: { amount: 1 }, after: { amount: 2 } }
+        );
+        const [first, ...rest] = writes;
+        return first === undefined
+          ? undefined
+          : await drizzle(env.DB).batch([first, ...rest]);
+      },
+      left: async (person) =>
+        await countWhere(
+          "call_changes",
+          "connection_id IN (SELECT id FROM connections WHERE owner_user_id = ?)",
+          person.userId
+        ),
+    },
+  ];
+
+  it.each(inFlight)(
+    "leaves nothing of theirs from $writer under way as their erasure began",
+    async ({ act, left }) => {
+      const person = someone();
+
+      // Each marks the erasure where a request under way meets it.
+      await outcome(act(person));
+
+      await expect(left(person)).resolves.toBe(0);
+    }
+  );
 });
