@@ -57,8 +57,12 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
  * in the same release, to that migration's own number.
  *
  * 0120 dropped `admission_topics` in the release that stopped using it.
+ * 0169 lets a revocation be every App's (a null `app_id`), which the code
+ * before it reads as one App's and fails on: a release before it would
+ * drop such rows unexpanded, and the screens they were for would never be
+ * told.
  */
-export const compatibleFromMigration = 120;
+export const compatibleFromMigration = 169;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -748,18 +752,21 @@ export const appIntegrations = sqliteTable(
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
  * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
- * role. `user_ids` is null for everyone the host knows of.
+ * role. `user_ids` is null for everyone the host knows of. A null
+ * `app_id` is a revocation for every App (an admin's role lost), kept as
+ * one row so the change's batch stays one row however many Apps there
+ * are; it is expanded into one row per App a page at a time, in App ID
+ * order, `after_app_id` the last App it has expanded to (GRA-650).
  */
 export const accessRevocations = sqliteTable(
   "access_revocations",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
+    appId: text("app_id").references(() => apps.id, { onDelete: "cascade" }),
     userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
+    afterAppId: text("after_app_id"),
   },
   // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
