@@ -11,6 +11,8 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { ProvisionError } from "../provision/errors.ts";
+import { DiscardError, discardClient } from "./discard.ts";
+import type { DiscardErrorCode } from "./discard.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import {
   destinationOf,
@@ -175,6 +177,29 @@ export const deletePlacedClientFn = createServerFn({ method: "POST" })
           })
       )
   );
+
+/** What discarding answers: done, or why it was refused. */
+export interface DiscardResult {
+  refused: DiscardErrorCode | null;
+}
+
+/**
+ * Discarding a client that was never placed and has nothing anywhere
+ * (src/hosting/discard.ts): its record goes, audited, and its id is free.
+ */
+export const discardClientFn = createServerFn({ method: "POST" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(async ({ data, context }): Promise<DiscardResult> => {
+    try {
+      await discardClient(env, context.staff, data.clientId);
+      return { refused: null };
+    } catch (error) {
+      if (error instanceof DiscardError) {
+        return { refused: error.code };
+      }
+      throw error;
+    }
+  });
 
 /** Every offboarded placed client, for Platform's Offboarded page. */
 export const fetchOffboardedClients = createServerFn({ method: "GET" }).handler(

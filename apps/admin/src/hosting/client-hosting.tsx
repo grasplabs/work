@@ -31,13 +31,14 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import { CapabilityChecklist } from "./capability-checks.tsx";
 import {
+  discardClientFn,
   offboardPlacedClientFn,
   placeAndProvisionFn,
   releasePlacedClientFn,
@@ -50,6 +51,7 @@ import type {
   DestinationProblem,
 } from "./placement.ts";
 import {
+  discardRefusals,
   notStartedWords,
   offboardRefusals,
   operationErrorWords,
@@ -513,6 +515,61 @@ const MailNotice = ({ view }: { view: ClientHostingView }) =>
   ) : null;
 
 /**
+ * Discarding it: only for a client never placed, with nothing anywhere
+ * (src/hosting/discard.ts). Its record goes, audited, and its id is free;
+ * the page then goes back to every organization.
+ */
+const Discard = ({ view }: { view: ClientHostingView }) => {
+  const navigate = useNavigate();
+  const { busy, failure, run } = useAction(discardRefusals);
+  const [understood, setUnderstood] = useState(false);
+  const discard = () => {
+    void run(async () => {
+      const result = await discardClientFn({
+        data: { clientId: view.clientId },
+      });
+      if (result.refused === null) {
+        await navigate({ to: "/" });
+      }
+      return result;
+    });
+  };
+  return (
+    <div className="flex flex-col gap-3 border-t pt-4">
+      <p className="text-sm">
+        Added by mistake, or for a test? It was never placed and nothing of it
+        exists anywhere: discarding it removes its record, and its id can be
+        used again. The audit log keeps what was done.
+      </p>
+      <Field orientation="horizontal">
+        <Checkbox
+          checked={understood}
+          id="discard-understood"
+          onCheckedChange={setUnderstood}
+        />
+        <FieldLabel htmlFor="discard-understood">
+          Remove this organization for good
+        </FieldLabel>
+      </Field>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button
+          disabled={busy || !understood}
+          onClick={discard}
+          variant="destructive"
+        >
+          Discard it
+        </Button>
+        {failure === null ? null : (
+          <p className="text-destructive text-sm" role="alert">
+            {failure}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
  * The releases starting or resuming it offers, newest first: any, before
  * it has an operation; once stopped, the one its operation has and every
  * newer one, which resuming switches it to while nothing is live
@@ -560,6 +617,14 @@ const releaseOffered = (
   }
   return offered[0]?.id ?? "";
 };
+
+/** Whether it may be discarded: never placed, nothing started, not live or offboarded. */
+const discardable = (view: ClientHostingView): boolean =>
+  view.placement === null &&
+  view.operation === null &&
+  !view.going &&
+  !view.active &&
+  view.offboardedAt === null;
 
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
@@ -627,6 +692,7 @@ export const ClientHosting = ({
         <Releases operation={view.operation} releases={releases} view={view} />
       ) : null}
       {view.placement === null ? null : <Offboarding view={view} />}
+      {discardable(view) ? <Discard view={view} /> : null}
       {provisionable(view) ? (
         <div className="flex flex-col gap-4">
           {view.operation === null && view.notStarted === null ? (

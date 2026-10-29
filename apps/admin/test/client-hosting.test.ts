@@ -10,9 +10,11 @@ import {
   clientRuns,
   hostingDestinations,
   releases,
+  settings,
 } from "../src/db/schema.ts";
 import {
   deletePlacedClientFn,
+  discardClientFn,
   fetchClientHosting,
   offboardPlacedClientFn,
   placeAndProvisionFn,
@@ -24,6 +26,7 @@ import {
   placeClient,
 } from "../src/hosting/inventory.ts";
 import { getClientHosting } from "../src/hosting/placement.ts";
+import { claimRun } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -464,6 +467,76 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       said: html.includes("run_gone"),
       words: html.includes("Its attempt is gone, or never started"),
     }).toStrictEqual({ run: "gone", going: false, said: true, words: true });
+  });
+
+  it("discards a client never placed, audited, freeing its id, and refuses one placed, unknown or being worked on", async () => {
+    const shared = await destination();
+    const mistaken = await client();
+    await db.insert(settings).values({
+      clientId: mistaken,
+      key: "AUDIT_RETENTION_DAYS",
+      value: "90",
+      updatedBy: caller,
+      updatedAt: new Date(),
+    });
+    const placed = await client();
+    await placeClient(db, staff, {
+      clientId: placed,
+      destinationId: shared,
+      policyId,
+    });
+    const busy = await client();
+    await claimRun(
+      db,
+      staff,
+      busy,
+      null,
+      { action: "client.provision_placed", clientId: busy },
+      { kind: "provision_placed", runId: `${busy}-p1` }
+    );
+    const discard = async (clientId: string) =>
+      await callServerFn(discardClientFn, { clientId }, { email: caller });
+
+    const discarded = await discard(mistaken);
+    const left = {
+      client: await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(eq(clients.id, mistaken)),
+      settings: await db
+        .select({ key: settings.key })
+        .from(settings)
+        .where(eq(settings.clientId, mistaken)),
+    };
+
+    expect({
+      discarded,
+      left,
+      discardedBy: await actorsOf(mistaken, "client.discard"),
+      placed: await discard(placed),
+      unknown: await discard("nobody-here"),
+      busy: await discard(busy),
+      kept: await placementOf(placed),
+    }).toStrictEqual({
+      discarded: { refused: null },
+      left: { client: [], settings: [] },
+      discardedBy: [caller],
+      placed: { refused: "placed" },
+      unknown: { refused: "client_unknown" },
+      busy: { refused: "client_busy" },
+      kept: { destinationId: shared },
+    });
+
+    // Its id is free for the next client.
+    const now = new Date();
+    await expect(
+      db.insert(clients).values({
+        id: mistaken,
+        name: mistaken,
+        createdAt: now,
+        updatedAt: now,
+      })
+    ).resolves.toBeDefined();
   });
 
   it("refuses anyone Access doesn't vouch for, placing and reading nothing", async () => {

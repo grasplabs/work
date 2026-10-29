@@ -107,6 +107,7 @@ export const eventWords = (
     "rollout.cancel": `cancelled ${rollout}`,
     "rollout.rollback": `rolled ${company} back`,
     "client.create": `added ${company}`,
+    "client.discard": `discarded ${company}, which was never placed`,
     "client.ring": `moved ${company} to another ring`,
     "client.model_spend_ceiling": `changed ${company}'s model spend ceiling`,
     "client.pin": `pinned ${company} to ${target}`,
