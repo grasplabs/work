@@ -17,11 +17,11 @@ import {
   stageNamed,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { adminDatabase } from "../db/act.ts";
+import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients, hostingDestinations } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -33,7 +33,6 @@ import {
   InventoryError,
   placeClient,
   placementOf,
-  saveDestination,
 } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import { ProvisionOperationError, provisionOf } from "./operation.ts";
@@ -202,8 +201,8 @@ export const stageDestinationId = (stage: Stage): string =>
  * It claims no capability: each is unknown until staff record evidence
  * of it, as a policy requires (src/hosting/policy.ts), so nothing is
  * placed here on the admin's word. An admin whose STAGE names no stage
- * records nothing, and `saveDestination` refuses any namespace but the
- * stage's own, so a staging admin never records production's.
+ * records nothing, and the namespace is the stage's own, so a staging
+ * admin never records production's.
  */
 export const ensureStageDestination = async (
   env: Env,
@@ -214,26 +213,25 @@ export const ensureStageDestination = async (
     return;
   }
   const namespace = clientsNamespace(stage);
-  const existing = await db
-    .select({ id: hostingDestinations.id })
-    .from(hostingDestinations)
-    .where(eq(hostingDestinations.namespace, namespace))
-    .get();
-  if (existing !== undefined) {
-    return;
-  }
-  await saveDestination(
+  const id = stageDestinationId(stage);
+  const now = Date.now();
+  // Insert only, in one statement: while no destination is in the
+  // namespace, and never over one with its id. Two reads at once create
+  // it once, audited once; nothing already there is ever overwritten.
+  await actIfChanged(
     db,
     "system",
+    db
+      .insert(hostingDestinations)
+      .select(
+        sql`SELECT ${id}, ${"workers_for_platforms"}, ${platformAccountId}, ${namespace}, ${JSON.stringify(["eu-storage"])}, ${"{}"}, ${now}, ${now} WHERE NOT EXISTS (SELECT 1 FROM ${hostingDestinations} WHERE ${hostingDestinations.namespace} = ${namespace})`
+      )
+      .onConflictDoNothing(),
     {
-      id: stageDestinationId(stage),
-      kind: "workers_for_platforms",
-      accountId: platformAccountId,
-      namespace,
-      policies: ["eu-storage"],
-      capabilities: {},
-    },
-    stage
+      action: "destination.create",
+      target: id,
+      detail: { namespace, policies: "eu-storage" },
+    }
   );
 };
 

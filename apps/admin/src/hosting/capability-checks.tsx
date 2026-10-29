@@ -4,7 +4,9 @@
  * or by provisioning's own check, when, and where it is recorded), still
  * to be checked by a person, or to be checked by provisioning itself the
  * first time it runs there. A person records what they checked with one
- * form, as themselves; every record is audited
+ * form, as themselves, also over a record already there (to put a failed
+ * check right, or withdraw one that no longer holds); every record is
+ * audited
  * (src/hosting/functions.ts, `recordCapabilityCheckFn`).
  */
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -53,16 +55,23 @@ const textOf = (form: FormData, name: string): string => {
   return typeof value === "string" ? value : "";
 };
 
-/** A date and time as the form's field takes it, from an ISO string. */
-const localOf = (date: Date): string => date.toISOString().slice(0, 16);
+/**
+ * The instant a `datetime-local` field's `value` names, in UTC: the field
+ * is in the browser's own time zone, which `Date` reads it in, and the
+ * admin stores and shows every time in UTC.
+ */
+const utcOf = (value: string): string => new Date(value).toISOString();
 
 /** The form a person records a check with. */
 const RecordCheck = ({
   destinationId,
   capability,
+  again,
 }: {
   destinationId: string;
   capability: CapabilityCheck["capability"];
+  /** Whether it has a record already, which this one replaces. */
+  again: boolean;
 }) => {
   const router = useRouter();
   const { busy, failure, run } = useAction(inventoryWords);
@@ -80,7 +89,7 @@ const RecordCheck = ({
                 holds: holds === "yes",
                 procedure: textOf(form, "procedure"),
                 record: textOf(form, "record"),
-                observedAt: new Date(textOf(form, "observedAt")).toISOString(),
+                observedAt: utcOf(textOf(form, "observedAt")),
               },
             }),
           async () => {
@@ -92,7 +101,7 @@ const RecordCheck = ({
   return (
     <Collapsible>
       <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
-        Record a check
+        {again ? "Record a new check" : "Record a check"}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <form
@@ -126,14 +135,18 @@ const RecordCheck = ({
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-when`}>When (UTC)</FieldLabel>
+              <FieldLabel htmlFor={`${id}-when`}>
+                When, in your own time
+              </FieldLabel>
               <Input
-                defaultValue={localOf(new Date())}
                 id={`${id}-when`}
                 name="observedAt"
                 required
                 type="datetime-local"
               />
+              <FieldDescription>
+                Kept and shown in UTC, as every time in the admin is.
+              </FieldDescription>
             </Field>
             <FieldSet>
               <FieldLegend variant="label">What you found</FieldLegend>
@@ -202,12 +215,13 @@ const CheckItem = ({
         </a>
       </p>
     )}
-    {check.state === "needs_checking" ? (
-      <RecordCheck
-        capability={check.capability}
-        destinationId={destinationId}
-      />
-    ) : null}
+    {/* Also once recorded: to put a failed check right, or withdraw one
+        that no longer holds, as a new record that replaces it, audited. */}
+    <RecordCheck
+      again={check.evidence !== null}
+      capability={check.capability}
+      destinationId={destinationId}
+    />
   </li>
 );
 

@@ -1,4 +1,4 @@
-import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
+import { platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -12,22 +12,27 @@ import {
 import {
   fetchClientHosting,
   fetchDestinations,
-  placeAndProvisionFn,
-  recordCapabilityCheckFn,
 } from "../src/hosting/functions.ts";
 import { destinationOf } from "../src/hosting/inventory.ts";
 import {
   ensureStageDestination,
   stageDestinationId,
 } from "../src/hosting/placement.ts";
-import type { Capability } from "../src/hosting/policy.ts";
-import { startClient } from "../src/provision/functions.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, staff } from "./hosting.ts";
+import {
+  added,
+  graspAccount,
+  ownId,
+  place,
+  recordedOf,
+  sharedRelease,
+  vouch,
+  vouched,
+} from "./own-destination.ts";
 import { callServerFn, page } from "./pages.ts";
-import { placedRelease } from "./placed.ts";
 import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
@@ -50,89 +55,6 @@ const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
-/** This admin's stage, as its wrangler.jsonc sets it for the tests. */
-const stage = "production";
-const ownId = stageDestinationId(stage);
-
-/** The binding kinds Workers for Platforms documents for user Workers. */
-const documented = new Set([
-  "d1",
-  "r2_bucket",
-  "durable_object_namespace",
-  "assets",
-]);
-
-/** A release a client in a Workers for Platforms namespace runs: documented bindings, no cron triggers. */
-const sharedRelease = async (): Promise<string> =>
-  await placedRelease("feat(core): the first", { crons: [] }, (core) => ({
-    ...core,
-    bindings: core.bindings.filter(({ type }) => documented.has(type)),
-  }));
-
-/** What no provisioning observes, so a person vouches for each. */
-const vouched: readonly Capability[] = [
-  "durable_objects.eu_jurisdiction",
-  "logs.payload_free",
-  "models.approved_transport",
-  "secrets.replication_recorded",
-];
-
-/** Staff recording, through the form, that they checked `capability`. */
-const vouch = async (capability: Capability, email = staff.email) =>
-  await callServerFn(
-    recordCapabilityCheckFn,
-    {
-      destinationId: ownId,
-      capability,
-      holds: true,
-      procedure: `Read ${capability} back on a test client`,
-      record: "https://linear.app/grasp-os/issue/GRA-430",
-      observedAt: "2026-10-29T09:00:00.000Z",
-    },
-    { email }
-  );
-
-/** A client staff add, as the new-organization form does. */
-const added = async (): Promise<string> => {
-  const clientId = `acme-${crypto.randomUUID().slice(0, 8)}`;
-  const result = await callServerFn(
-    startClient,
-    {
-      clientId,
-      name: "Acme",
-      ring: 1,
-      signIn: {
-        domains: ["acme.test"],
-        admins: ["ada@acme.test"],
-        entraTenantId: "8f3c9a52-1d4e-4b6f-9a2c-3e5d7f9b1c2a",
-      },
-    },
-    { email: staff.email }
-  );
-  if (result.clientId === null) {
-    throw new Error(`Adding ${clientId} was refused: ${result.refused}`);
-  }
-  return clientId;
-};
-
-const place = async (clientId: string, releaseId: string) =>
-  await callServerFn(
-    placeAndProvisionFn,
-    { clientId, releaseId, policyId: "eu-storage", destinationId: null },
-    { email: staff.email }
-  );
-
-/** What the destination's record says of each capability: its status and who observed it. */
-const recordedOf = async () => {
-  const { capabilities } = await destinationOf(db, ownId);
-  return Object.fromEntries(
-    Object.entries(capabilities).map(([capability, entry]) => [
-      capability,
-      `${entry?.status ?? "unknown"} by ${entry?.evidence.recordedBy ?? "nobody"}`,
-    ])
-  );
-};
-
 // In order, as one new admin's life: its own destination recorded and a
 // check made on the Destinations page, its first client provisioned there,
 // then a provisioning that finds a database outside the EU.
@@ -140,12 +62,7 @@ describe("a new admin's own shared destination", () => {
   useStoreSecrets({ deployer: token });
   // Grasp's own account, with the stage's clients' namespace in it.
   beforeEach(() => {
-    const account = cloudflare.addAccount(
-      "Grasp",
-      undefined,
-      platformAccountId
-    );
-    account.namespaces.set(clientsNamespace(stage), new Map());
+    graspAccount(cloudflare);
     // Attempts log why they stopped.
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -198,7 +115,7 @@ describe("a new admin's own shared destination", () => {
       byWhom: true,
       recorded: { "logs.payload_free": "verified by ops@grasp.test" },
       audited: [
-        "destination.save by system",
+        "destination.create by system",
         "destination.evidence by ops@grasp.test",
       ],
     });
@@ -292,12 +209,7 @@ describe("a new admin's own shared destination", () => {
     const releaseId = await sharedRelease();
     const clientId = await added();
     // Cloudflare puts the database somewhere other than asked.
-    const account = cloudflare.addAccount(
-      "Grasp",
-      undefined,
-      platformAccountId
-    );
-    account.namespaces.set(clientsNamespace(stage), new Map());
+    const account = graspAccount(cloudflare);
     account.d1Reports = "default";
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
 

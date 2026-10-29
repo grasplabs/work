@@ -87,28 +87,29 @@ const observations = (
 
 /**
  * Records, in a destination that checks itself, each capability the kinds
- * in `seen` showed in the policy's jurisdiction, unless it is verified
- * already: provisioning's own evidence, the first time it is observed.
+ * in `seen` showed in the policy's jurisdiction: provisioning's own
+ * evidence, written only where the capability has no record yet
+ * (`unrecordedOnly`), in the statement that writes it, so it never
+ * replaces what a person or an earlier check found, a capability found
+ * not to hold above all.
  */
 const recordObserved = async (
   db: AdminDatabase,
-  destination: Awaited<ReturnType<typeof destinationOf>>,
+  destinationId: string,
   check: SelfCheck,
   seen: ReadonlySet<ClientResource["kind"]>
 ): Promise<void> => {
-  const unrecorded = [...seen].flatMap((kind) => {
+  const observed = [...seen].flatMap((kind) => {
     const capability = capabilityOf[kind];
-    return capability === undefined ||
-      destination.capabilities[capability]?.status === "verified"
-      ? []
-      : [capability];
+    return capability === undefined ? [] : [capability];
   });
-  if (unrecorded.length > 0) {
+  if (observed.length > 0) {
     await recordCapabilityEvidence(
       db,
       "system",
-      destination.id,
-      observations(check, unrecorded, "verified")
+      destinationId,
+      observations(check, observed, "verified"),
+      { unrecordedOnly: true }
     );
   }
 };
@@ -353,7 +354,7 @@ export const ensureClientResources = async (
     );
   }
   if (check !== undefined) {
-    await recordObserved(db, destination, check, seen);
+    await recordObserved(db, destination.id, check, seen);
   }
   return await clientInventory(db, clientId);
 };

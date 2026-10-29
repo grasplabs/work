@@ -25,7 +25,7 @@ import {
 import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { act, actIfChanged } from "../db/act.ts";
@@ -47,6 +47,7 @@ import {
   placementProblems,
 } from "./policy.ts";
 import type {
+  Capability,
   DestinationCapabilities,
   Evidence,
   HostingPolicyId,
@@ -411,61 +412,79 @@ export const assertPlaceable = async (
 
 /**
  * Records what was observed of some of destination `destinationId`'s
- * capabilities (`observed`), as `actor`, leaving the rest as they are:
- * staff vouching for one through the Platform page, or provisioning's
- * own check (`selfCheckedCapabilities`). Evidence must name a subject the
- * admin knows, as `saveDestination`'s does; each is kept in the
- * capability's history and audited.
+ * capabilities (`observed`), as `actor`: staff checking one through the
+ * form (src/hosting/capability-checks.tsx), or provisioning's own check
+ * (`selfCheckedCapabilities`). Evidence must name a subject the admin
+ * knows, as `saveDestination`'s does.
+ *
+ * Each capability is written on its own, in one statement that sets only
+ * its key of the destination's capabilities (`json_set`), so two records
+ * at once, of the same destination, never undo each other: neither reads
+ * the capabilities and writes them back whole. With `unrecordedOnly`
+ * (provisioning's own check) a capability is written only while it has no
+ * record at all, decided in that same statement, so an automatic success
+ * never replaces what a person or an earlier check found. Each one
+ * written is kept in the capability's history and audited, in the same
+ * batch; one not written leaves neither. Returns the capabilities written.
  */
 export const recordCapabilityEvidence = async (
   db: AdminDatabase,
   actor: Actor,
   destinationId: string,
-  observed: DestinationCapabilities
-): Promise<void> => {
+  observed: DestinationCapabilities,
+  { unrecordedOnly = false }: { unrecordedOnly?: boolean } = {}
+): Promise<Capability[]> => {
   const parsed = destinationCapabilitiesSchema.parse(observed);
   const destination = await destinationOf(db, destinationId);
   await assertSubjectsKnown(db, destination.kind, parsed);
-  const now = new Date();
-  const merged = destinationCapabilitiesSchema.parse({
-    ...destination.capabilities,
-    ...parsed,
-  });
-  const declarations = Object.entries(parsed).flatMap(([capability, entry]) =>
-    entry === undefined
-      ? []
-      : [
-          db.insert(destinationCapabilityEvidence).values({
-            destinationId,
-            capability,
-            status: entry.status,
-            subjectKind: entry.evidence.subject.kind,
-            subjectId: entry.evidence.subject.id,
-            procedure: entry.evidence.procedure,
-            observedAt: new Date(entry.evidence.observedAt),
-            recordedBy: entry.evidence.recordedBy,
-            record: entry.evidence.record,
-            declaredBy: actor === "system" ? actor : actor.email,
-            declaredAt: now,
-          }),
-        ]
-  );
-  await act(
-    db,
-    actor,
-    [
+  const written: Capability[] = [];
+  for (const capability of capabilities) {
+    const entry = parsed[capability];
+    if (entry === undefined) {
+      continue;
+    }
+    const now = new Date();
+    // The capability's key: it has dots in it, so it's quoted.
+    const path = `$."${capability}"`;
+    const { evidence } = entry;
+    const declaredBy = actor === "system" ? actor : actor.email;
+    // oxlint-disable-next-line no-await-in-loop -- one capability at a time
+    const changed = await actIfChanged(
+      db,
+      actor,
       db
         .update(hostingDestinations)
-        .set({ capabilities: JSON.stringify(merged), updatedAt: now })
-        .where(eq(hostingDestinations.id, destinationId)),
-      ...declarations,
-    ],
-    {
-      action: "destination.evidence",
-      target: destinationId,
-      detail: evidenceDetail(parsed),
+        .set({
+          capabilities: sql`json_set(${hostingDestinations.capabilities}, ${path}, json(${JSON.stringify(entry)}))`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(hostingDestinations.id, destinationId),
+            unrecordedOnly
+              ? sql`json_extract(${hostingDestinations.capabilities}, ${path}) IS NULL`
+              : undefined
+          )
+        ),
+      {
+        action: "destination.evidence",
+        target: destinationId,
+        detail: evidenceDetail({ [capability]: entry }),
+      },
+      [
+        // Only once the event is recorded: `changes()` reads its insert.
+        db
+          .insert(destinationCapabilityEvidence)
+          .select(
+            sql`SELECT NULL, ${destinationId}, ${capability}, ${entry.status}, ${evidence.subject.kind}, ${evidence.subject.id}, ${evidence.procedure}, ${new Date(evidence.observedAt).getTime()}, ${evidence.recordedBy}, ${evidence.record}, ${declaredBy}, ${now.getTime()} WHERE changes() > 0`
+          ),
+      ]
+    );
+    if (changed) {
+      written.push(capability);
     }
-  );
+  }
+  return written;
 };
 
 /** A new deployment id: random, lowercase, never derived from the client. */
