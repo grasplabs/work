@@ -5,7 +5,7 @@
  *
  * Built afresh for each run, so a secret rotated in Secrets Store reaches
  * the next deploy. The token and the secrets stay in the context: a caller
- * running in a Workflow step never returns it from the step, whose result
+ * running in a run's step never returns it from the step, whose result
  * is stored (threat model R17, CO3).
  */
 import type { ClientDispatcher } from "../clients/core-address.ts";
