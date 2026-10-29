@@ -110,6 +110,7 @@
     "./onboarding-summary": "./src/onboarding-summary.ts",
     "./packages": "./src/packages.ts",
     "./permissions": "./src/permissions.ts",
+    "./person-columns": "./src/person-columns.ts",
     "./platform-change": "./src/platform-change.ts",
     "./platform-limits": "./src/platform-limits.ts",
     "./platform-measures": "./src/platform-measures.ts",
