@@ -85,7 +85,7 @@ const SteeredWriteBadge = ({ write }: { write: SteeredWrite }) => {
       ? `${write.alias}: ${formatList(write.operations)}`
       : write.alias;
   return (
-    <Badge variant="destructive">
+    <Badge variant="attention">
       <Trans>Writes a model may steer: {target}</Trans>
     </Badge>
   );
@@ -226,7 +226,7 @@ const WorkflowHeader = ({
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h1 className="text-2xl font-medium tracking-tight">{resource.name}</h1>
+        <h1 className="type-title">{resource.name}</h1>
         {status === undefined ? null : (
           <WorkflowStatus
             lifecycle={status}

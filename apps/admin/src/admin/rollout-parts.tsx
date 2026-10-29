@@ -375,7 +375,7 @@ export const Revocation = ({ rolloutId }: { rolloutId: string }) => {
         <div
           className={cn(
             "flex flex-col gap-1 border-t px-5 py-3",
-            !verdict.safe && "text-destructive"
+            !verdict.safe && "text-status-attention"
           )}
           role={verdict.safe ? undefined : "alert"}
         >

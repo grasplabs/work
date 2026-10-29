@@ -117,7 +117,7 @@ export const BannerHeader = ({
         )}
       </Panel>
       <span className="flex flex-col gap-0.5">
-        <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
+        <h1 className="type-title wrap-break-word">
           {note.kind === "statement" ? quoted(note.title) : note.title}
         </h1>
         {/* Last heard follows the summary's last word, so a summary that wraps keeps it beside its words. A source's summary already carries its date. */}

@@ -84,7 +84,7 @@ export const shadcnComponents = {
       "AlertDialogTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `scrim` token instead of raw black.",
+      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
   },
   "aspect-ratio": {
     status: "supported",
@@ -120,11 +120,15 @@ export const shadcnComponents = {
       "AvatarGroupCount",
       "AvatarImage",
     ],
+    changes:
+      "The image fades in as it loads, on its opacity alone; give the fallback a `delay` so initials stand in only when the image is slow.",
   },
   badge: {
     status: "supported",
     summary: "A small label for a status or a count.",
     exports: ["Badge", "badgeVariants"],
+    changes:
+      "The default badge is grey, never black; `passed` (green) and `attention` (amber) are the brand's signals.",
   },
   breadcrumb: {
     status: "supported",
@@ -151,7 +155,7 @@ export const shadcnComponents = {
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` variant and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class.",
+      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class. The default and `ask` variants go forest under the pointer (`primary-hover`).",
   },
   "button-group": {
     status: "supported",
@@ -182,6 +186,8 @@ export const shadcnComponents = {
       "CardHeader",
       "CardTitle",
     ],
+    changes:
+      "Has the brand's hairline (`ring-hairline`) and long soft shadow (`shadow-block`).",
   },
   carousel: {
     status: "supported",
@@ -242,7 +248,7 @@ export const shadcnComponents = {
       "chartColors",
     ],
     changes:
-      "A series' colour is a chart token (`chart-1` to `chart-5`): marks take `chartColor(token)`, markers use the token's class. No `<style>` element, no inline styles, no ChartStyle, and no per-theme colours: the tokens have their own dark values. Hands on recharts' charts and their parts, since screens can't import recharts. The chart's surface shows a focus ring instead of hiding it. The tooltip shows numeric labels, such as a year, and the tooltip and legend content hand HTML props (id, ARIA, data) on to their element.",
+      "A series' colour is a chart token (`chart-1` to `chart-5`): marks take `chartColor(token)`, markers use the token's class. No `<style>` element, no inline styles, no ChartStyle, and no per-theme colours: the tokens have their own dark values. Hands on recharts' charts and their parts, since screens can't import recharts. The chart's surface shows a focus ring instead of hiding it. The tooltip shows numeric labels, such as a year, and the tooltip and legend content hand HTML props (id, ARIA, data) on to their element. The chart fades in once recharts has measured its room, on its opacity alone, and its tooltip floats on `shadow-lifted`.",
   },
   checkbox: {
     status: "supported",
@@ -276,7 +282,7 @@ export const shadcnComponents = {
       "useComboboxAnchor",
     ],
     changes:
-      "`triggerLabel` and `clearLabel` name the input's trigger and clear buttons, which upstream leaves without a name.",
+      "`triggerLabel` and `clearLabel` name the input's trigger and clear buttons, which upstream leaves without a name. Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   command: {
     status: "supported",
@@ -313,6 +319,8 @@ export const shadcnComponents = {
       "ContextMenuSubTrigger",
       "ContextMenuTrigger",
     ],
+    changes:
+      "Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   dialog: {
     status: "supported",
@@ -330,7 +338,7 @@ export const shadcnComponents = {
       "DialogTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
   },
   direction: {
     status: "supported",
@@ -354,7 +362,7 @@ export const shadcnComponents = {
       "DrawerTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `scrim` token instead of raw black.",
+      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its title is set in `type-heading`.",
   },
   "dropdown-menu": {
     status: "supported",
@@ -376,6 +384,8 @@ export const shadcnComponents = {
       "DropdownMenuSubTrigger",
       "DropdownMenuTrigger",
     ],
+    changes:
+      "Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   empty: {
     status: "supported",
@@ -416,6 +426,8 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A preview card that opens when a link is hovered or focused.",
     exports: ["HoverCard", "HoverCardContent", "HoverCardTrigger"],
+    changes:
+      "Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   input: {
     status: "supported",
@@ -433,6 +445,8 @@ export const shadcnComponents = {
       "InputGroupText",
       "InputGroupTextarea",
     ],
+    changes:
+      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is its edge in the keyboard's ink and a hair of ring, not a field's wide ring.",
   },
   "input-otp": {
     status: "supported",
@@ -494,7 +508,7 @@ export const shadcnComponents = {
       "MenubarTrigger",
     ],
     changes:
-      "Its triggers show a focus ring from the keyboard; upstream hides the outline and shows nothing.",
+      "Its triggers show a focus ring from the keyboard; upstream hides the outline and shows nothing. Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   message: {
     status: "supported",
@@ -544,7 +558,7 @@ export const shadcnComponents = {
       "navigationMenuTriggerStyle",
     ],
     changes:
-      "Fixes upstream's slide classes for the activation direction, which Tailwind didn't know, and drops two that did nothing.",
+      "Fixes upstream's slide classes for the activation direction, which Tailwind didn't know, and drops two that did nothing. Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   pagination: {
     status: "supported",
@@ -571,7 +585,7 @@ export const shadcnComponents = {
       "PopoverTrigger",
     ],
     changes:
-      "The content is never taller than the room beside its anchor (`--available-height`) and scrolls, as the kit's menus and selects do.",
+      "The content is never taller than the room beside its anchor (`--available-height`) and scrolls, as the kit's menus and selects do. Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   progress: {
     status: "supported",
@@ -636,6 +650,8 @@ export const shadcnComponents = {
       "SelectTrigger",
       "SelectValue",
     ],
+    changes:
+      "Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   separator: {
     status: "supported",
@@ -656,7 +672,7 @@ export const shadcnComponents = {
       "SheetTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted` and moves on the house curve; its title is set in `type-heading`.",
   },
   sidebar: {
     status: "supported",
@@ -689,7 +705,7 @@ export const shadcnComponents = {
       "useSidebar",
     ],
     changes:
-      "The inset's dark shadow uses the theme's `scrim` token instead of raw black.",
+      'The container and the phone\'s sheet draw the brand book\'s Rings, rising faintly from the foot (`patterned`, `data-pattern="rings"`, `data-from="bottom"`), and the inset variant\'s inner ground is clear so they show.',
   },
   skeleton: {
     status: "supported",
@@ -743,6 +759,8 @@ export const shadcnComponents = {
       "TabsTrigger",
       "tabsListVariants",
     ],
+    changes:
+      "The default list is the brand book's pill bar: a card with a hairline, the open tab an ink thumb that glides between tabs on the house curve.",
   },
   textarea: {
     status: "supported",
@@ -767,6 +785,8 @@ export const shadcnComponents = {
       "toast",
       "useToastManager",
     ],
+    changes:
+      "Floats on the brand's `shadow-lifted` instead of a ring and a grey shadow.",
   },
   toggle: {
     status: "supported",
@@ -784,6 +804,7 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A short label that shows on hover or focus.",
     exports: ["Tooltip", "TooltipContent", "TooltipProvider", "TooltipTrigger"],
+    changes: "The `quiet` variant floats on `shadow-lifted`.",
   },
 } as const satisfies Record<string, CatalogEntry>;
 
@@ -794,11 +815,22 @@ export type ShadcnComponent = keyof typeof shadcnComponents;
  * a screen. Optional, and without page chrome of their own.
  */
 export const graspComponents = {
+  "brand-header": {
+    status: "supported",
+    summary:
+      "The head of Grasp's sidebar: the app icon on its lime tile, with a title over a subtitle, as the way home.",
+    exports: ["BrandHeader"],
+  },
   "auto-height": {
     status: "supported",
     summary:
       "A box whose height eases to fit what is inside, and content that fades in, so a dialog glides between its steps.",
     exports: ["AutoHeight", "FadeIn"],
+  },
+  "grasp-mark": {
+    status: "supported",
+    summary: "The Grasp mark, in the colour of the text around it.",
+    exports: ["GraspMark"],
   },
   grid: {
     status: "supported",
@@ -842,6 +874,12 @@ export const graspComponents = {
       "PageHeaderDescription",
       "PageHeaderTitle",
     ],
+  },
+  "painted-field": {
+    status: "supported",
+    summary:
+      "One of the brand book's paintings with a grain and a pattern over it, behind the one or two things on a screen that matter most.",
+    exports: ["PaintedField"],
   },
   "prompt-input": {
     status: "supported",

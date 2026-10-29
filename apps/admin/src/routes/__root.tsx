@@ -6,6 +6,11 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+// Light or dark as the platform has it: the web's own script, the one
+// file for both, run in <head> before first paint so the admin never
+// flashes light. The admin has no choice of its own, so it follows the
+// system's colour scheme.
+import themeScript from "../../../web/public/theme.js?url";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
@@ -41,7 +46,7 @@ const Frame = () => {
 /** A page there isn't, in the admin's frame. */
 const NotFound = () => (
   <main className="flex flex-col gap-4 p-6">
-    <h1 className="text-2xl font-medium">Not found</h1>
+    <h1 className="type-title">Not found</h1>
     <p className="text-sm">There&apos;s no such page.</p>
     <Link className="text-sm underline underline-offset-4" to="/">
       Back to the admin
@@ -74,6 +79,7 @@ export const Route = createRootRoute({
       { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }],
+    scripts: [{ src: themeScript }],
   }),
   shellComponent: RootDocument,
   component: Frame,

@@ -230,7 +230,7 @@ export const AskChat = ({
     return (
       <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-          <h2 className="text-center text-2xl font-medium tracking-tight text-balance">
+          <h2 className="type-display text-center">
             Ask about every organization
           </h2>
           <div className="flex flex-col gap-3">

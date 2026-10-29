@@ -194,7 +194,7 @@ const WorkflowRow = ({
                 {workflow.workflow}
               </Link>
               {workflow.scheduleStopped ? (
-                <Badge variant="destructive">
+                <Badge variant="attention">
                   <Trans>Schedule stopped</Trans>
                 </Badge>
               ) : null}
@@ -372,7 +372,7 @@ const List = ({
 const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
   <div className="flex min-w-0 flex-col-reverse gap-0.5">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="text-2xl tabular-nums">{value ?? "–"}</dd>
+    <dd className="type-figure">{value ?? "–"}</dd>
   </div>
 );
 

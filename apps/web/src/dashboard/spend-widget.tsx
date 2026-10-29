@@ -62,7 +62,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   return (
     <>
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-2xl font-medium tabular-nums">{total}</span>
+        <span className="type-figure">{total}</span>
         <span className="text-muted-foreground text-xs">
           <Trans>for every model call this month</Trans>
         </span>
