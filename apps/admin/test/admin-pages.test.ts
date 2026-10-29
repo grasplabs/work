@@ -3,6 +3,7 @@ import { env, exports } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { orgSections, sectionTo, sectionWords } from "../src/admin/sections.ts";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
@@ -200,6 +201,21 @@ const integrationsOf = ({
   ),
   toCome: html.includes("This section isn’t in the admin yet."),
 });
+
+/** Each section as an organization not read shows it. */
+const unread = (state: string[]) =>
+  orgSections
+    .filter((each) => each !== "setup")
+    .map((section) => ({
+      section,
+      status: 200,
+      title: true,
+      column: true,
+      failed: false,
+      fromCore: false,
+      toSetup: true,
+      state,
+    }));
 
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token });
@@ -1198,70 +1214,66 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
+  it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
-
+    /** What a section of `client` says, on every section but its Setup. */
+    const sectionsOf = async (client: { clientId: string; name: string }) => {
+      const said = [];
+      for (const section of orgSections.filter((each) => each !== "setup")) {
+        const path = sectionTo[section].replace("$clientId", client.clientId);
+        // oxlint-disable-next-line no-await-in-loop -- pages render one at a time
+        const { status, html } = await page(path);
+        said.push({
+          section,
+          status,
+          title: html.includes(
+            `${section === "overview" ? client.name : sectionWords[section].title}</h1>`
+          ),
+          column:
+            columnOf(html, client.name).includes("Members") &&
+            columnOf(html, client.name).includes("Not read now"),
+          failed: html.includes("This couldn’t be shown"),
+          fromCore: ["Needs Grasp", "% known", "From the company"].some(
+            (text) => html.includes(text)
+          ),
+          toSetup: html.includes(
+            `href="/organizations/${client.clientId}/setup"`
+          ),
+          state: [
+            "isn’t set up yet",
+            "See its Setup progress",
+            "’s Grasp didn’t answer",
+            "Try again",
+          ].filter((text) => html.includes(text)),
+        });
+      }
+      return said;
+    };
+    const downSections = await sectionsOf(down);
+    const waitingSections = await sectionsOf(waiting);
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
     const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
-    const pageOf = (
-      { status, html }: { status: number; html: string },
-      name: string,
-      title = name
-    ) => ({
-      status,
-      title: html.includes(`${title}</h1>`),
-      column:
-        columnOf(html, name).includes("Members") &&
-        columnOf(html, name).includes("Not read now"),
-      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
-        html.includes(text)
-      ),
-      toSetup: html.includes(
-        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
-      ),
-    });
 
     expect({
-      down: pageOf(downPage, down.name),
+      downSections,
+      waitingSections,
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name, "Members"),
       membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
       // Its Setup is the admin's own record, read whatever its core does.
       setup: downSetup.html.includes("How it stands"),
-      waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
+      downSections: unread(["’s Grasp didn’t answer", "Try again"]),
+      waitingSections: unread(["isn’t set up yet", "See its Setup progress"]),
       downWhy: true,
-      downMembers: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       membersWhy: true,
       setup: true,
-      waiting: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       waitingWhy: true,
     });
   });
