@@ -1,3 +1,5 @@
+import { CloudflareApiError } from "../cloudflare/api.ts";
+
 /**
  * Why a deploy stopped, as its `client_deploys` row and audit event record
  * it: a fixed code, never a message or a response body (threat model R17).
@@ -46,8 +48,6 @@ export const deployErrorCodes = [
   "bucket_outside_eu",
   /** A D1 migration failed to apply. */
   "d1_migration_failed",
-  /** A newer deploy of the same client started: this one no longer runs. */
-  "deploy_superseded",
   /** Another runner took the client over while the deploy ran: a rollback. */
   "runner_replaced",
   /** The account's script ran a Durable Object migration the release doesn't have. */
@@ -84,8 +84,6 @@ export const deployErrorCodes = [
   "unknown_worker",
   /** The release's Workers bind each other as services in a cycle. */
   "service_binding_cycle",
-  /** The client's id can't be its hostname: not a lowercase DNS label, or reserved. */
-  "invalid_client_id",
   /** No free workers.dev subdomain was found for the account. */
   "subdomain_unavailable",
   /** Core's address isn't an `https://*.workers.dev` origin. */
@@ -98,12 +96,6 @@ export const deployErrorCodes = [
   "generation_behind",
   /** The router's map has an entry for the hostname the router can't read. */
   "router_entry_invalid",
-  /**
-   * The client is placed in a hosting destination (src/hosting/): its
-   * Workers and resources are its inventory's, which this account-per-
-   * client path doesn't deploy, so it never touches them.
-   */
-  "client_placed",
 ] as const;
 
 export type DeployErrorCode = (typeof deployErrorCodes)[number];
@@ -118,3 +110,18 @@ export class DeployError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * A failure as the admin records it: a code, never a message. A step's own
+ * failure has its `DeployError` code; the API's is `cloudflare_<status>`
+ * and its error codes; anything else is `unexpected`.
+ */
+export const errorCode = (error: unknown): string => {
+  if (error instanceof DeployError) {
+    return error.code;
+  }
+  if (error instanceof CloudflareApiError) {
+    return ["cloudflare", error.status, ...error.codes].join("_");
+  }
+  return "unexpected";
+};

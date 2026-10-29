@@ -205,18 +205,6 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
-  /**
-   * What the analytics API reports for it (`/graphql`): its Workers'
-   * requests and CPU time this month, its AI Gateway's spend, and its
-   * requests and errors over the last day. Unset, it reports nothing.
-   */
-  usage?: {
-    monthRequests: number;
-    monthCpuTimeUs: number;
-    monthAiCost: number;
-    dayRequests: number;
-    dayErrors: number;
-  };
 }
 
 /** A call the fake got. */

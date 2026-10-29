@@ -17,15 +17,10 @@
  * before, and a rollback going back no further (src/rollout/rollback.ts).
  */
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
-import {
-  clientDeploys,
-  clientProvisions,
-  clientWorkers,
-  releases,
-} from "../db/schema.ts";
+import { clientProvisions, clientWorkers, releases } from "../db/schema.ts";
 import { importedManifest } from "./release.ts";
 
 /** Why a client can't go to a release: a code, and our own words for it. */
@@ -191,11 +186,10 @@ export const currentReleases = async (
 
 /**
  * The release whose schemas client `clientId`'s databases are at, as its
- * records tell: the newest-built release a deploy may have run the
- * migrations of (one that finished a step before them), its Workers were
- * seen running, or its operation recorded before running them, whatever
- * it did after; never how the operation's last run ended. Null when none
- * did. Its databases may be at a newer schema than
+ * records tell: the newest-built release whose migrations may have run:
+ * one its Workers were seen running, or one its operation recorded before
+ * running them, whatever it did after; never how the operation's last
+ * run ended. Null when none did. Its databases may be at a newer schema than
  * the release its Workers run, after a rollback. Releases are built from
  * `main` in order, so a newer one ships every migration an older one
  * does, and its schemas run code from no older migration.
@@ -204,12 +198,6 @@ export const appliedSchema = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<ReleaseManifest | null> => {
-  const deployed = db
-    .select({ releaseId: clientDeploys.releaseId })
-    .from(clientDeploys)
-    .where(
-      and(eq(clientDeploys.clientId, clientId), isNotNull(clientDeploys.step))
-    );
   // What its Workers were seen running: their releases' migrations ran.
   const running = db
     .select({ releaseId: clientWorkers.releaseId })
@@ -226,13 +214,7 @@ export const appliedSchema = async (
   const [newest] = await db
     .select({ id: releases.id })
     .from(releases)
-    .where(
-      or(
-        inArray(releases.id, deployed),
-        inArray(releases.id, running),
-        inArray(releases.id, recorded)
-      )
-    )
+    .where(or(inArray(releases.id, running), inArray(releases.id, recorded)))
     .orderBy(desc(releases.builtAt))
     .limit(1);
   return newest === undefined ? null : await importedManifest(db, newest.id);

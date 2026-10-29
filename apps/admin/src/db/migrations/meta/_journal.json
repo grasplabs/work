@@ -239,6 +239,13 @@
       "when": 1793224292539,
       "tag": "0033_client_run_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1793244940873,
+      "tag": "0034_remove_account_per_client",
+      "breakpoints": true
     }
   ]
 }

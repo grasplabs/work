@@ -5,25 +5,21 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { formatDate } from "../src/admin/words.ts";
 import { attioLimits } from "../src/crm/attio.ts";
 import { setAttioCompanyFn } from "../src/crm/functions.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { attioValue, fakeAttio } from "./attio-fake.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn, page } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admin-crm-7d2e41";
-const tenantToken = "test-tenant-admin-token-admin-crm-a90c3f";
 /** Attio's read-only key; never a real one. */
 const attioKey = "attio-read-key-admin-crm-fake-4f1b8c2e";
 
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 const attio = fakeAttio(attioKey);
 
@@ -49,31 +45,14 @@ const eachTest = ({ withKey }: { withKey: boolean }): void => {
 
 /** An active client running a new release, whose core answers an empty snapshot. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): crm" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): crm");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot("Noordkade");
   return clientId;
 };
@@ -162,7 +141,7 @@ const daysAgo = (days: number): string =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
 describe("an organization's company in Attio, with Attio's key", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: true });
 
   it("shows a linked company, its people and its deals, read only", async () => {
@@ -478,7 +457,7 @@ describe("an organization's company in Attio, with Attio's key", () => {
 });
 
 describe("an organization's company in Attio, without Attio's key", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
   it("offers no deal to start an organization from, saying Attio isn't connected", async () => {

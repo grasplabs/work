@@ -27,8 +27,7 @@ import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-expiry-9e3b41";
-const tenantToken = "test-tenant-admin-token-expiry-1c7d58";
-mockCloudflareApi(token, tenantToken);
+mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
@@ -87,7 +86,6 @@ const aClient = async (expires?: string): Promise<string> => {
       db.insert(clients).values({
         id: clientId,
         name: clientId,
-        accountId: `account-${clientId}`,
         status: "active",
         createdAt: now,
         updatedAt: now,
@@ -125,7 +123,7 @@ const toldOf = (clientId: string): string[] =>
     .map((text) => text.split("\n")[1] ?? "");
 
 describe("a client's Teams bot secret expiring", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   mockDiscord();
   beforeEach(async () => {
     await setStoreSecret(
