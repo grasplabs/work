@@ -86,6 +86,7 @@ import {
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -346,6 +347,8 @@ export interface ProvisionContext {
      * stage's, no operation runs (`stage_unset`).
      */
     namespace?: string;
+    /** Relay mode for its core's sign-in (src/deploy/context.ts, `oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
@@ -1410,6 +1413,9 @@ const coreVarsOf = async (
     signIn: loaded.client.signIn,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
+    ...(context.router.oauthRelay === undefined
+      ? {}
+      : { oauthRelay: context.router.oauthRelay }),
   });
   return await configuredCoreVars(
     context.db,
