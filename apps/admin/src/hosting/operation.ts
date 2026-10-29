@@ -2668,9 +2668,10 @@ const recordFailure = async (
  * Records client `held.clientId`'s operation failed with `code` at its
  * first step, audited, when runner `held` stopped before it could run it:
  * what it works with couldn't be read (a secret missing from Secrets
- * Store, no client domain). Only while the runner still holds the client
- * and the operation is running: never over another runner's, nor over
- * what a run recorded. Staff then read why on its Setup, rather than an
+ * Store, no client domain). Only while that attempt of the runner
+ * (`held.attempt`, taken first) still holds the client and the operation
+ * is running: never over another runner's, nor a retry's that took the
+ * client over, nor what a run recorded. Staff then read why on its Setup, rather than an
  * operation left running by a run that's gone.
  */
 export const recordUnstarted = async (

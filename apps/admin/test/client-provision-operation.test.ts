@@ -49,6 +49,7 @@ import {
 } from "../src/hosting/offboarding.ts";
 import {
   ProvisionOperationError,
+  recordUnstarted,
   runClientProvision,
   sendsSettled,
   startClientProvision,
@@ -2693,6 +2694,42 @@ describe("provisioning a placed client", () => {
     await expect(operationOf(clientId)).resolves.toMatchObject({
       status: "done",
       error: null,
+    });
+  });
+
+  it("records a failure before the operation ran as that attempt alone: an old attempt's never lands over the retry that took the client over", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    const attemptKey = `${held.runId}-provision`;
+    const old = { ...held, attempt: 1, attemptKey };
+    const retry = { ...held, attempt: 2, attemptKey };
+    await takeAttempt(db, old);
+    // The old attempt timed out, and its retry took the client.
+    await takeAttempt(db, retry);
+    const code = "store_secret_missing: ROUTER_KEY";
+
+    await recordUnstarted(db, old, code);
+    const afterOld = await operationOf(clientId);
+    await recordUnstarted(db, retry, code);
+    const afterRetry = await operationOf(clientId);
+    const failed = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.fail")
+        )
+      );
+
+    expect({
+      afterOld: [afterOld?.status, afterOld?.error],
+      afterRetry: [afterRetry?.status, afterRetry?.error],
+      audited: failed.length,
+    }).toStrictEqual({
+      afterOld: ["running", null],
+      afterRetry: ["failed", code],
+      audited: 1,
     });
   });
 
