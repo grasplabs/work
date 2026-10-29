@@ -4647,6 +4647,44 @@ export const workflowCandidateRuns = sqliteTable(
 );
 
 /**
+ * Tests of a draft's checkpoint over recent real items (GRA-513,
+ * workflows/item-tests.ts): one row per item, the run whose input it took,
+ * and the test run that ran it, or why none did. A started item's row is
+ * written with its test run's, and none changes; swept with the test runs,
+ * after a week.
+ */
+export const workflowItemTests = sqliteTable(
+  "workflow_item_tests",
+  {
+    id: text().primaryKey(),
+    testId: text("test_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    principalId: text("principal_id").notNull(),
+    draftRevision: integer("draft_revision").notNull(),
+    /** Its place in the test: 0 for the newest run's item. */
+    position: integer().notNull(),
+    sourceRunId: text("source_run_id").notNull(),
+    /** Its test run (`workflow_candidate_runs`); null when none started. */
+    candidateRunId: text("candidate_run_id"),
+    /** Why its test run never started, as an error code. */
+    refusalCode: text("refusal_code"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_item_tests_position_idx").on(
+      table.testId,
+      table.position
+    ),
+    // The sweep of tests kept long enough.
+    index("workflow_item_tests_created_idx").on(table.createdAt),
+    // Whose test run of an item is (candidate-runs.ts, `readsItemRun`).
+    index("workflow_item_tests_candidate_idx").on(table.candidateRunId),
+  ]
+);
+
+/**
  * The application landscape's syncs (src/landscape.ts), one row per
  * landscape connection: the sync under way, or the last one. A sync reads
  * the connection's grants a page at a time, `cursor` the next page's,
