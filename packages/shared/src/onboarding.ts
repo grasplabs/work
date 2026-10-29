@@ -285,9 +285,9 @@ export interface OnboardingView {
    */
   waiting: number;
   /**
-   * Whether the deployment sends mail: false where nothing is bound to
-   * send it, as on hosting where mail isn't available yet, or where it has
-   * no sender. Links then go out by hand alone.
+   * Whether the deployment can send mail where it runs: false where
+   * nothing is bound to send it, as on hosting where mail isn't available
+   * yet. Links then go out by hand alone.
    */
   mailSends: boolean;
 }

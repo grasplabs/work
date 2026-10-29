@@ -144,6 +144,7 @@ describe("the mail outbox", () => {
       MAIL_FROM: env.MAIL_FROM,
     });
     let unbound: Awaited<ReturnType<typeof store.view>> | undefined;
+    let unsent: Awaited<ReturnType<typeof store.view>> | undefined;
     try {
       // As where mail isn't available yet: its admin is told so.
       unbound = await store.view();
@@ -151,6 +152,8 @@ describe("the mail outbox", () => {
       await store.deliverMail();
       await setStoreEnv(store, { MAIL_FROM: undefined });
       await captureMail(store);
+      // Bound, with no sender set: it sends where it runs, once set.
+      unsent = await store.view();
       await store.sendMail(note("note/no-from"));
       await store.deliverMail();
     } finally {
@@ -162,12 +165,14 @@ describe("the mail outbox", () => {
     expect({
       sends: bound.mailSends,
       unbound: unbound?.mailSends,
+      noSenderSet: unsent?.mailSends,
       noSender: noSender?.reason,
       noFrom: noFrom?.reason,
       log: log.map(({ what }) => what),
     }).toStrictEqual({
       sends: true,
       unbound: false,
+      noSenderSet: true,
       noSender: "mail.no_sender",
       noFrom: "mail.no_from",
       log: ["mail.note.failed.no_sender", "mail.note.failed.no_from"],
