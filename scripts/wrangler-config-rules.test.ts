@@ -92,6 +92,37 @@ describe("wrangler config rules", () => {
     });
   });
 
+  it("refuse wrangler's singular route, at the top level or in an env, as no deploy of ours reads it", () => {
+    expect({
+      top: wranglerConfigErrors(
+        file,
+        configWith({ route: "admin.ongrasp.app/*" })
+      ),
+      env: wranglerConfigErrors(
+        file,
+        configWith({
+          env: {
+            staging: {
+              route: { pattern: "x.ongrasp.app/*", zone_name: "ongrasp.app" },
+            },
+          },
+        })
+      ),
+      plural: wranglerConfigErrors(
+        file,
+        configWith({
+          routes: [{ pattern: "x.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        })
+      ),
+    }).toStrictEqual({
+      top: [`${file}: declare routes under "routes", not "route".`],
+      env: [
+        `${file} (env staging): declare routes under "routes", not "route".`,
+      ],
+      plural: [],
+    });
+  });
+
   it("refuse a TOML config", () => {
     expect(
       wranglerConfigErrors("apps/example/wrangler.toml", 'name = "example"')
@@ -220,10 +251,6 @@ describe("platform names", () => {
         gatewayFile,
         gateway({ routes: productionRoutes })
       ),
-      gatewaySingular: platformNameErrors(
-        gatewayFile,
-        gateway({ route: "gateway.ongrasp.app/*" })
-      ),
     }).toStrictEqual({
       unrouted: [
         `${routerFile} (env staging): routes is none, not *.staging.ongrasp.app/* zone ongrasp.app.`,
@@ -234,9 +261,6 @@ describe("platform names", () => {
       gatewayUnrouted: [],
       gatewayRouted: [
         `${gatewayFile}: routes is *.ongrasp.app/* zone ongrasp.app, not none.`,
-      ],
-      gatewaySingular: [
-        `${gatewayFile}: routes is gateway.ongrasp.app/*, not none.`,
       ],
     });
   });
