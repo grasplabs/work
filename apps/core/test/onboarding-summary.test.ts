@@ -141,6 +141,7 @@ const view = (more: Partial<OnboardingView> = {}): OnboardingView => ({
   sponsor: null,
   context: noContext,
   waiting: 0,
+  mailSends: true,
   ...more,
 });
 

@@ -165,7 +165,7 @@ import {
   queueMail,
 } from "../mail-outbox.ts";
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
-import { sendMail } from "../mail.ts";
+import { mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
 import {
   intakeIds,
@@ -965,6 +965,7 @@ export class Onboarding extends DurableObject<Env> {
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
+      mailSends: mailSends(this.env),
     };
   }
 
