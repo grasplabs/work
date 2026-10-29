@@ -698,6 +698,11 @@ export const apps = sqliteTable("apps", {
    */
   audienceType: text("audience_type", { enum: ["person", "team"] }),
   audienceId: text("audience_id"),
+  /**
+   * The business process it serves (@grasp-os/shared/business-processes),
+   * when a builder said; null otherwise. Grants nothing.
+   */
+  process: text(),
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
@@ -4672,6 +4677,24 @@ export const workflowItemTests = sqliteTable(
     // Whose test run of an item is (candidate-runs.ts, `readsItemRun`).
     index("workflow_item_tests_candidate_idx").on(table.candidateRunId),
   ]
+);
+
+/**
+ * The business process each workflow serves (GRA-511,
+ * workflow-resources.ts `setWorkflowProcess`), when a builder said: one
+ * row per workflow, replaced when it changes and deleted when cleared.
+ * Who set which is in the audit log. Grants nothing.
+ */
+export const workflowResourceProcesses = sqliteTable(
+  "workflow_resource_processes",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    process: text().notNull(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  }
 );
 
 /**
