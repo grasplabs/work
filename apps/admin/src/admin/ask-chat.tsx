@@ -39,7 +39,7 @@ const refusals: Readonly<Record<AskRefusal, string>> = {
   grasp_client_unset:
     "Ask Grasp isn’t set up: the admin doesn’t know which organization is Grasp’s own. Choose it under Grasp’s own organization on Platform.",
   grasp_client_unknown:
-    "Ask Grasp isn’t set up: the organization chosen as Grasp’s own is one the admin no longer has. Choose Grasp’s own organization again on Platform.",
+    "Ask Grasp isn’t set up: the organization chosen as Grasp’s own is gone or offboarded. Choose Grasp’s own organization again on Platform.",
   grasp_client_not_active:
     "Ask Grasp can’t ask yet: Grasp’s own organization isn’t live. Open its Setup and finish setting it up, or resume it there.",
   secret_missing:

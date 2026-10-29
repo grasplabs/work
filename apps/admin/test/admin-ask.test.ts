@@ -137,6 +137,21 @@ describe("Ask Grasp", () => {
     });
   });
 
+  it("says to choose Grasp's own organization again once the one chosen is offboarded", async () => {
+    const { clientId, account } = await liveClient();
+    const answer = await asGrasp(clientId, async () => {
+      await db
+        .update(clients)
+        .set({ status: "offboarded" })
+        .where(eq(clients.id, clientId));
+      return await ask(question);
+    });
+    expect({ answer, asked: account.asked.length }).toStrictEqual({
+      answer: cannotAsk("grasp_client_unknown"),
+      asked: 0,
+    });
+  });
+
   it("says Grasp's own organization isn't live, while it's still being set up", async () => {
     const { clientId, account } = await liveClient();
     await db

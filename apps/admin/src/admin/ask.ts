@@ -69,8 +69,9 @@ export const askInputSchema = z.object({
  * the page words it:
  * - `grasp_client_unset`: staff haven't chosen Grasp's own organization
  *   on Platform;
- * - `grasp_client_unknown`: the one chosen isn't one the admin has any more;
- * - `grasp_client_not_active`: it isn't live yet, or no longer;
+ * - `grasp_client_unknown`: the one chosen isn't one the admin has any
+ *   more, or it's offboarded: staff choose another;
+ * - `grasp_client_not_active`: it isn't live yet;
  * - `secret_missing`: a Secrets Store secret the question is signed with
  *   isn't there (`secret` names it);
  * - `no_client_domain`: no client domain is set, so it has no hostname;
@@ -153,7 +154,8 @@ const graspCore = async (
   }
   const grid = await clientGrid(env);
   const row = grid.find(({ id }) => id === clientId);
-  if (row === undefined) {
+  // Offboarded, it's never deployed again: as good as gone.
+  if (row === undefined || row.status === "offboarded") {
     return { notSetUp: "grasp_client_unknown" };
   }
   if (row.status !== "active") {
