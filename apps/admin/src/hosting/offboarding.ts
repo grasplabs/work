@@ -215,7 +215,7 @@ export const offboardPlacedClient = async (
       target: client.placement.destinationId,
       ...(ended === null ? {} : { detail: { replaces: ended } }),
     },
-    // No Workflow runs for it: Workflows has no such instance, so its
+    // No run starts for it: the engine has no such run, so its
     // claim reads as starting, and as gone should it never be given back.
     // Gone is `startingMs` after it's taken: an offboarding stalled longer
     // than that, between its last check of the claim and the route's

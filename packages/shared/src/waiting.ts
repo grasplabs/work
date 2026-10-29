@@ -110,7 +110,8 @@ export interface GoLiveItem extends ItemBase {
 
 /**
  * A version of an independent workflow a builder asked to go live, for
- * its owner or an admin to approve or send back; never for whoever asked.
+ * its owner or an admin to approve or send back; for whoever asked only
+ * while nobody else may (`selfApproval`).
  */
 export interface WorkflowGoLiveItem extends ItemBase {
   kind: "workflowGoLive";
@@ -120,6 +121,8 @@ export interface WorkflowGoLiveItem extends ItemBase {
   requestedBy: string;
   /** The lifecycle revision it was read at: a verdict names it. */
   revision: number;
+  /** The reader asked for it, and approves it themselves as nobody else may. */
+  selfApproval: boolean;
 }
 
 /** A workflow that failed while acting for the person, which they can ask the agent to fix. */

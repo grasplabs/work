@@ -1,7 +1,7 @@
 /**
  * How the admin changes anything: the change and its audit event in one
  * D1 batch, so neither lands without the other (threat model R19, CO6). A
- * change outside the database (a Workflow started) is recorded first, on
+ * change outside the database (a run started) is recorded first, on
  * its own (`audit`).
  */
 import { sql } from "drizzle-orm";
@@ -79,7 +79,7 @@ export const act = async (
 
 /**
  * Records `event` by `actor` on its own: for an action whose change isn't
- * in the admin's database, such as starting a Workflow. Recorded before
+ * in the admin's database, such as starting a run. Recorded before
  * the action, so an action that then fails is still an audited attempt.
  */
 export const audit = async (
