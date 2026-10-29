@@ -115,17 +115,23 @@ const timesSent = async (upload: Upload): Promise<number> => {
   ).length;
 };
 
-/** Runs `run` with `config` as the deployment's gateway config. */
+/**
+ * Runs `run` with `config` as the deployment's gateway config, and
+ * `transport` as its transport config.
+ */
 const withDeployment = async (
   config: unknown,
-  run: () => Promise<void>
+  run: () => Promise<void>,
+  transport?: unknown
 ): Promise<void> => {
-  const { MODEL_GATEWAY: gateway } = env;
+  const { MODEL_GATEWAY: gateway, MODEL_TRANSPORT: transported } = env;
   env.MODEL_GATEWAY = config;
+  env.MODEL_TRANSPORT = transport;
   try {
     await run();
   } finally {
     env.MODEL_GATEWAY = gateway;
+    env.MODEL_TRANSPORT = transported;
   }
 };
 
@@ -206,7 +212,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sent: [], status: "ready", extractor: "local" });
   });
 
-  it("keep every file of a deployment whose rules keep everything in the EU in the Worker", async () => {
+  it("keep every file of a deployment whose rules, or whose residency, keep everything in the EU in the Worker", async () => {
     const person = await signedInApi(idp, "user");
     const { id: collectionId } = await person.api.knowledge.createCollection({
       name: `Files ${unique()}`,
@@ -219,6 +225,14 @@ describe("upload routing", { timeout: 60_000 }, () => {
         await withDeployment(euOnly, async () => {
           uploads.push(await uploadedTo(person.api, collectionId));
         });
+        // An organization whose residency is the EU, whatever its rules.
+        await withDeployment(
+          { gateway: "grasp-os-test", models: [testModel] },
+          async () => {
+            uploads.push(await uploadedTo(person.api, collectionId));
+          },
+          { primary: { kind: "cloudflare-ai-gateway" }, residency: "eu" }
+        );
       }
     );
 
@@ -233,7 +247,10 @@ describe("upload routing", { timeout: 60_000 }, () => {
       ),
     }).toStrictEqual({
       sent: [],
-      uploads: [{ status: "ready", extractor: "local", sent: 0 }],
+      uploads: [
+        { status: "ready", extractor: "local", sent: 0 },
+        { status: "ready", extractor: "local", sent: 0 },
+      ],
     });
   });
 

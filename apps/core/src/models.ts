@@ -409,14 +409,22 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
 
 /**
  * Whether the deployment's config keeps every call in the EU
- * (`eu.deployment`): for what sends data out of the Worker without being a model call,
+ * (`eu.deployment`, or its transport's `residency`): for what sends data out of the Worker without being a model call,
  * such as Workers AI's document conversion (knowledge/extract.ts), which
  * then stays in the Worker. A config whose rules don't parse keeps it
  * there too: it fails closed. The default config has no EU rule.
  */
 export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
   const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
-  return !parsed.success || parsed.data.eu?.deployment === true;
+  // An organization whose residency is the EU (`MODEL_TRANSPORT`) too:
+  // Workers AI runs on Cloudflare's global network. A transport setting
+  // that doesn't parse keeps it there as well.
+  const transport = transportConfigOf(env);
+  return (
+    !parsed.success ||
+    parsed.data.eu?.deployment === true ||
+    transport?.residency !== "global"
+  );
 };
 
 /** What a call is for, such as `workflow.step` or `chat.turn`. */
