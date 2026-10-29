@@ -732,6 +732,13 @@ export const apps = sqliteTable(
      * App only while it is published.
      */
     link: text(),
+    /**
+     * When it was removed (app-removal.ts), and by whom: a removed App is a
+     * tombstone, kept so what names it stays history, and answers nothing.
+     * Null while it is an App.
+     */
+    removedAt: timestamp("removed_at"),
+    removedBy: text("removed_by"),
   },
   (table) => [uniqueIndex("apps_link").on(table.link)]
 );
