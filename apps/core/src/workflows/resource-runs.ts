@@ -1660,6 +1660,70 @@ export const stopRunsStartedBy = async (
 };
 
 /**
+ * Stops the unfinished runs of independent workflows that ran for
+ * `personId` (their principal), as an admin erased them (core's
+ * person-erasure.ts): each as a builder's stop is, audited under `actor`,
+ * claimed first so no pass asks it twice. A stop that fails is logged and
+ * left to the next pass. Answers how many it asked to stop, and how many
+ * unfinished runs of theirs a stop is still due for: never asked, or
+ * claimed so long ago that the stop may never have been sent (`stopDue`).
+ */
+export const stopRunsFor = async (
+  env: Env,
+  actor: AuditActor,
+  personId: string
+): Promise<{ asked: number; unasked: number }> => {
+  const db = drizzle(env.DB);
+  const ofTheirs = and(
+    eq(workflowResourceRuns.principalId, personId),
+    inArray(workflowResourceRuns.status, unended)
+  );
+  const rows = await db
+    .select()
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, stopDue()))
+    .orderBy(asc(workflowResourceRuns.createdAt), asc(workflowResourceRuns.id));
+  let asked = 0;
+  for (const run of rows) {
+    const claimedAt = new Date();
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    const [claimed] = await db
+      .update(workflowResourceRuns)
+      .set({ stopRequestedAt: claimedAt })
+      .where(and(eq(workflowResourceRuns.id, run.id), stopDue()))
+      .returning({ id: workflowResourceRuns.id });
+    if (claimed === undefined) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await stopResourceRun(env, actor, run);
+      asked += 1;
+    } catch (error) {
+      log.error("workflow.erasure_stop_failed", {
+        runId: run.id,
+        ...errorFields(error),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await db
+        .update(workflowResourceRuns)
+        .set({ stopRequestedAt: null })
+        .where(
+          and(
+            eq(workflowResourceRuns.id, run.id),
+            eq(workflowResourceRuns.stopRequestedAt, claimedAt)
+          )
+        );
+    }
+  }
+  const [left] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(workflowResourceRuns)
+    .where(and(ofTheirs, stopDue()));
+  return { asked, unasked: left?.count ?? 0 };
+};
+
+/**
  * Whether an independent run App `app` started still has a stop claimed
  * for it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
  * whose sender died between the claim and the send. A restore waits for

@@ -704,6 +704,45 @@ export const cancelRunsOf = async (
 };
 
 /**
+ * Cancels the unfinished runs of App workflows `personId` started, for
+ * `by`, the admin who erased them (core's person-erasure.ts): each as a
+ * builder's cancel is, audited. A run asked to cancel already is the
+ * engine's to end. Answers how many unfinished runs of theirs no cancel
+ * was asked for yet.
+ */
+export const cancelRunsStartedBy = async (
+  env: Env,
+  by: Requester,
+  personId: string
+): Promise<{ unasked: number }> => {
+  const ofTheirs = and(
+    eq(workflowRuns.startedBy, personId),
+    inArray(workflowRuns.status, unended)
+  );
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(workflowRuns)
+    .where(and(ofTheirs, isNull(workflowRuns.cancelRequestedAt)))
+    .orderBy(asc(workflowRuns.createdAt), asc(workflowRuns.id));
+  for (const row of rows) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await control(env, by, row, "cancel");
+    } catch (error) {
+      log.error("workflow.erasure_cancel_failed", {
+        runId: row.id,
+        ...errorFields(error),
+      });
+    }
+  }
+  const [left] = await drizzle(env.DB)
+    .select({ count: sql<number>`count(*)` })
+    .from(workflowRuns)
+    .where(and(ofTheirs, isNull(workflowRuns.cancelRequestedAt)));
+  return { unasked: left?.count ?? 0 };
+};
+
+/**
  * Cancels, a few at a time, the unfinished runs of Apps that are archived:
  * those archiving left (more than one call cancels, or a cancel that
  * failed), and a run whose start raced the archive. Each is cancelled for
