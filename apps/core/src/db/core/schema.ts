@@ -287,7 +287,7 @@ export const personErasureAreas = sqliteTable(
       .notNull()
       .references(() => personErasures.userId),
     area: text().notNull(),
-    state: text({ enum: ["pending", "complete"] }).notNull(),
+    state: text({ enum: ["pending", "complete", "skipped"] }).notNull(),
     attempts: integer().notNull().default(0),
     updatedAt: timestamp("updated_at").notNull(),
   },
