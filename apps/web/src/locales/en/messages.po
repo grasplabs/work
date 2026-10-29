@@ -6030,6 +6030,10 @@ msgstr "Gaps"
 msgid "Gave consent for a connection"
 msgstr "Gave consent for a connection"
 
+#: src/activity/audit-words.ts
+msgid "Gave up revoking a disconnected account's access at its provider"
+msgstr "Gave up revoking a disconnected account's access at its provider"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Gets its links once the team is told"
@@ -7307,6 +7311,10 @@ msgstr "Keeps failing"
 msgctxt "a proposed rule an admin kept"
 msgid "Kept"
 msgstr "Kept"
+
+#: src/activity/audit-words.ts
+msgid "Kept access at the provider for an account connected again"
+msgstr "Kept access at the provider for an account connected again"
 
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
@@ -11223,6 +11231,10 @@ msgstr "Revoke the packages for {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Revoke the packages for {domain}?"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a disconnected account's access at its provider"
+msgstr "Revoked a disconnected account's access at its provider"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
