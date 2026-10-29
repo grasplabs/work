@@ -182,12 +182,17 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
       await step.do(
         "deploy",
         workerflowDeployStep,
-        guarded(async ({ attempt }) => {
+        guarded(async ({ attempt, idempotencyKey }) => {
           // As the client's runner, this attempt of it alone: a try that
           // timed out goes on beside its retry, and once the retry takes
           // the client every check and write of the older one is refused
           // (`takeAttempt`). It stops too if another runner takes it.
-          const held = { clientId, runId: event.instanceId, attempt };
+          const held = {
+            clientId,
+            runId: event.instanceId,
+            attempt,
+            attemptKey: idempotencyKey,
+          };
           try {
             const context = await deployContext(env);
             // An earlier try finished the operation, and gave the client

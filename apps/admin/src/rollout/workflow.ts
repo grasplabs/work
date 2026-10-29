@@ -1,11 +1,11 @@
 /**
- * Rolling a release out to clients, as a Cloudflare Workflow: one
- * instance per rollout, its id the rollout's. It reaches its first ring
+ * Rolling a release out to clients, as a run on Workerflow
+ * (src/workflow-runs.ts): one per rollout, its id the rollout's. It reaches its first ring
  * (ring 0, Grasp's own deployments) first, then waits for one staff
  * member's approval (src/rollout/control.ts) and rolls out to the fleet,
  * every ring after in turn, with no approval between them (spec 40.1).
  * It deploys its first ring's clients itself, one at a time. Each fleet
- * client is deployed by a child instance of its own (`RolloutClient`,
+ * client is deployed by a run of its own (`rolloutClientRun`,
  * src/rollout/fleet-client.ts), at most `fleetConcurrency` at once, ring
  * by ring: "all clients" is one approved operation, not a burst of API
  * requests, and the run's steps grow by a few per fleet client rather
@@ -66,9 +66,12 @@
  * on: nothing rolls back on its own.
  */
 import { log } from "@grasp-os/shared/log";
-import { WorkflowEntrypoint } from "cloudflare:workers";
-import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
+import type {
+  WorkflowDefinition,
+  WorkflowStep,
+} from "@grasp-os/workerflow/contracts";
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { sendStaffAlert } from "../alerts.ts";
@@ -98,14 +101,16 @@ import {
   instanceStatus,
   releaseRun,
   stillHolds,
+  takeAttempt,
 } from "../runners.ts";
+import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import {
-  deployStepConfig,
   guarded,
   isEngineAbort,
   quickStep,
   stop,
   stopReason,
+  workerflowDeployStep,
 } from "../workflow-steps.ts";
 import { ClientEndedError } from "./client-ended.ts";
 import {
@@ -118,7 +123,7 @@ import {
 } from "./targets.ts";
 import type { TargetClient } from "./targets.ts";
 
-/** What a rollout's run is started with: identifiers only, since Workflows stores them. */
+/** What a rollout's run is started with: identifiers only, since its journal keeps them. */
 export interface RolloutParams {
   rolloutId: string;
   /**
@@ -130,6 +135,13 @@ export interface RolloutParams {
   startedBy: Staff;
 }
 
+/** `RolloutParams`, as a run reads its payload back. */
+export const rolloutParamsSchema = z.object({
+  rolloutId: z.string(),
+  releaseId: z.string().nullable(),
+  startedBy: z.object({ email: z.string(), sub: z.string() }),
+});
+
 /** The event staff send to retry a rollout's failed fleet clients, as round `round`. */
 export const retryEvent = (round: number): string => `retry-${round}`;
 
@@ -137,11 +149,12 @@ export const retryEvent = (round: number): string => `retry-${round}`;
 export const approvalEvent = (ring: number): string => `approve-ring-${ring}`;
 
 /**
- * The most steps a rollout's run may be expected to take: under
- * Workflows' default limit of 1,024 steps per instance, with room to
- * spare. A rollout over it is refused when it starts
- * (src/rollout/control.ts). A fleet client's deploy takes steps of its
- * child's, not of the rollout's run (`RolloutClient`).
+ * The most steps a rollout's run may be expected to take. Workerflow sets
+ * no limit of its own, but a run's journal and every activation's replay
+ * grow with its steps: a synthetic run of 1,000 steps on the admin's host
+ * takes seconds (test/workflow-budget.test.ts). A rollout over it is
+ * refused when it starts (src/rollout/control.ts). A fleet client's deploy
+ * takes steps of its own run, not of the rollout's (`rolloutClientRun`).
  */
 export const stepBudget = 900;
 
@@ -693,6 +706,82 @@ const claimTarget = async (
 };
 
 /**
+ * Whether rollout `rolloutId` finished client `clientId`'s operation
+ * already, its change (`change`) or the rollback of it after a failed
+ * probe: an earlier try completed it, giving the claim back as an
+ * operation does, and its result was lost before the engine kept it.
+ */
+const finishedBy = async (
+  db: AdminDatabase,
+  rolloutId: string,
+  clientId: string,
+  change: number | null | undefined
+): Promise<boolean> => {
+  const operation = await db
+    .select({
+      status: clientProvisions.status,
+      runId: clientProvisions.runId,
+      change: clientProvisions.change,
+    })
+    .from(clientProvisions)
+    .where(eq(clientProvisions.clientId, clientId))
+    .get();
+  return (
+    operation?.status === "done" &&
+    operation.runId === rolloutId &&
+    change !== null &&
+    change !== undefined &&
+    operation.change >= change
+  );
+};
+
+/**
+ * Runs client `clientId`'s operation as rollout `params.rolloutId`, this
+ * attempt of it alone: a try that timed out goes on beside its retry, and
+ * once the retry takes the client every check and write of the older one
+ * is refused (`takeAttempt`).
+ */
+const operateAs = async (
+  env: Env,
+  params: RolloutParams,
+  clientId: string,
+  {
+    attempt,
+    attemptKey,
+    rollBackOnProbe,
+  }: { attempt: number; attemptKey: string; rollBackOnProbe: boolean }
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const held = { clientId, runId: params.rolloutId, attempt, attemptKey };
+  if (!(await takeAttempt(db, held))) {
+    throw stop(
+      "runner_replaced",
+      `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+    );
+  }
+  try {
+    await runClientProvision(
+      {
+        ...(await deployContext(env)),
+        alert: async (alert) => {
+          await sendStaffAlert(env, alert);
+        },
+      },
+      held,
+      { rollBackOnProbe }
+    );
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError ||
+      error instanceof InventoryError
+    ) {
+      throw stop(error.code, error.message);
+    }
+    throw error;
+  }
+};
+
+/**
  * Runs client `clientId`'s operation as rollout `rolloutId`, its runner:
  * the operation stops (`runner_replaced`) as soon as the rollout no longer
  * holds the client, and writes nothing to its record after. Its own
@@ -708,7 +797,8 @@ const claimTarget = async (
 const runOperation = async (
   env: Env,
   params: RolloutParams,
-  clientId: string
+  clientId: string,
+  { attempt, attemptKey }: { attempt: number; attemptKey: string }
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   const target = await db
@@ -721,25 +811,12 @@ const runOperation = async (
     .get();
   const ran = parsePrevious(target?.previous ?? null)?.release ?? null;
   const toAnother = params.releaseId !== null && ran !== params.releaseId;
-  try {
-    await runClientProvision(
-      {
-        ...(await deployContext(env)),
-        alert: async (alert) => {
-          await sendStaffAlert(env, alert);
-        },
-      },
-      { clientId, runId: params.rolloutId },
-      { rollBackOnProbe: toAnother }
-    );
-  } catch (error) {
-    if (
-      error instanceof ProvisionOperationError ||
-      error instanceof InventoryError
-    ) {
-      throw stop(error.code, error.message);
-    }
-    throw error;
+  if (!(await finishedBy(db, params.rolloutId, clientId, target?.change))) {
+    await operateAs(env, params, clientId, {
+      attempt,
+      attemptKey,
+      rollBackOnProbe: toAnother,
+    });
   }
   const operation = await db
     .select({
@@ -799,18 +876,23 @@ const clientStep = async <T>(
   db: AdminDatabase,
   { rolloutId, clientId }: { rolloutId: string; clientId: string },
   name: string,
-  config: typeof quickStep | typeof deployStepConfig,
-  work: () => Promise<T>
+  config: typeof quickStep | typeof workerflowDeployStep,
+  work: (attempted: { attempt: number; attemptKey: string }) => Promise<T>
 ): Promise<T> => {
   const done = await step.do(
     name,
     config,
-    guarded(async (): Promise<ClientStepResult<T>> => {
-      if (await endIfCancelled(db, rolloutId, clientId)) {
-        return { ended: true };
+    guarded(
+      async ({ attempt, idempotencyKey }): Promise<ClientStepResult<T>> => {
+        if (await endIfCancelled(db, rolloutId, clientId)) {
+          return { ended: true };
+        }
+        return {
+          ended: false,
+          result: await work({ attempt, attemptKey: idempotencyKey }),
+        };
       }
-      return { ended: false, result: await work() };
-    })
+    )
   );
   if (done.ended) {
     throw new ClientEndedError(`${rolloutId} ended ${clientId}: cancelled`);
@@ -840,10 +922,10 @@ const deployClaimed = async (
     db,
     client,
     `${label} run`,
-    deployStepConfig,
-    async () => {
+    workerflowDeployStep,
+    async (attempted) => {
       await markStarted(db, rolloutId, clientId);
-      await runOperation(env, params, clientId);
+      await runOperation(env, params, clientId, attempted);
     }
   );
   await clientStep(step, db, client, `${label} done`, quickStep, async () => {
@@ -1097,7 +1179,7 @@ export interface RolloutClientParams extends RolloutParams {
  * `round`: the same each time, so a check that runs again (the run
  * restarted, or the step retried) finds the child it started rather than
  * starting a second for the same client. A rollout id (36), a client id
- * (at most 50) and a round fit Workflows' 100 characters.
+ * (at most 50) and a round fit in a run's id.
  */
 export const clientRunId = (
   rolloutId: string,
@@ -1105,7 +1187,7 @@ export const clientRunId = (
   round: number
 ): string => `${rolloutId}-${clientId}-${round}`;
 
-/** Whether `error` is Workflows saying an instance of that id exists already. */
+/** Whether `error` is the engine saying a run of that id exists already. */
 const isExistingInstance = (error: unknown): boolean =>
   error instanceof Error && error.message.includes("already_exists");
 
@@ -1121,7 +1203,10 @@ const startClientRun = async (
 ): Promise<void> => {
   const childParams: RolloutClientParams = { ...params, clientId, round };
   try {
-    await env.ROLLOUT_CLIENT.create({
+    await adminWorkflow<RolloutClientParams>(
+      env,
+      adminWorkflows.rolloutClient
+    ).create({
       id: clientRunId(params.rolloutId, clientId, round),
       params: childParams,
     });
@@ -1184,7 +1269,7 @@ const advanceFleet = async (
   for (const [index, clientId] of unended.entries()) {
     // oxlint-disable-next-line no-await-in-loop -- in order, to the first not started
     const { status } = await instanceStatus(
-      env.ROLLOUT_CLIENT,
+      adminWorkflow(env, adminWorkflows.rolloutClient),
       clientRunId(rolloutId, clientId, round),
       neverStarting
     );
@@ -1224,7 +1309,7 @@ const advanceFleet = async (
 
 /**
  * Deploys fleet clients `clientIds` in `round`, each by a child of its own
- * (`RolloutClient`), at most `fleetConcurrency` at once, as steps named
+ * (`rolloutClientRun`), at most `fleetConcurrency` at once, as steps named
  * after `stage`: a check (`advanceFleet`), then a wait for a child's end,
  * again until every child has ended. Returns whether the rollout goes on:
  * not once it's cancelled, and then only after every child it started
@@ -1414,17 +1499,20 @@ export interface RolloutResult {
   rings: number;
 }
 
-export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
-  override async run(
-    event: WorkflowEvent<RolloutParams>,
-    step: WorkflowStep
-  ): Promise<RolloutResult> {
-    const { payload: params } = event;
+/**
+ * Rolling a release (or secrets) out, as a run on Workerflow
+ * (src/workflow-runs.ts): the first ring client by client, one staff
+ * approval, then the fleet ring by ring, each client in a run of its own
+ * (`rolloutClientRun`, src/rollout/fleet-client.ts).
+ */
+export const rolloutRun = (env: Env): WorkflowDefinition => ({
+  run: async (event, step): Promise<RolloutResult> => {
+    const params: RolloutParams = rolloutParamsSchema.parse(event.payload);
     const { rolloutId } = params;
-    const db = adminDatabase(this.env.DB);
+    const db = adminDatabase(env.DB);
     // The first ring's client being deployed, so a rollout that stops on
     // it, whatever stops it, records which. A fleet client's child records
-    // its own (`RolloutClient`).
+    // its own (`rolloutClientRun`).
     let current: string | null = null;
     try {
       const rings = await step.do(
@@ -1439,7 +1527,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
       for (const clientId of internal?.clientIds ?? []) {
         current = clientId;
         // oxlint-disable-next-line no-await-in-loop -- one client at a time
-        const goOn = await deployClient(this.env, step, params, clientId);
+        const goOn = await deployClient(env, step, params, clientId);
         current = null;
         if (!goOn) {
           return result;
@@ -1473,7 +1561,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
           );
         }
         // oxlint-disable-next-line no-await-in-loop -- ring by ring
-        const goOn = await deployFleet(this.env, step, params, clientIds, {
+        const goOn = await deployFleet(env, step, params, clientIds, {
           stage: `ring ${ring} fleet`,
           round: 0,
         });
@@ -1494,7 +1582,7 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
           break;
         }
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const goOn = await deployFleet(this.env, step, params, retried, {
+        const goOn = await deployFleet(env, step, params, retried, {
           stage: `retry ${round} fleet`,
           round,
         });
@@ -1523,5 +1611,5 @@ export class Rollout extends WorkflowEntrypoint<Env, RolloutParams> {
       });
       throw error;
     }
-  }
-}
+  },
+});
