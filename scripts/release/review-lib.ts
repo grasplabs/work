@@ -21,9 +21,10 @@
  *   changes requested.
  * - CODEOWNERS is read as it was before the merge (the merge commit's
  *   first parent): a pull request that edits CODEOWNERS can't name its own
- *   owners. Only its catch-all rule (`*`) is resolved: one with any other
- *   rule is refused rather than matched by hand, since a path rule could
- *   name other owners for the files a raise touches.
+ *   owners. Only its catch-all rules (`*`) are resolved, the last of them
+ *   naming the owners as GitHub reads it: one with any other rule is
+ *   refused rather than matched by hand, since a path rule could name
+ *   other owners for the files a raise touches.
  */
 import { z } from "zod";
 
@@ -36,12 +37,17 @@ export interface SecurityReview {
 const loginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u);
 
 /**
- * The owners CODEOWNERS (`text`) names for every file, by GitHub login.
- * Throws for a file with a rule other than `*`, or teams or addresses as
- * owners: they aren't resolved here.
+ * The owners CODEOWNERS (`text`) names for every file, by GitHub login: as
+ * GitHub reads it, the last rule that matches a file names its owners
+ * alone, so of several `*` rules only the last one counts, and an owner
+ * an earlier `*` line named is no owner. Throws for a file with a rule
+ * other than `*`, for teams or addresses as the owners, and when the last
+ * rule names none (GitHub reads that as no owner): they aren't resolved
+ * here. No CODEOWNERS parser is among the repo's dependencies, and with
+ * `*` rules alone GitHub's rule is only this.
  */
 export const catchAllOwners = (text: string): string[] => {
-  const owners: string[] = [];
+  let owners: string[] | undefined;
   for (const line of text.split("\n")) {
     const rule = line.replace(/#.*$/u, "").trim();
     if (rule === "") {
@@ -53,20 +59,21 @@ export const catchAllOwners = (text: string): string[] => {
         `CODEOWNERS has a rule for ${pattern ?? "nothing"}: only \`*\` is resolved for limit evidence`
       );
     }
-    for (const owner of named) {
-      const login = /^@(?<login>[^/]+)$/u.exec(owner)?.groups?.login;
-      if (login === undefined || !loginSchema.safeParse(login).success) {
-        throw new Error(
-          `CODEOWNERS names ${owner}: only users are resolved for limit evidence`
-        );
-      }
-      owners.push(login.toLowerCase());
-    }
+    // A later `*` rule replaces this one's owners, never adds to them.
+    owners = named;
   }
-  if (owners.length === 0) {
+  if (owners === undefined || owners.length === 0) {
     throw new Error("CODEOWNERS names no owner");
   }
-  return owners;
+  return owners.map((owner) => {
+    const login = /^@(?<login>[^/]+)$/u.exec(owner)?.groups?.login;
+    if (login === undefined || !loginSchema.safeParse(login).success) {
+      throw new Error(
+        `CODEOWNERS names ${owner}: only users are resolved for limit evidence`
+      );
+    }
+    return login.toLowerCase();
+  });
 };
 
 const pullSchema = z.object({

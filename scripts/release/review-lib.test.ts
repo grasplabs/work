@@ -118,6 +118,34 @@ describe("the security review of a release's change", () => {
     );
     expect(() => catchAllOwners("# none\n")).toThrow(/names no owner/u);
   });
+
+  it("takes the last catch-all rule's owners alone, as GitHub does, so a former owner can't approve", () => {
+    const current = catchAllOwners("* @former\n* @current\n");
+    const merged = mergedAs([pull()], commit);
+    const approvedBy = (login: string): string => {
+      try {
+        return ownerApproval(
+          merged,
+          [review(login, "APPROVED", "2026-10-27T09:00:00Z")],
+          current
+        ).approvedBy;
+      } catch {
+        return "refused";
+      }
+    };
+
+    expect({
+      owners: current,
+      former: approvedBy("former"),
+      current: approvedBy("current"),
+    }).toStrictEqual({
+      owners: ["current"],
+      former: "refused",
+      current: "current",
+    });
+    // A last rule naming no one leaves every file without an owner.
+    expect(() => catchAllOwners("* @current\n*\n")).toThrow(/names no owner/u);
+  });
 });
 
 /** Main between two releases, as GitHub would answer for it. */
