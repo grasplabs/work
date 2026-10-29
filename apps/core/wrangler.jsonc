@@ -1,5 +1,6 @@
-// grasp-os-staging deployment. Client deployments are provisioned by the admin,
-// which creates the D1 databases and R2 buckets below in the EU jurisdiction;
+// Released, never deployed from here: CI builds it into every release, and
+// the admin deploys each client's core from it, creating the D1 databases
+// and R2 buckets below in the EU jurisdiction;
 // Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
 // workflow runs included: each is a Durable Object of its own.
 {
@@ -96,9 +97,8 @@
   //
   // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
   // `cloudflare` makes Code Mode's run record claim the CPU limit as
-  // enforced. Not a var here, which local dev and tests read too: staging's
-  // deploy script passes it (package.json), and the admin sets it on every
-  // client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
+  // enforced. Not a var here, which local dev and tests read too: the admin
+  // sets it on every client deploy (apps/admin/src/deploy/core-config.ts). Plain workerd
   // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
   //
   // Local dev reads none of these from .dev.vars (Wrangler loads only the

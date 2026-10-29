@@ -718,6 +718,64 @@ const FailedItem = ({
   );
 };
 
+/**
+ * A version of a workflow asked to go live: approved or sent back here,
+ * through the workflow's lifecycle, which checks again that the person
+ * may and that it is still the version waiting.
+ */
+const WorkflowGoLiveDetail = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "workflowGoLive" }>;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { item } = source;
+  const { busy, failure, run } = useCoreAction();
+  const who = frame.item.context;
+  const { version } = item;
+  // Read again once it is decided. A refused decision stays, with why.
+  const decide = async (
+    verdict: "approve" | "reject",
+    said: string
+  ): Promise<void> => {
+    await run(async (session) => {
+      await session.workflowResources.lifecycle.decideGoLive(item.workflow.id, {
+        version,
+        verdict,
+        revision: item.revision,
+      });
+      frame.onSaid(said);
+      await router.invalidate({ sync: true });
+    });
+  };
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`Approve`,
+          name: t`Let version ${version} of ${who} go live`,
+          onPress: async () => {
+            await decide("approve", t`Live: ${who}, version ${version}.`);
+          },
+        },
+        {
+          label: t`Send back`,
+          name: t`Send version ${version} of ${who} back`,
+          onPress: async () => {
+            await decide("reject", t`Sent back: ${who}, version ${version}.`);
+          },
+        },
+      ]}
+      busy={busy}
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
@@ -755,6 +813,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "failed") {
     return <FailedItem frame={frame} source={source} />;
+  }
+  if (source.type === "workflowGoLive") {
+    return <WorkflowGoLiveDetail frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };

@@ -231,7 +231,7 @@ const turnOf = async (
           firstMs,
           answerMs: performance.now() - started,
           cost: answer.usage?.cost ?? 0,
-          ...(answer.error === undefined ? {} : { reason: answer.error }),
+          ...(answer.failure === undefined ? {} : { reason: answer.failure }),
         });
       } else if (update.stopped !== null && !update.running) {
         done.resolve({

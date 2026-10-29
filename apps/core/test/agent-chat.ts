@@ -178,19 +178,43 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
 
 /**
  * Sets `vars` in the object's env, as `pointAtGateway` points its gateway:
- * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say.
+ * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say. The env is the
+ * test Worker's own, shared by every object of the file, so the test puts
+ * back what was there with the restore this returns (in a `finally`), or
+ * the tests after it run under its values.
  */
 export const setObjectEnv = async (
   stub: WorkspaceStub,
   vars: Record<string, string>
-) => {
-  await runInDurableObject(stub, (instance) => {
+): Promise<() => Promise<void>> => {
+  const before = await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
     if (typeof objectEnv !== "object" || objectEnv === null) {
       throw new TypeError("The Workspace object has no env");
     }
+    const kept: Record<string, { value: unknown } | undefined> = {};
+    for (const key of Object.keys(vars)) {
+      const value: unknown = Reflect.get(objectEnv, key);
+      kept[key] = Object.hasOwn(objectEnv, key) ? { value } : undefined;
+    }
     Object.assign(objectEnv, vars);
+    return kept;
   });
+  return async () => {
+    await runInDurableObject(stub, (instance) => {
+      const objectEnv: unknown = Reflect.get(instance, "env");
+      if (typeof objectEnv !== "object" || objectEnv === null) {
+        throw new TypeError("The Workspace object has no env");
+      }
+      for (const [key, was] of Object.entries(before)) {
+        if (was === undefined) {
+          Reflect.deleteProperty(objectEnv, key);
+        } else {
+          Reflect.set(objectEnv, key, was.value);
+        }
+      }
+    });
+  };
 };
 
 /** What a test's own code run records of its module. */

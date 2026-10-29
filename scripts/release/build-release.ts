@@ -144,7 +144,7 @@ const buildWorker = async (
     path.relative(ROOT, configFile),
     parseJsonc(readFileSync(configFile, "utf-8"))
   );
-  // Each app's own build step, as its deploy script runs it.
+  // Each app's own build step.
   runVisibly("vp", ["run", "build"], dir);
   const outDir = path.join(bundleDir, app);
   runVisibly("wrangler", ["deploy", "--dry-run", "--outdir", outDir], dir);

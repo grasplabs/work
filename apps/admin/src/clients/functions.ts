@@ -66,7 +66,7 @@ export const fetchClientGrid = createServerFn({ method: "GET" }).handler(
  * unless anything in them is unknown.
  */
 export const fetchGridLive = createServerFn({ method: "GET" }).handler(
-  async () => await gridLive(env, new Date())
+  async () => await gridLive(env)
 );
 
 /**
@@ -76,12 +76,7 @@ export const fetchGridLive = createServerFn({ method: "GET" }).handler(
 export const fetchClientLive = createServerFn({ method: "GET" })
   .validator(clientSchema)
   .handler(async ({ data }): Promise<LiveStatus | null> => {
-    const live = await gridLive(
-      env,
-      new Date(),
-      defaultLiveOptions,
-      data.clientId
-    );
+    const live = await gridLive(env, defaultLiveOptions, data.clientId);
     return live[data.clientId] ?? null;
   });
 

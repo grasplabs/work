@@ -4,7 +4,11 @@ import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
-import type { GoLiveItem, SignInAgainItem } from "@grasp-os/shared/waiting";
+import type {
+  GoLiveItem,
+  SignInAgainItem,
+  WorkflowGoLiveItem,
+} from "@grasp-os/shared/waiting";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
@@ -62,6 +66,8 @@ export interface Waiting {
   screens: Loaded<ScreensWaiting[]> | undefined;
   /** Decisions of workflows' runs that wait for the person's answer. */
   decisions: Loaded<DecisionView[]>;
+  /** Versions of workflows asked to go live that the person may approve or send back. */
+  workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */

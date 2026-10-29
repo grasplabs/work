@@ -6,16 +6,13 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { kickoffFn } from "../src/clients/kickoff-functions.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // The kickoff brought in from an organization's Steps (GRA-1099,
@@ -28,9 +25,8 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // signature's attacks).
 
 const token = "test-deployer-token-admin-kickoff-5a1e3c";
-const tenantToken = "test-tenant-admin-token-admin-kickoff-9c27d4";
 
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 mockAccess();
 
 const db = adminDatabase(env.DB);
@@ -38,31 +34,14 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** An active client running a new release, as a deploy made it live. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(core): kickoff" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(core): kickoff");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
   const name = `Noordkade ${clientId}`;
-  const account = cloudflare.addAccount(name);
-  const now = new Date();
-  await act(
-    db,
-    staff,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, clientId, release.id)
-  );
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name,
+    signIn: null,
+  });
   account.admin = emptyAdminSnapshot("Noordkade");
   return { clientId, account };
 };
@@ -112,7 +91,7 @@ const fileOf = (text: string): string =>
   toBase64(new TextEncoder().encode(text));
 
 describe("the kickoff from an organization's Steps", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
 
   beforeEach(async () => {
     await db

@@ -374,6 +374,10 @@ const WaitingBadge = ({ count }: { count: number }) => (
 
 /** The page: what it is for, the apps asked for, the one open, and how one is built. */
 export const IntegrationsToBuild = ({ open }: { open: string | undefined }) => {
+  // The asked apps alone, until the page shows the admin's record of
+  // builds (GRA-689): then it reads `integrationsToBuild`
+  // (./integrations-asked.ts) with the builds, as the admin's MCP does, so
+  // the two say the same.
   const apps = askedApps(adminRoute.useLoaderData().admins);
   return (
     <AdminPage

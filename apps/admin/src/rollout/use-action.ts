@@ -40,7 +40,7 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   rollback_failed:
     "The rollback didn't finish: check the client's drift, then try again.",
   secrets_store_incomplete:
-    "Secrets Store is missing a shared secret: run Deploy grasp-os-ops with secrets only first.",
+    "Secrets Store is missing a shared secret: run Deploy platform with secrets only first.",
 };
 
 /** A staff action on a rollout (`useAction`), its refusals worded. */
