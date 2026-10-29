@@ -44,10 +44,11 @@ export const journalOf = async (
 /** Polls `check` until it returns something, or fails at the deadline. */
 export const until = async <T>(
   what: string,
-  check: () => Promise<T | undefined> | T | undefined
+  check: () => Promise<T | undefined> | T | undefined,
+  waitMs = deadlineMs
 ): Promise<T> => {
   const started = Date.now();
-  while (Date.now() - started < deadlineMs) {
+  while (Date.now() - started < waitMs) {
     // oxlint-disable-next-line no-await-in-loop -- polling, one check at a time
     const value = await check();
     if (value !== undefined) {
@@ -75,19 +76,27 @@ export const within = async <T>(
   }
 };
 
-/** Waits until the run has ended, and returns how. */
+/**
+ * Waits until the run has ended, and returns how: within `waitMs`, the
+ * deadline unless the run's work needs longer.
+ */
 export const ended = async (
   definition: string,
   id: string,
-  runs: Runs = env.RUNS
+  runs: Runs = env.RUNS,
+  waitMs = deadlineMs
 ): Promise<InstanceStatus> => {
   const instance = await workflow(definition, runs).get(id);
-  return await until(`run ${id} to end`, async () => {
-    const status = await instance.status();
-    return status.status === "complete" || status.status === "errored"
-      ? status
-      : undefined;
-  });
+  return await until(
+    `run ${id} to end`,
+    async () => {
+      const status = await instance.status();
+      return status.status === "complete" || status.status === "errored"
+        ? status
+        : undefined;
+    },
+    waitMs
+  );
 };
 
 export const newId = (): string => crypto.randomUUID();
