@@ -105,6 +105,9 @@ describe("an approved plan, signed", () => {
     await stepSucceeded(adminWorkflows.integrationBuild, runId, "plan 2 check");
     await recordPlan(env, app, planFor(app));
     await approvePlan(env, staff, app, 2);
+    // The run reads the store once the build is writing, to start the
+    // agent's session (src/builds/session.ts): before the test empties it.
+    await stepSucceeded(adminWorkflows.integrationBuild, runId, "session");
     const { text, signature } = await signedPlan(env, app);
     const document = signedPlanSchema.parse(JSON.parse(text));
     const anotherApp = planDocumentText({
@@ -146,9 +149,11 @@ describe("an approved plan, signed", () => {
   });
 
   it("signs nothing while the admin has no key", async () => {
-    const { app } = await awaitingPlan();
+    const { app, runId } = await awaitingPlan();
     await recordPlan(env, app, planFor(app));
     await approvePlan(env, staff, app, 1);
+    // Nor does the run start a session without it.
+    await stepSucceeded(adminWorkflows.integrationBuild, runId, "session");
 
     await expect(signedPlan(env, app)).rejects.toThrow(
       "PLAN_SIGNING_KEY is missing from Secrets Store"

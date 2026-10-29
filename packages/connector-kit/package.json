@@ -11,6 +11,7 @@
     "./manifest": "./src/manifest.ts",
     "./plan-signature": "./src/plan-signature.ts",
     "./provider": "./src/provider.ts",
+    "./session-ticket": "./src/session-ticket.ts",
     "./sign-in": "./src/sign-in.ts"
   },
   "dependencies": {

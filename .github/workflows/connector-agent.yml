@@ -1,0 +1,244 @@
+# A session of Grasp's agent writing a new connector (GRA-689, S3): the
+# admin dispatches it when a build whose plan a person approved starts
+# writing, with the plan and a session ticket it signed
+# (apps/admin/src/builds/session.ts). scripts/connector-session.ts holds
+# each job to its threat model:
+#
+# - `verify` checks both signatures and the ticket's bounds before any
+#   other job runs. Only main's copy of this workflow runs a session: a
+#   dispatch from any other ref is refused, and its environments' secrets
+#   are only for main (a person sets that up).
+# - `session` runs the agent with the plan, the repository and its own
+#   Anthropic key: nothing that can write to GitHub, no other secret.
+#   What it wrote, and its whole transcript, leave as artifacts.
+# - `push`, on a runner the agent never touched, checks the artifact, writes
+#   the signed plan itself, holds the result to the connector guard, and
+#   only then gets the agent's GitHub App a token to push
+#   `feat/connector-<app>` and open its pull request.
+#
+# Every value from the dispatch reaches a script through env, never
+# interpolated into one: the dispatch is checked, not trusted.
+name: Connector agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        description: The approved plan document, as the admin signed it, base64
+        required: true
+      plan_signature:
+        description: The plan's Ed25519 signature by the admin, base64
+        required: true
+      ticket:
+        description: The session ticket, as the admin signed it, base64
+        required: true
+      ticket_signature:
+        description: The ticket's Ed25519 signature by the admin, base64
+        required: true
+
+permissions:
+  contents: read
+
+# One session at a time: each is a model's spend, and the admin starts
+# them one build at a time anyway.
+concurrency:
+  group: connector-agent
+  cancel-in-progress: false
+
+env:
+  # The agent: pinned, as every tool CI runs is.
+  CLAUDE_CODE_VERSION: 2.1.308
+  # Most the agent may spend on one session, in US dollars, and its turns.
+  SESSION_BUDGET_USD: "20"
+  SESSION_MAX_TURNS: "300"
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.verify.outputs.app }}
+      branch: ${{ steps.verify.outputs.branch }}
+      nonce: ${{ steps.verify.outputs.nonce }}
+      verified_at: ${{ steps.verify.outputs.verified_at }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # Its read-only token, for fetching the agent's branch: nothing
+          # of the agent's runs in this job.
+          persist-credentials: true
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - name: Check the dispatch
+        id: verify
+        env:
+          REF: ${{ github.ref }}
+          CONNECTOR_PLAN_KEY: ${{ vars.CONNECTOR_PLAN_KEY }}
+          PLAN: ${{ inputs.plan }}
+          PLAN_SIGNATURE: ${{ inputs.plan_signature }}
+          TICKET: ${{ inputs.ticket }}
+          TICKET_SIGNATURE: ${{ inputs.ticket_signature }}
+        run: node scripts/run-connector-session.ts verify
+
+  session:
+    name: session
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Holds only the agent's own Anthropic key; main alone may use it.
+    environment: connector-agent-session
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - name: Brief the agent
+        env:
+          REF: ${{ github.ref }}
+          CONNECTOR_PLAN_KEY: ${{ vars.CONNECTOR_PLAN_KEY }}
+          PLAN: ${{ inputs.plan }}
+          PLAN_SIGNATURE: ${{ inputs.plan_signature }}
+          TICKET: ${{ inputs.ticket }}
+          TICKET_SIGNATURE: ${{ inputs.ticket_signature }}
+          VERIFIED_AT: ${{ needs.verify.outputs.verified_at }}
+          BRIEF_DIR: ${{ runner.temp }}/brief
+        run: node scripts/run-connector-session.ts brief
+      - name: Install the agent
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Write the connector
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CONNECTOR_AGENT_ANTHROPIC_KEY }}
+          BRIEF_DIR: ${{ runner.temp }}/brief
+          LOG_DIR: ${{ runner.temp }}/log
+          DISABLE_TELEMETRY: "1"
+          DISABLE_AUTOUPDATER: "1"
+        run: |
+          mkdir -p "$LOG_DIR"
+          claude --print "$(cat "$BRIEF_DIR/prompt.md")" \
+            --settings "$BRIEF_DIR/settings.json" \
+            --strict-mcp-config \
+            --max-turns "$SESSION_MAX_TURNS" \
+            --max-budget-usd "$SESSION_BUDGET_USD" \
+            --output-format stream-json --verbose \
+            > "$LOG_DIR/session.jsonl"
+      - name: Check what it wrote
+        if: success()
+        env:
+          LOG_DIR: ${{ runner.temp }}/log
+        run: |
+          vp install --offline --ignore-scripts 2>&1 | tee "$LOG_DIR/install.txt"
+          vp check 2>&1 | tee "$LOG_DIR/check.txt"
+      - name: Stage it
+        if: success()
+        env:
+          APP: ${{ needs.verify.outputs.app }}
+          STAGE_DIR: ${{ runner.temp }}/stage
+        run: node scripts/run-connector-session.ts stage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: success()
+        with:
+          name: connector
+          path: ${{ runner.temp }}/stage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      # Code the agent ran could have printed its key into the transcript:
+      # GitHub masks secrets in its own log, not in an artifact.
+      - name: Take the agent's key out of its logs
+        if: always()
+        env:
+          KEY: ${{ secrets.CONNECTOR_AGENT_ANTHROPIC_KEY }}
+          LOG_DIR: ${{ runner.temp }}/log
+        run: |
+          if [ -n "$KEY" ] && [ -d "$LOG_DIR" ]; then
+            find "$LOG_DIR" -type f -exec sed -i "s|${KEY}|[the agent's key]|g" {} +
+          fi
+      # The transcript, kept whether it succeeded or not: the admin links
+      # the build to this run, and a person reads why it went as it did.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: session-log
+          path: ${{ runner.temp }}/log
+          if-no-files-found: warn
+          retention-days: 30
+
+  push:
+    name: push
+    needs: [verify, session]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Holds the agent's GitHub App's key; main alone may use it.
+    environment: connector-agent
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # Its read-only token, for fetching the agent's branch: nothing
+          # of the agent's runs in this job.
+          persist-credentials: true
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: connector
+          path: ${{ runner.temp }}/artifact
+      - name: Commit it
+        id: commit
+        env:
+          REF: ${{ github.ref }}
+          CONNECTOR_PLAN_KEY: ${{ vars.CONNECTOR_PLAN_KEY }}
+          PLAN: ${{ inputs.plan }}
+          PLAN_SIGNATURE: ${{ inputs.plan_signature }}
+          TICKET: ${{ inputs.ticket }}
+          TICKET_SIGNATURE: ${{ inputs.ticket_signature }}
+          VERIFIED_AT: ${{ needs.verify.outputs.verified_at }}
+          ARTIFACT_DIR: ${{ runner.temp }}/artifact
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/run-connector-session.ts collect
+      # Only now, with the commit made from checked data, is there a token
+      # that can write: contents and pull requests, this repository alone.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          client-id: ${{ vars.CONNECTOR_AGENT_CLIENT_ID }}
+          private-key: ${{ secrets.CONNECTOR_AGENT_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Push and open the pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ github.repository }}
+          APP: ${{ needs.verify.outputs.app }}
+          BRANCH: ${{ needs.verify.outputs.branch }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # The checkout's read-only token would win over the App's.
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
+          if [ -z "$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+              --title "feat(connect): add the ${APP} connector" \
+              --body "Written by Grasp's agent from the plan a person approved in the admin. Session: ${RUN_URL}"
+          fi

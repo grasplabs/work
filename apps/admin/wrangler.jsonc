@@ -162,6 +162,17 @@
       "store_id": "account-secrets-store",
       "secret_name": "PLAN_SIGNING_KEY",
     },
+    // A GitHub token that may only run grasplabs/work's workflows (Actions:
+    // read and write, that repository alone), with which the admin starts
+    // Grasp's agent's session for a build whose plan a person approved and
+    // reads how it went (src/builds/session.ts). It can't push, so a
+    // stolen copy starts sessions the workflow refuses without a signed
+    // ticket. Put in the store by hand; until it is, no session starts.
+    {
+      "binding": "AGENT_DISPATCH_TOKEN",
+      "store_id": "account-secrets-store",
+      "secret_name": "AGENT_DISPATCH_TOKEN",
+    },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a

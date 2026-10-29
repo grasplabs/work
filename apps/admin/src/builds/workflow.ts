@@ -11,9 +11,16 @@
  * Each wait reads the row again at least once a day (`leave`), so a
  * run's steps stay few: at most `maxPlanRounds` plans, and a day's two steps for each day a
  * build waits. A wait that runs out stops the build for a person (`needs_person`),
- * and so does any failure of the run itself. The agent's sessions start
- * from here once they exist: research where the build starts
- * researching, writing where it starts writing.
+ * and so does any failure of the run itself.
+ *
+ * Where the build starts writing, the run starts the agent's session
+ * (src/builds/session.ts) and reads how its run on GitHub stands every
+ * `sessionPollMinutes`, woken sooner by the pull request's event: a
+ * session that fails, or ends without a pull request, stops the build for
+ * a person; one that opens it moves the build on. While the admin isn't
+ * set up to start sessions, the build waits for its pull request as it
+ * did before they existed. The agent's research isn't started from here
+ * yet: only an approved plan may start a session.
  */
 import { log } from "@grasp-os/shared/log";
 import type {
@@ -38,6 +45,11 @@ import {
   stopForPerson,
 } from "./builds.ts";
 import type { BuildStage } from "./builds.ts";
+import {
+  recordSessionPullRequest,
+  sessionOutcome,
+  startSession,
+} from "./session.ts";
 
 /** What a build's run is started with: the app's connector name, the build's. */
 const buildParamsSchema = z.object({ app: z.string() });
@@ -48,6 +60,15 @@ const agentDays = 1;
 
 /** How many days a build waits for a person before it stops. */
 const personDays = 30;
+
+/** How often a session's run on GitHub is read while nothing wakes the build. */
+const sessionPollMinutes = 10;
+
+/**
+ * Most reads of a session's run: three hours, past the session job's two
+ * and the push after it. A session still running then needs a person.
+ */
+const sessionPolls = 18;
 
 /**
  * Most plans one build may go through: each sent-back plan is another
@@ -112,12 +133,99 @@ const leave = async (
   return stage === from ? "timed_out" : stage;
 };
 
+/** A wait of the run, as `follow` waits: the stage it moved to, or which one timed out. */
+type Waited = (wait: Wait) => Promise<BuildStage | `${BuildStage}_timed_out`>;
+
+/** Where the build of `app` is once session `run` has ended, as GitHub says it went. */
+const afterSession = async (
+  env: Env,
+  db: AdminDatabase,
+  app: string,
+  run: number
+): Promise<BuildStage> => {
+  const stage = await stageOf(db, app);
+  if (stage !== "writing") {
+    return stage;
+  }
+  const outcome = await sessionOutcome(env, run);
+  if (outcome === "running") {
+    return "writing";
+  }
+  if (outcome === "failed") {
+    throw stop("session_failed", `The agent's session (run ${run}) failed`);
+  }
+  if (await recordSessionPullRequest(env, app)) {
+    return "in_review";
+  }
+  const now = await stageOf(db, app);
+  if (now === "writing") {
+    throw stop(
+      "session_without_pull_request",
+      `The agent's session (run ${run}) opened no pull request`
+    );
+  }
+  return now;
+};
+
+/**
+ * The agent's session for the build of `app`, from its start to its pull
+ * request: the stage the build moved to, or `writing_timed_out`.
+ */
+const write = async (
+  step: WorkflowStep,
+  env: Env,
+  db: AdminDatabase,
+  app: string,
+  waited: Waited
+): Promise<BuildStage | `${BuildStage}_timed_out`> => {
+  const run = await step.do(
+    "session",
+    quickStep,
+    guarded(async () => {
+      const session = await startSession(env, app);
+      return session === undefined ? null : session.run;
+    })
+  );
+  if (run === null) {
+    return await waited({
+      label: "pull request",
+      from: "writing",
+      event: buildEvents.pullRequest,
+      days: agentDays,
+    });
+  }
+  for (let poll = 1; poll <= sessionPolls; poll += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one read after another
+      await step.waitForEvent(`session ${poll}`, {
+        type: buildEvents.pullRequest,
+        timeout: `${sessionPollMinutes} minutes`,
+      });
+    } catch (error) {
+      if (isEngineAbort(error)) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one read after another
+    const stage = await step.do(
+      `session ${poll} check`,
+      quickStep,
+      guarded(async () => await afterSession(env, db, app, run))
+    );
+    if (stage !== "writing") {
+      return stage;
+    }
+  }
+  return "writing_timed_out";
+};
+
 /**
  * From an approved plan to the merge: the keys (for Grasp's own OAuth
- * app), the agent's pull request, a person's merge.
+ * app), the agent's session and its pull request, a person's merge.
  */
 const writeAndMerge = async (
-  waited: (wait: Wait) => Promise<BuildStage | `${BuildStage}_timed_out`>,
+  waited: Waited,
+  written: () => Promise<BuildStage | `${BuildStage}_timed_out`>,
   approved: BuildStage | `${BuildStage}_timed_out`
 ): Promise<BuildStage | `${BuildStage}_timed_out`> => {
   let stage = approved;
@@ -130,12 +238,7 @@ const writeAndMerge = async (
     });
   }
   if (stage === "writing") {
-    stage = await waited({
-      label: "pull request",
-      from: "writing",
-      event: buildEvents.pullRequest,
-      days: agentDays,
-    });
+    stage = await written();
   }
   if (stage === "in_review") {
     stage = await waited({
@@ -162,6 +265,7 @@ const pastPlan: ReadonlySet<string> = new Set<BuildStage>([
  */
 const follow = async (
   step: WorkflowStep,
+  env: Env,
   db: AdminDatabase,
   app: string
 ): Promise<BuildStage | `${BuildStage}_timed_out`> => {
@@ -169,6 +273,7 @@ const follow = async (
     const stage = await leave(step, db, app, wait);
     return stage === "timed_out" ? (`${wait.from}_timed_out` as const) : stage;
   };
+  const written = async () => await write(step, env, db, app, waited);
   for (let round = 1; round <= maxPlanRounds; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one plan at a time
     const planned = await waited({
@@ -184,7 +289,7 @@ const follow = async (
         return planned;
       }
       // oxlint-disable-next-line no-await-in-loop -- the last round
-      return await writeAndMerge(waited, planned);
+      return await writeAndMerge(waited, written, planned);
     }
     // oxlint-disable-next-line no-await-in-loop -- one plan at a time
     const decided = await waited({
@@ -195,7 +300,7 @@ const follow = async (
     });
     if (decided !== "researching") {
       // oxlint-disable-next-line no-await-in-loop -- the last round
-      return await writeAndMerge(waited, decided);
+      return await writeAndMerge(waited, written, decided);
     }
   }
   throw stop("too_many_plans", `No plan approved in ${maxPlanRounds} rounds`);
@@ -216,7 +321,7 @@ export const integrationBuild = (env: Env): WorkflowDefinition => ({
         quickStep,
         guarded(async () => await startResearching(db, app))
       );
-      ended = await follow(step, db, app);
+      ended = await follow(step, env, db, app);
     } catch (error) {
       if (isEngineAbort(error)) {
         throw error;

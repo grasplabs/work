@@ -46,6 +46,9 @@ export const adminSecrets = (tokens: {
   // Empty, as a store nobody put the key in reads: the plan signing tests
   // set it (test/plan-signing.test.ts).
   [env.PLAN_SIGNING_KEY, ""],
+  // Empty too: until a person stores it, no session of the agent starts
+  // (test/build-sessions.test.ts sets it).
+  [env.AGENT_DISPATCH_TOKEN, ""],
   // Empty, as a store nobody put Stripe's key in reads: a test that
   // reads Stripe sets it (test/admin-billing.test.ts).
   [env.STRIPE_RESTRICTED_KEY, ""],

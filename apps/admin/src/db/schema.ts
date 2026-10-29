@@ -704,6 +704,15 @@ export const integrationBuilds = sqliteTable("integration_builds", {
   pullRequest: integer("pull_request"),
   /** The commit its pull request was squash-merged as, on `main`. */
   mergeCommitSha: text("merge_commit_sha"),
+  /**
+   * The nonce of the agent's session ticket (src/builds/session.ts), kept
+   * before the session is started so a start made again pushes once.
+   */
+  sessionNonce: text("session_nonce"),
+  /** The agent's session: its run of the `connector-agent` workflow on GitHub. */
+  sessionRun: integer("session_run"),
+  /** That run's page, where its logs are kept. */
+  sessionUrl: text("session_url"),
   /** The staff member who confirmed Build it. */
   requestedBy: text("requested_by").notNull(),
   createdAt: timestamp("created_at").notNull(),
