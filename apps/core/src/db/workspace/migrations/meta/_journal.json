@@ -183,6 +183,13 @@
       "when": 1793143856788,
       "tag": "0025_chat_app",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1793269717022,
+      "tag": "0026_chat_search_text",
+      "breakpoints": true
     }
   ]
 }

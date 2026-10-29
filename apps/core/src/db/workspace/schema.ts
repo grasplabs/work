@@ -151,6 +151,21 @@ export const chatMessages = sqliteTable(
 );
 
 /**
+ * What was said in each chat, as plain text (chat-search.ts): its
+ * questions and answers in order, and the same folded to lower case,
+ * which a search looks through. Added to as each message is stored; a
+ * chat kept before it existed gets its row the first time it's needed.
+ */
+export const chatSearchText = sqliteTable("chat_search_text", {
+  chatId: text("chat_id")
+    .$type<ChatId>()
+    .primaryKey()
+    .references(() => chats.id),
+  said: text().notNull(),
+  folded: text().notNull(),
+});
+
+/**
  * What a chat's agent has read from, each source once: the collections and
  * connections its code read through the chat's APIs, and, for a chat
  * started to fix a failed run, the run and its App's sources. Every model

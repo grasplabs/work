@@ -31,6 +31,7 @@ import type {
   ChatProject,
   ChatOutput,
   ChatProvenance,
+  ChatSearchHit,
   ChatSummary,
   ChatToolEvent,
   ProjectDocument,
@@ -81,7 +82,18 @@ import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, count, desc, eq, gt, isNull, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  max,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -134,6 +146,13 @@ import {
   coreMessageProvider,
   partialOf,
 } from "./chat-messages.ts";
+import {
+  foldOf,
+  hasEvery,
+  saidOf,
+  searchWordsOf,
+  snippetOf,
+} from "./chat-search.ts";
 import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
@@ -164,6 +183,7 @@ import {
   chatProjectDocuments,
   chatProjects,
   chatRunSources,
+  chatSearchText,
   chatSources,
   chatToolEvents,
   chats,
@@ -591,6 +611,9 @@ const previewPollMs = 100;
 /** Most chats a person keeps: delete one to make another. */
 export const maxChatsPerPerson = 500;
 
+/** Most chats one search finds: the most recently active first. */
+export const searchHitsMax = 50;
+
 /**
  * Why a turn under way stopped short of an answer, as its person reads
  * it: an unplanned error is logged, and shown as one, with the log line's
@@ -955,7 +978,147 @@ export class Workspace extends DurableObject<Env> {
       .set({ lastAt: stored.createdAt })
       .where(eq(chats.id, chatId))
       .run();
+    this.#addSaid(chatId, message);
     return stored;
+  }
+
+  /**
+   * Adds what `message` said to what a search looks through in its chat,
+   * which is stored already: past what was said before it, or, for a
+   * chat kept before searches were, with all it said (`#indexChat`).
+   */
+  #addSaid(chatId: ChatId, message: Message): void {
+    const said = saidOf(message);
+    if (said === "") {
+      return;
+    }
+    const kept = this.#db
+      .select({ chatId: chatSearchText.chatId })
+      .from(chatSearchText)
+      .where(eq(chatSearchText.chatId, chatId))
+      .get();
+    if (kept === undefined) {
+      this.#indexChat(chatId);
+      return;
+    }
+    this.#db
+      .update(chatSearchText)
+      .set({
+        said: sql`ltrim(${chatSearchText.said} || ' ' || ${said})`,
+        folded: sql`ltrim(${chatSearchText.folded} || ' ' || ${foldOf(said)})`,
+      })
+      .where(eq(chatSearchText.chatId, chatId))
+      .run();
+  }
+
+  /** Keeps what was said in the chat so far, for searches to look through. */
+  #indexChat(chatId: ChatId): void {
+    const said = this.#transcript(chatId)
+      .map(saidOf)
+      .filter((each) => each !== "")
+      .join(" ");
+    const folded = foldOf(said);
+    this.#db
+      .insert(chatSearchText)
+      .values({ chatId, said, folded })
+      .onConflictDoUpdate({
+        target: chatSearchText.chatId,
+        set: { said, folded },
+      })
+      .run();
+  }
+
+  /**
+   * `personId`'s own chats that hold every word of `query` in their title,
+   * their project's name or what was said in them, the most recently
+   * active first: at most {@link searchHitsMax}. One found only with what
+   * was said carries where it was said. What was said is folded as it is
+   * kept, so SQLite looks through it as it is, in any script; the few
+   * titles and project names are compared here.
+   */
+  searchChats(personId: string, query: string): ChatSearchHit[] {
+    const words = searchWordsOf(query);
+    if (words.length === 0) {
+      return [];
+    }
+    const unindexed = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .leftJoin(chatSearchText, eq(chatSearchText.chatId, chats.id))
+      .where(and(eq(chats.personId, personId), isNull(chatSearchText.chatId)))
+      .all();
+    for (const { id } of unindexed) {
+      this.#indexChat(id);
+    }
+    // Which words were said in each chat: "1" or "0" for each, in order.
+    const saidWords = sql.join(
+      words.map(
+        (word) =>
+          sql`(coalesce(instr(${chatSearchText.folded}, ${word}), 0) > 0)`
+      ),
+      sql` || `
+    );
+    const rows = this.#db
+      .select({
+        id: chats.id,
+        title: chats.title,
+        createdAt: chats.createdAt,
+        lastAt: chats.lastAt,
+        projectId: chats.projectId,
+        appId: chats.appId,
+        projectName: chatProjects.name,
+        said: sql<string>`'' || ${saidWords}`,
+      })
+      .from(chats)
+      .leftJoin(chatSearchText, eq(chatSearchText.chatId, chats.id))
+      .leftJoin(chatProjects, eq(chatProjects.id, chats.projectId))
+      .where(eq(chats.personId, personId))
+      .orderBy(desc(chats.lastAt))
+      .all();
+    const found = rows
+      .filter((row) => {
+        const named = foldOf(`${row.title} ${row.projectName ?? ""}`);
+        return words.every(
+          (word, index) => row.said[index] === "1" || named.includes(word)
+        );
+      })
+      .slice(0, searchHitsMax);
+    const bySaid = found.filter(
+      (row) => !hasEvery(query, row.title, row.projectName ?? "")
+    );
+    const saidIn = new Map(
+      bySaid.length === 0
+        ? []
+        : this.#db
+            .select({
+              chatId: chatSearchText.chatId,
+              said: chatSearchText.said,
+            })
+            .from(chatSearchText)
+            .where(
+              inArray(
+                chatSearchText.chatId,
+                bySaid.map(({ id }) => id)
+              )
+            )
+            .all()
+            .map(({ chatId, said }) => [chatId, said])
+    );
+    return found.map((row) => {
+      const said = saidIn.get(row.id);
+      return {
+        chat: {
+          id: row.id,
+          title: row.title,
+          createdAt: row.createdAt.toISOString(),
+          lastAt: row.lastAt.toISOString(),
+          running: this.#turns.has(row.id),
+          projectId: row.projectId,
+          appId: row.appId,
+        },
+        said: said === undefined ? null : snippetOf(said, query),
+      };
+    });
   }
 
   /**
@@ -3567,6 +3730,10 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
+        this.#db
+          .delete(chatSearchText)
+          .where(eq(chatSearchText.chatId, id))
+          .run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db
           .delete(chatDocuments)
