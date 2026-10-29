@@ -879,6 +879,38 @@ const candidateAnswer = async (
 };
 
 /**
+ * Refuses `call` of `run` through `binding` unless it may go now, before
+ * anything is sent: a connector call from an action of a restricted run
+ * (connect would hold it for a decision no action waits for), and any
+ * call whose authority isn't decided again (`requireCallAuthority`), a
+ * read kept as a file with the files binding it goes into too, as the
+ * files call it stands for would be (GRA-886).
+ */
+const requireCallAllowed = async (
+  env: Env,
+  run: CallingRun,
+  binding: FrozenCatalogBinding,
+  call: BuiltCall,
+  effect: Effect
+): Promise<void> => {
+  if (
+    effect.fromAction === true &&
+    run.restricted &&
+    call.name === "grasp.connector"
+  ) {
+    throw workflowResourceErrors.create("workflow.action_restricted");
+  }
+  await requireCallAuthority(env, run, binding);
+  if (call.name === "grasp.connector" && call.into !== undefined) {
+    const files = run.bindings.get(call.into);
+    if (files?.kind !== "files") {
+      throw workflowResourceErrors.create("workflow.call_denied");
+    }
+    await requireCallAuthority(env, run, files);
+  }
+};
+
+/**
  * Makes `call`, a task's named call with its arguments built, as task
  * `task` of `run`, for `effect`: through the binding its start froze for
  * the call's alias, once the authority behind it was decided again
@@ -947,28 +979,10 @@ export const makeCall = async (
   };
   let output: Json;
   try {
-    // Refused before anything is decided or sent, and kept as the call's
-    // receipt: connect would hold it for a decision no action waits for.
-    if (
-      effect.fromAction === true &&
-      run.restricted &&
-      call.name === "grasp.connector"
-    ) {
-      throw workflowResourceErrors.create("workflow.action_restricted");
-    }
     if (call.name === "grasp.files") {
       fileDetail = filesCallDetail(call.operation, call.arguments);
     }
-    await requireCallAuthority(env, run, binding);
-    // A read kept as a file needs the files binding it goes into, and its
-    // authority now, as the files call it stands for would (GRA-886).
-    if (call.name === "grasp.connector" && call.into !== undefined) {
-      const files = run.bindings.get(call.into);
-      if (files?.kind !== "files") {
-        throw workflowResourceErrors.create("workflow.call_denied");
-      }
-      await requireCallAuthority(env, run, files);
-    }
+    await requireCallAllowed(env, run, binding, call, effect);
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
