@@ -15,6 +15,9 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
+/** Every client's model spend ceiling until staff set another, in euros a month (GRA-141). */
+export const defaultModelSpendCeiling = 250;
+
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
   /** `r<run6>-<sha7>`. */
@@ -132,12 +135,14 @@ export const clients = sqliteTable(
     configChangedAt: timestamp("config_changed_at"),
     /**
      * The most its model calls may cost in a calendar month, in whole
-     * euros (GRA-141): €250 unless staff set another
+     * euros (GRA-141): `defaultModelSpendCeiling` unless staff set another
      * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
      * it to its core's model gateway as its deployment budget, which the
      * gateway enforces before each provider request.
      */
-    modelSpendCeiling: integer("model_spend_ceiling").notNull().default(250),
+    modelSpendCeiling: integer("model_spend_ceiling")
+      .notNull()
+      .default(defaultModelSpendCeiling),
     /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name

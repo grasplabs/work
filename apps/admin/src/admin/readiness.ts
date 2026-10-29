@@ -13,7 +13,6 @@ import {
   clientDomain as stageDomain,
   stageNamed,
 } from "@grasp-os/shared/names";
-import { releaseManifestSchema } from "@grasp-os/shared/release";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { count, desc, eq } from "drizzle-orm";
@@ -21,7 +20,11 @@ import { z } from "zod";
 
 import { ifStored } from "../clients/grid.ts";
 import { adminDatabase } from "../db/act.ts";
-import { hostingDestinations, releases } from "../db/schema.ts";
+import {
+  defaultModelSpendCeiling,
+  hostingDestinations,
+  releases,
+} from "../db/schema.ts";
 import { clientDomain, deployerApi, storeSecret } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
@@ -178,18 +181,14 @@ const destinationCheck = (choices: DestinationChoice[]): ReadinessCheck => {
   };
 };
 
-/** The newest imported release's manifest; null before any. */
-const newestManifest = async (envOf: Env) => {
+/** The newest imported release's id; null before any. */
+const newestRelease = async (envOf: Env): Promise<string | null> => {
   const [row] = await adminDatabase(envOf.DB)
-    .select({ manifest: releases.manifest })
+    .select({ id: releases.id })
     .from(releases)
     .orderBy(desc(releases.builtAt))
     .limit(1);
-  if (row === undefined) {
-    return null;
-  }
-  const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
-  return parsed.success ? parsed.data : null;
+  return row?.id ?? null;
 };
 
 const releaseCheck = (
@@ -216,43 +215,16 @@ const releaseCheck = (
       };
 
 /**
- * Model spend (GRA-141): the provisioning operation refuses any Worker
- * that binds Workers AI until a spend ceiling and the shared AI Gateway
- * are decided (`model_spend_undecided`, src/hosting/operation.ts). This
- * reads the newest release as the operation would: blocked while it binds
- * Workers AI. Change it with the operation's check.
+ * Model spend (GRA-141): every organization's model calls go through its
+ * gateway, held to its ceiling: the default unless staff set another on
+ * its Setup.
  */
-const modelSpendCheck = (
-  manifest: Awaited<ReturnType<typeof newestManifest>>
-): ReadinessCheck => {
-  if (manifest === null) {
-    return {
-      id: "model_spend",
-      title: "Model spend",
-      required: true,
-      status: "waiting",
-      words: "Checked once a release is imported.",
-    };
-  }
-  const binds = Object.values(manifest.workers).some((worker) =>
-    worker.bindings.some(({ type }) => type === "ai")
-  );
-  return binds
-    ? {
-        id: "model_spend",
-        title: "Model spend",
-        required: true,
-        status: "blocked",
-        words:
-          "The newest release binds Workers AI, which placed organizations don't get until a model spend ceiling and the shared AI Gateway are decided (GRA-141). No organization can be provisioned until then: decide GRA-141.",
-      }
-    : {
-        id: "model_spend",
-        title: "Model spend",
-        required: true,
-        status: "ready",
-        words: "The newest release binds no Workers AI.",
-      };
+const modelSpendCheck: ReadinessCheck = {
+  id: "model_spend",
+  title: "Model spend",
+  required: true,
+  status: "ready",
+  words: `Every organization is held to a model spend ceiling of €${defaultModelSpendCeiling} a month, its gateway's budget, unless staff set another on its Setup.`,
 };
 
 /** The names of `names` Secrets Store doesn't have. */
@@ -440,13 +412,12 @@ const discordBotCheck = (envOf: Env): ReadinessCheck => {
 /** The checklist, as this admin stands now. */
 export const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
-  const [choices, [imported], manifest, missing] = await Promise.all([
+  const [choices, [imported], newestId, missing] = await Promise.all([
     destinationChoices(db, policyId),
     db.select({ n: count() }).from(releases),
-    newestManifest(envOf),
+    newestRelease(envOf),
     missingSecrets(envOf, requiredSecrets),
   ]);
-  const newestId = manifest?.releaseId ?? null;
   // The one new organizations go in, or with several, each of them.
   const automatic = automaticChoice(choices).destinationId;
   const placeable =
@@ -466,7 +437,7 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       placeable,
       missing.includes("DEPLOYER_API_TOKEN")
     ),
-    modelSpendCheck(manifest),
+    modelSpendCheck,
     await roomsCheck(envOf),
     discordBotCheck(envOf),
   ];

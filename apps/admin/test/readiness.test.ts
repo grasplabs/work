@@ -94,11 +94,11 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        model_spend: "waiting",
+        model_spend: "ready",
         rooms: "not_configured",
         discord_bot: "ready",
       },
-      blocking: 4,
+      blocking: 3,
       release:
         "No release is imported yet. CI publishes one for every merge to main, and the admin imports it within five minutes; Releases lists any it couldn't import, and why.",
       banner: true,
@@ -164,15 +164,12 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("blocks on a deployer token that can't reach the namespace, and on a release that binds Workers AI while model spend is undecided", async () => {
+  it("blocks on a deployer token that can't reach the namespace", async () => {
     // The deployer isn't a member of this account.
     const account = cloudflare.addAccount("Not ours", "someone@else.test");
     account.namespaces.set(clientsNamespace("production"), new Map());
     await destination({ accountId: account.id });
-    await placedRelease("feat(core): binds Workers AI", {}, (core) => ({
-      ...core,
-      bindings: [...core.bindings, { type: "ai", name: "AI" }],
-    }));
+    await placedRelease("feat(core): unreachable");
 
     const read = await withVars(production, readiness);
 
@@ -181,13 +178,19 @@ describe("Platform's Readiness", () => {
       deployerWords: wordsOf(read, "deployer").includes(
         "The deployer's token can't reach"
       ),
-      modelSpend: statuses(read).model_spend,
-      modelWords: wordsOf(read, "model_spend").includes("GRA-141"),
+    }).toStrictEqual({ deployer: "blocked", deployerWords: true });
+  });
+
+  it("says every organization is held to the default model spend ceiling unless staff set another", async () => {
+    const read = await withVars(production, readiness);
+
+    expect({
+      status: statuses(read).model_spend,
+      words: wordsOf(read, "model_spend"),
     }).toStrictEqual({
-      deployer: "blocked",
-      deployerWords: true,
-      modelSpend: "blocked",
-      modelWords: true,
+      status: "ready",
+      words:
+        "Every organization is held to a model spend ceiling of €250 a month, its gateway's budget, unless staff set another on its Setup.",
     });
   });
 
