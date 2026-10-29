@@ -102,6 +102,11 @@ export interface StaffLogEntry {
   /** The person it is about, and their team, while they are on the roster. */
   person: { id: string; name: string } | null;
   team: string | null;
+  /**
+   * Whom it names besides, while they are on the roster: the colleague
+   * someone named for work that isn't theirs (`interview.referred`).
+   */
+  named?: { id: string; name: string } | null;
 }
 
 /** The log as one read gives it: its entries, and the teams to narrow it by. */

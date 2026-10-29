@@ -127,6 +127,7 @@ import {
   countedPeople,
   countedWorks,
   drawFailures,
+  referrals,
   drawnWorks,
   events,
   interviewStates,
@@ -184,6 +185,7 @@ import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
 import { organizationOf, rosterAfter } from "./organization.ts";
 import type { ListChange, ListRefusal } from "./organization.ts";
+import { referralOf, referred } from "./referral.ts";
 import {
   agreementsIn,
   closesOn,
@@ -2218,6 +2220,7 @@ export class Onboarding extends DurableObject<Env> {
           .run();
       }
       this.#noted(person.id, "interview.approved", now);
+      this.#queueReferral(person.id, now);
       const moved = admissionKey(this.#admittedKeys(person.id)) !== before;
       if (moved) {
         this.#admissionChanged(person, true, false, now);
@@ -2354,6 +2357,7 @@ export class Onboarding extends DurableObject<Env> {
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
       ...(kind === "lead" ? [] : openKnown(this.#drawingAskedOf(person.id))),
+      ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
     ].filter((part) => part !== "");
@@ -2449,7 +2453,11 @@ export class Onboarding extends DurableObject<Env> {
       agreedAt: state.agreedAt,
       generation: `${state.agreedAt}|${state.revocations}`,
       admission: `${state.startedAt ?? ""}|${state.revocations}`,
-      facts: facts.map(({ tag, record }) => ({ tag, record })),
+      // Who does the work they were asked about names a colleague: it is
+      // for putting right who is asked what (`#referOne`), never drawn.
+      facts: facts
+        .filter(({ tag }) => tag !== "who")
+        .map(({ tag, record }) => ({ tag, record })),
     };
   }
 
@@ -2482,11 +2490,18 @@ export class Onboarding extends DurableObject<Env> {
     }
     const { item, about } = due;
     const at = new Date(now).toISOString();
-    const what = due.work === undefined ? "map" : "work";
+    let what = due.work === undefined ? "map" : "work";
+    if (due.referral === true) {
+      what = "referral";
+    }
     try {
-      await (due.work === undefined
-        ? this.#mapTeam(due.id, at)
-        : this.#drawWork(due.work, at));
+      if (due.referral === true) {
+        await this.#referOne(due.id, at);
+      } else if (due.work === undefined) {
+        await this.#mapTeam(due.id, at);
+      } else {
+        await this.#drawWork(due.work, at);
+      }
       this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
     } catch (error) {
       const tries = due.tries + 1;
@@ -2497,7 +2512,15 @@ export class Onboarding extends DurableObject<Env> {
       });
       const wait = drawRetryMs[tries - 1];
       if (wait === undefined) {
-        if (due.work === undefined) {
+        if (due.referral === true) {
+          // Who does what stays as it was: the work is drawn all the same.
+          this.#db.delete(referrals).where(eq(referrals.person, due.id)).run();
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, item))
+            .run();
+          this.#noted(about, "referral.gave_up", at, "grasp");
+        } else if (due.work === undefined) {
           this.#giveUp(due.id, about, at);
         } else {
           this.#giveUpWork(due.work, at);
@@ -4437,6 +4460,10 @@ export class Onboarding extends DurableObject<Env> {
       .orderBy(desc(events.seq))
       .limit(logPageMax)
       .all();
+    const namedOf = (id: string) => {
+      const one = byId.get(id);
+      return one === undefined ? null : { id: one.id, name: one.name };
+    };
     const entries = rows.map((row): StaffLogEntry => {
       const person = row.about === null ? undefined : byId.get(row.about);
       return {
@@ -4447,6 +4474,7 @@ export class Onboarding extends DurableObject<Env> {
         person:
           person === undefined ? null : { id: person.id, name: person.name },
         team: person?.team ?? null,
+        ...(row.named === null ? {} : { named: namedOf(row.named) }),
       };
     });
     return { entries, teams: named };
@@ -5227,6 +5255,7 @@ export class Onboarding extends DurableObject<Env> {
     after: number;
     tries: number;
     work?: WorkToDraw;
+    referral?: true;
   }[] {
     return [
       ...this.#teamsToMap(now).map((team) => ({
@@ -5234,6 +5263,9 @@ export class Onboarding extends DurableObject<Env> {
         item: `team:${team.id}`,
         about: team.lead,
       })),
+      // Who does what is put right before work is drawn, so it is drawn
+      // from those who do it.
+      ...this.#referralsDue(now),
       ...this.#worksToDraw(now).map((work) => ({
         item: `work:${work.id}`,
         id: work.id,
@@ -6164,6 +6196,208 @@ export class Onboarding extends DurableObject<Env> {
    * Stops drawing a piece of work that keeps failing, until someone agrees
    * to something new about it: what was drawn of it before stays.
    */
+  /**
+   * What Stephen learns from once someone said the work they were asked
+   * about isn't theirs (GRA-1285): the work they do instead, as they said
+   * it, from then on in their interview.
+   */
+  #insteadKnown(person: Roster["people"][number]): string[] {
+    const instead = this.#held(person.id)?.facts.findLast(
+      ({ tag, out }) => tag === "work" && out !== true
+    );
+    return instead === undefined
+      ? []
+      : [
+          `${firstName(person.name)} said the work they were asked about is not theirs. From here on, learn about their own: ${instead.record}`,
+        ];
+  }
+
+  /**
+   * Queues putting right who does what (GRA-1285) when someone, not a
+   * lead, agreed to having said the work they were asked about isn't
+   * theirs: a `who` or `work` fact of theirs counts.
+   */
+  #queueReferral(person: string, now: string): void {
+    const roster = this.#roster();
+    if (roster === null || leads(roster, person)) {
+      return;
+    }
+    const said = this.#admitted(person).some(
+      ({ tag }) => tag === "who" || tag === "work"
+    );
+    if (!said) {
+      return;
+    }
+    this.#db
+      .insert(referrals)
+      .values({ person, at: now })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /** The referrals due, the oldest first, as the drawing's queue takes them. */
+  #referralsDue(now: number): {
+    item: string;
+    id: string;
+    about: string;
+    after: number;
+    tries: number;
+    referral: true;
+  }[] {
+    const failures = new Map(
+      this.#db
+        .select()
+        .from(drawFailures)
+        .all()
+        .map((row) => [row.item, row])
+    );
+    return this.#db
+      .select()
+      .from(referrals)
+      .orderBy(asc(referrals.at))
+      .all()
+      .map(({ person }) => {
+        const failed = failures.get(`refer:${person}`);
+        return {
+          item: `refer:${person}`,
+          id: person,
+          about: person,
+          after: failed === undefined ? now : Date.parse(failed.after),
+          tries: failed?.tries ?? 0,
+          referral: true as const,
+        };
+      });
+  }
+
+  /**
+   * Someone said the work they were asked about isn't theirs: what they
+   * agreed to says which work they do and who does that one (referral.ts).
+   * The record is put right, whoever they named is asked about it next and
+   * sent their link at once, so that work is told by those who do it.
+   */
+  async #referOne(personId: string, at: string): Promise<void> {
+    const done = () => {
+      this.#db.delete(referrals).where(eq(referrals.person, personId)).run();
+    };
+    const roster = this.#roster();
+    const person = roster?.people.find(({ id }) => id === personId);
+    const [askedRow] = this.#db
+      .select({ work: askedAbout.work })
+      .from(askedAbout)
+      .where(eq(askedAbout.person, personId))
+      .all();
+    const all = this.#db.select().from(works).all();
+    const asked = all.find(({ id }) => id === askedRow?.work);
+    const facts = this.#admitted(personId).filter(
+      ({ tag }) => tag === "who" || tag === "work"
+    );
+    if (
+      roster === null ||
+      person === undefined ||
+      asked === undefined ||
+      facts.length === 0
+    ) {
+      done();
+      return;
+    }
+    const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
+    const found = await referralOf(
+      this.env,
+      {
+        asked: asked.local === "" ? asked.name : asked.local,
+        works: all
+          .filter(({ team, id }) => team === person.team && id !== asked.id)
+          .map(({ id, name, local }) => ({ id, name, local })),
+        people: roster.people
+          .filter(({ id, away }) => id !== personId && !away)
+          .map(({ id, name, title, team }) => ({
+            id,
+            name,
+            title,
+            team: teamNames.get(team) ?? "",
+          })),
+        facts: facts.map(({ tag, record }) => ({ tag, record })),
+      },
+      (took) => {
+        this.meter(took, at);
+      }
+    );
+    // What changed while it was read stands: read again.
+    const said = await this.#mailContext();
+    const now = this.#roster();
+    const { plan } = this.#row();
+    if (now === null) {
+      done();
+      return;
+    }
+    const talked = new Set(
+      this.#db
+        .select({ person: interviewStates.person })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.completedAt))
+        .all()
+        .map(({ person: id }) => id)
+    );
+    const change = referred(
+      this.#db
+        .select()
+        .from(works)
+        .all()
+        .map(({ id, team, doers }) => ({ id, team, doers: doersOf(doers) })),
+      { by: personId, asked: asked.id, ...found },
+      now.people.map(({ id, team, away }) => ({
+        id,
+        team,
+        away,
+      })),
+      (id) => talked.has(id)
+    );
+    const invite =
+      change.invite === null
+        ? undefined
+        : now.people.find(({ id }) => id === change.invite);
+    const sending =
+      invite !== undefined &&
+      plan !== null &&
+      this.isOpen() &&
+      takingPart(now, invite) &&
+      !this.#linkFacts().sent.has(invite.id);
+    this.ctx.storage.transactionSync(() => {
+      for (const work of change.works) {
+        this.#db
+          .update(works)
+          .set({ doers: JSON.stringify(work.doers) })
+          .where(eq(works.id, work.id))
+          .run();
+      }
+      for (const { person: who, work } of change.asked) {
+        this.#db
+          .insert(askedAbout)
+          .values({ person: who, work })
+          .onConflictDoUpdate({ target: askedAbout.person, set: { work } })
+          .run();
+      }
+      this.#db
+        .insert(events)
+        .values({
+          at,
+          by: interviewee,
+          what: "interview.referred",
+          about: personId,
+          named: found.who,
+        })
+        .run();
+      if (sending && plan !== null) {
+        this.#send({ roster: now, plan, said }, invite.id, at);
+        this.#noted(invite.id, "onboarding.link.sent_referred", at, "grasp");
+      }
+      done();
+    });
+    if (sending) {
+      this.#deliverMailSoon();
+    }
+  }
+
   #giveUpWork(due: WorkToDraw, at: string): void {
     this.ctx.storage.transactionSync(() => {
       this.#db
