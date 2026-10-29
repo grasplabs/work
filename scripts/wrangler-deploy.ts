@@ -8,7 +8,7 @@
  * `wrangler deploy` (`filledConfig`, ./wrangler-deploy-config.ts); a config
  * with neither, such as the connect gateway's, deploys as it is:
  * - `"account-secrets-store"`: from SECRETS_STORE_ID when the job sets it
- *   (deploy-ops does), otherwise from the Cloudflare API, as the
+ *   (deploy-platform does), otherwise from the Cloudflare API, as the
  *   account's only store;
  * - `"router-hosts-namespace"`: the router's hostname map, which
  *   scripts/cloudflare-account-setup.ts creates as `grasp-router-hosts`

@@ -1,8 +1,8 @@
-// Deployed only by hand, with deploy-ops (never by CI on a merge), behind
+// Deployed only by hand, with deploy-platform (never by CI on a merge), behind
 // Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-ops passes them from the ops 1Password Environment
+// everything. Deploy-platform passes them from the stage's 1Password Environment
 // with `--var`, and stops if either is missing.
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
@@ -49,8 +49,8 @@
     },
   ],
   // Per-person limits on reads that reach every client's core once. The
-  // namespace ids are unique in grasp-os-ops, beside the router's 1001 to
-  // 1003.
+  // namespace ids are unique in Grasp's account, beside the router's 1001
+  // to 1003.
   "ratelimits": [
     // Tool calls of the admin's MCP (src/admin/mcp.ts), per staff member:
     // 30 a minute.
@@ -112,7 +112,7 @@
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
   // are derived from; and the secrets every client shares, which
-  // deploy-ops copies in from 1Password. The store id is the account's own: `deploy` fills it in
+  // deploy-platform copies in from 1Password. The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [
@@ -205,7 +205,7 @@
       "secret_name": "ATTIO_READ_KEY",
     },
   ],
-  // Staging (`wrangler deploy --env staging`, deploy-ops with stage
+  // Staging (`wrangler deploy --env staging`, deploy-platform with stage
   // staging): every name from @grasp-os/shared/names with -staging appended,
   // its own rate limit namespaces, and its own router and client keys and
   // deployer token in the account's Secrets Store, so it never deploys with

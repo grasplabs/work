@@ -1,5 +1,6 @@
-// grasp-os-staging deployment. Client deployments are provisioned by the admin,
-// which creates the D1 databases and R2 buckets below in the EU jurisdiction;
+// Released, never deployed from here: CI builds it into every release, and
+// the admin deploys each client's core from it, creating the D1 databases
+// and R2 buckets below in the EU jurisdiction;
 // Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
 // workflow runs included: each is a Durable Object of its own.
 {

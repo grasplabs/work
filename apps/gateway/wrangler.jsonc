@@ -1,5 +1,5 @@
 // The connect gateway (@grasp-os/shared/connect-gateway, GRA-1217).
-// Deployed by hand, with deploy-ops, to Grasp's account, next to the
+// Deployed by hand, with deploy-platform, to Grasp's account, next to the
 // router, in the account the clients' dispatch namespace is in. It has no
 // address of its own: only the placed cores the admin binds to it reach
 // it, each with props naming its own connect.

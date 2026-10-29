@@ -1,7 +1,7 @@
 /**
  * What the browser journeys' admin starts from (e2e/admin/*.e2e.ts), made
  * as the admin's tests make it: its database migrated, its Secrets Store
- * filled as deploy-ops fills it, and a client in ring 0, placed in a
+ * filled as deploy-platform fills it, and a client in ring 0, placed in a
  * dedicated destination of its own on the fake Cloudflare API, provisioned
  * on a release, with a newer release imported to roll out.
  */

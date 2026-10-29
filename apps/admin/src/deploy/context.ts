@@ -65,7 +65,7 @@ export class MissingStoreSecretError extends Error {
 /**
  * The value of the Secrets Store secret `name`. One that's missing or
  * empty stops the caller (`MissingStoreSecretError`), naming the secret
- * and nothing of its value: deploy-ops writes every one of them, so a gap
+ * and nothing of its value: deploy-platform writes every one of them, so a gap
  * is a store to fix, not a secret to leave off.
  */
 export const storeSecret = async (
@@ -209,7 +209,7 @@ const varOf = (value: string | undefined): string | undefined => {
 };
 
 /**
- * Grasp's OAuth apps' client ids, from the admin's vars (deploy-ops sets
+ * Grasp's OAuth apps' client ids, from the admin's vars (deploy-platform sets
  * them): not secrets, their secrets are shared secrets above.
  */
 export const signInApps = (env: Env): SignInApps => {

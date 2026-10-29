@@ -139,7 +139,7 @@ export const routerHostKey = (hostname: string): string =>
  * as lowercase hex (`deriveClientSecret`). The router derives it on every
  * forward, the admin to set it on the client's core, so nothing per
  * client is stored anywhere. `routerKey` is the one `ROUTER_KEY` in
- * Secrets Store (grasp-os-ops).
+ * Secrets Store (Grasp's account).
  */
 export const deriveRouterSecret = async (
   routerKey: string,

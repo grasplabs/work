@@ -4,17 +4,18 @@
 # (grasp-admin-staging, grasp-router-staging and
 # grasp-connect-gateway-staging, serving grasp-clients-staging), then with
 # "production" once the change works there. Every name comes from
-# @grasp-os/shared/names. Require a reviewer on the grasp-os-ops and
-# grasp-os-ops-staging environments in GitHub so a second person approves
-# every run.
+# @grasp-os/shared/names. Each stage runs in the GitHub environment of its
+# name and reads the 1Password Environment of the same name: production
+# requires a second person to approve every run; staging, which CI also
+# publishes releases from on every merge, doesn't.
 #
 # Every run also copies the shared secrets (Grasp's OAuth app secrets and
-# Composio key) from 1Password into the ops account's Secrets Store, where
+# Composio key) from 1Password into the account's Secrets Store, where
 # the admin reads them to set on each client's Workers. The admin never
 # holds a 1Password credential. Run it with "secrets only" after rotating one
 # in 1Password to copy it without deploying; a secrets-only rollout from the
 # admin then takes it to every client.
-name: Deploy grasp-os-ops
+name: Deploy platform
 
 on:
   workflow_dispatch:
@@ -33,20 +34,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-grasp-os-ops-${{ inputs.stage }}
+  group: deploy-platform-${{ inputs.stage }}
   cancel-in-progress: false
 
 jobs:
-  deploy-ops:
-    name: deploy-ops
+  deploy-platform:
+    name: deploy-platform
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: ${{ inputs.stage == 'production' && 'grasp-os-ops' || 'grasp-os-ops-staging' }}
+    environment: ${{ inputs.stage }}
     env:
       STAGE: ${{ inputs.stage }}
-      # The stage's 1Password Environment: ops, or ops-staging.
-      OPS: ${{ inputs.stage == 'production' && 'ops' || 'ops-staging' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,13 +56,13 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # The Cloudflare credentials and store, from the ops 1Password
+      # The Cloudflare credentials and store, from the stage's 1Password
       # Environment, as everything this workflow reads:
       # OP_SERVICE_ACCOUNT_TOKEN, the environment's secret, is the only value
       # kept in GitHub.
       - uses: ./.github/actions/load-1password
         with:
-          environment: ${{ env.OPS }}
+          environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: CLOUDFLARE_API_TOKEN
           settings: CLOUDFLARE_ACCOUNT_ID SECRETS_STORE_ID
@@ -73,7 +72,7 @@ jobs:
       # Each is named as the Worker secret it becomes.
       - uses: ./.github/actions/load-1password
         with:
-          environment: ${{ env.OPS }}
+          environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY
       # Secrets Store keeps each secret by an ID of its own: an existing one
@@ -98,7 +97,7 @@ jobs:
             fi
           done
           if [ "${#empty[@]}" -gt 0 ]; then
-            echo "::error::Empty in the ops 1Password Environment, nothing written: ${empty[*]}"
+            echo "::error::Empty in the $STAGE 1Password Environment, nothing written: ${empty[*]}"
             exit 1
           fi
           existing='[]'
@@ -130,9 +129,8 @@ jobs:
           done
       # A D1 database's jurisdiction is set only when it is created, and deploy
       # would auto-provision a missing one outside the EU: create the
-      # admin's database before its first deploy, as CI does for
-      # grasp-os-staging. One that exists outside the EU stops the deploy; it
-      # has to be recreated.
+      # admin's database before its first deploy. One that exists outside
+      # the EU stops the deploy; it has to be recreated.
       - name: Create the admin database in the EU
         if: ${{ !inputs.secrets-only }}
         run: |
@@ -175,7 +173,7 @@ jobs:
       # The admin verifies every request's Access JWT against its Access
       # application (apps/admin/src/access.ts) and refuses everyone
       # without these, so a deploy without them would lock staff out: stop
-      # before deploying. They're settings in the ops 1Password
+      # before deploying. They're settings in the stage's 1Password
       # Environment, not secrets: the AUD tag and the team URL
       # identify the app, they grant nothing. So is CLIENT_DOMAIN, the
       # domain clients are served under: without it the admin provisions
@@ -199,7 +197,7 @@ jobs:
       - if: ${{ !inputs.secrets-only }}
         uses: ./.github/actions/load-1password
         with:
-          environment: ${{ env.OPS }}
+          environment: ${{ inputs.stage }}
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           settings: CF_ACCESS_AUD CF_ACCESS_ISS CLIENT_DOMAIN ENTRA_CLIENT_ID GOOGLE_CLIENT_ID GRASP_CLIENT_ID ROOMS_ORIGIN ADMIN_HOST DISCORD_PUBLIC_KEY DISCORD_STAFF_IDS
       - name: Deploy the admin with its Access settings
@@ -207,7 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$CF_ACCESS_AUD" ] || [ -z "$CF_ACCESS_ISS" ]; then
-            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the ops 1Password Environment; nothing deployed"
+            echo "::error::Set CF_ACCESS_AUD and CF_ACCESS_ISS in the $STAGE 1Password Environment; nothing deployed"
             exit 1
           fi
           vars=(--var "CF_ACCESS_AUD:$CF_ACCESS_AUD" --var "CF_ACCESS_ISS:$CF_ACCESS_ISS")

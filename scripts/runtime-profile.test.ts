@@ -1,8 +1,8 @@
 /**
  * Code Mode's run record claims the CPU limit as enforced only where
  * `RUNTIME_PROFILE=cloudflare` (apps/core/src/code-mode.ts). These read the
- * real configs: staging's deploy must say `cloudflare`, so its records carry
- * the right evidence; local dev and the on-prem smoke run on plain workerd
+ * real configs: core's deploy script must say `cloudflare`, so its records
+ * carry the right evidence; local dev and the on-prem smoke run on plain workerd
  * must say `workerd`; and core's wrangler.jsonc, which dev and tests read
  * too, must say nothing, so no unvouched run claims a limit. The admin's
  * client deploys are covered by its deploy test (apps/admin/test). An
@@ -58,34 +58,7 @@ const wranglerVars = (
   return vars;
 };
 
-const releaseVar = /--var (?<name>\w+):(?<value>\S+)/gu;
-
-/**
- * The `--var NAME:value`s of each line of CI that deploys core from the
- * release (scripts/release/deploy-release.ts), by name.
- */
-const releaseDeployVars = (): Record<string, string>[] =>
-  read(".github/workflows/ci.yml")
-    .split("\n")
-    .filter(
-      (line) =>
-        line.includes("vp run release:deploy") && line.includes("--worker core")
-    )
-    .map((line) => {
-      const vars: Record<string, string> = {};
-      for (const match of line.matchAll(releaseVar)) {
-        vars[match.groups?.name ?? ""] = match.groups?.value ?? "";
-      }
-      return vars;
-    });
-
 describe("the runtime profile each deployment says", () => {
-  it("is cloudflare on staging, whose CI deploys core from the release", () => {
-    expect(
-      releaseDeployVars().map((vars) => vars.RUNTIME_PROFILE)
-    ).toStrictEqual(["cloudflare"]);
-  });
-
   it("is cloudflare when core is deployed with its deploy script", () => {
     const deploy = coreScripts().deploy ?? "";
     expect(wranglerVars(deploy, "deploy")?.RUNTIME_PROFILE).toBe("cloudflare");
