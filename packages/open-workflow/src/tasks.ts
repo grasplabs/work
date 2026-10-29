@@ -194,6 +194,75 @@ const metadataUses: Readonly<Record<string, readonly string[]>> = {
   concurrency: ["for", "fork"],
 };
 
+/**
+ * A named part the task begins (`metadata.grasp.section`): its name, and
+ * what it is for and its summary as display text. Nothing in it runs.
+ */
+const checkSection = (
+  checker: Checker,
+  value: JsonValue | undefined,
+  pointer: string,
+  site: Site
+): void => {
+  const section = objectAt(checker, value, pointer, site, "section");
+  if (section === undefined) {
+    return;
+  }
+  allowKeys(checker, section, ["name", "purpose", "summary"], pointer, site);
+  if (requireKey(checker, section, "name", pointer, site)) {
+    textAt(
+      checker,
+      section.name,
+      pointerJoin(pointer, "name"),
+      site,
+      profileLimits.maxTitleLength
+    );
+  }
+  if (Object.hasOwn(section, "purpose")) {
+    textAt(
+      checker,
+      section.purpose,
+      pointerJoin(pointer, "purpose"),
+      site,
+      profileLimits.maxTitleLength
+    );
+  }
+  if (Object.hasOwn(section, "summary")) {
+    textAt(
+      checker,
+      section.summary,
+      pointerJoin(pointer, "summary"),
+      site,
+      profileLimits.maxSummaryLength
+    );
+  }
+};
+
+/** A task's place on the canvas (`metadata.grasp.position`): `x` and `y`. */
+const checkPosition = (
+  checker: Checker,
+  value: JsonValue | undefined,
+  positionPointer: string,
+  site: Site
+): void => {
+  const position = objectAt(checker, value, positionPointer, site, "position");
+  if (position === undefined) {
+    return;
+  }
+  allowKeys(checker, position, ["x", "y"], positionPointer, site);
+  for (const axis of ["x", "y"]) {
+    const coordinate = member(position, axis);
+    if (typeof coordinate !== "number") {
+      checker.report.error(
+        "profile.invalid_value",
+        at(site, pointerJoin(positionPointer, axis)),
+        "Give x and y as finite numbers.",
+        { expected: "number" }
+      );
+    }
+  }
+};
+
 const checkMetadata = (
   checker: Checker,
   value: JsonValue | undefined,
@@ -224,7 +293,7 @@ const checkMetadata = (
   if (grasp === undefined) {
     return metadata;
   }
-  const applicable = ["label", "position"];
+  const applicable = ["label", "position", "section"];
   for (const [key, uses] of Object.entries(metadataUses)) {
     if (uses.includes(kind)) {
       applicable.push(key);
@@ -240,29 +309,21 @@ const checkMetadata = (
       profileLimits.maxTitleLength
     );
   }
+  if (Object.hasOwn(grasp, "section")) {
+    checkSection(
+      checker,
+      grasp.section,
+      pointerJoin(graspPointer, "section"),
+      site
+    );
+  }
   if (Object.hasOwn(grasp, "position")) {
-    const positionPointer = pointerJoin(graspPointer, "position");
-    const position = objectAt(
+    checkPosition(
       checker,
       grasp.position,
-      positionPointer,
-      site,
-      "position"
+      pointerJoin(graspPointer, "position"),
+      site
     );
-    if (position !== undefined) {
-      allowKeys(checker, position, ["x", "y"], positionPointer, site);
-      for (const axis of ["x", "y"]) {
-        const coordinate = member(position, axis);
-        if (typeof coordinate !== "number") {
-          checker.report.error(
-            "profile.invalid_value",
-            at(site, pointerJoin(positionPointer, axis)),
-            "Give x and y as finite numbers.",
-            { expected: "number" }
-          );
-        }
-      }
-    }
   }
   if (Object.hasOwn(grasp, "binding") && applicable.includes("binding")) {
     metadata.binding = {

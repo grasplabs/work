@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
 import { workflowStartReceipts } from "../db/core/schema.ts";
+import { withDoors } from "../workflow-doors.ts";
 import {
   requireWorkflowRole,
   workflowDefinition,
@@ -179,7 +180,8 @@ export const resourceRunTrace = async (
     workflow.id,
     run.version
   );
-  const diagram = workflowDiagram(z.json().parse(JSON.parse(definition)));
+  const parsed = z.json().parse(JSON.parse(definition));
+  const diagram = await withDoors(env, by, workflowDiagram(parsed), parsed);
   // Past its retention as the deployment has it now, or once swept, no
   // more of it is shown than of its result (resource-runs.ts): the engine
   // may still hold its journal for the retention it was admitted with.
