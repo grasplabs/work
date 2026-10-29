@@ -2,6 +2,7 @@ import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   applySettingsFn,
@@ -22,10 +23,12 @@ import {
   rollbackClientFn,
   rollbackRingFn,
 } from "../src/rollout/functions.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
+import { ended } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-functions-6a2f90";
@@ -163,7 +166,6 @@ interface Arranged {
 /** The runs a change may start or touch, followed. */
 interface Followed {
   rolloutRuns: Runs;
-  applyRuns: Runs;
 }
 
 /**
@@ -375,16 +377,31 @@ const changes: {
   },
   {
     name: "applying a client's settings now",
-    arrange: async ({ applyRuns }) => {
+    arrange: async () => {
       const release = await importedRelease("feat(core): applied to");
       const clientId = await activeClient(1, release);
       return {
         make: async () =>
           await callServerFn(applySettingsFn, { clientId }, { email: caller }),
         audited: { action: "client.apply_settings", clientId, target: null },
+        // Its run, on Workerflow: the one its claim's record names.
         settled: async () => {
-          const run = await latestOf(applyRuns);
-          await run.waitForStatus("complete");
+          const [claim] = await db
+            .select({ detail: auditEvents.detail })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.clientId, clientId),
+                eq(auditEvents.action, "client.apply_settings")
+              )
+            );
+          const run = z
+            .object({ run: z.string() })
+            .parse(JSON.parse(claim?.detail ?? "null"));
+          // Ended, and done: an apply that failed doesn't pass this test.
+          const settledRun = await ended(adminWorkflows.applyClient, run.run);
+          expect(settledRun.status).toBe("complete");
+          return settledRun;
         },
       };
     },
@@ -413,11 +430,7 @@ describe("the admin's changes, through its entry", () => {
       await using rolloutRuns = await follow(env.ROLLOUT);
       // An approved rollout deploys its fleet clients in runs of their own.
       await using _fleetRuns = await follow(env.ROLLOUT_CLIENT);
-      await using applyRuns = await follow(env.APPLY_CLIENT);
-      const { make, audited, settled } = await arrange({
-        rolloutRuns,
-        applyRuns,
-      });
+      const { make, audited, settled } = await arrange({ rolloutRuns });
 
       const { refused } = await make();
       await settled?.();

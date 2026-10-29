@@ -112,7 +112,7 @@ const isMissingInstance = (error: unknown): boolean =>
 const workflows: Readonly<Record<RunKind, (env: Env) => RunBinding>> = {
   rollout: (env) => env.ROLLOUT,
   rollback: (env) => env.ROLLBACK_CLIENT,
-  apply: (env) => env.APPLY_CLIENT,
+  apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
   provision_placed: (env) =>
     adminWorkflow(env, adminWorkflows.provisionPlacedClient),
 };
