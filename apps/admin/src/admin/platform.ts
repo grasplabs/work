@@ -12,6 +12,8 @@ import type { GridRow, LiveStatus } from "../clients/grid.ts";
  * are in, and the ring after the one it waits after is the next of
  * those, as approving it moves on to (src/rollout/control.ts).
  */
+import { compareReleaseIds } from "@grasp-os/shared/release-id";
+
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";
@@ -142,7 +144,7 @@ export const ringsOf = (
 const newestFirst = (releases: readonly ReleaseSummary[]): ReleaseSummary[] =>
   releases.toSorted(
     (a, b) =>
-      b.builtAt.getTime() - a.builtAt.getTime() || b.id.localeCompare(a.id)
+      b.builtAt.getTime() - a.builtAt.getTime() || compareReleaseIds(b.id, a.id)
   );
 
 /**

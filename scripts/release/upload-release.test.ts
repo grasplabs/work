@@ -21,11 +21,17 @@ import path from "node:path";
 import { buffer, text } from "node:stream/consumers";
 
 import {
+  commitKey,
   limitEvidenceFile,
   limitEvidenceKey,
   moduleKey,
 } from "@grasp-os/shared/release";
+import {
+  compareReleaseIds,
+  releaseMonthPrefix,
+} from "@grasp-os/shared/release-id";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { limitEvidenceFor } from "./evidence-lib.ts";
 import { builds, info } from "./fixture-release.ts";
@@ -67,6 +73,13 @@ const published = `releases/${manifest.releaseId}/manifest.json`;
 
 const HTTP_BAD_REQUEST = 400;
 
+/** What the tests read of a published manifest and its evidence. */
+const storedManifest = z.object({ releaseId: z.string(), commit: z.string() });
+const storedEvidence = z.object({
+  releaseId: z.string(),
+  limitEvidence: z.array(z.object({ releaseId: z.string() })),
+});
+
 const sha256Base64 = (bytes: Uint8Array): string =>
   createHash("sha256").update(bytes).digest("base64");
 
@@ -80,6 +93,8 @@ interface Bucket {
   checksums: Map<string, string>;
   puts: string[];
   writtenAfterHead: Map<string, Buffer>;
+  /** Objects another writer stores right after the next listing is answered. */
+  writtenAfterList: Map<string, Buffer>;
 }
 
 const emptyBucket = (): Bucket => ({
@@ -87,7 +102,44 @@ const emptyBucket = (): Bucket => ({
   checksums: new Map(),
   puts: [],
   writtenAfterHead: new Map(),
+  writtenAfterList: new Map(),
 });
+
+/** A ListObjectsV2 by `/` of the keys under `prefix`, in one page. */
+const listing = (bucket: Bucket, prefix: string): string => {
+  const ids = new Set(
+    [...bucket.objects.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(0, key.indexOf("/", "releases/".length) + 1))
+      .filter((key) => key.length > 0)
+  );
+  return `<ListBucketResult><IsTruncated>false</IsTruncated>${[...ids]
+    .map((id) => `<CommonPrefixes><Prefix>${id}</Prefix></CommonPrefixes>`)
+    .join("")}</ListBucketResult>`;
+};
+
+/** Answers a ListObjectsV2 of the bucket, if `request` is one. */
+const answeredListing = (
+  bucket: Bucket,
+  request: IncomingMessage,
+  response: ServerResponse
+): boolean => {
+  const url = request.url ?? "";
+  if (
+    !url.startsWith(`/${BUCKET}?`) ||
+    request.method !== "GET" ||
+    request.headers.authorization === undefined
+  ) {
+    return false;
+  }
+  const query = new URLSearchParams(url.slice(url.indexOf("?") + 1));
+  response.writeHead(HTTP_OK).end(listing(bucket, query.get("prefix") ?? ""));
+  for (const [key, bytes] of bucket.writtenAfterList) {
+    bucket.objects.set(key, bytes);
+  }
+  bucket.writtenAfterList.clear();
+  return true;
+};
 
 const handle = async (
   bucket: Bucket,
@@ -96,6 +148,9 @@ const handle = async (
 ): Promise<void> => {
   const prefix = `/${BUCKET}/`;
   const url = request.url ?? "";
+  if (answeredListing(bucket, request, response)) {
+    return;
+  }
   const key = url.startsWith(prefix) ? url.slice(prefix.length) : undefined;
   if (key === undefined || request.headers.authorization === undefined) {
     response.writeHead(HTTP_NOT_FOUND).end();
@@ -147,6 +202,8 @@ describe("publishing a release", () => {
   let server: Server | undefined;
   let bucket = emptyBucket();
   let endpoint = "";
+  /** Release directories `buildOf` made, removed after each test. */
+  const builtDirs: string[] = [];
 
   beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
@@ -174,6 +231,9 @@ describe("publishing a release", () => {
       await once(server, "close");
     }
     rmSync(dir, { force: true, recursive: true });
+    for (const built of builtDirs.splice(0)) {
+      rmSync(built, { force: true, recursive: true });
+    }
   });
 
   const upload = async (...flags: string[]): Promise<string> =>
@@ -214,7 +274,7 @@ describe("publishing a release", () => {
       evidenceFile,
       JSON.stringify({
         ...limitEvidenceFor(manifest, null),
-        releaseId: "r999999-fffffff",
+        releaseId: "26.01.999999",
       })
     );
     const another = await outcomeOf(upload());
@@ -224,7 +284,7 @@ describe("publishing a release", () => {
       JSON.stringify({
         ...limitEvidenceFor(manifest, null),
         previousRelease: {
-          releaseId: "r000000-0000000",
+          releaseId: "25.12.1",
           platformLimits: { ...info.platformLimits, workflowSteps: 10 },
         },
       })
@@ -233,7 +293,7 @@ describe("publishing a release", () => {
 
     expect({
       missing: missing.includes("has no limit-evidence.json"),
-      another: another.includes("is for r999999-fffffff"),
+      another: another.includes("is for 26.01.999999"),
       unevidenced: unevidenced.includes(
         "raises workflowSteps to 1000 without capacity and security evidence"
       ),
@@ -302,6 +362,137 @@ describe("publishing a release", () => {
     writeFileSync(path.join(dir, stray), "not in the manifest");
     await upload();
     expect(bucket.puts).not.toContain(stray);
+  });
+
+  it("keeps the id it has without --assign-id, as Promote release publishes it", async () => {
+    await upload();
+    expect(bucket.objects.get(published)).toStrictEqual(
+      readFileSync(path.join(dir, "manifest.json"))
+    );
+  });
+
+  /** A built release of `commit` in a directory of its own, under a build's id. */
+  const buildOf = (commit: string): string => {
+    const built = mkdtempSync(path.join(tmpdir(), "grasp-os-upload-test-"));
+    const local = generateManifest(
+      { ...info, releaseId: "dev-build", commit },
+      fixture
+    );
+    writeRelease(built, local, fixture);
+    writeFileSync(
+      path.join(built, limitEvidenceFile),
+      `${JSON.stringify(limitEvidenceFor(local, null))}\n`
+    );
+    builtDirs.push(built);
+    return built;
+  };
+
+  const publish = async (built: string): Promise<string> =>
+    await run([SCRIPT, "--release", built, "--assign-id"], {
+      PATH: process.env.PATH,
+      R2_ENDPOINT: endpoint,
+      R2_BUCKET: BUCKET,
+      R2_ACCESS_KEY_ID: "test-key-id",
+      R2_SECRET_ACCESS_KEY: "test-secret",
+    });
+
+  /** The ids published, oldest first, each with its manifest's and evidence's ids and commit. */
+  const publishedReleases = (): {
+    id: string;
+    manifestId: unknown;
+    evidenceIds: unknown[];
+    commit: unknown;
+  }[] =>
+    [...bucket.objects.keys()]
+      .filter((key) => key.endsWith("/manifest.json"))
+      .map((key) => key.slice("releases/".length, -"/manifest.json".length))
+      .toSorted(compareReleaseIds)
+      .map((id) => {
+        const stored = storedManifest.parse(
+          JSON.parse(
+            bucket.objects.get(`releases/${id}/manifest.json`)?.toString() ?? ""
+          )
+        );
+        const evidence = storedEvidence.parse(
+          JSON.parse(bucket.objects.get(limitEvidenceKey(id))?.toString() ?? "")
+        );
+        return {
+          id,
+          manifestId: stored.releaseId,
+          evidenceIds: [
+            evidence.releaseId,
+            ...evidence.limitEvidence.map((entry) => entry.releaseId),
+          ],
+          commit: stored.commit,
+        };
+      });
+
+  it("publishes under the month's next id, YY.MM.N, the next commit under the one after", async () => {
+    const month = releaseMonthPrefix(new Date());
+    await publish(buildOf("1".repeat(40)));
+    await publish(buildOf("2".repeat(40)));
+
+    expect(publishedReleases()).toStrictEqual([
+      {
+        id: `${month}1`,
+        manifestId: `${month}1`,
+        evidenceIds: [`${month}1`],
+        commit: "1".repeat(40),
+      },
+      {
+        id: `${month}2`,
+        manifestId: `${month}2`,
+        evidenceIds: [`${month}2`],
+        commit: "2".repeat(40),
+      },
+    ]);
+    expect(bucket.objects.get(commitKey("2".repeat(40)))?.toString()).toBe(
+      `${month}2\n`
+    );
+  });
+
+  it("takes the next id when another publish claims one between its listing and its write", async () => {
+    const month = releaseMonthPrefix(new Date());
+    bucket.writtenAfterList.set(
+      limitEvidenceKey(`${month}1`),
+      Buffer.from("another publish's")
+    );
+    await publish(buildOf("1".repeat(40)));
+
+    expect(bucket.objects.get(limitEvidenceKey(`${month}1`))?.toString()).toBe(
+      "another publish's"
+    );
+    expect(publishedReleases().map(({ id }) => id)).toStrictEqual([
+      `${month}2`,
+    ]);
+  });
+
+  it("never gives publishes running at once the same id", async () => {
+    const commits = ["3", "4", "5"].map((digit) => digit.repeat(40));
+    const dirs = commits.map(buildOf);
+    await Promise.all(dirs.map(publish));
+
+    const releases = publishedReleases();
+    expect(new Set(releases.map(({ id }) => id)).size).toBe(commits.length);
+    expect(
+      releases
+        .map(({ commit }) => String(commit))
+        .toSorted((a, b) => a.localeCompare(b))
+    ).toStrictEqual(commits);
+    expect(
+      releases.every(
+        ({ id, manifestId, evidenceIds }) =>
+          manifestId === id && evidenceIds.every((other) => other === id)
+      )
+    ).toBeTruthy();
+  });
+
+  it("publishes a commit once, however often its publish runs", async () => {
+    await publish(buildOf("6".repeat(40)));
+    const stdout = await publish(buildOf("6".repeat(40)));
+
+    expect(publishedReleases()).toHaveLength(1);
+    expect(stdout).not.toContain("Published");
   });
 
   it("uploads nothing on a dry run", async () => {
