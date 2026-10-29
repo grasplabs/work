@@ -1535,6 +1535,69 @@ describe("entity linking", () => {
     }).toStrictEqual({ before: [pair[1]], after: [], proposals: 1 });
   });
 
+  it("refuses a `same` whose evidence a purge rewrote as it was decided", async () => {
+    const { host, admin, pair, proof } = await adaTwice();
+    const writer = writerOf("admin");
+    const content = {
+      type: "content",
+      documentIds: [proof],
+      terms: ["calls"],
+      reason: "erasure_request",
+    };
+    let purged = false;
+    // The purge runs between the decision's read of its evidence and its write.
+    const racing = {
+      ...host.brain,
+      db: new Proxy(host.brain.db, {
+        get: (target, property): unknown => {
+          const value: unknown = Reflect.get(target, property);
+          if (property === "batch" && typeof value === "function") {
+            return async (...args: unknown[]): Promise<unknown> => {
+              if (!purged) {
+                purged = true;
+                const prepared = await preparePurge(
+                  host.brain,
+                  writer,
+                  content,
+                  noCopies
+                );
+                await purge(
+                  host.brain,
+                  writer,
+                  content,
+                  prepared.token,
+                  noCopies
+                );
+              }
+              return await Reflect.apply(value, target, args);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      }),
+    };
+    const decided = await outcome(
+      decideEntityMatch(racing, admin, {
+        entities: pair,
+        decision: "same",
+        evidence: { documentId: proof, version: 1 },
+      })
+    );
+
+    expect({
+      purged,
+      decided,
+      same: await sameAsFor(host.brain, admin, pair[0]),
+    }).toStrictEqual({
+      purged: true,
+      decided: "brain.revision_conflict",
+      same: [],
+    });
+  });
+
   it("decides a pair though one side has more readable mentions than one read takes", async () => {
     const { host, admin, pair } = await adaTwice();
     // Thousands of newer mentions of one side, as many sources would give.

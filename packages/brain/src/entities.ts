@@ -2185,10 +2185,10 @@ const requireEvidence = async <C>(
   brain: Brain<C>,
   reader: C,
   evidence: { documentId: string; version: number }
-): Promise<void> => {
+): Promise<string> => {
   const allowed = await allowedFor(brain.ports, reader);
   const found = await brain.db
-    .select({ id: documents.id })
+    .select({ id: documents.id, payloadKey: versions.payloadKey })
     .from(documents)
     .innerJoin(collections, eq(collections.id, documents.collectionId))
     .innerJoin(
@@ -2203,6 +2203,7 @@ const requireEvidence = async <C>(
   if (found === undefined) {
     throw brainErrors.create("brain.not_found");
   }
+  return found.payloadKey;
 };
 
 /**
@@ -2217,7 +2218,7 @@ const decidable = async <C>(
   [first, second]: readonly [string, string],
   evidence: { documentId: string; version: number } | undefined,
   decision: "same" | "different"
-): Promise<ReadableMention[]> => {
+): Promise<{ rows: ReadableMention[]; payloadKey: string | null }> => {
   const { sides, rows } = await readableSides(brain, reader, [first, second]);
   const one = sides.get(first);
   const other = sides.get(second);
@@ -2231,10 +2232,13 @@ const decidable = async <C>(
   ) {
     throw brainErrors.create("brain.invalid");
   }
-  if (evidence !== undefined) {
-    await requireEvidence(brain, reader, evidence);
-  }
-  return rows;
+  return {
+    rows,
+    payloadKey:
+      evidence === undefined
+        ? null
+        : await requireEvidence(brain, reader, evidence),
+  };
 };
 
 /**
@@ -2299,7 +2303,13 @@ export const decideEntityMatch = async <C>(
   // A person's own call: an App, run or agent never decides who is who.
   const decidedBy = brain.ports.ownerOf(reader);
   const [first, second] = entities;
-  const rows = await decidable(brain, reader, entities, evidence, decision);
+  const { rows, payloadKey } = await decidable(
+    brain,
+    reader,
+    entities,
+    evidence,
+    decision
+  );
   const [entityA, entityB] = first < second ? [first, second] : [second, first];
   const pair = and(
     eq(brainEntityMatches.entityA, entityA),
@@ -2314,7 +2324,19 @@ export const decideEntityMatch = async <C>(
     decidedBy,
     decidedAt,
   };
-  const [written] = await auditedBatch(brain.ports, brain.db, [
+  // The evidence as read, checked as the decision is written: a purge
+  // that rewrote it meanwhile fails the batch (a decision without its
+  // pair, which NOT NULL refuses), so no match rests on purged text.
+  const evidenceChanged =
+    evidence === undefined || payloadKey === null
+      ? sql`0`
+      : sql`NOT EXISTS (SELECT 1 FROM ${versions} WHERE ${versions.documentId} = ${evidence.documentId} AND ${versions.number} = ${evidence.version} AND ${versions.payloadKey} = ${payloadKey})`;
+  const [, written] = await auditedBatch(brain.ports, brain.db, [
+    brain.db
+      .insert(brainEntityMatches)
+      .select(
+        sql`SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${evidenceChanged}`
+      ),
     brain.db
       .insert(brainEntityMatches)
       .values({ entityA, entityB, ...values })
@@ -2345,7 +2367,12 @@ export const decideEntityMatch = async <C>(
         ...new Set(rows.flatMap(({ collectionId }) => collectionId ?? [])),
       ],
     }),
-  ]);
+  ]).catch((error: unknown) => {
+    if (String(error).includes("NOT NULL")) {
+      throw brainErrors.create("brain.revision_conflict");
+    }
+    throw error;
+  });
   if (written.meta.changes === 0) {
     throw brainErrors.create("brain.revision_conflict");
   }
