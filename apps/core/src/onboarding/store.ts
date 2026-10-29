@@ -4251,7 +4251,12 @@ export class Onboarding extends DurableObject<Env> {
     if (row === undefined) {
       return [];
     }
-    const texts: string[] = [row.transcript];
+    // Its file's name too: staff's upload may be named for what a purge
+    // takes out.
+    const texts: string[] = [
+      row.transcript,
+      ...(row.fileName === null ? [] : [row.fileName]),
+    ];
     const collect = (value: unknown): void => {
       if (typeof value === "string") {
         texts.push(value);
@@ -6535,16 +6540,15 @@ export class Onboarding extends DurableObject<Env> {
     return count <= linkCallsPerMinute;
   }
 
-  /** What someone's interview holds now; none before a save. */
+  /**
+   * What someone's interview holds now; none before a save, and none for
+   * one that no longer reads as an interview: it gives nothing to a
+   * drawing or a count, and a purge reaches it as stored
+   * (`interviewStored`), so nothing stops on it.
+   */
   #held(person: string): InterviewProgress | null {
-    const [row] = this.#db
-      .select({ progress: interviews.progress })
-      .from(interviews)
-      .where(eq(interviews.person, person))
-      .all();
-    return row === undefined
-      ? null
-      : interviewProgressSchema.parse(JSON.parse(row.progress));
+    const stored = this.interviewStored(person);
+    return stored !== null && "progress" in stored ? stored.progress : null;
   }
 
   /**

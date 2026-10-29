@@ -390,6 +390,93 @@ describe("a content purge of the interviews", () => {
     );
   });
 
+  it("goes on past a teammate's interview that no longer reads as one, while their team's facts are in the brain", async () => {
+    const term = `Zq${unique()}`;
+    const { lead } = await talking(`Zq${unique()}`);
+    const store = onboardingStore(env);
+    const member = `max-${unique()}`;
+    await store.saveRoster(
+      {
+        teams: [{ id: "sales", name: "Sales", lead, does: "", off: false }],
+        people: [
+          {
+            id: lead,
+            name: "Lea Lund",
+            email: "lea@acme.test",
+            team: "sales",
+            title: "Head of Sales",
+            away: false,
+          },
+          {
+            id: member,
+            name: "Max Berg",
+            email: "max@acme.test",
+            team: "sales",
+            title: "Seller",
+            away: false,
+          },
+        ],
+      },
+      { type: "system" }
+    );
+    // Their interview kept in a shape a later release no longer reads, and
+    // their team's facts in the brain: what the purge's drawing reads.
+    const stored = JSON.stringify({ said: [`${term} closes the deals.`] });
+    await runInDurableObject(store, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO interviews (person, progress, updated_at) VALUES (?, ?, ?)",
+        member,
+        stored,
+        new Date().toISOString()
+      );
+      state.storage.sql.exec(
+        "INSERT INTO brain_sent (record, type, team, person) VALUES (?, 'statement', 'sales', ?)",
+        `record-${unique()}`,
+        member
+      );
+    });
+
+    await purgeTerm(term);
+    const after = await runInDurableObject(store, (_instance, state) =>
+      state.storage.sql
+        .exec<{ progress: string }>(
+          "SELECT progress FROM interviews WHERE person = ?",
+          member
+        )
+        .one()
+    );
+
+    expect(after.progress).toBe(
+      JSON.stringify({ said: [`${purgedMarker} closes the deals.`] })
+    );
+  });
+
+  it("forgets the kickoff when only its file's name holds the term", async () => {
+    const term = `Zq${unique()}`;
+    const store = onboardingStore(env);
+    await store.saveKickoff(
+      {
+        transcript: "We sell boats.",
+        fileName: `${term}.vtt`,
+        reading: {
+          fields: { business: { text: "Boats", quote: "We sell boats" } },
+          ask: {},
+          teams: [],
+        },
+      },
+      { type: "system" },
+      await store.purgeMark()
+    );
+
+    await purgeTerm(term);
+    const kept = await store.kickoff();
+
+    expect({
+      holds: JSON.stringify(kept).includes(term),
+      transcript: kept.transcript,
+    }).toStrictEqual({ holds: false, transcript: null });
+  });
+
   it("forgets a checked difference holding the term, and keeps its drawing", async () => {
     const term = `Zq${unique()}`;
     await talking(`Zq${unique()}`);
