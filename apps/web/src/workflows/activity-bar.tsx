@@ -156,7 +156,7 @@ export const ActivityBar = ({
       </div>
       <div
         className={cn(
-          "ease-sidebar grid transition-all duration-500",
+          "ease-sidebar grid transition-all duration-300",
           open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         )}
         id="workflow-activity-lines"
