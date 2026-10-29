@@ -17,6 +17,7 @@ import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import {
   callAppFunction,
   callRunFunction,
+  invocationFor,
   readFunctionRequest,
 } from "../src/app-functions.ts";
 import type { RunCaller } from "../src/app-functions.ts";
@@ -25,8 +26,12 @@ import type { Release } from "../src/app-releases.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { activeStaffRole } from "../src/auth/identity.ts";
+import { callOperation } from "../src/operations.ts";
+import type { Runner } from "../src/operations.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { hostedRelease } from "../src/release-runner.ts";
 import {
   approveResourceBinding,
   reviewResourceBindings,
@@ -254,6 +259,46 @@ export default app({
 });
 
 /** A relay: `relay.go` calls the next App's `relay.go`, and says how far it got. */
+/** An App whose action writes twice, a mutation's commit each time. */
+const touchFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation } from "#grasp/server";
+export const touch = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await ctx.db.insert("notes", { title: "touched" });
+    return null;
+  },
+});
+export const touchTwice = action({
+  args: {},
+  returns: v.null(),
+  uses: [touch],
+  handler: async (ctx) => {
+    await ctx.runMutation(touch, {});
+    await ctx.runMutation(touch, {});
+    return null;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { touch, touchTwice } from "./operations/notes.ts";
+import schema from "./schema.ts";
+export default app({
+  name: "Touch",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { notes: { touch, touchTwice } },
+  screens: [],
+  uses: [],
+});
+`,
+};
+
 const relayFiles: Record<string, string> = {
   "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
@@ -1612,6 +1657,47 @@ export default workflowTests(definition, [{ name: "runs", mocks: { relay: null }
       bound: { ok: true, value: "+++error:resource.unavailable:undefined" },
       first: [{ actor: "workflow", staff: staffId, onBehalfOf: staffId }],
       second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
+    });
+  });
+
+  it("refuses a staff-started call's next write once their staff session has ended", async () => {
+    const sealed = await sealedApp(touchFiles, "Touch");
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staffId } = await whoami(session);
+    const role = await activeStaffRole(env, staffId);
+    if (role === undefined) {
+      throw new Error("A staff session");
+    }
+    const hosted = hostedRelease(env, sealed.release);
+    let ended = false;
+    // Their sessions end while the action runs, before its first commit.
+    const run: Runner = async (path, args, channel) => {
+      if (path === "notes.touch" && !ended) {
+        ended = true;
+        await env.DB.prepare(
+          "DELETE FROM sessions WHERE user_id = ? AND staff = 1"
+        )
+          .bind(staffId)
+          .run();
+      }
+      return await hosted.run(path, args, channel);
+    };
+    const invocation = await invocationFor(env, sealed.release, {
+      by: { userId: staffId, role },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 60_000,
+      byStaff: true,
+    });
+    const result = await callOperation(
+      { manifest: sealed.release.app, run },
+      invocation,
+      { path: "notes.touchTwice", kind: "action" },
+      {}
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "permission.person_inactive" },
     });
   });
 

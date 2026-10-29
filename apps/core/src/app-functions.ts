@@ -248,11 +248,21 @@ export const invocationFor = async (
   // Before every protected step: the call starts, each mutation commits
   // and each resource request (the operation host's one gate, `admit`).
   // A release revoked, a role lost or an agent's permission withdrawn
-  // meanwhile stops a call already running.
+  // meanwhile stops a call already running. Work Grasp staff started reads
+  // their staff role again each time, as a run does (`runInvocationFor`):
+  // the role the call began with isn't theirs once their staff session
+  // ends, however the call was reached.
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    return await operationRoles(env, by, app);
+    if (!byStaff) {
+      return await operationRoles(env, by, app);
+    }
+    const role = await personRole(env, by.userId, true);
+    if (role === undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    return await operationRoles(env, { userId: by.userId, role }, app);
   };
   const bindings = resourceBindingsFor(env, {
     app,
