@@ -11538,7 +11538,9 @@ msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
 #. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
+#: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Gezegd door vijf of meer mensen"
 
