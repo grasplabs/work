@@ -5141,6 +5141,10 @@ msgstr "Brouillon"
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Leurs propres brouillons, événements et fichiers, après avoir appuyé sur une carte."
 
+#: src/chat/drawer-edge.tsx
+msgid "Drag to make the chat wider or narrower"
+msgstr "Faites glisser pour élargir ou rétrécir le chat"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
 msgstr "Redessiner"
@@ -9832,7 +9836,6 @@ msgstr "Ouverte depuis le {date}. Tant qu’elle reste sans réponse, cette vale
 msgid "Open since Grasp's go on {since}."
 msgstr "Ouvert depuis le feu vert de Grasp le {since}."
 
-#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Ouvrir le chat"

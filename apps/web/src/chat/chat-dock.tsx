@@ -10,7 +10,6 @@ import {
 } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
-  ChevronUpIcon,
   Maximize2Icon,
   MessagesSquareIcon,
   Minimize2Icon,
@@ -29,8 +28,9 @@ import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
-import { setDockMode, useDockMode } from "./dock-mode.ts";
+import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
+import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
@@ -39,9 +39,12 @@ import { useAsk } from "./use-ask.ts";
 // prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
 // the person's open chat, so what is asked anywhere goes on there and shows
 // in its list, and a new chat here is a new one there. A slim bar to ask in;
-// sending, or its arrow, opens a frame around it with the conversation,
-// which grows into a drawer down the right side and back, or folds away to
-// the bar. The thread and the box are the chat's own (thread.tsx,
+// sending, or a click into it with a chat behind it, opens a frame around
+// it with the conversation, which grows into a drawer down the right side
+// (its edge dragged to make it wider or narrower) and back, or folds away
+// to the bar. Folded or open, it is a white card with the brand's soft
+// shadow; its surfaces share one rounding and its controls another, and
+// what is in it keeps 20 pixels from every edge. The thread and the box are the chat's own (thread.tsx,
 // composer.tsx), and the chat is the same watch as on Chat (chat-watch.ts).
 // What the agent builds is in Chat's side panel: "Open in chat" opens it.
 
@@ -158,8 +161,8 @@ const DockHeader = ({
     <header
       className={
         mode === "drawer"
-          ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-1.5 pl-4"
-          : "flex flex-none items-center gap-0.5 border-b py-1.5 pr-1.5 pl-4"
+          ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-2.5 pl-5"
+          : "flex h-13 flex-none items-center gap-0.5 border-b pr-2.5 pl-5"
       }
     >
       <h2 className="flex-1 font-medium">{title}</h2>
@@ -229,11 +232,12 @@ const DockThread = ({
   onRetry: () => void;
 }) => {
   if (chatId === undefined) {
-    return <p className="text-muted-foreground flex-1 p-4">{empty}</p>;
+    return <p className="text-muted-foreground flex-1 p-5">{empty}</p>;
   }
   return (
     <ChatThread
       chatId={chatId}
+      compact
       loaded={view.loaded || failure !== undefined}
       messages={view.messages}
       onRetry={onRetry}
@@ -289,7 +293,6 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
  * tab's open chat of `slot` (active-chat.ts).
  */
 const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
-  const { t } = useLingui();
   const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
   const { models, retry } = useModels();
@@ -306,20 +309,52 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
     slot
   );
   const mode = useDockMode();
+  const drawerWidth = useDockDrawerWidth();
+  // While the drawer's edge is dragged, nothing eases.
+  const [dragging, setDragging] = useState(false);
   // The box stays as the dock moves, but the button that moved it may go:
   // the focus goes back to the box, so the cursor stays in it as the frame
   // opens, grows or folds away.
   const dock = useRef<HTMLElement>(null);
+  // Whether the box is being given the focus back by the dock itself, as
+  // it folds away: that focus doesn't open the chat again.
+  const refocusing = useRef(false);
   const focusBox = (): void => {
     requestAnimationFrame(() => {
+      refocusing.current = true;
       dock.current?.querySelector("textarea")?.focus();
+      refocusing.current = false;
     });
   };
   const moveTo = (next: DockMode): void => {
     setDockMode(next);
     focusBox();
   };
+  // A click or the focus into the folded box, with a conversation behind
+  // it, opens the chat on it: the box is the way in, with no arrow of its
+  // own. A click counts even with the cursor already in the box.
   const open = mode !== "bar";
+  const unfolds = !open && chatId !== undefined;
+  useEffect(() => {
+    const element = dock.current;
+    const unfold = (event: Event): void => {
+      if (event.target instanceof HTMLTextAreaElement && !refocusing.current) {
+        setDockMode("frame");
+      }
+    };
+    if (unfolds) {
+      element?.addEventListener("focusin", unfold);
+      element?.addEventListener("pointerdown", unfold);
+    }
+    return () => {
+      element?.removeEventListener("focusin", unfold);
+      element?.removeEventListener("pointerdown", unfold);
+    };
+  }, [unfolds]);
+  // The drawer's width, as a variable its class reads: no inline style.
+  useEffect(() => {
+    dock.current?.style.setProperty("--dock-drawer", `${drawerWidth}px`);
+  }, [drawerWidth]);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
     <Composer
@@ -334,43 +369,29 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
       }}
       placeholder={words.placeholder}
       running={view.running}
-    >
-      {!open && chatId !== undefined ? (
-        <Button
-          aria-label={t`Open the chat`}
-          onClick={() => {
-            moveTo("frame");
-          }}
-          size="icon-xs"
-          title={t`Open the chat`}
-          type="button"
-          variant="ghost"
-        >
-          <ChevronUpIcon />
-        </Button>
-      ) : null}
-    </Composer>
+    />
   );
   const drawer = mode === "drawer";
   // One tree in every mode, so the box, and the draft in it, stays as the
   // dock opens, grows or folds away. As in the prototype's corner chat
   // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
-  // 416 typed in, as round as the box in it; the frame and the drawer
-  // 442 wide, the frame kept 16 pixels off every edge of the window and
-  // rising out of the bar as it opens.
+  // 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
+  // kept 16 pixels off every edge of the window and rising out of the bar
+  // as it opens; the drawer as wide as its edge was dragged. Each is a
+  // white card on `shadow-lifted`, with no glow, blur or ring round it.
   let place =
     "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
   let look =
-    "chat-glow bg-background/80 pointer-events-auto w-80 max-w-full rounded-md text-sm backdrop-blur-md transition-all duration-300 ease-out focus-within:w-104 motion-reduce:transition-none";
+    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
   if (drawer) {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
     look =
-      "bg-background pointer-events-auto flex h-full w-110.5 max-w-full flex-col border-l text-sm";
+      "bg-card pointer-events-auto relative flex h-full w-(--dock-drawer) max-w-full flex-col border-l text-sm";
   } else if (open) {
     place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
     look =
-      "chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none";
+      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
   }
   return (
     <div className={place}>
@@ -379,6 +400,16 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
         className={look}
         ref={dock}
       >
+        {drawer ? (
+          <DrawerEdge
+            dragging={dragging}
+            onClose={() => {
+              moveTo("frame");
+            }}
+            onDragging={setDragging}
+            width={drawerWidth}
+          />
+        ) : null}
         {open ? (
           <DockHeader
             chatId={chatId}
@@ -405,7 +436,11 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
           />
         ) : null}
         {open ? <DockQuestions slot={slot} /> : null}
-        <div className={open ? "flex flex-none flex-col gap-1 p-3" : undefined}>
+        <div
+          className={
+            open ? "flex flex-none flex-col gap-1 px-5 pt-2 pb-5" : undefined
+          }
+        >
           {box}
           {noModels === undefined ? null : (
             <p

@@ -4,8 +4,11 @@ import {
   MessageScrollerContent,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@grasp-os/ui/components/message-scroller";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 
 // A chat's thread that follows the answer as it grows, in the prototype's
 // AI Elements conversation (grasplabs/prototype
@@ -16,18 +19,69 @@ import { cn } from "@grasp-os/ui/lib/utils";
 // prototype's empty state and download aren't here: the chat page has its
 // own, and the export menu its own Markdown.
 
+/** How long a thread keeps to its end while what is around it settles, in milliseconds. */
+const settlesWithinMs = 500;
+
+/**
+ * A thread opens at its end, and stays there while what is around it
+ * settles: the chat dock's frame rises into place and its box is measured
+ * a moment later, so the view gets smaller after the scroller went to the
+ * end, and the newest words would slip under the box. For the first half
+ * second only, and not once the person scrolls.
+ */
+const SettleAtEnd = ({
+  scroller,
+}: {
+  scroller: RefObject<HTMLDivElement | null>;
+}) => {
+  const { scrollToEnd } = useMessageScroller();
+  useEffect(() => {
+    const element = scroller.current;
+    const observer = new ResizeObserver(() => {
+      scrollToEnd({ behavior: "auto" });
+    });
+    const stop = (): void => {
+      observer.disconnect();
+    };
+    const timer = setTimeout(stop, settlesWithinMs);
+    if (element !== null) {
+      observer.observe(element);
+      element.addEventListener("wheel", stop, { once: true, passive: true });
+      element.addEventListener("touchmove", stop, {
+        once: true,
+        passive: true,
+      });
+    }
+    return () => {
+      clearTimeout(timer);
+      stop();
+      element?.removeEventListener("wheel", stop);
+      element?.removeEventListener("touchmove", stop);
+    };
+  }, [scroller, scrollToEnd]);
+  return null;
+};
+
 /** The thread: it opens at its end and follows it. */
 export const Conversation = ({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof MessageScroller>) => (
-  <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-    <MessageScroller className={cn("min-h-0 flex-1", className)} {...props}>
-      {children}
-    </MessageScroller>
-  </MessageScrollerProvider>
-);
+}: React.ComponentProps<typeof MessageScroller>) => {
+  const scroller = useRef<HTMLDivElement>(null);
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller
+        className={cn("min-h-0 flex-1", className)}
+        ref={scroller}
+        {...props}
+      >
+        <SettleAtEnd scroller={scroller} />
+        {children}
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+};
 
 /** What the thread scrolls through, named for assistive technology. */
 export const ConversationContent = ({

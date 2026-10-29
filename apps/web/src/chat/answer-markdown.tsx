@@ -93,7 +93,7 @@ const CodeBlock = ({
   const { t } = useLingui();
   const { copied, copy } = useCopy();
   return (
-    <figure className="bg-muted flex min-w-0 flex-col rounded-md text-sm">
+    <figure className="bg-muted flex min-w-0 flex-col rounded-xl text-sm">
       <figcaption className="text-muted-foreground flex items-center justify-between gap-2 py-1 pr-1 pl-3 text-xs">
         <span>{language ?? t`Code`}</span>
         <Button

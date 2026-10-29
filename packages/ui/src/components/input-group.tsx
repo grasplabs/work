@@ -40,7 +40,7 @@ function InputGroup({
         size === "prompt" &&
           "h-9 rounded-xl [&>textarea]:px-4.5 [&>textarea]:pt-3.5",
         size === "chat" &&
-          "h-9 rounded-xl [&>[data-align=block-end]]:px-1.5 [&>[data-align=block-end]]:pt-0 [&>[data-align=block-end]]:pb-1.5 [&>[data-align=inline-end]]:pr-2.5 [&>[data-slot=input-group-addon]_button]:rounded-lg [&>textarea]:px-3",
+          "h-9 rounded-xl [&>[data-align=block-end]]:px-1.5 [&>[data-align=block-end]]:pt-0 [&>[data-align=block-end]]:pb-1.5 [&>[data-align=inline-end]]:pr-2.5 [&>[data-slot=input-group-addon]_button]:rounded-md [&>textarea]:px-3",
         size === "lg" &&
           "text-foreground min-h-14 rounded-[1.75rem] px-1.5 text-sm font-medium shadow-sm [&>[data-slot=input-group-addon]]:py-2 [&>textarea]:px-3.5 [&>textarea]:py-4.5 [&>textarea]:font-medium",
         className

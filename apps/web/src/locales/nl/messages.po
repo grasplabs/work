@@ -5141,6 +5141,10 @@ msgstr "Concept"
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Hun eigen concepten, afspraken en bestanden, nadat ze op een kaart drukken."
 
+#: src/chat/drawer-edge.tsx
+msgid "Drag to make the chat wider or narrower"
+msgstr "Sleep om de chat breder of smaller te maken"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
 msgstr "Opnieuw tekenen"
@@ -9832,7 +9836,6 @@ msgstr "Open sinds {date}. Tot er een antwoord is, blijft dit onbekend, nooit nu
 msgid "Open since Grasp's go on {since}."
 msgstr "Open sinds het startsein van Grasp op {since}."
 
-#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat openen"

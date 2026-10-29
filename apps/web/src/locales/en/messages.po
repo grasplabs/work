@@ -5141,6 +5141,10 @@ msgstr "Draft"
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Drafts, events and files of their own, after they press a card."
 
+#: src/chat/drawer-edge.tsx
+msgid "Drag to make the chat wider or narrower"
+msgstr "Drag to make the chat wider or narrower"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
 msgstr "Draw again"
@@ -9832,7 +9836,6 @@ msgstr "Open since {date}. Until it is answered, this stays unknown, never zero.
 msgid "Open since Grasp's go on {since}."
 msgstr "Open since Grasp's go on {since}."
 
-#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Open the chat"

@@ -32,7 +32,7 @@ import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
-import { dockDrawerWidth, useDockMode } from "../chat/dock-mode.ts";
+import { useDockDrawerWidth, useDockMode } from "../chat/dock-mode.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype
 // (`routes/brain/index.tsx`). The prototype's chat at its foot, which tells
@@ -189,6 +189,7 @@ const keyOnControl = (event: KeyboardEvent): boolean =>
 const AtlasPage = () => {
   // The brain's chat, open as a drawer, takes the right of the canvas.
   const dock = useDockMode();
+  const drawerWidth = useDockDrawerWidth();
   const { t, i18n } = useLingui();
   const { workspace: ws, brain } = useBrainData();
   const atlas = atlasOf(ws, brain);
@@ -317,7 +318,7 @@ const AtlasPage = () => {
       clear={{
         ...CLEAR,
         corner: legendCorner(groups.length),
-        right: dock === "drawer" ? dockDrawerWidth : 0,
+        right: dock === "drawer" ? drawerWidth : 0,
       }}
       controls={controls}
       dive={dive}

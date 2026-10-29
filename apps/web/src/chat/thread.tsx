@@ -524,6 +524,7 @@ export const ChatThread = ({
   running,
   tools = noTools,
   onRetry,
+  compact = false,
   children,
 }: {
   /** The chat, whose answers' sources core is asked for. */
@@ -540,6 +541,8 @@ export const ChatThread = ({
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
+  /** In the chat dock: closer together, 20 pixels from every edge. */
+  compact?: boolean;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -576,7 +579,11 @@ export const ChatThread = ({
         <ConversationContent label={t`Messages`}>
           <ol
             aria-label={t`Messages`}
-            className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+            className={
+              compact
+                ? "flex w-full flex-col gap-7 p-5"
+                : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+            }
           >
             {loaded ? null : (
               <li className="flex justify-center py-8">
