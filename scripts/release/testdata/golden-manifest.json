@@ -76,6 +76,10 @@
           "id": "$D1_DB_ID",
           "name": "DB",
           "type": "d1"
+        },
+        {
+          "name": "CF_VERSION_METADATA",
+          "type": "version_metadata"
         }
       ],
       "compatibilityFlags": [

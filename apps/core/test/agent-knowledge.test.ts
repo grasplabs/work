@@ -4,7 +4,7 @@ import { citedSnippetMax } from "@grasp-os/shared/chat";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import type { CollectionInput } from "@grasp-os/shared/knowledge";
+import type { CollectionInput, PurgeInput } from "@grasp-os/shared/knowledge";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -66,6 +66,24 @@ const newAdmin = async () => {
 const newPerson = async () => await signedInWithRole(idp, "user");
 
 type Admin = Awaited<ReturnType<typeof newAdmin>>;
+
+const pinnedPrefix = "brain-document:";
+
+/**
+ * A withheld source as its IDs name it: a pinned document version's
+ * (`brainDocumentRead`) as `brain-document:<collection>/<document>`, so a
+ * test needn't know the pin; any other as it is.
+ */
+const sourceNamed = (source: unknown): string => {
+  const text = String(source);
+  if (!text.startsWith(pinnedPrefix)) {
+    return text;
+  }
+  const [collectionId, documentId] = z
+    .tuple([z.string(), z.string(), z.int(), z.string()])
+    .parse(JSON.parse(text.slice(pinnedPrefix.length)));
+  return `${pinnedPrefix}${collectionId}/${documentId}`;
+};
 
 /** Grants `agent` reading `collectionId`, under `binding`. */
 const grantRead = async (
@@ -933,29 +951,120 @@ describe("a chat's Knowledge", setUpTime, () => {
     await ask("And now?");
     expect(JSON.stringify(gateway.requests.at(-1)?.body)).toContain(secret);
 
-    // Audited once, by the agent for its person: the run and the source,
-    // never what it read.
-    const events = await eventsOf(agent.agentId, (all) =>
-      all.some(({ action }) => action === "chat.history_withheld")
+    // Audited once, by the agent for its person: the run and each source
+    // (its collection, and the document it read there), never what it read.
+    const events = await eventsOf(
+      agent.agentId,
+      (all) =>
+        all.filter(({ action }) => action === "chat.history_withheld").length >=
+        2
     );
-    const withheld = events.filter(
-      ({ action }) => action === "chat.history_withheld"
-    );
+    const withheld = events
+      .filter(({ action }) => action === "chat.history_withheld")
+      .toSorted((a, b) =>
+        sourceNamed(a.detail.source).localeCompare(sourceNamed(b.detail.source))
+      );
     expect(
       withheld.map((event) => ({
         target: event.target,
-        source: event.detail.source,
+        source: sourceNamed(event.detail.source),
         run: typeof event.detail.run,
         holdsSecret: JSON.stringify(event).includes(secret),
       }))
-    ).toStrictEqual([
-      {
-        target: { type: "chat", id: chat.id },
-        source: plans?.collectionId,
-        run: "string",
-        holdsSecret: false,
+    ).toStrictEqual(
+      [
+        plans?.collectionId ?? "",
+        `brain-document:${plans?.collectionId}/${plans?.documentId}`,
+      ]
+        .toSorted((a, b) => a.localeCompare(b))
+        .map((source) => ({
+          target: { type: "chat", id: chat.id },
+          source,
+          run: "string",
+          holdsSecret: false,
+        }))
+    );
+  });
+
+  it("withholds what a read or a search handed over once its document is gone, though its collection may still be read", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    const readSecret = `READ-${unique()}`;
+    const searchWord = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+    const foundSecret = `FOUND-${unique()}`;
+    const { id: collectionId } = await admin.knowledge.createCollection({
+      name: `Handbook ${unique()}`,
+      access: "everyone",
+    });
+    const [readDoc, searchedDoc] = await Promise.all(
+      [
+        { path: "read.md", text: `# Read\n\nThe code is ${readSecret}.` },
+        {
+          path: "found.md",
+          text: `# Found\n\n${searchWord} is ${foundSecret}.`,
+        },
+      ].map(
+        async ({ path, text }) =>
+          await admin.knowledge.saveDocument({
+            collectionId,
+            path,
+            text,
+            ifVersion: 0,
+          })
+      )
+    );
+    const { ask, agent, chat, gateway } = await chatOf(
+      person.userId,
+      codeStep(readCode(readDoc?.id ?? "")),
+      says("Read it."),
+      codeStep(
+        `export default async (self, env) => (await env.knowledge.search(${JSON.stringify(searchWord)})).hits.map(({ snippet }) => snippet);`
+      ),
+      says("Found it."),
+      says("Gone.")
+    );
+    await grantRead(admin, agent, collectionId);
+    await ask("What's the code?");
+    await ask("Find the word.");
+    const before = JSON.stringify(gateway.requests.at(-1)?.body);
+    // Erased from Knowledge, as a purge erases them: the collection stays.
+    for (const document of [readDoc, searchedDoc]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+        .bind(document?.id ?? "")
+        .run();
+    }
+    await ask("And now?");
+    const after = JSON.stringify(gateway.requests.at(-1)?.body);
+    const events = await eventsOf(agent.agentId, (all) =>
+      all.some(({ action }) => action === "chat.history_withheld")
+    );
+
+    expect({
+      before: {
+        read: before.includes(readSecret),
+        // What it found, never the search the code asked for.
+        searched: before.includes(foundSecret),
       },
-    ]);
+      after: {
+        read: after.includes(readSecret),
+        searched: after.includes(foundSecret),
+      },
+      sources: events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.history_withheld" && target?.id === chat.id
+        )
+        .map(({ detail }) => sourceNamed(detail.source))
+        .toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      before: { read: true, searched: true },
+      after: { read: false, searched: false },
+      sources: [
+        `brain-document:${collectionId}/${readDoc?.id}`,
+        `brain-document:${collectionId}/${searchedDoc?.id}`,
+      ].toSorted((a, b) => a.localeCompare(b)),
+    });
   });
 
   it("stops a turn under way once something it read can't be read any more, before its next request", async () => {
@@ -1009,7 +1118,8 @@ describe("a chat's Knowledge", setUpTime, () => {
     const asked = outcome(ask("When does the route plan depart?"));
     await vi.waitFor(
       async () => {
-        await expect(recorded()).resolves.toBe(1);
+        // Its collection, and the document it read there.
+        await expect(recorded()).resolves.toBe(2);
       },
       { timeout: 10_000, interval: 50 }
     );
@@ -1457,10 +1567,14 @@ describe("a chat's recall before a question", setUpTime, () => {
     );
     await grantRead(admin, agent, collectionId);
     await grantBrain(admin, agent);
-    // Too short for any run to finish.
-    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
-
-    const reply = await ask(word);
+    // Too short for any run to finish: only for this test's turn.
+    const restore = await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1" });
+    let reply: Awaited<ReturnType<typeof ask>>;
+    try {
+      reply = await ask(word);
+    } finally {
+      await restore();
+    }
 
     const [request] = gateway.requests.map(({ body }) => splitRequest(body));
     expect({
@@ -1475,6 +1589,106 @@ describe("a chat's recall before a question", setUpTime, () => {
       statuses: ["wall_expired"],
       told: true,
       sent: false,
+    });
+  });
+
+  it("withholds what a recall handed over once its document is gone or purged, or the Brain permission is revoked, though its collection may still be read, and audits it", async () => {
+    const admin = await newAdmin();
+    const person = await newPerson();
+    /** A chat whose first turn recalled `fact`, from a collection it keeps. */
+    const recalled = async () => {
+      const word = `zq${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+      const code = `depot${crypto.randomUUID().replaceAll(/[^a-f]/gu, "")}`;
+      const fact = `The depot code is ${code}`;
+      const { id: collectionId } = await admin.knowledge.createCollection({
+        name: `Handbook ${unique()}`,
+        access: "everyone",
+      });
+      const { id: documentId } = await admin.knowledge.saveDocument({
+        collectionId,
+        path: "depot.md",
+        text: `# Depot ${word}\n\n${fact}.`,
+        ifVersion: 0,
+      });
+      const chat = await chatOf(
+        person.userId,
+        says("Noted."),
+        says("And again.")
+      );
+      await grantRead(admin, chat.agent, collectionId);
+      const brainGrant = await grantBrain(admin, chat.agent);
+      await chat.ask(word);
+      /** Whether the next turn's first request still sent the fact. */
+      const next = async () => {
+        const before = chat.gateway.requests.length;
+        await chat.ask("And the code?");
+        const body = JSON.stringify(chat.gateway.requests[before]?.body);
+        return {
+          fact: body.includes(fact),
+          withheld: body.includes(withheldResult),
+        };
+      };
+      return { ...chat, code, collectionId, documentId, brainGrant, next };
+    };
+    /** The sources of the chat's `chat.history_withheld` events. */
+    const withheldOf = async (agentId: string, chatId: string) => {
+      const events = await eventsOf(agentId, (all) =>
+        all.some(({ action }) => action === "chat.history_withheld")
+      );
+      return events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.history_withheld" && target?.id === chatId
+        )
+        .map(({ detail }) => sourceNamed(detail.source));
+    };
+
+    const kept = await recalled();
+    const unchanged = await kept.next();
+    const erased = await recalled();
+    // Erased from the Brain, as a purge erases it: its collection stays.
+    await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+      .bind(erased.documentId)
+      .run();
+    const afterErase = await erased.next();
+    const purged = await recalled();
+    // Purged from it: the document stays, in its collection, at a new
+    // version, without the code.
+    const purge: PurgeInput = {
+      type: "content",
+      documentIds: [purged.documentId],
+      terms: [purged.code],
+      reason: "erasure_request",
+    };
+    const plan = await admin.knowledge.preparePurge(purge);
+    await admin.knowledge.purge(purge, plan.token);
+    const afterPurge = await purged.next();
+    const revoked = await recalled();
+    await admin.api.permissions.revoke(revoked.brainGrant);
+    const afterRevoke = await revoked.next();
+
+    expect({
+      unchanged,
+      afterErase,
+      afterPurge,
+      afterRevoke,
+      erasedSources: await withheldOf(erased.agent.agentId, erased.chat.id),
+      purgedSources: await withheldOf(purged.agent.agentId, purged.chat.id),
+      revokedSources: await withheldOf(revoked.agent.agentId, revoked.chat.id),
+    }).toStrictEqual({
+      // Still readable: the next turn sends what the first recalled.
+      unchanged: { fact: true, withheld: false },
+      afterErase: { fact: false, withheld: true },
+      afterPurge: { fact: false, withheld: true },
+      afterRevoke: { fact: false, withheld: true },
+      // Named by its IDs, never by what it said.
+      erasedSources: [
+        `brain-document:${erased.collectionId}/${erased.documentId}`,
+      ],
+      purgedSources: [
+        `brain-document:${purged.collectionId}/${purged.documentId}`,
+      ],
+      revokedSources: ["brain-grant"],
     });
   });
 });

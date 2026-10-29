@@ -1,9 +1,12 @@
 # Loads named values from a 1Password Environment into the job's env: the
 # one place that knows the secret manager, as grasplabs/grasp's
-# load-deployment-secrets is. Each GitHub environment holds only its
-# service account's token (OP_SERVICE_ACCOUNT_TOKEN), read-only and able to
-# read that one 1Password Environment; the Environments' ids are below,
-# ids, not credentials.
+# load-deployment-secrets is. One per stage, as Grasp's one Cloudflare
+# account has: production and staging, each read from the GitHub
+# environment of the same name, plus stephen-eval for the eval. Each GitHub
+# environment holds only its service account's token
+# (OP_SERVICE_ACCOUNT_TOKEN), read-only and able to read that one 1Password
+# Environment. They're found by id, below (ids, not credentials), so
+# renaming one in 1Password changes nothing here.
 #
 # Only the names a job lists are exported, so a job never gets the rest of
 # its Environment. Secrets are masked in the log; settings aren't, so a
@@ -17,7 +20,7 @@ description: Export allowlisted values of a 1Password Environment to the job
 
 inputs:
   environment:
-    description: "The 1Password Environment: stephen-eval, staging, releases or ops"
+    description: "The 1Password Environment: production, staging or stephen-eval"
     required: true
   service-account-token:
     description: The GitHub environment's read-only 1Password service account token
@@ -66,10 +69,9 @@ runs:
       run: |
         set -euo pipefail
         case "$ENVIRONMENT" in
-          stephen-eval) id=gwkizmisgitdjte6uoldfhps2a ;;
+          production) id=4uwnjx2wvetaznfn4hpdb2zdkm ;;
           staging) id=ihkarcfaogzo7joffe6yuifkha ;;
-          releases) id=uyh2pedp7mdecljjxwvlo64d5y ;;
-          ops) id=4uwnjx2wvetaznfn4hpdb2zdkm ;;
+          stephen-eval) id=gwkizmisgitdjte6uoldfhps2a ;;
           *) echo "::error::No 1Password Environment called $ENVIRONMENT"; exit 1 ;;
         esac
         if [[ ! "$id" =~ ^[a-z0-9]{26}$ ]]; then

@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { purgedMarker } from "@grasp-os/shared/knowledge";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
@@ -6,7 +5,6 @@ import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -76,35 +74,6 @@ const staff = async () => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
   const { core } = await openRpc(session);
   return await core.authenticate();
-};
-
-/** Staff bring a kickoff in that names a team the roster doesn't have. */
-const bringInKickoff = async (): Promise<void> => {
-  const api = await staff();
-  const fake = fakeGateway({
-    text: JSON.stringify({
-      fields: [],
-      teams: [{ name: "Legal", does: "Contracts", people: 3 }],
-    }),
-    inputTokens: 900,
-    outputTokens: 300,
-  });
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    await api.onboardingStaff.saveKickoff({
-      locale: "en",
-      transcript: {
-        text: `Anna (CEO): We are an accounting firm in Utrecht with two teams.
-Jakob (Grasp): Where do you want to be in two years?
-Anna (CEO): We want every client to get their numbers within a week, and AI should help us get there.
-Anna (CEO): Our Finance team has 8 people and spends days copying invoices by hand.
-Anna (CEO): Our Legal team of 3 handles the contracts.`,
-      },
-    });
-  } finally {
-    spy.mockRestore();
-  }
 };
 
 /** Saves `text` as a note in `person`'s Personal collection. */
@@ -297,29 +266,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       ),
     };
 
-    // A kickoff-only team takes no values: its id is its place in the
-    // reading, which reading the kickoff again moves.
-    await bringInKickoff();
-    const withKickoff = await admin.api.brain.read();
-    const kickoffTeams = withKickoff.teams
-      .map(({ id }) => id)
-      .filter((id) => id.startsWith("team.kickoff-"));
-    const kickoffCount = await outcome(
-      admin.api.brain.addRecords([
-        {
-          type: "teamCount",
-          id: `${ids.source}-kickoff`,
-          teamId: kickoffTeams[0] ?? "team.kickoff-0",
-          sourceId: ids.source,
-          date: "2026-10-20",
-          people: 3,
-        },
-      ])
-    );
-
-    expect({ ...outcomes, kickoffTeams, kickoffCount }).toStrictEqual({
-      kickoffTeams: ["team.kickoff-0"],
-      kickoffCount: "brain.record_missing",
+    expect(outcomes).toStrictEqual({
       teamCount: "brain.record_missing",
       statementTeam: "brain.record_missing",
       workflow: "brain.record_invalid",

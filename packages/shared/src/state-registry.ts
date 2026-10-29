@@ -313,6 +313,10 @@ const coreDb: D1State = {
       `${core}workflows/host.ts`,
       "What each run's latest recall cites, checked before its next calls."
     ),
+    run_evidence_holds: transient(
+      `${core}workflows/resource-reads.ts`,
+      "The runs whose evidence a run holds, its children's whose output it took: checked with its own."
+    ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
     workflow_admission_queue: transient(`${core}workflows/admission.ts`),
@@ -417,6 +421,7 @@ const coreDb: D1State = {
     workflow_resource_drafts: exported(`${core}workflow-drafts.ts`),
     workflow_resource_draft_modules: exported(`${core}workflow-drafts.ts`),
     workflow_resource_draft_inspections: cache(`${core}workflow-drafts.ts`),
+    workflow_resource_lifecycles: exported(`${core}workflow-lifecycle.ts`),
     app_workflow_bindings: exported(`${core}app-workflow-bindings.ts`),
     workflow_candidate_runs: exported(`${core}workflows/candidate-runs.ts`),
     workflow_item_tests: exported(`${core}workflows/item-tests.ts`),
@@ -583,6 +588,14 @@ const connectDb: D1State = {
     call_changes: exported(`${connect}changes.ts`),
     event_sources: exported(`${connect}events.ts`),
     connector_events: exported(`${connect}events.ts`),
+    token_revocations: exported(
+      `${connect}revocations.ts`,
+      "Revokes a provider still owes, the tokens kept until they go through: an obligation a move must keep."
+    ),
+    erased_people: exported(
+      `${connect}person-erasure.ts`,
+      "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
+    ),
   },
 };
 
@@ -770,6 +783,20 @@ const onboarding: DurableObjectState = {
     mail_outbox: exported(
       `${core}mail-outbox.ts`,
       "Holds no link secret: a link is filled in only as its mail is sent."
+    ),
+  },
+  kv: {
+    purges: exported(
+      `${core}onboarding/store.ts`,
+      "How often a content purge reached or rewrote the onboarding: a kickoff read, or a drawing drawn, before one keeps nothing."
+    ),
+    kickoff_records_owed: exported(
+      `${core}onboarding/store.ts`,
+      "The brain's records of the kickoff still owed, which the alarm keeps until done."
+    ),
+    kickoff_source_at: exported(
+      `${core}onboarding/store.ts`,
+      "When a kickoff a purge forgot came in: its source stays by title and day alone."
     ),
   },
 };
@@ -1024,9 +1051,9 @@ export const clientStateRegistry: ClientStateRegistry = {
   },
   notClientState: {
     "apps/admin/wrangler.jsonc":
-      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+      "Grasp's admin runs once per stage, in Grasp's account: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+      "The router runs once per stage, in Grasp's account, and holds only hostnames the admin writes.",
     "apps/gateway/wrangler.jsonc":
       "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },

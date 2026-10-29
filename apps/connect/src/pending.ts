@@ -1,6 +1,9 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
-import { heldBindingSchema } from "@grasp-os/shared/capability";
+import {
+  capabilityErrors,
+  heldBindingSchema,
+} from "@grasp-os/shared/capability";
 import type {
   CapabilityClaims,
   HeldBinding,
@@ -55,8 +58,14 @@ import type { GuardedChange } from "./audit.ts";
 import { nativeConnector } from "./bundled-connectors.ts";
 import { providerName } from "./catalog.ts";
 import type { Connection } from "./connections.ts";
-import { connections, idempotentCalls, pendingActions } from "./db/schema.ts";
+import {
+  connections,
+  erasedPeople,
+  idempotentCalls,
+  pendingActions,
+} from "./db/schema.ts";
 import type { DecidedCall } from "./decisions.ts";
+import { erasureBegan } from "./erased-people.ts";
 
 // Side effects that wait for their person (threat model R7, R12). A side
 // effect a person is there for (`interactive`: from chat, or from a person
@@ -593,6 +602,9 @@ export const hold = async (
           and(
             eq(connections.id, connection.id),
             eq(connections.status, "active"),
+            // Never for someone whose erasure began, on any connection:
+            // a held action asks them, so it is theirs (person-erasure.ts).
+            sql`NOT ${erasureBegan(authority.onBehalfOf)}`,
             // In the one statement, so of two such calls at once one is
             // held and the other finds it. A call with a key is kept to
             // one by the unique index on it.
@@ -610,9 +622,18 @@ export const hold = async (
   // The same call, held before: the same action, unless its input changed.
   const held = await db.select().from(pendingActions).where(sameCall).get();
   if (held === undefined) {
-    // Nothing inserted and nothing held: the connection went inactive, or
-    // the held call was taken (decided) a moment ago, and a repeat finds
-    // its outcome.
+    // Nothing inserted and nothing held: the person it acts for is being
+    // erased, the connection went inactive, or the held call was taken
+    // (decided) a moment ago, and a repeat finds its outcome.
+    const [erased] = await db
+      .select({ userId: erasedPeople.userId })
+      .from(erasedPeople)
+      .where(eq(erasedPeople.userId, authority.onBehalfOf));
+    if (erased !== undefined) {
+      throw capabilityErrors.create("capability.invalid", {
+        reason: "scope",
+      });
+    }
     const now = await db
       .select({ status: connections.status })
       .from(connections)
