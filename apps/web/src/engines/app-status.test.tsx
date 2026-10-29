@@ -50,6 +50,7 @@ const fakeApps = (
     owner: "user-1",
     responsible: "user-1",
     audience: null,
+    process: null,
     blueprint: null,
     currentVersion,
     pendingVersion: null,

@@ -52,6 +52,7 @@ const engine: App = {
   owner: "ada",
   responsible: "ada",
   audience: null,
+  process: null,
   blueprint: null,
   currentVersion: 2,
   pendingVersion: null,
