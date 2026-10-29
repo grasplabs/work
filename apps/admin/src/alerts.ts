@@ -27,10 +27,9 @@
 import { log } from "@grasp-os/shared/log";
 import { and, eq, sql } from "drizzle-orm";
 
-import { ifStored } from "./clients/grid.ts";
 import { adminDatabase } from "./db/act.ts";
 import { clients, staffAlerts } from "./db/schema.ts";
-import { storeSecret } from "./deploy/context.ts";
+import { ifStored, storeSecret } from "./deploy/context.ts";
 import { discordWebhookOf, postToDiscord } from "./discord-webhook.ts";
 
 /** What a caller may add to an alert: numbers alone, never words. */

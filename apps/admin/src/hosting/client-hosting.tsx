@@ -50,6 +50,7 @@ import type {
   DestinationProblem,
 } from "./placement.ts";
 import {
+  notStartedWords,
   offboardRefusals,
   operationErrorWords,
   placeRefusals,
@@ -272,10 +273,12 @@ const Operation = ({
   </div>
 );
 
-/** What starting it says, by where the client is. */
-const startWords = (view: ClientHostingView): string => {
+/** What starting it says, by where the client is and the release picked. */
+const startWords = (view: ClientHostingView, releaseId: string): string => {
   if (view.operation !== null) {
-    return "Resume provisioning";
+    return releaseId === view.operation.releaseId
+      ? "Resume provisioning"
+      : `Resume provisioning on ${releaseId}`;
   }
   return view.placement === null
     ? "Place and start provisioning"
@@ -509,6 +512,51 @@ const MailNotice = ({ view }: { view: ClientHostingView }) =>
     </p>
   ) : null;
 
+/**
+ * The releases starting or resuming it offers, newest first: any, before
+ * it has an operation; once stopped, the one its operation has and every
+ * newer one, which resuming switches it to while nothing is live
+ * (src/hosting/operation.ts). None while its operation is going.
+ */
+const offeredReleases = (
+  view: ClientHostingView,
+  releases: readonly { id: string; notes: string }[]
+): readonly { id: string; notes: string }[] => {
+  const { operation } = view;
+  if (operation === null) {
+    return releases;
+  }
+  if (view.going) {
+    return [];
+  }
+  const at = releases.findIndex(({ id }) => id === operation.releaseId);
+  return at === -1 ? releases : releases.slice(0, at + 1);
+};
+
+/**
+ * The release offered first: staff's pick while offered, else the newest
+ * that fits the client (`suggestedReleaseId`), else what its operation
+ * has, else the newest.
+ */
+const releaseOffered = (
+  view: ClientHostingView,
+  offered: readonly { id: string }[],
+  picked: string | null
+): string => {
+  const isOffered = (id: string | null | undefined): id is string =>
+    id !== null && id !== undefined && offered.some((each) => each.id === id);
+  if (isOffered(picked)) {
+    return picked;
+  }
+  if (isOffered(view.suggestedReleaseId)) {
+    return view.suggestedReleaseId;
+  }
+  if (isOffered(view.operation?.releaseId)) {
+    return view.operation.releaseId;
+  }
+  return offered[0]?.id ?? "";
+};
+
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
   view.operation?.status !== "done" &&
@@ -527,9 +575,9 @@ export const ClientHosting = ({
   const [chosen, setChosen] = useState(
     view.automatic.destinationId === null ? "" : automatic
   );
-  const [releaseId, setReleaseId] = useState(
-    view.operation?.releaseId ?? releases[0]?.id ?? ""
-  );
+  const [picked, setPicked] = useState<string | null>(null);
+  const offered = offeredReleases(view, releases);
+  const releaseId = releaseOffered(view, offered, picked);
   const [blocking, setBlocking] = useState<DestinationProblem[]>([]);
   const placing = view.placement === null;
   const start = () => {
@@ -577,20 +625,23 @@ export const ClientHosting = ({
       {view.placement === null ? null : <Offboarding view={view} />}
       {provisionable(view) ? (
         <div className="flex flex-col gap-4">
-          {view.operation === null ? (
+          {view.operation === null && view.notStarted === null ? (
             <NotStarted imported={releases.length > 0} />
           ) : null}
-          {view.operation === null ? (
+          {view.notStarted === null ? null : (
+            <p className="text-sm">{notStartedWords(view.notStarted)}</p>
+          )}
+          {offered.length > 0 ? (
             <Field>
               <FieldLabel htmlFor="hosting-release">Release</FieldLabel>
               <NativeSelect
                 id="hosting-release"
                 onChange={(event) => {
-                  setReleaseId(event.target.value);
+                  setPicked(event.target.value);
                 }}
                 value={releaseId}
               >
-                {releases.map((release) => (
+                {offered.map((release) => (
                   <NativeSelectOption key={release.id} value={release.id}>
                     {release.id}
                   </NativeSelectOption>
@@ -603,7 +654,7 @@ export const ClientHosting = ({
               disabled={busy || releaseId === "" || (placing && chosen === "")}
               onClick={start}
             >
-              {startWords(view)}
+              {startWords(view, releaseId)}
             </Button>
             {failure === null ? null : (
               <p className="text-destructive text-sm" role="alert">

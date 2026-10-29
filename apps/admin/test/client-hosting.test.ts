@@ -409,12 +409,34 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       placement: { destinationId: shared },
     });
 
+    // Stopped with nothing live: a newer release takes its operation
+    // over, and resuming offers the newest that fits it; an older one,
+    // or another destination, is refused.
+    const newer = await importedRelease();
+    const offered = await hostingOf(clientId);
+    const switched = await place(clientId, newer, null);
+    await latestStopped(attempts);
     expect({
+      offered: offered.suggestedReleaseId,
       moved: await place(clientId, releaseId, other),
-      anotherRelease: await place(clientId, await importedRelease(), null),
+      switched,
+      operation: await operationOf(clientId),
+      switchedBy: await actorsOf(clientId, "provision.switch_release"),
+      older: await place(clientId, releaseId, null),
+      after: await operationOf(clientId),
     }).toMatchObject({
+      offered: newer,
       moved: { refused: "placement_changed" },
-      anotherRelease: { refused: "operation_release_changed" },
+      switched: { refused: null },
+      operation: {
+        id: first?.id,
+        releaseId: newer,
+        status: "failed",
+        error: "wfp_schedule_unqualified",
+      },
+      switchedBy: [caller],
+      older: { refused: "operation_release_changed" },
+      after: { releaseId: newer },
     });
   });
 

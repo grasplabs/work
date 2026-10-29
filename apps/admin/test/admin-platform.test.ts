@@ -3,7 +3,7 @@ import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { platformData, staffEvents } from "../src/admin/platform-data.ts";
-import { eventWords } from "../src/admin/platform-parts.tsx";
+import { eventWords, needWords } from "../src/admin/platform-parts.tsx";
 import {
   companiesOf,
   goingOut,
@@ -12,11 +12,13 @@ import {
   ringsOf,
   spreadOf,
 } from "../src/admin/platform.ts";
+import { clientGrid } from "../src/clients/grid.ts";
 import type { GridRow, LiveStatus } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
   clients,
+  hostingDestinations,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -76,6 +78,7 @@ const row = (id: string, input: Partial<GridRow> = {}): GridRow => ({
   release: "r3",
   pinnedReleaseId: null,
   lastDeploy: null,
+  setup: null,
   ...input,
 });
 
@@ -219,6 +222,17 @@ describe("the Platform page's model", () => {
         row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
+        row("waiting", {
+          status: "provisioning",
+          release: null,
+          setup: { state: "not_started", why: "no_release" },
+        }),
+        row("stalled", {
+          status: "provisioning",
+          release: null,
+          lastDeploy: { releaseId: "r3", status: "running", at: day(3) },
+          setup: { state: "stopped" },
+        }),
         row("unread"),
         row("timedout"),
         row("gone", { status: "offboarded", release: "r1" }),
@@ -246,6 +260,8 @@ describe("the Platform page's model", () => {
       { id: "failed", standing: "attention", needs: ["failed"] },
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
+      { id: "stalled", standing: "attention", needs: ["stopped"] },
+      { id: "waiting", standing: "attention", needs: ["not_started"] },
       { id: "new", standing: "setup", needs: [] },
       { id: "timedout", standing: "unread", needs: [] },
       { id: "unread", standing: "unread", needs: [] },
@@ -253,6 +269,36 @@ describe("the Platform page's model", () => {
       { id: "zeta", standing: "healthy", needs: [] },
       { id: "gone", standing: "offboarded", needs: [] },
     ]);
+  });
+});
+
+describe("a company being set up, on the grid", () => {
+  it("says it hasn't started and why, or that it stopped, each with the next step", async () => {
+    const id = `setup-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    await db.update(hostingDestinations).set({ policies: "[]" });
+    await db
+      .insert(clients)
+      .values({ id, name: id, createdAt: now, updatedAt: now });
+
+    const grid = await clientGrid(env);
+    const setup = grid.find((each) => each.id === id)?.setup;
+    const words = [
+      needWords({ kind: "not_started", why: "no_destination" }),
+      needWords({ kind: "not_started", why: "no_release" }),
+      needWords({ kind: "not_started", why: null }),
+      needWords({ kind: "stopped" }),
+    ];
+
+    expect({ setup, words }).toStrictEqual({
+      setup: { state: "not_started", why: "no_destination" },
+      words: [
+        "Not started: no hosting destination ready.",
+        "Not started: no release imported yet.",
+        "Not started: provision it from its Setup.",
+        "Stopped: resume it from its Setup.",
+      ],
+    });
   });
 });
 
