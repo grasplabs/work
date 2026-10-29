@@ -38,6 +38,8 @@ import {
   spreadOf,
 } from "../../admin/platform.ts";
 import type { PlatformNeed, Standing } from "../../admin/platform.ts";
+import { ReadinessPanel } from "../../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../../admin/readiness.ts";
 import { RingChecklist, uncheckedRing } from "../../admin/rollout-parts.tsx";
 import { formatDate, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
@@ -426,7 +428,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * ring is the one thing done here.
  */
 const PlatformPage = () => {
-  const { rows, platform } = Route.useLoaderData();
+  const { rows, platform, readiness } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -459,6 +461,7 @@ const PlatformPage = () => {
       {/* The panels' type, as the prototype's sections set it. */}
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
+        <ReadinessPanel readiness={readiness} />
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
         <EveryCompany live={live} releases={platform.releases} rows={rows} />
@@ -471,11 +474,12 @@ const PlatformPage = () => {
 /** Every company's own deployment, and the rollout going out. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform] = await Promise.all([
+    const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
+      fetchReadiness(),
     ]);
-    return { rows, platform };
+    return { rows, platform, readiness };
   },
   component: PlatformPage,
 });

@@ -176,7 +176,7 @@ export const signedByDiscord = async (
 };
 
 /** The Discord user ids that are Grasp's staff, from `DISCORD_STAFF_IDS`. */
-const staffIds = (env: Env): ReadonlySet<string> =>
+export const staffIds = (env: Env): ReadonlySet<string> =>
   new Set(
     (env.DISCORD_STAFF_IDS ?? "")
       .split(",")
