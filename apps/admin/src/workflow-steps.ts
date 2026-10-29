@@ -23,11 +23,23 @@ export const quickStep = {
 /**
  * A deploy, or a phase of one: uploads, migrations and a smoke check of
  * up to about 80 s. A retry resumes the same deploy, so it's retried less
- * often, and later.
+ * often, and later. For the workflows still on Cloudflare Workflows.
  */
 export const deployStepConfig = {
   retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
   timeout: "30 minutes",
+} as const;
+
+/**
+ * `deployStepConfig` for a run on Workerflow (src/workflow-runs.ts): its
+ * timeout is the longest a Workerflow attempt runs (its 14-minute handler
+ * budget). An attempt that runs out goes on beside its retry, so each
+ * attempt takes the client for itself first (src/runners.ts,
+ * `takeAttempt`), and one that timed out acts no more.
+ */
+export const workerflowDeployStep = {
+  ...deployStepConfig,
+  timeout: "14 minutes",
 } as const;
 
 /** Deploy failures a retry can fix: a new version still starting, a name race, a flaky query. */

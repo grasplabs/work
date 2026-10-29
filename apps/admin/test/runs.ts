@@ -5,7 +5,7 @@
  */
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { runObjectName } from "@grasp-os/workerflow/identity";
-import type { Journal } from "@grasp-os/workerflow/run";
+import type { Journal, StartCommand } from "@grasp-os/workerflow/run";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { vi } from "vite-plus/test";
@@ -116,6 +116,43 @@ export const deliverAlarm = async (
   });
 };
 
+/**
+ * Times out the attempt run `id` has out, as if its timeout had passed:
+ * its deadline moved to now and its alarm delivered, so the engine ends
+ * it as timed out; then its retry made due at once, and delivered
+ * (`retried`). The attempt itself goes on wherever it is, as one that
+ * timed out does.
+ */
+export const timeOutAttempt = async (
+  workflow: AdminWorkflow,
+  id: string
+): Promise<{ retried: Promise<void> }> => {
+  const stub = runObject(workflow, id);
+  await runInDurableObject(stub, (_object, state) => {
+    state.storage.sql.exec(
+      "UPDATE attempts SET deadline = ? WHERE ended_at IS NULL",
+      Date.now() - 1
+    );
+  });
+  await deliverAlarm(workflow, id);
+  await vi.waitFor(async () => {
+    const { attempts } = await journalOf(workflow, id);
+    if (!attempts.some((row) => row.ended === "timed_out")) {
+      throw new Error(`Run ${id}'s attempt hasn't timed out yet`);
+    }
+  }, waitFor);
+  await runInDurableObject(stub, (_object, state) => {
+    state.storage.sql.exec(
+      "UPDATE attempts SET retry_at = ? WHERE ended = 'timed_out' AND retry_at IS NOT NULL",
+      Date.now()
+    );
+  });
+  // Delivered here: the host holds the run's own alarm back while the
+  // activation the attempt is out in still runs. It settles once the
+  // retry's activation is done, which a test may hold.
+  return { retried: deliverAlarm(workflow, id) };
+};
+
 /** What a test reaches of a run's object: the env its definitions get. */
 interface WithEnv {
   env: Env;
@@ -129,20 +166,33 @@ interface WithEnv {
 const hasEnv = (object: object): object is WithEnv =>
   "env" in object && typeof object.env === "object" && object.env !== null;
 
+/** A run's write whose result its activation never gets (`holdFirstBatch`). */
+export interface LostWrite {
+  /** Settles once the write has committed. */
+  committed: Promise<unknown>;
+  /** Fails the held call, as an activation lost after the write would. */
+  lose: () => void;
+}
+
+/** A run's object, as a test reaches it. */
+type RunStub = ReturnType<typeof runObject>;
+
 /**
- * Has run `id`'s first D1 batch commit and then hang until released: the
- * effect of the step that made it is left, and its result held back, as
- * when the activation is lost right after the step's write. Set up
- * before the run starts. Every later batch of the run goes through.
+ * Has the first D1 batch of the run in `stub` after which `when` holds (of
+ * the run's own database) commit and then hang until lost, when it fails:
+ * the effect of the step that made it is left, and its result never
+ * reaches the run, as when the activation is lost right after the step's
+ * write. Set up before the run starts. Every other batch of the run goes
+ * through.
  */
-export const holdFirstBatch = async (
-  workflow: AdminWorkflow,
-  id: string
-): Promise<{ committed: Promise<unknown>; release: () => void }> => {
-  const committed = Promise.withResolvers<unknown>();
-  const released = Promise.withResolvers<unknown>();
+export const holdBatchOf = async (
+  stub: RunStub,
+  when: (database: D1Database) => Promise<boolean>
+): Promise<LostWrite> => {
+  const lost = Promise.withResolvers<unknown>();
   let first = true;
-  await runInDurableObject(runObject(workflow, id), (object) => {
+  let wrote = false;
+  await runInDurableObject(stub, (object) => {
     if (!hasEnv(object)) {
       throw new TypeError("The run's object keeps no env");
     }
@@ -158,20 +208,87 @@ export const holdFirstBatch = async (
         database.withSession(constraint),
       batch: async <T>(statements: D1PreparedStatement[]) => {
         const results = await database.batch<T>(statements);
-        if (first) {
+        if (first && (await when(database))) {
           first = false;
-          committed.resolve(true);
-          await released.promise;
+          wrote = true;
+          await lost.promise;
+          throw new Error("The activation was lost after its write");
         }
         return results;
       },
     });
     host.env = { ...host.env, DB: held };
   });
+  // Polled from the test, not settled from the run's object: a test that
+  // awaited a promise the object settled would go on in the object's I/O
+  // context, and lose its own bindings' clients.
   return {
-    committed: committed.promise,
-    release: () => {
-      released.resolve(true);
+    committed: vi.waitFor(() => {
+      if (!wrote) {
+        throw new Error("The run hasn't written yet");
+      }
+    }, waitFor),
+    lose: () => {
+      lost.resolve(true);
+    },
+  };
+};
+
+/** `holdBatchOf` for the run's first batch, whatever it wrote. */
+export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> =>
+  await holdBatchOf(stub, async () => await Promise.resolve(true));
+
+/** `holdFirstBatchOf` for run `id` of `workflow`. */
+export const holdFirstBatch = async (
+  workflow: AdminWorkflow,
+  id: string
+): Promise<LostWrite> => await holdFirstBatchOf(runObject(workflow, id));
+
+/** The runs of a workflow a test started, in order, while it records. */
+export interface Starts extends Disposable {
+  readonly started: readonly string[];
+}
+
+/**
+ * Records each run of `workflow` the engine creates from now on, until
+ * disposed: what a test reads the attempts it started from, as the engine
+ * lists no runs. `beforeStart` gets each run's object before its start
+ * reaches it, to set up what the run will meet.
+ */
+export const startsOf = (
+  workflow: AdminWorkflow,
+  beforeStart: (stub: RunStub) => Promise<unknown> = async () => {
+    await Promise.resolve();
+  }
+): Starts => {
+  const started: string[] = [];
+  const namespace = env.ADMIN_RUNS;
+  const get = namespace.get.bind(namespace);
+  const spy = vi.spyOn(namespace, "get").mockImplementation((id, options) => {
+    const stub = get(id, options);
+    return new Proxy(stub, {
+      get: (target, property): unknown => {
+        if (property === "start") {
+          return async (command: StartCommand) => {
+            if (command.definition === workflow) {
+              await beforeStart(target);
+            }
+            const outcome = await target.start(command);
+            if (outcome === "created" && command.definition === workflow) {
+              started.push(command.instanceId);
+            }
+            return outcome;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return value;
+      },
+    });
+  });
+  return {
+    started,
+    [Symbol.dispose]: () => {
+      spy.mockRestore();
     },
   };
 };

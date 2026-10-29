@@ -1010,6 +1010,15 @@ export const fakeCloudflareApi = (
     matches: (call: ApiCall) => boolean;
     meanwhile: () => Promise<void>;
   }[] = [];
+  /**
+   * What runs once the fake has answered the next call a test picks out,
+   * before its caller gets the answer, each once: the caller held between
+   * what it read and what it does next.
+   */
+  const answeredThen: {
+    matches: (call: ApiCall) => boolean;
+    meanwhile: () => Promise<void>;
+  }[] = [];
 
   /** Adds an account `member` is a member of, and returns what it holds. */
   const addAccount = (
@@ -1313,17 +1322,23 @@ export const fakeCloudflareApi = (
     const match = matched.findIndex(({ matches }) => matches(call));
     const [picked] = match === -1 ? [] : matched.splice(match, 1);
     const failure = planned.get(calls.length) ?? picked?.failure;
+    let response: Response;
     if (failure === "lost") {
       await respond(request, call);
-      return lostConnection();
+      response = lostConnection();
+    } else if (failure === undefined) {
+      const between = interleaved.findIndex(({ matches }) => matches(call));
+      const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
+      await meanwhile?.meanwhile();
+      response = await respond(request, call);
+    } else {
+      response = failed(failure);
     }
-    if (failure !== undefined) {
-      return failed(failure);
-    }
-    const between = interleaved.findIndex(({ matches }) => matches(call));
-    const [meanwhile] = between === -1 ? [] : interleaved.splice(between, 1);
-    await meanwhile?.meanwhile();
-    return await respond(request, call);
+    // Answered, a failure too: the caller holds what it got back.
+    const after = answeredThen.findIndex(({ matches }) => matches(call));
+    const [then] = after === -1 ? [] : answeredThen.splice(after, 1);
+    await then?.meanwhile();
+    return response;
   };
 
   /**
@@ -1541,6 +1556,7 @@ export const fakeCloudflareApi = (
     takenSubdomains.clear();
     matched.length = 0;
     interleaved.length = 0;
+    answeredThen.length = 0;
     load.peak = 0;
     load.peakAccounts = 0;
     busyAccounts.clear();
@@ -1604,6 +1620,18 @@ export const fakeCloudflareApi = (
       meanwhile: () => Promise<void>
     ) => {
       interleaved.push({ matches, meanwhile });
+    },
+    /**
+     * Runs `meanwhile` once the next call `matches` picks out has been
+     * answered and before its caller gets the answer, once: so what
+     * `meanwhile` does lands after the caller's read, and before it acts
+     * on it.
+     */
+    afterAnswering: (
+      matches: (call: ApiCall) => boolean,
+      meanwhile: () => Promise<void>
+    ) => {
+      answeredThen.push({ matches, meanwhile });
     },
   };
 };
