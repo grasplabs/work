@@ -79,7 +79,6 @@ import {
   SealedSecretChange,
   TeamsBotChange,
   TeamsPackageDownload,
-  TestAlert,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
@@ -189,7 +188,40 @@ type PlatformNeed =
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
   | { kind: "secrets" }
   | { kind: "settings" }
-  | { kind: "behind"; releases: number };
+  | { kind: "behind"; releases: number }
+  | { kind: "teams_bot_secret"; days: number }
+  | { kind: "stephen"; over: number };
+
+/** How many days before its Teams bot's secret expires its Setup says it needs a new one. */
+const botSecretWarnDays = 30;
+
+/** How long until its Teams bot's secret expires, `days` from now, as a sentence. */
+const botSecretWords = (days: number): string => {
+  if (days > 1) {
+    return `Its Teams bot's secret expires in ${days} days.`;
+  }
+  if (days === 1) {
+    return "Its Teams bot's secret expires tomorrow.";
+  }
+  return days === 0
+    ? "Its Teams bot's secret expires today: Stephen stops answering in Teams once it has."
+    : "Its Teams bot's secret has expired: Stephen can't answer in Teams.";
+};
+
+/** What a live company's chat apps need: a new bot secret soon, a look at Stephen. */
+const chatNeedsOf = (setup: ClientSetup): PlatformNeed[] => {
+  const needs: PlatformNeed[] = [];
+  const days = setup.teamsBotSecretDays;
+  if (days !== null && days <= botSecretWarnDays) {
+    needs.push({ kind: "teams_bot_secret", days });
+  }
+  const over =
+    setup.watched === null ? 0 : overBars(setup.watched.signals).size;
+  if (over > 0) {
+    needs.push({ kind: "stephen", over });
+  }
+  return needs;
+};
 
 /** A company this many releases behind the newest, not pinned, needs a look. */
 const behindAt = 2;
@@ -225,7 +257,7 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   if (pinned === null && behind !== null && behind >= behindAt) {
     needs.push({ kind: "behind", releases: behind });
   }
-  return needs;
+  return active ? [...needs, ...chatNeedsOf(setup)] : needs;
 };
 
 /** A need in a sentence. */
@@ -267,6 +299,12 @@ const needWords = (need: PlatformNeed): ReactNode => {
   }
   if (need.kind === "settings") {
     return "Changed settings wait to reach it: the next deploy carries them.";
+  }
+  if (need.kind === "teams_bot_secret") {
+    return `${botSecretWords(need.days)} Mint a new client secret for its bot in its own Entra and set it under Its Teams bot, with the day it expires.`;
+  }
+  if (need.kind === "stephen") {
+    return `${need.over === 1 ? "One of Stephen's signals is" : `${need.over} of Stephen's signals are`} over its bar: see Stephen below.`;
   }
   return `${need.releases} releases behind the newest.`;
 };
@@ -642,7 +680,8 @@ const NeedAction = ({
       );
     }
     case "secrets":
-    case "settings": {
+    case "settings":
+    case "teams_bot_secret": {
       return (
         <TabLink clientId={clientId} tab="settings">
           Its settings
@@ -657,8 +696,9 @@ const NeedAction = ({
       );
     }
     case "provisioning":
-    case "not_started": {
-      // Setting it up is seen to below, on this tab.
+    case "not_started":
+    case "stephen": {
+      // Setting it up, and Stephen's signals, are seen to below, on this tab.
       return null;
     }
     default: {
@@ -717,7 +757,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   const over = overBars(signals);
   return (
     <SetupSection
-      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. Each signal over its bar was posted to the staff alerts' channel.`}
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. A signal over its bar is marked, and the Setup says it needs a look.`}
       title="Stephen"
     >
       <Facts
@@ -1764,12 +1804,6 @@ const Settings = ({
           />
         </>
       )}
-      <SetupSection
-        description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."
-        title="Staff alerts"
-      >
-        <TestAlert clientId={clientId} />
-      </SetupSection>
     </>
   );
 };

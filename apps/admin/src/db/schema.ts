@@ -630,26 +630,6 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
- * When the admin last told staff of each kind of alert about each client
- * (src/alerts.ts): an alert of the same client and kind within its window
- * isn't sent again, so a storm is one message. Nothing of what an alert
- * said is kept.
- */
-export const staffAlerts = sqliteTable(
-  "staff_alerts",
-  {
-    clientId: text("client_id").notNull(),
-    /**
-     * The alert's kind, such as `test`, and its subject when it has one:
-     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
-     */
-    kind: text().notNull(),
-    sentAt: timestamp("sent_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
-);
-
-/**
  * What the admin's watch last read of how each client's Stephen fares
  * (src/clients/watch.ts): the signals it reads from the client's admin
  * snapshot, as JSON, and when. Counts only. One row a client, replaced

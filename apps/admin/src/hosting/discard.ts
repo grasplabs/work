@@ -34,7 +34,6 @@ import {
   clientWorkers,
   rolloutTargets,
   settings,
-  staffAlerts,
 } from "../db/schema.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 
@@ -160,9 +159,6 @@ export const discardClient = async (
     db
       .delete(rolloutTargets)
       .where(and(eq(rolloutTargets.clientId, clientId), still)),
-    db
-      .delete(staffAlerts)
-      .where(and(eq(staffAlerts.clientId, clientId), still)),
     db.delete(clientRuns).where(and(eq(clientRuns.clientId, clientId), still)),
     // Last, as its placement, operation, resources and Workers reference
     // it too: one written between the guard and this fails the batch.

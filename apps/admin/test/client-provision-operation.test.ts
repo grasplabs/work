@@ -18,7 +18,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
-import type { StaffAlert } from "../src/alerts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
@@ -3291,17 +3290,12 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("rolls a release that fails its probe once live back to the release before on its own, audited, and tells staff", async () => {
+  it("rolls a release that fails its probe once live back to the release before on its own, audited, and records a rollback that fails too", async () => {
     const first = await importRelease("dedicated");
     const { account, clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {
       notes: "feat(core): broken once live",
     });
-    // What staff are told, as the run sends it (src/alerts.ts).
-    const alert = vi
-      .fn<(alert: StaffAlert) => Promise<void>>()
-      .mockResolvedValue();
-    const alerting = { ...context, alert };
     const { connect } = await scriptsOf(clientId);
     // The release's core answers as another client; once the release's
     // connect went, the next upload of connect (the rollback's) finds core
@@ -3320,7 +3314,7 @@ describe("provisioning a placed client", () => {
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await runClientProvision(alerting, await attempt(clientId));
+      await runClientProvision(context, await attempt(clientId));
     } finally {
       errors.mockRestore();
     }
@@ -3334,11 +3328,8 @@ describe("provisioning a placed client", () => {
         )
       );
 
-    // A rollback that fails its probe too: thrown, and staff told so; an
-    // alert that can't be sent hides neither.
-    const unsent = vi
-      .fn<(alert: StaffAlert) => Promise<void>>()
-      .mockRejectedValue(new Error("channel down"));
+    // A rollback that fails its probe too: thrown, and recorded on the
+    // operation, where its Setup says so.
     const stuck = await liveClient(first);
     await startClientRelease(db, staff, await attempt(stuck.clientId), {
       releaseId: later.releaseId,
@@ -3346,7 +3337,7 @@ describe("provisioning a placed client", () => {
     stuck.account.coreProbe = { asClient: "someone-else" };
     const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
     const stuckError = await runClientProvision(
-      { ...context, alert: unsent },
+      context,
       await attempt(stuck.clientId)
     ).then(
       () => null,
@@ -3365,7 +3356,6 @@ describe("provisioning a placed client", () => {
         error: stuckError,
         operation: await operationOf(stuck.clientId),
       },
-      alerts: [...alert.mock.calls, ...unsent.mock.calls].map(([sent]) => sent),
     }).toMatchObject({
       operation: { releaseId: first.releaseId, status: "done" },
       runs: { core: first.releaseId, connect: first.releaseId },
@@ -3377,14 +3367,6 @@ describe("provisioning a placed client", () => {
         error: { code: "probe_identity_mismatch" },
         operation: { releaseId: first.releaseId, status: "failed" },
       },
-      alerts: [
-        { clientId, kind: "release_rolled_back", subject: later.releaseId },
-        {
-          clientId: stuck.clientId,
-          kind: "release_rollback_failed",
-          subject: later.releaseId,
-        },
-      ],
     });
   });
 
