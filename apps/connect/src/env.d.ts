@@ -103,6 +103,28 @@ interface __BaseEnv_Env {
   GMAIL_CLIENT_SECRET?: string;
   GMAIL_REFRESH_TOKEN?: string;
   /**
+   * Grasp's own keys at the AI providers, for platform features
+   * (src/ai-providers.ts): each optional, and a provider whose key is unset
+   * isn't offered for them. Never the organization's own keys, which are
+   * sealed in the database.
+   */
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  MISTRAL_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  /**
+   * `workerd` on plain workerd (on-prem): only then may an organization's
+   * OpenAI-compatible endpoint be on the deployment's own network, and only
+   * at a host `AI_PRIVATE_HOSTS` names (src/ai-endpoint-guard.ts).
+   */
+  RUNTIME_PROFILE?: string;
+  /**
+   * On-prem only: the private hosts an OpenAI-compatible endpoint may be
+   * at, comma-separated, such as `models.acme.lan,10.0.0.8`. Never a cloud
+   * metadata address, whatever it names.
+   */
+  AI_PRIVATE_HOSTS?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in
