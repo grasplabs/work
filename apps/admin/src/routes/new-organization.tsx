@@ -140,9 +140,9 @@ const DealChoice = ({
  * the admin's own: who it is, who goes through the onboarding (its first
  * admin, who the prototype sent a link and who here signs in with the
  * company's own Microsoft or Google), and the ring rollouts reach it in.
- * Adding it records it, with no account of its own (`client.create`); its
- * Setup then places it in a hosting destination and provisions it there,
- * on the release staff choose.
+ * Adding it records it, with no account of its own (`client.create`), and
+ * starts nothing: on its Setup, staff choose its release and start it,
+ * which places it in a hosting destination and provisions it there.
  *
  * Left out, as the admin keeps nowhere to put them yet: its website,
  * what it is, its language, who decided on Grasp, and marking it a test.
@@ -304,9 +304,9 @@ const NewOrganization = () => {
           <FieldSet>
             <FieldLegend variant="label">Where its Grasp runs</FieldLegend>
             <FieldDescription>
-              Its Setup places it in a hosting destination, the one that meets
-              its hosting policy, and provisions it there on the release you
-              choose.
+              Adding it starts nothing yet: on its Setup, you choose the release
+              it runs, and it is placed in the hosting destination that meets
+              its hosting policy and provisioned there.
             </FieldDescription>
             <Field>
               <FieldLabel htmlFor="org-ring">Ring</FieldLabel>

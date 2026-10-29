@@ -84,6 +84,7 @@ import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
   platformWorkerName,
+  adminHost,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
@@ -2620,6 +2621,25 @@ interface Stopped {
 }
 
 /**
+ * Sends `alert` to staff, a failure logged and not thrown: an alert that
+ * can't be sent never hides what the operation did, or why it stopped.
+ */
+const tellStaff = async (
+  context: ProvisionContext,
+  alert: StaffAlert
+): Promise<void> => {
+  try {
+    await context.alert?.(alert);
+  } catch (error) {
+    log.error("provision.alert_unsent", {
+      clientId: alert.clientId,
+      kind: alert.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+};
+
+/**
  * Runs client `held.clientId`'s operation once from its first step, as
  * runner `held`, and records it done; one done already is left as it is.
  * A failure is recorded (its step and code, audited) and answered.
@@ -2642,10 +2662,9 @@ const runOperation = async (
     // STAGE names no stage has no namespace of its own to hold a client
     // to, and never takes itself for production.
     const ownNamespace = context.router.namespace;
-    if (
-      ownNamespace === undefined ||
-      stageOfNamespace(ownNamespace) === undefined
-    ) {
+    const ownStage =
+      ownNamespace === undefined ? undefined : stageOfNamespace(ownNamespace);
+    if (ownNamespace === undefined || ownStage === undefined) {
       throw new ProvisionOperationError(
         "stage_unset",
         "This admin's STAGE is neither staging nor production: it runs no operation"
@@ -2659,7 +2678,11 @@ const runOperation = async (
     await validate(context, loaded);
 
     step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held);
+    const inventory = await ensureClientResources(api, db, "system", held, {
+      releaseId: loaded.operation.releaseId,
+      runId: held.runId,
+      record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
+    });
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
@@ -2697,6 +2720,15 @@ const runOperation = async (
     return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
+    // Provisioning's own check found a resource outside the policy's
+    // jurisdiction: the destination is marked so (src/hosting/provision.ts),
+    // and a person needs to look before anyone is placed there again.
+    if (code === "resource_outside_jurisdiction") {
+      await tellStaff(context, {
+        clientId: held.clientId,
+        kind: "hosting_check_failed",
+      });
+    }
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,
@@ -2737,25 +2769,6 @@ const rollsBack = async (
     .where(eq(clients.id, operation.clientId))
     .get();
   return client?.status === "active";
-};
-
-/**
- * Sends `alert` to staff, a failure logged and not thrown: an alert that
- * can't be sent never hides what the operation did, or why it stopped.
- */
-const tellStaff = async (
-  context: ProvisionContext,
-  alert: StaffAlert
-): Promise<void> => {
-  try {
-    await context.alert?.(alert);
-  } catch (error) {
-    log.error("provision.alert_unsent", {
-      clientId: alert.clientId,
-      kind: alert.kind,
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
 };
 
 /**
