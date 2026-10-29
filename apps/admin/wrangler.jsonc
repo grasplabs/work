@@ -14,6 +14,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
+  // The admin's own hostname, as a Custom Domain, which takes precedence
+  // over the router's route for every host below the stage's client domain
+  // (@grasp-os/shared/names, `platformRoutes`, which check:wrangler-configs
+  // holds this to). Deployed by cf as its `domains` (cf-worker.ts).
+  "routes": [{ "pattern": "admin.ongrasp.app", "custom_domain": true }],
   // Every setting of the admin's, none of them secret (src/env.d.ts says
   // what each does): production here, staging in `env.staging`, which
   // repeats every binding under its staging name, as wrangler inherits none
@@ -232,6 +237,9 @@
   "env": {
     "staging": {
       "name": "grasp-admin-staging",
+      "routes": [
+        { "pattern": "admin.staging.ongrasp.app", "custom_domain": true },
+      ],
       "vars": {
         "STAGE": "staging",
         "CF_ACCESS_AUD": "d9c971fada72b860273c91d805c70f07a73ccf1596aa81ff986ff3141d36619d",

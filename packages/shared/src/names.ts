@@ -97,6 +97,39 @@ export const adminHost = (stage: Stage): string =>
 export const authRelayHost = (stage: Stage): string =>
   `auth.${clientDomain(stage)}`;
 
+/** The Cloudflare zone every stage's hostnames are in: production's domain. */
+export const platformZone = productionDomain;
+
+/**
+ * Where a platform Worker answers in `stage`, as its wrangler.jsonc
+ * declares it (`routes`), so every deploy applies it:
+ *
+ * - the admin, on a custom domain of its own: `adminHost`;
+ * - the router, on a route for every host below `clientDomain` (each
+ *   client's, and the auth relay's), in `platformZone`;
+ * - the connect gateway, nowhere: it is reached by service binding alone.
+ *
+ * Production's route, `*.ongrasp.app/*`, matches staging's hosts too, as
+ * Cloudflare's `*` takes any number of labels. Cloudflare sends a request
+ * to the most specific route that matches it, so staging's own
+ * `*.staging.ongrasp.app/*` takes staging's hosts, and a Custom Domain
+ * takes precedence over any route, so the admin's hosts never reach a
+ * router. Each router still refuses another stage's host itself
+ * (`stageOfHost`), should a route ever send it one.
+ */
+export const platformRoutes = (
+  worker: PlatformWorker,
+  stage: Stage
+): { pattern: string; custom_domain?: true; zone_name?: string }[] => {
+  if (worker === "admin") {
+    return [{ pattern: adminHost(stage), custom_domain: true }];
+  }
+  if (worker === "router") {
+    return [{ pattern: `*.${clientDomain(stage)}/*`, zone_name: platformZone }];
+  }
+  return [];
+};
+
 /**
  * The stage hostname `host` belongs to: staging for staging's domain and
  * everything below it, production for anything else. Staging's domain

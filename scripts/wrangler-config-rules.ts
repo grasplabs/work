@@ -9,8 +9,9 @@
  *   older ones included, at an address of its own;
  * - is wrangler.jsonc, never TOML;
  * - for a platform Worker (the admin, the router, the connect gateway), names every Cloudflare
- *   resource as @grasp-os/shared/names does, at the top level for
- *   production and in `env.staging` for staging.
+ *   resource, and declares the routes it answers on, as the shared names
+ *   module (@grasp-os/shared/names) does, at the top level for production
+ *   and in `env.staging` for staging.
  * `check-wrangler-configs.ts` runs it on every wrangler config in the repo.
  */
 import {
@@ -21,6 +22,7 @@ import {
   storeSecretName,
   adminHost,
   clientDomain,
+  platformRoutes,
 } from "@grasp-os/shared/names";
 import type { PlatformWorker, Stage } from "@grasp-os/shared/names";
 
@@ -87,6 +89,20 @@ const platformConfigs: Readonly<Record<string, PlatformWorker>> = {
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+/** `routes` as one line to compare and show: each pattern, its zone, and whether it's a Custom Domain. */
+const routesText = (routes: unknown): string =>
+  list(routes)
+    .map((route) =>
+      [
+        String(field(route, "pattern")),
+        ...(field(route, "zone_name") === undefined
+          ? []
+          : [`zone ${String(field(route, "zone_name"))}`]),
+        ...(field(route, "custom_domain") === true ? ["custom domain"] : []),
+      ].join(" ")
+    )
+    .join(", ") || "none";
+
 /** `config`'s names that aren't what @grasp-os/shared/names gives `worker` in `stage`. */
 const stageNameErrors = (
   where: string,
@@ -102,6 +118,13 @@ const stageNameErrors = (
   };
   expect("name", field(config, "name"), platformWorkerName(worker, stage));
   expect("vars.STAGE", field(field(config, "vars"), "STAGE"), stage);
+  // Where it answers: without routes a deploy uploads it and serves it
+  // nowhere; with another stage's, it takes that stage's traffic.
+  expect(
+    "routes",
+    routesText(field(config, "routes")),
+    routesText(platformRoutes(worker, stage))
+  );
   for (const binding of list(field(config, "dispatch_namespaces"))) {
     expect(
       "the dispatch namespace",

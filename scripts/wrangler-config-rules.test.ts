@@ -101,11 +101,20 @@ describe("wrangler config rules", () => {
   });
 });
 
+/** The router's routes in each stage. */
+const productionRoutes = [
+  { pattern: "*.ongrasp.app/*", zone_name: "ongrasp.app" },
+];
+const stagingRoutes = [
+  { pattern: "*.staging.ongrasp.app/*", zone_name: "ongrasp.app" },
+];
+
 /** A router config in both stages, with `overrides` merged over each. */
 const router = (overrides: { production?: object; staging?: object } = {}) =>
   JSON.stringify({
     name: "grasp-router",
     vars: { STAGE: "production" },
+    routes: productionRoutes,
     ratelimits: [{ name: "A", namespace_id: "1001" }],
     dispatch_namespaces: [
       { binding: "DISPATCHER", namespace: "grasp-clients" },
@@ -115,6 +124,7 @@ const router = (overrides: { production?: object; staging?: object } = {}) =>
       staging: {
         name: "grasp-router-staging",
         vars: { STAGE: "staging" },
+        routes: stagingRoutes,
         ratelimits: [{ name: "A", namespace_id: "2001" }],
         dispatch_namespaces: [
           { binding: "DISPATCHER", namespace: "grasp-clients-staging" },
@@ -129,6 +139,22 @@ const routerFile = "apps/router/wrangler.jsonc";
 const secret = (name: string) => [
   { binding: "ROUTER_KEY", store_id: "s", secret_name: name },
 ];
+
+const gatewayFile = "apps/gateway/wrangler.jsonc";
+
+/** A connect gateway config in both stages, with `routes` in production. */
+const gateway = (routes?: object) =>
+  JSON.stringify({
+    name: "grasp-connect-gateway",
+    vars: { STAGE: "production" },
+    ...(routes === undefined ? {} : { routes }),
+    env: {
+      staging: {
+        name: "grasp-connect-gateway-staging",
+        vars: { STAGE: "staging" },
+      },
+    },
+  });
 
 describe("platform names", () => {
   it("accept a platform config named as @grasp-os/shared/names does, in both stages", () => {
@@ -159,7 +185,11 @@ describe("platform names", () => {
       shared: sharedRateLimitIds([{ file: routerFile, text: sharedLimit }]),
       noStaging: platformNameErrors(
         routerFile,
-        JSON.stringify({ name: "grasp-router", vars: { STAGE: "production" } })
+        JSON.stringify({
+          name: "grasp-router",
+          vars: { STAGE: "production" },
+          routes: productionRoutes,
+        })
       ),
     }).toStrictEqual({
       named: [
@@ -171,6 +201,32 @@ describe("platform names", () => {
       shared: ["1001"],
       noStaging: [
         `${routerFile}: add env.staging, the staging platform's names.`,
+      ],
+    });
+  });
+
+  it("refuse a platform Worker that answers nowhere, on another stage's hosts, or, for the gateway, anywhere", () => {
+    expect({
+      unrouted: platformNameErrors(
+        routerFile,
+        router({ staging: { routes: undefined } })
+      ),
+      productionsHosts: platformNameErrors(
+        routerFile,
+        router({ staging: { routes: productionRoutes } })
+      ),
+      gatewayUnrouted: platformNameErrors(gatewayFile, gateway()),
+      gatewayRouted: platformNameErrors(gatewayFile, gateway(productionRoutes)),
+    }).toStrictEqual({
+      unrouted: [
+        `${routerFile} (env staging): routes is none, not *.staging.ongrasp.app/* zone ongrasp.app.`,
+      ],
+      productionsHosts: [
+        `${routerFile} (env staging): routes is *.ongrasp.app/* zone ongrasp.app, not *.staging.ongrasp.app/* zone ongrasp.app.`,
+      ],
+      gatewayUnrouted: [],
+      gatewayRouted: [
+        `${gatewayFile}: routes is *.ongrasp.app/* zone ongrasp.app, not none.`,
       ],
     });
   });

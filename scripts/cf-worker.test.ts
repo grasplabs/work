@@ -87,6 +87,9 @@ describe("the admin's Worker for cf", () => {
         bindingOf(production, "STAGE")?.value,
         bindingOf(staging, "STAGE")?.value,
       ],
+      // Its own hostname, a Custom Domain, in each stage; no other route.
+      domains: [production.domains, staging.domains],
+      routes: staging.triggers?.filter((each) => each.type === "fetch"),
       // Inherited by staging from the top level, as Wrangler does.
       crons: staging.triggers?.length,
       redacted: staging.observability?.redactQueryString,
@@ -101,6 +104,8 @@ describe("the admin's Worker for cf", () => {
       deployers: ["DEPLOYER_API_TOKEN", "DEPLOYER_API_TOKEN_STAGING"],
       runs: ["grasp-admin", "grasp-admin-staging"],
       stages: ["production", "staging"],
+      domains: [["admin.ongrasp.app"], ["admin.staging.ongrasp.app"]],
+      routes: [],
       crons: 4,
       redacted: true,
     });
