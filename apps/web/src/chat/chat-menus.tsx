@@ -32,6 +32,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -162,6 +163,14 @@ export const useChatChanges = (chat: ChatSummary) => {
 };
 
 /**
+ * Keeps a menu's keys to itself: the ⌘K window around it would take Enter
+ * and the arrows for its list, opening a chat instead of the menu's item.
+ */
+const ownKeys = (event: KeyboardEvent): void => {
+  event.stopPropagation();
+};
+
+/**
  * A chat's three dots, there while its row is pointed at or in focus, and
  * always on a touch screen: rename it, move it into a project or out of
  * one, make a project for it, or delete it. Choosing Rename leaves the
@@ -196,6 +205,7 @@ export const ChatMenu = ({
       >
         <DropdownMenuTrigger
           aria-label={t`More for ${title}`}
+          onKeyDown={ownKeys}
           render={<Button size="icon-xs" variant="ghost" />}
         >
           <EllipsisIcon />
@@ -204,6 +214,7 @@ export const ChatMenu = ({
           align="end"
           className="w-60"
           finalFocus={() => !renaming.current}
+          onKeyDown={ownKeys}
         >
           <DropdownMenuItem
             onClick={() => {

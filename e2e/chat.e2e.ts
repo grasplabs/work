@@ -27,7 +27,17 @@ const chatsWindow = async (page: Page) => {
 
 /** A chat's row in the window, by its title. */
 const rowOf = (window: ReturnType<Page["getByRole"]>, title: string) =>
-  window.getByRole("option").filter({ hasText: title });
+  window
+    .getByRole("option")
+    .filter({ has: window.page().getByText(title, { exact: true }) });
+
+const regExpSyntax = /[$()*+.?[\\\]^{|}]/gu;
+
+/** A project in the window's column, by its name, with its count of chats. */
+const scopeOf = (window: ReturnType<Page["getByRole"]>, name: string) =>
+  window.getByRole("navigation", { name: "Projects" }).getByRole("button", {
+    name: new RegExp(`^${name.replaceAll(regExpSyntax, "\\$&")} \\d+$`, "u"),
+  });
 
 /**
  * A write the chat's agent asked for, as connect holds it for `person`:
@@ -311,7 +321,7 @@ test("a person groups chats in a project with a goal and a document, moves them 
   await expect(dialog).toHaveCount(0);
   // The window shows the new project, which holds no chat yet.
   const projects = chats.getByRole("navigation", { name: "Projects" });
-  const project = projects.getByRole("button", { name: projectName });
+  const project = scopeOf(chats, projectName);
   await expect(project).toHaveAttribute("aria-pressed", "true");
   await expect(chats).toContainText("No chats here yet.");
 
@@ -375,7 +385,7 @@ test("a person groups chats in a project with a goal and a document, moves them 
     .click();
   await expect(page).not.toHaveURL(/\/projects\//u);
   chats = await chatsWindow(page);
-  await expect(chats.getByRole("button", { name: projectName })).toHaveCount(0);
+  await expect(scopeOf(chats, projectName)).toHaveCount(0);
   await expect(rowOf(chats, first)).toBeVisible();
   await expect(rowOf(chats, second)).toBeVisible();
 });

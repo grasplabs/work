@@ -445,7 +445,13 @@ export const ChatSwitcher = ({
         open={open}
         title={t`Chats`}
       >
-        <Command flush loop shouldFilter={false}>
+        <Command
+          flush
+          // cmdk names its search by a label of its own: this one.
+          label={t`Search chats and projects`}
+          loop
+          shouldFilter={false}
+        >
           <CommandInput
             aria-label={t`Search chats and projects`}
             onValueChange={(value) => {
