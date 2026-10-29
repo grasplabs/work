@@ -28,7 +28,10 @@ export interface DeployTarget {
    * the config's top level: a built config is its stage's already.
    */
   env: string | undefined;
-  /** Secrets the Worker runs without, left unbound while the store lacks them. */
+  /**
+   * Secrets the Worker runs without, by binding name (in either stage),
+   * left unbound while the store lacks them.
+   */
   optional: ReadonlySet<string>;
 }
 
@@ -54,13 +57,18 @@ const deployedView = (
   return isRecord(view) ? view : undefined;
 };
 
-/** The secrets the deployed Worker's Secrets Store bindings name. */
-const boundSecrets = (view: Record<string, unknown> | undefined): string[] => {
+/** The deployed Worker's Secrets Store bindings: each binding and its secret's name. */
+const boundSecrets = (
+  view: Record<string, unknown> | undefined
+): { binding: string; name: string }[] => {
   const bindings = field(view, "secrets_store_secrets");
   return Array.isArray(bindings)
-    ? bindings.flatMap((binding) => {
-        const name = field(binding, "secret_name");
-        return typeof name === "string" ? [name] : [];
+    ? bindings.flatMap((each) => {
+        const binding = field(each, "binding");
+        const name = field(each, "secret_name");
+        return typeof binding === "string" && typeof name === "string"
+          ? [{ binding, name }]
+          : [];
       })
     : [];
 };
@@ -108,18 +116,18 @@ export const filledConfig = async (
     return filled;
   }
   const stored = await lookups.storedSecrets(store);
-  const missing = bound.filter((name) => !stored.has(name));
-  const needed = missing.filter((name) => !target.optional.has(name));
+  const missing = bound.filter(({ name }) => !stored.has(name));
+  const needed = missing.filter(({ binding }) => !target.optional.has(binding));
   if (needed.length > 0) {
     throw new Error(
-      `Secrets Store ${store} doesn't have ${needed.join(", ")}: put them in, then deploy again`
+      `Secrets Store ${store} doesn't have ${needed.map(({ name }) => name).join(", ")}: put them in, then deploy again`
     );
   }
   if (missing.length === 0 || view === undefined) {
     return filled;
   }
   console.warn(
-    `Not in Secrets Store yet, so left unbound: ${missing.join(", ")}`
+    `Not in Secrets Store yet, so left unbound: ${missing.map(({ name }) => name).join(", ")}`
   );
   const bindings = field(view, "secrets_store_secrets");
   view.secrets_store_secrets = Array.isArray(bindings)

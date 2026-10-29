@@ -103,6 +103,30 @@ describe("a Worker's config as it deploys", () => {
     });
   });
 
+  it("knows an optional secret by its binding, under its staging name too", async () => {
+    const built = JSON.stringify({
+      name: "grasp-admin-staging",
+      secrets_store_secrets: [
+        {
+          binding: "ROOMS_READ_TOKEN",
+          store_id: "account-secrets-store",
+          secret_name: "ROOMS_READ_TOKEN_STAGING",
+        },
+      ],
+    });
+    const deployed: unknown = JSON.parse(
+      await filledConfig(built, account().lookups, {
+        env: undefined,
+        optional: new Set(["ROOMS_READ_TOKEN"]),
+      })
+    );
+
+    expect(deployed).toStrictEqual({
+      name: "grasp-admin-staging",
+      secrets_store_secrets: [],
+    });
+  });
+
   it("leaves an optional secret the store lacks unbound, and deploys the rest", async () => {
     const built = JSON.stringify({
       name: "grasp-admin-staging",
