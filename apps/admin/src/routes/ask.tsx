@@ -7,6 +7,7 @@ import {
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
+import { WithAdmins } from "../admin/admins.tsx";
 import { AskChat } from "../admin/ask-chat.tsx";
 import { documentOf } from "../admin/ask-document.ts";
 import { AdminHeader } from "../admin/page.tsx";
@@ -26,13 +27,13 @@ const localToday = (): string => {
  * conversation shorter, never the page longer. "New chat" starts over.
  */
 const AskPage = () => {
-  const { admins } = adminRoute.useLoaderData();
+  const { clients } = adminRoute.useLoaderData();
   const { about } = Route.useSearch();
   const [chat, setChat] = useState(0);
   const name =
     about === undefined
       ? undefined
-      : admins.find(({ client }) => client.id === about)?.client.name;
+      : clients.find(({ id }) => id === about)?.name;
   return (
     <>
       <AdminHeader page="Ask Grasp" />
@@ -50,11 +51,16 @@ const AskPage = () => {
           </Button>
         </div>
         <h1 className="sr-only">Ask Grasp</h1>
-        <AskChat
-          about={name}
-          document={() => documentOf(admins, localToday())}
-          key={chat}
-        />
+        {/* Asked over every organization as its core answered, once they are in. */}
+        <WithAdmins>
+          {(admins) => (
+            <AskChat
+              about={name}
+              document={() => documentOf(admins, localToday())}
+              key={chat}
+            />
+          )}
+        </WithAdmins>
       </div>
     </>
   );

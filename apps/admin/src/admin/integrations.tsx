@@ -26,21 +26,15 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import {
-  getRouteApi,
-  Link,
-  rootRouteId,
-  useNavigate,
-} from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { BlocksIcon } from "lucide-react";
 
+import type { ClientAdmin } from "../clients/admin.ts";
+import { AdminsLoading, WithAdmins } from "./admins.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { AskedApp } from "./integrations-asked.ts";
 import { AdminPage } from "./page.tsx";
 import { formatDate, formatList } from "./words.ts";
-
-/** Every organization, as the admin's layout read them. */
-const adminRoute = getRouteApi(rootRouteId);
 
 /** The companies that asked for an app, by name. */
 const askedByOf = (app: AskedApp): string =>
@@ -165,14 +159,21 @@ const NothingAsked = () => (
   </section>
 );
 
+const appsTitle = "Apps asked for";
+const appsAbout =
+  "Apps the companies asked Grasp to add that Composio does not have, each listed once however many companies asked.";
+
 /** The page: the apps asked for, and the one open. */
-export const AppsAsked = ({ open }: { open: string | undefined }) => {
-  const apps = askedApps(adminRoute.useLoaderData().admins);
+const AppsAskedPage = ({
+  admins,
+  open,
+}: {
+  admins: readonly ClientAdmin[];
+  open: string | undefined;
+}) => {
+  const apps = askedApps(admins);
   return (
-    <AdminPage
-      description="Apps the companies asked Grasp to add that Composio does not have, each listed once however many companies asked."
-      title="Apps asked for"
-    >
+    <AdminPage description={appsAbout} title={appsTitle}>
       <div className="flex flex-col gap-6 text-sm">
         {apps.length > 0 ? <AppTable apps={apps} /> : <NothingAsked />}
       </div>
@@ -180,3 +181,16 @@ export const AppsAsked = ({ open }: { open: string | undefined }) => {
     </AdminPage>
   );
 };
+
+/** The page, once the apps every company asked for are in: its title at once. */
+export const AppsAsked = ({ open }: { open: string | undefined }) => (
+  <WithAdmins
+    fallback={
+      <AdminPage description={appsAbout} title={appsTitle}>
+        <AdminsLoading />
+      </AdminPage>
+    }
+  >
+    {(admins) => <AppsAskedPage admins={admins} open={open} />}
+  </WithAdmins>
+);

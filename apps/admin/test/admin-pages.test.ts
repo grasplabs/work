@@ -30,7 +30,7 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
 /** A client recorded as `status`, on a new account in the fake. */
 const recordClient = async (
-  status: "provisioning",
+  status: "provisioning" | "offboarded",
   clientId = `client-${crypto.randomUUID().slice(0, 8)}`
 ) => {
   const account = cloudflare.addAccount(`Acme ${clientId}`);
@@ -1253,6 +1253,32 @@ describe("the admin's frame", () => {
       setup: true,
       waitingWhy: true,
     });
+  });
+
+  it("says an offboarded organization was offboarded on each of its sections, and leaves it out of the sidebar", async () => {
+    const gone = await recordClient("offboarded");
+
+    const shown = [];
+    for (const section of ["overview", "members", "setup"] as const) {
+      const path = sectionTo[section].replace("$clientId", gone.clientId);
+      // oxlint-disable-next-line no-await-in-loop -- pages render one at a time
+      const { status, html } = await page(path);
+      shown.push({
+        status,
+        said: html.includes(`${gone.name} was offboarded`),
+        toOffboarded: html.includes('href="/platform/offboarded"'),
+        inSidebar: sidebarOf(html).includes(gone.name),
+      });
+    }
+
+    expect(shown).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        status: 200,
+        said: true,
+        toOffboarded: true,
+        inSidebar: false,
+      }))
+    );
   });
 
   it("has no page for a section an organization doesn't have", async () => {

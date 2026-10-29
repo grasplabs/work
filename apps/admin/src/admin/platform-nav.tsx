@@ -102,6 +102,6 @@ const adminRoute = getRouteApi(rootRouteId);
  * a page under Platform names a company rather than its id.
  */
 export const useCompanyNames = (): ReadonlyMap<string, string> => {
-  const { admins } = adminRoute.useLoaderData();
-  return new Map(admins.map(({ client }) => [client.id, client.name]));
+  const { clients } = adminRoute.useLoaderData();
+  return new Map(clients.map(({ id, name }) => [id, name]));
 };
