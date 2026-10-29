@@ -53,9 +53,10 @@ jobs:
         with:
           environment: production
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-          required: R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-      # Each bucket by the names module.
+          secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+          required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+      # The account's R2 endpoint, and each bucket, by the names module.
+      - run: echo "R2_ENDPOINT=$(vp exec node scripts/platform-names.ts production r2Endpoint)" >> "$GITHUB_ENV"
       - name: Fetch the release from staging's bucket
         run: |
           set -euo pipefail
