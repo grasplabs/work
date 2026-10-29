@@ -10,7 +10,6 @@ import { dropToolkitFlowsOf } from "./composio-connections.ts";
 import {
   callChanges,
   composioCleanups,
-  connectionTokens,
   connections,
   connectorEvents,
   erasedPeople,
@@ -19,8 +18,8 @@ import {
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
-import { disconnectPersonal, revoke } from "./oauth.ts";
-import { providerFor } from "./providers.ts";
+import { disconnectPersonal } from "./oauth.ts";
+import { revokeOwedOf } from "./revocations.ts";
 
 // Erasing a person (GRA-903, GRA-1183), connect's part, for core only, for
 // someone an admin removed and then erased (core's person-erasure.ts).
@@ -28,19 +27,14 @@ import { providerFor } from "./providers.ts";
 // at its provider: core's clock asks again until it isn't.
 //
 // - A connection of theirs still live (a flow that finished after they
-//   were removed, say) is revoked at its provider first, strictly: where
-//   the provider has a revocation endpoint and the revoke fails, it is
-//   left as it is, tokens and all, and this refuses
-//   (`connection.erase_pending`). Then it is stopped as any removal stops
-//   it (`disconnectPersonal`).
+//   were removed, say) is stopped as any removal stops it
+//   (`disconnectPersonal`). Where its provider won't take the revoke, the
+//   revoke is owed and its sealed tokens kept (src/revocations.ts): this
+//   asks again for every revoke of theirs still owed, since their removal
+//   too, and refuses (`connection.erase_pending`) while any is.
 // - A Composio connection is deleted at Composio after it is stopped, by
 //   a cleanup the cron trigger retries (composio-connections.ts): while
 //   one for theirs is outstanding, this refuses.
-// - A revoke that failed when they were removed can't be recovered: a
-//   disconnect deletes the tokens however its revoke went (threat model
-//   CN14), so there is nothing to revoke with any more, and nothing knows
-//   it failed. Until GRA-1191 keeps a token until its revoke succeeds,
-//   such a grant stays live at its provider until it lapses.
 //
 // First of all, connect marks that their erasure began (`erased_people`),
 // and from then makes nothing of theirs again: no connection a flow of
@@ -69,37 +63,6 @@ const theirConnections = (ownerUserId: string) =>
 /** Refuses: something of theirs may still be live at a provider. */
 const pending = (): Error =>
   connectionErrors.create("connection.erase_pending");
-
-/**
- * Revokes the grant of each live connection of `ownerUserId`'s whose
- * provider can revoke one, refusing on the first that fails.
- */
-const revokeLive = async (env: Env, ownerUserId: string): Promise<void> => {
-  const live = await drizzle(env.DB)
-    .select()
-    .from(connections)
-    .where(
-      and(theirConnections(ownerUserId), ne(connections.status, "disconnected"))
-    );
-  for (const connection of live) {
-    const provider = providerFor(connection.provider);
-    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-    const [token] = await drizzle(env.DB)
-      .select({ id: connectionTokens.connectionId })
-      .from(connectionTokens)
-      .where(eq(connectionTokens.connectionId, connection.id))
-      .limit(1);
-    // Without a token there is no grant here to revoke.
-    const revocable =
-      token !== undefined &&
-      provider?.kind === "oauth" &&
-      provider.revocationEndpoint !== undefined;
-    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-    if (revocable && !(await revoke(env, connection))) {
-      throw pending();
-    }
-  }
-};
 
 /** Whether a Composio cleanup of `ownerUserId`'s connections is outstanding. */
 const cleaningUp = async (env: Env, ownerUserId: string): Promise<boolean> => {
@@ -148,11 +111,12 @@ export const erasePersonal = async (
     .insert(erasedPeople)
     .values({ userId: ownerUserId, beganAt: new Date() })
     .onConflictDoNothing();
-  await revokeLive(env, ownerUserId);
-  // Stopped, its tokens gone, their flows spent and what waited for them
-  // dropped, as for anyone removed.
+  // Stopped, their flows spent and what waited for them dropped, as for
+  // anyone removed: a revoke their provider wouldn't take is owed, tokens
+  // kept, and asked again now with any owed since they were removed.
   await disconnectPersonal(env, { person: null, ownerUserIds: [ownerUserId] });
   if (
+    (await revokeOwedOf(env, ownerUserId)) ||
     (await anyLive(env, ownerUserId)) ||
     (await cleaningUp(env, ownerUserId))
   ) {
