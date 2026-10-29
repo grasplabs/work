@@ -249,16 +249,22 @@ export const runEntry = (
   },
 });
 
-/** The run's own actor in the audit log. */
+/**
+ * The run's own actor in the audit log: a run a Grasp staff member started
+ * names them (GRA-1088), when the row given says so.
+ */
 export const runActor = (
   row: Pick<RunRow, "id" | "appId" | "workflowId"> &
-    Partial<Pick<RunRow, "rootRunId">>
+    Partial<Pick<RunRow, "rootRunId" | "startedBy" | "startedByStaff">>
 ): AuditActor =>
   runActorOf({
     runId: row.id,
     app: row.appId,
     workflow: row.workflowId,
     rootRunId: row.rootRunId,
+    ...(row.startedByStaff === true && typeof row.startedBy === "string"
+      ? { authority: { onBehalfOf: row.startedBy, staff: true } }
+      : {}),
   });
 
 /**
@@ -322,6 +328,13 @@ export interface RunRequest {
    * (its status changed, their role went) starts nothing.
    */
   starter?: Person;
+  /**
+   * That a Grasp staff member starts it (GRA-1088), as their own session
+   * has them (`startWorkflow`'s `by.staff`), never from what was asked:
+   * written to the row as `started_by_staff`. Ignored for a run another
+   * run or a trigger starts, which staff never start.
+   */
+  byStaff?: boolean;
   /**
    * The trigger that started it, with the key of what it started it for
    * (triggers.ts): while a run has that key, it is the run, and no other
@@ -747,6 +760,22 @@ const requireStillStartable = async (
 };
 
 /**
+ * Whether a run is one a Grasp staff member started (`started_by_staff`):
+ * only a run a person starts by hand, as their session says staff, never
+ * one a trigger or another run starts.
+ */
+const staffStarted = ({
+  byStaff,
+  startedBy,
+  trigger,
+  parent,
+}: Pick<RunRequest, "byStaff" | "startedBy" | "trigger" | "parent">): boolean =>
+  byStaff === true &&
+  startedBy !== null &&
+  trigger === undefined &&
+  parent === undefined;
+
+/**
  * Starts a run on the App's current version, which it keeps until it ends.
  * The row, the start it is to send and its audit event are written before
  * the start is sent, so the dispatcher always finds the row, and a start
@@ -781,6 +810,7 @@ export const startRun = async (
     trigger,
     parent,
     starter,
+    byStaff,
   }: RunRequest
 ): Promise<WorkflowRun> => {
   if (input !== undefined && jsonBytes(input) > maxInputBytes) {
@@ -807,6 +837,7 @@ export const startRun = async (
     workflowId: workflow,
     version,
     startedBy,
+    startedByStaff: staffStarted({ byStaff, startedBy, trigger, parent }),
     status: "starting",
     createdAt: new Date(),
     endedAt: null,
@@ -874,6 +905,7 @@ export const startWorkflow = async (
     workflow: parse(workflowInputSchema, workflow),
     input: parse(z.json().optional(), input),
     startedBy: by.userId,
+    byStaff: by.staff,
     actor: actorOf(by),
     ...(via === undefined ? {} : { via }),
   });

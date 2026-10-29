@@ -679,6 +679,10 @@ msgstr "{label} · {count}"
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, en el sitio de soporte de Grasp, en una pestaña nueva"
 
+#: src/activity/audit-log.tsx
+msgid "{label}, started by {name} (Grasp staff)"
+msgstr "{label}, a petición de {name} (personal de Grasp)"
+
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
