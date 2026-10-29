@@ -96,6 +96,7 @@
     "./memory": "./src/memory.ts",
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
+    "./oauth-relay": "./src/oauth-relay.ts",
     "./onboarding": "./src/onboarding.ts",
     "./operation-limits": "./src/operation-limits.ts",
     "./operations": "./src/operations.ts",

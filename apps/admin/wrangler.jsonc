@@ -23,9 +23,13 @@
   // Entra and Google OAuth apps, which each client's core and connect sign
   // in with; CLIENT_DOMAIN is where
   // clients are served, and ADMIN_HOST the admin's own hostname, both as the
-  // names module gives them (check:wrangler-configs holds them to it). One that's
-  // unset is a setting the admin works without, as src/env.d.ts says,
-  // except the Access pair, without which nothing is deployed.
+  // names module gives them (check:wrangler-configs holds them to it);
+  // OAUTH_RELAY "on" sends every client's sign-in and connections back
+  // through the stage's OAuth relay, as every client this admin deploys is
+  // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
+  // each client's own origin. One that's unset is a setting the admin
+  // works without, as src/env.d.ts says, except the Access pair, without
+  // which nothing is deployed.
   "vars": {
     "STAGE": "production",
     "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
@@ -34,6 +38,7 @@
     "GOOGLE_CLIENT_ID": "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
     "CLIENT_DOMAIN": "ongrasp.app",
     "ADMIN_HOST": "admin.ongrasp.app",
+    "OAUTH_RELAY": "on",
   },
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
@@ -235,6 +240,7 @@
         "GOOGLE_CLIENT_ID": "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
         "CLIENT_DOMAIN": "staging.ongrasp.app",
         "ADMIN_HOST": "admin.staging.ongrasp.app",
+        "OAUTH_RELAY": "on",
       },
       "d1_databases": [
         {

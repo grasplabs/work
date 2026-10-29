@@ -102,8 +102,11 @@ export default defineProject({
           DISCORD_STAFF_IDS: discordTest.staffIds.join(","),
           // workerd has no jurisdictions (src/env.d.ts).
           DURABLE_OBJECT_JURISDICTION: "none",
-          // Where provisioned clients are served (src/deploy/context.ts).
+          // Where provisioned clients are served (src/deploy/context.ts),
+          // which no stage's OAuth relay serves: no relay mode, but where
+          // a test asks for it.
           CLIENT_DOMAIN: "grasp.test",
+          OAUTH_RELAY: "off",
           // Off production's hostname in wrangler.jsonc: the tests of the
           // admin's own hostname set it themselves (src/admin-host.ts).
           ADMIN_HOST: "",
