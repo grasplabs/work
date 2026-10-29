@@ -155,6 +155,10 @@ const coreOriginOf = async (
  *   own version, which differs from the one recorded: `drifted`, held.
  *   Code made to name the recorded version needs write access to the
  *   account, which can take the secrets anyway: out of scope.
+ * - A secret changed by hand. In a namespace every secret change, as every
+ *   upload, makes a new version, which version metadata names (a live
+ *   check on a real namespace, GRA-1223, 29 Oct): the version recorded is
+ *   only named while connect runs the secrets its operation delivered.
  * - Core naming core's version as connect's, or connect's for core: each
  *   Worker is compared only with its own recorded version, and two
  *   versions never share an id.
