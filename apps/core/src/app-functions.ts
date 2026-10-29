@@ -158,17 +158,27 @@ interface UseRefusalContext {
   readonly principal: string;
   readonly requestId: string;
   readonly runId: string | null;
+  /**
+   * The Grasp staff member whose work the call is, when staff started it
+   * (GRA-1088): core's own mark, never the App's word.
+   */
+  readonly staff?: string;
 }
 
 /** Writes `refusal` as `app.use.refused` for `context`; never throws. */
 const writeUseRefusal = async (
   env: Env,
-  { app, version, principal, requestId, runId }: UseRefusalContext,
+  { app, version, principal, requestId, runId, staff }: UseRefusalContext,
   refusal: UseRefusal
 ): Promise<void> => {
   try {
     await keepAuditEvent(env, drizzle(env.DB), {
-      actor: { type: "app", appId: app, part: "server" },
+      actor: {
+        type: "app",
+        appId: app,
+        part: "server",
+        ...(staff === undefined ? {} : { staff }),
+      },
       action: "app.use.refused",
       target: { type: "app", id: app },
       requestId,
@@ -304,6 +314,7 @@ export const invocationFor = async (
       principal: by.userId,
       requestId,
       runId: null,
+      ...(byStaff ? { staff: by.userId } : {}),
     }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
@@ -524,6 +535,7 @@ export const runInvocationFor = async (
       principal: authority.onBehalfOf,
       requestId,
       runId,
+      ...(authority.staff === true ? { staff: authority.onBehalfOf } : {}),
     }),
     // No `workflows`: a run's call starts no workflow (operations.ts,
     // `Invocation.workflows`), so its step can't open a lineage of its own.
