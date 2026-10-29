@@ -1,13 +1,12 @@
-import type { InstanceStatus as EngineStatus } from "@grasp-os/workerflow/contracts";
 /**
  * A client's runner: the one thing that may change what its account runs,
- * as `client_runs` names it. A provisioning attempt (a Workflow instance
- * per attempt, `<clientId>-p<random>`, src/hosting/workflow.ts), a rollout
- * while it deploys the client (the rollout's instance, or for a fleet
- * client a child of it that claims it in the rollout's name,
- * src/rollout/workflow.ts), a rollback of the client (its instance,
- * src/rollout/rollback.ts), or applying its settings (its instance,
- * src/clients/apply.ts). Instances are never deleted or reused.
+ * as `client_runs` names it: one of the admin's runs (src/workflow-runs.ts).
+ * A provisioning attempt (a run per attempt, `<clientId>-p<random>`,
+ * src/hosting/workflow.ts), a rollout while it deploys the client (the
+ * rollout's run, or for a fleet client a child of it that claims it in
+ * the rollout's name, src/rollout/workflow.ts), a rollback of the client
+ * (its run, src/rollout/rollback.ts), or applying its settings (its run,
+ * src/clients/apply.ts). Runs are never reused.
  *
  * A runner claims the client with one conditional write that names the
  * runner it replaces (none, for a client without one), audited in the
@@ -19,14 +18,17 @@ import type { InstanceStatus as EngineStatus } from "@grasp-os/workerflow/contra
  * a rollback takes a client from a runner still going, and only from the
  * rollout it rolls back.
  *
- * One set of rules for every runner: each is a Workflow instance, and it
- * holds the client while `client_runs` names it and its instance hasn't
- * ended (`hasEnded`); a claim whose instance doesn't exist yet counts as
+ * One set of rules for every runner: each is a run, and it holds the
+ * client while `client_runs` names it and its run hasn't ended
+ * (`hasEnded`); a claim whose run doesn't exist yet counts as
  * starting for `startingMs`. A runner checks it still holds the client
  * right before and after each change it makes live, and every write it
  * makes to the client's record carries `stillHolds` in the same
  * statement, so one that lost the client changes nothing.
  */
+import type { Workflow } from "@grasp-os/workerflow/binding";
+import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
+import type { WorkflowInstance } from "@grasp-os/workerflow/instance";
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 
@@ -35,35 +37,16 @@ import { actIfChanged, adminDatabase } from "./db/act.ts";
 import { clientRuns } from "./db/schema.ts";
 import { adminWorkflow, adminWorkflows } from "./workflow-runs.ts";
 
-/** Which Workflow a runner is an instance of. */
+/** Which of the admin's workflows a runner is a run of. */
 export type RunKind = (typeof clientRuns.kind.enumValues)[number];
 
 /**
- * Where a client's current run is: its engine's status, `starting` for a
+ * Where a client's current run is: the engine's status, `starting` for a
  * run claimed a moment ago that the engine doesn't have yet (its creation
  * is under way), or `gone` for one the engine doesn't have after that
- * (its retention passed, or its creation failed). Runs are on Cloudflare
- * Workflows or on Workerflow (src/workflow-runs.ts) while the admin moves
- * to Workerflow; Workerflow adds `rollingBack`.
+ * (its retention passed, or its creation failed).
  */
-export type RunStatus =
-  | InstanceStatus["status"]
-  | EngineStatus["status"]
-  | "starting"
-  | "gone";
-
-/** A run, on either engine: what the admin reads and asks of it. */
-export interface RunInstance {
-  status: () => Promise<{ status: RunStatus }>;
-  pause: () => Promise<void>;
-  resume: () => Promise<void>;
-  terminate: () => Promise<void>;
-}
-
-/** A binding of runs, on either engine. */
-interface RunBinding {
-  get: (id: string) => Promise<RunInstance>;
-}
+export type RunStatus = InstanceStatus["status"] | "starting" | "gone";
 
 /** A client's current run. */
 export interface CurrentRun {
@@ -72,18 +55,18 @@ export interface CurrentRun {
   /** When it was claimed: what's newer belongs to it. */
   claimedAt: Date;
   status: RunStatus;
-  /** The instance, when its engine has it. */
-  instance: RunInstance | null;
+  /** The run, when the engine has it. */
+  instance: WorkflowInstance | null;
 }
 
 /**
- * How long a claimed run Workflows doesn't have counts as starting: well
+ * How long a claimed run the engine doesn't have counts as starting: well
  * past the moment between a claim and its create. After it, the run is
  * gone and may be replaced.
  */
 export const startingMs = 60_000;
 
-/** Runs that ended without finishing, or that Workflows no longer has: a claim may replace them. */
+/** Runs that ended without finishing, or that the engine no longer has: a claim may replace them. */
 const replaceable: ReadonlySet<RunStatus> = new Set([
   "errored",
   "terminated",
@@ -104,12 +87,12 @@ export const isReplaceable = (status: RunStatus): boolean =>
 export const hasEnded = (status: RunStatus): boolean =>
   status === "complete" || isReplaceable(status);
 
-/** Whether `error` is the engine saying it has no instance of that id: both say it so. */
+/** Whether `error` is the engine saying it has no run of that id. */
 const isMissingInstance = (error: unknown): boolean =>
   error instanceof Error && error.message.includes("instance.not_found");
 
 /** The workflow a runner of `kind` is a run of. */
-const workflows: Readonly<Record<RunKind, (env: Env) => RunBinding>> = {
+const workflows: Readonly<Record<RunKind, (env: Env) => Workflow>> = {
   rollout: (env) => adminWorkflow(env, adminWorkflows.rollout),
   rollback: (env) => adminWorkflow(env, adminWorkflows.rollbackClient),
   apply: (env) => adminWorkflow(env, adminWorkflows.applyClient),
@@ -118,15 +101,15 @@ const workflows: Readonly<Record<RunKind, (env: Env) => RunBinding>> = {
 };
 
 /**
- * Where instance `id` of `workflow`, created (or about to be) at
- * `since`, is, and the instance when its engine has it.
+ * Where run `id` of `workflow`, created (or about to be) at `since`, is,
+ * and the run when the engine has it.
  */
-export const instanceStatus = async <Instance extends RunInstance>(
-  workflow: { get: (id: string) => Promise<Instance> },
+export const instanceStatus = async (
+  workflow: Workflow,
   id: string,
   since: Date
-): Promise<{ status: RunStatus; instance: Instance | null }> => {
-  let instance: Instance;
+): Promise<{ status: RunStatus; instance: WorkflowInstance | null }> => {
+  let instance: WorkflowInstance;
   try {
     instance = await workflow.get(id);
   } catch (error) {

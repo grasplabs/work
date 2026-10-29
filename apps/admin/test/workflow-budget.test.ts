@@ -11,9 +11,9 @@ import { quickStep } from "../src/workflow-steps.ts";
 import { ended, journalOf, runObject } from "./runs.ts";
 
 // How long a run as long as a rollout may get takes on the admin's own
-// Workerflow host (src/run-object.ts): rollouts moved there from
-// Cloudflare Workflows (src/rollout/workflow.ts), and a rollout of the
-// fleet may take up to `stepBudget` steps. A synthetic run of 1,000 steps,
+// Workerflow host (src/run-object.ts), where rollouts run
+// (src/rollout/workflow.ts), and a rollout of the fleet may take up to
+// `stepBudget` steps. A synthetic run of 1,000 steps,
 // each a D1 read as a rollout's quick steps make, suspending now and then
 // as a rollout does between rings, through the host's real object.
 
