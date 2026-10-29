@@ -679,6 +679,10 @@ msgstr "{label} · {count}"
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, on Grasp’s support site, in a new tab"
 
+#: src/activity/audit-log.tsx
+msgid "{label}, started by {name} (Grasp staff)"
+msgstr "{label}, started by {name} (Grasp staff)"
+
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -6149,6 +6153,10 @@ msgstr "Grasp can't be reached right now. Try again in a moment."
 msgid "Grasp can't count model spend right now. Try again later."
 msgstr "Grasp can't count model spend right now. Try again later."
 
+#: src/onboarding/review-parts.tsx
+msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
+msgstr "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
+
 #: src/chat/failure.ts
 msgid "Grasp can't read your organization's model limits right now. Try again later."
 msgstr "Grasp can't read your organization's model limits right now. Try again later."
@@ -7833,6 +7841,10 @@ msgstr "Madrid"
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail and messages to other people, after they press a card with every recipient."
+
+#: src/onboarding/review-parts.tsx
+msgid "Mail isn’t available on this hosting yet"
+msgstr "Mail isn’t available on this hosting yet"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"

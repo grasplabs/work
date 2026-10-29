@@ -332,6 +332,54 @@ describe("threat model", () => {
     );
   });
 
+  it("AP2: in relay mode the code goes only to the stage's relay, and is exchanged with that same redirect URI", async () => {
+    const { person, account } = personWithAccount("sample-oauth");
+    const relayOrigin = "https://auth.ongrasp.app";
+    const start = async (
+      callbackOrigin: string,
+      origin = "https://acme.ongrasp.app"
+    ) =>
+      await exports.default.startConnection({
+        person,
+        provider: "sample-oauth",
+        scope: "personal",
+        origin,
+        callbackOrigin,
+        returnTo: "/connections",
+      });
+    const started = await start(relayOrigin);
+    const url = new URL(started.url);
+    const redirect = url.searchParams.get("redirect_uri");
+    const code = apps.authorize(url.href, account);
+    const finished = await finish(person, stateOf(url), code);
+    const [exchange] = apps.tokenRequests("authorization_code");
+
+    expect({
+      redirect,
+      finished,
+      exchanged: new URLSearchParams(exchange?.body).get("redirect_uri"),
+      // Only a stage's relay origin, exactly, for a client of that stage.
+      refused: await Promise.all(
+        [
+          start("https://evil.test"),
+          start(`${relayOrigin}/x`),
+          start("https://auth.ongrasp.app.evil.test"),
+          start("https://auth.staging.ongrasp.app"),
+          start(relayOrigin, clientOrigin),
+          start(relayOrigin, "https://acme.ongrasp.app:8443"),
+        ].map(async (attempt) => await outcome(attempt))
+      ),
+    }).toStrictEqual({
+      redirect: `${relayOrigin}/callback/connections`,
+      finished: "ok",
+      exchanged: `${relayOrigin}/callback/connections`,
+      refused: Array.from(
+        { length: 6 },
+        () => "connection.provider_unavailable"
+      ),
+    });
+  });
+
   // The record's endpoints themselves (HTTPS, a DNS name, no port) are the
   // connector kit's sign-in tests'; here, connect's side of them.
   it("AP3: the client secret, the code and the tokens go only to the record's endpoints, never through a redirect", async () => {
