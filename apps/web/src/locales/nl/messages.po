@@ -4750,6 +4750,10 @@ msgstr "Pakketten geweigerd"
 msgid "Depends on"
 msgstr "Hangt af van"
 
+#: src/engines/new-app.tsx
+msgid "Describe the app: what it shows, and for whom"
+msgstr "Beschrijf de app: wat hij laat zien, en voor wie"
+
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Description"
@@ -5019,6 +5023,7 @@ msgstr "Snelkoppelingen van domeinen"
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -8242,6 +8247,11 @@ msgstr "Nooit"
 msgctxt "when Pulse may report"
 msgid "Never"
 msgstr "Nooit"
+
+#: src/routes/_shell.apps.new.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "New app"
+msgstr "Nieuwe app"
 
 #: src/brain/goals-editor.tsx
 msgid "New board goal"
@@ -15272,6 +15282,10 @@ msgstr "Wat moet er veranderen?"
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"
 msgstr "Wat moet Grasp daar doen?"
+
+#: src/engines/new-app.tsx
+msgid "What should the app show, and for whom?"
+msgstr "Wat moet de app laten zien, en voor wie?"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
