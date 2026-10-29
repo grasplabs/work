@@ -775,6 +775,35 @@ describe("erasing a person", () => {
     });
   });
 
+  it("finishes their workspace's erasure when the weekly sweep discarded a preview's store first", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = await signedInApi(idp, "builder");
+    const chat = await person.api.chats.create("Theirs");
+    // A preview's store the workspace still lists, which the sweep already
+    // discarded, with core's record of it (sealed-previews.ts).
+    await runInDurableObject(
+      workspace(env, personalWorkspaceId(person.userId)),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "INSERT INTO preview_stores (store_id, chat_id, app_id, revision) VALUES (?, ?, 'app-gone', 1)",
+          `store-${crypto.randomUUID()}`,
+          chat.id
+        );
+      }
+    );
+    await admin.api.members.remove(person.userId);
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    expect({
+      workspace: erased.areas.find(({ area }) => area === "workspace")?.state,
+      stores: await inWorkspace(person.userId, "preview_stores"),
+    }).toStrictEqual({ workspace: "complete", stores: 0 });
+  });
+
   it("empties their workspace, their chats and everything in them, and leaves everyone else's as it was", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");

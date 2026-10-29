@@ -3671,8 +3671,19 @@ export class Workspace extends DurableObject<Env> {
       .from(previewStores)
       .all();
     for (const { storeId } of stores) {
+      // One the weekly sweep discarded first (sealed-previews.ts) is gone
+      // with core's record of it: discarded already, and its row here
+      // goes with the rest of the object's storage below.
       // oxlint-disable-next-line no-await-in-loop -- one store at a time
-      await discardFixtureStore(this.env, storeIdSchema.parse(storeId));
+      const recorded = await this.env.DB.prepare(
+        "SELECT 1 AS found FROM preview_fixture_stores WHERE store_id = ?"
+      )
+        .bind(storeId)
+        .first<{ found: number }>();
+      if (recorded !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- one store at a time
+        await discardFixtureStore(this.env, storeIdSchema.parse(storeId));
+      }
     }
     // Every event of what it did is in the log before its outbox goes.
     if ((await drainObjectOutbox(this.env, this.ctx.storage.sql)) > 0) {
