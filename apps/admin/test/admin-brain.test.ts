@@ -149,7 +149,7 @@ describe("an organization's brain", () => {
       const at = numbers.indexOf(`>${label}</span>`);
       return at === -1
         ? ""
-        : (/<span class="[^"]*\bcol-span-2 row-start-2[^"]*">(?<value>[^<]*)</u.exec(
+        : (/<span class="[^"]*\bcol-span-2 row-start-2[^"]*">(?:<span [^>]*>)?(?<value>[^<]*)</u.exec(
             numbers.slice(at)
           )?.groups?.value ?? "");
     };

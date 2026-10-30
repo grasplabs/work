@@ -21,6 +21,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { PageLoading } from "../admin/failure.tsx";
 import { domainOfEmail, slugOf } from "../admin/new-organization.ts";
 import { AdminPage } from "../admin/page.tsx";
 import { HostingChoice } from "../hosting/hosting-choice.tsx";
@@ -479,4 +480,5 @@ export const Route = createFileRoute("/new-organization")({
   loader: async () => await fetchCreateOptions(),
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
+  pendingComponent: PageLoading,
 });
