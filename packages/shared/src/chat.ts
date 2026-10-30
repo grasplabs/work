@@ -7,6 +7,7 @@ import type {
   ScreenBundle,
   ScreenProblem,
 } from "./screens.ts";
+import type { ThinkingStep } from "./thinking.ts";
 import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -382,6 +383,12 @@ export type ChatMessage =
       text: string;
       failed: boolean;
       at: string;
+      /**
+       * A step of thinking the brain showed (`show_thinking`, see
+       * `ThinkingStep`), for the result of a call that showed one; none
+       * for any other.
+       */
+      thinking?: ThinkingStep;
     };
 
 /**
@@ -649,6 +656,12 @@ export interface ChatsApi {
   efforts: () => Promise<Record<string, ModelEfforts>>;
   /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
+  /**
+   * One of the person's chats, as `list` gives it, however long ago it was
+   * active: for a chat past the end of the list. Not theirs, or not there,
+   * is `agent.chat_not_found`.
+   */
+  summary: (chatId: string) => Promise<ChatSummary>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
   /**

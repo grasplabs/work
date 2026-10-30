@@ -4,23 +4,21 @@
  * what the new release's platform limits are raised over. Writes `null`
  * when there's none. Reads only.
  *
- * Env: R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY;
- *      GITHUB_RUN_NUMBER, the run being built, unless --before-run is given
- * Usage: vp run release:previous --out <file> [--before-run <n>]
+ * Env: R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+ * Usage: vp run release:previous --out <file>
  */
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
 import { manifestKey } from "@grasp-os/shared/release";
-import { AwsClient } from "aws4fetch";
 
-import { earlierReleaseIds, parseReleaseListing } from "./previous-lib.ts";
+import { releasesBucketFromEnv } from "./bucket-lib.ts";
+import { newestReleaseIds } from "./previous-lib.ts";
 
 const { values: args } = parseArgs({
   options: {
     out: { type: "string" },
-    "before-run": { type: "string" },
   },
 });
 if (args.out === undefined) {
@@ -28,63 +26,18 @@ if (args.out === undefined) {
 }
 const out = path.resolve(args.out);
 
-const requireEnv = (name: string): string => {
-  const value = process.env[name];
-  if (value === undefined || value === "") {
-    throw new Error(`${name} is required`);
-  }
-  return value;
-};
-
-const beforeRun = Number(args["before-run"] ?? requireEnv("GITHUB_RUN_NUMBER"));
-if (!Number.isSafeInteger(beforeRun) || beforeRun < 1) {
-  throw new Error(`${beforeRun} isn't a run number`);
-}
-
-const endpoint = requireEnv("R2_ENDPOINT").replace(/\/$/u, "");
-const bucket = requireEnv("R2_BUCKET");
-const client = new AwsClient({
-  accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
-  secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
-  service: "s3",
-  region: "auto",
-});
-
-const publishedIds = async (): Promise<string[]> => {
-  const ids: string[] = [];
-  let token: string | undefined;
-  do {
-    const query = new URLSearchParams({
-      "list-type": "2",
-      prefix: "releases/",
-      delimiter: "/",
-      ...(token === undefined ? {} : { "continuation-token": token }),
-    });
-    // oxlint-disable-next-line no-await-in-loop -- each page names the next
-    const response = await client.fetch(
-      `${endpoint}/${bucket}?${query.toString()}`
-    );
-    if (!response.ok) {
-      throw new Error(`LIST releases/: ${response.status}`);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- each page names the next
-    const page = parseReleaseListing(await response.text());
-    ids.push(...page.ids);
-    token = page.next;
-  } while (token !== undefined);
-  return ids;
-};
+const bucket = releasesBucketFromEnv();
 
 const HTTP_NOT_FOUND = 404;
 
-/** The newest earlier release whose manifest exists, and its bytes. */
+/** The newest release whose manifest exists, and its bytes. */
 const previousManifest = async (): Promise<
   { id: string; bytes: Uint8Array } | undefined
 > => {
-  for (const id of earlierReleaseIds(await publishedIds(), beforeRun)) {
+  for (const id of newestReleaseIds(await bucket.listIds())) {
     const key = manifestKey(id);
     // oxlint-disable-next-line no-await-in-loop -- newest first, until one is published
-    const response = await client.fetch(`${endpoint}/${bucket}/${key}`);
+    const response = await bucket.fetch(bucket.url(key));
     if (response.status === HTTP_NOT_FOUND) {
       continue;
     }
@@ -100,8 +53,8 @@ const previousManifest = async (): Promise<
 const previous = await previousManifest();
 if (previous === undefined) {
   writeFileSync(out, "null\n");
-  console.info(`No release published before run ${beforeRun}`);
+  console.info("No release published yet");
 } else {
   writeFileSync(out, previous.bytes);
-  console.info(`The release before run ${beforeRun} is ${previous.id}`);
+  console.info(`The release before this one is ${previous.id}`);
 }

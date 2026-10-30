@@ -20,6 +20,7 @@ import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
+import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -39,6 +40,7 @@ import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sweepStatistics } from "./statistics.ts";
+import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { sweepConnectorTriggerHolds } from "./workflows/connector-triggers.ts";
@@ -223,6 +225,20 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "channels.signals",
     period: "quarterHour",
     run: sweepChannelSignals,
+  },
+  // Stephen's requests past their thirteen months, and the questions
+  // nothing points at (src/channels/stephen-requests.ts).
+  {
+    name: "channels.requests",
+    period: "quarterHour",
+    run: sweepStephenRequests,
+  },
+  // The weekly summary of Stephen's requests, on Monday mornings
+  // (src/stephen-summary.ts).
+  {
+    name: "stephen.summaries",
+    period: "quarterHour",
+    run: sendStephenSummaries,
   },
   // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
   { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
