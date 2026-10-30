@@ -3549,6 +3549,85 @@ export const guestChats = sqliteTable(
   ]
 );
 
+/**
+ * Who may open a published App without being a member (app-visitors.ts):
+ * each address its builders listed, and each domain whose every address
+ * may. Only these can ask for a code.
+ */
+export const appVisitorEntries = sqliteTable(
+  "app_visitor_entries",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    kind: text({ enum: ["address", "domain"] }).notNull(),
+    /** Lower case, ASCII (`appVisitorEntrySchema`). */
+    value: text().notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.kind, table.value] })]
+);
+
+/**
+ * The codes sent to visitors (app-visitors.ts), each kept as its SHA-256
+ * only, with how many tries it took. A row outlives its code (signed in,
+ * used up or expired) for an hour, so the hour's codes per address and
+ * per App are counted from it, then the sweep deletes it.
+ */
+export const appVisitorCodes = sqliteTable(
+  "app_visitor_codes",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    codeHash: text("code_hash").notNull(),
+    tries: integer().notNull(),
+    /** When it was used, or ran out of tries: it takes nothing after. */
+    usedAt: timestamp("used_at"),
+    sentAt: timestamp("sent_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // An address's codes for an App, newest first: the one to check, and
+    // the hour's count.
+    index("app_visitor_codes_address_idx").on(
+      table.appId,
+      table.address,
+      table.sentAt
+    ),
+    // The hour's count for the App.
+    index("app_visitor_codes_sent_idx").on(table.appId, table.sentAt),
+    // What the sweep deletes, oldest first.
+    index("app_visitor_codes_sweep_idx").on(table.sentAt),
+  ]
+);
+
+/**
+ * Signed-in visitors (app-visitors.ts): each session opens one App, until
+ * it expires or the visitor signs out. Kept as its token's SHA-256 only.
+ */
+export const appVisitorSessions = sqliteTable(
+  "app_visitor_sessions",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    address: text().notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_visitor_sessions_token_idx").on(table.tokenHash),
+    // What the sweep deletes.
+    index("app_visitor_sessions_expires_idx").on(table.expiresAt),
+  ]
+);
+
 /** A guest chat's messages, in order: the guest's, and the model's answers. */
 export const guestMessages = sqliteTable(
   "guest_messages",

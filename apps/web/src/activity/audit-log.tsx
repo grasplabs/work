@@ -387,6 +387,13 @@ const doerOf = (
       id: actor.chatId,
     };
   }
+  if (actor.type === "visitor") {
+    const engine = appName(directory, actor.appId);
+    return {
+      label: i18n._(msg`Visitor of ${ph({ domain: engine })}`),
+      id: actor.sessionId ?? actor.appId,
+    };
+  }
   // The platform itself: a name, the same in every language.
   return { label: "Grasp" };
 };

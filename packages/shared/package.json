@@ -77,6 +77,7 @@
     "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",
+    "./app-visitors": "./src/app-visitors.ts",
     "./guests": "./src/guests.ts",
     "./interview-hear": "./src/interview-hear.ts",
     "./interview-links": "./src/interview-links.ts",

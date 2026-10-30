@@ -395,6 +395,15 @@ const coreDb: D1State = {
     notifications: exported(`${core}notifications.ts`),
     guest_chats: exported(`${core}guests.ts`),
     guest_messages: exported(`${core}guests.ts`),
+    app_visitor_entries: exported(`${core}app-visitors.ts`),
+    app_visitor_codes: transient(
+      `${core}app-visitors.ts`,
+      "Codes last 10 minutes and their rows an hour: a restored deployment's visitors ask for new ones."
+    ),
+    app_visitor_sessions: transient(
+      `${core}app-visitors.ts`,
+      "Sessions last 8 hours at most: a restored deployment's visitors sign in again."
+    ),
     migration_samples: exported(`${core}migration-samples.ts`),
     migration_sample_leases: transient(`${core}migration-samples.ts`),
     business_stores: exported(`${core}data-stores.ts`),
