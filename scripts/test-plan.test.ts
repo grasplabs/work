@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { affectedProjects, packageOf } from "./test-plan.ts";
+import { affectedProjects, packageOf, reachedPackages } from "./test-plan.ts";
 
 const root = "/repo";
 const packages = [
@@ -54,5 +54,68 @@ describe("planning which test projects run", () => {
 
   it("runs no project when no package is affected", () => {
     expect(affectedProjects(files, packages, new Set())).toStrictEqual([]);
+  });
+});
+
+/** The workspace's shape where it matters: core uses ui, and web's build. */
+const workspace = [
+  { name: "grasp-os", dir: root, dependsOn: ["/repo/packages/shared"] },
+  {
+    name: "@grasp-os/shared",
+    dir: "/repo/packages/shared",
+    dependsOn: [],
+  },
+  {
+    name: "@grasp-os/ui",
+    dir: "/repo/packages/ui",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/web",
+    dir: "/repo/apps/web",
+    dependsOn: ["/repo/packages/ui", "/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/core",
+    dir: "/repo/apps/core",
+    dependsOn: ["/repo/apps/web", "/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/admin",
+    dir: "/repo/apps/admin",
+    dependsOn: ["/repo/packages/ui"],
+  },
+];
+
+describe("following a change through the workspace", () => {
+  it("reaches every package that depends on a changed one, directly or not", () => {
+    expect(reachedPackages(workspace, ["/repo/packages/shared"])).toStrictEqual(
+      new Set([
+        "/repo/packages/shared",
+        root,
+        "/repo/packages/ui",
+        "/repo/apps/web",
+        "/repo/apps/core",
+        "/repo/apps/admin",
+      ])
+    );
+  });
+
+  it("doesn't reach core from web, whose build is all core takes", () => {
+    expect(reachedPackages(workspace, ["/repo/apps/web"])).toStrictEqual(
+      new Set(["/repo/apps/web"])
+    );
+  });
+
+  it("still reaches core from what web and core both use", () => {
+    expect(reachedPackages(workspace, ["/repo/packages/ui"])).toContain(
+      "/repo/apps/core"
+    );
+  });
+
+  it("follows every dependency when none is build-only", () => {
+    expect(
+      reachedPackages(workspace, ["/repo/apps/web"], new Map())
+    ).toStrictEqual(new Set(["/repo/apps/web", "/repo/apps/core"]));
   });
 });
