@@ -964,6 +964,10 @@ msgstr "{name} a été vu pour la première fois le {firstSeen}, il y a moins d�
 msgid "{name} was first seen on {firstSeen}, more than a month ago."
 msgstr "{name} a été vu pour la première fois le {firstSeen}, il y a plus d’un mois."
 
+#: src/activity/audit-log.tsx
+msgid "{name}, in {app}"
+msgstr "{name}, dans {app}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
 msgstr "{name}, par {key}"
@@ -2289,6 +2293,10 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} pour {person}"
+
+#: src/activity/audit-log.tsx
+msgid "Agent {agentId} for {person}, in {app}"
+msgstr "Agent {agentId} pour {person}, dans {app}"
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
