@@ -2340,6 +2340,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Actie"
 
+#: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -2363,6 +2364,10 @@ msgstr "Acties voor {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
 msgstr "Acties voor {who}"
+
+#: src/engines/app-versions.tsx
+msgid "Actions for version {version}"
+msgstr "Acties voor versie {version}"
 
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
@@ -3994,6 +3999,10 @@ msgstr "Per workflow"
 msgid "By workflow run"
 msgstr "Per workflowrun"
 
+#: src/engines/app-versions.tsx
+msgid "by you"
+msgstr "door jou"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Een model aangeroepen"
@@ -4035,8 +4044,11 @@ msgstr "Niet leesbaar"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-remove.tsx
 #: src/engines/app-status.tsx
+#: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/knowledge/new-collection.tsx
@@ -4515,6 +4527,7 @@ msgstr "Klik om Gebruik te openen"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
@@ -5162,6 +5175,10 @@ msgctxt "kind of app"
 msgid "CRM"
 msgstr "CRM"
 
+#: src/engines/app-versions.tsx
+msgid "Current"
+msgstr "Huidig"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Huidig abonnement"
@@ -5335,6 +5352,7 @@ msgstr "Versie van de definitie"
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/engines/app-remove.tsx
 #: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
@@ -5353,6 +5371,7 @@ msgstr "‘{title}’ verwijderen?"
 msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Het interview van {first} voorgoed verwijderen, met alles wat is gezegd?"
 
+#: src/engines/app-remove.tsx
 #: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete {name}?"
@@ -5361,6 +5380,10 @@ msgstr "{name} verwijderen?"
 #: src/onboarding/interview-actions.tsx
 msgid "Delete and start over"
 msgstr "Verwijderen en opnieuw beginnen"
+
+#: src/engines/app-remove.tsx
+msgid "Delete for good"
+msgstr "Definitief verwijderen"
 
 #: src/interview/closed.tsx
 msgid "Delete it"
@@ -7970,6 +7993,10 @@ msgstr "Er is nog geen stap vastgelegd."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Het is voorgoed weg en kan niet worden teruggehaald. Het auditlogboek houdt bij dat het is verwijderd en door wie, nooit wat het was."
 
+#: src/engines/app-remove.tsx
+msgid "It is gone for good: its apps, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
+msgstr "Het is definitief weg: de apps, versies en leden, en wat het mocht. De opslag en de records erin blijven, net als de workflows die het niet bezit."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It is no longer held."
 msgstr "Het wordt niet meer vastgehouden."
@@ -8066,6 +8093,10 @@ msgstr "Het blijft hier voor jou om te lezen. Je kunt het nog steeds verwijderen
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "Het werkt nog steeds niet. Je kunt nu stoppen en later terugkomen. Je plek blijft bewaard."
 
+#: src/engines/release-controls.tsx
+msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
+msgstr "Hij stopt meteen, ook lopende aanroepen, en kan nooit meer draaien. Hij blijft bewaard, en de intrekking wordt vastgelegd met uw reden."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "Het doet vanaf het begin mee. Voeg daarna de mensen toe en kies de teamleider: die praat eerst."
@@ -8137,6 +8168,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 #: src/connections/connection-list.tsx
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: domeinen en agents houden hun toestemmingen ervoor."
+
+#: src/engines/app-versions.tsx
+msgid "Its apps and workflows run on it from now on. Grasp checks and builds it first, and refuses if the version that runs changed since you looked."
+msgstr "De apps en workflows draaien er vanaf nu op. Grasp controleert en bouwt hem eerst, en weigert als de draaiende versie is veranderd sinds je keek."
 
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
@@ -8237,6 +8272,10 @@ msgstr "Iedereen erin krijgt de vraag wat hij doet"
 #: src/onboarding/organization-words.ts
 msgid "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
 msgstr "De mensen krijgen hun links zonder te wachten, en Stephen vraagt iedereen welk werk hij doet. Met een teamleider vraagt hij eerst die welk werk er is."
+
+#: src/engines/app-versions.tsx
+msgid "Its permissions on connections, to start workflows and to call other domains wait for an admin to grant them again."
+msgstr "De rechten op verbindingen, om workflows te starten en andere domeinen aan te roepen, wachten tot een beheerder ze opnieuw verleent."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "its retries"
@@ -8616,6 +8655,10 @@ msgstr "Juridische en beleidsdocumenten die de leverancier publiceert."
 msgid "Legal data"
 msgstr "Juridische gegevens"
 
+#: src/engines/release-controls.tsx
+msgid "Legal hold: {hold}"
+msgstr "Juridische bewaarplicht: {hold}"
+
 #: src/brain/memory-page.tsx
 msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
@@ -8675,6 +8718,18 @@ msgstr "Licentie"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Licentie"
+
+#: src/engines/release-controls.tsx
+msgid "Lift hold"
+msgstr "Bewaarplicht opheffen"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold}"
+msgstr "Juridische bewaarplicht {hold} opheffen"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold} from version {version}?"
+msgstr "Juridische bewaarplicht {hold} van versie {version} opheffen?"
 
 #: src/frame/person-menu.tsx
 msgid "Light"
@@ -8856,6 +8911,10 @@ msgstr "Laag"
 msgid "Low confidence"
 msgstr "Lage betrouwbaarheid"
 
+#: src/engines/app-versions.tsx
+msgid "Made"
+msgstr "Gemaakt"
+
 #: src/policies/policy.ts
 msgid "Made by {vendors}"
 msgstr "Gemaakt door {vendors}"
@@ -8918,6 +8977,10 @@ msgstr "Er een workflow van maken"
 msgid "Make admin"
 msgstr "Beheerder maken"
 
+#: src/engines/app-versions.tsx
+msgid "Make current"
+msgstr "Huidig maken"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Versie {version} actueel maken"
@@ -8925,6 +8988,10 @@ msgstr "Versie {version} actueel maken"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Versie {version} actueel maken en publiceren"
+
+#: src/engines/app-versions.tsx
+msgid "Make version {version} current?"
+msgstr "Versie {version} huidig maken?"
 
 #: src/inbox/items.ts
 msgid "Make version {version} of {name} live?"
@@ -9282,6 +9349,10 @@ msgstr "Naam"
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Naam van een nieuwe workflow"
+
+#: src/engines/release-controls.tsx
+msgid "Name of the hold, such as a case reference"
+msgstr "Naam van de bewaarplicht, zoals een zaaknummer"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
@@ -9993,6 +10064,10 @@ msgstr "Geen gebruik gezien"
 #: src/workflows/files-and-apps.tsx
 msgid "No version uses it yet"
 msgstr "Nog geen versie gebruikt het"
+
+#: src/engines/app-versions.tsx
+msgid "No version yet: its builders make the first in a chat."
+msgstr "Nog geen versie: de bouwers maken de eerste in een chat."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "No watching rule catches an app."
@@ -11859,6 +11934,18 @@ msgctxt "filter: where people reach Stephen"
 msgid "Place"
 msgstr "Plek"
 
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold"
+msgstr "Juridische bewaarplicht instellen"
+
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold on version {version}?"
+msgstr "Juridische bewaarplicht instellen voor versie {version}?"
+
+#: src/engines/release-controls.tsx
+msgid "Place hold"
+msgstr "Bewaarplicht instellen"
+
 #: src/onboarding/place-picker.tsx
 msgid "Places"
 msgstr "Plekken"
@@ -12889,6 +12976,7 @@ msgstr "Revisie {revision} doorstaat de controle van het profiel en kan worden g
 
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 #: src/policies/policy-editing.tsx
 msgid "Revoke"
@@ -12917,6 +13005,18 @@ msgstr "Pakketten voor {domain} intrekken"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakketten voor {domain} intrekken?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke this version"
+msgstr "Deze versie intrekken"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke version {version}?"
+msgstr "Versie {version} intrekken?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoked"
+msgstr "Ingetrokken"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"
@@ -12982,6 +13082,18 @@ msgstr "Rol van {who}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Roles"
 msgstr "Rollen"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back"
+msgstr "Terugzetten"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to this version"
+msgstr "Terugzetten naar deze versie"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to version {version}?"
+msgstr "Terugzetten naar versie {version}?"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -13776,6 +13888,10 @@ msgstr "Oudere tonen"
 #: src/landscape/audit-trail.tsx
 msgid "Show older events to read further back."
 msgstr "Toon oudere gebeurtenissen om verder terug te lezen."
+
+#: src/engines/app-versions.tsx
+msgid "Show older versions"
+msgstr "Oudere versies tonen"
 
 #: src/dashboard/widget-ask.tsx
 msgid "Show only the failed runs."
@@ -15689,6 +15805,14 @@ msgstr "de Verenigde Staten"
 msgid "The upload was cancelled."
 msgstr "De upload is geannuleerd."
 
+#: src/engines/release-controls.tsx
+msgid "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
+msgstr "De versie blijft alleen bewaard zolang de bewaarregels en haar andere bewaarplichten dat vragen. Het opheffen wordt vastgelegd."
+
+#: src/engines/release-controls.tsx
+msgid "The version is kept, however old, until an admin lifts the hold. The hold is recorded with your reason."
+msgstr "De versie blijft bewaard, hoe oud ook, tot een beheerder de bewaarplicht opheft. De bewaarplicht wordt vastgelegd met uw reden."
+
 #: src/brain/brain.ts
 msgid "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
 msgstr "Het visiegesprek, de interviews met stakeholders en medewerkers via voice of chat, en chats met een Grasp-agent. Voegt toe hoe elk team werkt, in eigen woorden."
@@ -16730,6 +16854,10 @@ msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wi
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in dit domein noch in een ander domein dat de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
 
+#: src/engines/app-versions.tsx
+msgid "Up for review"
+msgstr "Ter beoordeling"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
 msgstr "Tot {upTo} minuten"
@@ -16918,6 +17046,7 @@ msgstr "Nu controleren"
 msgid "Verify the chain"
 msgstr "Keten controleren"
 
+#: src/engines/app-versions.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -16985,6 +17114,10 @@ msgstr "Versie {waiting} wacht om live te gaan"
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Te beoordelen versie: {version}"
+
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Versions"
+msgstr "Versies"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -17329,6 +17462,7 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "Wat binnenkwam"
 
+#: src/engines/app-versions.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -18137,6 +18271,7 @@ msgid "Whose numbers to show"
 msgstr "Wiens cijfers te tonen"
 
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/knowledge/purge.tsx
 #: src/policies/policy-editing.tsx
 #: src/workflows/requests/request-table.tsx
@@ -18497,6 +18632,10 @@ msgstr "Geschreven door een model: {0}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Opgeschreven"
+
+#: src/engines/app-versions.tsx
+msgid "Written in a chat"
+msgstr "In een chat geschreven"
 
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
