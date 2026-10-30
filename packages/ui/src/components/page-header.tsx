@@ -1,5 +1,7 @@
 // Layout primitive, not in shadcn: a page's title, what it is for and its
 // actions. The actions move under the title on a phone.
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@grasp-os/ui/lib/utils";
 
 function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
@@ -28,20 +30,32 @@ function PageHeaderContent({
   );
 }
 
+/**
+ * A page's own title, in the serif: the one place a page's name is set
+ * large. `render` makes it another heading, such as the `h2` of a record
+ * that stands as a page's subject. A page may focus its title for a
+ * screen reader (`tabIndex={-1}`); a title is never a control, so it shows
+ * no ring for it.
+ */
 function PageHeaderTitle({
   className,
-  children,
+  render,
   ...props
-}: React.ComponentProps<"h1">) {
-  return (
-    <h1
-      data-slot="page-header-title"
-      className={cn("type-title", className)}
-      {...props}
-    >
-      {children}
-    </h1>
-  );
+}: useRender.ComponentProps<"h1">) {
+  return useRender({
+    defaultTagName: "h1",
+    props: mergeProps<"h1">(
+      {
+        className: cn(
+          "font-serif text-3xl leading-tight font-light tracking-tight text-balance outline-none",
+          className
+        ),
+      },
+      props
+    ),
+    render,
+    state: { slot: "page-header-title" },
+  });
 }
 
 function PageHeaderDescription({

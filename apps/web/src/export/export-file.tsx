@@ -1,4 +1,5 @@
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
@@ -10,11 +11,11 @@ import type { ExportFigure } from "./figure-tiles.tsx";
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
-// mark at its head, Geist for the text, the title, the Markdown's first two
-// levels of heading and any key figures in Newsreader (`type-title`,
-// `page-export` in styles.css, `type-figure`), and the light theme, which
-// is what paper takes (the theme's dark is for the screen only). No PDF is
-// drawn in the app itself.
+// mark at its head, Geist for the text, the title (PageHeaderTitle), the
+// Markdown's first two levels of heading (`page-export` in styles.css) and
+// any key figures (Stat) in Newsreader, and the light theme, which is what
+// paper takes (the theme's dark is for the screen only). No PDF is drawn
+// in the app itself.
 //
 // The page to print is a frame of this origin, so it keeps this page's
 // Content Security Policy: no inline script or style. Its look comes from
@@ -92,10 +93,10 @@ const PrintPage = ({
 }) => (
   <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
     <header className="flex items-center gap-2 font-medium">
-      <GraspMark className="h-4 w-auto" variant="logo" />
+      <GraspMark className="h-4 w-auto" />
       Grasp
     </header>
-    <h1 className="type-title">{title}</h1>
+    <PageHeaderTitle>{title}</PageHeaderTitle>
     <FigureTiles figures={figures} />
     <PlainMarkdown
       text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
@@ -215,7 +216,7 @@ export const printAsPdf = async (
   await withinTime(
     Promise.all([
       page.fonts.load('1em "Geist Variable"'),
-      page.fonts.load('300 1.75rem "Newsreader Variable"'),
+      page.fonts.load('300 1em "Newsreader Variable"'),
     ])
   );
   await withinTime(page.fonts.ready);

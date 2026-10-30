@@ -7,6 +7,7 @@ import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { MessagesSquareIcon, XIcon } from "lucide-react";
@@ -219,7 +220,7 @@ export const InterviewFrame = ({
       )}
       <div className="flex items-center justify-between sm:contents">
         <div className="flex h-14 items-center gap-2 sm:order-1 sm:flex-1 sm:basis-0">
-          <GraspMark className="size-5 flex-none" variant="logo" />
+          <GraspMark className="size-5 flex-none" />
           <SaveNote />
         </div>
         <div className="flex h-14 items-center justify-end sm:order-3 sm:flex-1 sm:basis-0">
@@ -246,7 +247,7 @@ const Stopped = ({
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
-        <h1 className="type-title">{t`Your place is kept.`}</h1>
+        <PageHeaderTitle>{t`Your place is kept.`}</PageHeaderTitle>
         <p className="text-muted-foreground text-balance">
           {t`Open this link again whenever you like, and carry on where you stopped.`}
         </p>
@@ -270,7 +271,7 @@ const Over = ({ room }: { room: number }) => {
   return (
     <Said fill={1} label={t`${who}, drawn in dots.`} room={room} sign="heart">
       <div className="flex flex-col gap-2">
-        <h1 className="type-title">{t`The interviews are over.`}</h1>
+        <PageHeaderTitle>{t`The interviews are over.`}</PageHeaderTitle>
         <p className="text-muted-foreground text-balance">
           {t`Thank you for your time.`}
         </p>
@@ -285,9 +286,9 @@ const Deleted = ({ room }: { room: number }) => {
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
-      <h1 aria-live="polite" className="type-title">
+      <PageHeaderTitle aria-live="polite">
         {t`Deleted. Nothing you said is kept.`}
-      </h1>
+      </PageHeaderTitle>
     </Said>
   );
 };
@@ -299,9 +300,9 @@ const Withdrawn = ({ room }: { room: number }) => {
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
-        <h1 aria-live="polite" className="type-title">
+        <PageHeaderTitle aria-live="polite">
           {t`You withdrew. Nothing you said is used from now on.`}
-        </h1>
+        </PageHeaderTitle>
         <p className="text-muted-foreground text-balance">
           {t`It stays here for you to read. You can still delete it.`}
         </p>
