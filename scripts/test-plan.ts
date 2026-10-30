@@ -143,12 +143,8 @@ const listed = z.array(
   })
 );
 
-/**
- * The workspace packages `filter` selects, by pnpm, all when none, with
- * their workspace dependencies. A change to a journey file alone selects
- * no package by it.
- */
-const packagesSelected = (filter?: string): WorkspacePackage[] => {
+/** `vp pm ls` of the workspace's packages, those `filter` selects. */
+const listPackages = (filter?: string): z.infer<typeof listed> => {
   const output = execFileSync(
     "vp",
     [
@@ -158,7 +154,8 @@ const packagesSelected = (filter?: string): WorkspacePackage[] => {
       "--depth=0",
       "--json",
       ...(filter === undefined ? [] : [`--filter=${filter}`]),
-      // pnpm's own flag, which vp passes on after `--`.
+      // pnpm's own flag, which vp passes on after `--`: a change to a
+      // journey file alone selects no package by it.
       "--",
       ...journeyFiles.map(
         (pattern) => `--changed-files-ignore-pattern=${pattern}`
@@ -166,7 +163,16 @@ const packagesSelected = (filter?: string): WorkspacePackage[] => {
     ],
     { encoding: "utf-8" }
   );
-  return listed.parse(JSON.parse(output)).map((entry) => ({
+  return listed.parse(JSON.parse(output));
+};
+
+/** The workspace packages' directories, of those `filter` selects, by pnpm. */
+export const packagesSelected = (filter?: string): string[] =>
+  listPackages(filter).map(({ path: dir }) => dir);
+
+/** Every workspace package, with its workspace dependencies, by pnpm. */
+const workspacePackages = (): WorkspacePackage[] =>
+  listPackages().map((entry) => ({
     name: entry.name,
     dir: entry.path,
     dependsOn: Object.values({
@@ -176,7 +182,6 @@ const packagesSelected = (filter?: string): WorkspacePackage[] => {
       .filter(({ version }) => version.startsWith("link:"))
       .map(({ path: dir }) => dir),
   }));
-};
 
 const writeOutput = (name: string, value: string): void => {
   const file = process.env.GITHUB_OUTPUT;
@@ -206,11 +211,11 @@ const plan = async (base: string | undefined): Promise<void> => {
       "No base to compare with (the merge queue, or a run by hand): every project.";
   } else {
     // Changed itself, without what depends on it: the root's own files.
-    const changed = packagesSelected(`[${base}]`).map(({ dir }) => dir);
+    const changed = packagesSelected(`[${base}]`);
     if (changed.includes(root)) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const packages = packagesSelected();
+      const packages = workspacePackages();
       const affected = reachedPackages(packages, changed);
       projects = affectedProjects(
         specs.map((spec) => ({
