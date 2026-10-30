@@ -52,7 +52,7 @@ export const ChatSources = ({
   return (
     <div className="flex flex-wrap items-start gap-2 text-xs">
       {restricted ? (
-        <Badge variant="destructive">
+        <Badge variant="attention">
           <Trans>Restricted</Trans>
         </Badge>
       ) : null}

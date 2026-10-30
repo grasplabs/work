@@ -2,15 +2,15 @@ import type { Workspace } from "@grasp-os/shared/brain";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 import type { I18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useEffect, useState } from "react";
 
-import type { Atlas } from "../brain-atlas.ts";
-import type { Brain } from "../brain.ts";
 import { beatsEnd } from "./beats.ts";
 import type { BeatSay, ThinkingBeat } from "./beats.ts";
+import type { ShapeGround } from "./ground.ts";
+import { roundHours } from "./hours.ts";
 import { later } from "./later.ts";
-import { learn, noteArrivals } from "./log.ts";
+import { learn, noteArrivals, teachOnce } from "./log.ts";
 import type { Learned } from "./log.ts";
 import { thinkingIn, thinkingSchedule } from "./play.ts";
 import { beatsOf, figureAt, paceOf, thinkingTeaches } from "./shapes.ts";
@@ -19,9 +19,6 @@ import type { ThinkingFigure } from "./shapes.ts";
 // Grasp's thinking played in the brain, step by step and beat by beat
 // (grasplabs/prototype `data/brain-thinking.ts`, its logic alone), from
 // what the tab saw of it (log.ts).
-
-/** The calls whose findings were taught to the brain already. */
-const taught = new Set<string>();
 
 /**
  * The steps of a chat that reached this tab, as the brain takes them: when
@@ -39,8 +36,7 @@ export const noteThinking = (
   for (const { steps, calls } of thinkingIn(messages)) {
     for (const [index, call] of calls.entries()) {
       const step = steps[index];
-      if (!taught.has(call) && step !== undefined) {
-        taught.add(call);
+      if (step !== undefined && teachOnce(call)) {
         lessons.push(
           ...thinkingTeaches(step, ws).map(([from, to], at) => ({
             id: `${call}:${at}`,
@@ -150,6 +146,43 @@ export const beatWords = (said: BeatSay, i18n: I18n): string => {
       const { team } = said;
       return i18n._(msg`Not the same in ${team}`);
     }
+    case "readingAll": {
+      const { count } = said;
+      return i18n._(
+        msg`${plural(count, { one: "Reading # workflow", other: "Reading # workflows" })}`
+      );
+    }
+    case "weighingAll": {
+      const { count } = said;
+      return i18n._(
+        msg`${plural(count, { one: "Adding up the hours of # workflow", other: "Adding up the hours of # workflows" })}`
+      );
+    }
+    case "weighing": {
+      const { name } = said;
+      const hours = roundHours(said.hours);
+      return i18n._(
+        msg`${name}: ${plural(hours, { one: "# hour a week", other: "# hours a week" })}`
+      );
+    }
+    case "unknown": {
+      const { count } = said;
+      return i18n._(msg`${plural(count, { other: "# not counted yet" })}`);
+    }
+    case "total": {
+      const hours = roundHours(said.hours);
+      return i18n._(
+        msg`${plural(hours, { one: "# hour a week in all that Grasp can count", other: "# hours a week in all that Grasp can count" })}`
+      );
+    }
+    case "share": {
+      const whole = new Intl.NumberFormat(i18n.locale, {
+        maximumFractionDigits: 0,
+      });
+      const hours = whole.format(said.hours);
+      const all = whole.format(said.of);
+      return i18n._(msg`${hours} of the ${all} hours a week`);
+    }
     default: {
       return "";
     }
@@ -177,24 +210,20 @@ export const usePlayedThinking = (
   key: string | undefined,
   steps: readonly ThinkingStep[],
   {
-    ws,
-    brain,
-    atlas,
+    ground,
     still,
     arrivals,
     open = false,
     i18n,
   }: {
-    ws: Workspace;
-    brain: Brain;
-    atlas: Atlas;
+    ground: ShapeGround;
     still: boolean;
     arrivals?: readonly (number | undefined)[];
     open?: boolean;
     i18n: I18n;
   }
 ): PlayedThinking => {
-  const shapes = steps.map((_, at) => figureAt(steps, at, ws, brain, atlas));
+  const shapes = steps.map((_, at) => figureAt(steps, at, ground));
   const beats = shapes.map((shape) =>
     shape === undefined ? [] : beatsOf(shape)
   );

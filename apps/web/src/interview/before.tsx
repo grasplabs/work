@@ -47,7 +47,7 @@ const Line = ({
 }) => {
   const said = useSaidOf(text);
   const className =
-    "animate-in fade-in slide-in-from-bottom-2 max-w-lg text-2xl font-medium tracking-tight text-balance duration-500";
+    "type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500";
   return (
     <div
       aria-live="polite"
@@ -102,7 +102,12 @@ const Language = ({ room, onNext }: { room: number; onNext: () => void }) => {
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line heading text={question} />
         <LanguageChoice onPick={keepGoing} picked />
-        <Button className="w-full max-w-sm" onClick={onNext} size="xl">
+        <Button
+          className="w-full max-w-sm"
+          onClick={onNext}
+          size="xl"
+          variant="highlight"
+        >
           {t`Continue`}
         </Button>
       </div>
@@ -314,7 +319,7 @@ const About = ({
         />
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <h1 className="type-title">
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
         </h1>
         <dl className="w-full text-left">
@@ -329,7 +334,12 @@ const About = ({
           ))}
         </dl>
         <div className="flex w-full max-w-sm flex-col items-center gap-3">
-          <Button className="w-full" onClick={onNext} size="xl">
+          <Button
+            className="w-full"
+            onClick={onNext}
+            size="xl"
+            variant="highlight"
+          >
             {t`Check sound and microphone`}
           </Button>
           <Quiet onClick={onType}>{t`Type instead, without sound`}</Quiet>

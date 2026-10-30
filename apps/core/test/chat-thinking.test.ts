@@ -469,4 +469,31 @@ describe("show_thinking in a chat", slow, () => {
       },
     ]);
   });
+
+  // Last: the team it adds shares the name "Ops" the tests above name it by.
+  it("draws an answer's picture from what the brain shows the person, with who said what, and nothing else of it", async () => {
+    const ids = await teamInTheBrain();
+    const { member, teamId, said, work } = await askedWithBrain(ids);
+    const [ground, brain] = await Promise.all([
+      member.api.brain.thinking(),
+      member.api.brain.read(),
+    ]);
+
+    expect({
+      teams: ground.teams,
+      statements: ground.statements.map(({ id }) => id),
+      saidBy: ground.statements.find(({ id }) => id === said)?.teamId,
+      work: ground.workflows.find(({ id }) => id === work?.id),
+      keys: Object.keys(ground).toSorted(),
+    }).toStrictEqual({
+      teams: brain.teams.map(({ id, name }) => ({ id, name })),
+      statements: brain.statements.map(({ id }) => id),
+      saidBy: teamId,
+      work:
+        work === undefined
+          ? undefined
+          : { id: work.id, name: work.name, hours: hoursPerWeek(work) },
+      keys: ["statements", "teams", "workflows"],
+    });
+  });
 });
