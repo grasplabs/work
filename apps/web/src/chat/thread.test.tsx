@@ -19,10 +19,13 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ChatThread } from "./thread.tsx";
 
-// What the model thought before an answer, in the thread: while it thinks,
-// its words stream in, open under "Thinking"; once the answer is kept, a
-// quiet line says how long it thought, and unfolds what it thought. And
+// An answer's steps as one trace in the thread. What the model thought:
+// while it thinks, its words stream in, open under "Thinking"; once the
+// answer is kept, a quiet line says how long it thought, folded, and opens
+// to what it thought. How long Grasp worked is the trace's first line. And
 // what an answer's code did to the dashboard, under the step that did it.
+// While an answer is written, the words of the block being written fade
+// in where they land, the blocks before it done; a kept one stands still.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -77,13 +80,17 @@ const thread = async (
   });
 };
 
-/** What the thread shows of the model's thinking: its line, whether it is open, and what it thought. */
-const thinking = () => {
-  const details = document.querySelector("details");
+/** The first step that folds open: its line, whether it is open, and what it shows. */
+const firstStep = () => {
+  const line = document.querySelector("button[aria-expanded]");
+  const shows = line?.getAttribute("aria-controls");
   return {
-    line: details?.querySelector("summary")?.textContent,
-    open: details?.open,
-    thought: details?.querySelector("p")?.textContent,
+    line: line?.textContent,
+    open: line?.getAttribute("aria-expanded") === "true",
+    shows:
+      shows === null || shows === undefined
+        ? undefined
+        : document.querySelector(`#${shows}`)?.textContent,
   };
 };
 
@@ -103,10 +110,10 @@ describe(ChatThread, () => {
       reasoning: "Add two to two.",
     });
 
-    expect(thinking()).toStrictEqual({
+    expect(firstStep()).toStrictEqual({
       line: "Thinking",
       open: true,
-      thought: "Add two to two.",
+      shows: "Add two to two.",
     });
   });
 
@@ -124,15 +131,15 @@ describe(ChatThread, () => {
         at: "2026-10-27T09:00:05.000Z",
       },
     ]);
-    const folded = thinking();
+    const folded = firstStep();
     await act(async () => {
-      document.querySelector("summary")?.click();
+      document.querySelector<HTMLElement>("button[aria-expanded]")?.click();
       await Promise.resolve();
     });
 
-    expect([folded, thinking()]).toStrictEqual([
-      { line: "Thought for 3s", open: false, thought: "Add two to two." },
-      { line: "Thought for 3s", open: true, thought: "Add two to two." },
+    expect([folded, firstStep()]).toStrictEqual([
+      { line: "Thought for 3s", open: false, shows: undefined },
+      { line: "Thought for 3s", open: true, shows: "Add two to two." },
     ]);
   });
 
@@ -173,16 +180,49 @@ describe(ChatThread, () => {
         },
       ]
     );
-    const line = [...document.querySelectorAll("p")].find((each) =>
-      each.textContent.includes("dashboard")
-    );
+    const way = document.querySelector('a[href="/dashboard"]');
 
     expect({
-      said: line?.textContent,
-      to: line?.querySelector("a")?.getAttribute("href"),
+      said: way?.parentElement?.textContent,
+      step: document.querySelector("button[aria-expanded]")?.textContent,
     }).toStrictEqual({
       said: "Grasp added a widget to your dashboard. Open the dashboard",
-      to: "/dashboard",
+      step: "Code stepDone",
+    });
+  });
+
+  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
+    await thread([asked], {
+      text: "It adds up.\n\nFour, as **two** and two.",
+      code: [],
+      reasoning: "",
+    });
+    const landing = [...document.querySelectorAll("span.animate-in")].map(
+      (word) => word.textContent
+    );
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "Four, as **two** and two.",
+        citations: [],
+        code: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ]);
+
+    expect({
+      landing,
+      kept: document.querySelectorAll("span.animate-in").length,
+    }).toStrictEqual({
+      landing: ["Four,", "as", "two", "and", "two."],
+      kept: 0,
     });
   });
 });

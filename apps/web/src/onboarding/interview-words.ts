@@ -72,6 +72,7 @@ export const tagTitles: Record<FactTag, MessageDescriptor> = {
   term: msg({ message: "Their word", context: "kind of fact" }),
   next: msg({ message: "Who comes next", context: "kind of fact" }),
   work: msg({ message: "Piece of work", context: "kind of fact" }),
+  who: msg({ message: "Who does it", context: "kind of fact" }),
 };
 
 /** The steps everyone goes through with their link, from being asked to having talked. */
