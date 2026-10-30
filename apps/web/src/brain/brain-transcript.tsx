@@ -619,7 +619,7 @@ export const TranscriptRail = ({
         </h2>
         {chapters.map((chapter, index) => (
           <button
-            className="hover:bg-sidebar-accent -mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-sm"
+            className="hover:bg-muted -mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-sm"
             key={chapter.at}
             onClick={() => {
               document
@@ -649,7 +649,7 @@ export const TranscriptRail = ({
                 last: drawn rather than placed, as SVG takes a share of its height as a position. */}
             <div
               aria-hidden="true"
-              className="bg-sidebar-accent relative w-1.5 flex-none rounded-full"
+              className="bg-muted relative w-1.5 flex-none rounded-full"
             >
               <svg className="absolute inset-0 size-full overflow-visible">
                 {highlights.map((highlight) => (

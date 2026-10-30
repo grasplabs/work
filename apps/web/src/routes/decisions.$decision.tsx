@@ -4,6 +4,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { Label } from "@grasp-os/ui/components/label";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
@@ -28,7 +29,6 @@ import { AppFrame } from "../frame/app-frame.tsx";
 import { NotFound } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
-import { GraspMark } from "../grasp-mark.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -291,7 +291,7 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
 /** A page of its own, for someone not signed in or when core is away. */
 const OnItsOwn = ({ children }: { children: ReactNode }) => (
   <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center text-sm">
-    <GraspMark className="text-foreground size-6" />
+    <GraspMark className="size-6" variant="logo" />
     {children}
   </main>
 );
@@ -325,7 +325,7 @@ const Decision = () => {
   if (page.state === "offline") {
     return (
       <OnItsOwn>
-        <h1 className="text-2xl font-medium tracking-tight">
+        <h1 className="type-title">
           <Trans>Decision</Trans>
         </h1>
         <ErrorText>
@@ -337,7 +337,7 @@ const Decision = () => {
   if (page.state === "signed-out") {
     return (
       <OnItsOwn>
-        <h1 className="text-2xl font-medium tracking-tight">
+        <h1 className="type-title">
           <Trans>Sign in to answer</Trans>
         </h1>
         <p className="text-muted-foreground">
@@ -369,7 +369,7 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <h1 className="text-2xl font-medium tracking-tight">
+        <h1 className="type-title">
           <Trans>Decision</Trans>
         </h1>
         <p className="text-muted-foreground">
@@ -387,7 +387,7 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <h1 className="text-2xl font-medium tracking-tight">
+        <h1 className="type-title">
           <Trans>Decision</Trans>
         </h1>
         <ErrorText>{page.message}</ErrorText>

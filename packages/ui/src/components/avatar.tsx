@@ -24,10 +24,13 @@ function Avatar({
 
 function AvatarImage({ className, ...props }: AvatarPrimitive.Image.Props) {
   return (
+    // The portrait fades in as it arrives, on its opacity alone, instead of
+    // popping in. A page that has portraits gives the fallback a `delay`, so
+    // the initials stand in only when the portrait is slow.
     <AvatarPrimitive.Image
       data-slot="avatar-image"
       className={cn(
-        "aspect-square size-full rounded-full object-cover",
+        "aspect-square size-full rounded-full object-cover transition-opacity duration-150 data-starting-style:opacity-0 motion-reduce:transition-none",
         className
       )}
       {...props}

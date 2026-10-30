@@ -286,39 +286,45 @@ describe("a session on the on-prem sandbox", () => {
     }
   );
 
-  it("refuses to run on a sandbox that doesn't say it bounds the call's CPU time", async () => {
-    // A proxy in front of the supervisor that drops what it says.
-    const proxy = path.join(tempDir(), "proxy.sock");
-    const server = createServer((client: Socket) => {
-      const upstream = connect(supervisor.socket);
-      let head = true;
-      upstream.on("data", (chunk: Buffer) => {
-        client.write(
-          head
-            ? chunk
-                .toString("latin1")
-                .replace(/\r\nx-grasp-sandbox-cpu-ms: \d+/iu, "")
-            : chunk
-        );
-        head = false;
-      });
-      client.pipe(upstream);
-      upstream.on("close", () => {
-        client.destroy();
-      });
-      client.on("close", () => {
-        upstream.destroy();
-      });
-    }).listen(proxy);
-    try {
-      const behindProxy = await serveStandIn("session-worker.ts", proxy);
-      const outcome = await run("capabilities", "app-stand-in", behindProxy);
-      expect(outcome.status).toBe("unavailable");
-      expect(outcome.message).toContain("doesn't bound");
-    } finally {
-      server.close();
+  it(
+    "refuses to run on a sandbox that doesn't say it bounds the call's CPU time",
+    // It serves a stand-in of its own behind the proxy, as the tests above
+    // do, which a busy test runner takes longer than the default to start.
+    { timeout: 20_000 },
+    async () => {
+      // A proxy in front of the supervisor that drops what it says.
+      const proxy = path.join(tempDir(), "proxy.sock");
+      const server = createServer((client: Socket) => {
+        const upstream = connect(supervisor.socket);
+        let head = true;
+        upstream.on("data", (chunk: Buffer) => {
+          client.write(
+            head
+              ? chunk
+                  .toString("latin1")
+                  .replace(/\r\nx-grasp-sandbox-cpu-ms: \d+/iu, "")
+              : chunk
+          );
+          head = false;
+        });
+        client.pipe(upstream);
+        upstream.on("close", () => {
+          client.destroy();
+        });
+        client.on("close", () => {
+          upstream.destroy();
+        });
+      }).listen(proxy);
+      try {
+        const behindProxy = await serveStandIn("session-worker.ts", proxy);
+        const outcome = await run("capabilities", "app-stand-in", behindProxy);
+        expect(outcome.status).toBe("unavailable");
+        expect(outcome.message).toContain("doesn't bound");
+      } finally {
+        server.close();
+      }
     }
-  });
+  );
 
   it("says the sandbox is unavailable, not the App's fault, when the supervisor is gone", async () => {
     await supervisor.stop();

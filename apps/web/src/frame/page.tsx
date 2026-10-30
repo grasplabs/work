@@ -40,7 +40,7 @@ export const PageHeading = ({
   <div className="flex flex-wrap items-end gap-3">
     {/* A width of its own, so actions beside it go to the next line rather than squeezing it. */}
     <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-      <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+      <h1 className="type-title">{title}</h1>
       {description === undefined ? null : (
         <p className="text-muted-foreground text-sm">{description}</p>
       )}

@@ -8,7 +8,13 @@ export type BeatSay =
   | { kind: "reading"; name: string }
   | { kind: "pain"; team: string; words: string }
   | { kind: "same"; team: string }
-  | { kind: "other"; team: string };
+  | { kind: "other"; team: string }
+  | { kind: "readingAll"; count: number }
+  | { kind: "weighing"; name: string; hours: number }
+  | { kind: "weighingAll"; count: number }
+  | { kind: "unknown"; count: number }
+  | { kind: "total"; hours: number }
+  | { kind: "share"; hours: number; of: number };
 
 /**
  * A moment within a step: what the brain does then, said in the line over
@@ -51,6 +57,24 @@ export const sayLength = (say: BeatSay): number => {
     }
     case "other": {
       return say.team.length + 16;
+    }
+    case "readingAll": {
+      return 20;
+    }
+    case "weighing": {
+      return say.name.length + 14;
+    }
+    case "weighingAll": {
+      return 36;
+    }
+    case "unknown": {
+      return 18;
+    }
+    case "total": {
+      return 40;
+    }
+    case "share": {
+      return 32;
     }
     default: {
       return 0;

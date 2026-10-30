@@ -209,7 +209,7 @@ const ParamField = ({
         </label>
         <code className="text-muted-foreground text-xs">{param.name}</code>
         {param.sensitive ? (
-          <Badge variant="destructive">
+          <Badge variant="attention">
             <Trans>Sensitive</Trans>
           </Badge>
         ) : null}

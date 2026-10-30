@@ -346,6 +346,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  async summary(chatId: string): Promise<ChatSummary> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        await this.#chatsOf(userId).chatSummary(chatIdOf(chatId), userId)
+    );
+  }
+
   async create(title: string, projectId?: string | null): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
