@@ -562,7 +562,7 @@ const RecordRow = ({
       </div>
       <div className="flex flex-none flex-wrap items-center gap-2">
         {record.verified ? null : (
-          <Badge variant="destructive">
+          <Badge variant="attention">
             <Trans>Not verified</Trans>
           </Badge>
         )}

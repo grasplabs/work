@@ -94,6 +94,8 @@ function ChartContainer({
 
   // Upstream hides the outline of the chart's surface, which takes focus
   // for keyboard use (recharts' accessibility layer); here it shows a ring.
+  // Recharts draws a chart once it has measured its room, a moment after the
+  // page: the chart fades in then, by its opacity alone.
   return (
     // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
     <ChartContext.Provider value={contextValue}>
@@ -101,7 +103,7 @@ function ChartContainer({
         data-slot="chart"
         data-chart={chartId}
         className={cn(
-          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-surface:focus-visible]:outline-ring flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface:focus-visible]:outline-2 [&_.recharts-surface:focus-visible]:outline-solid",
+          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-surface:focus-visible]:outline-ring flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface:focus-visible]:outline-2 [&_.recharts-surface:focus-visible]:outline-solid [&_.recharts-wrapper]:transition-opacity [&_.recharts-wrapper]:duration-200 motion-reduce:[&_.recharts-wrapper]:transition-none [&_.recharts-wrapper]:starting:opacity-0",
           className
         )}
         {...props}
@@ -305,7 +307,7 @@ function ChartTooltipContent({
     <div
       {...htmlPropsOf(props)}
       className={cn(
-        "border-border/50 bg-background grid min-w-32 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl",
+        "border-border/50 bg-background shadow-lifted grid min-w-32 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs",
         className
       )}
     >
