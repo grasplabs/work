@@ -426,6 +426,41 @@ describe("the inventory", () => {
     );
   });
 
+  it("links a tool to a workflow by its whole name, so Mail is not Gmail", () => {
+    const [triage] = ws.workflows;
+    if (!triage) {
+      throw new Error("No workflow");
+    }
+    const mailed = {
+      ...ws,
+      tools: [
+        ...ws.tools,
+        {
+          id: "tool-mail",
+          name: "Mail",
+          teamIds: ["team-finance"],
+          sourceId: "src-finance",
+        },
+      ],
+      workflows: [
+        ...ws.workflows,
+        {
+          ...triage,
+          id: "gmail-triage",
+          name: "Gmail triage",
+          baseline: { ...triage.baseline, steps: [{ tool: "Gmail" }] },
+        },
+        {
+          ...triage,
+          id: "mail-triage",
+          name: "Mail triage",
+          baseline: { ...triage.baseline, steps: [{ tool: "Excel, mail" }] },
+        },
+      ],
+    };
+    expect(words(noteIn(mailed, "tool-mail"), "Workflows")).toBe("Mail triage");
+  });
+
   it("says whether a tool is AI, and who says so", () => {
     const unseen = {
       id: "tool-checklist",

@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
+import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
@@ -30,6 +31,20 @@ const titleOf = (question: string): string => {
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
+/** Where a question goes when there is no chat yet, and what follows it. */
+export interface AskOptions {
+  /**
+   * The chat a first question goes into, for a slot whose chat is made
+   * otherwise (an App's own, `chats.forApp`); by default a new chat named
+   * after the question.
+   */
+  chatFor?: (session: Session) => Promise<string>;
+  /** Once a question is taken, in the chat it went into. */
+  onAsked?: (chatId: string) => void;
+}
+
+const noOptions: AskOptions = {};
+
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
  * `chatId`, or in a new chat named after the question.
@@ -44,7 +59,8 @@ export const useAsk = (
   /** The project a new chat is made in, when it is started from one. */
   projectId?: string,
   /** Which of the tab's open chats a new chat becomes. */
-  slot: ChatSlot = "chat"
+  slot: ChatSlot = "chat",
+  { chatFor, onAsked }: AskOptions = noOptions
 ) => {
   const router = useRouter();
   const navigate = useNavigate();
@@ -87,6 +103,9 @@ export const useAsk = (
         unsent.current.projectId === projectId
           ? unsent.current.id
           : undefined);
+      if (id === undefined && chatFor !== undefined) {
+        id = await chatFor(session);
+      }
       if (id === undefined) {
         ({ id } = await session.chats.create(
           titleOf(question),
@@ -121,6 +140,7 @@ export const useAsk = (
         await navigate({ to: "/", search: { chat: sent } });
       }
     }
+    onAsked?.(sent);
     // Chat's list shows a new chat; from the dock, Chat reads it when it
     // opens, and the page the person is on has nothing to read again.
     if (opens === "page") {

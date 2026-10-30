@@ -851,14 +851,23 @@ const everyStep = (steps: Step[]): Step[] =>
     ...(step.split?.paths.flatMap((path) => everyStep(path.steps)) ?? []),
   ]);
 
-/** Workflows whose steps use any of these tool names, today or in the target design. */
+/**
+ * Workflows whose steps use any of these tool names, today or in the target
+ * design. A name counts as a whole word, as the Integrations page counts it:
+ * a step in "Gmail" doesn't use Mail.
+ */
 const workflowsUsing = (ws: Workspace, names: string[]): Workflow[] => {
-  const wanted = names.map((name) => name.toLowerCase());
+  const wanted = names.map(
+    (name) =>
+      new RegExp(
+        String.raw`(?<![\p{L}\p{N}])${escape(name)}(?![\p{L}\p{N}])`,
+        "iu"
+      )
+  );
   const uses = (step: Step) =>
     (step.tool ?? "")
       .split(",")
-      .map((name) => name.trim().toLowerCase())
-      .some((name) => wanted.some((want) => name.includes(want)));
+      .some((name) => wanted.some((want) => want.test(name.trim())));
   return ws.workflows.filter((workflow) =>
     [
       ...everyStep(workflow.baseline.steps),

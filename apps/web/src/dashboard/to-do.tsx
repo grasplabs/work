@@ -1,21 +1,12 @@
-import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
-import type { DecisionView } from "@grasp-os/shared/decisions";
-import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
-import type {
-  GoLiveItem,
-  SignInAgainItem,
-  WorkflowGoLiveItem,
-} from "@grasp-os/shared/waiting";
+import type { SignInAgainItem } from "@grasp-os/shared/waiting";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useMatch } from "@tanstack/react-router";
 import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -27,8 +18,11 @@ import {
 } from "./dashboard-card.tsx";
 import { FailedWorkflows } from "./failed-workflows.tsx";
 import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
+import { InboxGroup, inInbox } from "./in-inbox.tsx";
 import { TodoPile } from "./todo-pile.tsx";
 import type { PileItem } from "./todo-pile.tsx";
+import { decidesRequests } from "./waiting.ts";
+import type { Viewer, Waiting } from "./waiting.ts";
 
 // What waits on the person, on top of the dashboard. What can be settled
 // on its card is a pile of cards, gone through one at a time
@@ -40,42 +34,8 @@ import type { PileItem } from "./todo-pile.tsx";
 // listed under the pile with the way there, not counted on it: the current
 // apps of engines whose code nobody approved (read on the engine's page),
 // workflows failed while acting for the person, with a way to ask the
-// agent to fix it, and connections they can sign in to again. Decisions a
-// run waits on aren't here: core can't list a person's decisions yet (they
-// come by mail and link).
-
-/**
- * What the dashboard read of what waits on the person (core's feed of
- * it, `session.waiting`), each part on its own: one core couldn't read
- * says so in its place.
- */
-export interface Waiting {
-  held: Loaded<PendingAction[]>;
-  /** Calls of the person's whose answer was lost, for them to say what became of each. */
-  outcomes: Loaded<UnknownOutcome[]>;
-  failed: Loaded<NotificationsPage>;
-  /** Connections whose access ran out, among those the person may sign in to again. */
-  reconnect: Loaded<SignInAgainItem[]>;
-  /** Versions of Apps the person answers for, up for review. */
-  versions: Loaded<GoLiveItem[]>;
-  /** Admins only. */
-  requests: Loaded<PendingRequests> | undefined;
-  /** Packages to approve: none for anyone without that permission. */
-  dependencies: Loaded<DependenciesWaiting>;
-  /** Engines with apps whose code waits for approval. Admins only. */
-  screens: Loaded<ScreensWaiting[]> | undefined;
-  /** Decisions of workflows' runs that wait for the person's answer. */
-  decisions: Loaded<DecisionView[]>;
-  /** Versions of workflows asked to go live that the person may approve or send back. */
-  workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
-}
-
-/** Who counts what waits: what they may act on follows from their role. */
-export type Viewer = Pick<Identity, "role" | "staff">;
-
-/** Whether permission requests wait on this person: admins decide them; staff can't, and don't get them. */
-export const decidesRequests = (viewer: Viewer): boolean =>
-  isMemberAdmin(viewer);
+// agent to fix it, connections they can sign in to again, and what the
+// inbox settles (`in-inbox.tsx`), each a way to its item there.
 
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: SignInAgainItem }) => {
@@ -277,6 +237,12 @@ export const ToDo = ({
   }>();
   const older: OlderFailures =
     kept?.after === waiting.failed ? kept.older : { rows: [], more: undefined };
+  // When the dashboard read what waits: it dates only what core lists
+  // undated, which the dashboard doesn't show.
+  const readAt = new Date(
+    useMatch({ from: "/_shell/dashboard", select: (match) => match.updatedAt })
+  ).toISOString();
+  const inbox = inInbox(waiting, identity, readAt);
   const { failed, reconnect, screens } = waiting;
   // A part of the pile that couldn't be read says so below it.
   const notLoaded = (
@@ -291,6 +257,7 @@ export const ToDo = ({
   );
   const elsewhere =
     notLoaded.length > 0 ||
+    inbox.length > 0 ||
     failed.state !== "ready" ||
     failed.data.page.notifications.length > 0 ||
     reconnect.state !== "ready" ||
@@ -310,10 +277,19 @@ export const ToDo = ({
               message: "Waiting elsewhere",
               context: "dashboard: what waits on you, settled on its own page",
             })}
+            actions={
+              <Link
+                className={buttonVariants({ size: "xs", variant: "ghost" })}
+                to="/inbox"
+              >
+                <Trans>Open the inbox</Trans>
+              </Link>
+            }
           />
           {notLoaded.map(({ key, part }) => (
             <PartNotLoaded key={key} part={part} />
           ))}
+          <InboxGroup items={inbox} />
           {screens === undefined ? null : <ScreensGroup screens={screens} />}
           <FailedGroup
             failed={failed}
