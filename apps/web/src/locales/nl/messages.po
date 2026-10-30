@@ -4619,6 +4619,10 @@ msgstr "Kopiëren als Markdown"
 msgid "Copy code"
 msgstr "Code kopiëren"
 
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "Kopiëren naar Our skills"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Tabel kopiëren"
@@ -10416,6 +10420,10 @@ msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig."
+
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "Our skills heeft al een skill op {path}: pas die aan."
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
