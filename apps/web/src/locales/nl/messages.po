@@ -641,6 +641,10 @@ msgstr "{file} verwijderd"
 msgid "{fileName} · uploaded by {uploadedBy} on {uploadedOn}"
 msgstr "{fileName} · geüpload door {uploadedBy} op {uploadedOn}"
 
+#: src/routes/_shell.policies.documents.$policyId.tsx
+msgid "{fileName} · uploaded on {uploadedOn}"
+msgstr "{fileName} · geüpload op {uploadedOn}"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{finished} of {started}"
 msgstr "{finished} van {started}"
@@ -2919,6 +2923,10 @@ msgstr "Een antwoord"
 msgid "An App"
 msgstr "Een App"
 
+#: src/policies/policy-editing.tsx
+msgid "An app breaks the rule when every condition holds."
+msgstr "Een app overtreedt de regel wanneer elke voorwaarde geldt."
+
 #: src/engines/screen-approval.tsx
 msgid "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
 msgstr "Een app is code die in de browser van mensen draait. De app krijgt de gegevens van dit domein pas als een beheerder precies die code heeft goedgekeurd, en een wijziging van de code vraagt om een nieuwe goedkeuring. Lees eerst de code: goedgekeurde code kan wat ze krijgt nog steeds ergens anders heen sturen, dus met goedkeuren zeg je dat je de code vertrouwt."
@@ -2963,6 +2971,11 @@ msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "Een eigenaar kan dit aanzetten."
+
+#: src/policies/policy-editing.tsx
+msgctxt "between two conditions of a rule: both must hold"
+msgid "and"
+msgstr "en"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
@@ -3309,6 +3322,7 @@ msgstr "Apps per categorie"
 msgid "Apps flagged"
 msgstr "Gemarkeerde apps"
 
+#: src/policies/policy-editing.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Apps it catches"
 msgstr "Apps die de regel treft"
@@ -4737,10 +4751,6 @@ msgctxt "where a package runs"
 msgid "Computations"
 msgstr "Berekeningen"
 
-#: src/policies/policy-editing.tsx
-msgid "Condition {position}"
-msgstr "Voorwaarde {position}"
-
 #: src/activity/audit-log.tsx
 msgid "Configuration"
 msgstr "Configuratie"
@@ -5335,7 +5345,6 @@ msgstr "Versie van de definitie"
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
-#: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
 msgstr "Verwijderen"
@@ -5374,6 +5383,10 @@ msgstr "Mijn interview verwijderen"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Delete project"
 msgstr "Project verwijderen"
+
+#: src/policies/policy-editing.tsx
+msgid "Delete rule"
+msgstr "Regel verwijderen"
 
 #: src/chat/chat-menus.tsx
 msgid "Delete the project “{name}”?"
@@ -5943,7 +5956,6 @@ msgstr "Eerdere versies"
 
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/policies/policy-editing.tsx
 msgid "Edit"
 msgstr "Bewerken"
 
@@ -5951,6 +5963,10 @@ msgstr "Bewerken"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit project"
 msgstr "Project bewerken"
+
+#: src/policies/policy-editing.tsx
+msgid "Edit rule"
+msgstr "Regel bewerken"
 
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit the instructions"
@@ -7433,8 +7449,8 @@ msgid "Hours not known yet"
 msgstr "Uren nog niet bekend"
 
 #: src/policies/policy-editing.tsx
-msgid "How condition {position} reads"
-msgstr "Hoe voorwaarde {position} luidt"
+msgid "How {field} reads"
+msgstr "Hoe „{field}” luidt"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"
@@ -7897,10 +7913,6 @@ msgstr "ze antwoordde iets wat niet haar records zijn"
 #: src/dashboard/outcome-card.tsx
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "Het kan nog één keer worden verstuurd, precies zoals eerder. Niets wordt ongedaan gemaakt."
-
-#: src/policies/policy-editing.tsx
-msgid "It catches an app when every one of these holds"
-msgstr "Hij vangt een app wanneer elk van deze voorwaarden geldt"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
@@ -8866,8 +8878,12 @@ msgid "Made by hand"
 msgstr "Handmatig gemaakt"
 
 #: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Made by hand by {createdBy} on {madeOn}."
-msgstr "Handmatig gemaakt door {createdBy} op {madeOn}."
+msgid "Made by hand by {maker} on {madeOn}."
+msgstr "Handmatig gemaakt door {maker} op {madeOn}."
+
+#: src/routes/_shell.policies.rules.$ruleId.tsx
+msgid "Made by hand on {madeOn}."
+msgstr "Handmatig gemaakt op {madeOn}."
 
 #: src/policies/policy-editing.tsx
 msgid "Made by none of"
@@ -9166,6 +9182,14 @@ msgstr "Meer voor het project {name}"
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
 msgstr "Meer voor deze chat"
+
+#: src/policies/policy-editing.tsx
+msgid "More for this policy"
+msgstr "Meer voor dit beleid"
+
+#: src/policies/policy-editing.tsx
+msgid "More for this rule"
+msgstr "Meer voor deze regel"
 
 #: src/interview/words.ts
 msgid "More of the steps."
@@ -9468,6 +9492,7 @@ msgid "New project…"
 msgstr "Nieuw project…"
 
 #: src/policies/policy-editing.tsx
+#: src/routes/_shell.policies.rules.new.tsx
 msgid "New rule"
 msgstr "Nieuwe regel"
 
@@ -11894,6 +11919,7 @@ msgstr "Nog een keer afspelen"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 #: src/routes/_shell.policies.index.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
+#: src/routes/_shell.policies.rules.new.tsx
 msgid "Policies"
 msgstr "Beleid"
 
@@ -12556,6 +12582,10 @@ msgstr "{documentName} verwijderen"
 msgid "Remove {domain}"
 msgstr "{domain} verwijderen"
 
+#: src/policies/policy-editing.tsx
+msgid "Remove {field}"
+msgstr "„{field}” verwijderen"
+
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
@@ -12581,10 +12611,6 @@ msgstr "{title} verwijderen?"
 msgid "Remove {what} from the brain?"
 msgstr "{what} uit het brein verwijderen?"
 
-#: src/policies/policy-editing.tsx
-msgid "Remove condition {position}"
-msgstr "Voorwaarde {position} verwijderen"
-
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
 #: src/brain/forget.tsx
@@ -12594,6 +12620,10 @@ msgstr "Uit het brein verwijderen"
 #: src/brain/forget.tsx
 msgid "Remove it"
 msgstr "Verwijderen"
+
+#: src/policies/policy-editing.tsx
+msgid "Remove policy"
+msgstr "Beleid verwijderen"
 
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
@@ -13294,6 +13324,10 @@ msgstr "Eerst opslaan"
 msgid "Save instructions"
 msgstr "Instructies opslaan"
 
+#: src/policies/policy-editing.tsx
+msgid "Save rule"
+msgstr "Regel opslaan"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
 msgstr "Afspraken opslaan"
@@ -13345,6 +13379,10 @@ msgstr "Zeg wat er moet veranderen"
 #: src/chat/chat-dock.tsx
 msgid "Say what should change in {name}. Every change is a new version of it."
 msgstr "Zeg wat er in {name} moet veranderen. Elke wijziging is er een nieuwe versie van."
+
+#: src/policies/policy-editing.tsx
+msgid "Say which apps break the rule, and what happens to them."
+msgstr "Zeg welke apps de regel overtreden en wat er met ze gebeurt."
 
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how far a team is with AI"
@@ -14124,6 +14162,11 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Beginnen"
 
+#: src/policies/policy-editing.tsx
+msgctxt "how a new rule starts: watching or active"
+msgid "Start"
+msgstr "Start"
+
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Start a chat in {name}"
 msgstr "Begin een chat in {name}"
@@ -14237,7 +14280,6 @@ msgstr "Statistieken"
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -14262,6 +14304,10 @@ msgstr "Status"
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
+
+#: src/policies/policy-editing.tsx
+msgid "Status of this rule"
+msgstr "Status van deze regel"
 
 #: src/screens/screen-frame.tsx
 msgid "Stay"
@@ -17333,10 +17379,6 @@ msgstr "Wat binnenkwam"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Wat er is gewijzigd"
-
-#: src/policies/policy-editing.tsx
-msgid "What condition {position} checks"
-msgstr "Wat voorwaarde {position} controleert"
 
 #: src/dashboard/report.ts
 msgid "What could be better"

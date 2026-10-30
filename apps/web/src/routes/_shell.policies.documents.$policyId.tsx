@@ -125,16 +125,21 @@ const PolicyDetail = ({
   proposals,
   book,
   edits,
+  people,
 }: {
   policy: PolicyDocument;
   proposals: readonly ProposalCatch[];
   book: PolicyBook;
   /** Whether the reader may change it. */
   edits: boolean;
+  /** People's names by ID. */
+  people: ReadonlyMap<string, string>;
 }) => {
   const { t, i18n } = useLingui();
   const uploadedOn = formatDate(policy.uploadedAt);
-  const { uploadedBy, fileName } = policy;
+  const { fileName } = policy;
+  // By name, never by ID: unknown when the member list can't be read.
+  const uploadedBy = people.get(policy.uploadedBy);
   const rules = book.rules.filter((rule) => rule.policyId === policy.id);
   return (
     <>
@@ -146,17 +151,19 @@ const PolicyDetail = ({
       />
       <Page>
         <PageHeading
-          action={
-            edits ? (
-              <PolicyActions policies={book.policies} policy={policy} />
-            ) : undefined
-          }
+          action={edits ? <PolicyActions policy={policy} /> : undefined}
           description={policy.summary}
           meta={
-            <span className="text-muted-foreground">
-              <Trans>
-                {fileName} · uploaded by {uploadedBy} on {uploadedOn}
-              </Trans>
+            <span className="text-muted-foreground text-base">
+              {uploadedBy === undefined ? (
+                <Trans>
+                  {fileName} · uploaded on {uploadedOn}
+                </Trans>
+              ) : (
+                <Trans>
+                  {fileName} · uploaded by {uploadedBy} on {uploadedOn}
+                </Trans>
+              )}
             </span>
           }
           title={policy.title}
@@ -308,7 +315,7 @@ const PolicyDetail = ({
 const PolicyPage = () => {
   const { t } = useLingui();
   const { policyId } = Route.useParams();
-  const { found, book: loaded } = Route.useLoaderData();
+  const { found, book: loaded, people } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const policy = book.policies.find(({ id }) => id === policyId);
@@ -347,6 +354,7 @@ const PolicyPage = () => {
     <PolicyDetail
       book={book}
       edits={editsPolicies(identity)}
+      people={people}
       policy={policy}
       proposals={findingsOfLoaded(found).proposals}
     />

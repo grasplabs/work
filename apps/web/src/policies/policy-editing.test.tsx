@@ -31,6 +31,7 @@ import {
   RuleActions,
   RuleExceptions,
   ruleInputOf,
+  RuleStatusControl,
 } from "./policy-editing.tsx";
 
 // Changing the policies from their pages: who may, what the rule dialog
@@ -158,6 +159,7 @@ const opened = async (
       <div>
         <output>{rule.status}</output>
         <RuleActions policies={loaded.policies} rule={rule} />
+        <RuleStatusControl rule={rule} />
         <RuleExceptions
           apps={[chatGpt]}
           edits
@@ -315,13 +317,11 @@ describe("changing the policies", () => {
     });
   });
 
-  it("turns a rule on from its dialog, keeping what it checks, and the page reads it again", async () => {
+  it("turns a rule on from its page, keeping what it checks, and the page reads it again", async () => {
     const { sent, policies } = fakePolicies();
     await opened(policies);
 
-    await click("Edit");
-    await fill("Status", "active");
-    await click("Save");
+    await click("Active");
 
     expect({ shown: shown().status, sent: sent.updated }).toStrictEqual({
       shown: "active",

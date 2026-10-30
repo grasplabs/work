@@ -22,7 +22,6 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -32,30 +31,55 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import {
   Field,
+  FieldContent,
   FieldDescription,
+  FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
+  FieldTitle,
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/ui/components/radio-group";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate, useRouter } from "@tanstack/react-router";
-import { PencilIcon, PlusIcon, UploadIcon, XIcon } from "lucide-react";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  FileUpIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
-import { SectionTitle } from "../frame/page.tsx";
+import { PageHeading, SectionTitle } from "../frame/page.tsx";
 import { exposureMeta } from "../landscape/landscape.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -65,9 +89,11 @@ import {
   aiKindLabel,
   certificateLabel,
   dpaLabel,
+  effectDescription,
   effectLabel,
   extensionLabel,
   regionLabel,
+  ruleStatusDescription,
   ruleStatusLabel,
   trainingLabel,
 } from "./policy.ts";
@@ -220,79 +246,46 @@ const vendorsOf = (typed: string): string[] =>
     .map((vendor) => vendor.trim())
     .filter((vendor) => vendor !== "");
 
-/** One condition: what it checks, and the values it checks for. */
-const ConditionRow = ({
+/** One condition, as the prototype's card: what it checks, and the values it checks for. */
+const ConditionCard = ({
   condition,
-  index,
   disabled,
   onChange,
   onRemove,
 }: {
   condition: DraftCondition;
-  index: number;
   disabled: boolean;
   onChange: (condition: DraftCondition) => void;
   onRemove: () => void;
 }) => {
   const { t, i18n } = useLingui();
   const ids = useId();
+  const field = i18n._(fieldLabel[condition.field]);
   const ops = opsOf[condition.field] ?? [];
   const choices = choicesOf[condition.field] ?? [];
-  const position = index + 1;
   return (
-    <div className="bg-muted/40 flex flex-col gap-3 rounded-lg border p-3">
-      <FieldSet>
-        <FieldLegend className="sr-only">
-          <Trans>Condition {position}</Trans>
-        </FieldLegend>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="bg-card flex items-start gap-3 rounded-lg border p-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <span className="font-medium" id={`${ids}-field`}>
+          {field}
+        </span>
+        {ops.length === 0 ? null : (
           <NativeSelect
-            aria-label={t`What condition ${position} checks`}
+            aria-label={t`How ${field} reads`}
             disabled={disabled}
             onChange={(event) => {
-              const field = fields.find((each) => each === event.target.value);
-              if (field !== undefined) {
-                onChange(freshCondition(field));
-              }
+              onChange({ ...condition, op: event.target.value });
             }}
             size="sm"
-            value={condition.field}
+            value={condition.op}
           >
-            {fields.map((field) => (
-              <NativeSelectOption key={field} value={field}>
-                {i18n._(fieldLabel[field])}
+            {ops.map((op) => (
+              <NativeSelectOption key={op.value} value={op.value}>
+                {i18n._(op.label)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
-          {ops.length === 0 ? null : (
-            <NativeSelect
-              aria-label={t`How condition ${position} reads`}
-              disabled={disabled}
-              onChange={(event) => {
-                onChange({ ...condition, op: event.target.value });
-              }}
-              size="sm"
-              value={condition.op}
-            >
-              {ops.map((op) => (
-                <NativeSelectOption key={op.value} value={op.value}>
-                  {i18n._(op.label)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          )}
-          <Button
-            aria-label={t`Remove condition ${position}`}
-            className="ml-auto"
-            disabled={disabled}
-            onClick={onRemove}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        </div>
+        )}
         {condition.field === "vendor" ? (
           <Field>
             <FieldLabel htmlFor={`${ids}-vendors`}>
@@ -336,37 +329,110 @@ const ConditionRow = ({
           </Field>
         ) : null}
         {choices.length === 0 ? null : (
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {choices.map((choice) => {
-              const id = `${ids}-${choice.value}`;
-              return (
-                <label
-                  className="flex items-center gap-2"
-                  htmlFor={id}
-                  key={id}
-                >
-                  <Checkbox
-                    checked={condition.values.includes(choice.value)}
-                    disabled={disabled}
-                    id={id}
-                    onCheckedChange={(checked) => {
-                      onChange({
-                        ...condition,
-                        values: checked
-                          ? [...condition.values, choice.value]
-                          : condition.values.filter(
-                              (each) => each !== choice.value
-                            ),
-                      });
-                    }}
-                  />
-                  {i18n._(choice.label)}
-                </label>
-              );
-            })}
-          </div>
+          <ToggleGroup
+            aria-labelledby={`${ids}-field`}
+            className="flex-wrap"
+            disabled={disabled}
+            multiple
+            onValueChange={(values) => {
+              onChange({ ...condition, values });
+            }}
+            size="sm"
+            value={condition.values}
+            variant="outline"
+          >
+            {choices.map((choice) => (
+              <ToggleGroupItem key={choice.value} value={choice.value}>
+                {i18n._(choice.label)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         )}
-      </FieldSet>
+      </div>
+      <Button
+        aria-label={t`Remove ${field}`}
+        disabled={disabled}
+        onClick={onRemove}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      >
+        <XIcon />
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * A rule's conditions, each a card, "and" between them; a new one is
+ * picked by what it checks, as in the prototype's editor.
+ */
+const ConditionEditor = ({
+  conditions,
+  disabled,
+  onChange,
+}: {
+  conditions: readonly DraftCondition[];
+  disabled: boolean;
+  onChange: (conditions: DraftCondition[]) => void;
+}) => {
+  const { i18n } = useLingui();
+  return (
+    <div className="flex flex-col gap-2">
+      {conditions.map((condition, index) => (
+        // A card's place is its identity while the rule is written.
+        <div className="flex flex-col gap-2" key={index}>
+          {index > 0 ? (
+            <span className="text-muted-foreground text-xs">
+              <Trans context="between two conditions of a rule: both must hold">
+                and
+              </Trans>
+            </span>
+          ) : null}
+          <ConditionCard
+            condition={condition}
+            disabled={disabled}
+            onChange={(changed) => {
+              onChange(
+                conditions.map((each, at) => (at === index ? changed : each))
+              );
+            }}
+            onRemove={() => {
+              onChange(conditions.filter((_each, at) => at !== index));
+            }}
+          />
+        </div>
+      ))}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={disabled || conditions.length >= 20}
+          render={
+            <Button
+              className="self-start"
+              size="sm"
+              type="button"
+              variant="outline"
+            />
+          }
+        >
+          <PlusIcon data-icon="inline-start" />
+          <Trans>Add a condition</Trans>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuGroup>
+            {fields.map((field) => (
+              <DropdownMenuItem
+                key={field}
+                onClick={() => {
+                  onChange([...conditions, freshCondition(field)]);
+                }}
+              >
+                {i18n._(fieldLabel[field])}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 };
@@ -427,33 +493,22 @@ export const ruleInputOf = (draft: RuleDraft): RuleInput | undefined => {
   };
 };
 
-/** Makes a rule, by hand or from a policy, or edits `rule`. */
-export const RuleDialog = ({
-  rule,
-  policyId = null,
-  policies,
-  open,
-  onOpenChange,
-}: {
-  /** The rule to edit; none to make one. */
-  rule?: PolicyRule;
-  /** The policy a new rule comes from, when made from one. */
-  policyId?: string | null;
-  policies: readonly PolicyDocument[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) => {
-  const { t, i18n } = useLingui();
-  const ids = useId();
+/** Whether `draft` can be saved: a name, and every condition one core takes. */
+export const canSaveRule = (draft: RuleDraft): boolean =>
+  draft.name.trim() !== "" && ruleInputOf(draft) !== undefined;
+
+/**
+ * Saves a rule: makes one and opens it, or replaces `rule`; then every
+ * page, the policy manager's kept one included, reads it again.
+ */
+const useSaveRule = (rule?: PolicyRule) => {
   const router = useRouter();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
-  const [draft, setDraft] = useState<RuleDraft>(() => draftOf(rule, policyId));
-  const input = ruleInputOf(draft);
-  const canSave = draft.name.trim() !== "" && input !== undefined && !busy;
-  const save = async (): Promise<void> => {
+  const save = async (draft: RuleDraft): Promise<boolean> => {
+    const input = ruleInputOf(draft);
     if (input === undefined) {
-      return;
+      return false;
     }
     const saved = await run(async (session) =>
       rule === undefined
@@ -461,18 +516,292 @@ export const RuleDialog = ({
         : await session.policies.updateRule(rule.id, input)
     );
     if (saved === undefined) {
-      return;
+      return false;
     }
-    onOpenChange(false);
     if (rule === undefined) {
       await navigate({
         to: "/policies/rules/$ruleId",
         params: { ruleId: saved.id },
       });
     }
-    // Every page, the policy manager's kept one included, shows it.
     await router.invalidate();
+    return true;
   };
+  return { busy, failure, save };
+};
+
+/** One choice of a rule's, as the prototype's card: its name, what it means, and its radio. */
+const ChoiceCard = ({
+  id,
+  value,
+  title,
+  description,
+}: {
+  id: string;
+  value: string;
+  title: string;
+  description: string;
+}) => (
+  <FieldLabel htmlFor={id}>
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldTitle>{title}</FieldTitle>
+        <FieldDescription>{description}</FieldDescription>
+      </FieldContent>
+      <RadioGroupItem id={id} value={value} />
+    </Field>
+  </FieldLabel>
+);
+
+/**
+ * Writing a rule, as the prototype's form: its name and what it is for,
+ * the apps it catches, what it does, for a new rule whether it starts by
+ * watching, and the policy it comes from.
+ */
+const RuleForm = ({
+  draft,
+  onChange,
+  policies,
+  disabled,
+  fresh,
+}: {
+  draft: RuleDraft;
+  onChange: (draft: RuleDraft) => void;
+  policies: readonly PolicyDocument[];
+  disabled: boolean;
+  /** A new rule: it also says how it starts. */
+  fresh: boolean;
+}) => {
+  const { t, i18n } = useLingui();
+  const ids = useId();
+  return (
+    <FieldGroup>
+      <Field>
+        <FieldLabel htmlFor={`${ids}-name`}>
+          <Trans context="the name of a policy rule">Name</Trans>
+        </FieldLabel>
+        <Input
+          autoComplete="off"
+          disabled={disabled}
+          id={`${ids}-name`}
+          maxLength={120}
+          onChange={(event) => {
+            onChange({ ...draft, name: event.target.value });
+          }}
+          placeholder={t`Customer data stays in the EU`}
+          value={draft.name}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${ids}-description`}>
+          <Trans>What it&apos;s for</Trans>
+        </FieldLabel>
+        <Textarea
+          disabled={disabled}
+          id={`${ids}-description`}
+          maxLength={2000}
+          onChange={(event) => {
+            onChange({ ...draft, description: event.target.value });
+          }}
+          rows={2}
+          value={draft.description}
+        />
+      </Field>
+      <FieldSet>
+        <FieldLegend variant="label">
+          <Trans>Apps it catches</Trans>
+        </FieldLegend>
+        <FieldDescription>
+          <Trans>An app breaks the rule when every condition holds.</Trans>
+        </FieldDescription>
+        <ConditionEditor
+          conditions={draft.conditions}
+          disabled={disabled}
+          onChange={(conditions) => {
+            onChange({ ...draft, conditions });
+          }}
+        />
+      </FieldSet>
+      <FieldSet>
+        <FieldLegend variant="label">
+          <Trans>What it does</Trans>
+        </FieldLegend>
+        <RadioGroup
+          disabled={disabled}
+          onValueChange={(value) => {
+            const effect = ruleEffectSchema.safeParse(value);
+            if (effect.success) {
+              onChange({ ...draft, effect: effect.data });
+            }
+          }}
+          value={draft.effect}
+        >
+          {(["flag", "block"] as const).map((effect) => (
+            <ChoiceCard
+              description={i18n._(effectDescription[effect])}
+              id={`${ids}-effect-${effect}`}
+              key={effect}
+              title={i18n._(effectLabel[effect])}
+              value={effect}
+            />
+          ))}
+        </RadioGroup>
+      </FieldSet>
+      {fresh ? (
+        <FieldSet>
+          <FieldLegend variant="label">
+            <Trans context="how a new rule starts: watching or active">
+              Start
+            </Trans>
+          </FieldLegend>
+          <RadioGroup
+            disabled={disabled}
+            onValueChange={(value) => {
+              const status = ruleStatusSchema.safeParse(value);
+              if (status.success) {
+                onChange({ ...draft, status: status.data });
+              }
+            }}
+            value={draft.status}
+          >
+            {(["watching", "active"] as const).map((status) => (
+              <ChoiceCard
+                description={i18n._(ruleStatusDescription[status])}
+                id={`${ids}-status-${status}`}
+                key={status}
+                title={i18n._(ruleStatusLabel[status])}
+                value={status}
+              />
+            ))}
+          </RadioGroup>
+        </FieldSet>
+      ) : null}
+      <Field>
+        <FieldLabel htmlFor={`${ids}-source`}>
+          <Trans>Where it comes from</Trans>
+        </FieldLabel>
+        <NativeSelect
+          className="w-full"
+          disabled={disabled}
+          id={`${ids}-source`}
+          onChange={(event) => {
+            const chosen = event.target.value;
+            onChange({
+              ...draft,
+              policyId: chosen === "" ? null : chosen,
+            });
+          }}
+          value={draft.policyId ?? ""}
+        >
+          <NativeSelectOption value="">{t`Made by hand`}</NativeSelectOption>
+          {policies.map((policy) => (
+            <NativeSelectOption key={policy.id} value={policy.id}>
+              {policy.title}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+      {draft.policyId === null ? null : (
+        <Field>
+          <FieldLabel htmlFor={`${ids}-excerpt`}>
+            <Trans>The passage it says</Trans>
+          </FieldLabel>
+          <Textarea
+            disabled={disabled}
+            id={`${ids}-excerpt`}
+            maxLength={4000}
+            onChange={(event) => {
+              onChange({ ...draft, excerpt: event.target.value });
+            }}
+            rows={3}
+            value={draft.excerpt}
+          />
+          <FieldDescription>
+            <Trans>Word for word, as the policy has it.</Trans>
+          </FieldDescription>
+        </Field>
+      )}
+    </FieldGroup>
+  );
+};
+
+/**
+ * A rule made by hand, or from `policyId`, on a page of its own as in the
+ * prototype (`routes/policies/rules/new.tsx`). It starts by watching unless
+ * it is turned on straight away.
+ */
+export const NewRule = ({
+  policies,
+  policyId,
+}: {
+  policies: readonly PolicyDocument[];
+  policyId: string | null;
+}) => {
+  const { t } = useLingui();
+  const [draft, setDraft] = useState<RuleDraft>(() =>
+    draftOf(undefined, policyId)
+  );
+  const { busy, failure, save } = useSaveRule();
+  return (
+    <>
+      <PageHeading
+        action={
+          <>
+            <Button
+              nativeButton={false}
+              render={<Link to="/policies" />}
+              size="sm"
+              variant="outline"
+            >
+              <Trans>Cancel</Trans>
+            </Button>
+            <Button
+              disabled={!canSaveRule(draft) || busy}
+              onClick={() => {
+                void save(draft);
+              }}
+              size="sm"
+            >
+              {busy ? <Spinner data-icon="inline-start" /> : null}
+              <Trans>Save rule</Trans>
+            </Button>
+          </>
+        }
+        description={t`Say which apps break the rule, and what happens to them.`}
+        title={t`New rule`}
+      />
+      <ErrorText>{failure}</ErrorText>
+      {/* The prototype's form column, without the preview beside it: core works out what a rule catches once it is saved. */}
+      <div className="max-w-3xl">
+        <RuleForm
+          disabled={busy}
+          draft={draft}
+          fresh
+          onChange={setDraft}
+          policies={policies}
+        />
+      </div>
+    </>
+  );
+};
+
+/** Edits `rule`: everything but its status, which its page turns. */
+const EditRuleDialog = ({
+  rule,
+  policies,
+  open,
+  onOpenChange,
+}: {
+  rule: PolicyRule;
+  policies: readonly PolicyDocument[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
+  const [draft, setDraft] = useState<RuleDraft>(() =>
+    draftOf(rule, rule.policyId)
+  );
+  const { busy, failure, save } = useSaveRule(rule);
+  const canSave = canSaveRule(draft) && !busy;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-h-svh overflow-y-auto sm:max-w-2xl">
@@ -481,194 +810,26 @@ export const RuleDialog = ({
           onSubmit={(event) => {
             event.preventDefault();
             if (canSave) {
-              void save();
+              void (async () => {
+                if (await save(draft)) {
+                  onOpenChange(false);
+                }
+              })();
             }
           }}
         >
           <DialogHeader>
             <DialogTitle>
-              {rule === undefined ? (
-                <Trans>New rule</Trans>
-              ) : (
-                <Trans>Edit the rule</Trans>
-              )}
+              <Trans>Edit the rule</Trans>
             </DialogTitle>
           </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-name`}>
-              <Trans context="the name of a policy rule">Name</Trans>
-            </FieldLabel>
-            <Input
-              autoComplete="off"
-              disabled={busy}
-              id={`${ids}-name`}
-              maxLength={120}
-              onChange={(event) => {
-                setDraft({ ...draft, name: event.target.value });
-              }}
-              placeholder={t`Customer data stays in the EU`}
-              value={draft.name}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-description`}>
-              <Trans>What it&apos;s for</Trans>
-            </FieldLabel>
-            <Textarea
-              disabled={busy}
-              id={`${ids}-description`}
-              maxLength={2000}
-              onChange={(event) => {
-                setDraft({ ...draft, description: event.target.value });
-              }}
-              rows={2}
-              value={draft.description}
-            />
-          </Field>
-          <FieldSet>
-            <FieldLegend>
-              <Trans>It catches an app when every one of these holds</Trans>
-            </FieldLegend>
-            <div className="flex flex-col gap-3">
-              {draft.conditions.map((condition, index) => (
-                <ConditionRow
-                  condition={condition}
-                  disabled={busy}
-                  index={index}
-                  // A row's place is its identity while the dialog is open.
-                  key={index}
-                  onChange={(changed) => {
-                    setDraft({
-                      ...draft,
-                      conditions: draft.conditions.map((each, at) =>
-                        at === index ? changed : each
-                      ),
-                    });
-                  }}
-                  onRemove={() => {
-                    setDraft({
-                      ...draft,
-                      conditions: draft.conditions.filter(
-                        (_each, at) => at !== index
-                      ),
-                    });
-                  }}
-                />
-              ))}
-              <Button
-                className="self-start"
-                disabled={busy || draft.conditions.length >= 20}
-                onClick={() => {
-                  setDraft({
-                    ...draft,
-                    conditions: [
-                      ...draft.conditions,
-                      freshCondition("hosting"),
-                    ],
-                  });
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Add a condition</Trans>
-              </Button>
-            </div>
-          </FieldSet>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${ids}-effect`}>
-                <Trans>What it does</Trans>
-              </FieldLabel>
-              <NativeSelect
-                className="w-full"
-                disabled={busy}
-                id={`${ids}-effect`}
-                onChange={(event) => {
-                  const effect = ruleEffectSchema.safeParse(event.target.value);
-                  if (effect.success) {
-                    setDraft({ ...draft, effect: effect.data });
-                  }
-                }}
-                value={draft.effect}
-              >
-                {(["flag", "block"] as const).map((effect) => (
-                  <NativeSelectOption key={effect} value={effect}>
-                    {i18n._(effectLabel[effect])}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${ids}-status`}>
-                <Trans>Status</Trans>
-              </FieldLabel>
-              <NativeSelect
-                className="w-full"
-                disabled={busy}
-                id={`${ids}-status`}
-                onChange={(event) => {
-                  const status = ruleStatusSchema.safeParse(event.target.value);
-                  if (status.success) {
-                    setDraft({ ...draft, status: status.data });
-                  }
-                }}
-                value={draft.status}
-              >
-                {(["watching", "active", "paused"] as const).map((status) => (
-                  <NativeSelectOption key={status} value={status}>
-                    {i18n._(ruleStatusLabel[status])}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-          </div>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-source`}>
-              <Trans>Where it comes from</Trans>
-            </FieldLabel>
-            <NativeSelect
-              className="w-full"
-              disabled={busy}
-              id={`${ids}-source`}
-              onChange={(event) => {
-                const chosen = event.target.value;
-                setDraft({
-                  ...draft,
-                  policyId: chosen === "" ? null : chosen,
-                });
-              }}
-              value={draft.policyId ?? ""}
-            >
-              <NativeSelectOption value="">{t`Made by hand`}</NativeSelectOption>
-              {policies.map((policy) => (
-                <NativeSelectOption key={policy.id} value={policy.id}>
-                  {policy.title}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </Field>
-          {draft.policyId === null ? null : (
-            <Field>
-              <FieldLabel htmlFor={`${ids}-excerpt`}>
-                <Trans>The passage it says</Trans>
-              </FieldLabel>
-              <Textarea
-                disabled={busy}
-                id={`${ids}-excerpt`}
-                maxLength={4000}
-                onChange={(event) => {
-                  setDraft({ ...draft, excerpt: event.target.value });
-                }}
-                rows={3}
-                value={draft.excerpt}
-              />
-              <FieldDescription>
-                <Trans>Word for word, as the policy has it.</Trans>
-              </FieldDescription>
-            </Field>
-          )}
+          <RuleForm
+            disabled={busy}
+            draft={draft}
+            fresh={false}
+            onChange={setDraft}
+            policies={policies}
+          />
           <ErrorText>{failure}</ErrorText>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>
@@ -682,6 +843,54 @@ export const RuleDialog = ({
         </form>
       </DialogContent>
     </Dialog>
+  );
+};
+
+/**
+ * Whether a rule watches, acts or is paused, turned on its page as in the
+ * prototype; it keeps everything else the rule says.
+ */
+export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
+  const { t, i18n } = useLingui();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const turn = async (status: RuleStatus): Promise<void> => {
+    const input = ruleInputOf({ ...draftOf(rule, rule.policyId), status });
+    if (input === undefined) {
+      return;
+    }
+    await run(async (session) => {
+      await changeThenRefresh(
+        async () => await session.policies.updateRule(rule.id, input),
+        async () => {
+          await router.invalidate();
+        }
+      );
+    });
+  };
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <ToggleGroup
+        aria-label={t`Status of this rule`}
+        disabled={busy}
+        onValueChange={(value) => {
+          const next = ruleStatusSchema.safeParse(value[0]);
+          if (next.success && next.data !== rule.status) {
+            void turn(next.data);
+          }
+        }}
+        size="sm"
+        value={[rule.status]}
+        variant="outline"
+      >
+        {(["watching", "active", "paused"] as const).map((status) => (
+          <ToggleGroupItem key={status} value={status}>
+            {i18n._(ruleStatusLabel[status])}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      <ErrorText>{failure}</ErrorText>
+    </div>
   );
 };
 
@@ -990,14 +1199,9 @@ export const ExceptionDialog = ({
 
 /* ── The pages' actions ──────────────────────────────────────────────── */
 
-/** The policy manager's actions: upload a policy, make a rule by hand. */
-export const PoliciesActions = ({
-  policies,
-}: {
-  policies: readonly PolicyDocument[];
-}) => {
+/** The policy manager's actions: upload a policy, make a rule by hand on its own page. */
+export const PoliciesActions = () => {
   const [uploading, setUploading] = useState(false);
-  const [making, setMaking] = useState(false);
   return (
     <>
       <Button
@@ -1007,13 +1211,12 @@ export const PoliciesActions = ({
         size="sm"
         variant="outline"
       >
-        <UploadIcon data-icon="inline-start" />
+        <FileUpIcon data-icon="inline-start" />
         <Trans>Upload a policy</Trans>
       </Button>
       <Button
-        onClick={() => {
-          setMaking(true);
-        }}
+        nativeButton={false}
+        render={<Link to="/policies/rules/new" />}
         size="sm"
       >
         <PlusIcon data-icon="inline-start" />
@@ -1022,13 +1225,6 @@ export const PoliciesActions = ({
       {/* Mounted while open, so each opening starts from nothing. */}
       {uploading ? (
         <UploadPolicyDialog onOpenChange={setUploading} open={uploading} />
-      ) : null}
-      {making ? (
-        <RuleDialog
-          onOpenChange={setMaking}
-          open={making}
-          policies={policies}
-        />
       ) : null}
     </>
   );
@@ -1049,21 +1245,15 @@ const useLeaveAndReload = () => {
 
 /**
  * A policy's actions: publish it while it waits for review, or once Grasp
- * couldn't read it (its rules are then made by hand); make a rule from
- * it; remove it.
+ * couldn't read it (its rules are then made by hand); and, behind its
+ * menu as in the prototype, make a rule from it or remove it.
  */
-export const PolicyActions = ({
-  policy,
-  policies,
-}: {
-  policy: PolicyDocument;
-  policies: readonly PolicyDocument[];
-}) => {
+export const PolicyActions = ({ policy }: { policy: PolicyDocument }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const navigate = useNavigate();
   const leave = useLeaveAndReload();
   const { busy, failure, run } = useCoreAction();
-  const [making, setMaking] = useState(false);
   const [removing, setRemoving] = useState(false);
   const { title } = policy;
   const publish = async (): Promise<void> => {
@@ -1088,27 +1278,6 @@ export const PolicyActions = ({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setRemoving(true);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Remove</Trans>
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setMaking(true);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <PlusIcon data-icon="inline-start" />
-          <Trans>Make a rule from it</Trans>
-        </Button>
         {policy.status === "review" || policy.status === "failed" ? (
           <Button
             disabled={busy}
@@ -1121,16 +1290,46 @@ export const PolicyActions = ({
             <Trans>Publish</Trans>
           </Button>
         ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={busy}
+            render={
+              <Button
+                aria-label={t`More for this policy`}
+                size="icon-sm"
+                variant="outline"
+              />
+            }
+          >
+            <MoreHorizontalIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                onClick={() => {
+                  void navigate({
+                    to: "/policies/rules/new",
+                    search: { policy: policy.id },
+                  });
+                }}
+              >
+                <PlusIcon />
+                <Trans>Make a rule from it</Trans>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setRemoving(true);
+                }}
+                variant="destructive"
+              >
+                <Trash2Icon />
+                <Trans>Remove policy</Trans>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <ErrorText>{failure}</ErrorText>
-      {making ? (
-        <RuleDialog
-          onOpenChange={setMaking}
-          open={making}
-          policies={policies}
-          policyId={policy.id}
-        />
-      ) : null}
       <RemoveDialog
         description={t`Its rules stay, as rules made by hand. This can't be undone.`}
         onOpenChange={setRemoving}
@@ -1145,7 +1344,7 @@ export const PolicyActions = ({
   );
 };
 
-/** A rule's actions: edit it, its status included, or delete it. */
+/** A rule's actions, behind its menu as in the prototype: edit it, or delete it. */
 export const RuleActions = ({
   rule,
   policies,
@@ -1170,31 +1369,44 @@ export const RuleActions = ({
   };
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button
+      <DropdownMenu>
+        <DropdownMenuTrigger
           disabled={busy}
-          onClick={() => {
-            setRemoving(true);
-          }}
-          size="sm"
-          variant="outline"
+          render={
+            <Button
+              aria-label={t`More for this rule`}
+              size="icon-sm"
+              variant="outline"
+            />
+          }
         >
-          <Trans>Delete</Trans>
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setEditing(true);
-          }}
-          size="sm"
-        >
-          <PencilIcon data-icon="inline-start" />
-          <Trans>Edit</Trans>
-        </Button>
-      </div>
+          <MoreHorizontalIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => {
+                setEditing(true);
+              }}
+            >
+              <PencilIcon />
+              <Trans>Edit rule</Trans>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setRemoving(true);
+              }}
+              variant="destructive"
+            >
+              <Trash2Icon />
+              <Trans>Delete rule</Trans>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <ErrorText>{failure}</ErrorText>
       {editing ? (
-        <RuleDialog
+        <EditRuleDialog
           onOpenChange={setEditing}
           open={editing}
           policies={policies}

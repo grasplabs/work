@@ -134,11 +134,7 @@ const PoliciesPage = () => {
       <SiteHeader crumbs={[{ label: t`Policies` }]} />
       <Page wide>
         <PageHeading
-          action={
-            editsPolicies(identity) ? (
-              <PoliciesActions policies={policies} />
-            ) : undefined
-          }
+          action={editsPolicies(identity) ? <PoliciesActions /> : undefined}
           description={t`Rules for the apps and AI tools your people use, drawn from your own policies.`}
           title={t`Policies`}
         />
