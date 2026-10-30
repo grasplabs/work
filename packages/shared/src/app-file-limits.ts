@@ -80,19 +80,16 @@ export const notInFileName = /[\u0000-\u001F\u007F-\u009F\p{Cf}/\\]/u;
 const allNotInFileName = new RegExp(notInFileName.source, "gu");
 
 /**
- * The name a file of `type` is saved under, from its stored `name`, the
- * one place both core's `Content-Disposition` and the page's download
- * take it from: without what `notInFileName` refuses, and ending in an
- * extension of the type its bytes were checked to be, appended when the
- * name's own isn't one, with half a surrogate pair replaced (U+FFFD) so
- * it always encodes. So a text file named `report.html` saves as
- * `report.html.txt` and opens as text, never as what its name claims.
+ * `name` as saved by a file whose type's extensions are `extensions`
+ * (`downloadNameOf`): cleaned, and ending in one of them.
  */
-export const downloadNameOf = (name: string, type: FileType): string => {
+export const savedNameOf = (
+  name: string,
+  extensions: readonly [string, ...string[]]
+): string => {
   // Well-formed first (core stores no other, but a name read back is
   // never trusted to be), so it always encodes.
   const cleaned = name.toWellFormed().replaceAll(allNotInFileName, "").trim();
-  const { extensions } = fileTypes[type];
   const dot = cleaned.lastIndexOf(".");
   const extension = dot > 0 ? cleaned.slice(dot + 1).toLowerCase() : "";
   const fits = extensions.some((known) => known === extension);
@@ -101,6 +98,18 @@ export const downloadNameOf = (name: string, type: FileType): string => {
   }
   return `${cleaned.length === 0 ? "file" : cleaned}.${extensions[0]}`;
 };
+
+/**
+ * The name a file of `type` is saved under, from its stored `name`, the
+ * one place both core's `Content-Disposition` and the page's download
+ * take it from: without what `notInFileName` refuses, and ending in an
+ * extension of the type its bytes were checked to be, appended when the
+ * name's own isn't one, with half a surrogate pair replaced (U+FFFD) so
+ * it always encodes. So a text file named `report.html` saves as
+ * `report.html.txt` and opens as text, never as what its name claims.
+ */
+export const downloadNameOf = (name: string, type: FileType): string =>
+  savedNameOf(name, fileTypes[type].extensions);
 
 export type FileType = keyof typeof fileTypes;
 

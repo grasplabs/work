@@ -15,8 +15,10 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
+import { RunFiles } from "./run-files.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
 import { WaitingForAiProvider } from "./runs.tsx";
+import { StopRun } from "./stop-run.tsx";
 
 // One run of an independent workflow, opened beside the page (prototype
 // `workflow-inside/inside-traces.tsx` `Detail`): when it ran, how it
@@ -29,7 +31,9 @@ import { WaitingForAiProvider } from "./runs.tsx";
 // steps show under it, they follow the run (`status`): the run is read
 // again only when where it is moves (its status, or a wait for its AI
 // provider begun or ended, traces.tsx `followedState`), never on a second
-// timer of its own.
+// timer of its own. The workflow's builders may stop a run that hasn't
+// ended (asked again first); the files it finished writing are there to
+// download for those who may see what it returned (run-files.tsx).
 
 /** How often a run still going is read again. */
 const followMs = 1500;
@@ -188,6 +192,36 @@ const RunFacts = ({
     };
   }, [core, opened.id, workflow, status]);
 
+  // Only its builders may stop a run: the reader's role, as core says it.
+  const [builder, setBuilder] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    const readRole = async (): Promise<void> => {
+      try {
+        const read = await core.withSession(
+          async (session) => await session.workflowResources.get(workflow)
+        );
+        if (!stopped) {
+          setBuilder(read.role === "builder");
+        }
+      } catch {
+        // Not offered then: core would refuse the stop anyway.
+      }
+    };
+    void readRole();
+    return () => {
+      stopped = true;
+    };
+  }, [core, workflow]);
+
+  const stop = async (): Promise<void> => {
+    const stopped = await core.withSession(
+      async (session) =>
+        await session.workflowResources.terminateRun(workflow, run.id)
+    );
+    setRun(stopped);
+  };
+
   const seesResult = run.principal === names.me || admin;
   return (
     <div className="flex flex-col gap-6">
@@ -211,7 +245,14 @@ const RunFacts = ({
         </Fact>
         <Fact label={t`Version`}>{run.version}</Fact>
       </dl>
+      {builder && !ended(run) ? <StopRun stop={stop} /> : null}
       <RunResultView run={run} seesResult={seesResult} />
+      <RunFiles
+        // Read again once the run ends, with what it finished last.
+        key={ended(run) ? "ended" : "going"}
+        run={run.id}
+        workflow={workflow}
+      />
     </div>
   );
 };
