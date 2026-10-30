@@ -312,15 +312,16 @@ export const mayRetire = async (
  * The chats others share that `reader` is in now and could publish a
  * record into (`mayPublish` for a session): those whose audience Grasp
  * knows whole, most recently seen first, each named by the organization's
- * other members in it. Only a person who is one of the organization's
- * members: anyone else is in no chat's audience.
+ * other members in it. Only for a person, never Grasp's staff: as
+ * `mayPublish`, which refuses either a publication, this refuses them
+ * (`brain.denied`).
  */
 export const sharedChatsOf = async (
   env: Env,
   reader: Reader
 ): Promise<SharedChat[]> => {
   if (reader.type !== "person" || reader.person.staff) {
-    return [];
+    throw brainErrors.create("brain.denied");
   }
   const { userId } = reader.person;
   const db = drizzle(env.DB);
