@@ -295,6 +295,7 @@ const cast = {
   knowledge: { one: "user", two: "user" },
   knowledgeUploads: { one: "user" },
   knowledgeReader: { admin: "admin", reader: "user" },
+  knowledgePurge: { admin: "admin", member: "user" },
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },

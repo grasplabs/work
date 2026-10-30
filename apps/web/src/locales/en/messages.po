@@ -474,9 +474,21 @@ msgstr "{documentKinds}, and whatever explains how you work. Share what you have
 msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 msgstr "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {# document purged} other {# documents purged}}"
+msgstr "{documents, plural, one {# document purged} other {# documents purged}}"
+
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
+msgstr "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documents}}"
+
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {From every version of this collection's # file.} other {From every version of this collection's # files.}}"
+msgstr "{documents, plural, one {From every version of this collection's # file.} other {From every version of this collection's # files.}}"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{domain} doesn't get these packages."
@@ -631,6 +643,10 @@ msgstr "{hidden, plural, one {Show # more} other {Show # more}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} on {resource}"
 
+#: src/knowledge/purge.tsx
+msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
+msgstr "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# hour} other {# hours}}"
@@ -772,6 +788,10 @@ msgstr "{live} of {count}"
 msgid "{live} of {count} live"
 msgstr "{live} of {count} live"
 
+#: src/knowledge/purge.tsx
+msgid "{longer, plural, one {A term is still in # longer word or address.} other {A term is still in # longer words or addresses.}}"
+msgstr "{longer, plural, one {A term is still in # longer word or address.} other {A term is still in # longer words or addresses.}}"
+
 #: src/onboarding/work-record.tsx
 msgid "{low} to {high}"
 msgstr "{low} to {high}"
@@ -795,6 +815,10 @@ msgstr "{matching, plural, one {End of the audit trail · # event} other {End of
 #: src/dashboard/standard-widgets.tsx
 msgid "{measured} a month measured return"
 msgstr "{measured} a month measured return"
+
+#: src/knowledge/purge.tsx
+msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
+msgstr "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
 
 #. A length of time, said short: 4 minutes and 21 seconds.
 #: src/chat/thread.tsx
@@ -1004,6 +1028,10 @@ msgstr "{normal} minutes, {quickest} to {longest}"
 msgid "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 msgstr "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 
+#: src/knowledge/purge.tsx
+msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
+msgstr "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} and {other} both name the same handover, each from their own side."
@@ -1027,6 +1055,10 @@ msgstr "{open} still open"
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
+
+#: src/knowledge/purge.tsx
+msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
+msgstr "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "{out, plural, one {All in place: # link is out, the rest go by the plan.} other {All in place: # links are out, the rest go by the plan.}}"
@@ -1292,6 +1324,10 @@ msgstr "{status, select, drawn {{workflow} (drawn)} designed {{workflow} (design
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 
+#: src/knowledge/purge.tsx
+msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
+msgstr "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{stopped, plural, one {# interview stopped halfway and was not picked up again.} other {# interviews stopped halfway and were not picked up again.}}"
 msgstr "{stopped, plural, one {# interview stopped halfway and was not picked up again.} other {# interviews stopped halfway and were not picked up again.}}"
@@ -1525,6 +1561,14 @@ msgstr "{value} of {of}"
 msgid "{vendor} · usage unknown"
 msgstr "{vendor} · usage unknown"
 
+#: src/knowledge/purge.tsx
+msgid "{versions, plural, one {# version purged} other {# versions purged}}"
+msgstr "{versions, plural, one {# version purged} other {# versions purged}}"
+
+#: src/knowledge/purge.tsx
+msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
+msgstr "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
+
 #: src/landscape/columns-menu.tsx
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
@@ -1742,6 +1786,10 @@ msgstr "A draft: only its builders open it, and its triggers don't fire, until i
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "A file is downloaded only when you ask for it, with a click."
 
+#: src/knowledge/purge.tsx
+msgid "A form spelled otherwise, or part of a longer word or address. Purge again with those forms as terms."
+msgstr "A form spelled otherwise, or part of a longer word or address. Purge again with those forms as terms."
+
 #: src/connections/request-app-dialog.tsx
 msgid "A former member"
 msgstr "A former member"
@@ -1851,6 +1899,10 @@ msgstr "A run of a workflow asked for this answer."
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "A run of a workflow waits for this answer."
+
+#: src/knowledge/purge.tsx
+msgid "A search for part of a word still finds those. Go back and add each such form as a term of its own."
+msgstr "A search for part of a word still finds those. Go back and add each such form as a term of its own."
 
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
@@ -2542,6 +2594,10 @@ msgstr "Another link is waiting for an answer, or one was just turned down. Try 
 #: src/onboarding/connect-steps.tsx
 msgid "Another platform"
 msgstr "Another platform"
+
+#: src/knowledge/purge.tsx
+msgid "Another reason"
+msgstr "Another reason"
 
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
@@ -3641,6 +3697,10 @@ msgstr "Change the default limit"
 msgid "Change the limit for {name}"
 msgstr "Change the limit for {name}"
 
+#: src/knowledge/purge.tsx
+msgid "Change the terms"
+msgstr "Change the terms"
+
 #: src/settings/stephen-settings.tsx
 msgid "Change their own"
 msgstr "Change their own"
@@ -3945,6 +4005,7 @@ msgstr "Click to open Usage"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
+#: src/knowledge/purge.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -4011,6 +4072,10 @@ msgstr "Collection"
 #: src/activity/pending.tsx
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
+
+#: src/knowledge/purge.tsx
+msgid "Collection actions"
+msgstr "Collection actions"
 
 #: src/engines/resource-bindings.tsx
 msgid "Collection for {collection}"
@@ -5999,6 +6064,10 @@ msgstr "From all of that, I work out where AI saves your team the most time."
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From before marks were kept"
 msgstr "From before marks were kept"
+
+#: src/knowledge/purge.tsx
+msgid "From every version of the first {first} files of this collection; purge again for the rest."
+msgstr "From every version of the first {first} files of this collection; purge again for the rest."
 
 #: src/onboarding/place-picker.tsx
 msgid "From Google Drive. I read only the files you add."
@@ -9628,6 +9697,10 @@ msgstr "Onboarding steps"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 
+#: src/knowledge/purge.tsx
+msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
+msgstr "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
+
 #: src/onboarding/interview-list.tsx
 msgid "One by one"
 msgstr "One by one"
@@ -10468,6 +10541,10 @@ msgstr "Preview of the {screen} app"
 msgid "Preview of the draft's first app"
 msgstr "Preview of the draft's first app"
 
+#: src/knowledge/purge.tsx
+msgid "Preview the purge"
+msgstr "Preview the purge"
+
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Preview: changes nothing, reads no real data"
@@ -10609,6 +10686,22 @@ msgstr "Pulse on company devices. Adds which applications, MCP servers and skill
 #: src/brain/brain-atlas.ts
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse shows what runs on the laptops, AI tools included."
+
+#: src/knowledge/purge.tsx
+msgid "Purge for good"
+msgstr "Purge for good"
+
+#: src/knowledge/purge.tsx
+msgid "Purge more"
+msgstr "Purge more"
+
+#: src/knowledge/purge.tsx
+msgid "Purge personal data"
+msgstr "Purge personal data"
+
+#: src/knowledge/purge.tsx
+msgid "Purge personal data from {collection}"
+msgstr "Purge personal data from {collection}"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Purpose and model"
@@ -12175,6 +12268,10 @@ msgstr "SOC 2"
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 msgstr "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 
+#: src/knowledge/purge.tsx
+msgid "Someone asked for their data to be erased"
+msgstr "Someone asked for their data to be erased"
+
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
 msgid "Someone at the company"
@@ -12196,6 +12293,10 @@ msgstr "Someone else"
 #: src/screens/screen-frame.tsx
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+
+#: src/knowledge/purge.tsx
+msgid "Someone left the organization"
+msgstr "Someone left the organization"
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -12706,6 +12807,10 @@ msgstr "Takes part in the interviews"
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Takes sensitive data"
+
+#: src/knowledge/purge.tsx
+msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
+msgstr "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
 
 #: src/connections/connect-dialog.tsx
 msgid "Taking long? <0>Try again</0>"
@@ -13941,6 +14046,10 @@ msgstr "This app's stored code no longer matches the code that was approved, so 
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "This browser cannot listen. You can type your answers."
+
+#: src/knowledge/purge.tsx
+msgid "This can't be undone. Confirm by {until}, or prepare it again."
+msgstr "This can't be undone. Confirm by {until}, or prepare it again."
 
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
@@ -15450,6 +15559,10 @@ msgstr "What they told us"
 msgid "What to fix"
 msgstr "What to fix"
 
+#: src/knowledge/purge.tsx
+msgid "What to remove"
+msgstr "What to remove"
+
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "What waits on you"
@@ -15817,6 +15930,7 @@ msgid "Whose numbers to show"
 msgstr "Whose numbers to show"
 
 #: src/engines/package-approvals.tsx
+#: src/knowledge/purge.tsx
 #: src/policies/policy-editing.tsx
 msgid "Why"
 msgstr "Why"
