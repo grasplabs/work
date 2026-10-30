@@ -33,7 +33,7 @@ import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
-import { setDockMode, useDockMode } from "./dock-mode.ts";
+import { dockDrawerClass, setDockMode, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { HeldWrites } from "./held-writes.tsx";
 import { ChatThread } from "./thread.tsx";
@@ -462,12 +462,10 @@ const Dock = ({
   if (drawer) {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
-    look =
-      "bg-background pointer-events-auto flex h-full w-110.5 max-w-full flex-col border-l text-sm";
+    look = `bg-background pointer-events-auto flex h-full ${dockDrawerClass} max-w-full flex-col border-l text-sm`;
   } else if (open) {
     place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
-    look =
-      "chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none";
+    look = `chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full ${dockDrawerClass} max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none`;
   }
   return (
     <div className={place}>
