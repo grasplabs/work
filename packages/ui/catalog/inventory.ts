@@ -84,7 +84,7 @@ export const shadcnComponents = {
       "AlertDialogTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
+      "The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. Its content floats on `shadow-lifted`, and its title is set in the serif.",
   },
   "aspect-ratio": {
     status: "supported",
@@ -148,14 +148,14 @@ export const shadcnComponents = {
     summary: "A chat message's bubble, with reactions.",
     exports: ["Bubble", "BubbleContent", "BubbleGroup", "BubbleReactions"],
     changes:
-      "The hovered `secondary` and `muted` bubbles and the `tinted` bubble use the theme's `secondary-hover`, `muted-hover`, `tinted` and `tinted-hover` tokens instead of colours mixed in their classes.",
+      "Adds the `tinted` variant, on the theme's `tinted` and `tinted-foreground`. Hovers are shadcn's `/80`.",
   },
   button: {
     status: "supported",
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class. The default and `ask` variants go forest under the pointer (`primary-hover`).",
+      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use.",
   },
   "button-group": {
     status: "supported",
@@ -187,7 +187,7 @@ export const shadcnComponents = {
       "CardTitle",
     ],
     changes:
-      "Has the brand's hairline (`ring-hairline`) and long soft shadow (`shadow-block`).",
+      "Rests on the page with the brand's long soft shadow (`shadow-block`).",
   },
   carousel: {
     status: "supported",
@@ -338,7 +338,7 @@ export const shadcnComponents = {
       "DialogTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted`, and its title is set in the serif.",
   },
   direction: {
     status: "supported",
@@ -362,7 +362,7 @@ export const shadcnComponents = {
       "DrawerTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its title is set in `type-heading`.",
+      "The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. Its title is set in the serif.",
   },
   "dropdown-menu": {
     status: "supported",
@@ -446,7 +446,7 @@ export const shadcnComponents = {
       "InputGroupTextarea",
     ],
     changes:
-      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is its edge in the keyboard's ink and a hair of ring, not a field's wide ring.",
+      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is the same ring as Input's. In the `chat` size its buttons are rounded as every control is (`rounded-md`).",
   },
   "input-otp": {
     status: "supported",
@@ -672,7 +672,7 @@ export const shadcnComponents = {
       "SheetTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted` and moves on the house curve; its title is set in `type-heading`.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted` and moves on the house curve; its title is set in the serif.",
   },
   sidebar: {
     status: "supported",
@@ -705,7 +705,7 @@ export const shadcnComponents = {
       "useSidebar",
     ],
     changes:
-      'The container and the phone\'s sheet draw the brand book\'s Rings, rising faintly from the foot (`patterned`, `data-pattern="rings"`, `data-from="bottom"`), and the inset variant\'s inner ground is clear so they show.',
+      "The container and the phone's sheet draw the brand book's Rings, rising faintly from the foot (`patterned`), and the inset variant's inner ground is clear so they show.",
   },
   skeleton: {
     status: "supported",
@@ -864,9 +864,16 @@ export const graspComponents = {
     summary: "Children in a row that wraps, such as actions or tags.",
     exports: ["Inline", "inlineVariants"],
   },
+  stat: {
+    status: "supported",
+    summary:
+      'A key figure, one number that says the result, in the serif: over or under what it counts, or inside a sentence. `variant="attention"` for one that needs someone.',
+    exports: ["Stat", "statVariants"],
+  },
   "page-header": {
     status: "supported",
-    summary: "A page's title, description and actions.",
+    summary:
+      "A page's title, in the serif, its description and actions. The title's `render` makes it another heading.",
     exports: [
       "PageHeader",
       "PageHeaderActions",

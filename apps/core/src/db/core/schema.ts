@@ -5016,6 +5016,13 @@ export const brainRecords = sqliteTable(
      * the brain. Kept, never deleted, and left out of `brain.read`.
      */
     retiredAt: timestamp("retired_at"),
+    /**
+     * When an admin took the record out of the brain (brain-forget.ts):
+     * its body is then a tombstone holding no words, only what a removed
+     * source still shows (its kind and day). Kept, never deleted, so its
+     * id stays taken and the same record sent again is left as removed.
+     */
+    forgottenAt: timestamp("forgotten_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
