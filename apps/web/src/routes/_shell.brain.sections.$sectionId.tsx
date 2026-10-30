@@ -111,9 +111,7 @@ const SectionPage = () => {
               {shownCount(folder)}
             </span>
           </div>
-          <h1 className="text-2xl font-medium tracking-tight">
-            {i18n._(groupLabel[section.group])}
-          </h1>
+          <h1 className="type-title">{i18n._(groupLabel[section.group])}</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
             {i18n._(section.description)}
           </p>

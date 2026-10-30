@@ -76,6 +76,8 @@ const NoteItem = ({ note }: { note: Note }) => (
   <Link
     className="text-muted-foreground hover:bg-accent hover:text-foreground data-[status=active]:bg-accent data-[status=active]:text-foreground flex items-center gap-2 rounded-md px-2 py-1 text-sm data-[status=active]:font-medium"
     params={{ noteId: note.id }}
+    // A piece of work opens on what Grasp knows about it.
+    search={note.kind === "candidate" ? { knowledge: true } : {}}
     title={note.title}
     to="/brain/$noteId"
   >
