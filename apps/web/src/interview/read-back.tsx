@@ -14,6 +14,7 @@ import type { LoopState } from "./loop.ts";
 import { partAt, withFactsBack, withFactToggled } from "./progress.ts";
 import { useSaidIn, voiceLevel } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
+import { usePromise } from "./words.ts";
 
 // The read-back (prototype `interview-talk.tsx`, `ReadBack`): one part at
 // a time, a few lines each, so it is read, checked and agreed to without
@@ -128,6 +129,7 @@ const ReadBackLine = ({
 
 export const ReadBack = ({ room }: { room: number }) => {
   const { t } = useLingui();
+  const promise = usePromise();
   const loop = useLoop();
   const progress = useProgress();
   const interviewer = useInterviewer();
@@ -168,10 +170,7 @@ export const ReadBack = ({ room }: { room: number }) => {
         who={interviewer}
       />
       <div className="flex w-full flex-col items-center gap-5" ref={body}>
-        <h1
-          aria-live="polite"
-          className="min-h-8 text-2xl font-medium tracking-tight text-balance"
-        >
+        <h1 aria-live="polite" className="type-display min-h-8">
           <SpokenText said={said} text={loop.line} />
         </h1>
         {/* How much there is still to check: nobody agrees with care to pages without an end in sight. */}
@@ -212,10 +211,16 @@ export const ReadBack = ({ room }: { room: number }) => {
               agreeToPart(out.length > 0 ? `${agree}.` : undefined);
             }}
             size="xl"
+            variant="highlight"
           >
             {agree}
           </Button>
           <p className="text-muted-foreground text-xs text-balance">{t`Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts.`}</p>
+          {at === parts.length - 1 ? (
+            <p className="text-muted-foreground text-xs text-balance">
+              {promise}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
