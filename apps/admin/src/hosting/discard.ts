@@ -34,7 +34,6 @@ import {
   clientWorkers,
   rolloutTargets,
   settings,
-  staffAlerts,
 } from "../db/schema.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 
@@ -131,7 +130,7 @@ const stillDiscardable = (clientId: string): SQL =>
 /**
  * Discards client `clientId`, as `staff`, audited (`client.discard`):
  * its record and what only the admin keeps of it (settings, sealed
- * secrets, reads, its watch, alerts and an ended runner's claim), in one
+ * secrets, reads, its watch and an ended runner's claim), in one
  * batch. Refused unless it was never placed and has nothing recorded
  * anywhere (`DiscardErrorCode`). Its id is free afterwards.
  */
@@ -160,9 +159,6 @@ export const discardClient = async (
     db
       .delete(rolloutTargets)
       .where(and(eq(rolloutTargets.clientId, clientId), still)),
-    db
-      .delete(staffAlerts)
-      .where(and(eq(staffAlerts.clientId, clientId), still)),
     db.delete(clientRuns).where(and(eq(clientRuns.clientId, clientId), still)),
     // Last, as its placement, operation, resources and Workers reference
     // it too: one written between the guard and this fails the batch.
