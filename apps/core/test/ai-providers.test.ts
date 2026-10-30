@@ -15,7 +15,10 @@
  * passes, and what the organization's admins do with their keys.
  */
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { aiCredentialPlaceholder } from "@grasp-os/shared/ai-providers";
+import {
+  aiCredentialPlaceholder,
+  aiProviderErrors,
+} from "@grasp-os/shared/ai-providers";
 import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -40,7 +43,13 @@ import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 const idp = mockIdp();
@@ -360,7 +369,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         .all();
 
       expect(listing.providers).toMatchObject([
-        { provider: "openai", mask: `${key.slice(0, 3)}…${key.slice(-4)}` },
+        { provider: "openai", mask: `…${key.slice(-4)}` },
       ]);
       expect(sealed.results).toHaveLength(1);
       // Nowhere: not what core answered, not connect's database, not
@@ -388,6 +397,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
           "https://localhost/v1",
           "https://models.internal/v1",
           "https://[::1]/v1",
+          "https://127.0.0.1.nip.io/v1",
+          "https://169-254-169-254.acme-ai.test/v1",
           "https://llm.acme-ai.test:8443/v1",
           `https://${["user", "pass"].join(":")}@llm.acme-ai.test/v1`,
         ].map(
@@ -520,14 +531,26 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await by.api.aiProviders.remove("anthropic");
 
       const events = await auditedFor(by.userId, 6);
+      // Connect records a key's changes in its own outbox, core the rest
+      // in its: the log has them all, each in its own outbox's order.
       expect(
         events
           .filter(({ action }) => action.startsWith("ai_provider."))
+          .map(({ action, source }) => `${source} ${action}`)
+          .toSorted()
+      ).toStrictEqual([
+        "connect ai_provider.added",
+        "connect ai_provider.removed",
+        "connect ai_provider.replaced",
+        "core ai_provider.models_set",
+        "core ai_provider.tested",
+      ]);
+      expect(
+        events
+          .filter(({ source }) => source === "connect")
           .map(({ action }) => action)
       ).toStrictEqual([
         "ai_provider.added",
-        "ai_provider.tested",
-        "ai_provider.models_set",
         "ai_provider.replaced",
         "ai_provider.removed",
       ]);
@@ -557,6 +580,94 @@ describe("AI providers", { timeout: 60_000 }, () => {
         added: "role.forbidden",
         listed: "role.forbidden",
       });
+    });
+
+    it("refuses a key change from an admin demoted since their session was checked", async () => {
+      const key = newKey();
+      const { admin: by } = await admin();
+      await by.api.aiProviders.add({ provider: "openai", key });
+      await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+        .bind(by.userId)
+        .run();
+
+      const adding = await outcome(
+        by.api.aiProviders.add({ provider: "anthropic", key: newKey() })
+      );
+      const removing = await outcome(by.api.aiProviders.remove("openai"));
+      const kept = await connectDb()
+        .prepare("SELECT provider FROM ai_provider_keys")
+        .all<{ provider: string }>();
+
+      expect({ adding, removing }).toStrictEqual({
+        adding: "role.forbidden",
+        removing: "role.forbidden",
+      });
+      expect(kept.results.map(({ provider }) => provider)).toStrictEqual([
+        "openai",
+      ]);
+    });
+
+    it("answers a save the database refuses as a failure that quotes nothing of what was written", async () => {
+      const spies = [
+        vi.spyOn(console, "log"),
+        vi.spyOn(console, "warn"),
+        vi.spyOn(console, "error"),
+      ];
+      const key = newKey();
+      const marker = "QUOTED:";
+      const { admin: by } = await admin();
+      // A database error quotes its query's values: here the sealed key
+      // and its mask, behind the marker.
+      await connectDb()
+        .prepare(
+          `CREATE TRIGGER quoting_refusal BEFORE INSERT ON ai_provider_keys BEGIN SELECT RAISE(ABORT, '${marker}' || NEW.sealed || ' ' || NEW.mask); END`
+        )
+        .run();
+      let failure: unknown;
+      try {
+        await by.api.aiProviders.add({ provider: "openai", key });
+      } catch (error) {
+        failure = error;
+      } finally {
+        await connectDb().prepare("DROP TRIGGER quoting_refusal").run();
+      }
+
+      expect(aiProviderErrors.codeOf(failure)).toBe("ai_provider.failed");
+      const everywhere = JSON.stringify([
+        String(failure),
+        failure instanceof Error ? failure.message : null,
+        spies.map((spy) => spy.mock.calls),
+        await coreDatabaseText(),
+      ]);
+      expect(everywhere).not.toContain(marker);
+      expect(everywhere).not.toContain(key.slice(-4));
+    });
+
+    it("audits Grasp staff's every read of the providers, naming nothing they hold", async () => {
+      const key = newKey();
+      const { admin: by } = await admin();
+      await by.api.aiProviders.add({ provider: "openai", key });
+      const { core } = await openRpc(
+        await signedIn(idp, "grasp-staff", staffPerson())
+      );
+      const staff = core.authenticate();
+      const { userId } = await staff.whoami();
+
+      const listing = await staff.aiProviders.list();
+      const adding = await outcome(
+        staff.aiProviders.add({ provider: "anthropic", key: newKey() })
+      );
+
+      expect(listing.providers.map(({ provider }) => provider)).toStrictEqual([
+        "openai",
+      ]);
+      expect(adding).toBe("role.forbidden");
+      const audited = await auditedFor(userId, 2);
+      const views = audited.filter(({ action }) => action === "staff.accessed");
+      expect(views.map(({ detail }) => detail.surface)).toStrictEqual(
+        expect.arrayContaining(["aiProviders.list", "aiProviders.add"])
+      );
+      expect(JSON.stringify(views)).not.toContain(key.slice(-4));
     });
   });
 

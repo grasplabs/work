@@ -13,6 +13,7 @@ import type {
   AiProviderId,
 } from "@grasp-os/shared/ai-providers";
 import { signModelGrant } from "@grasp-os/shared/capability";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 
 import { isRouteApi, maxTokensOf } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
@@ -25,7 +26,7 @@ import type { ModelTransport, TransportRoute } from "./model-transport.ts";
 // to connect over the `CONNECT` service binding (`modelFetch`), with a
 // grant core signs for exactly that request once the ledger admitted it
 // (@grasp-os/shared/capability, `signModelGrant`): the credential, the
-// provider, the host and the ledger's ID for it. Core never sees a key:
+// provider, the host, the ledger's ID for it and its body's hash. Core never sees a key:
 // where the key goes, the adapter puts `aiCredentialPlaceholder`, which
 // connect replaces. It runs on plain workerd as on Cloudflare: one service
 // binding, no AI binding.
@@ -120,10 +121,11 @@ const connectFetch =
     headers.delete(endsAtHeader);
     headers.set("x-request-id", ledgerRequest);
     // Without the caller's signal, which can't cross the service binding.
+    const body = asked.method === "GET" ? null : await asked.arrayBuffer();
     const request = new Request(asked.url, {
       method: asked.method,
       headers,
-      body: asked.method === "GET" ? null : await asked.arrayBuffer(),
+      body,
     });
     const { signal } = asked;
     const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
@@ -132,6 +134,7 @@ const connectFetch =
       host,
       request: ledgerRequest,
       notAfter: endsAt,
+      body: await sha256HexOfBytes(body ?? new ArrayBuffer(0)),
     });
     // A request cut off here stops being waited for at once, and its
     // answer, should it come, is cancelled unread.

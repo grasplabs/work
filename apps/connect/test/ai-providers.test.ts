@@ -16,8 +16,10 @@ import {
   aiKeyErrors,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
+import { auditEventSchema } from "@grasp-os/shared/audit";
 import { signModelGrant } from "@grasp-os/shared/capability";
 import type { ModelGrantScope } from "@grasp-os/shared/capability";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -60,6 +62,12 @@ const connect = (vars: Partial<Env> = {}) =>
 /** A key no other test uses. */
 const newKey = (): string => `test-byok-${crypto.randomUUID()}`;
 
+/** The organization's admin core names as changing a key. */
+const byAdmin = { type: "person", userId: "admin-1" } as const;
+
+/** The body a model request carries unless a test says otherwise. */
+const modelBody = JSON.stringify({ model: "gpt-5.4" });
+
 /** The grant core signs for one request, made with connect's key. */
 const grantFor = async (
   scope: Partial<ModelGrantScope> & Pick<ModelGrantScope, "provider" | "host">,
@@ -69,6 +77,7 @@ const grantFor = async (
     credential: "organization",
     request: crypto.randomUUID(),
     notAfter: Date.now() + 60_000,
+    body: await sha256Hex(modelBody),
     ...scope,
   });
 
@@ -78,13 +87,44 @@ const modelRequest = (
   {
     method = "POST",
     headers = { authorization: `Bearer ${aiCredentialPlaceholder}` },
-  }: { method?: string; headers?: Record<string, string> } = {}
+    body = modelBody,
+  }: { method?: string; headers?: Record<string, string>; body?: string } = {}
 ): Request =>
   new Request(url, {
     method,
     headers: { "content-type": "application/json", ...headers },
-    body: method === "GET" ? null : JSON.stringify({ model: "gpt-5.4" }),
+    body: method === "GET" ? null : body,
   });
+
+/** The `store` a sent JSON body asks for, if it names one. */
+const storeOf = (body: string): unknown => {
+  const parsed: unknown = JSON.parse(body);
+  return typeof parsed === "object" && parsed !== null && "store" in parsed
+    ? parsed.store
+    : undefined;
+};
+
+/** The events connect's audit outbox holds, oldest first. */
+const outboxed = async () => {
+  const { results } = await env.DB.prepare(
+    "SELECT event FROM audit_outbox ORDER BY rowid"
+  ).all<{ event: string }>();
+  return results.map(({ event }) => auditEventSchema.parse(JSON.parse(event)));
+};
+
+/**
+ * Makes the database refuse every write of a key with an error that
+ * quotes what was written, as a database's errors quote a query's
+ * values, behind `marker`; until the returned function puts it right.
+ */
+const quotingRefusal = async (marker: string): Promise<() => Promise<void>> => {
+  await env.DB.prepare(
+    `CREATE TRIGGER quoting_refusal BEFORE INSERT ON ai_provider_keys BEGIN SELECT RAISE(ABORT, '${marker}' || NEW.sealed || ' ' || NEW.mask); END`
+  ).run();
+  return async () => {
+    await env.DB.prepare("DROP TRIGGER quoting_refusal").run();
+  };
+};
 
 /** The code connect refused a key with, or "ok" if it kept it. */
 const outcome = async (promise: Promise<unknown>): Promise<string> => {
@@ -105,6 +145,7 @@ const openAiUrl = "https://api.openai.com/v1/responses";
 describe("AI providers in connect", () => {
   beforeEach(async () => {
     await env.DB.prepare("DELETE FROM ai_provider_keys").run();
+    await env.DB.prepare("DELETE FROM audit_outbox").run();
     nextAnswer = () =>
       new Response("data: {}\n\n", {
         headers: {
@@ -122,7 +163,10 @@ describe("AI providers in connect", () => {
 
   describe("a model request connect refuses before it leaves", () => {
     it("refuses one without core's grant: none, forged, expired, or a connector's capability", async () => {
-      await connect().saveAiProviderKey({ provider: "openai", key: newKey() });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
       const scope = { provider: "openai", host: "api.openai.com" } as const;
       // A connector call's capability, made with the same key.
       const capability = await capabilityFor(appFor("user-1"), {
@@ -140,6 +184,7 @@ describe("AI providers in connect", () => {
             credential: "organization",
             request: crypto.randomUUID(),
             notAfter: Date.now(),
+            body: await sha256Hex(modelBody),
             ...scope,
           },
           Date.now() - 120_000
@@ -158,7 +203,10 @@ describe("AI providers in connect", () => {
     });
 
     it("refuses a request to any host but its provider's, or the one its grant names", async () => {
-      await connect().saveAiProviderKey({ provider: "openai", key: newKey() });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
       const elsewhere = [
         // Another host, with a grant for it.
         ["https://attacker.example/v1/responses", "attacker.example"],
@@ -186,7 +234,10 @@ describe("AI providers in connect", () => {
     });
 
     it("refuses what isn't a model request: another path, method or query, or a credential of core's own", async () => {
-      await connect().saveAiProviderKey({ provider: "openai", key: newKey() });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
       const grant = await grantFor({
         provider: "openai",
         host: "api.openai.com",
@@ -266,7 +317,10 @@ describe("AI providers in connect", () => {
     });
 
     it("never follows a redirect, which would take the key along", async () => {
-      await connect().saveAiProviderKey({ provider: "openai", key: newKey() });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
       nextAnswer = () =>
         new Response(null, {
           status: 307,
@@ -283,7 +337,10 @@ describe("AI providers in connect", () => {
     });
 
     it("says a provider that didn't answer is unreachable, never refused", async () => {
-      await connect().saveAiProviderKey({ provider: "openai", key: newKey() });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
       nextAnswer = () => {
         throw new TypeError("Network connection lost.");
       };
@@ -297,6 +354,53 @@ describe("AI providers in connect", () => {
         502,
         "unreachable",
       ]);
+    });
+
+    it("refuses a body other than the one its grant was signed for", async () => {
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
+      const grant = await grantFor({
+        provider: "openai",
+        host: "api.openai.com",
+      });
+
+      const response = await connect().modelFetch(
+        modelRequest(openAiUrl, {
+          body: JSON.stringify({ model: "gpt-5.4", input: "Something else." }),
+        }),
+        grant
+      );
+
+      expect(refusalOf(response)).toBe("body");
+      expect(sent).toStrictEqual([]);
+    });
+
+    it("refuses a request on Grasp's key that builds on a response or conversation OpenAI kept", async () => {
+      const refusals = await Promise.all(
+        [
+          { model: "gpt-5.4", previous_response_id: "resp_1" },
+          { model: "gpt-5.4", conversation: "conv_1" },
+          ["not", "an", "object"],
+        ].map(async (asked) => {
+          const body = JSON.stringify(asked);
+          return refusalOf(
+            await connect().modelFetch(
+              modelRequest(openAiUrl, { body }),
+              await grantFor({
+                provider: "openai",
+                host: "api.openai.com",
+                credential: "platform",
+                body: await sha256Hex(body),
+              })
+            )
+          );
+        })
+      );
+
+      expect(refusals).toStrictEqual(["stored", "stored", "stored"]);
+      expect(sent).toStrictEqual([]);
     });
   });
 
@@ -322,7 +426,7 @@ describe("AI providers in connect", () => {
       "carries the %s key once, in its one header, with nothing else of core's",
       async (provider, url, header) => {
         const key = newKey();
-        await connect().saveAiProviderKey({ provider, key });
+        await connect().saveAiProviderKey({ provider, key }, byAdmin);
         const placeholder: Record<string, string> =
           header === "x-api-key"
             ? { "x-api-key": aiCredentialPlaceholder }
@@ -386,6 +490,39 @@ describe("AI providers in connect", () => {
         platform: ["openai"],
       });
     });
+
+    it("sends a request on Grasp's key to OpenAI with store off, whatever core asked, and the organization's as it came", async () => {
+      const body = JSON.stringify({ model: "gpt-5.4", store: true });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: newKey() },
+        byAdmin
+      );
+
+      await Promise.all(
+        (["platform", "organization"] as const).map(
+          async (credential) =>
+            await connect().modelFetch(
+              modelRequest(openAiUrl, { body }),
+              await grantFor({
+                provider: "openai",
+                host: "api.openai.com",
+                credential,
+                body: await sha256Hex(body),
+              })
+            )
+        )
+      );
+
+      const stores = Object.fromEntries(
+        sent.map(({ headers, body: carried }) => [
+          headers.authorization === `Bearer ${platformKey}`
+            ? "platform"
+            : "organization",
+          storeOf(carried),
+        ])
+      );
+      expect(stores).toStrictEqual({ platform: false, organization: true });
+    });
   });
 
   describe("an organization's own key", () => {
@@ -398,10 +535,13 @@ describe("AI providers in connect", () => {
       ];
       const key = newKey();
 
-      const saved = await connect().saveAiProviderKey({
-        provider: "openai",
-        key,
-      });
+      const saved = await connect().saveAiProviderKey(
+        {
+          provider: "openai",
+          key,
+        },
+        byAdmin
+      );
       const listed = await connect().aiProviderKeys();
       await connect().modelFetch(
         modelRequest(openAiUrl),
@@ -417,7 +557,7 @@ describe("AI providers in connect", () => {
 
       expect(saved).toMatchObject({
         provider: "openai",
-        mask: `${key.slice(0, 3)}…${key.slice(-4)}`,
+        mask: `…${key.slice(-4)}`,
         baseUrl: null,
       });
       expect(JSON.stringify([saved, listed, stored.results])).not.toContain(
@@ -428,13 +568,128 @@ describe("AI providers in connect", () => {
       }
     });
 
+    it("is recorded in the admin's name in the same write as each save and removal, never with the key", async () => {
+      const key = newKey();
+
+      await connect().saveAiProviderKey(
+        {
+          provider: "openai-compatible",
+          key,
+          baseUrl: "https://llm.acme-ai.test/v1",
+        },
+        byAdmin
+      );
+      await connect().saveAiProviderKey(
+        {
+          provider: "openai-compatible",
+          key: newKey(),
+          baseUrl: "https://llm.acme-ai.test/v1",
+        },
+        byAdmin
+      );
+      await connect().removeAiProviderKey("openai-compatible", byAdmin);
+      await connect().removeAiProviderKey("openai-compatible", byAdmin);
+      const events = await outboxed();
+
+      expect(
+        events.map(({ actor, action, target, detail }) => ({
+          actor,
+          action,
+          target,
+          detail,
+        }))
+      ).toStrictEqual([
+        {
+          actor: byAdmin,
+          action: "ai_provider.added",
+          target: { type: "ai_provider", id: "openai-compatible" },
+          detail: {
+            provider: "openai-compatible",
+            endpointHost: "llm.acme-ai.test",
+          },
+        },
+        {
+          actor: byAdmin,
+          action: "ai_provider.replaced",
+          target: { type: "ai_provider", id: "openai-compatible" },
+          detail: {
+            provider: "openai-compatible",
+            endpointHost: "llm.acme-ai.test",
+          },
+        },
+        {
+          actor: byAdmin,
+          action: "ai_provider.removed",
+          target: { type: "ai_provider", id: "openai-compatible" },
+          detail: { provider: "openai-compatible" },
+        },
+      ]);
+      expect(JSON.stringify(events)).not.toContain(key);
+    });
+
+    it("is changed only in a person's name, never staff's, code's or no one's", async () => {
+      const changers = [
+        undefined,
+        { type: "staff", userId: "staff-1" },
+        { type: "system" },
+      ];
+
+      const refusals = await Promise.all(
+        changers.map(
+          async (by) =>
+            await outcome(
+              connect().saveAiProviderKey(
+                { provider: "openai", key: newKey() },
+                by
+              )
+            )
+        )
+      );
+
+      expect(new Set(refusals)).toStrictEqual(new Set(["ai_key.invalid"]));
+      await expect(connect().aiProviderKeys()).resolves.toStrictEqual([]);
+      await expect(outboxed()).resolves.toStrictEqual([]);
+    });
+
+    it("fails a save the database refuses as ai_key.failed, quoting nothing of what was written, and keeps no event", async () => {
+      const spies = [
+        vi.spyOn(console, "log"),
+        vi.spyOn(console, "warn"),
+        vi.spyOn(console, "error"),
+      ];
+      const key = newKey();
+      const marker = "QUOTED:";
+      const restore = await quotingRefusal(marker);
+      let failure: unknown;
+      try {
+        await connect().saveAiProviderKey({ provider: "openai", key }, byAdmin);
+      } catch (error) {
+        failure = error;
+      } finally {
+        await restore();
+      }
+
+      expect(aiKeyErrors.codeOf(failure)).toBe("ai_key.failed");
+      const everywhere = JSON.stringify([
+        String(failure),
+        failure instanceof Error ? failure.message : null,
+        spies.map((spy) => spy.mock.calls),
+      ]);
+      expect(everywhere).not.toContain(marker);
+      expect(everywhere).not.toContain(key.slice(-4));
+      await expect(outboxed()).resolves.toStrictEqual([]);
+    });
+
     it("goes only to the base URL it was saved with, and not once that base URL is changed in the database", async () => {
       const key = newKey();
-      await connect().saveAiProviderKey({
-        provider: "openai-compatible",
-        key,
-        baseUrl: "https://llm.acme-ai.test/v1/",
-      });
+      await connect().saveAiProviderKey(
+        {
+          provider: "openai-compatible",
+          key,
+          baseUrl: "https://llm.acme-ai.test/v1/",
+        },
+        byAdmin
+      );
       const grant = async () =>
         await grantFor({
           provider: "openai-compatible",
@@ -485,11 +740,14 @@ describe("AI providers in connect", () => {
         ].map(
           async (baseUrl) =>
             await outcome(
-              connect().saveAiProviderKey({
-                provider: "openai-compatible",
-                key: newKey(),
-                baseUrl,
-              })
+              connect().saveAiProviderKey(
+                {
+                  provider: "openai-compatible",
+                  key: newKey(),
+                  baseUrl,
+                },
+                byAdmin
+              )
             )
         )
       );
@@ -507,25 +765,34 @@ describe("AI providers in connect", () => {
       });
 
       const named = await outcome(
-        onPrem.saveAiProviderKey({
-          provider: "openai-compatible",
-          key: newKey(),
-          baseUrl: "http://models.acme.lan:8000/v1",
-        })
+        onPrem.saveAiProviderKey(
+          {
+            provider: "openai-compatible",
+            key: newKey(),
+            baseUrl: "http://models.acme.lan:8000/v1",
+          },
+          byAdmin
+        )
       );
       const metadata = await outcome(
-        onPrem.saveAiProviderKey({
-          provider: "openai-compatible",
-          key: newKey(),
-          baseUrl: "http://169.254.169.254/v1",
-        })
+        onPrem.saveAiProviderKey(
+          {
+            provider: "openai-compatible",
+            key: newKey(),
+            baseUrl: "http://169.254.169.254/v1",
+          },
+          byAdmin
+        )
       );
       const hosted = await outcome(
-        connect({ AI_PRIVATE_HOSTS: "models.acme.lan" }).saveAiProviderKey({
-          provider: "openai-compatible",
-          key: newKey(),
-          baseUrl: "http://models.acme.lan:8000/v1",
-        })
+        connect({ AI_PRIVATE_HOSTS: "models.acme.lan" }).saveAiProviderKey(
+          {
+            provider: "openai-compatible",
+            key: newKey(),
+            baseUrl: "http://models.acme.lan:8000/v1",
+          },
+          byAdmin
+        )
       );
 
       expect({ named, metadata, hosted }).toStrictEqual({
@@ -538,13 +805,19 @@ describe("AI providers in connect", () => {
     it("is replaced and removed whole", async () => {
       const first = newKey();
       const second = newKey();
-      await connect().saveAiProviderKey({ provider: "openai", key: first });
-      await connect().saveAiProviderKey({ provider: "openai", key: second });
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: first },
+        byAdmin
+      );
+      await connect().saveAiProviderKey(
+        { provider: "openai", key: second },
+        byAdmin
+      );
       const grant = async () =>
         await grantFor({ provider: "openai", host: "api.openai.com" });
 
       await connect().modelFetch(modelRequest(openAiUrl), await grant());
-      const removed = await connect().removeAiProviderKey("openai");
+      const removed = await connect().removeAiProviderKey("openai", byAdmin);
       const after = await connect().modelFetch(
         modelRequest(openAiUrl),
         await grant()
@@ -558,16 +831,19 @@ describe("AI providers in connect", () => {
         "no_credential",
       ]);
       await expect(
-        connect().removeAiProviderKey("openai")
+        connect().removeAiProviderKey("openai", byAdmin)
       ).resolves.toBeFalsy();
     });
 
     it("survives a rotation of the token key: sealed again by the clock", async () => {
       const key = newKey();
-      await connect().saveAiProviderKey({
-        provider: "openai",
-        key,
-      });
+      await connect().saveAiProviderKey(
+        {
+          provider: "openai",
+          key,
+        },
+        byAdmin
+      );
       const newTokenKey = btoa("another-token-key-of-32-bytes!!!");
       const rotating = {
         ...env,
@@ -602,11 +878,39 @@ describe("AI providers in connect", () => {
       ["https://100.64.0.1/v1", "private_address"],
       ["https://[::ffff:169.254.169.254]/v1", "private_address"],
       ["https://models/v1", "private_address"],
+      ["https://127.0.0.1.nip.io/v1", "address_in_name"],
+      ["https://7f000001.nip.io/v1", "address_in_name"],
+      ["https://10-0-0-8.sslip.io/v1", "address_in_name"],
+      ["https://169-254-169-254.attacker.example/v1", "address_in_name"],
+      ["https://llm.10.0.0.8.attacker.example/v1", "address_in_name"],
       ["ftp://models.example.com/v1", "scheme"],
       ["not a url", "invalid_url"],
     ])("refuses %s (%s)", (url, refused) => {
       const checked = checkEndpoint(url, hosted);
       expect("refused" in checked ? checked.refused : "ok").toBe(refused);
+    });
+
+    it("refuses a name carrying an address on-prem too, unless the deployment lists it exactly", () => {
+      const onPrem: EndpointPolicy = {
+        onPrem: true,
+        privateHosts: ["models.acme.lan", "10.0.0.8.nip.io"],
+      };
+      const outcomeOf = (url: string) => {
+        const checked = checkEndpoint(url, onPrem);
+        return "refused" in checked ? checked.refused : "ok";
+      };
+
+      expect({
+        unlisted: outcomeOf("http://127.0.0.1.nip.io:8000/v1"),
+        listed: outcomeOf("http://10.0.0.8.nip.io:8000/v1"),
+        named: outcomeOf("http://models.acme.lan:8000/v1"),
+        unnamedPrivate: outcomeOf("http://10.0.0.9:8000/v1"),
+      }).toStrictEqual({
+        unlisted: "address_in_name",
+        listed: "ok",
+        named: "ok",
+        unnamedPrivate: "private_address",
+      });
     });
 
     it("takes a public HTTPS endpoint", () => {

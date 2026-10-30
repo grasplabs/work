@@ -14,15 +14,21 @@ import type {
   AiProviderRoutes,
   AiRefusal,
 } from "@grasp-os/shared/ai-providers";
+import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { verifyModelGrant } from "@grasp-os/shared/capability";
 import type { ModelGrantClaims } from "@grasp-os/shared/capability";
+import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { checkEndpoint } from "./ai-endpoint-guard.ts";
 import type { EndpointPolicy } from "./ai-endpoint-guard.ts";
-import { aiProviderKeys } from "./db/schema.ts";
+import { recordEventIf } from "./audit.ts";
+import { aiProviderKeys, auditOutbox } from "./db/schema.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 
 // The AI providers' credentials, and the one place a model request leaves
@@ -42,9 +48,15 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 // - A key leaks to core, the logs or the database: a key is sealed as soon
 //   as it arrives, bound to its provider and, for a custom endpoint, its
 //   base URL (a key moved to another row or another base URL doesn't
-//   open), and never answered back: listings carry only a mask
-//   (`sk-…a3f2`). Nothing here logs a header, a body, a URL's query, or a
-//   fetch error's message, only identifiers, statuses and timings.
+//   open), and never answered back: listings carry only a mask of its
+//   last four characters (`…a3f2`). Nothing here logs a header, a body, a
+//   URL's query, or an error's message (a database error's quotes its
+//   query's values: the sealed key, its mask), only identifiers, statuses
+//   and timings; a save or removal that fails is `ai_key.failed`, which
+//   carries nothing of it.
+// - A key changed with no trace: a save or removal and its audit event
+//   are one write (connect's audit outbox, which core drains), so one is
+//   never kept without the other.
 // - A key sent somewhere else: only to its provider's own host, or the
 //   organization's registered base URL for a custom endpoint (checked by
 //   src/ai-endpoint-guard.ts when it is saved and again on every request),
@@ -59,8 +71,13 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   betas), and the key goes in that one header.
 // - A request core's gateway didn't decide: each needs a grant, made with
 //   the capability key only core and connect hold, for a few seconds, for
-//   that credential, provider and host; a grant never passes for a
-//   connector capability, nor one for a grant.
+//   that credential, provider, host and body (its hash); a grant never
+//   passes for a connector capability, nor one for a grant.
+// - One client's conversation kept by a provider on Grasp's key, where
+//   anything else holding that key could read it back: a request on
+//   Grasp's key to OpenAI goes with `store: false`, set here whatever core
+//   sent, and one that names a stored response or conversation to build
+//   on is refused.
 // - A provider's answer read as connect's: connect's own refusals carry
 //   `aiRefusedHeader`, which is never passed back from a provider, nor any
 //   other header but the content type, the request's ID and a rate
@@ -72,12 +89,15 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 const contextOf = (provider: AiProviderId, baseUrl: string | null): string =>
   `ai-provider-key\n${provider}\n${baseUrl ?? ""}`;
 
-/** The shortest key whose ends a mask shows. */
+/** The shortest key whose end a mask shows. */
 const maskedFrom = 12;
 
-/** A key's first three and last four characters, or nothing of a short one. */
+/**
+ * A key's last four characters, or nothing of a short one: never its
+ * start, which with the end would give away much of a short custom key.
+ */
 const maskOf = (key: string): string =>
-  key.length < maskedFrom ? "…" : `${key.slice(0, 3)}…${key.slice(-4)}`;
+  key.length < maskedFrom ? "…" : `…${key.slice(-4)}`;
 
 /** Where a custom endpoint may point, for this deployment. */
 const policyOf = (env: Env): EndpointPolicy => ({
@@ -117,17 +137,74 @@ const keyOf = (row: typeof aiProviderKeys.$inferSelect): AiProviderKey => ({
 });
 
 /**
+ * Who changes a key, as core names them: only ever a person, one of the
+ * organization's own admins (core checks that); never staff or code.
+ */
+const changerOf = (by: unknown): AuditActor => {
+  const parsed = auditActorSchema.safeParse(by);
+  if (!parsed.success || parsed.data.type !== "person") {
+    throw aiKeyErrors.create("ai_key.invalid");
+  }
+  return parsed.data;
+};
+
+/**
+ * Runs a key's write, and turns any failure but connect's own refusals
+ * into `ai_key.failed`, logged by its kind alone: a database error's
+ * message quotes its query's values, the sealed key and its mask among
+ * them, and must reach neither the logs nor core.
+ */
+const writing = async <T>(
+  provider: AiProviderId,
+  write: () => Promise<T>
+): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (aiKeyErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    log.error("ai.key_write_failed", {
+      provider,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    throw aiKeyErrors.create("ai_key.failed");
+  }
+};
+
+/**
+ * Stores `entry`'s event in the audit outbox only if `condition` holds
+ * when it runs, in the batch it runs in, before the batch's later writes.
+ */
+const outboxedWhere = (
+  db: DrizzleD1Database,
+  entry: AuditEntry,
+  condition: SQL
+) => {
+  const event = createAuditEvent(entry, "connect");
+  return db
+    .insert(auditOutbox)
+    .select(
+      sql`SELECT ${event.id}, ${JSON.stringify(event)}, ${Date.now()} WHERE ${condition}`
+    );
+};
+
+/**
  * Seals and keeps the organization's key for a provider, replacing the one
  * it had; for an OpenAI-compatible endpoint, with the base URL it goes to.
+ * Recorded in `by`'s name, `ai_provider.added` or `ai_provider.replaced`
+ * by whether it had one as the write ran, in the same batch.
  */
 export const saveAiProviderKey = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  by: unknown
 ): Promise<AiProviderKey> => {
   const parsed = aiProviderKeySaveSchema.safeParse(request);
   if (!parsed.success) {
     throw aiKeyErrors.create("ai_key.invalid");
   }
+  const actor = changerOf(by);
   const { provider, key } = parsed.data;
   const custom = provider === "openai-compatible";
   if (custom !== (parsed.data.baseUrl !== undefined)) {
@@ -148,46 +225,84 @@ export const saveAiProviderKey = async (
   const sealed = await vault.seal(key, contextOf(provider, baseUrl));
   const now = new Date();
   const db = drizzle(env.DB);
-  const [row] = await db
-    .insert(aiProviderKeys)
-    .values({
+  const had = sql`EXISTS (SELECT 1 FROM ${aiProviderKeys} WHERE ${aiProviderKeys.provider} = ${provider})`;
+  const entry = (action: string): AuditEntry => ({
+    actor,
+    action,
+    target: { type: "ai_provider", id: provider },
+    detail: {
       provider,
-      sealed,
-      mask: maskOf(key),
-      baseUrl,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: aiProviderKeys.provider,
-      set: { sealed, mask: maskOf(key), baseUrl, updatedAt: now },
-    })
-    .returning();
-  if (row === undefined) {
-    throw new Error("The key's row wasn't written");
-  }
+      endpointHost: baseUrl === null ? null : new URL(baseUrl).hostname,
+    },
+  });
+  const row = await writing(provider, async () => {
+    // Which event is decided by the row as the batch finds it, before
+    // the write: a concurrent save is one or the other, never both.
+    const [_added, _replaced, written] = await db.batch([
+      outboxedWhere(db, entry("ai_provider.added"), sql`NOT ${had}`),
+      outboxedWhere(db, entry("ai_provider.replaced"), had),
+      db
+        .insert(aiProviderKeys)
+        .values({
+          provider,
+          sealed,
+          mask: maskOf(key),
+          baseUrl,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: aiProviderKeys.provider,
+          set: { sealed, mask: maskOf(key), baseUrl, updatedAt: now },
+        })
+        .returning(),
+    ]);
+    const [kept] = written;
+    if (kept === undefined) {
+      throw new Error("The key's row wasn't written");
+    }
+    return kept;
+  });
   log.info("ai.key_saved", { provider });
   return keyOf(row);
 };
 
-/** Deletes the organization's key for a provider; whether it had one. */
+/**
+ * Deletes the organization's key for a provider, recorded in `by`'s name
+ * (`ai_provider.removed`) in the same batch when it had one; whether it
+ * had one.
+ */
 export const removeAiProviderKey = async (
   env: Env,
-  provider: unknown
+  provider: unknown,
+  by: unknown
 ): Promise<boolean> => {
   const parsed = aiProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiKeyErrors.create("ai_key.invalid");
   }
-  const removed = await drizzle(env.DB)
-    .delete(aiProviderKeys)
-    .where(eq(aiProviderKeys.provider, parsed.data))
-    .returning({ provider: aiProviderKeys.provider });
+  const actor = changerOf(by);
+  const which = eq(aiProviderKeys.provider, parsed.data);
+  const removed = await writing(
+    parsed.data,
+    async () =>
+      await recordEventIf(
+        env,
+        {
+          actor,
+          action: "ai_provider.removed",
+          target: { type: "ai_provider", id: parsed.data },
+          detail: { provider: parsed.data },
+        },
+        { from: aiProviderKeys, where: which },
+        [drizzle(env.DB).delete(aiProviderKeys).where(which)]
+      )
+  );
   log.info("ai.key_removed", {
     provider: parsed.data,
-    removed: removed.length,
+    removed: removed ? 1 : 0,
   });
-  return removed.length > 0;
+  return removed;
 };
 
 /** The organization's keys, as masks, in the providers' order. */
@@ -403,6 +518,52 @@ const passedBack = (answered: Response): Response => {
   return new Response(answered.body, { status: answered.status, headers });
 };
 
+/** OpenAI's model paths whose JSON bodies take `store`. */
+const storingPaths: ReadonlySet<string> = new Set([
+  "/v1/responses",
+  "/v1/chat/completions",
+]);
+
+/** Fields that build on what OpenAI kept of an earlier request. */
+const storedContextFields = ["previous_response_id", "conversation"] as const;
+
+/**
+ * The body to send: on Grasp's own key to OpenAI, with `store: false`
+ * whatever core sent, so nothing of one client's is kept where another
+ * holding the same key could read it; `undefined` for one that names a
+ * stored response or conversation, or isn't a JSON object. Any other
+ * request's body goes as it came: an organization's own key keeps what
+ * its owner's account settings say (pi asks `store: false` anyway).
+ */
+const unstoredBody = (
+  asked: ArrayBuffer,
+  claims: ModelGrantClaims,
+  url: URL
+): ArrayBuffer | Uint8Array | undefined => {
+  if (
+    claims.credential !== "platform" ||
+    claims.provider !== "openai" ||
+    !storingPaths.has(url.pathname)
+  ) {
+    return asked;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(asked));
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    Array.isArray(json) ||
+    storedContextFields.some((field) => field in json)
+  ) {
+    return undefined;
+  }
+  return new TextEncoder().encode(JSON.stringify({ ...json, store: false }));
+};
+
 /** Whether an HTTP status sends the client elsewhere. */
 const isRedirect = (status: number): boolean => status >= 300 && status < 400;
 
@@ -445,7 +606,14 @@ export const modelFetch = async (
     return refused("path", claims);
   }
   const startedAt = Date.now();
-  const body = await request.arrayBuffer();
+  const asked = await request.arrayBuffer();
+  if ((await sha256HexOfBytes(asked)) !== claims.body) {
+    return refused("body", claims);
+  }
+  const body = unstoredBody(asked, claims, url);
+  if (body === undefined) {
+    return refused("stored", claims);
+  }
   let answered: Response;
   try {
     answered = await fetch(url, {
