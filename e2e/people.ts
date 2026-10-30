@@ -203,6 +203,31 @@ export const teamMadeBy = async (
   return id;
 };
 
+/** Puts `userId` in the team `teamId`, as an admin does through Better Auth. */
+export const teamMemberAddedBy = async (
+  admin: Pick<Person, "cookie">,
+  teamId: string,
+  userId: string
+): Promise<void> => {
+  const response = await fetch(
+    new URL("/api/auth/organization/add-team-member", origin),
+    {
+      method: "POST",
+      headers: {
+        origin,
+        cookie: `${sessionCookie}=${encodeURIComponent(admin.cookie)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ teamId, userId }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Adding ${userId} to team ${teamId} failed (${response.status}): ${await response.text()}`
+    );
+  }
+};
+
 /** The person's API over `/rpc`, from Node, as their browser would open it. */
 export const apiOf = (person: Pick<Person, "cookie">) => {
   const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
@@ -296,6 +321,7 @@ const cast = {
   knowledgeUploads: { one: "user" },
   knowledgeReader: { admin: "admin", reader: "user" },
   knowledgeCreate: { admin: "admin", member: "user" },
+  knowledgePurge: { admin: "admin", member: "user" },
   workflowMap: { admin: "admin", reader: "user" },
   boardPage: { admin: "admin" },
   intake: { admin: "admin" },
@@ -336,6 +362,8 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainTranscript: { member: "user" },
+  brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   boardGoals: { admin: "admin", member: "user" },
   workflowTeam: { admin: "admin", builder: "builder", member: "user" },
   brainChat: { member: "user" },
