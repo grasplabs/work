@@ -7,10 +7,15 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { FileTextIcon, NotebookPenIcon } from "lucide-react";
+import { FileTextIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -495,72 +500,74 @@ export const MemoryPage = ({
   // Read again after a change: what changed shows as it is now.
   const [changes, setChanges] = useState(0);
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <NotebookPenIcon className="size-5" />
-          <Trans>Memory</Trans>
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <RememberDialog
-            onRemembered={(memoryId) => {
-              setTab("mine");
-              setChanges((count) => count + 1);
-              setPicked(memoryId);
-            }}
-          />
-          <Tabs
-            onValueChange={(value: string) => {
-              setTab(
-                value === "shared" || value === "lessons" ? value : "mine"
-              );
-              setPicked(undefined);
-            }}
-            value={tab}
-          >
-            <TabsList>
-              <TabsTrigger value="mine">
-                <Trans context="memory records: the person's own">Yours</Trans>
-              </TabsTrigger>
-              <TabsTrigger value="shared">
-                <Trans context="memory records: others' that you read">
-                  Shared with you
-                </Trans>
-              </TabsTrigger>
-              <TabsTrigger value="lessons">
-                <Trans context="the Brain's lessons from repeated failures">
-                  Lessons
-                </Trans>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </div>
-      {tab === "lessons" ? (
-        <LessonsView admin={admin} />
-      ) : (
-        <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-          <RecordList
-            among={tab}
-            key={`${tab}:${changes}`}
-            onPick={setPicked}
-            picked={picked}
-          />
-          {picked === undefined ? null : (
-            <LineagePanel
-              admin={admin}
-              teams={teams}
-              key={`${picked}:${changes}`}
-              memoryId={picked}
-              onChanged={(memoryId) => {
+    // A page of the brain as its log is (brain-log.tsx): the title in the
+    // serif, the kinds of record as a line of tabs under it, in the brain's
+    // column, with room at the foot for the chat.
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-8 md:px-12">
+        <PageHeader>
+          <PageHeaderTitle>
+            <Trans>Memory</Trans>
+          </PageHeaderTitle>
+          <PageHeaderActions>
+            <RememberDialog
+              onRemembered={(memoryId) => {
+                setTab("mine");
                 setChanges((count) => count + 1);
                 setPicked(memoryId);
               }}
-              onPick={setPicked}
             />
-          )}
-        </div>
-      )}
+          </PageHeaderActions>
+        </PageHeader>
+        <Tabs
+          onValueChange={(value: string) => {
+            setTab(value === "shared" || value === "lessons" ? value : "mine");
+            setPicked(undefined);
+          }}
+          value={tab}
+        >
+          <TabsList variant="line">
+            <TabsTrigger className="flex-none" value="mine">
+              <Trans context="memory records: the person's own">Yours</Trans>
+            </TabsTrigger>
+            <TabsTrigger className="flex-none" value="shared">
+              <Trans context="memory records: others' that you read">
+                Shared with you
+              </Trans>
+            </TabsTrigger>
+            <TabsTrigger className="flex-none" value="lessons">
+              <Trans context="the Brain's lessons from repeated failures">
+                Lessons
+              </Trans>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {tab === "lessons" ? (
+          <LessonsView admin={admin} />
+        ) : (
+          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+            <RecordList
+              among={tab}
+              key={`${tab}:${changes}`}
+              onPick={setPicked}
+              picked={picked}
+            />
+            {picked === undefined ? null : (
+              <LineagePanel
+                admin={admin}
+                teams={teams}
+                key={`${picked}:${changes}`}
+                memoryId={picked}
+                onChanged={(memoryId) => {
+                  setChanges((count) => count + 1);
+                  setPicked(memoryId);
+                }}
+                onPick={setPicked}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
