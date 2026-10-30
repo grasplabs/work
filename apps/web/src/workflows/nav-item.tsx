@@ -49,7 +49,8 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
 
 /**
  * The sidebar's Workflows entry, with how many workflows need the person;
- * for owners and admins (`requests`), Stephen's requests under it.
+ * for owners and admins (`requests`), Stephen's requests under it while
+ * the person is in Workflows.
  */
 export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
   const router = useRouter();
@@ -86,10 +87,15 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
     };
   }, [router, core]);
   const shown = waiting !== undefined && waiting > 0;
+  // As the prototype's: Requests is under Workflows while the person is
+  // in them, and lit on its own there.
+  const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
+  const onRequests =
+    matchRoute({ to: "/workflows/requests", fuzzy: true }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={matchRoute({ to: "/workflows", fuzzy: true }) !== false}
+        isActive={inWorkflows && !onRequests}
         render={<Link to="/workflows" />}
       >
         <WorkflowIcon />
@@ -110,11 +116,11 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
           </SidebarMenuBadge>
         ) : null}
       </SidebarMenuButton>
-      {requests ? (
+      {requests && inWorkflows ? (
         <SidebarMenuSub>
           <SidebarMenuSubItem>
             <SidebarMenuSubButton
-              isActive={matchRoute({ to: "/workflows/requests" }) !== false}
+              isActive={onRequests}
               render={<Link to="/workflows/requests" />}
             >
               <span>
