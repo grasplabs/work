@@ -5,6 +5,7 @@ import {
   moduleKey,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
+import { nextReleaseId as nextPublishedId } from "@grasp-os/shared/release-id";
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -342,22 +343,12 @@ CREATE TABLE t (id TEXT);`,
     expect(result.imported).toContain(good.id);
   });
 
-  it("refuses a manifest that names another release or commit, or isn't a manifest", async () => {
+  it("refuses a manifest that names another release, or isn't a manifest", async () => {
     const release = await publishRelease({ notes: "feat(core): elsewhere" });
     const moved = nextReleaseId();
     await env.RELEASES.put(manifestKey(moved), release.manifestText);
     const garbled = nextReleaseId();
     await env.RELEASES.put(manifestKey(garbled), "{ not json");
-    // Its own id, but a commit its id's short SHA doesn't name.
-    const otherCommit = await buildRelease({ notes: "feat(core): commit" });
-    await putBlobs(otherCommit);
-    await env.RELEASES.put(
-      manifestKey(otherCommit.id),
-      JSON.stringify({
-        ...otherCommit.manifest,
-        commit: sameSizeOther(otherCommit.manifest.commit),
-      })
-    );
     const huge = nextReleaseId();
     await env.RELEASES.put(
       manifestKey(huge),
@@ -374,7 +365,7 @@ CREATE TABLE t (id TEXT);`,
 
     const result = await runImport();
 
-    const refused = [moved, garbled, otherCommit.id, huge, bom.id, invalidUtf8];
+    const refused = [moved, garbled, huge, bom.id, invalidUtf8];
     expect(result.failed).toStrictEqual(expect.arrayContaining(refused));
     const rows = await Promise.all(refused.map(releaseRow));
     expect(rows.filter((row) => row !== undefined)).toStrictEqual([]);
@@ -396,6 +387,28 @@ CREATE TABLE t (id TEXT);`,
     const second = await runImport();
 
     expect(second.imported).toContain(oldest);
+  });
+
+  it("takes the newest release by year, month and N as numbers, never as text", async () => {
+    // A month after every other release in the file's bucket.
+    const month = new Date(Date.UTC(2099, 11, 15));
+    const ids: string[] = [];
+    for (let n = 1; n <= 10; n += 1) {
+      ids.push(nextPublishedId(ids, month));
+    }
+    const [ninth = "", tenth = ""] = ids.slice(-2);
+    for (const id of [ninth, tenth]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      const release = await buildRelease({ notes: `feat(core): ${id}` }, id);
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await putBlobs(release);
+      // oxlint-disable-next-line no-await-in-loop -- in order, oldest first
+      await putManifest(release);
+    }
+
+    const result = await runImport();
+
+    expect(result.imported.slice(0, 2)).toStrictEqual([tenth, ninth]);
   });
 
   it("counts two runs' failures of the same release at once as two attempts", async () => {

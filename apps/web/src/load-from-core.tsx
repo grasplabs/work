@@ -79,6 +79,18 @@ export const loadFromCore = async <T,>(
   }
 };
 
+/**
+ * What `read` reads, or null when core refuses it or can't be reached: a
+ * read that may fail on its own without failing the page it is part of.
+ */
+export const orNull = async <T,>(read: () => Promise<T>): Promise<T | null> => {
+  try {
+    return await read();
+  } catch {
+    return null;
+  }
+};
+
 const unreachable = msg`Grasp can't be reached right now. Try again in a moment.`;
 const missing = msg`Not found. It may have been renamed or removed.`;
 

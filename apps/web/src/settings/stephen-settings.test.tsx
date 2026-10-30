@@ -269,6 +269,19 @@ const press = async (element: HTMLElement) => {
   await settled();
 };
 
+/** The button named `name`. */
+const button = (name: string): HTMLElement => {
+  const found = [...document.querySelectorAll("button")].find(
+    (each) =>
+      each.getAttribute("aria-label") === name ||
+      each.textContent?.trim().startsWith(name)
+  );
+  if (!(found instanceof HTMLElement)) {
+    throw new TypeError(`No button ${name}`);
+  }
+  return found;
+};
+
 describe("Settings › Stephen", () => {
   afterEach(() => {
     act(() => {
@@ -278,7 +291,7 @@ describe("Settings › Stephen", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets an admin say who can talk to him, and narrow who reaches him in Teams and whether he acts there", async () => {
+  it("lets an admin say who can talk to him, pause him after asking, and narrow who reaches him in Teams and whether he acts there", async () => {
     const { connections, asked } = fakeConnections();
     await shown(connections);
 
@@ -287,12 +300,18 @@ describe("Settings › Stephen", () => {
     const beforeTeam = [...asked];
     await tick("Who can talk to him", "Sales");
     await tick("Who can talk to him", "Support");
+    // Teams' panel, opened from its row.
+    await press(button("Microsoft Teams"));
     await choose(choice("Who reaches him in Microsoft Teams"), "nobody");
     await press(toggle("Does things for people in Microsoft Teams"));
-    await press(toggle("On in chat apps"));
+    // Pausing him asks first.
+    await press(toggle("Stephen outside Grasp"));
+    const beforePause = asked.length;
+    await press(button("Pause"));
 
-    expect({ beforeTeam, asked }).toStrictEqual({
+    expect({ beforeTeam, beforePause, asked }).toStrictEqual({
       beforeTeam: [],
+      beforePause: 4,
       asked: [
         ["reach", true, { who: "teams", teams: [sales.teamId] }],
         [
@@ -313,7 +332,7 @@ describe("Settings › Stephen", () => {
     expect({
       who: choice("Who can talk to him").value,
       teams: choice("Who reaches him in Microsoft Teams").value,
-      on: toggle("On in chat apps").getAttribute("aria-checked"),
+      on: toggle("Stephen outside Grasp").getAttribute("aria-checked"),
     }).toStrictEqual({ who: "teams", teams: "nobody", on: "false" });
   });
 
@@ -323,6 +342,7 @@ describe("Settings › Stephen", () => {
 
     await choose(choice("Reach others"), "teams");
     await tick("Reach others", "Support");
+    await press(button("Microsoft 365"));
     await choose(choice("Read the company's in Microsoft 365"), "teams");
     await tick("Read the company's in Microsoft 365", "Sales");
     await tick("Read the company's in Microsoft 365", "Sales");
@@ -360,9 +380,9 @@ describe("Settings › Stephen", () => {
           )
       ).length,
     }).toStrictEqual({
-      // Stephen's on and who; Teams' who and acts; six classes; Microsoft
-      // 365's two.
-      shown: 12,
+      // Stephen's on and who, and six classes; a place's and an app's
+      // panels open from their rows.
+      shown: 8,
       enabled: 0,
     });
   });

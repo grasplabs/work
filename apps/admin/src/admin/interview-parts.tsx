@@ -109,9 +109,7 @@ export const Figure = ({
     {ring !== undefined && ring.of > 0 ? (
       <Ring of={ring.of} value={ring.value} />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure col-span-2 row-start-2">{value}</span>
     {sub === undefined ? null : (
       <span className="text-muted-foreground col-span-2 row-start-3 text-xs">
         {sub}

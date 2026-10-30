@@ -56,6 +56,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import {
   HoverCard,
   HoverCardContent,
@@ -164,7 +165,6 @@ import {
   LoadingLines,
   NotFoundState,
 } from "../frame/page-states.tsx";
-import { GraspMark } from "../grasp-mark.tsx";
 
 const models = [
   { label: "Small", value: "small" },
@@ -198,7 +198,12 @@ const swatches = [
   { name: "tile", className: "bg-tile" },
   { name: "status-agreed", className: "bg-status-agreed" },
   { name: "status-attention", className: "bg-status-attention" },
-  { name: "scrim", className: "bg-scrim" },
+  { name: "status-attention-soft", className: "bg-status-attention-soft" },
+  { name: "highlight", className: "bg-highlight" },
+  { name: "signal", className: "bg-signal" },
+  { name: "hairline", className: "bg-hairline" },
+  { name: "icon-tile", className: "bg-icon-tile" },
+  { name: "veil", className: "bg-veil" },
 ];
 
 const buttonVariants = [
@@ -208,10 +213,13 @@ const buttonVariants = [
   "ghost",
   "destructive",
   "link",
+  "highlight",
 ] as const;
 
 const badgeVariants = [
   "default",
+  "passed",
+  "attention",
   "secondary",
   "destructive",
   "outline",
@@ -242,10 +250,14 @@ const Theme = () => (
           ))}
         </ul>
         <div className="flex flex-col gap-1">
-          <p className="text-2xl font-medium tracking-tight">
-            A page&apos;s title
+          <p className="type-display">What Grasp says, in Newsreader.</p>
+          <p className="type-title">A page&apos;s title</p>
+          <p className="type-heading">A heading inside a page</p>
+          <p className="type-figure">1,284</p>
+          <p className="text-sm">
+            The body text, in Geist, with a{" "}
+            <span className="line-under">line under</span> what was heard.
           </p>
-          <p className="text-sm">The body text, in Geist.</p>
           <p className="text-muted-foreground text-sm">A quiet line.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -740,10 +752,10 @@ const Kit = () => (
     <TooltipProvider>
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
         <div className="flex items-center gap-3">
-          <div className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg">
+          <div className="bg-icon-tile text-icon-tile-foreground flex size-8 items-center justify-center rounded-lg">
             <GraspMark className="size-4" />
           </div>
-          <h1 className="text-2xl font-medium">UI kit</h1>
+          <h1 className="type-title">UI kit</h1>
         </div>
 
         <Theme />
