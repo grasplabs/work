@@ -497,6 +497,29 @@ export interface WorkflowBindingApproval {
   approvedAt: string;
 }
 
+/**
+ * A version of a workflow that runs, or waits to go live, whose catalog
+ * bindings an admin hasn't approved, so its starts are refused
+ * (`workflow.binding_unapproved`): each binding, with the targets core can
+ * offer now that would serve it, each checked as an approval is. A
+ * binding with none offered is approved where its target is chosen in
+ * full (its workflow's page).
+ */
+export interface PendingWorkflowBindings {
+  workflow: { id: string; name: string };
+  version: number;
+  /** Whether it is the version that runs now, rather than the one asked to go live. */
+  live: boolean;
+  bindings: {
+    alias: string;
+    kind: CatalogBindingKind;
+    /** The catalog contract it calls. */
+    contractId: string;
+    /** Each target offered, with what it names: a model's ID, a collection's name; empty for one that names nothing. */
+    offered: { target: WorkflowBindingTarget; label: string }[];
+  }[];
+}
+
 const paramNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
 /**
@@ -1259,6 +1282,12 @@ export interface WorkflowResourcesApi {
   ) => Promise<WorkflowBindingApproval>;
   /** Revokes a binding approval; for the organization's admins. */
   revokeBinding: (id: string, approval: string) => Promise<void>;
+  /**
+   * The versions of workflows that run or wait to go live whose bindings
+   * no admin approved, at most 50, each with the targets core can offer;
+   * for the organization's own admins, never Grasp staff.
+   */
+  pendingBindings: () => Promise<PendingWorkflowBindings[]>;
   /** Binds an exact version to an App; for the App's builders. */
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */

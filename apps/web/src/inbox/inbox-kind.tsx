@@ -70,6 +70,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  bindingApproval: msg({
+    message: "Bindings",
+    context:
+      "inbox item kind: what a workflow reaches, for an admin to approve",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -94,6 +99,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
+  bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };
 

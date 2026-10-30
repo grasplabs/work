@@ -8,7 +8,11 @@ import type {
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
-import type { GoLiveItem, WorkflowGoLiveItem } from "@grasp-os/shared/waiting";
+import type {
+  BindingApprovalItem,
+  GoLiveItem,
+  WorkflowGoLiveItem,
+} from "@grasp-os/shared/waiting";
 import { i18n } from "@lingui/core";
 import { ph, plural, t } from "@lingui/core/macro";
 
@@ -55,6 +59,7 @@ export type InboxKind =
   | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
+  | "bindingApproval"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
@@ -76,6 +81,7 @@ export type InboxSource =
   | { type: "screens"; waiting: ScreensWaiting }
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
+  | { type: "bindings"; item: BindingApprovalItem }
   | {
       type: "failed";
       notification: RunFailedNotification;
@@ -134,6 +140,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
+  bindingApproval: "workflows",
   decision: "workflows",
 };
 
@@ -417,6 +424,45 @@ const workflowGoLiveItems = (
     };
   });
 
+/**
+ * A version of a workflow whose bindings no admin approved, so its starts
+ * are refused: approved here, binding by binding, by an admin.
+ */
+const bindingItems = (
+  pending: readonly BindingApprovalItem[],
+  readAt: string
+): InboxItem[] =>
+  pending.map((item) => {
+    const { workflow, version, live, bindings } = item.pending;
+    const { name } = workflow;
+    const count = bindings.length;
+    return {
+      id: item.id,
+      kind: "bindingApproval",
+      title: t`Approve what ${name} reaches`,
+      context: name,
+      body: [
+        live
+          ? t`Version ${version} of ${name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`
+          : t`Version ${version} of ${name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls.`,
+      ],
+      facts: [
+        { label: t`Version`, value: String(version) },
+        {
+          label: t`Waiting`,
+          value: plural(count, {
+            one: "# binding",
+            other: "# bindings",
+          }),
+        },
+      ],
+      about: { kind: "independentWorkflow", workflow: workflow.id },
+      date: readAt,
+      urgent: item.urgent,
+      source: { type: "bindings", item },
+    };
+  });
+
 /** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
 const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -562,6 +608,9 @@ export const inboxItems = (
   const decisions = readyOf(waiting.decisions) ?? [];
   const versions = readyOf(waiting.versions) ?? [];
   const workflowGoLives = readyOf(waiting.workflowGoLives) ?? [];
+  const bindings = decidesRequests(viewer)
+    ? (readyOf(waiting.bindings) ?? [])
+    : [];
   const reconnect = (readyOf(waiting.reconnect) ?? []).map(
     ({ integration, connection }): InboxItem => {
       const app =
@@ -603,6 +652,7 @@ export const inboxItems = (
     ...screenItems(screens, readAt),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
+    ...bindingItems(bindings, readAt),
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
@@ -623,6 +673,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.versions,
     waiting.decisions,
     waiting.workflowGoLives,
+    waiting.bindings,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>
