@@ -57,6 +57,7 @@
     "./channel-keys": "./src/channel-keys.ts",
     "./channels": "./src/channels.ts",
     "./chat": "./src/chat.ts",
+    "./chat-search": "./src/chat-search.ts",
     "./chunks": "./src/chunks.ts",
     "./client-secrets": "./src/client-secrets.ts",
     "./config": "./src/config.ts",
@@ -147,6 +148,7 @@
     "./state-registry": "./src/state-registry.ts",
     "./statistics": "./src/statistics.ts",
     "./stephen-reach": "./src/stephen-reach.ts",
+    "./stephen-requests": "./src/stephen-requests.ts",
     "./store-limits": "./src/store-limits.ts",
     "./store-queries": "./src/store-queries.ts",
     "./store-reads": "./src/store-reads.ts",
@@ -163,6 +165,7 @@
     "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
+    "./work-knowledge": "./src/work-knowledge.ts",
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {

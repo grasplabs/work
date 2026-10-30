@@ -507,6 +507,15 @@ const sessionShape = {
        * own code makes such a call.
        */
       z.strictObject({ platform: z.literal("policy_reading") }),
+      /**
+       * Core's own sorting of a request someone made of Stephen in a chat
+       * app (channels/request-sorting.ts), from their words and his
+       * answer, into the company's topics; and its proposals for what an
+       * owner could fix (stephen-requests.ts). Judged as onboarding's is,
+       * as carrying sensitive data, on the budget of the person it is
+       * for. Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("stephen_requests") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

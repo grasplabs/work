@@ -7,9 +7,10 @@ import { useActiveChat } from "../../chat/active-chat.ts";
 import { useFollowedChat } from "../../chat/chat-watch.ts";
 import type { Atlas, RegionId } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
+import { groundOf } from "./ground.ts";
 import { putThinkingAway, useThinkingLog } from "./log.ts";
 import { liveThinking, parseThink, thinkingIn } from "./play.ts";
-import { aboutRegion, samePainTitle } from "./shapes.ts";
+import { aboutRegion, thinkingTitle } from "./shapes.ts";
 import type { Thought } from "./shapes.ts";
 import { noteThinking, usePlayedThinking } from "./use-thinking.ts";
 import type { PlayedThinking } from "./use-thinking.ts";
@@ -100,9 +101,7 @@ export const useBrainThinking = ({
     key = again === undefined ? `live:${live?.questionId}` : `again:${think}`;
   }
   const played = usePlayedThinking(key, steps, {
-    ws,
-    brain,
-    atlas,
+    ground: groundOf(ws, brain, atlas),
     still,
     ...(live === undefined ? {} : { arrivals: live.arrivals, open: live.open }),
     i18n,
@@ -116,9 +115,10 @@ export const useBrainThinking = ({
     to,
   ]);
   const about = key === undefined ? undefined : aboutRegion(steps, atlas);
+  const title = key === undefined ? undefined : thinkingTitle(steps);
   return {
     ...(thought === undefined ? {} : { thought }),
-    ...(key === undefined ? {} : { title: i18n._(samePainTitle) }),
+    ...(title === undefined ? {} : { title: i18n._(title) }),
     ...(about === undefined ? {} : { about }),
     learned,
     putAway: () => {
