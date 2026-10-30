@@ -5380,6 +5380,10 @@ msgstr "Geben Sie einen Betrag ein, zum Beispiel 12.50."
 msgid "Entries"
 msgstr "Einträge"
 
+#: src/settings/audit-chain.tsx
+msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
+msgstr "Die Einträge bis {purged} wurden entfernt, als ihre Aufbewahrung endete: Sie sind noch verknüpft, konnten aber nicht geprüft werden."
+
 #: src/workflows/history-view.tsx
 msgid "Entry {sequence} can't be read."
 msgstr "Eintrag {sequence} kann nicht gelesen werden."
@@ -9295,10 +9299,6 @@ msgstr "Noch nicht begonnen."
 msgid "Not verified"
 msgstr "Nicht verifiziert"
 
-#: src/settings/audit-chain.tsx
-msgid "Not verified since this page opened."
-msgstr "Seit dem Öffnen dieser Seite nicht geprüft."
-
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Note"
@@ -9582,6 +9582,10 @@ msgstr "Älteste zuerst"
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "am {date} um {hour}"
+
+#: src/settings/audit-chain.tsx
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
+msgstr "Am {time} brach die Kette bei Eintrag {entry}: Ab dort ist nichts geprüft."
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
@@ -13187,10 +13191,6 @@ msgstr "Der Katalog führt {app} nicht, daher können die Tools nicht angezeigt 
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "Der Katalog der Integrationen konnte nicht gelesen werden, deshalb zeigt diese Seite nur, was Ihre Konten darüber sagen."
 
-#: src/settings/audit-chain.tsx
-msgid "The chain breaks at entry {entry}: nothing from there on is verified."
-msgstr "Die Kette bricht bei Eintrag {entry}: Ab dort ist nichts geprüft."
-
 #: src/engines/store-changes.tsx
 msgid "The change to the store {name} was abandoned"
 msgstr "Die Änderung am Speicher {name} wurde verworfen"
@@ -13771,7 +13771,11 @@ msgid "The way some told it"
 msgstr "So haben es manche erzählt"
 
 #: src/settings/audit-chain.tsx
-msgid "The whole chain verified, through entry {entries}, at {time}."
+msgid "The whole chain has not been verified yet."
+msgstr "Die ganze Kette wurde noch nicht geprüft."
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, on {time}."
 msgstr "Die ganze Kette ist geprüft, bis Eintrag {entries}, am {time}."
 
 #: src/connections/connection-list.tsx

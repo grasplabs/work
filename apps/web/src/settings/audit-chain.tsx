@@ -1,4 +1,8 @@
-import type { ChainBreak, ChainVerification } from "@grasp-os/shared/audit-log";
+import type {
+  ChainBreak,
+  ChainVerification,
+  FullVerification,
+} from "@grasp-os/shared/audit-log";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import type { MessageDescriptor } from "@lingui/core";
@@ -9,6 +13,8 @@ import { useState } from "react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
 
@@ -18,15 +24,10 @@ import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
 // for the next stretch from where the last one ended, and says how far it
 // got, until core says it reached the head or names the first entry where
 // the chain breaks. Core keeps a pass that runs from the first entry
-// unbroken as the last full verification, which exports report, and
-// records each pass that ends in the log itself. Admins only, as core
-// checks on every call.
-
-/** A pass that ended: how, and when the page saw it end. */
-type Ended = { checkedAt: string } & (
-  | { ok: true; through: number }
-  | { ok: false; brokenAt: number; reason: ChainBreak }
-);
+// unbroken as the last full verification (`audit.lastVerification`),
+// which the page shows until it runs a pass of its own, and which exports
+// report; it records each pass that ends in the log itself. Admins only,
+// as core checks on every call.
 
 /** Why the chain breaks, in the page's language. */
 const breakReasons: Record<ChainBreak, MessageDescriptor> = {
@@ -44,24 +45,22 @@ const breakReasons: Record<ChainBreak, MessageDescriptor> = {
 const verifyChain = async (
   session: Session,
   progress: (through: number) => void
-): Promise<Ended> => {
+): Promise<FullVerification> => {
+  const startedAt = new Date().toISOString();
   let after = 0;
   for (;;) {
     // Each stretch starts where the last one ended.
     // oxlint-disable-next-line no-await-in-loop -- one after the other, by design
     const step: ChainVerification = await session.audit.verify(after);
-    const checkedAt = new Date().toISOString();
+    const finishedAt = new Date().toISOString();
     if (!step.ok) {
-      return {
-        ok: false,
-        brokenAt: step.brokenAt,
-        reason: step.reason,
-        checkedAt,
-      };
+      const { brokenAt, reason } = step;
+      return { ok: false, brokenAt, reason, startedAt, finishedAt };
     }
     progress(step.through);
     if (step.done) {
-      return { ok: true, through: step.through, checkedAt };
+      const { through, head } = step;
+      return { ok: true, through, head, startedAt, finishedAt };
     }
     if (step.through <= after) {
       throw new Error(`The chain check stopped at entry ${after}.`);
@@ -70,7 +69,7 @@ const verifyChain = async (
   }
 };
 
-/** What the last pass found, or how far the running one got. */
+/** What the last full pass found, or how far the running one got. */
 const Outcome = ({
   running,
   through,
@@ -78,7 +77,7 @@ const Outcome = ({
 }: {
   running: boolean;
   through: number;
-  ended: Ended | null;
+  ended: FullVerification | null;
 }) => {
   const { i18n } = useLingui();
   if (running) {
@@ -92,11 +91,11 @@ const Outcome = ({
   if (ended === null) {
     return (
       <span className="text-muted-foreground">
-        <Trans>Not verified since this page opened.</Trans>
+        <Trans>The whole chain has not been verified yet.</Trans>
       </span>
     );
   }
-  const time = formatDateTime(ended.checkedAt);
+  const time = formatDateTime(ended.finishedAt);
   if (ended.ok && ended.through === 0) {
     return (
       <span>
@@ -108,11 +107,21 @@ const Outcome = ({
   }
   if (ended.ok) {
     const entries = ended.through;
+    const purged = ended.purgedThrough;
     return (
       <span>
         <Trans>
-          The whole chain verified, through entry {entries}, at {time}.
+          The whole chain verified, through entry {entries}, on {time}.
         </Trans>
+        {purged === undefined ? null : (
+          <>
+            {" "}
+            <Trans>
+              Entries through {purged} were removed when their retention ended:
+              they still link up, but could not be checked.
+            </Trans>
+          </>
+        )}
       </span>
     );
   }
@@ -120,25 +129,35 @@ const Outcome = ({
   return (
     <span className="text-destructive" role="alert">
       <Trans>
-        The chain breaks at entry {entry}: nothing from there on is verified.
+        On {time}, the chain broke at entry {entry}: nothing from there on is
+        verified.
       </Trans>{" "}
       {i18n._(breakReasons[ended.reason])}
     </span>
   );
 };
 
-/** The chain check, for an admin. */
-export const AuditChainCheck = () => {
+/**
+ * The chain check, for an admin: `last`, the last full pass core kept,
+ * until the page runs one of its own.
+ */
+export const AuditChainCheck = ({
+  last,
+}: {
+  last: Loaded<FullVerification | null>;
+}) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [through, setThrough] = useState(0);
-  const [ended, setEnded] = useState<Ended | null>(null);
+  const [own, setOwn] = useState<FullVerification | null>(null);
   const verify = async (): Promise<void> => {
     setThrough(0);
     const result = await run(
       async (session) => await verifyChain(session, setThrough)
     );
-    setEnded(result ?? null);
+    if (result !== undefined) {
+      setOwn(result);
+    }
   };
   return (
     <SettingsSection
@@ -161,7 +180,15 @@ export const AuditChainCheck = () => {
         className="flex flex-col gap-1 border-t px-5 py-4"
         aria-live="polite"
       >
-        <Outcome ended={ended} running={busy} through={through} />
+        {own === null && !busy && last.state !== "ready" ? (
+          <NotLoaded page={last} />
+        ) : (
+          <Outcome
+            ended={own ?? (last.state === "ready" ? last.data : null)}
+            running={busy}
+            through={through}
+          />
+        )}
         <ErrorText>{failure}</ErrorText>
       </div>
     </SettingsSection>

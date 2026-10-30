@@ -35,7 +35,7 @@ const logKey = (filters: LogSearch, { records, next }: AuditPage): string =>
 
 const AuditTrail = () => {
   const { t } = useLingui();
-  const log = Route.useLoaderData();
+  const { log, last } = Route.useLoaderData();
   const filters = Route.useSearch();
   return (
     <>
@@ -61,7 +61,7 @@ const AuditTrail = () => {
           </div>
         )}
       </SettingsSection>
-      <AuditChainCheck />
+      <AuditChainCheck last={last} />
     </>
   );
 };
@@ -70,8 +70,16 @@ export const Route = createFileRoute("/_shell/settings/audit")({
   validateSearch: (search: Record<string, unknown>): LogSearch =>
     logSearchOf(search),
   loaderDeps: ({ search }) => search,
-  loader: async ({ context: { core }, deps }) =>
-    await loadFromCore(core, async (session) => await readLog(session, deps)),
+  loader: async ({ context: { core }, deps }) => {
+    const [log, last] = await Promise.all([
+      loadFromCore(core, async (session) => await readLog(session, deps)),
+      loadFromCore(
+        core,
+        async (session) => await session.audit.lastVerification()
+      ),
+    ]);
+    return { log, last };
+  },
   errorComponent: SettingsError,
   component: AuditTrail,
 });
