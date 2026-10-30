@@ -3,7 +3,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { useLingui } from "@lingui/react/macro";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { XIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { useActiveChat } from "../chat/active-chat.ts";
@@ -123,11 +123,19 @@ const TourCard = ({
   progress?: string;
 }) => {
   const { t } = useLingui();
+  // Focus comes to the card as it appears: from "Start the tour", whose
+  // button leaves the page, or from the person menu, which closes.
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    card.current?.focus();
+  }, []);
   return (
     <section
       aria-label={t`Tour of Grasp`}
       data-tour-card=""
-      className="bg-popover text-popover-foreground ring-foreground/10 fixed right-4 bottom-4 left-4 z-50 flex flex-col gap-3 rounded-xl p-4 text-sm shadow-md ring-1 sm:left-auto sm:w-96"
+      ref={card}
+      tabIndex={-1}
+      className="bg-popover text-popover-foreground ring-foreground/10 fixed right-4 bottom-4 left-4 z-50 flex flex-col gap-3 rounded-xl p-4 text-sm shadow-md ring-1 outline-none sm:left-auto sm:w-96"
     >
       <div className="flex items-center gap-2">
         <span className="flex-1 font-medium">Stephen</span>
@@ -159,10 +167,13 @@ const TourCard = ({
 export const TourOffer = ({
   userId,
   headingId,
+  onDeclined,
 }: {
   userId: string;
   /** The new chat's heading's ID, which labels it: his question is it while he asks. */
   headingId: string;
+  /** "Not now" was pressed: its button is gone, so the page moves focus on. */
+  onDeclined: () => void;
 }) => {
   const { i18n, t } = useLingui();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -171,7 +182,7 @@ export const TourOffer = ({
       aria-label={t`Tour of Grasp`}
       className="flex flex-col items-center gap-6"
     >
-      <h1 aria-live="polite" className="type-display" id={headingId}>
+      <h1 className="type-display" id={headingId}>
         {i18n._(tourOffer.say)}
       </h1>
       <div className="flex flex-wrap justify-center gap-2">
@@ -187,6 +198,7 @@ export const TourOffer = ({
           onClick={() => {
             tourOffered(userId);
             endTour();
+            onDeclined();
           }}
           variant="ghost"
         >

@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelRightIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
@@ -135,17 +135,25 @@ const NewChat = ({
   // Offered the tour, his question stands in the greeting's place, and
   // nothing to start from under the box until it is answered.
   const offered = useTour().phase === "invited";
+  // Where focus goes once the offer is turned down: the box to ask in.
+  const page = useRef<HTMLDivElement>(null);
   return (
     <section
       aria-labelledby="new-chat"
       className="flex min-w-0 flex-1 flex-col overflow-y-auto"
     >
       <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
+        <div className="flex w-full max-w-3xl flex-col gap-8 pb-10" ref={page}>
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
             {offered ? (
-              <TourOffer headingId="new-chat" userId={identity.userId} />
+              <TourOffer
+                headingId="new-chat"
+                onDeclined={() => {
+                  page.current?.querySelector("textarea")?.focus();
+                }}
+                userId={identity.userId}
+              />
             ) : (
               <h1 className="type-display" id="new-chat">
                 <Trans>What should we look at today?</Trans>

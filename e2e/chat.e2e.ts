@@ -123,6 +123,10 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
+  // Offered the tour first, in the greeting's place: turned down, the box
+  // to ask in has the focus the gone button had.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByLabel("Your question")).toBeFocused();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
