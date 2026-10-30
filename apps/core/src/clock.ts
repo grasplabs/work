@@ -17,7 +17,6 @@ import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
-import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
@@ -223,7 +222,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: sweepChannelSignals,
   },
   // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
-  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
+  // Loaded when it runs, not as core starts: it brings the Chat SDK.
+  {
+    name: "channels.gmail_watch",
+    period: "quarterHour",
+    run: async (env) => {
+      const { renewGmailWatch } = await import("./channels/gmail.ts");
+      await renewGmailWatch(env);
+    },
+  },
   {
     name: "workflows.run_details",
     period: "quarterHour",

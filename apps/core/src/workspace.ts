@@ -87,6 +87,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { agentApis } from "./agent-apis.ts";
+import { isMessage } from "./agent-messages.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -100,7 +101,6 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
-import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
@@ -1546,6 +1546,9 @@ export class Workspace extends DurableObject<Env> {
       // The turn's answer is the last response it keeps.
       let answer: number | undefined;
       const textSoFar = onText === undefined ? undefined : throttled(onText);
+      // Loaded at the first turn, not as core starts: the loop brings Pi
+      // and TypeBox (GRA-1349).
+      const { runTurn } = await import("./agent.ts");
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,

@@ -1,7 +1,17 @@
-import { loadJq } from "jq-wasm";
-
-import jqModule from "./jq.wasm";
 import { jqProvenance } from "./provenance.ts";
+
+/**
+ * jq's runtime and its compiled module, loaded at the first run rather
+ * than as the Worker starts: an isolate that never evaluates an expression
+ * never compiles the WebAssembly (about 1 MB) or the runtime around it.
+ */
+const loadRuntime = async () => {
+  const [{ loadJq }, { default: jqModule }] = await Promise.all([
+    import("jq-wasm"),
+    import("./jq.wasm"),
+  ]);
+  return { loadJq, jqModule };
+};
 
 /**
  * How much work one jq run may do, in fuel: one unit per function call and
@@ -139,6 +149,7 @@ export const runJq = async (
   given: number = runFuel
 ): Promise<JqRun> => {
   const meter: Meter = { fuel: undefined, memoryRefused: false };
+  const { loadJq, jqModule } = await loadRuntime();
   const jq = await loadJq({
     instantiateWasm: (imports, onSuccess) => {
       const instance = new WebAssembly.Instance(

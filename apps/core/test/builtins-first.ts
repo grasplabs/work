@@ -18,7 +18,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
-import { builtins, fingerprintOf, release } from "../src/builtins.ts";
+import { builtins, fingerprintOf, loadRelease } from "../src/builtins.ts";
 import worker from "../src/index.ts";
 
 /** Evaluated once per runtime, as this module is. */
@@ -46,7 +46,7 @@ export const installBuiltinsFirst = async (): Promise<boolean> => {
     builtins(env),
     async (_instance, state) => await state.storage.get("installed")
   );
-  if (!response.ok || stored !== (await fingerprintOf(release))) {
+  if (!response.ok || stored !== (await fingerprintOf(await loadRelease()))) {
     throw new Error("The first request didn't install the built-ins");
   }
   installed = true;
