@@ -16,14 +16,14 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
+import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCore } from "../use-core.ts";
 import { setActiveChat, useActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
@@ -67,40 +67,6 @@ const readModels = async (
     },
     signal
   );
-
-/**
- * The models a question may name, read once the dock is shown and again
- * on `retry`, as after core was out of reach.
- */
-const useModels = (): {
-  models: Loaded<Offered> | undefined;
-  retry: () => void;
-} => {
-  const core = useCore();
-  const [models, setModels] = useState<Loaded<Offered>>();
-  useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await readModels(core, left.signal);
-      if (!left.signal.aborted) {
-        setModels(loaded);
-      }
-    };
-    void read();
-    return () => {
-      left.abort();
-    };
-  }, [core]);
-  return {
-    models,
-    retry: () => {
-      setModels(undefined);
-      void (async () => {
-        setModels(await readModels(core));
-      })();
-    },
-  };
-};
 
 /** Why nothing can be asked yet, if that is so: the models are what a question names. */
 const useNoModels = (
@@ -288,11 +254,22 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
  * The dock itself: on every page in the frame but Chat's, carrying on the
  * tab's open chat of `slot` (active-chat.ts).
  */
-const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
+const Dock = ({
+  slot,
+  words,
+  models,
+  retry,
+}: {
+  slot: ChatSlot;
+  words: DockWords;
+  /** The models a question may name; none while they are read. */
+  models: Loaded<Offered> | undefined;
+  /** Reads the models again, as after core was out of reach. */
+  retry: () => void;
+}) => {
   const { t } = useLingui();
   const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
-  const { models, retry } = useModels();
   const noModels = useNoModels(models);
   // Core out of reach or refusing may pass: the read can be asked for again.
   const canRetry = models !== undefined && models.state !== "ready";
@@ -446,6 +423,10 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
 export const ChatDock = () => {
   const { t } = useLingui();
   const { pathname } = useLocation();
+  // Read here, once for every page, not by each dock: the brain's dock and
+  // the chat's take each other's place between pages, and each read them
+  // again when it did.
+  const { value: models, readAgain } = useFrameRead(readModels);
   if (pathname === "/") {
     return null;
   }
@@ -453,6 +434,8 @@ export const ChatDock = () => {
     return (
       <Dock
         key="brain"
+        models={models}
+        retry={readAgain}
         slot="brain"
         words={{
           title: t`Ask the brain`,
@@ -465,6 +448,8 @@ export const ChatDock = () => {
   return (
     <Dock
       key="chat"
+      models={models}
+      retry={readAgain}
       slot="chat"
       words={{
         title: t`Ask Grasp`,

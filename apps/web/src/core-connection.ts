@@ -517,6 +517,71 @@ export const loadCoreStatus = async (
 };
 
 /**
+ * How long what the frame read for every page (who is signed in, the
+ * sidebar's counts, the chat's models) is shown as it is before it is read
+ * again, behind the page, on the way to another one.
+ */
+export const frameReadMs = 30_000;
+
+/** What core last said of who is signed in, per connection, and when. */
+interface KnownStatus {
+  status: CoreStatus;
+  at: number;
+  /** The ask behind the page under way, if one is. */
+  asking?: Promise<void>;
+}
+
+const knownStatuses = new WeakMap<CoreConnection, KnownStatus>();
+
+/** Asks core again behind the page, keeping what it says once it answers. */
+const askAgainBehind = async (
+  core: CoreConnection,
+  known: KnownStatus
+): Promise<void> => {
+  const status = await loadCoreStatus(core);
+  if (knownStatuses.get(core) !== known) {
+    return;
+  }
+  if (!status.connected) {
+    // Core couldn't say: what it said last stands, and the next page asks.
+    known.asking = undefined;
+  } else if (status.identity === undefined) {
+    // Nobody now: the next page asks core itself, and is sent to sign in.
+    knownStatuses.delete(core);
+  } else {
+    knownStatuses.set(core, { status, at: Date.now() });
+  }
+};
+
+/**
+ * The shell's `loadCoreStatus`, asked on every way to a page: core is
+ * asked the first time, and every time until it answered with someone
+ * signed in; from then on that answer serves at once, and core is asked
+ * again behind the page once it is older than {@link frameReadMs}, so a
+ * changed role, team or name shows from the page after. A round trip on
+ * every click bought nothing a person could see: a session that ends
+ * (signed out, revoked, removed, someone else signed in) is no answer this
+ * waits for, as core closes the connection on it within seconds
+ * (`sessionRecheckMs`) and the connection ends the page (`CoreConnection`).
+ */
+export const shellStatus = async (
+  core: CoreConnection
+): Promise<CoreStatus> => {
+  const known = knownStatuses.get(core);
+  if (known === undefined) {
+    const status = await loadCoreStatus(core);
+    if (status.connected && status.identity !== undefined) {
+      knownStatuses.set(core, { status, at: Date.now() });
+    }
+    return status;
+  }
+  if (known.asking === undefined && Date.now() - known.at >= frameReadMs) {
+    known.asking = askAgainBehind(core, known);
+  }
+  return known.status;
+};
+
+/**
  * `read` on the signed-in person's API over `core`, within a few seconds
  * all told (or as long as `signal` allows): the wait for a connection and
  * for the answer. Given up on while it waits for the connection, `read`
