@@ -6,6 +6,7 @@
  * API; and what the destination's record says.
  */
 import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
+import { env } from "cloudflare:workers";
 
 import {
   placeAndProvisionFn,
@@ -14,7 +15,7 @@ import {
 import { destinationOf } from "../src/hosting/inventory.ts";
 import { stageDestinationId } from "../src/hosting/placement.ts";
 import type { Capability } from "../src/hosting/policy.ts";
-import { startClient } from "../src/provision/functions.ts";
+import { createClient } from "../src/provision/control.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
 import { db, staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
@@ -66,28 +67,23 @@ export const vouch = async (
     { email }
   );
 
-/** A client staff add, as the new-organization form does. */
-export const added = async (): Promise<string> => {
-  const clientId = `acme-${crypto.randomUUID().slice(0, 8)}`;
-  const result = await callServerFn(
-    startClient,
-    {
-      clientId,
-      name: "Acme",
-      ring: 1,
-      signIn: {
-        domains: ["acme.test"],
-        admins: ["ada@acme.test"],
-        entraTenantId: "8f3c9a52-1d4e-4b6f-9a2c-3e5d7f9b1c2a",
-      },
+/**
+ * A client staff add, recorded as the new-organization form records it,
+ * without the form's start of its provisioning (`provisionIfReady`): these
+ * tests place and provision it themselves (`place`), once the destination
+ * and the fake account are as each test needs them.
+ */
+export const added = async (): Promise<string> =>
+  await createClient(env, staff, {
+    clientId: `acme-${crypto.randomUUID().slice(0, 8)}`,
+    name: "Acme",
+    ring: 1,
+    signIn: {
+      domains: ["acme.test"],
+      admins: ["ada@acme.test"],
+      entraTenantId: "8f3c9a52-1d4e-4b6f-9a2c-3e5d7f9b1c2a",
     },
-    { email: staff.email }
-  );
-  if (result.clientId === null) {
-    throw new Error(`Adding ${clientId} was refused: ${result.refused}`);
-  }
-  return clientId;
-};
+  });
 
 export const place = async (clientId: string, releaseId: string) =>
   await callServerFn(
