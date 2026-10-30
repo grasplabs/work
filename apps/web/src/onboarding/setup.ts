@@ -397,15 +397,6 @@ export const settledAs = (
 };
 
 /**
- * Grasp's sending domain for the deployment at `hostname`: its client's
- * hostname (`<id>.<domain>`, where the router serves it) with `mail.` in
- * front, the domain the admin sets up for Email Sending. Core doesn't
- * tell the web app who its mail is from yet; once it does, that replaces
- * this.
- */
-export const sendingDomainOf = (hostname: string): string => `mail.${hostname}`;
-
-/**
  * What is kept once the admin is on step `index`: the furthest step stays
  * the furthest when they go back. The same object when nothing changed.
  */
