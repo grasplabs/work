@@ -37,6 +37,7 @@ import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
 import { RoomsLink } from "../../../admin/rooms-link.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { StripeLink } from "../../../admin/stripe-link.tsx";
 import {
   addSecretStep,
@@ -118,36 +119,6 @@ const Figure = ({
       {sub}
     </span>
   </div>
-);
-
-/** A part of the page: its title, one line on it, and what is in it. */
-const Part = ({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id?: string;
-  title: string;
-  description: string;
-  children?: ReactNode;
-}) => (
-  <section
-    aria-labelledby={id === undefined ? undefined : `${id}-title`}
-    className="bg-card scroll-mt-4 overflow-hidden rounded-xl border"
-    id={id}
-  >
-    <div className="flex flex-col gap-0.5 px-5 py-4">
-      <h2
-        className="font-medium"
-        id={id === undefined ? undefined : `${id}-title`}
-      >
-        {title}
-      </h2>
-      <p className="text-muted-foreground">{description}</p>
-    </div>
-    {children}
-  </section>
 );
 
 /** One line of a part: what it is on the left, how it stands on the right. */
@@ -333,7 +304,7 @@ const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
   const { contract } = view;
   if (view.unknown.contract) {
     return (
-      <Part
+      <Section
         description="Nothing is known about the contract yet."
         id="contract-contract"
         title="The terms"
@@ -341,12 +312,12 @@ const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
         <dl>
           <Line label="The proposal">{proposalLine(proposal)}</Line>
         </dl>
-      </Part>
+      </Section>
     );
   }
   if (contract.status === "draft") {
     return (
-      <Part
+      <Section
         description="Nothing is agreed yet: the contract is still being written."
         id="contract-contract"
         title="The terms"
@@ -354,7 +325,7 @@ const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
         <dl>
           <Line label="The proposal">{proposalLine(proposal)}</Line>
         </dl>
-      </Part>
+      </Section>
     );
   }
   const after =
@@ -362,7 +333,7 @@ const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
       ? `Carries on by itself; the last day to give notice is ${formatDate(contract.noticeBy)}.`
       : "It ends on the last day, unless something new is agreed.";
   return (
-    <Part
+    <Section
       description="As it was signed."
       id="contract-contract"
       title="The terms"
@@ -391,7 +362,7 @@ const Terms = ({ view, proposal }: { view: AdminView; proposal: Proposal }) => {
         </Line>
         <Line label="The proposal">{proposalLine(proposal)}</Line>
       </dl>
-    </Part>
+    </Section>
   );
 };
 
@@ -409,7 +380,7 @@ const Gives = ({ view }: { view: AdminView }) => {
     open = "None agreed yet";
   }
   return (
-    <Part
+    <Section
       description="How many people may come in, and how much AI use the fee covers."
       title="What it gives the company"
     >
@@ -421,7 +392,7 @@ const Gives = ({ view }: { view: AdminView }) => {
           {open === "" ? euros(contract.aiIncluded) : open}
         </Line>
       </dl>
-    </Part>
+    </Section>
   );
 };
 
@@ -472,7 +443,7 @@ const Agreements = ({
     description = `Without all three, nobody is invited. ${open} ${plural(open, "is", "are")} still open.`;
   }
   return (
-    <Part
+    <Section
       description={description}
       id="contract-agreements"
       title="Agreed before the first interview"
@@ -534,7 +505,7 @@ const Agreements = ({
           </CollapsibleContent>
         </Collapsible>
       </div>
-    </Part>
+    </Section>
   );
 };
 
@@ -556,7 +527,7 @@ const invoicesLine = ({ contract, invoices, unknown }: AdminView): string => {
 
 /** The invoices the contract brought so far, the newest first. */
 const Invoices = ({ view }: { view: AdminView }) => (
-  <Part
+  <Section
     description={invoicesLine(view)}
     id="contract-invoices"
     title="Invoices"
@@ -593,7 +564,7 @@ const Invoices = ({ view }: { view: AdminView }) => (
         ))}
       </ul>
     ) : null}
-  </Part>
+  </Section>
 );
 
 /** Amounts in one or more currencies, in a phrase. */
@@ -732,7 +703,7 @@ const ProposalPart = ({
 }) => {
   const projectId = proposal.state === "not_linked" ? null : proposal.projectId;
   return (
-    <Part
+    <Section
       description={proposalLine(proposal)}
       id="contract-proposal"
       title="The proposal"
@@ -787,7 +758,7 @@ const ProposalPart = ({
         </ul>
       ) : null}
       <RoomsLink clientId={clientId} projectId={projectId} />
-    </Part>
+    </Section>
   );
 };
 
@@ -804,7 +775,7 @@ const BillingPart = ({
 }) => {
   const customerId = billing.state === "not_linked" ? null : billing.customerId;
   return (
-    <Part
+    <Section
       description={billingLine(billing)}
       id="contract-billing"
       title="Billing"
@@ -816,7 +787,7 @@ const BillingPart = ({
         />
       ) : null}
       <StripeLink clientId={clientId} customerId={customerId} />
-    </Part>
+    </Section>
   );
 };
 
@@ -841,7 +812,7 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
         : `From Stripe, the latest ${invoices.length}. All are paid.`;
   }
   return (
-    <Part description={description} id="contract-invoices" title="Invoices">
+    <Section description={description} id="contract-invoices" title="Invoices">
       {invoices.length > 0 ? (
         <ul className="flex flex-col">
           {invoices.map((invoice) => (
@@ -874,7 +845,7 @@ const StripeInvoices = ({ account }: { account: BillingAccount }) => {
           ))}
         </ul>
       ) : null}
-    </Part>
+    </Section>
   );
 };
 
