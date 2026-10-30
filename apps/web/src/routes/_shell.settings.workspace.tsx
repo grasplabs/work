@@ -27,6 +27,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
+import { SignInSection } from "../settings/sign-in-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Workspace, as in the prototype (`routes/settings/workspace.tsx`):
@@ -225,6 +226,7 @@ const WorkspaceSettings = ({
           <span className="text-muted-foreground">{formatList(domains)}</span>
         </SettingsRow>
       </SettingsSection>
+      <SignInSection />
       <SettingsSection
         description={t`Where your data lives, and the time Grasp uses.`}
         title={t`Region`}

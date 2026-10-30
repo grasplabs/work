@@ -7,21 +7,25 @@
  * holds the account, shared or dedicated.
  */
 import { newClientIdSchema } from "@grasp-os/shared/router";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
+import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain, signInApps } from "../deploy/context.ts";
 import { clientSignInSchema, missingSignInApp } from "../deploy/core-config.ts";
 import { hostingKinds, jurisdictions } from "../hosting/organization.ts";
+import { clientIdProblem } from "./client-id.ts";
 import { ProvisionError } from "./errors.ts";
 
 /** What staff fill in to add a client. */
 export const provisionInputSchema = z.object({
   clientId: newClientIdSchema,
   name: z.string().trim().min(1).max(100),
-  ring: z.int().nonnegative(),
+  /** The rollout ring it's in: Production's unless staff move it on Setup. */
+  ring: z.int().nonnegative().default(1),
   /** How its people sign in: every deploy makes core's `SIGN_IN` from it. */
   signIn: clientSignInSchema,
   /**
@@ -38,6 +42,30 @@ export const provisionInputSchema = z.object({
   jurisdiction: z.enum(jurisdictions).default("eu"),
 });
 export type ProvisionInput = z.input<typeof provisionInputSchema>;
+
+/**
+ * Why `clientId` can't be a new organization's web address, in words, or
+ * null when it can: the server's own rule for an id (`clientIdProblem`),
+ * and that no organization has it.
+ */
+export const clientIdAvailability = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<{ problem: string | null }> => {
+  const problem = clientIdProblem(clientId);
+  if (problem !== null) {
+    return { problem };
+  }
+  const taken = await db
+    .select({ id: clients.id })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  return {
+    problem:
+      taken === undefined ? null : `${clientId} is taken: choose another.`,
+  };
+};
 
 /**
  * Records the client `input` describes, as `staff`, being provisioned and

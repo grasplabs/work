@@ -45,7 +45,7 @@ export const fixtureBuild = async (app: string): Promise<WorkerBuild> => {
 };
 
 export const info: ReleaseInfo = {
-  releaseId: "r000001-0000000",
+  releaseId: "26.01.1",
   commit: "0".repeat(40),
   createdAt: "2026-01-01T00:00:00.000Z",
   notes: "feat(core): a fixture",
