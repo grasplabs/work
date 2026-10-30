@@ -1,19 +1,26 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { connectorEventActions } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import {
-  connectionIdSchema,
-  identifierSchema,
-  triggerIdSchema,
-} from "@grasp-os/shared/ids";
+import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
-import { canonicalJson, jsonPointerPattern } from "@grasp-os/shared/json";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import {
+  connectorTriggerConfigSchema,
+  scheduleTriggerConfigSchema,
+  systemTriggerConfigSchema,
+  workflowTriggerCreateSchema,
+} from "@grasp-os/shared/workflow-triggers";
+import type {
+  TriggerKind,
+  WorkflowTrigger,
+} from "@grasp-os/shared/workflow-triggers";
 import { nextScheduledRun } from "@grasp-os/shared/workflows";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -38,9 +45,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one exact workflow version on its own. This is their
-// registry: creating one, moving it to another version of its workflow,
-// disabling and deleting it. What it may start is decided as for any other
-// subject, by a permission of its own (`start` on the workflow), granted
+// registry: listing, creating one, moving it to another version of its
+// workflow, disabling and deleting it, each served to a signed-in person
+// over `/rpc` (workflow-triggers-rpc.ts). What it may start is decided as
+// for any other subject, by a permission of its own (`start` on the workflow), granted
 // by an admin, and checked at every start (workflow-starts.ts).
 //
 // Threat model, and how each is closed:
@@ -62,6 +70,9 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   grant keeps the workflow from being deleted.
 // - A trigger acting for someone who lost access: each start requires its
 //   person to still have a role in the workflow (workflow-starts.ts).
+// - Learning of a trigger one may not stop: listing shows a workflow's
+//   triggers to whoever may disable them (its builders, admins) and
+//   anyone else only their own.
 // - Triggers piling up: a person has at most the quota policy's
 //   `triggerResourcesPerPerson` live triggers.
 // - Disabling or deleting it under a start. Every start reads the trigger
@@ -83,98 +94,6 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   `start` (permissions.ts). Its input is a fixed mapping (JSON Pointers
 //   into the event, RFC 6901) with literal defaults, never an expression.
 //   Its events start runs as workflows/connector-triggers.ts says.
-
-/** The kinds of trigger: what each is started by. */
-export const triggerKinds = [
-  "system",
-  "connector",
-  "webhook",
-  "schedule",
-] as const;
-
-const createTriggerSchema = z.strictObject({
-  kind: z.enum(triggerKinds),
-  workflowId: z.string().min(1).max(128),
-  version: z.number().int().positive(),
-  /** The trigger's own configuration: its schedule, event type, mapping. */
-  config: z.json(),
-});
-
-/**
- * A system trigger's configuration (spec 15.1: "declared resource/event
- * type"): the catalog event contract, by its key, and the type of it
- * whose emitted events start its workflow (workflows/event-delivery.ts),
- * the event's data its input. Nothing else: no expression, no URL.
- */
-export const systemTriggerConfigSchema = z.strictObject({
-  event: z.strictObject({
-    contract: z.string().min(1).max(256),
-    type: z.string().min(1).max(256),
-  }),
-});
-
-/**
- * A schedule trigger's configuration (spec 15.1, 15.2): when it starts its
- * workflow, a five-field cron expression read in an IANA time zone; the
- * literal input each run starts with; and what it does about occurrences
- * missed while nothing ran, which is to start one run for them all
- * (`coalesce`, the only choice).
- */
-export const scheduleTriggerConfigSchema = z.strictObject({
-  schedule: z.strictObject({
-    cron: z.string().min(1).max(256),
-    timeZone: z.string().min(1).max(64),
-  }),
-  input: z.json(),
-  missedOccurrences: z.literal("coalesce"),
-});
-
-/** Most input fields a connector trigger's mapping names. */
-const maxMappedFields = 50;
-
-const inputFieldSchema = z.string().min(1).max(128);
-
-/**
- * How a connector trigger's event becomes its run's input (spec 15.2):
- * each input field from a JSON Pointer into the event (RFC 6901; `/id`,
- * `/payload/subject`), and literal defaults for fields the event lacks.
- * Nothing in it is evaluated.
- */
-export const inputMappingSchema = z.strictObject({
-  fields: z
-    .record(
-      inputFieldSchema,
-      z.string().max(512).regex(jsonPointerPattern, "Not a JSON Pointer")
-    )
-    .refine((fields) => Object.keys(fields).length <= maxMappedFields)
-    .default({}),
-  defaults: z
-    .record(inputFieldSchema, z.json())
-    .refine((defaults) => Object.keys(defaults).length <= maxMappedFields)
-    .default({}),
-});
-
-/** A connector trigger's mapping of its event to its run's input. */
-export type InputMapping = z.infer<typeof inputMappingSchema>;
-
-/**
- * A connector trigger's configuration (spec 15.1, "Connect verified
- * event"): the connection whose events start it, and the part of it (a
- * mailbox, a drive) or none for the account's own; the event type; and
- * how each event becomes the run's input.
- */
-export const connectorTriggerConfigSchema = z.strictObject({
-  connection: z.strictObject({
-    connectionId: connectionIdSchema,
-    resource: identifierSchema.optional(),
-  }),
-  event: z
-    .string()
-    .refine((type) => Object.hasOwn(connectorEventActions, type), {
-      message: "Not an event type a connection reports",
-    }),
-  input: inputMappingSchema,
-});
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -280,7 +199,7 @@ const connectorFieldsOf = async (
  */
 const kindFieldsOf = async (
   env: Env,
-  kind: (typeof triggerKinds)[number],
+  kind: TriggerKind,
   config: unknown,
   workflowId: string,
   version: number,
@@ -327,7 +246,7 @@ const kindFieldsOf = async (
 /** A trigger, as its registry answers it. */
 export interface TriggerResource {
   id: TriggerId;
-  kind: (typeof triggerKinds)[number];
+  kind: TriggerKind;
   owner: string;
   version: number;
   workflowId: string;
@@ -389,7 +308,7 @@ export const createTriggerResource = async (
   requireNotStaff(by);
   const { kind, workflowId, version, config } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
-    createTriggerSchema,
+    workflowTriggerCreateSchema,
     input
   );
   const workflow = await requireWorkflowRole(env, by, workflowId, "builder");
@@ -703,8 +622,15 @@ export const setTriggerEnabled = async (
   env: Env,
   by: Acting,
   id: unknown,
-  enabled: boolean
+  wanted: unknown
 ): Promise<void> => {
+  // Over `/rpc` anything may arrive: only a boolean says which way, and
+  // which of the two checks applies.
+  const enabled = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    z.boolean(),
+    wanted
+  );
   const trigger = await requireTriggerManager(
     env,
     by,
@@ -791,4 +717,196 @@ export const deleteTriggerResource = async (
       ),
     outboxedIfChanged(db, entry(by, "trigger.deleted", trigger.id)),
   ]);
+};
+
+const jsonSchema = z.json();
+
+/** The canonical JSON a trigger version keeps, read back. */
+const keptJson = (text: string): Json => jsonSchema.parse(JSON.parse(text));
+
+/** What a trigger's current version keeps, as `triggersWhere` reads it. */
+interface TriggerRow {
+  id: string;
+  kind: TriggerKind;
+  owner: string;
+  version: number;
+  enabled: boolean;
+  createdAt: Date;
+  workflowId: string;
+  workflowVersion: number;
+  principal: string;
+  eventContract: string | null;
+  eventType: string | null;
+  scheduleCron: string | null;
+  scheduleTimeZone: string | null;
+  scheduleInput: string | null;
+  connectionId: string | null;
+  connectionResource: string | null;
+  inputMapping: string | null;
+  nextAt: Date | null;
+}
+
+/** A system trigger's configuration, if its version keeps one. */
+const systemConfigOf = (row: TriggerRow): Json | null =>
+  row.eventContract === null || row.eventType === null
+    ? null
+    : { event: { contract: row.eventContract, type: row.eventType } };
+
+/** A schedule trigger's configuration, if its version keeps one. */
+const scheduleConfigOf = (row: TriggerRow): Json | null =>
+  row.scheduleCron === null ||
+  row.scheduleTimeZone === null ||
+  row.scheduleInput === null
+    ? null
+    : {
+        schedule: { cron: row.scheduleCron, timeZone: row.scheduleTimeZone },
+        input: keptJson(row.scheduleInput),
+        missedOccurrences: "coalesce",
+      };
+
+/** A connector trigger's configuration, if its version keeps one. */
+const connectorConfigOf = (row: TriggerRow): Json | null => {
+  if (
+    row.connectionId === null ||
+    row.eventType === null ||
+    row.inputMapping === null
+  ) {
+    return null;
+  }
+  const connection: Record<string, Json> = { connectionId: row.connectionId };
+  if (row.connectionResource !== null) {
+    connection.resource = row.connectionResource;
+  }
+  return {
+    connection,
+    event: row.eventType,
+    input: keptJson(row.inputMapping),
+  };
+};
+
+/**
+ * A trigger's configuration as it was created, in its kind's schema, from
+ * the fields its version keeps; null when it keeps none (a webhook).
+ */
+const configOf = (row: TriggerRow): Json | null => {
+  if (row.kind === "system") {
+    return systemConfigOf(row);
+  }
+  if (row.kind === "schedule") {
+    return scheduleConfigOf(row);
+  }
+  if (row.kind === "connector") {
+    return connectorConfigOf(row);
+  }
+  return null;
+};
+
+const viewOf = (row: TriggerRow): WorkflowTrigger => ({
+  id: row.id,
+  kind: row.kind,
+  owner: row.owner,
+  version: row.version,
+  workflowId: row.workflowId,
+  workflowVersion: row.workflowVersion,
+  principal: row.principal,
+  enabled: row.enabled,
+  createdAt: row.createdAt.toISOString(),
+  config: configOf(row),
+  nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
+});
+
+/** The live triggers `where` finds, at their current versions, oldest first. */
+const triggersWhere = async (
+  env: Env,
+  where: SQL | undefined
+): Promise<WorkflowTrigger[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: triggerResources.id,
+      kind: triggerResources.kind,
+      owner: triggerResources.ownerId,
+      version: triggerResources.currentVersion,
+      enabled: triggerResources.enabled,
+      createdAt: triggerResources.createdAt,
+      workflowId: triggerResourceVersions.workflowResourceId,
+      workflowVersion: triggerResourceVersions.workflowResourceVersion,
+      principal: triggerResourceVersions.principalBinding,
+      eventContract: triggerResourceVersions.eventContract,
+      eventType: triggerResourceVersions.eventType,
+      scheduleCron: triggerResourceVersions.scheduleCron,
+      scheduleTimeZone: triggerResourceVersions.scheduleTimeZone,
+      scheduleInput: triggerResourceVersions.scheduleInput,
+      connectionId: triggerResourceVersions.connectionId,
+      connectionResource: triggerResourceVersions.connectionResource,
+      inputMapping: triggerResourceVersions.inputMapping,
+      nextAt: triggerSchedules.nextAt,
+    })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .leftJoin(
+      triggerSchedules,
+      and(
+        eq(triggerSchedules.triggerId, triggerResources.id),
+        eq(triggerSchedules.version, triggerResources.currentVersion)
+      )
+    )
+    .where(and(isNull(triggerResources.deletedAt), where))
+    .orderBy(asc(triggerResources.createdAt), asc(triggerResources.id))
+    .all();
+  return rows.map(viewOf);
+};
+
+/** Live trigger `id`, as anyone who may manage it (`requireTriggerManager`) sees it. */
+export const workflowTrigger = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowTrigger> => {
+  const trigger = await requireTriggerManager(env, by, id);
+  const [view] = await triggersWhere(env, eq(triggerResources.id, trigger.id));
+  if (view === undefined) {
+    throw unavailable();
+  }
+  return view;
+};
+
+/**
+ * The live triggers that start workflow `workflowId`, for `by`, never Grasp
+ * staff: every one for the organization's admins and the workflow's
+ * builders, who may disable any of them; `by`'s own for anyone else, so
+ * nobody learns of a trigger they may not manage.
+ */
+export const listWorkflowTriggers = async (
+  env: Env,
+  by: Acting,
+  workflowId: unknown
+): Promise<WorkflowTrigger[]> => {
+  requireNotStaff(by);
+  const id = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    z.string().min(1).max(128),
+    workflowId
+  );
+  const ofWorkflow = eq(triggerResourceVersions.workflowResourceId, id);
+  if (isAdmin(by.role)) {
+    return await triggersWhere(env, ofWorkflow);
+  }
+  try {
+    await requireWorkflowRole(env, by, id, "builder");
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return await triggersWhere(
+        env,
+        and(ofWorkflow, eq(triggerResources.ownerId, by.userId))
+      );
+    }
+    throw error;
+  }
+  return await triggersWhere(env, ofWorkflow);
 };
