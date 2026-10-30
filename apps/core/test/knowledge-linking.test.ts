@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { brainErrors } from "@grasp-os/brain/contract";
 import {
   entitiesFor,
@@ -13,20 +12,21 @@ import { z } from "zod";
 import type { Reader } from "../src/knowledge/access.ts";
 import { extractEntities } from "../src/knowledge/entities.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
-import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { answeringProvider, fakeProviderFor } from "./model-provider.ts";
 import { signedInApi, unique, whoami } from "./sign-in.ts";
 
 // Linking a saved document's entities, in core: the clock's sweep starts
 // the linking workflow on the engine, whose extraction goes through the
-// model gateway (faked, the one outside provider), and the Brain links
+// model gateway to the provider behind connect (faked, the one outside
+// system), and the Brain links
 // what it answers. Nobody calls a relationship API.
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 const euModel = "openai/gpt-5.4";
 
 describe("linking Brain sources in core", () => {
@@ -51,7 +51,7 @@ describe("linking Brain sources in core", () => {
     });
     // Whatever else is waiting to be linked gets
     // an answer naming nothing.
-    const gateway = answeringGateway((requests) => ({
+    const provider = await answeringProvider((requests) => ({
       text: JSON.stringify({
         entities: JSON.stringify(requests.at(-1)?.body ?? "").includes(address)
           ? [{ kind: "person", name, identifiers: [address] }]
@@ -60,48 +60,38 @@ describe("linking Brain sources in core", () => {
       inputTokens: 300,
       outputTokens: 40,
     }));
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-    try {
-      const found = await vi.waitFor(
-        async () => {
-          // Each sweep starts a few runs: as many as it takes.
-          await runMinuteTasks({}, new Date(Date.now() + settleMs + 60_000));
-          const entities = await entitiesFor(brainOf(env), reader, {
-            query: name,
-          });
-          if (entities.length === 0) {
-            throw new Error("Not linked yet");
-          }
-          return entities;
-        },
-        { timeout: 30_000, interval: 200 }
-      );
+    const found = await vi.waitFor(
+      async () => {
+        // Each sweep starts a few runs: as many as it takes.
+        await runMinuteTasks({}, new Date(Date.now() + settleMs + 60_000));
+        const entities = await entitiesFor(brainOf(env), reader, {
+          query: name,
+        });
+        if (entities.length === 0) {
+          throw new Error("Not linked yet");
+        }
+        return entities;
+      },
+      { timeout: 30_000, interval: 200 }
+    );
 
-      expect({
-        found: found.map(({ kind, label, sources }) => ({
-          kind,
-          label,
-          sources,
-        })),
-        asked: gateway.requests.filter(({ body }) =>
-          JSON.stringify(body).includes(address)
-        ).length,
-      }).toStrictEqual({
-        found: [{ kind: "person", label: name, sources: 1 }],
-        asked: 1,
-      });
-    } finally {
-      spy.mockRestore();
-    }
+    expect({
+      found: found.map(({ kind, label, sources }) => ({
+        kind,
+        label,
+        sources,
+      })),
+      asked: provider.requests.filter(({ body }) =>
+        JSON.stringify(body).includes(address)
+      ).length,
+    }).toStrictEqual({
+      found: [{ kind: "person", label: name, sources: 1 }],
+      asked: 1,
+    });
   });
 
   it("reads a piece as dense with relations as the Brain keeps, its whole answer within what the model may give", async () => {
-    const rules = {
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      sensitive: { models: [workersAi], connections: [] },
-    };
+    const rules = { sensitive: { models: [mistral], connections: [] } };
     // As many relations as a source keeps, each its own sentence, in one
     // piece of text: the answer copies every sentence.
     const team = `Support ${unique()}`;
@@ -131,20 +121,30 @@ describe("linking Brain sources in core", () => {
     // About three characters a token, as JSON goes; cut at the request's
     // own limit, as a provider cuts an answer.
     const tokens = Math.ceil(text.length / 3);
-    const gateway = answeringGateway((requests) => {
-      const limit = z
-        .object({ max_completion_tokens: z.number() })
-        .parse(requests.at(-1)?.body).max_completion_tokens;
-      return {
-        text: tokens > limit ? text.slice(0, limit * 3) : text,
-        truncated: tokens > limit,
-        inputTokens: 3000,
-        outputTokens: Math.min(tokens, limit),
-      };
-    });
+    await answeringProvider(
+      (requests) => {
+        const asked = z
+          .object({
+            max_completion_tokens: z.number().optional(),
+            max_tokens: z.number().optional(),
+          })
+          .parse(requests.at(-1)?.body);
+        const limit = asked.max_completion_tokens ?? asked.max_tokens;
+        if (limit === undefined) {
+          throw new Error("The request named no answer limit");
+        }
+        return {
+          text: tokens > limit ? text.slice(0, limit * 3) : text,
+          truncated: tokens > limit,
+          inputTokens: 3000,
+          outputTokens: Math.min(tokens, limit),
+        };
+      },
+      { models: [mistral] }
+    );
 
     const read = await extractEntities(
-      { ...env, AI: gateway.binding, MODEL_GATEWAY: rules },
+      { ...env, MODEL_GATEWAY: rules },
       lines.join("\n")
     );
 
@@ -155,27 +155,27 @@ describe("linking Brain sources in core", () => {
   });
 
   it("reads a source only through a model the sensitive-data rule lists, recorded as the Brain's upkeep", async () => {
-    const rules = {
-      gateway: "grasp-os-test",
-      models: [workersAi, euModel],
-      sensitive: { models: [euModel], connections: [] },
-    };
-    const gateway = fakeGateway({
+    const provider = await fakeProviderFor([mistral, euModel], {
       text: JSON.stringify({ entities: [] }),
       inputTokens: 100,
       outputTokens: 10,
     });
     const marker = `Upkeep ${unique()}`;
     const read = await extractEntities(
-      { ...env, AI: gateway.binding, MODEL_GATEWAY: rules },
+      {
+        ...env,
+        MODEL_GATEWAY: { sensitive: { models: [euModel], connections: [] } },
+      },
       `${marker} is a project.`
     );
-    // A careful model the rule doesn't list: no model may read it.
+    // A rule that lists none of the models the organization chose: no
+    // model may read it.
     const refused = await extractEntities(
       {
         ...env,
-        AI: gateway.binding,
-        MODEL_GATEWAY: { ...rules, roles: { careful: workersAi } },
+        MODEL_GATEWAY: {
+          sensitive: { models: ["anthropic/claude-opus-4-8"], connections: [] },
+        },
       },
       "Anything."
     ).then(
@@ -193,7 +193,7 @@ describe("linking Brain sources in core", () => {
     expect({
       read,
       refused,
-      sentTo: gateway.requests.map(({ url }) => url.includes("/openai/")),
+      sentTo: provider.requests.map(({ url }) => new URL(url).host),
       call: call && {
         actor: call.actor,
         model: call.model?.model,
@@ -202,7 +202,7 @@ describe("linking Brain sources in core", () => {
     }).toStrictEqual({
       read: { entities: [] },
       refused: "brain.unavailable",
-      sentTo: [true],
+      sentTo: ["api.openai.com"],
       call: {
         actor: { type: "system" },
         model: "gpt-5.4",

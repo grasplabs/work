@@ -29,7 +29,7 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
     })
   ).toHaveAttribute("href", "/settings/ai-providers");
   const allowed = sectionOf(page, "Allowed models").getByRole("row", {
-    name: /llama-3\.3-70b-instruct-fp8-fast/u,
+    name: /mistral-large-latest/u,
   });
   await expect(allowed).toContainText("Hosted in the EU");
   await expect(allowed).not.toContainText("Takes sensitive data");

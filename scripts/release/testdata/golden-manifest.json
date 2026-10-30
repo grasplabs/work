@@ -134,7 +134,8 @@
       },
       "previewUrls": false,
       "requiredSecrets": [
-        "CAPABILITY_SIGNING_KEY"
+        "CAPABILITY_SIGNING_KEY",
+        "TOKEN_ENCRYPTION_KEY"
       ],
       "workersDev": false
     },
@@ -242,10 +243,6 @@
           "jurisdiction": "eu",
           "name": "BRAIN_OBJECTS",
           "type": "r2_bucket"
-        },
-        {
-          "name": "AI",
-          "type": "ai"
         },
         {
           "name": "EMAIL",

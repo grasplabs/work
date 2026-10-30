@@ -418,7 +418,6 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       model: {
         id: "anthropic/claude-sonnet-4-5",
         provider: "brain-stub-reader/2026-10-15",
-        gateway: "grasp-os-test",
       },
       pinned: true,
       run: ["dev", repeats, "8"],

@@ -1593,7 +1593,7 @@ export class Workspace extends DurableObject<Env> {
       models: [model],
     } = await modelSettings(this.env);
     if (model === undefined) {
-      throw modelErrors.create("model.unconfigured");
+      throw modelErrors.create("model.no_provider");
     }
     if (where !== undefined) {
       await keepAudience(

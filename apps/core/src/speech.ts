@@ -2,7 +2,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 
 import { models } from "./models.ts";
-import type { ModelsEnv, SpeechCall } from "./models.ts";
+import type { SpeechCall } from "./models.ts";
 import { platformAi } from "./platform-ai.ts";
 
 // Speech synthesis as core implements it: Grasp's own speech feature
@@ -23,10 +23,7 @@ export type SpeechCaller = Omit<
  * The speech model the platform's settings name, as the gateway names it:
  * the quicker one for a line only known as it is said (`quick`).
  */
-export const speechModelOf = (
-  env: ModelsEnv,
-  quick = false
-): string | undefined => {
+export const speechModelOf = (env: Env, quick = false): string | undefined => {
   const speech = platformAi(env)?.speech;
   if (speech === undefined) {
     return undefined;
@@ -39,7 +36,7 @@ export const speechModelOf = (
  * settings name, or the one the request names.
  */
 export const platformSpeech = (
-  env: ModelsEnv,
+  env: Env,
   caller: SpeechCaller
 ): SpeechSynthesis => ({
   speak: async ({ text, voice, language, model }, signal) => {

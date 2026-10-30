@@ -118,7 +118,7 @@ const admission = (
     id: crypto.randomUUID(),
     period: "2400-01",
     scopes,
-    model: "workers-ai/test",
+    model: "mistral/test",
     price,
     reservedMicros,
     actor,
@@ -595,8 +595,8 @@ describe("the model ledger", () => {
     }).toStrictEqual({
       // Their spend is whole: either decision may be made.
       listed: [
-        [released.id, 30, "workers-ai/test", false],
-        [charged.id, 20, "workers-ai/test", false],
+        [released.id, 30, "mistral/test", false],
+        [charged.id, 20, "mistral/test", false],
       ].toSorted(byJson),
       resolved: [
         { state: "decided", how: "release", chargedMicros: 0 },
@@ -743,7 +743,7 @@ describe("the model ledger", () => {
         {
           action: "model.spend.released",
           request: held.id,
-          model: "workers-ai/test",
+          model: "mistral/test",
           period: "2400-01",
           charged: 0,
           damaged: 2,

@@ -17,7 +17,7 @@ import {
   models,
   usableAnswerTokens,
 } from "../models.ts";
-import type { ModelAnswer, ModelCall, ModelsEnv } from "../models.ts";
+import type { ModelAnswer, ModelCall } from "../models.ts";
 import { platformAi, platformRouteFor } from "../platform-ai.ts";
 import {
   boundedInCore,
@@ -440,7 +440,7 @@ type ConversionSettings = Exclude<
  * gateway's refusals as the upload takes them: not set up, or a wait.
  */
 const conversionRequest = async (
-  env: ModelsEnv,
+  env: Env,
   call: ModelCall<undefined>
 ): Promise<ModelAnswer<undefined>> => {
   try {
@@ -472,7 +472,7 @@ const conversionRequest = async (
  */
 const platformConverter =
   (
-    env: ModelsEnv,
+    env: Env,
     { provider, model }: ConversionSettings,
     trigger: AuditActor
   ): Extractor =>
@@ -537,7 +537,7 @@ export type ExtractorName = "platform" | "local";
  * (`upload.conversion_unavailable`), never read another way unasked.
  */
 export const extractorFor = (
-  env: ModelsEnv & LocalExtractorEnv,
+  env: Env & LocalExtractorEnv,
   collection: { sensitive: boolean },
   mediaType: UploadMediaType,
   trigger: AuditActor

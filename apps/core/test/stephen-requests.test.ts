@@ -13,9 +13,9 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { sendStephenSummaries } from "../src/stephen-summary.ts";
 import { says } from "./agent-chat.ts";
-import { stephenRequestReplies } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
+import { fakeProvider, stephenRequestReplies } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -783,6 +783,8 @@ describe("Needs you", setUpTime, () => {
         missing: [{ id: "afas.leave", why: "actionOff" }],
       })
     );
+    // A provider connected, so Grasp has a model to propose with.
+    await fakeProvider();
     stephenRequestReplies.push({
       text: JSON.stringify({
         proposal: "Turn on Request leave in AFAS in Settings › Stephen.",

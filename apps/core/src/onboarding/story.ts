@@ -78,11 +78,16 @@ export const interviewStoryResponse = async (
     return linkRefusal(found.code, requestId);
   }
   // The model that says his lines tells it: someone is waiting for it.
-  const model = modelForRole(await modelSettings(env), "quick", {
-    sensitive: true,
-  });
+  const settings = await modelSettings(env);
+  const connected = settings.models.length > 0;
+  const model = connected
+    ? modelForRole(settings, "quick", { sensitive: true })
+    : undefined;
   if (model === undefined) {
-    log.error("interview.no_model", { requestId });
+    log.error("interview.no_model", {
+      requestId,
+      ...(connected ? {} : { code: "model.no_provider" }),
+    });
     return asTheyStand(503);
   }
   const { text: system } = await tellingText(asked.interviewer, asked.locale);

@@ -60,7 +60,7 @@ export const labRequestSchema = z.discriminatedUnion("action", [
   }),
   /** Everyone's interview link, as the onboarding would send it. */
   z.strictObject({ action: z.literal("links") }),
-  /** How the models are reached: the gateway, and the model of each role. */
+  /** How the models are reached: the model of each role. */
   z.strictObject({ action: z.literal("via") }),
   /**
    * One of Stephen's turns on fixed input, with who it is with given: the
@@ -90,9 +90,8 @@ export const labRequestSchema = z.discriminatedUnion("action", [
 ]);
 export type LabRequest = z.output<typeof labRequestSchema>;
 
-/** How a local core reaches its models: its AI Gateway, and the model each role goes to. */
+/** How a local core reaches its models: the model each role goes to. */
 export const labViaSchema = z.strictObject({
-  gateway: z.string(),
   quick: z.string().nullable(),
   careful: z.string().nullable(),
 });

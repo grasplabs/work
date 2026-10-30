@@ -15,7 +15,8 @@ import { z } from "zod";
  * front, before any test runs; tests only look theirs up.
  */
 import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
-import { origin } from "./stack.ts";
+import { expectModelRequestsHere } from "./model-fake.ts";
+import { e2eModel, e2eModelKey, e2eThinkingModel, origin } from "./stack.ts";
 
 /** Signs session cookies on the test stack only; never a real secret. */
 export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
@@ -26,6 +27,13 @@ export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
  */
 export const testCapabilityKey =
   "e2e-only-capability-signing-key-of-32-chars-or-more";
+
+/**
+ * Seals what connect keeps, the AI provider keys the stack's organization
+ * adds among them, on the test stack only: 32 bytes, base64. Never a real
+ * secret.
+ */
+export const testTokenKey = btoa("e2e-only-token-key-of-32-bytes!!");
 
 const sessionCookie = "__Host-grasp.session_token";
 
@@ -447,6 +455,19 @@ export const signInCast = async (attempts: number): Promise<Cast> => {
           await api.members.setRole(userId, role);
         })
     );
+    // The stack's AI providers and models (e2e/stack.ts), as an admin
+    // connects them in Settings: every page that offers a model reads them.
+    await api.aiProviders.add({ provider: "mistral", key: e2eModelKey });
+    await api.aiProviders.add({ provider: "anthropic", key: e2eModelKey });
+    await api.aiProviders.setModels({
+      defaultModel: e2eModel,
+      fallbacks: [e2eThinkingModel],
+    });
+    // Each provider asked once, as an admin tests it: its request must
+    // reach the stack's fake providers, never the provider itself.
+    await api.aiProviders.test("mistral", e2eModel);
+    await api.aiProviders.test("anthropic", e2eThinkingModel);
+    await expectModelRequestsHere(["api.mistral.ai", "api.anthropic.com"]);
     const byAttempt: Cast = Array.from({ length: attempts }, () => ({}));
     for (const { attempt, scene, name, ...person } of signedIn) {
       const scenes = byAttempt[attempt] ?? {};

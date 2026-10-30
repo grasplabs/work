@@ -242,6 +242,28 @@ const textFeed = () => {
 };
 
 /**
+ * How long a stream may take to end once the answer is in. One the
+ * platform refused may never end: Teams' adapter waits for an
+ * acknowledgement of its first words that a refused stream never gets
+ * (@chat-adapter/teams, `streamViaEmit`). Past this, the stream counts as
+ * refused, and the answer is posted whole.
+ */
+const streamEndMs = 5000;
+
+/** Settles once `posting` has, or throws once `ms` passed first. */
+const endedWithin = async (posting: Promise<unknown>, ms: number) => {
+  const late = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    late.reject(new Error("The stream didn't end"));
+  }, ms);
+  try {
+    await Promise.race([posting, late.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
  * An answer streamed into `thread` as the model writes it, where the
  * platform streams (Teams, in a private chat): `onText` takes the text so
  * far; `finish` adds what the last update missed of `final` and waits for
@@ -284,7 +306,7 @@ const streamInto = (thread: Thread, onFirst: () => void) => {
       if (posting === undefined) {
         return false;
       }
-      await posting;
+      await endedWithin(posting, streamEndMs);
       return true;
     },
   };
@@ -306,6 +328,19 @@ const underStream =
       await thread.post(sourcesCard(card));
     })();
   };
+
+/**
+ * The stream an answer goes into, when it is to stream: only in a direct
+ * message the platform's SDK handed over.
+ */
+const streamingIn = (
+  thread: Thread | Conversation,
+  stream: boolean,
+  onFirst: () => void
+) =>
+  stream && "isDM" in thread && thread.isDM
+    ? streamInto(thread, onFirst)
+    : undefined;
 
 /** The answer as a chat app shows it: no links to Grasp's own notes. */
 const shownText = (text: string): string =>
@@ -335,7 +370,9 @@ const answerOne = async (
     messageId?: string;
   },
   text: string,
-  locale: ChannelLocale
+  locale: ChannelLocale,
+  /** Whether it streams where the platform streams; posted whole if not. */
+  stream: boolean
 ): Promise<void> => {
   const startedAt = Date.now();
   const { settle, rate, requestId } = await takenIn(env, {
@@ -345,11 +382,7 @@ const answerOne = async (
     text,
   });
   const stopTyping = typingIn(thread);
-  // Streamed only in a direct message the platform's SDK handed over.
-  const streaming =
-    "isDM" in thread && thread.isDM
-      ? streamInto(thread, stopTyping)
-      : undefined;
+  const streaming = streamingIn(thread, stream, stopTyping);
   // Held writes are this turn's from here on: connect stamps each when
   // it holds it, by the same clock.
   const since = Date.now();
@@ -551,7 +584,8 @@ export const carryOnAfterConnecting = async (
         },
       },
       kept.question,
-      kept.locale
+      kept.locale,
+      true
     );
     for (const send of later) {
       // oxlint-disable-next-line no-await-in-loop -- in the order they were asked for
@@ -573,13 +607,16 @@ export const answerInChat =
   async (accepted) => {
     const { message, thread, kept } = accepted;
     const fallback = appLocale(message.raw);
+    // Posted whole: Teams streams one answer per message it hands over,
+    // and this message's own answer, after it, streams.
     if (kept !== undefined) {
       // What they asked before Grasp knew them: a message of its own.
       await answerOne(
         env,
         { ...accepted, messageId: `${message.id}:kept` },
         kept,
-        languageOf(kept, fallback)
+        languageOf(kept, fallback),
+        false
       );
     }
     const text = message.text.trim();
@@ -591,5 +628,11 @@ export const answerInChat =
       }
       return;
     }
-    await answerOne(env, { ...accepted, messageId: message.id }, text, locale);
+    await answerOne(
+      env,
+      { ...accepted, messageId: message.id },
+      text,
+      locale,
+      true
+    );
   };

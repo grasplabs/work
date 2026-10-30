@@ -103,7 +103,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
       text: "---\nname: book-invoices\ndescription: How we book invoices.\n---\n# Steps",
       ifVersion: 0,
     });
-    const { stub, chat, gateway, ask, agent } = await chatOf(
+    const { stub, chat, provider, ask, agent } = await chatOf(
       person.userId,
       codeStep(
         "export default async (self, env) => await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 });"
@@ -118,7 +118,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     await ask("Hoe gaat het?");
     await ask("En nu?");
 
-    const [first, , third, fourth] = gateway.requests.map(({ body }) =>
+    const [first, , third, fourth] = provider.requests.map(({ body }) =>
       systemOf(body)
     );
     expect({

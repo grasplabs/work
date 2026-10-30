@@ -49,9 +49,6 @@ import {
 
 const idp = mockIdp();
 
-/** The one model the tests' gateway allows (vite.config.ts). */
-const testModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-
 /** A test file, from the fixtures the test assets serve. */
 const fixture = async (name: string): Promise<Uint8Array> => {
   const response = await env.ASSETS.fetch(`https://assets/uploads/${name}`);
@@ -318,9 +315,7 @@ describe("uploads", { timeout: 60_000 }, () => {
     gatewayBefore = env.MODEL_GATEWAY;
     platformBefore = env.PLATFORM_AI;
     env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [testModel],
-      eu: { models: [testModel], deployment: true },
+      eu: { models: ["mistral/mistral-large-latest"], deployment: true },
     };
     env.PLATFORM_AI = { conversion: { provider: "local" } };
   });

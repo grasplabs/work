@@ -18,10 +18,8 @@ import {
   auditArchiveRetentionSchema,
   auditRetentionDefaultDays,
   auditRetentionSchema,
-  defaultGatewayModels,
   inboundMailDomainSchema,
   mailFromSchema,
-  modelGatewayConfigSchema,
   modelRulesConfigSchema,
   runRetentionSchema,
   signInConfigSchema,
@@ -46,6 +44,40 @@ import { DeployError } from "./errors.ts";
  * serves them all, and a run that ensures it again finds it.
  */
 export const clientGatewayId = "grasp-os";
+
+// Kept here, as they were in @grasp-os/shared, only until the admin stops
+// provisioning AI Gateway: core reads no `gateway`, `models` or `roles`
+// from `MODEL_GATEWAY` any more (it ignores them), only its rules.
+
+/** The models a new deployment allowed at its AI Gateway. */
+export const defaultGatewayModels = [
+  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+  "workers-ai/@cf/zai-org/glm-5.3-flash",
+] as const;
+
+/** An AI Gateway ID: lowercase letters, digits and dashes. */
+const gatewayIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+
+/** The allowlist's part of `MODEL_GATEWAY`, as the admin still sets it. */
+const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
+  z
+    .object({
+      gateway: z.string().regex(gatewayIdPattern),
+      models: z.array(modelRef).min(1),
+      roles: z
+        .strictObject({
+          quick: modelRef.optional(),
+          careful: modelRef.optional(),
+        })
+        .optional(),
+    })
+    .refine(
+      ({ models: allowed, roles }) =>
+        Object.values(roles ?? {}).every(
+          (ref) => ref === undefined || allowed.includes(ref)
+        ),
+      { message: "A role's model is an allowed model", path: ["roles"] }
+    );
 
 /**
  * The runtime every client's core runs on: Cloudflare, where the isolates

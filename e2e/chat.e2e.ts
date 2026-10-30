@@ -11,7 +11,7 @@ import type { Person } from "./people.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off. The local stack reaches no model, so the answer is the
+// off. The stack's provider refuses its key, so the answer is the
 // gateway's failure; streaming, resuming and the person check themselves
 // are core's tests (apps/core/test/chats.test.ts).
 
@@ -477,33 +477,36 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
   await control.click();
   const choices = page.getByRole("menuitemradio");
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
   ]);
 
   // One that thinks offers its efforts in the same menu, which stays open
   // for them, at the model's own default.
-  await page.getByRole("menuitemradio", { name: /^glm-5\.3-flash/u }).click();
+  await page
+    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
+    .click();
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
     "Low",
+    "Medium",
     "High",
     "Max",
   ]);
   await expect(
-    page.getByRole("menuitemradio", { name: "High" })
+    page.getByRole("menuitemradio", { name: "Medium" })
   ).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemradio", { name: "Max" }).click();
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   const question = `Think hard ${tag}.`;
@@ -518,23 +521,23 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     (message) => message.includes('"send"') && message.includes(question)
   );
   expect(asked).toContain('"effort":"max"');
-  expect(asked).toContain('"model":"workers-ai/@cf/zai-org/glm-5.3-flash"');
+  expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
   // Kept for the person in this browser.
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
   await page
-    .getByRole("menuitemradio", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
     .click();
   await expect(choices).toHaveCount(2);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
 });
 

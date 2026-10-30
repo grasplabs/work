@@ -18,13 +18,13 @@ import {
   channelLinks,
 } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { configureObject, says } from "./agent-chat.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import {
-  member,
+  memberAnsweredBy,
   messageFrom as teamsMessageFrom,
   post as postToTeams,
   reached,
@@ -363,16 +363,15 @@ describe("a linked person's question in Slack", () => {
   it("gets the same answer as the same question in Teams, in their own Slack chat", async () => {
     const answer = "Parental leave lasts sixteen weeks.";
     const { userId, slackUser } = await linkedPerson();
-    await pointAtGateway(
-      workspace(env, personalWorkspaceId(userId)),
-      fakeGateway(says(answer))
-    );
+    // One provider for the organization: it answers both chats.
+    const provider = await fakeProvider(says(answer), says(answer));
+    await configureObject(workspace(env, personalWorkspaceId(userId)));
     const question = "How long is parental leave?";
     const fromSlack = messageFrom(slackUser);
     fromSlack.event.text = question;
     await post(fromSlack, { caught: false });
 
-    const inTeams = await member(idp, says(answer));
+    const inTeams = await memberAnsweredBy(idp, provider);
     await postToTeams(teamsMessageFrom(inTeams.teams, { text: question }));
 
     const slackPosts = await slackSawIn(fromSlack.event.channel);
@@ -381,9 +380,10 @@ describe("a linked person's question in Slack", () => {
       activities.filter(({ type }) => type === "message")
     );
     expect({
+      // Posted whole, or streamed: a first post, then updated as it comes.
       slack: slackPosts.some(
         ({ method, fields, authorized }) =>
-          method === "chat.postMessage" &&
+          ["chat.postMessage", "chat.update"].includes(method) &&
           authorized &&
           JSON.stringify(fields).includes(answer)
       ),

@@ -18,7 +18,7 @@ import type {
 import { signModelGrant } from "@grasp-os/shared/capability";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 
-import { isRouteApi, maxTokensOf } from "./model-catalog.ts";
+import { isRouteApi } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import type { ModelTransport, TransportRoute } from "./model-transport.ts";
 
@@ -32,10 +32,9 @@ import type { ModelTransport, TransportRoute } from "./model-transport.ts";
 // provider, the host, the ledger's ID for it and its body's hash. Core never sees a key:
 // where the key goes, the adapter puts `aiCredentialPlaceholder`, which
 // connect replaces. It runs on plain workerd as on Cloudflare: one service
-// binding, no AI binding.
+// binding.
 //
-// The SDKs' own retries are off for these routes (`sdkRetries: false`):
-// the gateway retries only a rate limit's refusal, within the call's
+// The SDKs' own retries are off (`streamRoute`): the gateway retries only a rate limit's refusal, within the call's
 // deadline (models.ts, `open`).
 
 /** Where an admitted call's requests go, and on whose key. */
@@ -167,6 +166,77 @@ const cancelLate = async (sent: Promise<Response>): Promise<void> => {
   }
 };
 
+/** Cancels `reader`, whose stream may have ended or failed already. */
+const cancelQuietly = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reason: unknown
+): Promise<void> => {
+  try {
+    await reader.cancel(reason);
+  } catch {
+    // Already done with: nothing to cancel.
+  }
+};
+
+/**
+ * `answered` with its body cut off once `signal` aborts: a caller that
+ * stops waiting mid-answer stops reading it at once, and connect's request
+ * with it, never left waiting for the provider's next words.
+ */
+const cutOffBy = (
+  answered: Response,
+  signal: AbortSignal | undefined
+): Response => {
+  const body: ReadableStream<Uint8Array> | null = answered.body;
+  if (signal === undefined || body === null) {
+    return answered;
+  }
+  const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
+  let reading: ReadableStreamDefaultController<Uint8Array> | undefined =
+    undefined;
+  const stop = (): void => {
+    try {
+      reading?.error(signal.reason);
+    } catch {
+      // It ended first.
+    }
+    void cancelQuietly(reader, signal.reason);
+  };
+  const cut = new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      reading = controller;
+      if (signal.aborted) {
+        stop();
+      } else {
+        signal.addEventListener("abort", stop, { once: true });
+      }
+    },
+    pull: async (controller) => {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          signal.removeEventListener("abort", stop);
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        signal.removeEventListener("abort", stop);
+        controller.error(error);
+      }
+    },
+    cancel: async (reason) => {
+      signal.removeEventListener("abort", stop);
+      await cancelQuietly(reader, reason);
+    },
+  });
+  return new Response(cut, {
+    status: answered.status,
+    statusText: answered.statusText,
+    headers: answered.headers,
+  });
+};
+
 /**
  * Hands one admitted request to connect with its grant, until `endsAt`,
  * which connect cuts it off at too, or until `signal` is aborted, when
@@ -215,7 +285,7 @@ const sendThroughConnect = async (
     await answered.body?.cancel();
     throw new ConnectUnansweredError();
   }
-  return answered;
+  return cutOffBy(answered, signal);
 };
 
 /** What one request through connect is admitted as: the ledger's ID, the deadline. */
@@ -376,7 +446,6 @@ export const connectTransport = (
     providers: target.provider === "elevenlabs" ? [] : [target.provider],
     payloadLoggingOff: true,
     sharedCacheOff: true,
-    sdkRetries: false,
   },
   route: (ref): TransportRoute | undefined => {
     const base =
@@ -400,7 +469,6 @@ export const connectTransport = (
         ...ref.catalog,
         api,
         baseUrl: base.replace(/\/+$/u, ""),
-        maxTokens: maxTokensOf(ref),
       },
       api,
       host: host.toLowerCase(),

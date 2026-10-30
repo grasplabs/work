@@ -9,12 +9,12 @@ import {
   codeResults,
   codeStep,
   model,
-  pointAtGateway,
+  configureObject,
   says,
 } from "../agent-chat.ts";
-import { fakeGateway } from "../ai-gateway.ts";
 import { release, requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
+import { fakeProvider } from "../model-provider.ts";
 import { signedInApi } from "../sign-in.ts";
 
 // What a spec 8 draft's function writes with `console` in its sealed
@@ -91,10 +91,8 @@ describe(
       }
       const chat = await builder.api.chats.create("Invoice desk");
       const stub = workspace(env, personalWorkspaceId(builder.userId));
-      await pointAtGateway(
-        stub,
-        fakeGateway(
-          codeStep(`export default async (self, env) => {
+      await fakeProvider(
+        codeStep(`export default async (self, env) => {
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
           await env.build.write(app.id, ${JSON.stringify(drafted)});
           const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
@@ -104,9 +102,9 @@ describe(
             logs: preview.logs.map(({ level, message, method }) => ({ level, message, method })),
           };
         };`),
-          says("Checked.")
-        )
+        says("Checked.")
       );
+      await configureObject(stub);
 
       await stub.ask(chatIdSchema.parse(chat.id), {
         text: "Try the invoice desk's notes",

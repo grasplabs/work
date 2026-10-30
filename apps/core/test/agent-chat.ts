@@ -6,16 +6,16 @@ import { env } from "cloudflare:workers";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { Answer, GatewayReply } from "./ai-gateway.ts";
+import { fakeProvider, testModel } from "./model-provider.ts";
+import type { Answer, ProviderReply } from "./model-provider.ts";
 
 // A chat's agent, as the tests drive it: the Workspace object's loop, the
-// code it runs in isolates of their own, and the model gateway, all real.
-// The outside system is the model provider behind AI Gateway: a fake behind
-// the object's AI binding answers with scripted replies, in the provider's
-// own wire format.
+// code it runs in isolates of their own, the model gateway and connect, all
+// real. The outside system is the model provider behind connect: a fake
+// answers with scripted replies, in the provider's own wire format
+// (test/model-provider.ts).
 
-export const model = "anthropic/claude-sonnet-4-5";
+export const model = testModel;
 
 /** The model calls `executeCode` with `code`, `times` times at once. */
 export const codeStep = (code: string, times = 1): Answer => ({
@@ -67,22 +67,15 @@ export const pausedReply = (answer: Answer, at: number) => {
 
 export type WorkspaceStub = ReturnType<typeof workspace>;
 
-/** The deployment's model config: the model the tests use, and no other. */
-export const gatewayConfig = { gateway: "grasp-os-test", models: [model] };
-
 /**
- * Points the object's model gateway at a fake AI Gateway, with `config`,
- * and sets the memory files' limits when given. Objects may share their
- * env, so every test sets it; a restarted object may get a new one, so it
- * is pointed again.
+ * Sets the object's model rules (`MODEL_GATEWAY`), none unless given, and
+ * the memory files' limits when given. Objects may share their env, so
+ * every test sets it; a restarted object may get a new one, so it is set
+ * again.
  */
-export const pointAtGateway = async (
+export const configureObject = async (
   stub: WorkspaceStub,
-  gateway: ReturnType<typeof fakeGateway>,
-  {
-    config = gatewayConfig,
-    memoryLimits,
-  }: { config?: object; memoryLimits?: object } = {}
+  { rules = {}, memoryLimits }: { rules?: object; memoryLimits?: object } = {}
 ) => {
   await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
@@ -90,8 +83,7 @@ export const pointAtGateway = async (
       throw new TypeError("The Workspace object has no env");
     }
     Object.assign(objectEnv, {
-      AI: gateway.binding,
-      MODEL_GATEWAY: config,
+      MODEL_GATEWAY: rules,
       ...(memoryLimits === undefined ? {} : { MEMORY_LIMITS: memoryLimits }),
     });
   });
@@ -101,16 +93,16 @@ export const pointAtGateway = async (
  * A new chat of `personId`'s in a new workspace, answered by `replies`,
  * and the agent subject its permissions are granted to.
  */
-export const chatOf = async (personId: string, ...replies: GatewayReply[]) => {
+export const chatOf = async (personId: string, ...replies: ProviderReply[]) => {
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
   const chat = await stub.createChat("Questions", personId, id);
-  const gateway = fakeGateway(...replies);
-  await pointAtGateway(stub, gateway);
+  const provider = await fakeProvider(...replies);
+  await configureObject(stub);
   const ask = async (text: string) => await stub.ask(chat.id, { text, model });
   // The workspace's agent: its grants hold in all the workspace's chats.
   const agent = { type: "agent" as const, agentId: id };
-  return { id, stub, chat, personId, gateway, ask, agent };
+  return { id, stub, chat, personId, provider, ask, agent };
 };
 
 /**
@@ -120,12 +112,12 @@ export const chatOf = async (personId: string, ...replies: GatewayReply[]) => {
  */
 export const personalChatsOf = async (
   personId: string,
-  ...replies: GatewayReply[]
+  ...replies: ProviderReply[]
 ) => {
   const id = personalWorkspaceId(personId);
   const stub = workspace(env, id);
-  const gateway = fakeGateway(...replies);
-  await pointAtGateway(stub, gateway);
+  const provider = await fakeProvider(...replies);
+  await configureObject(stub);
   const agent = { type: "agent" as const, agentId: crypto.randomUUID() };
   const newChat = async () => {
     const chat = await stub.createChat("Questions", personId, agent.agentId);
@@ -133,7 +125,7 @@ export const personalChatsOf = async (
       await stub.ask(chat.id, { text, model });
     return { chat, ask };
   };
-  return { id, stub, gateway, agent, newChat };
+  return { id, stub, provider, agent, newChat };
 };
 
 /** The chat's transcript, as the object keeps it. */
@@ -177,7 +169,7 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
 };
 
 /**
- * Sets `vars` in the object's env, as `pointAtGateway` points its gateway:
+ * Sets `vars` in the object's env, as `configureObject` sets its rules:
  * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say. The env is the
  * test Worker's own, shared by every object of the file, so the test puts
  * back what was there with the restore this returns (in a `finally`), or

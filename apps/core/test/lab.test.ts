@@ -22,17 +22,17 @@ import { z } from "zod";
 
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
   approveAgreed,
-  careful,
   countedFor,
-  gatewayConfig,
+  interviewRules,
   modelOf,
   quick,
 } from "./interview-link.ts";
+import { keyChanger } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
   routed,
@@ -43,14 +43,15 @@ import {
 } from "./sign-in.ts";
 
 // The Stephen Lab's way into a local core (src/onboarding/lab.ts): its
-// model calls through the gateway, and the practice people's links. AI
-// Gateway is the outside system: a fake behind the AI binding. The ways it
+// model calls through the gateway, and the practice people's links. The
+// model provider is the outside system, faked behind connect. The ways it
 // can fail, tried here:
 //
 // - A deployed core answering it: anyone could then spend a client's
 //   models on the lab, or read the links it gives out.
 // - Anyone but Grasp's staff using it, on a local stack too.
-// - A call that goes around the gateway's allowlist, rules or audit log.
+// - A call that goes around the organization's models, the rules or the
+//   audit log.
 // - A turn or a drawing on the benches' fixed input (GRA-338) counted as
 //   someone's interview, or kept as the company's drawing.
 
@@ -154,8 +155,8 @@ const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
   await approveAgreed({ secret, key }, facts);
 };
 
-/** What the careful model answers for the team's map: entering orders, Karin's. */
-const mapOf = (karin: string): GatewayReply => ({
+/** What the model answers for the team's map: entering orders, Karin's. */
+const mapOf = (karin: string): ProviderReply => ({
   text: JSON.stringify({
     does: "Enters the orders",
     works: [
@@ -173,8 +174,8 @@ const mapOf = (karin: string): GatewayReply => ({
   outputTokens: 300,
 });
 
-/** What the careful model answers for entering orders, from Karin. */
-const ordersDrawn = (karin: string): GatewayReply => ({
+/** What the model answers for entering orders, from Karin. */
+const ordersDrawn = (karin: string): ProviderReply => ({
   text: JSON.stringify({
     starts: "",
     steps: [
@@ -258,11 +259,12 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
         purpose: detail.purpose,
       })),
     }).toStrictEqual({
+      // Both roles resolve to the organization's default.
       output: { say: "by email" },
-      model: careful,
+      model: quick,
       sentTo: [
-        careful.slice(careful.indexOf("/") + 1),
-        careful.slice(careful.indexOf("/") + 1),
+        quick.slice(quick.indexOf("/") + 1),
+        quick.slice(quick.indexOf("/") + 1),
       ],
       calls: [
         { actor: "staff", purpose: "onboarding.lab" },
@@ -271,13 +273,15 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuses a call while the deployment's rules don't let the role's model take what the interviews carry", async () => {
+  it("refuses a call while the deployment's rules don't let any of the organization's models take what the interviews carry", async () => {
     const session = await staffSession();
     const { requests, result } = await answering([], async () => {
       env.MODEL_GATEWAY = {
-        ...gatewayConfig,
-        roles: { careful },
-        sensitive: { models: [quick], connections: [] },
+        ...interviewRules,
+        sensitive: {
+          models: ["mistral/mistral-large-latest"],
+          connections: [],
+        },
       };
       return await refusedWith(asked, { session });
     });
@@ -287,16 +291,29 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("says how the models are reached: the gateway, and the model of each role", async () => {
+  it("refuses a call, and names no model of any role, while the organization has no provider connected", async () => {
+    const session = await staffSession();
+    const { requests, result } = await answering([], async () => {
+      await env.CONNECT.removeAiProviderKey("anthropic", keyChanger);
+      return {
+        refused: await refusedWith(asked, { session }),
+        via: labViaSchema.parse(await answerTo({ action: "via" }, { session })),
+      };
+    });
+    expect({ ...result, sent: requests.length }).toStrictEqual({
+      refused: [503, "model.no_provider"],
+      via: { quick: null, careful: null },
+      sent: 0,
+    });
+  });
+
+  it("says how the models are reached: the model of each role", async () => {
     const session = await staffSession();
     const { result } = await answering([], async () =>
       labViaSchema.parse(await answerTo({ action: "via" }, { session }))
     );
-    expect(result).toStrictEqual({
-      gateway: gatewayConfig.gateway,
-      quick: gatewayConfig.roles.quick,
-      careful: gatewayConfig.roles.careful,
-    });
+    // Both roles resolve to the organization's default.
+    expect(result).toStrictEqual({ quick, careful: quick });
   });
 
   it("gives the practice people's links, which open their interviews", async () => {
@@ -431,9 +448,10 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       say: "Who releases it?",
       facts: ["The order gets released."],
       lineFirst: true,
+      // His line and what he wrote down: both from the organization's default.
       models: [
         quick.slice(quick.indexOf("/") + 1),
-        careful.slice(careful.indexOf("/") + 1),
+        quick.slice(quick.indexOf("/") + 1),
       ],
       told: [true, true, true, true],
       counted: 0,

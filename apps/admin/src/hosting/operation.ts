@@ -86,7 +86,6 @@
  * fingerprints.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
@@ -154,6 +153,7 @@ import {
   clientGatewayId,
   clientMailDomain,
   clientRuntimeProfile,
+  defaultGatewayModels,
   derivedCoreConfig,
 } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
