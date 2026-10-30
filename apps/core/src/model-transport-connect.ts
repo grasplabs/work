@@ -5,6 +5,8 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
   aiCredentialPlaceholder,
+  aiGrantHeader,
+  aiProviderHost,
   aiProviders,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
@@ -101,6 +103,158 @@ const cancelLate = async (sent: Promise<Response>): Promise<void> => {
 };
 
 /**
+ * Hands one admitted request to connect with its grant, until `endsAt`,
+ * which connect cuts it off at too, or until `signal` is aborted, when its
+ * answer, should it come, is cancelled unread. A request connect couldn't
+ * get an answer for throws; one it refused before sending comes back as
+ * its refusal.
+ */
+const sendThroughConnect = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  host: string,
+  request: Request,
+  { ledgerRequest, endsAt, signal }: SentBy
+): Promise<Response> => {
+  const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
+    credential: target.credential,
+    provider: target.provider,
+    host,
+    request: ledgerRequest,
+    notAfter: endsAt,
+    body: await sha256HexOfBytes(await request.clone().arrayBuffer()),
+  });
+  signal?.throwIfAborted();
+  const sent = env.CONNECT.modelFetch(request, grant);
+  const aborted = Promise.withResolvers<never>();
+  const stop = () => {
+    aborted.reject(signal?.reason);
+  };
+  signal?.addEventListener("abort", stop, { once: true });
+  let answered: Response;
+  try {
+    answered = await Promise.race([sent, aborted.promise]);
+  } catch (error) {
+    void cancelLate(sent);
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
+  if (answered.headers.get(aiRefusedHeader) === "unreachable") {
+    await answered.body?.cancel();
+    throw new ConnectUnansweredError();
+  }
+  return answered;
+};
+
+/** What one request through connect is admitted as: the ledger's ID, the deadline. */
+export interface SentBy {
+  ledgerRequest: string;
+  endsAt: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * The URL of `path` at `target`'s provider, for a platform feature's
+ * request of its own (speech, a recording written down): the provider's
+ * own host. None for a provider without a fixed one.
+ */
+const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
+  const host = aiProviderHost(target.provider);
+  return host === undefined ? undefined : new URL(path, `https://${host}`);
+};
+
+/**
+ * Sends one request of a platform feature (speech, a recording written
+ * down) to `path` at `target`'s provider through connect, as the ledger
+ * admitted it: the placeholder where the key goes, which connect replaces
+ * with Grasp's key, and only the headers given.
+ */
+export const connectRequest = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  path: string,
+  init: { headers: Record<string, string>; body: BodyInit },
+  sentBy: SentBy
+): Promise<Response> => {
+  const url = platformUrl(target, path);
+  if (url === undefined) {
+    throw new Error("The provider has no host of its own");
+  }
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(
+    placeholderHeaders(target.provider)
+  )) {
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  headers.set("x-request-id", sentBy.ledgerRequest);
+  // Read whole first, a form's boundary in its content type, as a body
+  // that streams can't cross the service binding with the request.
+  const asked = new Request(url, { method: "POST", headers, body: init.body });
+  const request = new Request(url, {
+    method: "POST",
+    headers: asked.headers,
+    body: await asked.arrayBuffer(),
+  });
+  return await sendThroughConnect(
+    env,
+    target,
+    url.hostname.toLowerCase(),
+    request,
+    sentBy
+  );
+};
+
+/**
+ * Opens a realtime WebSocket of a platform feature (live listening) to
+ * `pathAndQuery` at `target`'s provider through connect, which holds the
+ * key and relays the socket (connect's `modelSocket`): an upgrade can't
+ * go over RPC, so it goes over the service binding's `fetch`, with the
+ * grant in its own header. Throws when it won't open.
+ */
+export const connectSocket = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  pathAndQuery: string,
+  { ledgerRequest, endsAt, signal }: SentBy
+): Promise<WebSocket> => {
+  const url = platformUrl(target, pathAndQuery);
+  if (url === undefined) {
+    throw new Error("The provider has no host of its own");
+  }
+  const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
+    credential: target.credential,
+    provider: target.provider,
+    host: url.hostname.toLowerCase(),
+    request: ledgerRequest,
+    notAfter: endsAt,
+    // An upgrade has no body: what it sends goes over the socket.
+    body: await sha256HexOfBytes(new ArrayBuffer(0)),
+  });
+  const headers = new Headers({ upgrade: "websocket", [aiGrantHeader]: grant });
+  for (const [name, value] of Object.entries(
+    placeholderHeaders(target.provider)
+  )) {
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  const answered = await env.CONNECT.fetch(url, {
+    headers,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  const socket = answered.webSocket;
+  if (socket === null) {
+    await answered.body?.cancel();
+    throw new ConnectUnansweredError();
+  }
+  socket.accept();
+  return socket;
+};
+
+/**
  * The fetch that hands each request to connect, with its grant; until
  * the call's deadline (`tagged`), which connect cuts it off at too. A
  * request connect couldn't get an answer for throws, as a fetch that got
@@ -127,38 +281,11 @@ const connectFetch =
       headers,
       body,
     });
-    const { signal } = asked;
-    const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
-      credential: target.credential,
-      provider: target.provider,
-      host,
-      request: ledgerRequest,
-      notAfter: endsAt,
-      body: await sha256HexOfBytes(body ?? new ArrayBuffer(0)),
+    return await sendThroughConnect(env, target, host, request, {
+      ledgerRequest,
+      endsAt,
+      signal: asked.signal,
     });
-    // A request cut off here stops being waited for at once, and its
-    // answer, should it come, is cancelled unread.
-    signal.throwIfAborted();
-    const sent = env.CONNECT.modelFetch(request, grant);
-    const aborted = Promise.withResolvers<never>();
-    const stop = () => {
-      aborted.reject(signal.reason);
-    };
-    signal.addEventListener("abort", stop, { once: true });
-    let answered: Response;
-    try {
-      answered = await Promise.race([sent, aborted.promise]);
-    } catch (error) {
-      void cancelLate(sent);
-      throw error;
-    } finally {
-      signal.removeEventListener("abort", stop);
-    }
-    if (answered.headers.get(aiRefusedHeader) === "unreachable") {
-      await answered.body?.cancel();
-      throw new ConnectUnansweredError();
-    }
-    return answered;
   };
 
 /**
@@ -175,7 +302,6 @@ export const connectTransport = (
     providers: [target.provider],
     payloadLoggingOff: true,
     sharedCacheOff: true,
-    voice: false,
     sdkRetries: false,
   },
   route: (ref): TransportRoute | undefined => {

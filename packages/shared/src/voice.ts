@@ -5,6 +5,10 @@
 // what is said or heard is interview content, judged by the same rules as
 // any model call.
 //
+// Each goes to the provider and model the platform's settings name
+// (@grasp-os/shared/platform-ai), OpenAI's by default, with Grasp's own
+// key, which connect holds.
+//
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
 // is core's src/transcription.ts, which the onboarding's pages reach over a
@@ -30,10 +34,12 @@ export interface SpeechRequest {
   /** The language it is said in: an ISO 639-1 code, such as `en`. */
   language: string;
   /**
-   * The voice model, as the gateway names it (`<provider>/<model>`): one
-   * the deployment allows. The implementation's own when not named.
+   * The speech model, as the gateway names it (`<provider>/<model>`). The
+   * platform's setting when not named.
    */
   model?: string;
+  /** How to say it, such as its tone: never said itself. */
+  instructions?: string;
 }
 
 /** A word of a line, and when it is said, in ms from the start of the audio. */

@@ -1,3 +1,4 @@
+import { aiGrantHeader } from "@grasp-os/shared/ai-providers";
 import type {
   AiProviderKey,
   AiProviderRoutes,
@@ -77,6 +78,7 @@ import {
   aiProviderRoutes,
   listAiProviderKeys,
   modelFetch,
+  modelSocket,
   removeAiProviderKey,
   saveAiProviderKey,
 } from "./ai-providers.ts";
@@ -278,8 +280,15 @@ export default class Connect
   extends WorkerEntrypoint<Env>
   implements ConnectApi
 {
-  // oxlint-disable-next-line class-methods-use-this -- the Worker's fetch handler
-  override fetch(request: Request): Response {
+  /**
+   * Connect's health, and the one model request that can't go over RPC: a
+   * realtime WebSocket core's gateway decided, to the provider's own URL
+   * with its grant (`modelSocket`, src/ai-providers.ts).
+   */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.has(aiGrantHeader)) {
+      return await modelSocket(this.env, signingKeys(this.env), request);
+    }
     const { pathname } = new URL(request.url);
     if (pathname === "/health") {
       return Response.json({ ok: true });

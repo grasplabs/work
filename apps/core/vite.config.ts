@@ -16,6 +16,7 @@ import {
   connectClient,
   connectProvidersScript,
   connectVersionMetadata,
+  platformAnthropicKey,
   directoryClient,
   documentsClient,
   gmailAccount,
@@ -367,9 +368,11 @@ export const coreProject = (
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
                 TELEGRAM_BOT_TOKEN: telegramBot.token,
-                // Grasp's own key at OpenAI for platform features, which
-                // the fake OpenAI there takes once a test plans for it.
+                // Grasp's own keys at OpenAI and Anthropic for platform
+                // features, which the fakes there take once a test plans
+                // for them (OpenAI's audio endpoints answer unplanned).
                 OPENAI_API_KEY: platformOpenAiKey,
+                ANTHROPIC_API_KEY: platformAnthropicKey,
                 // Stephen's Gmail mailbox, which the fake Google there knows.
                 GMAIL_MAILBOX: gmailAccount.mailbox,
                 GMAIL_CLIENT_ID: gmailAccount.clientId,

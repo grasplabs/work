@@ -55,6 +55,13 @@ export interface AiProviderSpec {
    * an OpenAI-compatible endpoint, below its base URL's own path.
    */
   paths: readonly string[];
+  /**
+   * The paths below its host a realtime WebSocket may open, with the one
+   * query each takes, and nothing else: OpenAI's realtime transcription,
+   * for Grasp's live listening (platform features only, never an
+   * organization's key). Empty for a provider with none.
+   */
+  realtime: readonly { path: string; query: string }[];
   /** Where its key goes: `x-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
@@ -90,6 +97,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "Anthropic",
     baseUrls: { "anthropic-messages": "https://api.anthropic.com" },
     paths: ["/v1/messages"],
+    realtime: [],
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
     region: "us",
@@ -103,7 +111,15 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-responses": "https://api.openai.com/v1",
       "openai-completions": "https://api.openai.com/v1",
     },
-    paths: ["/v1/responses", "/v1/chat/completions"],
+    // Its audio endpoints too, for Grasp's own speech and transcription
+    // (@grasp-os/shared/platform-ai): models, never files or an account's.
+    paths: [
+      "/v1/responses",
+      "/v1/chat/completions",
+      "/v1/audio/transcriptions",
+      "/v1/audio/speech",
+    ],
+    realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",
@@ -115,6 +131,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
     paths: ["/v1/chat/completions"],
+    realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
@@ -129,6 +146,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-completions": "https://openrouter.ai/api/v1",
     },
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
+    realtime: [],
     keyHeader: "authorization",
     whereItRuns:
       "OpenRouter, United States, passing each call on to the model's provider",
@@ -141,6 +159,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "OpenAI-compatible endpoint",
     baseUrls: {},
     paths: ["/chat/completions"],
+    realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
@@ -179,6 +198,7 @@ export const aiRefusals = [
   "credential_header",
   "redirect",
   "unreachable",
+  "upgrade",
   "body",
   "stored",
 ] as const;
@@ -399,3 +419,11 @@ export interface AiProviderConnectApi {
    */
   modelFetch: (request: Request, grant: string) => Promise<Response>;
 }
+
+/**
+ * The header a realtime WebSocket's upgrade to connect carries its model
+ * grant in (connect's `fetch`, `modelSocket`): an upgrade can't go over
+ * RPC, so it goes over the service binding's `fetch`, to the provider's
+ * own URL, with the placeholder where the key goes.
+ */
+export const aiGrantHeader = "x-grasp-model-grant";

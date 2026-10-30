@@ -64,6 +64,7 @@ import { Figure, Panel } from "./parts.tsx";
 import { sectionTo } from "./sections.ts";
 import {
   euro,
+  euroRate,
   euros,
   formatDay,
   formatMonth,
@@ -636,7 +637,7 @@ const UseRow = ({
 const priceLine = (model: Model): string => {
   const price = PRICES[model];
   if (price.minute > 0) {
-    return `${euro(price.minute)} a minute`;
+    return `${euroRate(price.minute)} a minute`;
   }
   if (price.tokensIn + price.tokensOut > 0) {
     return `${euros(price.tokensIn)} a million tokens read, ${euros(price.tokensOut)} written`;

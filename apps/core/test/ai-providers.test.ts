@@ -833,6 +833,39 @@ describe("AI providers", { timeout: 60_000 }, () => {
   });
 
   describe("Grasp's own keys, for platform features", () => {
+    it("tells the organization's admins which provider handles each of Grasp's own features, and where it runs", async () => {
+      const { admin: by } = await admin();
+      const uses = async (platform?: unknown) => {
+        const before = env.PLATFORM_AI;
+        env.PLATFORM_AI = platform;
+        try {
+          const listing = await by.api.aiProviders.list();
+          return listing.platform.map(
+            ({ feature, provider }) =>
+              `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
+          );
+        } finally {
+          env.PLATFORM_AI = before;
+        }
+      };
+
+      await expect(uses()).resolves.toStrictEqual([
+        "conversion: OpenAI, United States",
+        "transcription: OpenAI, United States",
+        "speech: OpenAI, United States",
+      ]);
+      await expect(
+        uses({ conversion: { provider: "local" } })
+      ).resolves.toStrictEqual([
+        "conversion: here",
+        "transcription: OpenAI, United States",
+        "speech: OpenAI, United States",
+      ]);
+      await expect(
+        uses({ speech: { provider: "elevenlabs" } })
+      ).resolves.toStrictEqual([]);
+    });
+
     it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {
       await plan(platformOpenAiKey, [
         answered("openai-responses", "Converted."),
@@ -862,7 +895,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const { platform } = await env.CONNECT.aiProviderRoutes();
       const noKey = await outcome(
         models(env).platformCall(
-          await callOf(anthropicCase.model, {
+          await callOf("mistral/mistral-small-latest", {
             work: { platform: "brain_upkeep" },
           })
         )
@@ -872,7 +905,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["openai"],
+        platform: ["anthropic", "openai"],
         noKey: "model.not_allowed",
         notPlatform: "model.invalid_call",
       });
