@@ -9,7 +9,7 @@
 # with the Deploy platform workflow. Jobs with secrets never run for pull
 # requests from forks. CI deploys nothing: the admins roll releases out.
 #
-# A draft pull request runs only the fast checks (static, conventions):
+# A draft pull request runs only the fast checks (static):
 # the tests, workerd, the release build and the journeys wait until it is
 # ready for review, which runs them all (`ready_for_review`). A draft can't
 # be merged, and the merge queue runs everything again on top of main.
@@ -34,8 +34,10 @@ concurrency:
 
 jobs:
   # Everything but `vp test` and the build (release, below), once: format,
-  # lint and types, the repo checks, and that generated files are
-  # committed. Part of the required `check` (below).
+  # lint and types, the repo checks, that generated files are committed,
+  # and on a pull request its branch name and title, which becomes the
+  # commit on main and the release note. Part of the required `check`
+  # (below).
   static:
     name: static
     if: github.event_name != 'push'
@@ -65,6 +67,14 @@ jobs:
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
+      # The merge queue has no branch or title of its own: the pull
+      # request's were checked before it joined.
+      - if: github.event_name == 'pull_request'
+        run: vp run check:branch
+      - if: github.event_name == 'pull_request'
+        run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
 
   # Which test projects the run's changes can affect, and how many shards
   # their files take (scripts/test-plan.ts). A pull request compares its
@@ -228,23 +238,24 @@ jobs:
             echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
           fi
 
-  # The one required check (.github/rulesets/main.json) for static, release,
-  # the plan and every test shard, so sharding leaves the ruleset as it is.
-  # It runs however they ended, and passes only if all of them passed:
-  # GitHub counts a skipped required check as passing, so this job mustn't
-  # be skipped when one of them failed, was cancelled or was skipped. Two
+  # The one required check (.github/rulesets/main.json), for every job of
+  # the run: a job added, split or removed leaves the ruleset as it is, and
+  # no runner starts only to report a name the ruleset asks for. It runs
+  # however they ended, and passes only if all of them passed: GitHub
+  # counts a skipped required check as passing, so this job mustn't be
+  # skipped when one of them failed, was cancelled or was skipped. Two
   # skips pass: the test shards when the plan has none to run, and, on a
   # draft, everything but static (a draft can't be merged; marking it
   # ready runs it all, and this check again).
   check:
     name: check
-    needs: [static, plan, release, test]
+    needs: [static, plan, test, release, workerd, e2e, admin-e2e]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, plan: $PLAN ($SHARDS), release: $RELEASE, test shards: $TEST, draft: $DRAFT"
+          echo "static: $STATIC, plan: $PLAN ($SHARDS), test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, admin-e2e: $ADMIN_E2E, draft: $DRAFT"
           if [ "$STATIC" != success ]; then
             echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
             exit 1
@@ -256,8 +267,12 @@ jobs:
           if [ "$TEST" = skipped ] && [ "$PLAN" = success ] && [ "$SHARDS" = '[]' ]; then
             TEST="success (no tests affected)"
           fi
-          if [ "$PLAN" != success ] || [ "$RELEASE" != success ] || [ "${TEST%% *}" != success ]; then
-            echo "::error title=check::the plan ended as $PLAN, release as $RELEASE and the test shards as $TEST; check passes only when all of them succeed."
+          failed=""
+          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=$E2E" "admin-e2e=$ADMIN_E2E"; do
+            [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error title=check::not every job succeeded:${failed%,}. check passes only when all of them do."
             exit 1
           fi
         env:
@@ -265,8 +280,11 @@ jobs:
           PLAN: ${{ needs.plan.result }}
           SHARDS: ${{ needs.plan.outputs.shards }}
           RELEASE: ${{ needs.release.result }}
-          # A matrix job's result: a failure if any shard failed.
+          WORKERD: ${{ needs.workerd.result }}
+          # A matrix job's result: a failure if any shard or part failed.
           TEST: ${{ needs.test.result }}
+          E2E: ${{ needs.e2e.result }}
+          ADMIN_E2E: ${{ needs.admin-e2e.result }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
 
   # The journeys (playwright.config.ts) in parts, a runner and a stack
@@ -280,7 +298,7 @@ jobs:
   # own, where nothing runs before it: on one stack the three took about 7
   # minutes (October 2026, GRA-1094). Add a parallel part by adding an
   # entry and raising the count in every entry's `part`.
-  # Part of the required `e2e` (below).
+  # Part of the required `check` (above).
   #
   # In Playwright's image, which has the browsers and their system packages
   # installed: `playwright install --with-deps` fetched 119 MB of them from
@@ -379,32 +397,6 @@ jobs:
           name: playwright-traces-${{ matrix.artifact }}
           path: test-results/
           retention-days: 14
-
-  # The one required e2e check (.github/rulesets/main.json) for every part,
-  # so splitting leaves the ruleset as it is. Like `check`, it runs however
-  # they ended and passes only if all of them passed: GitHub counts a
-  # skipped required check as passing. A draft skips the parts.
-  e2e-result:
-    name: e2e
-    needs: [e2e]
-    if: always() && github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: |
-          echo "e2e parts: $E2E, draft: $DRAFT"
-          if [ "$DRAFT" = true ]; then
-            echo "A draft skips the journeys; marking it ready for review runs them."
-            exit 0
-          fi
-          if [ "$E2E" != success ]; then
-            echo "::error title=e2e::the e2e parts ended as $E2E; e2e passes only when every part succeeds."
-            exit 1
-          fi
-        env:
-          # A matrix job's result: a failure if any part failed.
-          E2E: ${{ needs.e2e.result }}
-          DRAFT: ${{ github.event.pull_request.draft == true }}
 
   # The admin's journeys (playwright.admin.config.ts): a stack of
   # their own, the admin on the fake Cloudflare API, so apart from e2e's.
@@ -510,41 +502,6 @@ jobs:
           path: release-out/
           if-no-files-found: error
           retention-days: 14
-
-  # The branch name and the PR title, which becomes the commit on main and the
-  # release note. Skipped (which counts as passing) in the merge queue.
-  conventions:
-    name: conventions
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - run: vp run check:branch
-      - run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-
-  # Stephen's eval against a real model runs by hand only (stephen-eval.yml),
-  # and weekly on main (stephen-weekly.yml); every change is checked against
-  # the scripted model in `vp test`. This job only keeps the required
-  # `stephen` check passing: delete it once branch protection no longer
-  # requires it.
-  stephen:
-    name: stephen
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
 
   # Every merge to main is a release: built once (the release job),
   # verified against its manifest and published to staging's releases
