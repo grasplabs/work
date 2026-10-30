@@ -30,7 +30,7 @@ import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
 import type { HostingPolicyId } from "../hosting/policy.ts";
-import { staffIds } from "./discord-staff.ts";
+import { discordPublicKey, staffIds } from "./discord-settings.ts";
 
 /**
  * How a check stands:
@@ -386,7 +386,7 @@ const roomsCheck = async (envOf: Env): Promise<ReadinessCheck> => {
 };
 
 const discordBotCheck = (envOf: Env): ReadinessCheck => {
-  const key = envOf.DISCORD_PUBLIC_KEY?.trim() ?? "";
+  const key = discordPublicKey(envOf);
   const staff = staffIds(envOf).size;
   const missing = [
     ...(publicKeyPattern.test(key) ? [] : ["DISCORD_PUBLIC_KEY"]),

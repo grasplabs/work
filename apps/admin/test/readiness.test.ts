@@ -215,6 +215,18 @@ describe("Platform's Readiness", () => {
     });
   });
 
+  it("says the Discord bot is ready with a spaced public key, as the bot reads it", async () => {
+    const read = await withVars(
+      {
+        ...production,
+        DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""} `,
+      },
+      readiness
+    );
+
+    expect(statuses(read).discord_bot).toBe("ready");
+  });
+
   it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
     const read = await withVars(
       { ...production, DISCORD_PUBLIC_KEY: "" },

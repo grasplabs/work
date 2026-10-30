@@ -69,7 +69,7 @@ import { audit, adminDatabase } from "../db/act.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { boundedText } from "../request-body.ts";
 import { discordCommandName, discordSubcommands } from "./discord-commands.ts";
-import { snowflake, staffIds } from "./discord-staff.ts";
+import { discordPublicKey, snowflake, staffIds } from "./discord-settings.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where Discord posts interactions. */
@@ -538,7 +538,7 @@ const discordBot = (
         // again, the same way, before anything reaches a handler.
         webhookVerifier: async (request, body) =>
           await signedByDiscord(
-            env.DISCORD_PUBLIC_KEY ?? "",
+            discordPublicKey(env),
             request.headers.get("x-signature-ed25519") ?? "",
             request.headers.get("x-signature-timestamp") ?? "",
             body
@@ -581,7 +581,7 @@ export const discordInteraction = async (
     return refused(413, "Too large.");
   }
   const signed = await signedByDiscord(
-    env.DISCORD_PUBLIC_KEY ?? "",
+    discordPublicKey(env),
     request.headers.get("x-signature-ed25519") ?? "",
     request.headers.get("x-signature-timestamp") ?? "",
     body
