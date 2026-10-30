@@ -60,6 +60,11 @@ export const factTags = [
   "term",
   "next",
   "work",
+  /**
+   * Who does the work someone was asked about and does not do, by the
+   * name they said: whom Grasp asks about it next (GRA-1285).
+   */
+  "who",
 ] as const;
 
 /** Where someone invited stands. */

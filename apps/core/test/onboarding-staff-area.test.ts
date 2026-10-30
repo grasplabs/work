@@ -177,6 +177,7 @@ describe("Grasp's onboarding area", () => {
         counts: { said: 1, facts: 1, out: 0, approved: 0 },
         participatedAt: null,
         withdrawnAt: null,
+        failedMail: null,
       },
       words: false,
       // On record as a staff look before anything was read, by the kind of

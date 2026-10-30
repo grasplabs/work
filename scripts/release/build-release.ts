@@ -72,14 +72,12 @@ const out = path.resolve(args.out);
 
 const commit = process.env.GITHUB_SHA ?? run("git", ["rev-parse", "HEAD"]);
 
-// CI: the workflow's run number (monotonic per workflow) and the short SHA.
-// Locally: a timestamp, so every local build is a release of its own.
-const defaultReleaseId = (): string => {
-  const runNumber = process.env.GITHUB_RUN_NUMBER;
-  return runNumber !== undefined && runNumber !== ""
-    ? `r${runNumber.padStart(6, "0")}-${commit.slice(0, 7)}`
-    : `dev-${Math.floor(Date.now() / 1000).toString(36)}`;
-};
+// A build's id until it's published: a timestamp, so every build is a
+// release of its own. CI's publish gives it its id (`YY.MM.N`) from the
+// bucket it's published to (upload-release.ts --assign-id); only the
+// manifest's id changes then, never a blob.
+const defaultReleaseId = (): string =>
+  `dev-${Math.floor(Date.now() / 1000).toString(36)}`;
 
 const packageJson = z.object({
   version: z.string().optional(),

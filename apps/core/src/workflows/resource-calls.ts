@@ -546,8 +546,9 @@ const callModel = async (
       trigger: { type: "system" },
       // Its lineage's: the run and every child under it share the
       // lineage's model requests at the gateway, whatever each one's own
-      // `maxModelCalls` allows (run-children.ts).
-      lineage: { rootRunId: run.rootRunId },
+      // `maxModelCalls` allows (run-children.ts). Its spend counts against
+      // its workflow's budget too.
+      lineage: { rootRunId: run.rootRunId, workflowId: run.workflowId },
       runStep: { runId: run.runId, step: task },
       connections: await connectionsOf(env, run),
       work: { authority: runAuthority(run), context: runContext(run) },
