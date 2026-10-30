@@ -20,14 +20,25 @@
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import {
   Select,
   SelectContent,
@@ -37,26 +48,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
 import {
   Link,
   Outlet,
   useChildMatches,
   useNavigate,
+  useMatchRoute,
   useRouter,
   rootRouteId,
 } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import { HourglassIcon, RotateCcwIcon, UnplugIcon } from "lucide-react";
 import { createContext, Fragment, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
-import { AdminHeader, PageHeading } from "./page.tsx";
+import { AdminHeader, PageBody, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
   needSection,
@@ -179,7 +186,7 @@ const SectionItem = ({
   );
 };
 
-/** An entry of the folded column: its icon, named by its tooltip. */
+/** An entry of the folded column: its icon, named by its tooltip, a link announced as the link it is. */
 const RailItem = ({
   section,
   clientId,
@@ -189,66 +196,33 @@ const RailItem = ({
   clientId: string;
   waits: boolean;
 }) => {
+  const matchRoute = useMatchRoute();
   const { title, icon: Icon } = sectionWords[section];
   const label = waits ? `${title}: something waits for Grasp` : title;
+  const active =
+    matchRoute({
+      to: sectionTo[section],
+      params: { clientId },
+      fuzzy: section !== "overview",
+    }) !== false;
   return (
-    <Tooltip>
-      {/* A link that looks like the rail's buttons: it is announced as the link it is. */}
-      <TooltipTrigger
-        render={
-          <SectionLink
-            aria-label={label}
-            className={cn(
-              buttonVariants({ size: "icon", variant: "ghost" }),
-              "data-[status=active]:bg-secondary data-[status=active]:text-secondary-foreground relative"
-            )}
-            clientId={clientId}
-            section={section}
-          />
-        }
-      >
+    <PageSidebarRailButton
+      active={active}
+      label={label}
+      render={<SectionLink clientId={clientId} section={section} />}
+    >
+      <span className="relative flex">
         <Icon />
         {/* Folded, the column still marks where something waits, as it does open. */}
         {waits ? (
           <span
             aria-hidden
-            className="bg-status-attention absolute top-1.5 right-1.5 size-1.5 rounded-full"
+            className="bg-status-attention absolute -top-0.5 -right-0.5 size-1.5 rounded-full"
             data-waits
           />
         ) : null}
-      </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
-  );
-};
-
-/** The column's button that folds it, or opens it again. */
-const FoldButton = ({
-  folded,
-  onFold,
-}: {
-  folded: boolean;
-  onFold: (folded: boolean) => void;
-}) => {
-  const label = folded ? "Expand the sections" : "Fold the sections";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={label}
-            onClick={() => {
-              onFold(!folded);
-            }}
-            size="icon"
-            variant="ghost"
-          />
-        }
-      >
-        {folded ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
-      </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
+      </span>
+    </PageSidebarRailButton>
   );
 };
 
@@ -300,9 +274,10 @@ const InterviewDay = ({ view }: { view: AdminView }) => {
 };
 
 /**
- * The column beside the organization: its name and how much Grasp knows
- * on top, then every section in its groups, and once the team is told,
- * the day its interviews are on. Folded, a rail of the sections' icons.
+ * The column beside the organization, the kit's page sidebar as the
+ * workspace's pages have it: its name and how much Grasp knows on top,
+ * then every section in its groups, and once the team is told, the day
+ * its interviews are on. Folded, a rail of the sections' icons.
  */
 const OrgColumn = ({
   name,
@@ -317,82 +292,88 @@ const OrgColumn = ({
   const [folded, setFolded] = useState(false);
   const waiting = new Set(view?.needs.map(needSection));
 
-  if (folded) {
-    return (
-      <nav
-        aria-label={name}
-        className="hidden w-12 flex-none flex-col items-center gap-1 overflow-y-auto border-r py-3 md:flex"
-      >
-        <FoldButton folded onFold={setFolded} />
-        <span aria-hidden className="bg-border my-1.5 h-px w-6" />
-        <RailItem
-          clientId={clientId}
-          section="overview"
-          waits={waiting.has("overview")}
-        />
-        {sectionGroups.map((group) => (
-          <Fragment key={group.id}>
-            <span aria-hidden className="bg-border my-1.5 h-px w-6" />
-            {group.sections.map((section) => (
-              <RailItem
-                clientId={clientId}
-                key={section}
-                section={section}
-                waits={waiting.has(section)}
-              />
-            ))}
-          </Fragment>
-        ))}
-      </nav>
-    );
-  }
-
   return (
-    <nav
-      aria-label={name}
-      className="hidden w-72 flex-none flex-col border-r md:flex"
-    >
-      <div className="flex flex-none items-center gap-1.5 px-3 pt-3">
-        <h2 className="min-w-0 flex-1 truncate px-2 font-medium">{name}</h2>
-        <FoldButton folded={false} onFold={setFolded} />
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pt-0.5 pb-3">
-        {view === null ? (
-          // Nothing of it is known now: where to see why, in sight on every section.
-          <SectionLink
-            className="text-status-attention hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex-none rounded-md px-2 py-1.5 text-xs outline-none focus-visible:ring-3"
+    <PageSidebar folded={folded} label={name} landmark="navigation">
+      {folded ? (
+        <>
+          <PageSidebarRailExpand
+            label="Expand the sections"
+            onExpand={() => {
+              setFolded(false);
+            }}
+          />
+          <PageSidebarRailDivider />
+          <RailItem
             clientId={clientId}
-            section="setup"
+            section="overview"
+            waits={waiting.has("overview")}
+          />
+          {sectionGroups.map((group) => (
+            <Fragment key={group.id}>
+              <PageSidebarRailDivider />
+              {group.sections.map((section) => (
+                <RailItem
+                  clientId={clientId}
+                  key={section}
+                  section={section}
+                  waits={waiting.has(section)}
+                />
+              ))}
+            </Fragment>
+          ))}
+        </>
+      ) : (
+        <>
+          <PageSidebarTop
+            fold={{
+              label: "Fold the sections",
+              onFold: () => {
+                setFolded(true);
+              },
+            }}
+            joined
           >
-            Not read now: see its Setup
-          </SectionLink>
-        ) : (
-          <Knowing clientId={clientId} view={view} />
-        )}
-        <SectionItem
-          clientId={clientId}
-          section="overview"
-          waits={waiting.has("overview")}
-        />
-        {sectionGroups.map((group) => (
-          <Fragment key={group.id}>
-            <span aria-hidden className="bg-border my-2 h-px flex-none" />
-            <span className="text-muted-foreground px-2 pb-1 text-xs">
-              {group.label}
-            </span>
-            {group.sections.map((section) => (
-              <SectionItem
-                clientId={clientId}
-                key={section}
-                section={section}
-                waits={waiting.has(section)}
-              />
+            <h2 className="truncate px-2 font-medium">{name}</h2>
+          </PageSidebarTop>
+          <PageSidebarBody joined>
+            {view === null ? (
+              // Nothing of it is known now: where to see why, in sight on every section.
+              <Badge
+                className="mb-2"
+                render={<SectionLink clientId={clientId} section="setup" />}
+                variant="attention"
+              >
+                Not read now: see its Setup
+              </Badge>
+            ) : (
+              <Knowing clientId={clientId} view={view} />
+            )}
+            <SectionItem
+              clientId={clientId}
+              section="overview"
+              waits={waiting.has("overview")}
+            />
+            {sectionGroups.map((group) => (
+              <Fragment key={group.id}>
+                <span aria-hidden className="bg-border my-2 h-px flex-none" />
+                <span className="text-muted-foreground px-2 pb-1 text-xs">
+                  {group.label}
+                </span>
+                {group.sections.map((section) => (
+                  <SectionItem
+                    clientId={clientId}
+                    key={section}
+                    section={section}
+                    waits={waiting.has(section)}
+                  />
+                ))}
+              </Fragment>
             ))}
-          </Fragment>
-        ))}
-      </div>
-      {view?.told === true ? <InterviewDay view={view} /> : null}
-    </nav>
+          </PageSidebarBody>
+          {view?.told === true ? <InterviewDay view={view} /> : null}
+        </>
+      )}
+    </PageSidebar>
   );
 };
 
@@ -504,8 +485,15 @@ const UnreadSection = ({
   return (
     <Empty data-unread={admin.error}>
       <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {unset ? <HourglassIcon /> : <UnplugIcon />}
+        </EmptyMedia>
         <EmptyTitle>
-          {unset ? `${name} isn’t set up yet` : `${name}’s Grasp didn’t answer`}
+          <h2>
+            {unset
+              ? `${name} isn’t set up yet`
+              : `${name}’s Grasp didn’t answer`}
+          </h2>
         </EmptyTitle>
         <EmptyDescription>
           {section === "overview"
@@ -513,27 +501,29 @@ const UnreadSection = ({
             : unreadWhy(admin)}
         </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent className="flex-row justify-center">
-        {unset ? null : (
-          <Button
-            onClick={() => {
-              void router.invalidate({
-                filter: (match) => match.routeId === rootRouteId,
-              });
-            }}
-            size="sm"
+      <EmptyContent>
+        <div className="flex flex-wrap justify-center gap-2">
+          {unset ? null : (
+            <Button
+              onClick={() => {
+                void router.invalidate({
+                  filter: (match) => match.routeId === rootRouteId,
+                });
+              }}
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              Try again
+            </Button>
+          )}
+          {/* A link that looks like a button: it is announced as the link it is. */}
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            params={{ clientId }}
+            to={sectionTo.setup}
           >
-            Try again
-          </Button>
-        )}
-        {/* A link that looks like a button: it is announced as the link it is. */}
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          params={{ clientId }}
-          to={sectionTo.setup}
-        >
-          {unset ? "See its Setup progress" : "Its Setup"}
-        </Link>
+            {unset ? "See its Setup progress" : "Its Setup"}
+          </Link>
+        </div>
       </EmptyContent>
     </Empty>
   );
@@ -579,27 +569,29 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
       <div className="flex min-h-0 flex-1 text-sm">
         <OrgColumn clientId={clientId} name={name} view={view} />
         <div className="relative min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
+          <PageBody>
             <SectionSelect clientId={clientId} section={section} />
-            <PageHeading
-              description={description}
-              title={section === "overview" ? name : title}
-            >
-              {admin.state === "answered" ? (
-                <SourceNote
-                  origins={
-                    originsOf(
-                      admin.snapshot,
-                      admin.billing.state === "read",
-                      admin.proposal.state === "read",
-                      admin.crm.state === "read"
-                    )[section]
-                  }
-                />
-              ) : null}
-            </PageHeading>
+            <PageHeader>
+              <PageHeading
+                description={description}
+                title={section === "overview" ? name : title}
+              >
+                {admin.state === "answered" ? (
+                  <SourceNote
+                    origins={
+                      originsOf(
+                        admin.snapshot,
+                        admin.billing.state === "read",
+                        admin.proposal.state === "read",
+                        admin.crm.state === "read"
+                      )[section]
+                    }
+                  />
+                ) : null}
+              </PageHeading>
+            </PageHeader>
             {shown}
-          </div>
+          </PageBody>
         </div>
       </div>
     </>
@@ -608,7 +600,9 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
 
 /** What a section shows until its content is ported: a line saying so. */
 export const SectionToCome = () => (
-  <p className="text-muted-foreground border-border rounded-xl border border-dashed px-5 py-8 text-center">
-    This section isn’t in the admin yet.
-  </p>
+  <Empty>
+    <EmptyHeader>
+      <EmptyDescription>This section isn’t in the admin yet.</EmptyDescription>
+    </EmptyHeader>
+  </Empty>
 );

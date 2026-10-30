@@ -161,8 +161,8 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
       swapped.headers.get("location"),
       notHers.headers.get("location"),
     ]).toStrictEqual([
-      `${clientOrigin}/connections?connectionError=connection.flow_invalid`,
-      `${clientOrigin}/connections?connectionError=connection.not_own_account`,
+      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`,
+      `${clientOrigin}/integrations?connectionError=connection.not_own_account`,
     ]);
     const after = await reached(ann.teams.conversation);
     expect(after.activities).toHaveLength(before.activities.length);

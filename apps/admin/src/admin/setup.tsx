@@ -20,6 +20,7 @@ import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { ModelSpendReport } from "@grasp-os/shared/model-spend-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -77,6 +78,7 @@ import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
 import { attentionWords, ringWords } from "./platform-parts.tsx";
+import { Section } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -95,7 +97,7 @@ import {
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
-import { Body, ErrorCode, Facts, Quiet, SetupSection } from "./setup-parts.tsx";
+import { ErrorCode, Facts, Quiet } from "./setup-parts.tsx";
 import { euros, formatDate } from "./words.ts";
 
 /** The section's tabs, in order: how it stands first. */
@@ -450,7 +452,7 @@ const Header = ({
               label="Open its Grasp"
             />
             <OutLink
-              href={`https://${provisioning.hostname}/activity`}
+              href={`https://${provisioning.hostname}/settings/audit`}
               label="Its activity"
             />
           </>
@@ -650,7 +652,7 @@ const Checklist = ({
   );
   const done = steps.filter(({ state }) => state === "done").length;
   return (
-    <SetupSection
+    <Section
       description={`${done} of ${steps.length} in place.`}
       title="From contract to go"
     >
@@ -691,7 +693,7 @@ const Checklist = ({
           </li>
         ))}
       </ul>
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -815,7 +817,7 @@ const HostingSection = ({
   hosting !== null &&
   (placedOf(hosting) ||
     setup.provisioning.client?.status === "provisioning") ? (
-    <SetupSection
+    <Section
       description="Where it runs and where it is placed. Grasp sets it up, and tries again, by itself."
       title="Hosting"
     >
@@ -833,7 +835,7 @@ const HostingSection = ({
           </CollapsibleContent>
         </Collapsible>
       </div>
-    </SetupSection>
+    </Section>
   ) : null;
 
 /** Milliseconds as seconds, to one decimal. */
@@ -853,7 +855,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   const { signals, readAt } = watched;
   const over = overBars(signals);
   return (
-    <SetupSection
+    <Section
       description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. A signal over its bar is marked, and the Setup says it needs a look.`}
       title="Stephen"
     >
@@ -902,7 +904,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
           },
         ]}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -944,11 +946,11 @@ const ModelSpend = ({
   spend: Promise<ModelSpendReport | null>;
   refresh: Refresh;
 }) => (
-  <SetupSection
+  <Section
     description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
     title="Model spend"
   >
-    <Body>
+    <CardContent>
       <Await
         fallback={<p>{`Ceiling: ${euros(ceiling)} a month.`}</p>}
         promise={spend}
@@ -960,8 +962,8 @@ const ModelSpend = ({
         clientId={clientId}
         refresh={refresh}
       />
-    </Body>
-  </SetupSection>
+    </CardContent>
+  </Section>
 );
 
 const Status = ({
@@ -996,10 +998,7 @@ const Status = ({
       <ProvisioningProgressView progress={progress} />
     ) : null}
     {needs.length > 0 ? (
-      <SetupSection
-        description="The most pressing first."
-        title="What needs a look"
-      >
+      <Section description="The most pressing first." title="What needs a look">
         <ul className="flex flex-col">
           {needs.map((need) => (
             <li
@@ -1017,7 +1016,7 @@ const Status = ({
             </li>
           ))}
         </ul>
-      </SetupSection>
+      </Section>
     ) : null}
     <HostingSection hosting={hosting} releases={releases} setup={setup} />
     {setup.account === null ? null : (
@@ -1028,7 +1027,7 @@ const Status = ({
         spend={modelSpend}
       />
     )}
-    <SetupSection
+    <Section
       description="Read from its account now, and kept a minute. The admin doesn’t keep these day by day yet. Cost is an estimate for the calendar month: its Workers Paid plan past what it includes, and AI Gateway spend; not storage or Durable Objects."
       title="Its platform in numbers"
     >
@@ -1036,7 +1035,7 @@ const Status = ({
         active={setup.provisioning.client?.status === "active"}
         clientId={clientId}
       />
-    </SetupSection>
+    </Section>
     {setup.provisioning.client?.status === "active" ? (
       // Its core read live, within the grid's deadline: the Setup shows
       // without waiting for it, and the section once it answers.
@@ -1047,7 +1046,7 @@ const Status = ({
       </Await>
     ) : null}
     <StephenWatched setup={setup} />
-    <SetupSection
+    <Section
       description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
       title="How it runs"
     >
@@ -1060,7 +1059,7 @@ const Status = ({
           <HowItRuns clientId={clientId} setup={setup} />
         )}
       </div>
-    </SetupSection>
+    </Section>
     {view === null ? null : (
       <Checklist
         clientId={clientId}
@@ -1162,7 +1161,7 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
   return (
     <>
       {done.length > 0 ? (
-        <SetupSection
+        <Section
           description="What someone at Grasp did to its platform by hand, as the admin’s audit log keeps it."
           title="Done here"
         >
@@ -1188,14 +1187,14 @@ const Done = ({ setup }: { setup: ClientSetup }) => {
               </li>
             ))}
           </ul>
-        </SetupSection>
+        </Section>
       ) : null}
-      <SetupSection
+      <Section
         description="Everything the admin’s audit log keeps of it, the newest first: what someone at Grasp did, and its provisioning, deploys and rollouts."
         title="Its history"
       >
         <History history={history} />
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1326,7 +1325,7 @@ const Resources = ({
   const { client } = provisioning;
   return (
     <>
-      <SetupSection
+      <Section
         description="In the hosting destination it is placed in (Hosting, on its Status), in the EU: the company’s data stays in its own resources there."
         title="Its deployment"
       >
@@ -1341,8 +1340,8 @@ const Resources = ({
             { label: "Added (UTC)", value: formatTime(client.createdAt) },
           ]}
         />
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         description="What the admin made live, and what Cloudflare says runs."
         title="Its Workers"
       >
@@ -1405,8 +1404,8 @@ const Resources = ({
           </div>
         )}
         {workers.length === 0 ? null : <WhatRuns clientId={clientId} />}
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         description="Found or made by every deploy, as the release it runs names them, all in the EU."
         title="What it keeps"
       >
@@ -1434,7 +1433,7 @@ const Resources = ({
             ))}
           </ul>
         )}
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1470,7 +1469,7 @@ const Releases = ({
   const pinned = client?.pinnedReleaseId ?? null;
   return (
     <>
-      <SetupSection
+      <Section
         description="A release goes out ring by ring, and waits after each for someone at Grasp. A pinned company stays on its release, whatever the rollouts."
         title="Where it gets releases"
       >
@@ -1506,7 +1505,7 @@ const Releases = ({
           ]}
         />
         {client === null ? null : (
-          <Body>
+          <CardContent>
             <RingChange
               clientId={clientId}
               refresh={refresh}
@@ -1521,11 +1520,11 @@ const Releases = ({
                 releases={imported}
               />
             ) : null}
-          </Body>
+          </CardContent>
         )}
         <RollBack clientId={clientId} refresh={refresh} rollout={rollout} />
-      </SetupSection>
-      <SetupSection
+      </Section>
+      <Section
         action={
           <Button
             nativeButton={false}
@@ -1577,7 +1576,7 @@ const Releases = ({
             ))}
           </ul>
         )}
-      </SetupSection>
+      </Section>
     </>
   );
 };
@@ -1638,7 +1637,7 @@ const TeamsBotSection = ({
     ({ name }) => name === "TEAMS_BOT_SECRET"
   );
   return (
-    <SetupSection
+    <Section
       description="Its own Teams bot, registered in its own Entra: its connect sends as it and its core answers it, from the next deploy. The secret is kept sealed by the admin and given only to its connect."
       title="Its Teams bot"
     >
@@ -1678,9 +1677,9 @@ const TeamsBotSection = ({
         />
       )}
       {bot === null ? null : (
-        <Body>
+        <CardContent>
           <TeamsPackageDownload clientId={clientId} />
-        </Body>
+        </CardContent>
       )}
       <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
       <SealedSecretChange
@@ -1691,7 +1690,7 @@ const TeamsBotSection = ({
         refresh={refresh}
         set={botSecret !== undefined}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -1742,7 +1741,7 @@ const SlackAppSection = ({
   const token = sealedRow(setup, "SLACK_BOT_TOKEN", "Bot token");
   const signing = sealedRow(setup, "SLACK_SIGNING_SECRET", "Signing secret");
   return (
-    <SetupSection
+    <Section
       description="Its own Slack app, which sends to its core. The bot token is kept sealed and given only to its connect, the signing secret only to its core, with each deploy."
       title="Its Slack app"
     >
@@ -1777,7 +1776,7 @@ const SlackAppSection = ({
         refresh={refresh}
         set={signing !== null}
       />
-    </SetupSection>
+    </Section>
   );
 };
 
@@ -1799,7 +1798,7 @@ const Settings = ({
   const waiting = secretsWaiting(account);
   return (
     <>
-      <SetupSection
+      <Section
         description="As someone at Grasp gave it. Every deploy sets it on core."
         title="How its people sign in"
       >
@@ -1847,9 +1846,9 @@ const Settings = ({
             signIn={signIn}
           />
         )}
-      </SetupSection>
+      </Section>
       {client === null ? null : (
-        <SetupSection
+        <Section
           description="A change to its settings reaches it with a deploy."
           title="Applying its settings"
         >
@@ -1860,9 +1859,9 @@ const Settings = ({
             pinned={client.pinnedReleaseId}
             refresh={refresh}
           />
-        </SetupSection>
+        </Section>
       )}
-      <SetupSection
+      <Section
         description="Derived for this company alone, never stored. New ones reach it with its next deploy; the old ones keep working a while after."
         title="Its secrets"
       >
@@ -1890,7 +1889,7 @@ const Settings = ({
         {account === null ? null : (
           <RotateSecrets clientId={clientId} refresh={refresh} />
         )}
-      </SetupSection>
+      </Section>
       {client === null ? null : (
         <>
           <TeamsBotSection
