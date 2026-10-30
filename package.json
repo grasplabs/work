@@ -51,6 +51,7 @@
     "@types/semver": "catalog:",
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
+    "eslint": "catalog:",
     "secretlint": "catalog:",
     "semver": "catalog:",
     "typescript": "catalog:",
