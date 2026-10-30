@@ -53,6 +53,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions, apps, brainRecords } from "./db/core/schema.ts";
@@ -113,6 +114,11 @@ interface Held {
   body: string;
   /** A purge rewrote it: the same id sent again leaves it as it is. */
   purged: boolean;
+  /**
+   * An admin took it out of the brain (brain-forget.ts): the same id sent
+   * again leaves it as removed, and nothing new may name it.
+   */
+  forgotten: boolean;
 }
 
 /** The records core holds among the ids `wanted`, of whatever type. */
@@ -129,6 +135,7 @@ const heldOf = async (
       type: brainRecords.type,
       body: brainRecords.body,
       purgedAt: brainRecords.purgedAt,
+      forgottenAt: brainRecords.forgottenAt,
     })
     .from(brainRecords)
     // Every id as one bound parameter: D1 binds at most 100 to a
@@ -137,9 +144,14 @@ const heldOf = async (
       sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`
     );
   return new Map(
-    rows.map(({ id, type, body, purgedAt }) => [
+    rows.map(({ id, type, body, purgedAt, forgottenAt }) => [
       id,
-      { type, body, purged: purgedAt !== null },
+      {
+        type,
+        body,
+        purged: purgedAt !== null,
+        forgotten: forgottenAt !== null,
+      },
     ])
   );
 };
@@ -339,9 +351,16 @@ const freshOf = (
 ): BrainRecord[] => {
   /** The records the call adds before the one being checked, by id. */
   const before = new Map<string, BrainRecordType>();
-  /** Whether `reference` is a record of its type, in the call or held. */
-  const isRecord = ({ type, id }: Reference): boolean => {
-    const found = before.get(id) ?? held.get(id)?.type;
+  /**
+   * Whether `reference` is a record of its type, in the call or held: for
+   * a record not held yet, one taken out of the brain isn't, so nothing
+   * new rests on what is gone.
+   */
+  const isRecord = ({ type, id }: Reference, adding: boolean): boolean => {
+    const stored = held.get(id);
+    const found =
+      before.get(id) ??
+      (adding && stored?.forgotten === true ? undefined : stored?.type);
     return (
       found !== undefined &&
       (type === "note" ? noteTypes.has(found) : found === type)
@@ -354,7 +373,7 @@ const freshOf = (
       fresh.push(record);
     } else if (
       stored.type !== record.type ||
-      (!stored.purged && stored.body !== bodyOf(record))
+      (!stored.purged && !stored.forgotten && stored.body !== bodyOf(record))
     ) {
       throw brainRecordErrors.create("brain.record_conflict", {
         issues: [`${keyOf(record)}: held already, differently`],
@@ -362,7 +381,7 @@ const freshOf = (
     }
     for (const reference of referencesOf(record)) {
       const known =
-        isRecord(reference) ||
+        isRecord(reference, stored === undefined) ||
         (reference.type === "source" && onboarding.sources.has(reference.id)) ||
         (reference.type === "team" && onboarding.teams.has(reference.id));
       if (!known) {
@@ -595,9 +614,15 @@ export const purgeOnboardingRecords = async (
   env: Env,
   ids: readonly string[]
 ): Promise<number> => {
-  const held = await heldOf(
-    env,
-    ids.filter((id) => id.startsWith(onboardingIdPrefix))
+  // One an admin took out of the brain holds no words, and stays: its id
+  // keeps the same claim, given again, from coming back.
+  const held = new Map(
+    [
+      ...(await heldOf(
+        env,
+        ids.filter((id) => id.startsWith(onboardingIdPrefix))
+      )),
+    ].filter(([, { forgotten }]) => !forgotten)
   );
   if (held.size === 0) {
     return 0;
@@ -867,7 +892,7 @@ const collect = (held: HeldRecords, record: BrainRecord): void => {
   switch (record.type) {
     case "source": {
       const { type: _source, ...source } = record;
-      held.sources.push(source);
+      held.sources.push({ ...source, forgettable: true });
       break;
     }
     case "tool": {
@@ -1036,6 +1061,77 @@ const withGoalChanges = (held: HeldRecords): void => {
   held.goalChanges = [];
 };
 
+/**
+ * What stays of a record an admin took out of the brain (brain-forget.ts):
+ * for a source, what still names it needs to say it was removed, so its
+ * kind and day; for anything else, nothing but what it was.
+ */
+export const forgottenBodyOf = (record: {
+  type: string;
+  id: string;
+  body: string;
+}): string => {
+  const { type, id } = record;
+  if (type !== "source") {
+    return canonicalJson({ type, id });
+  }
+  const parsed = brainRecordSchema.safeParse(parsedBody(record.body));
+  const source =
+    parsed.success && parsed.data.type === "source" ? parsed.data : undefined;
+  return canonicalJson({
+    type,
+    id,
+    ...(source === undefined ? {} : { kind: source.kind, date: source.date }),
+  });
+};
+
+const removedSourceSchema = z.strictObject({
+  type: z.literal("source"),
+  id: z.string(),
+  kind: z
+    .enum(["interview", "chat", "document", "import", "runLog"])
+    .default("document"),
+  date: z.iso.date().optional(),
+});
+
+/** A removed source as the brain shows it, from its tombstone; undefined for anything else. */
+const removedSourceOf = (body: string, at: Date): Source | undefined => {
+  const parsed = removedSourceSchema.safeParse(parsedBody(body));
+  if (!parsed.success) {
+    return undefined;
+  }
+  const removedAt = at.toISOString().slice(0, 10);
+  const { id, kind, date } = parsed.data;
+  return { id, kind, title: "", date: date ?? removedAt, removedAt };
+};
+
+/**
+ * `held` without what names a statement taken out of the brain: one that
+ * followed it up stands on its own, and a gap is no longer about it.
+ */
+const withoutForgotten = (
+  held: HeldRecords,
+  forgotten: ReadonlySet<string>
+): void => {
+  if (forgotten.size === 0) {
+    return;
+  }
+  held.statements = held.statements.map((statement) => {
+    if (
+      statement.followsUp === undefined ||
+      !forgotten.has(statement.followsUp)
+    ) {
+      return statement;
+    }
+    const { followsUp: _gone, ...rest } = statement;
+    return rest;
+  });
+  held.gaps = held.gaps.map((gap) => ({
+    ...gap,
+    about: gap.about.filter((id) => !forgotten.has(id)),
+  }));
+};
+
 /** Every record core keeps, in the order they were added. */
 export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const held: HeldRecords = {
@@ -1057,7 +1153,11 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   const db = drizzle(env.DB);
   const [rows, retired] = await Promise.all([
     db
-      .select({ body: brainRecords.body })
+      .select({
+        id: brainRecords.id,
+        body: brainRecords.body,
+        forgottenAt: brainRecords.forgottenAt,
+      })
       .from(brainRecords)
       // A retired record is kept, but no longer counts.
       .where(isNull(brainRecords.retiredAt))
@@ -1076,7 +1176,16 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
       held.retiredTeams.push({ id: parsed.data.id, name: parsed.data.name });
     }
   }
-  for (const { body } of rows) {
+  const forgotten = new Set<string>();
+  for (const { id, body, forgottenAt } of rows) {
+    if (forgottenAt !== null) {
+      forgotten.add(id);
+      const removed = removedSourceOf(body, forgottenAt);
+      if (removed !== undefined) {
+        held.sources.push(removed);
+      }
+      continue;
+    }
     let record: BrainRecord;
     try {
       record = brainRecordSchema.parse(JSON.parse(body));
@@ -1102,6 +1211,7 @@ export const readBrainRecords = async (env: Env): Promise<HeldRecords> => {
   for (const team of held.teams) {
     datedInOrder(team);
   }
+  withoutForgotten(held, forgotten);
   withDrawings(held);
   withGoalChanges(held);
   return held;

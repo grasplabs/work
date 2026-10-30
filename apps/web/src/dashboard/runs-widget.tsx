@@ -1,4 +1,5 @@
 import type { RunActivity, RunActivityDay } from "@grasp-os/shared/workflows";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -232,7 +233,7 @@ const Headline = ({ days }: { days: readonly RunActivityDay[] }) => {
     <p className="flex flex-wrap items-baseline gap-x-2">
       <span>
         <Trans>
-          <span className="type-figure">{without}</span> without a person
+          <Stat>{without}</Stat> without a person
         </Trans>
       </span>
       <span className="text-muted-foreground text-xs">
@@ -270,7 +271,7 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
         {counts.map(({ key, name, count }) => (
           <div className="flex flex-col" key={key}>
             <dt className="text-muted-foreground text-xs">{i18n._(name)}</dt>
-            <dd className="type-figure">{count}</dd>
+            <Stat render={<dd />}>{count}</Stat>
           </div>
         ))}
       </dl>

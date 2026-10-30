@@ -18,6 +18,7 @@ import {
   chartColor,
 } from "@grasp-os/ui/components/chart";
 import type { ChartConfig } from "@grasp-os/ui/components/chart";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -109,7 +110,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
     case "number": {
       return (
         <div className="flex flex-col gap-0.5">
-          <span className="type-figure">{formatNumber(part.value)}</span>
+          <Stat>{formatNumber(part.value)}</Stat>
           <span className="text-muted-foreground">{part.label}</span>
         </div>
       );
