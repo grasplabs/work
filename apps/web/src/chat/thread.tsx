@@ -504,19 +504,36 @@ const ReplySteps = ({
   );
 };
 
-/**
- * Whether the reply at `index` (or one being written after the last)
- * goes on from an earlier reply to the same question: a step's result
- * between them is no message of the thread's. Its words then stand right
- * under that reply's steps, as one answer does in the prototype, not a
- * message's distance away.
- */
-const goesOn = (messages: readonly ChatMessage[], index: number): boolean =>
-  messages.slice(0, index).findLast(({ role }) => role !== "result")?.role ===
-  "assistant";
+type Asked = Extract<ChatMessage, { role: "user" }>;
 
-/** Takes back the thread's gap between messages, to the gap within one. */
-const goesOnClass = (compact: boolean): string => (compact ? "-mt-4" : "-mt-5");
+/** A question, or the replies that answer it: one item of the thread. */
+type ThreadItem =
+  | { kind: "question"; message: Asked }
+  | { kind: "answer"; replies: Answer[] };
+
+/**
+ * The thread's items, in one pass: each question, and the replies to it
+ * together, a step's result between them being no message of the
+ * thread's. Grasp may answer in several replies (its steps, then its
+ * words); they read as one answer, its words right under its steps, as in
+ * the prototype.
+ */
+const threadItemsOf = (messages: readonly ChatMessage[]): ThreadItem[] => {
+  const items: ThreadItem[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      items.push({ kind: "question", message });
+    } else if (message.role === "assistant") {
+      const last = items.at(-1);
+      if (last?.kind === "answer") {
+        last.replies.push(message);
+      } else {
+        items.push({ kind: "answer", replies: [message] });
+      }
+    }
+  }
+  return items;
+};
 
 /** One response of the agent's, stored or being written. */
 const Reply = ({
@@ -778,6 +795,33 @@ export const ChatThread = ({
       <FinishedTop chatId={chatId} seconds={seconds} thinking={again} />
     );
   };
+  const items = threadItemsOf(messages);
+  // The answer being written, once it shows something; it joins the
+  // replies its question already has, or stands as an answer of its own.
+  const written =
+    shown === null ? null : (
+      <Reply
+        compact={compact}
+        output={output}
+        reply={{
+          ...shown,
+          reasoning:
+            shown.reasoning === ""
+              ? undefined
+              : { text: shown.reasoning, ms: null },
+        }}
+        results={results}
+        running={running}
+        sign={doing}
+        top={
+          doing !== undefined && replies.length === 0 ? (
+            <Working doing={doing} />
+          ) : undefined
+        }
+        writing
+      />
+    );
+  const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   return (
     <ChatTools value={tools}>
       <Conversation>
@@ -795,27 +839,30 @@ export const ChatThread = ({
                 <Spinner aria-label={t`Loading…`} />
               </li>
             )}
-            {messages.map((message, index) => {
-              if (message.role === "user") {
+            {items.map((item, at) => {
+              if (item.kind === "question") {
                 return (
-                  <li key={message.id}>
+                  <li key={item.message.id}>
                     <Message align="end">
                       <Bubble size="lg" variant="secondary">
-                        <BubbleContent>{message.text}</BubbleContent>
+                        <BubbleContent>{item.message.text}</BubbleContent>
                       </Bubble>
                     </Message>
                   </li>
                 );
               }
-              if (message.role === "assistant") {
-                return (
-                  <li
-                    className={
-                      goesOn(messages, index) ? goesOnClass(compact) : undefined
-                    }
-                    key={message.id}
-                  >
+              // The answer being written goes on the last one, when the
+              // question already has replies.
+              const goesOn = writtenGoesOn && at === items.length - 1;
+              return (
+                <li
+                  aria-busy={goesOn ? true : undefined}
+                  className="flex flex-col gap-3"
+                  key={item.replies[0]?.id}
+                >
+                  {item.replies.map((message) => (
                     <Reply
+                      key={message.id}
                       compact={compact}
                       onRetry={
                         !running && message === lastAnswer && answersLast
@@ -840,41 +887,13 @@ export const ChatThread = ({
                       top={topOf(message.id)}
                       writing={false}
                     />
-                  </li>
-                );
-              }
-              return null;
+                  ))}
+                  {goesOn ? written : null}
+                </li>
+              );
             })}
-            {shown === null ? null : (
-              <li
-                aria-busy="true"
-                className={
-                  goesOn(messages, messages.length)
-                    ? goesOnClass(compact)
-                    : undefined
-                }
-              >
-                <Reply
-                  compact={compact}
-                  output={output}
-                  reply={{
-                    ...shown,
-                    reasoning:
-                      shown.reasoning === ""
-                        ? undefined
-                        : { text: shown.reasoning, ms: null },
-                  }}
-                  results={results}
-                  running={running}
-                  sign={doing}
-                  top={
-                    doing !== undefined && replies.length === 0 ? (
-                      <Working doing={doing} />
-                    ) : undefined
-                  }
-                  writing
-                />
-              </li>
+            {written === null || writtenGoesOn ? null : (
+              <li aria-busy="true">{written}</li>
             )}
             {doing === "reading" ? (
               <li aria-busy="true">
