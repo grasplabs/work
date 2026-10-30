@@ -609,6 +609,10 @@ msgstr "{each, plural, one {# hour a week} other {# hours a week}}"
 msgid "{each} a run"
 msgstr "{each} a run"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "{event}, at {account}"
+msgstr "{event}, at {account}"
+
 #: src/policies/policy.ts
 msgid "{excepted, plural, one {# exception} other {# exceptions}}"
 msgstr "{excepted, plural, one {# exception} other {# exceptions}}"
@@ -2077,6 +2081,14 @@ msgstr "a month"
 msgid "A name has no [, ], # or |, and no empty folders."
 msgstr "A name has no [, ], # or |, and no empty folders."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A new file in Google Drive"
+msgstr "A new file in Google Drive"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A new file in Microsoft 365"
+msgstr "A new file in Microsoft 365"
+
 #: src/engines/resource-bindings.tsx
 msgid "A new template"
 msgstr "A new template"
@@ -2174,6 +2186,10 @@ msgstr "A run of version {version} started for someone else"
 msgid "A run of version {version} started for you"
 msgstr "A run of version {version} started for you"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A schedule"
+msgstr "A schedule"
+
 #: src/knowledge/purge.tsx
 msgid "A search for part of a word still finds those. Go back and add each such form as a term of its own."
 msgstr "A search for part of a word still finds those. Go back and add each such form as a term of its own."
@@ -2215,6 +2231,10 @@ msgstr "A tool switched on starts as Read where Composio says it only reads; Gra
 #: src/workflows/requests/request-parts.tsx
 msgid "A topic"
 msgstr "A topic"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
+msgstr "A trigger starts a run on its own, as whoever made it. It starts nothing until an admin allows it to start this workflow."
 
 #: src/dashboard/widget-board.tsx
 msgid "A widget Grasp made"
@@ -2459,6 +2479,10 @@ msgstr "Add a place"
 msgid "Add a team"
 msgstr "Add a team"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Add a trigger"
+msgstr "Add a trigger"
+
 #: src/dashboard/widget-board.tsx
 msgid "Add a widget"
 msgstr "Add a widget"
@@ -2511,6 +2535,10 @@ msgstr "Add the person"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Add the team"
 msgstr "Add the team"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Add the trigger"
+msgstr "Add the trigger"
 
 #: src/chat/builds.tsx
 #: src/settings/package-approvers.tsx
@@ -2950,6 +2978,10 @@ msgstr "An entry is missing."
 #: src/settings/audit-chain.tsx
 msgid "An entry was changed after it was written."
 msgstr "An entry was changed after it was written."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "An event at a connection"
+msgstr "An event at a connection"
 
 #: src/brain/memory-parts.tsx
 msgctxt "memory record kind"
@@ -4051,6 +4083,7 @@ msgstr "Can’t be read"
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -4431,6 +4464,10 @@ msgstr "China"
 msgid "Choose a collection"
 msgstr "Choose a collection"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Choose a connection."
+msgstr "Choose a connection."
+
 #: src/settings/person-limits.tsx
 msgid "Choose a person or a team"
 msgstr "Choose a person or a team"
@@ -4466,6 +4503,10 @@ msgstr "Choose your language"
 #: src/onboarding/setup-steps.tsx
 msgid "Choose your staff list"
 msgstr "Choose your staff list"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Choose…"
+msgstr "Choose…"
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
@@ -4879,6 +4920,7 @@ msgstr "Connecting your Microsoft 365"
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Connection"
 msgstr "Connection"
 
@@ -5345,6 +5387,11 @@ msgctxt "button: delete an interview for good"
 msgid "Delete"
 msgstr "Delete"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "delete a trigger"
+msgid "Delete"
+msgstr "Delete"
+
 #: src/chat/delete-chat-dialog.tsx
 msgid "Delete “{title}”?"
 msgstr "Delete “{title}”?"
@@ -5378,6 +5425,14 @@ msgstr "Delete project"
 #: src/chat/chat-menus.tsx
 msgid "Delete the project “{name}”?"
 msgstr "Delete the project “{name}”?"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Delete the trigger"
+msgstr "Delete the trigger"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Delete this trigger?"
+msgstr "Delete this trigger?"
 
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
@@ -6084,6 +6139,10 @@ msgstr "EU routing"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "European Union"
 msgstr "European Union"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Event"
+msgstr "Event"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "column of the audit trail export"
@@ -8050,6 +8109,10 @@ msgstr "It shows once the desktop agent or single sign-on sees someone use the a
 msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
 msgstr "It starts as proposed: Grasp uses it, and you can correct or retire it here."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "It starts no more runs. Runs it already started go on. This can't be undone."
+msgstr "It starts no more runs. Runs it already started go on. This can't be undone."
+
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "It starts when Stephen reads the kickoff, and grows with every interview."
@@ -8250,9 +8313,13 @@ msgstr "Its rules stay, as rules made by hand. This can't be undone."
 msgid "Its runs have written no file you may see."
 msgstr "Its runs have written no file you may see."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Its runs kept failing to start, so it starts no more until whoever made it turns it on again."
+msgstr "Its runs kept failing to start, so it starts no more until whoever made it turns it on again."
+
 #: src/inbox/items.ts
-msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time."
-msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time."
+msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time."
+msgstr "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
@@ -8898,6 +8965,10 @@ msgstr "Mail and messages to other people, after they press a card with every re
 msgid "Mail isn’t available on this hosting yet"
 msgstr "Mail isn’t available on this hosting yet"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Mailbox or drive, if not the account's own"
+msgstr "Mailbox or drive, if not the account's own"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Main"
@@ -9453,6 +9524,14 @@ msgstr "new facts in the last interviews"
 msgid "New group"
 msgstr "New group"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "New mail in Google"
+msgstr "New mail in Google"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "New mail in Microsoft 365"
+msgstr "New mail in Microsoft 365"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "New note"
@@ -9526,6 +9605,7 @@ msgid "Next person"
 msgstr "Next person"
 
 #: src/workflows/triggers.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Next run: {next}"
 msgstr "Next run: {next}"
 
@@ -10688,6 +10768,10 @@ msgstr "Nothing said yet."
 msgid "Nothing spent yet."
 msgstr "Nothing spent yet."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Nothing starts it on its own yet."
+msgstr "Nothing starts it on its own yet."
+
 #: src/workflows/triggers.tsx
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Nothing starts it on its own: it runs when someone starts it."
@@ -10787,6 +10871,11 @@ msgctxt "a day without Pulse hours"
 msgid "Off"
 msgstr "Off"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "a trigger that is turned off"
+msgid "Off"
+msgstr "Off"
+
 #: src/workflows/requests/request-summary.tsx
 msgctxt "weekly summary not sent"
 msgid "Off"
@@ -10851,6 +10940,11 @@ msgstr "Oldest first"
 msgid "On"
 msgstr "On"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "a trigger that is turned on"
+msgid "On"
+msgstr "On"
+
 #: src/settings/stephen-settings.tsx
 msgid "On · for everyone with Grasp"
 msgstr "On · for everyone with Grasp"
@@ -10899,6 +10993,10 @@ msgstr "On the connection {account}"
 #: src/chat/builds-state.ts
 msgid "on the event {event}, filtered"
 msgstr "on the event {event}, filtered"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "On the schedule <0>{cron}</0>, in {zone}"
+msgstr "On the schedule <0>{cron}</0>, in {zone}"
 
 #: src/workflows/triggers.tsx
 msgid "On the schedule set by {param} ({timeZone})"
@@ -14207,6 +14305,10 @@ msgstr "Starts {starts}"
 msgid "Starts the day the company tells its team."
 msgstr "Starts the day the company tells its team."
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Starts version {workflowVersion}"
+msgstr "Starts version {workflowVersion}"
+
 #: src/onboarding/work-canvas.tsx
 msgid "Starts when: {starts}"
 msgstr "Starts when: {starts}"
@@ -14430,6 +14532,7 @@ msgstr "Stop for now"
 
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Stopped"
 msgstr "Stopped"
 
@@ -15278,7 +15381,16 @@ msgstr "The go"
 msgid "The hour the other teams get their links"
 msgstr "The hour the other teams get their links"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The input each run starts with, as JSON"
+msgstr "The input each run starts with, as JSON"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The input fields aren't JSON."
+msgstr "The input fields aren't JSON."
+
 #: src/workflows/test-run.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "The input isn't JSON."
 msgstr "The input isn't JSON."
 
@@ -15608,6 +15720,10 @@ msgstr "The run started {openedAt}"
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "The run was stopped."
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "The run's input fields, each from the event as a JSON Pointer, as JSON"
+msgstr "The run's input fields, each from the event as a JSON Pointer, as JSON"
 
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
@@ -16278,6 +16394,7 @@ msgid "Time wasters"
 msgstr "Time wasters"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "Time zone"
 msgstr "Time zone"
 
@@ -16499,6 +16616,7 @@ msgid "Triggers"
 msgstr "Triggers"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgctxt "tab of a workflow"
 msgid "Triggers"
 msgstr "Triggers"
@@ -16525,6 +16643,19 @@ msgstr "Try another search, or clear the filters to see the whole trail."
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Trying again…"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgctxt "turn a trigger off"
+msgid "Turn off"
+msgstr "Turn off"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Turn on"
+msgstr "Turn on"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Turn on again"
+msgstr "Turn on again"
 
 #: src/voice/sound-controls.tsx
 msgid "Turn sound off"
@@ -16966,6 +17097,7 @@ msgstr "Version {number}, current"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
@@ -16981,6 +17113,10 @@ msgstr "Version {version}: read-only preview"
 #: src/workflows/workflow-status.tsx
 msgid "Version {waiting} waits to go live"
 msgstr "Version {waiting} waits to go live"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "Version it starts"
+msgstr "Version it starts"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
@@ -17590,6 +17726,7 @@ msgid "What should we look at today?"
 msgstr "What should we look at today?"
 
 #: src/onboarding/work-record.tsx
+#: src/workflows/workflow-triggers-tab.tsx
 msgid "What starts it"
 msgstr "What starts it"
 
@@ -17769,6 +17906,10 @@ msgctxt "column: when an interview was held"
 msgid "When"
 msgstr "When"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When {account} reports an event"
+msgstr "When {account} reports an event"
+
 #: src/onboarding/work-canvas.tsx
 msgid "When {when}"
 msgstr "When {when}"
@@ -17810,6 +17951,10 @@ msgstr "When it goes differently"
 msgid "When it stops"
 msgstr "When it stops"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When its webhook is called"
+msgstr "When its webhook is called"
+
 #: src/onboarding/work-list.tsx
 msgid "When one counts as known"
 msgstr "When one counts as known"
@@ -17834,6 +17979,10 @@ msgstr "When something needs you"
 msgid "When the event {event} happens"
 msgstr "When the event {event} happens"
 
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When the event {type} is sent"
+msgstr "When the event {type} is sent"
+
 #: src/onboarding/interview-actions.tsx
 msgid "When they lost the device their interview was on. Only on their request."
 msgstr "When they lost the device their interview was on. Only on their request."
@@ -17846,6 +17995,10 @@ msgstr "When to stop"
 #: src/knowledge/new-collection.tsx
 msgid "When to use it"
 msgstr "When to use it"
+
+#: src/workflows/workflow-triggers-tab.tsx
+msgid "When, as a cron expression"
+msgstr "When, as a cron expression"
 
 #: src/interview/words.ts
 #: src/onboarding/work-record.tsx
