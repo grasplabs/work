@@ -8,6 +8,7 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { teamsAdapter } from "../src/channels/teams.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
@@ -40,9 +41,10 @@ import { runEngine } from "../src/workflows/engine.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
+import { slackPostedUrl } from "./connect-providers.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
-import { reached } from "./teams-door.ts";
+import { providers, reached } from "./teams-door.ts";
 
 // `grasp.decision` in JSON workflows (GRA-941: @grasp-os/open-workflow's
 // generate.ts, core's resource-host.ts, resource-decisions.ts and the
@@ -457,6 +459,48 @@ const teamsChatOf = async (who: Identity, locale: string): Promise<string> => {
     .bind(threadId, who.userId, locale, Date.now(), Date.now())
     .run();
   return conversation;
+};
+
+/**
+ * A Slack direct message `who` wrote to Stephen in, kept as the door keeps
+ * it, in a thread of its own (`slack:<channel>:<ts>`), and, when `linked`,
+ * their Slack account linked to them: the direct message's channel.
+ */
+const slackChatOf = async (
+  who: Identity,
+  { linked, channel = `D${unique()}` }: { linked: boolean; channel?: string }
+): Promise<string> => {
+  const now = Date.now();
+  await env.DB.prepare(
+    "INSERT INTO channel_conversations (platform, thread_id, user_id, created_at, last_message_at) VALUES ('slack', ?, ?, ?, ?)"
+  )
+    .bind(`slack:${channel}:1700000000.000100`, who.userId, now, now)
+    .run();
+  if (linked) {
+    await env.DB.prepare(
+      "INSERT INTO channel_accounts (id, platform, platform_user_id, user_id, linked_at, linked_how) VALUES (?, 'slack', ?, ?, ?, 'sign_in_link')"
+    )
+      .bind(crypto.randomUUID(), `U${unique()}`, who.userId, now)
+      .run();
+  }
+  return channel;
+};
+
+/** What reached Slack's Web API, as connect's fake keeps it. */
+const slackCallsSchema = z.array(
+  z.object({ method: z.string(), fields: z.record(z.string(), z.unknown()) })
+);
+
+/** What Stephen posted in Slack's `channel`: each post's text and thread. */
+const slackPostsIn = async (channel: string) => {
+  const posted = await providers().fetch(slackPostedUrl);
+  const calls = slackCallsSchema.parse(await posted.json());
+  return calls
+    .filter(
+      ({ method, fields }) =>
+        method === "chat.postMessage" && fields.channel === channel
+    )
+    .map(({ fields }) => ({ text: fields.text, thread: fields.thread_ts }));
 };
 
 /** The IDs of the decisions waiting for `by` to answer (their inbox). */
@@ -908,6 +952,68 @@ describe("asking the people a JSON workflow's decision is for", () => {
       ],
       after: 1,
     });
+  });
+
+  it("tells its recipient once in their own Slack direct message with Stephen, as a message of its own, with the link", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const channel = await slackChatOf(reviewer, { linked: true });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(slackPostsIn(channel)).resolves.not.toStrictEqual([]);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    await ended(owner, workflow.id, runId);
+    const link = `/decisions/${encodeURIComponent(decision)}`;
+
+    const posts = await slackPostsIn(channel);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.thread).toBeUndefined();
+    expect(posts[0]?.text).toMatch(
+      new RegExp(
+        `^A workflow is waiting for your decision\\. Decide in Grasp: https://[^ ]+${link.replaceAll("/", "\\/")}$`,
+        "u"
+      )
+    );
+  });
+
+  it("tells nobody in Slack who unlinked their Slack account, or whose chat there isn't a direct message", async () => {
+    const { owner, reviewer, workflow } = await approvalWorkflow();
+    const unlinked = await slackChatOf(reviewer, { linked: false });
+    const runId = await started(owner, workflow.id, 5000);
+    const decision = await openedBy(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(decision)).resolves.not.toStrictEqual([]);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await confirmedAnswer(reviewer, decision, { approved: true });
+    await ended(owner, workflow.id, runId);
+
+    const other = await approvalWorkflow();
+    const inChannel = await slackChatOf(other.reviewer, {
+      linked: true,
+      channel: `C${unique()}`,
+    });
+    const otherRun = await started(other.owner, other.workflow.id, 5000);
+    const otherDecision = await openedBy(otherRun);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(otherDecision)).resolves.not.toStrictEqual([]);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await confirmedAnswer(other.reviewer, otherDecision, { approved: true });
+    await ended(other.owner, other.workflow.id, otherRun);
+
+    expect({
+      unlinked: await slackPostsIn(unlinked),
+      inChannel: await slackPostsIn(inChannel),
+    }).toStrictEqual({ unlinked: [], inChannel: [] });
   });
 
   it("asks more people than one ask lists without failing the run, audited by count, and one of them answers", async () => {
