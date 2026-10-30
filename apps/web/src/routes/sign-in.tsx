@@ -49,7 +49,7 @@ const SignIn = () => {
     <OnboardingFrame>
       <GraspBuddy />
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <h1 className="type-title">
           <Trans>Sign in to Grasp</Trans>
         </h1>
         {connected ? (

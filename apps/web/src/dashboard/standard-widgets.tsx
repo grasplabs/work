@@ -304,8 +304,8 @@ export const ReturnChartView = ({
             <span
               className={
                 full
-                  ? "text-2xl font-medium tabular-nums"
-                  : "font-medium tabular-nums @sm:text-2xl"
+                  ? "type-figure"
+                  : "@sm:type-figure font-medium tabular-nums"
               }
             >
               {whole}
@@ -500,8 +500,8 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                   <span
                     className={
                       full
-                        ? "text-2xl font-medium tabular-nums"
-                        : "font-medium tabular-nums @sm:text-2xl"
+                        ? "type-figure"
+                        : "@sm:type-figure font-medium tabular-nums"
                     }
                   >
                     {t`${live} of ${count}`}

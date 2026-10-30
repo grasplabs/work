@@ -138,7 +138,7 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
     <>
       <GraspBuddy />
       <div className="flex flex-col gap-2 text-center">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <h1 className="type-title">
           <Trans>Hi {name}</Trans>
         </h1>
         <p className="text-muted-foreground text-balance">
@@ -256,7 +256,7 @@ const Guest = () => {
         <>
           <GraspBuddy />
           <div className="flex flex-col items-center gap-2 text-center">
-            <h1 className="text-2xl font-medium tracking-tight">
+            <h1 className="type-title">
               <Trans>This chat can&apos;t be opened</Trans>
             </h1>
             <ErrorText>{shown.message}</ErrorText>

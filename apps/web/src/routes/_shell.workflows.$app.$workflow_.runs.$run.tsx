@@ -46,9 +46,7 @@ const RunPage = () => {
       <SiteHeader crumbs={crumbs} />
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6 text-sm">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-medium tracking-tight">
-            {t`Run of ${workflow}`}
-          </h1>
+          <h1 className="type-title">{t`Run of ${workflow}`}</h1>
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
             <RunResult queued={summary.queued} status={summary.status} />
             <span className="tabular-nums">

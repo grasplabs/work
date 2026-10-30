@@ -31,6 +31,7 @@ import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
+import type { StephenRequestsApi } from "./stephen-requests.ts";
 import type { StoresApi } from "./stores.ts";
 import type { ScreenSubmissionsApi } from "./submissions.ts";
 import type { UploadsApi } from "./uploads.ts";
@@ -186,6 +187,11 @@ export interface SessionApi {
    * its own admins (never Grasp staff) change them.
    */
   readonly orgSettings: OrgSettingsApi;
+  /**
+   * Stephen's requests outside Grasp: the report, what needs fixing, the
+   * weekly summary and his week. Owners and admins only.
+   */
+  readonly stephenRequests: StephenRequestsApi;
   /** The audit log: search, export and chain verification. Admins only. */
   readonly audit: AuditApi;
   /**
