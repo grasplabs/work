@@ -330,10 +330,15 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async runTrace(id: string, runId: string): Promise<WorkflowRunTrace> {
+  async runTrace(
+    id: string,
+    runId: string,
+    options?: unknown
+  ): Promise<WorkflowRunTrace> {
     return await withPerson(
       this.#check,
-      async (person) => await resourceRunTrace(this.#env, person, id, runId)
+      async (person) =>
+        await resourceRunTrace(this.#env, person, id, runId, options)
     );
   }
 
