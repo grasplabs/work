@@ -16,15 +16,18 @@ import { Command as CommandPrimitive } from "cmdk";
 import { SearchIcon, CheckIcon } from "lucide-react";
 import * as React from "react";
 
+/** A command menu. `flush` fills a window of its own to its edges, so its lines run from side to side. */
 function Command({
   className,
+  flush = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive>) {
+}: React.ComponentProps<typeof CommandPrimitive> & { flush?: boolean }) {
   return (
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "bg-popover text-popover-foreground flex size-full flex-col overflow-hidden rounded-xl! p-1",
+        "bg-popover text-popover-foreground flex size-full flex-col overflow-hidden rounded-xl!",
+        flush ? "p-0" : "p-1",
         className
       )}
       {...props}
@@ -65,13 +68,32 @@ function CommandDialog({
   );
 }
 
+/**
+ * The search on top of a command list. `lg` is the one of a window of its
+ * own: the whole width, taller, with a line under it instead of a box
+ * around it.
+ */
 function CommandInput({
   className,
+  size = "default",
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: Omit<React.ComponentProps<typeof CommandPrimitive.Input>, "size"> & {
+  size?: "default" | "lg";
+}) {
   return (
-    <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="border-input/30 bg-input/30 h-8! rounded-lg! shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+    <div
+      data-slot="command-input-wrapper"
+      data-size={size}
+      className="p-1 pb-0 data-[size=lg]:border-b data-[size=lg]:p-0"
+    >
+      <InputGroup
+        className={cn(
+          "rounded-lg! shadow-none! *:data-[slot=input-group-addon]:pl-2!",
+          size === "lg"
+            ? "h-13! rounded-none! border-0! bg-transparent! px-2 text-base *:data-[slot=input-group-addon]:pl-3!"
+            : "border-input/30 bg-input/30 h-8!"
+        )}
+      >
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(
@@ -88,15 +110,22 @@ function CommandInput({
   );
 }
 
+/**
+ * The list of a command menu. `fill` takes the height its place has, with
+ * room around its rows, for a list beside something else in a window of
+ * its own.
+ */
 function CommandList({
   className,
+  fill = false,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.List>) {
+}: React.ComponentProps<typeof CommandPrimitive.List> & { fill?: boolean }) {
   return (
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        "no-scrollbar scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        fill ? "h-full max-h-none p-2" : "max-h-72",
         className
       )}
       {...props}
@@ -146,11 +175,16 @@ function CommandSeparator({
   );
 }
 
+/**
+ * One choice in a command list. `check` marks a chosen one with a tick on
+ * the right; a row that lays out its own lines leaves it out.
+ */
 function CommandItem({
   className,
   children,
+  check = true,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Item>) {
+}: React.ComponentProps<typeof CommandPrimitive.Item> & { check?: boolean }) {
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
@@ -161,7 +195,9 @@ function CommandItem({
       {...props}
     >
       {children}
-      <CheckIcon className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+      {check ? (
+        <CheckIcon className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+      ) : null}
     </CommandPrimitive.Item>
   );
 }
