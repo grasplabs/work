@@ -1,10 +1,4 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import {
-  createRootRoute,
-  HeadContent,
-  Link,
-  Scripts,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 // Light or dark as the platform has it: the web's own script, the one
@@ -45,17 +39,6 @@ const Frame = () => {
   return <AdminFrame admins={admins} platform={platform} />;
 };
 
-/** A page there isn't, in the admin's frame. */
-const NotFound = () => (
-  <main className="flex flex-col gap-4 p-6">
-    <PageHeaderTitle>Not found</PageHeaderTitle>
-    <p className="text-sm">There&apos;s no such page.</p>
-    <Link className="text-sm underline underline-offset-4" to="/">
-      Back to the admin
-    </Link>
-  </main>
-);
-
 /**
  * Grasp's admin, in its own frame (src/admin/frame.tsx): the one place
  * staff manage everything, served from the root of its hostname. For
@@ -86,5 +69,4 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
   component: Frame,
   errorComponent: FrameFailure,
-  notFoundComponent: NotFound,
 });

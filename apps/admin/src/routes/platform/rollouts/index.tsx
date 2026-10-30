@@ -19,8 +19,8 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
-import { Panel } from "../../../admin/panel.tsx";
 import {
   PlatformNav,
   platformCrumb,
@@ -30,6 +30,7 @@ import {
 } from "../../../admin/platform-nav.tsx";
 import { ringWords } from "../../../admin/platform-parts.tsx";
 import { Quiet } from "../../../admin/release-parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { releaseName } from "../../../releases/version.ts";
 import { fetchRollouts, startRolloutFn } from "../../../rollout/functions.ts";
@@ -265,7 +266,7 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
 
 /** Every rollout, the latest first, each opening its own page. */
 const EveryRollout = ({ rollouts }: { rollouts: RolloutSummary[] }) => (
-  <Panel
+  <Section
     description="The latest first. A rollout opens its own page, where it is approved, paused, cancelled or rolled back."
     title="Every rollout"
   >
@@ -341,7 +342,7 @@ const EveryRollout = ({ rollouts }: { rollouts: RolloutSummary[] }) => (
         </Table>
       </div>
     )}
-  </Panel>
+  </Section>
 );
 
 /**
@@ -360,12 +361,12 @@ const RolloutsPage = () => {
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
         <div className="scroll-mt-20" id={startRolloutId}>
-          <Panel
+          <Section
             description="A release, or the shared secrets alone, and whom it reaches after Alpha."
             title="Start a rollout"
           >
             <StartRollout options={options} />
-          </Panel>
+          </Section>
         </div>
         <EveryRollout rollouts={rollouts} />
       </div>
@@ -376,4 +377,5 @@ const RolloutsPage = () => {
 export const Route = createFileRoute("/platform/rollouts/")({
   loader: async () => await fetchRollouts(),
   component: RolloutsPage,
+  pendingComponent: PageLoading,
 });

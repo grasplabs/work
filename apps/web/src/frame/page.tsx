@@ -1,4 +1,10 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderContent,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
 import type { ReactNode } from "react";
 
 // A page's body and heading, as the prototype has them
@@ -38,21 +44,20 @@ export const PageHeading = ({
   meta?: ReactNode;
   action?: ReactNode;
 }) => (
-  <div className="flex flex-wrap items-end gap-3">
-    {/* A width of its own, so actions beside it go to the next line rather than squeezing it. */}
-    <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+  <PageHeader>
+    <PageHeaderContent>
       <PageHeaderTitle>{title}</PageHeaderTitle>
       {description === undefined ? null : (
-        <p className="text-muted-foreground text-sm">{description}</p>
+        <PageHeaderDescription>{description}</PageHeaderDescription>
       )}
       {meta === undefined ? null : (
         <div className="mt-1 flex flex-wrap gap-1.5">{meta}</div>
       )}
-    </div>
+    </PageHeaderContent>
     {action === undefined ? null : (
-      <div className="ml-auto flex items-center gap-2">{action}</div>
+      <PageHeaderActions>{action}</PageHeaderActions>
     )}
-  </div>
+  </PageHeader>
 );
 
 /** A section title inside a page. */

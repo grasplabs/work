@@ -4,17 +4,16 @@
  * it stands, what to bring up with it, what Grasp doesn't know yet, and
  * once it is open where Grasp could do more. The same brief the
  * prototype's chat and MCP give (`briefOf`).
- *
- * Not here yet, as the prototype has it: its button to prepare the call
- * with Grasp's chat, which the admin doesn't have.
  */
 import { briefOf } from "@grasp-os/shared/admin/admin-brief";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { buttonVariants } from "@grasp-os/ui/components/button";
+import { PanelBody } from "@grasp-os/ui/components/panel";
 import { Link } from "@tanstack/react-router";
 import { SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Section } from "./section.tsx";
 import { needSection, sectionTo } from "./sections.ts";
 import { knowledgeWords, needLine, stageWords, whole } from "./words.ts";
 
@@ -57,20 +56,9 @@ export const OrgBrief = ({
   const { percent, questions } = brief;
   const where = view.open ? "Open since the go" : stageWords[brief.stage];
   return (
-    <section
-      aria-labelledby="before-the-next-call"
-      className="bg-card overflow-hidden rounded-xl border"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="font-medium" id="before-the-next-call">
-            Before the next call
-          </h2>
-          <p className="text-muted-foreground">
-            {where}. {percent}% of what Grasp needs is known.
-          </p>
-        </div>
-        {/* Opens Ask Grasp, which prepares the call at once. */}
+    <Section
+      action={
+        // Opens Ask Grasp, which prepares the call at once.
         <Link
           className={buttonVariants({ size: "sm", variant: "outline" })}
           search={{ about: clientId }}
@@ -79,8 +67,11 @@ export const OrgBrief = ({
           <SparklesIcon data-icon="inline-start" />
           Prepare the call with Grasp
         </Link>
-      </div>
-      <div className="flex flex-col gap-4 border-t px-5 py-4">
+      }
+      description={`${where}. ${percent}% of what Grasp needs is known.`}
+      title="Before the next call"
+    >
+      <PanelBody>
         {brief.bringUp.length > 0 ? (
           <BriefList title="Bring up">
             {brief.bringUp.map((need, index) => (
@@ -136,7 +127,7 @@ export const OrgBrief = ({
         brief.opportunities.length === 0 ? (
           <p className="text-muted-foreground">Nothing to bring up.</p>
         ) : null}
-      </div>
-    </section>
+      </PanelBody>
+    </Section>
   );
 };

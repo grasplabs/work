@@ -1,17 +1,16 @@
 // Layout primitive, not in shadcn: a page's title, what it is for and its
-// actions. The actions move under the title on a phone.
+// actions, as the prototype's components/page.tsx lays them out. The title
+// keeps a width of its own, so actions beside it go to the next line rather
+// than squeezing it.
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@grasp-os/ui/lib/utils";
 
-function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
+function PageHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <header
+    <div
       data-slot="page-header"
-      className={cn(
-        "flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between",
-        className
-      )}
+      className={cn("flex min-w-0 flex-wrap items-end gap-3", className)}
       {...props}
     />
   );
@@ -24,7 +23,7 @@ function PageHeaderContent({
   return (
     <div
       data-slot="page-header-content"
-      className={cn("flex min-w-0 flex-col gap-1", className)}
+      className={cn("flex min-w-0 flex-1 basis-64 flex-col gap-1", className)}
       {...props}
     />
   );
@@ -78,7 +77,7 @@ function PageHeaderActions({
   return (
     <div
       data-slot="page-header-actions"
-      className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
+      className={cn("ml-auto flex items-center gap-2", className)}
       {...props}
     />
   );

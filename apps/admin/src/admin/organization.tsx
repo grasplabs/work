@@ -26,8 +26,10 @@ import {
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
   Select,
   SelectContent,
@@ -51,12 +53,18 @@ import {
   useRouter,
   rootRouteId,
 } from "@tanstack/react-router";
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
+import {
+  HourglassIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  RotateCcwIcon,
+  UnplugIcon,
+} from "lucide-react";
 import { createContext, Fragment, use, useState } from "react";
 import type { ComponentProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
-import { AdminHeader, PageHeading } from "./page.tsx";
+import { AdminHeader, PageBody, PageHeading } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
   needSection,
@@ -504,8 +512,15 @@ const UnreadSection = ({
   return (
     <Empty data-unread={admin.error}>
       <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {unset ? <HourglassIcon /> : <UnplugIcon />}
+        </EmptyMedia>
         <EmptyTitle>
-          {unset ? `${name} isn’t set up yet` : `${name}’s Grasp didn’t answer`}
+          <h2>
+            {unset
+              ? `${name} isn’t set up yet`
+              : `${name}’s Grasp didn’t answer`}
+          </h2>
         </EmptyTitle>
         <EmptyDescription>
           {section === "overview"
@@ -513,27 +528,29 @@ const UnreadSection = ({
             : unreadWhy(admin)}
         </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent className="flex-row justify-center">
-        {unset ? null : (
-          <Button
-            onClick={() => {
-              void router.invalidate({
-                filter: (match) => match.routeId === rootRouteId,
-              });
-            }}
-            size="sm"
+      <EmptyContent>
+        <div className="flex flex-wrap justify-center gap-2">
+          {unset ? null : (
+            <Button
+              onClick={() => {
+                void router.invalidate({
+                  filter: (match) => match.routeId === rootRouteId,
+                });
+              }}
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              Try again
+            </Button>
+          )}
+          {/* A link that looks like a button: it is announced as the link it is. */}
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            params={{ clientId }}
+            to={sectionTo.setup}
           >
-            Try again
-          </Button>
-        )}
-        {/* A link that looks like a button: it is announced as the link it is. */}
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          params={{ clientId }}
-          to={sectionTo.setup}
-        >
-          {unset ? "See its Setup progress" : "Its Setup"}
-        </Link>
+            {unset ? "See its Setup progress" : "Its Setup"}
+          </Link>
+        </div>
       </EmptyContent>
     </Empty>
   );
@@ -579,27 +596,29 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
       <div className="flex min-h-0 flex-1 text-sm">
         <OrgColumn clientId={clientId} name={name} view={view} />
         <div className="relative min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
+          <PageBody>
             <SectionSelect clientId={clientId} section={section} />
-            <PageHeading
-              description={description}
-              title={section === "overview" ? name : title}
-            >
-              {admin.state === "answered" ? (
-                <SourceNote
-                  origins={
-                    originsOf(
-                      admin.snapshot,
-                      admin.billing.state === "read",
-                      admin.proposal.state === "read",
-                      admin.crm.state === "read"
-                    )[section]
-                  }
-                />
-              ) : null}
-            </PageHeading>
+            <PageHeader>
+              <PageHeading
+                description={description}
+                title={section === "overview" ? name : title}
+              >
+                {admin.state === "answered" ? (
+                  <SourceNote
+                    origins={
+                      originsOf(
+                        admin.snapshot,
+                        admin.billing.state === "read",
+                        admin.proposal.state === "read",
+                        admin.crm.state === "read"
+                      )[section]
+                    }
+                  />
+                ) : null}
+              </PageHeading>
+            </PageHeader>
             {shown}
-          </div>
+          </PageBody>
         </div>
       </div>
     </>
@@ -608,7 +627,9 @@ export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
 
 /** What a section shows until its content is ported: a line saying so. */
 export const SectionToCome = () => (
-  <p className="text-muted-foreground border-border rounded-xl border border-dashed px-5 py-8 text-center">
-    This section isn’t in the admin yet.
-  </p>
+  <Empty>
+    <EmptyHeader>
+      <EmptyDescription>This section isn’t in the admin yet.</EmptyDescription>
+    </EmptyHeader>
+  </Empty>
 );
