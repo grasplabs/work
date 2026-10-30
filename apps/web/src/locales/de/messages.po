@@ -9195,6 +9195,10 @@ msgstr "Jetzt nicht"
 msgid "Not offered"
 msgstr "Nicht angeboten"
 
+#: src/settings/sign-in-settings.tsx
+msgid "Not offered: its secret isn’t set"
+msgstr "Nicht angeboten: Sein Secret ist nicht gesetzt"
+
 #: src/landscape/overview-tab.tsx
 msgid "Not on file yet."
 msgstr "Noch nicht hinterlegt."
@@ -9596,6 +9600,10 @@ msgstr "beim Ereignis {event}, gefiltert"
 msgid "On the schedule set by {param} ({timeZone})"
 msgstr "Nach dem Zeitplan aus {param} ({timeZone})"
 
+#: src/settings/sign-in-settings.tsx
+msgid "On the sign-in page"
+msgstr "Auf der Anmeldeseite"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "Unterwegs"
@@ -9654,6 +9662,14 @@ msgstr "Ein echter Fall"
 msgctxt "Pulse status"
 msgid "Online"
 msgstr "Online"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the Google Workspace {hostedDomain}."
+msgstr "Nur Konten des Google Workspace {hostedDomain}."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the tenant {tenantId}."
+msgstr "Nur Konten des Tenants {tenantId}."
 
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
@@ -12083,6 +12099,7 @@ msgstr "Überall abmelden"
 
 #: src/brain/brain-atlas.ts
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Anmeldung"
 
@@ -12093,6 +12110,10 @@ msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder frage
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Sign-in domains"
 msgstr "Anmelde-Domains"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
+msgstr "Die Anmeldung ist für diesen Workspace noch nicht eingerichtet, daher kann sich niemand anmelden. Grasp richtet sie ein."
 
 #: src/brain/brain-atlas.ts
 msgid "Sign-in shows the applications people log in to."
@@ -13071,6 +13092,10 @@ msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
 msgstr "Das Konto, mit dem Sie sich angemeldet haben."
+
+#: src/settings/sign-in-settings.tsx
+msgid "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
+msgstr "Die Konten, mit denen sich Personen bei Grasp anmelden. Grasp richtet das für Ihren Workspace ein: Bitten Sie Grasp, es zu ändern."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
