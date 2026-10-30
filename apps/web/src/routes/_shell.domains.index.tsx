@@ -1,4 +1,8 @@
-import type { AppContents, AppStatus } from "@grasp-os/shared/apps";
+import type {
+  AppContents,
+  AppOverview,
+  AppStatus,
+} from "@grasp-os/shared/apps";
 import { canBuild } from "@grasp-os/shared/roles";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Card, CardContent, CardHeader } from "@grasp-os/ui/components/card";
@@ -24,14 +28,13 @@ import { useState } from "react";
 
 import { statusLabel } from "../engines/app-status.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
-import { listDomains } from "../engines/listed-domains.ts";
-import type { ListedDomain } from "../engines/listed-domains.ts";
 import { NewDomainDialog } from "../engines/new-domain-dialog.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { processNames } from "../workflows/business-process.tsx";
+import { noneIfRefused } from "../workflows/reads.ts";
 
 // Domains, as in the prototype (`routes/domains/index.tsx`): the domains
 // (core's Apps) the person can open, as core lists them, each a card with
@@ -44,14 +47,7 @@ import { processNames } from "../workflows/business-process.tsx";
 // many each holds.
 
 /** What a domain's current version holds: its workflows and apps, or that it has no version yet. */
-const Counts = ({ contents }: { contents: AppContents | undefined }) => {
-  if (contents === undefined) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>Its contents couldn&apos;t be read.</Trans>
-      </span>
-    );
-  }
+const Counts = ({ contents }: { contents: AppContents }) => {
   const workflows = contents.workflows.length;
   const apps = contents.screens.length;
   const { version } = contents;
@@ -90,7 +86,7 @@ const Counts = ({ contents }: { contents: AppContents | undefined }) => {
  * process it serves over its own name, what it is for, then what it holds.
  * The whole card is its link.
  */
-const EngineCard = ({ app, contents }: ListedDomain) => {
+const EngineCard = ({ app, contents }: AppOverview) => {
   const { i18n } = useLingui();
   return (
     <li className="relative">
@@ -192,7 +188,7 @@ const statuses = [
 ] as const satisfies readonly AppStatus[];
 
 /** The domains as cards, in a grid. */
-const EngineGrid = ({ listed }: { listed: ListedDomain[] }) => {
+const EngineGrid = ({ listed }: { listed: AppOverview[] }) => {
   const { t } = useLingui();
   return (
     <ul
@@ -211,7 +207,7 @@ const EngineGrid = ({ listed }: { listed: ListedDomain[] }) => {
  * builders see those. It opens where there is something to see: the
  * published ones, or else the drafts.
  */
-const ByStatus = ({ listed }: { listed: ListedDomain[] }) => {
+const ByStatus = ({ listed }: { listed: AppOverview[] }) => {
   const [status, setStatus] = useState<AppStatus>(() =>
     listed.some(({ app }) => app.status === "published") ? "published" : "draft"
   );
@@ -311,5 +307,8 @@ export const Route = createFileRoute("/_shell/domains/")({
   pendingComponent: PageLoading,
   component: Engines,
   loader: async ({ context: { core } }) =>
-    await loadFromCore(core, listDomains),
+    await loadFromCore(
+      core,
+      async (session) => await noneIfRefused(session.apps.overview())
+    ),
 });

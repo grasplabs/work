@@ -2,6 +2,7 @@ import type {
   App,
   AppChanges,
   AppContents,
+  AppOverview,
   AppsApi,
   CurrentExports,
   ListedScreen,
@@ -24,6 +25,7 @@ import {
   appExports,
   createApp,
   getApp,
+  listAppOverviews,
   listApps,
   listScreens,
 } from "./apps.ts";
@@ -103,6 +105,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await appContents(this.#env, by, app)
+    );
+  }
+
+  async overview(): Promise<AppOverview[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listAppOverviews(this.#env, by)
     );
   }
 

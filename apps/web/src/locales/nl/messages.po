@@ -8159,10 +8159,6 @@ msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van 
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Het budget kan niet worden gelezen, dus de koppeling bedient niets."
 
-#: src/routes/_shell.domains.index.tsx
-msgid "Its contents couldn't be read."
-msgstr "De inhoud kon niet worden gelezen."
-
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "De huidige versie heeft geen parameters."

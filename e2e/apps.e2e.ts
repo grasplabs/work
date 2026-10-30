@@ -396,58 +396,6 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   }
 });
 
-test("an engine whose contents can't be read, or never come, keeps its card, and the others theirs", async ({
-  pageOf,
-}) => {
-  const brokenName = `Broken ${crypto.randomUUID()}`;
-  // Released, so published: on the Published tab with the others, as a
-  // draft is on a tab of its own.
-  const broken = await newApp(builder, brokenName);
-  const page = await pageOf(builder);
-  // The page asks core for this engine's contents as for an App core
-  // doesn't have, which core refuses.
-  await page.routeWebSocket("**/rpc", (socket) => {
-    const toCore = socket.connectToServer();
-    socket.onMessage((message) => {
-      const text = String(message);
-      toCore.send(
-        text.includes('"contents"') ? text.replaceAll(broken, "missing") : text
-      );
-    });
-  });
-  await page.goto("/domains");
-  const cards = page
-    .getByRole("list", { name: "Domains" })
-    .getByRole("listitem");
-
-  await expect(cards.filter({ hasText: brokenName })).toContainText(
-    "Its contents couldn't be read."
-  );
-  await expect(cards.filter({ hasText: name })).toContainText("1 app");
-  await expect(page.getByRole("alert")).toHaveCount(0);
-
-  // A read that never comes costs only its own card too, not the page: the
-  // list shows, where a page waiting on every read would say core can't
-  // be reached.
-  const hangingName = `Hanging ${crypto.randomUUID()}`;
-  const hanging = await newApp(builder, hangingName);
-  const waiting = await pageOf(builder);
-  const gate = await callGate(waiting, hanging);
-  gate.hold();
-  await waiting.goto("/domains");
-  const waitingCards = waiting
-    .getByRole("list", { name: "Domains" })
-    .getByRole("listitem");
-  await expect(waitingCards.filter({ hasText: hangingName })).toContainText(
-    "Its contents couldn't be read.",
-    // The card waits out its read's limit, well under this.
-    { timeout: 10_000 }
-  );
-  await expect(waitingCards.filter({ hasText: name })).toContainText("1 app");
-  await expect(waiting.getByRole("alert")).toHaveCount(0);
-  gate.release();
-});
-
 test("a runs read that never comes leaves the engine usable, and says so in its tab", async ({
   pageOf,
 }) => {

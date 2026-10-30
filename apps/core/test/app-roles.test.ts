@@ -168,11 +168,19 @@ const asUser = {
 
 /** Whether `person` finds `app` among theirs. */
 const lists = async ({ api }: Person, app: string): Promise<boolean> => {
-  const [apps, screens] = await Promise.all([
+  const [apps, screens, overview] = await Promise.all([
     api.apps.list(),
     api.apps.screens(),
+    api.apps.overview(),
   ]);
   const listed = apps.some(({ id }) => id === app);
+  // The overview lists the same Apps, in the same roles, each with what
+  // its contents say.
+  expect(overview.map(({ app: each }) => each)).toStrictEqual(apps);
+  const contents = overview.find(({ app: each }) => each.id === app)?.contents;
+  expect(contents).toStrictEqual(
+    listed ? await api.apps.contents(app) : undefined
+  );
   // Its screens are listed exactly when it is: someone who can't open the
   // App never learns its screens, nor that it exists, from them.
   expect(
