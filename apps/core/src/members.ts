@@ -61,6 +61,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { isErasedEmail } from "./erased-people.ts";
+import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
   erasurePreview,
@@ -211,6 +212,15 @@ export const membersOf = async (env: Pick<Env, "DB">): Promise<Member[]> => {
 const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
   requireMemberAdmin(by);
   return await membersOf(env);
+};
+
+/** The organization's teams with their members, for admins only. */
+const listTeams = async (
+  env: Env,
+  by: Identity
+): ReturnType<MembersApi["teams"]> => {
+  requireMemberAdmin(by);
+  return await teamsWithMembers(env);
 };
 
 /**
@@ -835,6 +845,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await listMembers(this.#env, person)
+    );
+  }
+
+  async teams(): ReturnType<MembersApi["teams"]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listTeams(this.#env, person)
     );
   }
 
