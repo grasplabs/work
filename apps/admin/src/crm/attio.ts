@@ -11,10 +11,7 @@
  * Store on the server, sent only to Attio's API as its bearer token, and
  * never logged, kept in D1 or sent to the browser. It should be made with
  * read scopes only, so Attio itself refuses a write. The admin sends
- * only GETs, and one POST that reads: Attio lists records only through
- * `POST /objects/{object}/records/query`, and the admin calls it for
- * deals alone (`dealsQueryPath`), with a body that sets only a limit.
- * What Attio answers is untrusted: it is checked against what
+ * only GETs. What Attio answers is untrusted: it is checked against what
  * the admin reads of it, and a record other than the one asked for is
  * refused, as is a meeting or note on another company, so one company is
  * never shown another's people, deals or calls.
@@ -39,20 +36,14 @@ import { eachLimited } from "../live-reads.ts";
 export const attioApi = "https://api.attio.com/v2";
 
 /**
- * How many of a company's people, deals and calls are read, and how many
- * of the workspace's deals are looked through for won ones: enough for a
+ * How many of a company's people, deals and calls are read: enough for a
  * page, never a whole CRM.
  */
 export const attioLimits = {
   people: 25,
   deals: 10,
   calls: 20,
-  scanned: 500,
-  won: 20,
 } as const;
-
-/** The one listing the admin reads: the workspace's deals. */
-export const dealsQueryPath = "/objects/deals/records/query";
 
 /**
  * Where a deal stands, as the prototype's CRM has it (grasplabs/prototype
@@ -206,8 +197,6 @@ const notesSchema = listOf(
     parent_record_id: z.string(),
   })
 );
-
-const dealsSchema = listOf(dealSchema.shape.data);
 
 const membersSchema = z.object({
   data: z.array(
@@ -657,91 +646,6 @@ export const readAttioCompany = async (
           ];
         }),
       },
-    };
-  } catch (error) {
-    if (error instanceof AttioError) {
-      return { error: error.code };
-    }
-    throw error;
-  }
-};
-
-/** A deal Grasp won, with its company: where a new organization can start from. */
-export interface WonDeal {
-  dealId: string;
-  /** The deal, as it is called in Attio. */
-  title: string;
-  /** Its stage's own title: "Won 🎉". */
-  stage: string;
-  /** The day it came to that stage, when Attio says. */
-  on: string | null;
-  companyId: string;
-  /** The company's name in Attio. */
-  name: string;
-  domains: string[];
-}
-
-/**
- * The deals Grasp won in Attio, the latest first, each with its company,
- * leaving out companies in `linked` (already a client). At most
- * `attioLimits.won`, from the `attioLimits.scanned` deals looked through.
- * Throws only when a request itself fails or is stopped.
- */
-export const readWonDeals = async (
-  read: Pick<AttioRead, "key" | "signal">,
-  linked: ReadonlySet<string>
-): Promise<{ deals: WonDeal[] } | { error: AttioReadError }> => {
-  try {
-    const parsed = dealsSchema.safeParse(
-      await get(read, dealsQueryPath, { limit: attioLimits.scanned })
-    );
-    if (!parsed.success) {
-      return { error: "invalid_answer" };
-    }
-    const won = parsed.data.data.flatMap((deal) => {
-      const [stage] = deal.values.stage;
-      const companyId = deal.values.associated_company.find(
-        (each) => each.target_object === "companies"
-      )?.target_record_id;
-      return stage === undefined ||
-        stageKind(stage.status.title) !== "won" ||
-        companyId === undefined ||
-        linked.has(companyId)
-        ? []
-        : [
-            {
-              dealId: deal.id.record_id,
-              title: deal.values.name[0]?.value ?? "",
-              stage: stage.status.title,
-              on: dayOf(stage.active_from),
-              companyId,
-            },
-          ];
-    });
-    const latest = won
-      .toSorted((one, other) => (other.on ?? "").localeCompare(one.on ?? ""))
-      .slice(0, attioLimits.won);
-    const companies = await eachLimited(
-      latest,
-      concurrency,
-      async (deal) =>
-        await record(read, "companies", deal.companyId, companySchema)
-    );
-    return {
-      deals: latest.flatMap((deal, index) => {
-        const company = companies[index];
-        if (company === null || company === undefined) {
-          return [];
-        }
-        const { values: about } = company.data;
-        return [
-          {
-            ...deal,
-            name: about.name[0]?.value ?? deal.title,
-            domains: about.domains.map((each) => each.domain),
-          },
-        ];
-      }),
     };
   } catch (error) {
     if (error instanceof AttioError) {

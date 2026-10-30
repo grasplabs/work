@@ -75,7 +75,7 @@ export const fakeAttio = (key: string) => {
     /** Whether the workspace has Attio's meetings to list; without, `/meetings` answers 404. */
     hasMeetings: true,
     requests: 0,
-    /** Requests that would change something: anything not a GET, but the deals' one reading query. */
+    /** Requests that would change something: anything not a GET. */
     writes: 0,
     /** Every path asked for. */
     paths,
@@ -103,10 +103,7 @@ export const fakeAttio = (key: string) => {
     const url = new URL(request.url);
     const { pathname, searchParams } = url;
     state.paths.push(pathname);
-    const query =
-      request.method === "POST" &&
-      pathname === "/v2/objects/deals/records/query";
-    if (request.method !== "GET" && !query) {
+    if (request.method !== "GET") {
       state.writes += 1;
     }
     if (request.headers.get("authorization") !== `Bearer ${key}`) {
@@ -114,13 +111,6 @@ export const fakeAttio = (key: string) => {
         { status_code: 401, type: "auth_error", code: "unauthorized" },
         { status: 401 }
       );
-    }
-    if (query) {
-      return Response.json({
-        data: [...state.records.deals].map(([id, values]) =>
-          recordOf("deals", id, values)
-        ),
-      });
     }
     if (request.method !== "GET") {
       return Response.json(

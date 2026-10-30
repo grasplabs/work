@@ -427,7 +427,7 @@ const Middle = ({
   }
   return (
     <text dominantBaseline="middle" textAnchor="middle" x={cx} y={cy}>
-      <tspan className="fill-foreground text-2xl font-medium" x={cx} y={cy - 6}>
+      <tspan className="fill-foreground type-figure" x={cx} y={cy - 6}>
         {amount}
       </tspan>
       <tspan className="fill-muted-foreground text-xs" x={cx} y={cy + 14}>

@@ -27,6 +27,7 @@ import {
 } from "@grasp-os/shared/stephen-requests";
 import type {
   MissingTool,
+  MonthBilled,
   Need,
   NeedKind,
   NeedStatus,
@@ -1178,6 +1179,30 @@ const packOf = (tool: string): string => {
   return pack;
 };
 
+/**
+ * The requests billed this month, counted in the database, and what the
+ * plan includes: one number for Settings › Billing, without the report.
+ */
+const billedOf = async (env: Env): Promise<MonthBilled> => {
+  const month = rangeSpan("month", await companyDay(env));
+  const [settings, counted] = await Promise.all([
+    readRequestSettings(env),
+    drizzle(env.DB)
+      .select({ billed: sql<number>`count(*)` })
+      .from(stephenRequests)
+      .where(
+        and(
+          gte(stephenRequests.day, month.from),
+          lte(stephenRequests.day, month.to),
+          // Billed: what he finished (`requestsReport`'s billed).
+          eq(stephenRequests.outcome, "done")
+        )
+      )
+      .get(),
+  ]);
+  return { billed: counted?.billed ?? 0, included: settings.requestsIncluded };
+};
+
 /** Stephen's week, for the card on top of Settings › Stephen. */
 const weekOf = async (env: Env): Promise<StephenWeek> => {
   const today = await companyDay(env);
@@ -1331,6 +1356,13 @@ export class StephenRequestsRpc
   async setSummary(via: SummaryVia | null): Promise<void> {
     await withPerson(this.#check, async (by) => {
       await setSummary(this.#env, by, via);
+    });
+  }
+
+  async billed(): Promise<MonthBilled> {
+    return await withPerson(this.#check, async (by) => {
+      requireReader(by);
+      return await billedOf(this.#env);
     });
   }
 
