@@ -31,7 +31,7 @@ jobs:
   static:
     name: static
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,7 +68,7 @@ jobs:
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     # The test step's 15 minutes, and room for the steps around it.
     timeout-minutes: 21
     strategy:
@@ -216,7 +216,7 @@ jobs:
     name: check
     needs: [static, release, test]
     if: always() && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 5
     steps:
       - run: |
@@ -260,7 +260,7 @@ jobs:
       # in a home it doesn't own. A host IPC namespace, so Chromium's shared
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
-    runs-on: ubuntu-latest
+    runs-on: boat
     # About 1 minute of setup and 2 for the stack to build and start, then
     # each part's tests.
     timeout-minutes: 20
@@ -350,7 +350,7 @@ jobs:
     name: e2e
     needs: [e2e]
     if: always() && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 5
     steps:
       - run: |
@@ -372,7 +372,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -397,7 +397,7 @@ jobs:
   workerd:
     name: workerd
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -425,7 +425,7 @@ jobs:
   # for byte.
   release:
     name: release
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -470,7 +470,7 @@ jobs:
   conventions:
     name: conventions
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -495,7 +495,7 @@ jobs:
   stephen:
     name: stephen
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 5
     steps:
       - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
@@ -520,6 +520,8 @@ jobs:
     name: publish-release
     needs: release
     if: github.event_name == 'push'
+    # On GitHub's own runners, unlike the jobs above (boat.dev): it holds the
+    # staging 1Password token, and no secret leaves GitHub-hosted machines.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
