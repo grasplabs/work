@@ -1974,9 +1974,21 @@ msgstr "Eine Änderung wartet auf die Freigabe der Person, für die der Lauf han
 msgid "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
 msgstr "Eine Änderung wurde gesendet, aber ihre Antwort ging verloren: Sie wartet darauf, dass die Person, für die der Lauf handelt, sagt, ob sie geschehen ist"
 
+#: src/engines/app-access-requests.tsx
+msgid "A collection"
+msgstr "Eine Sammlung"
+
 #: src/knowledge/new-collection.tsx
 msgid "A collection holds documents Grasp and its agents may read."
 msgstr "Eine Sammlung enthält Dokumente, die Grasp und seine Agenten lesen dürfen."
+
+#: src/engines/app-access-requests.tsx
+msgid "A collection to read"
+msgstr "Eine Sammlung zum Lesen"
+
+#: src/engines/app-access-requests.tsx
+msgid "A connection"
+msgstr "Eine Verbindung"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -2330,6 +2342,10 @@ msgstr "Zugriffsverbindungen"
 msgctxt "rule condition"
 msgid "Access to company data"
 msgstr "Zugriff auf Unternehmensdaten"
+
+#: src/engines/app-access-requests.tsx
+msgid "Access waiting for an admin"
+msgstr "Zugriffe, die auf einen Admin warten"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3408,6 +3424,10 @@ msgstr "{name} dazuholen"
 msgid "Ask again"
 msgstr "Erneut fragen"
 
+#: src/engines/app-access-requests.tsx
+msgid "Ask an admin"
+msgstr "Einen Admin fragen"
+
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Ask an admin if you need to see what happened here."
 msgstr "Fragen Sie einen Admin, wenn Sie sehen müssen, was hier passiert ist."
@@ -3424,6 +3444,14 @@ msgstr "Fragen Sie alles zu dem, was das Gehirn weiß"
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
+
+#: src/engines/app-access-requests.tsx
+msgid "Ask for access"
+msgstr "Zugriff anfragen"
+
+#: src/engines/app-access-requests.tsx
+msgid "Ask for access for this domain"
+msgstr "Zugriff für diese Domäne anfragen"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
@@ -3477,6 +3505,7 @@ msgstr "Klären Sie vor der Freigabe mit dem Anbieter, wo Daten gespeichert und 
 msgid "Ask to go live with version {askable}"
 msgstr "Bitten, Version {askable} live zu schalten"
 
+#: src/engines/app-access-requests.tsx
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
 msgid "Asked"
@@ -3521,6 +3550,7 @@ msgstr "Angefragt von {requester} am {date}"
 msgid "Asked by a former member"
 msgstr "Angefragt von einem ehemaligen Mitglied"
 
+#: src/engines/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
 msgstr "Angefragt"
@@ -4035,6 +4065,7 @@ msgstr "Nicht lesbar"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-access-requests.tsx
 #: src/engines/app-status.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
@@ -4081,6 +4112,10 @@ msgstr "Kandidat"
 #: src/routes/_shell.settings.models.tsx
 msgid "Cap reached"
 msgstr "Obergrenze erreicht"
+
+#: src/engines/app-access-requests.tsx
+msgid "Capital letters, digits and underscores, starting with a letter, such as CRM."
+msgstr "Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben, etwa CRM."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Caps"
@@ -4451,6 +4486,10 @@ msgstr "Aus Google Drive auswählen"
 msgid "Choose from SharePoint or OneDrive"
 msgstr "Aus SharePoint oder OneDrive auswählen"
 
+#: src/engines/app-access-requests.tsx
+msgid "Choose one"
+msgstr "Eine auswählen"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Choose someone"
 msgstr "Person auswählen"
@@ -4514,6 +4553,7 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/app-access-requests.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -4596,6 +4636,7 @@ msgstr "Code-Schritt"
 msgid "colleagues talked"
 msgstr "Kolleginnen und Kollegen gesprochen"
 
+#: src/engines/app-access-requests.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
@@ -4876,6 +4917,7 @@ msgstr "Zum Verbinden braucht Ihre Organisation eine eigene Anmelde-App, die Gra
 msgid "Connecting your Microsoft 365"
 msgstr "Ihr Microsoft 365 wird verbunden"
 
+#: src/engines/app-access-requests.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -9279,6 +9321,10 @@ msgctxt "the name of a policy rule"
 msgid "Name"
 msgstr "Name"
 
+#: src/engines/app-access-requests.tsx
+msgid "Name in the app's code"
+msgstr "Name im Code der App"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Name eines neuen Workflows"
@@ -10691,6 +10737,10 @@ msgstr "Noch nichts ausgegeben."
 #: src/workflows/triggers.tsx
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Nichts startet ihn von selbst: Er läuft, wenn jemand ihn startet."
+
+#: src/engines/app-access-requests.tsx
+msgid "Nothing this domain asked for is waiting."
+msgstr "Nichts, was diese Domäne angefragt hat, wartet noch."
 
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
@@ -15546,6 +15596,10 @@ msgstr "die Erinnerung"
 msgid "The report as it stands today"
 msgstr "Der Bericht, wie er heute steht"
 
+#: src/engines/app-access-requests.tsx
+msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
+msgstr "Die Anfrage erlaubt nichts, bis ein Admin sie erteilt: Admins sehen, was die App anfragt, und entscheiden."
+
 #: src/screens/screen-files.ts
 #: src/screens/screen-links.ts
 msgid "The request failed."
@@ -16309,6 +16363,7 @@ msgid "to"
 msgstr "bis"
 
 #: src/activity/audit-log.tsx
+#: src/engines/app-access-requests.tsx
 msgid "To"
 msgstr "Bis"
 
@@ -16798,6 +16853,10 @@ msgstr "Andere Liste verwenden"
 #: src/onboarding/connect-steps.tsx
 msgid "Use another platform"
 msgstr "Andere Plattform wählen"
+
+#: src/engines/app-access-requests.tsx
+msgid "Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself."
+msgstr "Verwenden Sie Großbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben, und keinen Namen, den die Plattform selbst verwendet."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Use the chat, Knowledge and the apps shared with them"
@@ -17497,6 +17556,10 @@ msgstr "Woran sie gebunden ist, kann sie nicht mehr bedienen: Die Berechtigung w
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Woran sie gebunden ist, hat sich seit der Genehmigung der Bindung geändert. Binde sie erneut, sobald du geprüft hast, dass es noch passt."
 
+#: src/engines/app-access-requests.tsx
+msgid "What it needs"
+msgstr "Was sie braucht"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Worauf es sich stützt"
@@ -17609,6 +17672,10 @@ msgstr "Was Stephen auslässt"
 #: src/routes/_shell.settings.billing.tsx
 msgid "What Stripe emails to the billing email."
 msgstr "Was Stripe an die Rechnungs-E-Mail-Adresse sendet."
+
+#: src/engines/app-access-requests.tsx
+msgid "What the app may do with it"
+msgstr "Was die App damit tun darf"
 
 #: src/brain/brain-sections.ts
 msgid "What the board wants from the sprint: its goals and the rules of the road."
