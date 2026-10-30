@@ -134,7 +134,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("asks who an organization is, its sign-in and its ring on adding it, and no account to adopt or release", async () => {
+  it("asks who an organization is, its sign-in, its ring and where it runs on adding it, and no account to adopt or release", async () => {
     const { status, html } = await page("/new-organization");
 
     expect({
@@ -148,16 +148,24 @@ describe("the company pages, in the admin", () => {
         'name="domains"',
         'name="admins"',
       ].every((field) => html.includes(field)),
+      // Grasp Cloud with its data in the EU unless staff choose otherwise.
+      hosting: [
+        'id="org-hosting"',
+        "Grasp Cloud",
+        "On its own premises",
+        "Keep its data in the EU",
+      ].every((text) => html.includes(text)),
     }).toStrictEqual({
       status: 200,
       form: true,
       account: false,
       release: false,
       signIn: true,
+      hosting: true,
     });
   });
 
-  it("shows a company just added its Hosting, to place and provision on an imported release", async () => {
+  it("shows a company just added its Hosting read-only, with nothing to choose: Grasp places and provisions it by itself", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
@@ -168,12 +176,14 @@ describe("the company pages, in the admin", () => {
       status,
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
+      where: hosting.includes("Grasp Cloud, data kept in the EU"),
       account: html.includes("Account id"),
       hostname: html.includes(`${client.id}.grasp.test`),
     }).toStrictEqual({
       status: 200,
-      place: true,
-      release: true,
+      place: false,
+      release: false,
+      where: true,
       account: false,
       hostname: true,
     });
@@ -198,9 +208,9 @@ describe("the company pages, in the admin", () => {
     const { html } = await setupOf(client.id);
 
     expect({
-      stopped: html.includes("Setting it up stopped at its resources step"),
+      stopped: html.includes("Stopped after its resources step"),
       code: html.includes("probe_unanswered"),
-      resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
+      resume: sectionOf(html, "Hosting").includes("Retry now"),
     }).toStrictEqual({ stopped: true, code: true, resume: true });
   });
 

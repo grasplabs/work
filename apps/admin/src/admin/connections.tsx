@@ -328,8 +328,8 @@ export const WaitingOnConnectionsRows = ({
 
 /**
  * The apps the company asked Grasp to add, as Composio's catalog doesn't
- * have them: each with when it asked, and the way to its build on
- * Integrations to build, which is one for every company that asked.
+ * have them: each with when it asked, and the way to it on Apps asked
+ * for, which lists it once for every company that asked.
  */
 export const AskedOfGraspRows = ({
   asked,
@@ -346,7 +346,7 @@ export const AskedOfGraspRows = ({
           </span>
         </span>
         <Button
-          aria-label={`Asked of Grasp: open the build of ${app.name}`}
+          aria-label={`Asked of Grasp: open ${app.name} on Apps asked for`}
           nativeButton={false}
           render={
             <Link search={{ app: appKey(app.name) }} to="/integrations" />
