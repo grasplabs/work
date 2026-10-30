@@ -559,7 +559,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           kind: "interview",
           title: "Interview with Finance",
           date: finishedWeek,
-          who: "Head of finance",
+          // The lead's role alone would point at them: never sent.
           step: 2,
           interviewee: "stakeholder",
           teamIds: ["team-finance"],

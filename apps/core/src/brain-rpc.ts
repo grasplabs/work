@@ -24,6 +24,7 @@ import type {
 import type { CatalogSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 import { purgedMarker } from "@grasp-os/shared/knowledge";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -923,6 +924,25 @@ export const goalsFor = async (
   }));
 };
 
+/**
+ * `source` as the company may read who gave it: their role only where
+ * five or more in its team hold that role now, else no one, so it never
+ * points at one person. Every reader gets the same, so the floor holds
+ * here, not only where the web labels it (witness.ts).
+ */
+const witnessed = (teams: readonly Team[], source: Source): Source => {
+  const { who, ...rest } = source;
+  if (who === undefined) {
+    return source;
+  }
+  const team = teams.find(({ id }) => id === source.teamIds?.[0]);
+  const counts = team?.counts
+    .toSorted((a, b) => a.date.localeCompare(b.date))
+    .at(-1);
+  const holders = counts?.roles?.find(({ name }) => name === who)?.people ?? 0;
+  return holders >= minTeamShown ? source : rest;
+};
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -988,7 +1008,9 @@ export const readBrain = async (
     }),
     interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...records.sources, ...transcribed],
+    sources: [...sources, ...records.sources, ...transcribed].map((source) =>
+      witnessed(teams, source)
+    ),
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
