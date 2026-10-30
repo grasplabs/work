@@ -3702,6 +3702,7 @@ msgstr "Erwähnt in {source}"
 msgid "Can’t be read"
 msgstr "Nicht lesbar"
 
+#: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -4201,6 +4202,10 @@ msgctxt "shut every part of a workflow's overview"
 msgid "Close all"
 msgstr "Alle schließen"
 
+#: src/brain/gap-actions.tsx
+msgid "Close it"
+msgstr "Schließen"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Close it for the onboarding"
 msgstr "Für das Onboarding schließen"
@@ -4208,6 +4213,15 @@ msgstr "Für das Onboarding schließen"
 #: src/screens/app-panel.tsx
 msgid "Close panel"
 msgstr "Seitenleiste schließen"
+
+#: src/brain/gap-actions.tsx
+msgid "Close this question without an answer?"
+msgstr "Diese Frage ohne Antwort schließen?"
+
+#: src/brain/gap-actions.tsx
+#: src/chat/brain-questions.tsx
+msgid "Close without an answer"
+msgstr "Ohne Antwort schließen"
 
 #: src/onboarding/interview-words.ts
 msgctxt "where a link stands"
@@ -7361,6 +7375,10 @@ msgstr "Sie ist mit niemandem geteilt."
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "Sie weiß, wer welches Team leitet, damit ich zuerst mit den Teamleitungen sprechen kann. Wir verbinden sie gemeinsam mit Ihnen."
+
+#: src/brain/gap-actions.tsx
+msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
+msgstr "Sie verlässt die offenen Fragen, ohne Antwort, und niemand wird mehr danach gefragt. Sie lässt sich nicht wieder öffnen."
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -11367,6 +11385,18 @@ msgstr "Record-to-Report"
 msgid "Records checked: {scanned}. Filled in: {filled}."
 msgstr "Geprüfte Datensätze: {scanned}. Ausgefüllt: {filled}."
 
+#: src/brain/gap-actions.tsx
+msgid "Redact it"
+msgstr "Schwärzen"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact the answer"
+msgstr "Antwort schwärzen"
+
+#: src/brain/gap-actions.tsx
+msgid "Redact this answer?"
+msgstr "Diese Antwort schwärzen?"
+
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
 msgid "Redesign"
@@ -13875,6 +13905,10 @@ msgstr "Die Vereinbarung zwischen dem Unternehmen und Grasp über den Umgang mit
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "Die Antwort wurde am Limit des Modells abgeschnitten."
+
+#: src/brain/gap-actions.tsx
+msgid "The answer, and who gave it, are taken away for good. The question stays closed."
+msgstr "Die Antwort und wer sie gegeben hat, werden endgültig entfernt. Die Frage bleibt geschlossen."
 
 #: src/screens/screen-frame.tsx
 msgid "The app couldn't be loaded."
