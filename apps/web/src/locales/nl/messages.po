@@ -2820,6 +2820,10 @@ msgstr "Antwoorden vóór"
 msgid "Answer in the brain"
 msgstr "Beantwoorden in het brein"
 
+#: src/workflows/today-lanes.tsx
+msgid "Answer with a comment"
+msgstr "Antwoorden met een opmerking"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -3787,6 +3791,11 @@ msgstr "Niet leesbaar"
 #: src/settings/teams.tsx
 msgid "Cancel"
 msgstr "Annuleren"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "cancelled"
+msgstr "geannuleerd"
 
 #: src/workflows/runs.tsx
 msgid "Cancelled"
@@ -6034,6 +6043,11 @@ msgstr "Wordt uitgelezen"
 #: src/onboarding/interview-list.tsx
 msgid "Facts agreed"
 msgstr "Feiten akkoord"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "mislukt"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx

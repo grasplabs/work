@@ -17,14 +17,18 @@ import type {
 /**
  * What one run came to: it ran by itself (`done`), went to people
  * (`toPerson`), waits on the reader (`waits`), waits on someone else
- * (`waitsElsewhere`), or is going on (`running`).
+ * (`waitsElsewhere`), is going on (`running`), or ended without its
+ * result (`failed`, `cancelled`), whether or not people took part
+ * (the run's `went`).
  */
 export type LaneState =
   | "done"
   | "toPerson"
   | "waits"
   | "waitsElsewhere"
-  | "running";
+  | "running"
+  | "failed"
+  | "cancelled";
 
 /** One run on a lane. */
 export interface LaneRun {
@@ -38,6 +42,8 @@ export interface LaneRun {
   /** When it started, and ended, in milliseconds; `end` null while it goes on. */
   at: number;
   end: number | null;
+  /** When it began waiting on the reader, in milliseconds; null when it doesn't. */
+  waitsSince: number | null;
   state: LaneState;
   run: TodayRun;
 }
@@ -83,6 +89,9 @@ export const stateOf = (run: TodayRun): LaneState => {
   if (run.endedAt === null) {
     return "running";
   }
+  if (run.status === "failed" || run.status === "cancelled") {
+    return run.status;
+  }
   return run.went === "people" ? "toPerson" : "done";
 };
 
@@ -119,6 +128,7 @@ export const laneDay = (today: WorkflowsToday): LaneDay => {
         from: run.from,
         at: Date.parse(run.startedAt),
         end: run.endedAt === null ? null : Date.parse(run.endedAt),
+        waitsSince: run.waits === null ? null : Date.parse(run.waits.since),
         state: stateOf(run),
         run,
       }))
@@ -139,6 +149,29 @@ export const laneDay = (today: WorkflowsToday): LaneDay => {
     unseen: today.unseen,
   };
 };
+
+/**
+ * Of the page's read of the day and a later read of it, the one core
+ * served last (`now`): a page read again after an answer is not undone
+ * by an older refresh, nor a refresh by an older page read.
+ */
+export const laterDay = (
+  loaded: WorkflowsToday,
+  read?: WorkflowsToday
+): WorkflowsToday =>
+  read !== undefined && Date.parse(read.now) > Date.parse(loaded.now)
+    ? read
+    : loaded;
+
+/**
+ * The runs a lane shows where it is one line on a narrow page: its last
+ * `count`, and every earlier one that waits on the reader, who answers
+ * it from there; oldest first.
+ */
+export const listedRuns = (lane: Lane, count: number): LaneRun[] =>
+  lane.runs.filter(
+    ({ state }, index) => state === "waits" || index >= lane.runs.length - count
+  );
 
 /** Where a moment stands across the day, from 0 at its start to 1 at now. */
 export const placeOf = (
