@@ -75,7 +75,7 @@ export const initials = (name: string): string =>
  */
 const Who = ({ identity }: { identity: Identity }) => (
   <>
-    <Avatar>
+    <Avatar shape="square">
       <AvatarFallback aria-hidden="true">
         {initials(identity.name)}
       </AvatarFallback>
