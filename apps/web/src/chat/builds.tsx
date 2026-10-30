@@ -851,7 +851,7 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-3 text-sm">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-3 text-sm">
       <TriangleAlertIcon
         aria-hidden="true"
         className="text-status-attention size-4 flex-none"

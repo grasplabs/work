@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
@@ -49,9 +50,9 @@ const SignIn = () => {
     <OnboardingFrame>
       <GraspBuddy />
       <div className="flex flex-col gap-2">
-        <h1 className="type-title">
+        <PageHeaderTitle>
           <Trans>Sign in to Grasp</Trans>
-        </h1>
+        </PageHeaderTitle>
         {connected ? (
           <p className="text-muted-foreground text-balance">
             <Trans>Use your organization’s account to go on.</Trans>
