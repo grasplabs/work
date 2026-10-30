@@ -281,6 +281,13 @@
       "when": 1793331490368,
       "tag": "0039_drop_staff_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793333605227,
+      "tag": "0040_platform_settings",
+      "breakpoints": true
     }
   ]
 }
