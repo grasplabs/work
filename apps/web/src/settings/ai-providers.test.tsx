@@ -378,6 +378,8 @@ describe("Settings › AI providers", () => {
             lastFailedAt: null,
             lastFailure: null,
             lastStatus: null,
+            failingClass: null,
+            failingSince: null,
           },
         },
         {
@@ -387,6 +389,8 @@ describe("Settings › AI providers", () => {
             lastFailedAt: at + 60_000,
             lastFailure: "auth",
             lastStatus: 401,
+            failingClass: "refused",
+            failingSince: at + 60_000,
           },
         },
         { provider: "mistral" },

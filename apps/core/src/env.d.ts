@@ -144,6 +144,11 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_UNKNOWN_HOLD_MS?: string;
   /**
+   * Tests only: a shorter hold for a run waiting for a working AI provider
+   * key (src/workflows/host.ts).
+   */
+  WORKFLOW_AI_KEY_HOLD_MS?: string;
+  /**
    * Tests only: a shorter budget for the time one activation of a run
    * spends outside its steps (src/workflows/between-steps.ts).
    */
