@@ -613,10 +613,13 @@ export const LogRecords = ({
   first,
   search,
   directory,
+  archive = false,
 }: {
   first: AuditPage;
   search: LogSearch;
   directory: Directory;
+  /** Pages of the archive, where retention moved older events, not of the log. */
+  archive?: boolean;
 }) => {
   const [older, setOlder] = useState<AuditRecord[]>([]);
   const [next, setNext] = useState(first.next);
@@ -624,9 +627,10 @@ export const LogRecords = ({
   const { t } = useLingui();
   const records = [...first.records, ...older];
   const loadOlder = async (before: number): Promise<void> => {
-    const page = await run(
-      async (session) =>
-        await session.audit.search(auditFilterOf(search), before)
+    const page = await run(async ({ audit }) =>
+      archive
+        ? await audit.searchArchive(auditFilterOf(search), before)
+        : await audit.search(auditFilterOf(search), before)
     );
     if (page !== undefined) {
       setOlder((shown) => [...shown, ...page.records]);
