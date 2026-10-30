@@ -1,3 +1,4 @@
+import type { Statement } from "@grasp-os/shared/brain";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
@@ -11,10 +12,10 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { formatDay } from "../../format.ts";
+import { formatDay, isoWeek } from "../../format.ts";
 import { ClaimBasis } from "../aggregate.tsx";
 import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
@@ -102,11 +103,8 @@ export const BannerHeader = ({
   sticker?: ReactNode;
 }) => {
   const group = groupOf[note.kind];
-  const shown =
-    sticker ??
-    (kern.interviewed.length > 0 ? (
-      <Interviewed people={kern.interviewed} />
-    ) : undefined);
+  // Only a conversation's own page shows who it was with; a team or a piece of work never shows its people.
+  const shown = sticker;
   return (
     <header className="flex flex-col gap-4">
       <Panel group={group} short>
@@ -117,7 +115,7 @@ export const BannerHeader = ({
         )}
       </Panel>
       <span className="flex flex-col gap-0.5">
-        <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
+        <h1 className="type-title wrap-break-word">
           {note.kind === "statement"
             ? statementWords(note.id, note.title)
             : note.title}
@@ -146,14 +144,19 @@ export const BannerHeader = ({
 export const StatementLine = ({
   row,
   showKind = false,
+  onRemove,
 }: {
   row: StatementRow;
   showKind?: boolean;
+  /** Takes the statement out of the brain, for whoever may: a small button at its end. */
+  onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
-  const { statement, place } = row;
+  const { t } = useLingui();
+  const { statement, place, who } = row;
+  const week = isoWeek(place.source.date);
   return (
     <li
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0"
+      className={`grid items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0 ${onRemove === undefined ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto_auto]"}`}
       data-statement={statement.id}
     >
       <span className="flex min-w-0 flex-col gap-1">
@@ -179,10 +182,23 @@ export const StatementLine = ({
         title={place.source.title}
         to="/brain/$noteId"
       >
-        {[place.source.who, place.at ?? formatDay(place.source.date)]
-          .filter(given)
-          .join(" · ")}
+        {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. */}
+        {[who, t`week ${week}`].filter(given).join(" · ")}
       </Link>
+      {onRemove === undefined ? null : (
+        <Button
+          aria-label={t`Remove this from the brain`}
+          className="self-center"
+          onClick={() => {
+            onRemove(statement);
+          }}
+          size="icon-xs"
+          title={t`Remove from the brain`}
+          variant="ghost"
+        >
+          <Trash2Icon />
+        </Button>
+      )}
     </li>
   );
 };

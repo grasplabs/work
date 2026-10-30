@@ -71,7 +71,7 @@ const RolloutPage = () => {
     <AdminPage
       action={
         <Badge
-          variant={rollout.status === "failed" ? "destructive" : "secondary"}
+          variant={rollout.status === "failed" ? "attention" : "secondary"}
         >
           {state}
         </Badge>

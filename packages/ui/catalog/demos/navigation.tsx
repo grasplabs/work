@@ -1,3 +1,4 @@
+import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 // Demos of the kit's navigation components and the command palette. One
 // per component, for the dev-only gallery and its accessibility checks
 // (e2e/catalog.e2e.ts).
@@ -38,6 +39,7 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupLabel,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -149,6 +151,18 @@ const SidebarDemo = () => (
   </SidebarProvider>
 );
 
+const BrandHeaderDemo = () => (
+  <SidebarProvider className="min-h-0">
+    <div className="overflow-hidden rounded-lg border">
+      <Sidebar collapsible="none">
+        <SidebarHeader>
+          <BrandHeader subtitle="Grasp" title="Acme" />
+        </SidebarHeader>
+      </Sidebar>
+    </div>
+  </SidebarProvider>
+);
+
 const TabsDemo = () => (
   <Tabs defaultValue="account">
     <TabsList>
@@ -165,6 +179,7 @@ const TabsDemo = () => (
 );
 
 export const navigationDemos = {
+  "brand-header": BrandHeaderDemo,
   breadcrumb: BreadcrumbDemo,
   command: CommandDemo,
   "navigation-menu": NavigationMenuDemo,

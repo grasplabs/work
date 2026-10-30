@@ -5,7 +5,7 @@ import type { Neuron } from "../atlas-map.ts";
 // threads, and the measures every shape keeps to, so the line, the names
 // and the nerves sit the same in each. The dive draws it (dive.tsx).
 
-/** A neuron of the shape: a team, or something said. */
+/** A neuron of the shape: a team, something said, or a workflow. */
 export interface ThinkingNeuron extends Neuron {
   /** For something found: who said it, as a role and a team. */
   by?: string;
@@ -19,6 +19,8 @@ export interface ThinkingNeuron extends Neuron {
   say?: { x: number; y: number };
   /** The stems to underline in its words: the words both teams used. */
   marks?: string[];
+  /** For a workflow once Grasp has weighed it: its hours a week, said under its name; null while they are not known. */
+  hours?: number | null;
 }
 
 /** A nerve of the shape: between two of its neurons, by their place, sagging by this share of its length. */

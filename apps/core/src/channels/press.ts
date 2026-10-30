@@ -22,6 +22,7 @@ import type {
   WriteState,
 } from "./cards.tsx";
 import { memberOf, viewOf } from "./held.ts";
+import { pressedChanges } from "./stephen-requests.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
@@ -229,6 +230,14 @@ export const pressCard = async (
         platform,
         outcome,
         ...errorFields(error),
+      });
+      // The request the card is for keeps that its change didn't work: one
+      // request with the answer that showed it, never a second.
+      // oxlint-disable-next-line no-await-in-loop -- once, then out
+      await pressedChanges(env, {
+        userId,
+        chatId,
+        failed: held[index] === undefined ? [] : [held[index].action],
       });
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await editCard(event, shown(outcome));
