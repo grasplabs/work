@@ -620,6 +620,52 @@ describe("audit log access", () => {
     ).resolves.toStrictEqual([]);
   });
 
+  it("keeps the archive and how long things are kept to admins", async () => {
+    for (const role of ["builder", "user"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const { api } = await signedInApi(idp, role);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await expect(
+        Promise.all([
+          outcome(api.audit.searchArchive()),
+          outcome(api.audit.retention()),
+        ])
+      ).resolves.toStrictEqual(["role.forbidden", "role.forbidden"]);
+    }
+  });
+
+  it("says how long Grasp keeps events and run details, without recording that it was asked", async () => {
+    const { api } = await signedInApi(idp, "admin");
+
+    await expect(
+      auditedDuring(async () => {
+        await expect(api.audit.retention()).resolves.toStrictEqual({
+          auditDays: 180,
+          archiveDays: 7 * 365,
+          runDays: 30,
+        });
+      })
+    ).resolves.toStrictEqual([]);
+  });
+
+  it("records a search of the archive as a search, marked as of the archive", async () => {
+    const { api, userId } = await signedInApi(idp, "admin");
+    const targetId = `archived-${unique()}`;
+
+    await expect(
+      auditedDuring(async () => await api.audit.searchArchive({ targetId }))
+    ).resolves.toMatchObject([
+      {
+        actor: { type: "person", userId },
+        action: "audit.searched",
+        detail: { "filter.targetId": targetId, archive: true, records: 0 },
+      },
+    ]);
+    await expect(
+      outcome(api.audit.searchArchive({ targetId }, -1))
+    ).resolves.toBe("audit.invalid");
+  });
+
   it("records every read in the log itself", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
     const targetId = `watched-${unique()}`;

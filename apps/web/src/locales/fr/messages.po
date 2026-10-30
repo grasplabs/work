@@ -500,6 +500,7 @@ msgid "{daily} a day"
 msgstr "{daily} par jour"
 
 #: src/dashboard/signals.tsx
+#: src/settings/audit-archive.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
 
@@ -2432,6 +2433,10 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 msgid "After {most} interviews, it is better split in two"
 msgstr "Après {most} entretiens, mieux vaut le scinder en deux"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Après la fin d’une exécution. Ensuite, ses entrées, sorties et messages sont supprimés."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "who does a step"
 msgid "Agent"
@@ -3060,6 +3065,11 @@ msgstr "Applications à approuver"
 msgid "Archive"
 msgstr "Archiver"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archive"
+
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "Archiver {name} ?"
@@ -3072,6 +3082,10 @@ msgstr "Archiver et mettre hors ligne"
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archivé"
+
+#: src/settings/audit-archive.tsx
+msgid "Archived events"
+msgstr "Événements archivés"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3320,6 +3334,7 @@ msgstr "Tentative {n}"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/audit-archive.tsx
 msgid "Audit trail"
 msgstr "Journal d’audit"
 
@@ -5578,6 +5593,10 @@ msgstr "Routage UE"
 msgid "European Union"
 msgstr "Union européenne"
 
+#: src/settings/audit-archive.tsx
+msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
+msgstr "Les événements plus anciens que ce que conserve le journal d’audit, déplacés vers l’archive. La recherche utilise les filtres ci-dessus."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
 msgstr "Chaque appel reste dans l’UE : non."
@@ -6222,6 +6241,10 @@ msgstr "De la fin de ce que quelqu’un a dit au premier son de la réponse, mes
 msgid "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
 msgstr "Issu du lancement avec le sponsor. Ce qui est changé ici s’applique dès le prochain tour de parole de l’entretien."
 
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "À partir de l’enregistrement de chaque événement, archive comprise. Ensuite, les événements archivés sont supprimés."
+
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
 msgstr "De vos domaines"
@@ -6835,6 +6858,10 @@ msgstr "Combien de temps vous prend chacune, {name} ?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "Combien de temps cela vous prend-il, {name} ?"
+
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records."
+msgstr "Combien de temps Grasp conserve ce qu’il enregistre."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
@@ -11665,6 +11692,10 @@ msgstr "Résultats"
 msgid "Resume"
 msgstr "Reprendre"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Conservation"
+
 #: src/engines/package-approvals.tsx
 msgid "Retire"
 msgstr "Mettre hors service"
@@ -12253,6 +12284,10 @@ msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essay
 msgid "Search the apps"
 msgstr "Rechercher dans les applications"
 
+#: src/settings/audit-archive.tsx
+msgid "Search the archive"
+msgstr "Rechercher dans l’archive"
+
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Chercher dans la transcription"
@@ -12260,6 +12295,10 @@ msgstr "Chercher dans la transcription"
 #: src/chat/chat-window.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Recherchez dans vos chats et vos projets, et ouvrez-en un."
+
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -16886,6 +16925,10 @@ msgstr "Workflow introuvable"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Workflow packages"
 msgstr "Paquets du workflow"
+
+#: src/settings/audit-archive.tsx
+msgid "Workflow run details"
+msgstr "Détails des exécutions de workflow"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
