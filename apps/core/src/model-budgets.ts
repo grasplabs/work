@@ -355,6 +355,43 @@ export const scopesFor = (
   });
 };
 
+/**
+ * The scopes a call on Grasp's own key counts against (one of Grasp's own
+ * AI features, models.ts): Grasp's alone, which no budget limits, so the
+ * organization's budgets (the deployment's, a workflow's, a run's, a
+ * person's, a binding's) neither count it nor stop it; they limit what it
+ * spends on its own keys only. A run lineage's limit of requests, which
+ * holds every call, still holds it, with no budget. Still admitted and
+ * metered by the ledger, so what it costs shows to Grasp's staff.
+ */
+export const platformScopes = (
+  input: BudgetInput,
+  lineageRequests: number
+): LedgerScope[] => [
+  {
+    scope: "platform",
+    key: "platform",
+    limitMicros: null,
+    alertMicros: null,
+    limitRequests: null,
+    names: {},
+  },
+  ...workflowScopes(
+    undefined,
+    input,
+    Math.min(lineageRequests, lineageModelRequests)
+  )
+    .filter(({ scope }) => scope === "run")
+    .map(({ scope, key, names, requests }) => ({
+      scope,
+      key,
+      limitMicros: null,
+      alertMicros: null,
+      limitRequests: requests ?? null,
+      names,
+    })),
+];
+
 const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
 
 /**

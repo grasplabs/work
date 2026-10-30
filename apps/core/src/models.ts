@@ -83,6 +83,7 @@ import {
   hasBudget,
   limitedPersonOf,
   lineageModelRequests,
+  platformScopes,
   scopesFor,
 } from "./model-budgets.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
@@ -2534,7 +2535,9 @@ const scopesNowOf = (
   env: Env,
   call: Session,
   place: string,
-  scopesOn: (day: string, lineageRequests: number) => LedgerScope[]
+  scopesOn:
+    | ((day: string, lineageRequests: number) => LedgerScope[])
+    | "platform"
 ): Route["scopesNow"] => {
   const { subject, resource } = shareIdentity(call);
   return async () => {
@@ -2553,13 +2556,20 @@ const scopesNowOf = (
     // The person's teams as core's records have them now, so a person
     // moved between teams is held to the right limit from their next
     // request.
-    const person = await limitedPersonOf(env, budgetPersonOf(call));
+    const lineageRequests =
+      lineage?.limits.lineageModelRequests ?? lineageModelRequests;
+    // A call on Grasp's own key counts against none of the organization's
+    // budgets, a person's limit included (`platformScopes`).
+    const person =
+      scopesOn === "platform"
+        ? undefined
+        : await limitedPersonOf(env, budgetPersonOf(call));
     return {
       period: month,
-      scopes: scopesOn(
-        day,
-        lineage?.limits.lineageModelRequests ?? lineageModelRequests
-      ),
+      scopes:
+        scopesOn === "platform"
+          ? platformScopes(call, lineageRequests)
+          : scopesOn(day, lineageRequests),
       // The generation of the policy its shares come from, a fallback's
       // too (the last read's, or the platform's own, 0), so the ledger
       // refuses shares from a policy older than one it saw
@@ -2795,7 +2805,13 @@ const admit = async (
     place,
     disclose,
     notes: Promise.resolve(),
-    scopesNow: scopesNowOf(env, call, place, scopesOn),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(
+      env,
+      call,
+      place,
+      routing.way.credential === "platform" ? "platform" : scopesOn
+    ),
     perRequest:
       requestMicros === undefined
         ? undefined
@@ -3615,9 +3631,8 @@ const admitSpeech = async (
     // sent: what the ledger reserves is what it charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
     perRequest: undefined,
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,
@@ -4040,9 +4055,8 @@ const listenThrough = async (
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,

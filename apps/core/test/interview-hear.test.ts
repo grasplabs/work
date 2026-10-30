@@ -4,7 +4,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
-import { models } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { heardBudgets } from "../src/onboarding/transcription.ts";
 import { writtenText } from "./ai-providers-fake.ts";
@@ -26,10 +25,8 @@ import { routed, unique } from "./sign-in.ts";
 // - A request that isn't a recording, or is too large.
 // - The recording kept anywhere: the store, the database, the audit log.
 // - Listening out for words the page chose, or for more than 30.
-// - Writing down past the deployment's own budgets (GRA-1064).
-
-/** The transcription model recordings are written down by, the default. */
-const hearingModel = "openai/gpt-4o-transcribe";
+// - Charged to the organization's budgets, which limit its own keys only:
+//   what is heard is charged to Grasp's own key (GRA-1064).
 
 /** The deployment's rules: none, unless a test sets some. */
 const noRules = {};
@@ -130,6 +127,13 @@ const heardMicros = (seconds: number): number =>
 const deploymentSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
   const [row] = spent.deployment ?? [];
+  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+};
+
+/** What Grasp's own key spent and holds in `month`: what was heard counts there. */
+const graspSpend = async (month: string) => {
+  const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
+  const [row] = spent.platform ?? [];
   return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
 };
 
@@ -421,99 +425,57 @@ describe(
       });
     });
 
-    it("charges the deployment's budget what was heard, refuses while another listening holds it, and once it is spent", async () => {
+    it("charges what was heard to Grasp's own key, never to the deployment's budget, which doesn't stop it", async () => {
       const { link } = await openedFor();
       const month = newMonth();
       const head = await logHead();
-      const audio = { busy: newAudio(), first: newAudio(), spent: newAudio() };
+      const audio = { first: newAudio(), second: newAudio() };
       const result = await hearing(
         async () => {
-          // Two minutes held elsewhere: no room for half a minute beside them.
-          const elsewhere = await models(env).listen({
-            model: hearingModel,
-            seconds: 120,
-            openMs: 60_000,
-            purpose: "onboarding.hear",
-            trigger: { type: "system" },
-            work: { onboarding: true },
-          });
-          const busy = await codeOf(
-            await hear(recording(link, { seconds: "30", audio: audio.busy }))
-          );
-          await elsewhere.heard(100, "answered");
           const first = await hear(
             recording(link, { seconds: "29.2", audio: audio.first })
           );
-          const charged = await deploymentSpend(month);
-          // Spent: what is left is less than another half minute.
-          const spent = await codeOf(
-            await hear(recording(link, { seconds: "30", audio: audio.spent }))
+          const second = await hear(
+            recording(link, { seconds: "30", audio: audio.second })
           );
-          return { busy, first: first.status, charged, spent };
+          return {
+            first: first.status,
+            second: second.status,
+            deployment: await deploymentSpend(month),
+            grasp: await graspSpend(month),
+          };
         },
         {
-          // 2.4 cents: 100 seconds (1.67¢) and half a minute (0.5¢) fit,
-          // two minutes and half a minute don't, nor another half minute.
-          config: {
-            budgets: { deployment: { limit: 0.024 } },
-          },
+          // A cent: the two half minutes (0.5¢ each, rounded up) don't fit.
+          config: { budgets: { deployment: { limit: 0.01 } } },
           month,
         }
       );
       const sent = await Promise.all(
         Object.values(audio).map(async (one) => await sentCount(one))
       );
+      const heardEvent = {
+        action: "model.call",
+        actor: { type: "system" },
+        model: "gpt-4o-transcribe",
+        // Before the ledger rounds it up to a micro.
+        cost: (30 * microsPerMillionSeconds) / 1e12,
+        seconds: 30,
+        outcome: "answered",
+        reason: undefined,
+      };
       expect({
         ...result,
         sent,
         events: await gatewayEvents(head),
       }).toStrictEqual({
-        busy: [503, "hear.busy"],
         first: 200,
+        second: 200,
+        deployment: { spent: 0, held: 0 },
         // Whole seconds, rounded up.
-        charged: { spent: heardMicros(100) + heardMicros(30), held: 0 },
-        spent: [429, "hear.over_budget"],
-        // Only the recording admitted reached OpenAI.
-        sent: [0, 1, 0],
-        events: [
-          {
-            action: "model.refused",
-            actor: { type: "system" },
-            model: undefined,
-            cost: undefined,
-            seconds: undefined,
-            outcome: undefined,
-            reason: "model.budget_busy",
-          },
-          {
-            action: "model.call",
-            actor: { type: "system" },
-            model: "gpt-4o-transcribe",
-            cost: (100 * microsPerMillionSeconds) / 1e12,
-            seconds: 100,
-            outcome: "answered",
-            reason: undefined,
-          },
-          {
-            action: "model.call",
-            actor: { type: "system" },
-            model: "gpt-4o-transcribe",
-            // Before the ledger rounds it up to a micro.
-            cost: (30 * microsPerMillionSeconds) / 1e12,
-            seconds: 30,
-            outcome: "answered",
-            reason: undefined,
-          },
-          {
-            action: "model.refused",
-            actor: { type: "system" },
-            model: undefined,
-            cost: undefined,
-            seconds: undefined,
-            outcome: undefined,
-            reason: "model.over_budget",
-          },
-        ],
+        grasp: { spent: 2 * heardMicros(30), held: 0 },
+        sent: [1, 1],
+        events: [heardEvent, heardEvent],
       });
     });
   }

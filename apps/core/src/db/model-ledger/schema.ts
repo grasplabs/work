@@ -24,6 +24,10 @@ const scopes = [
   "binding",
   "binding_day",
   "person",
+  // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
+  // counted, never limited, and apart from every scope of the
+  // organization's own.
+  "platform",
 ] as const;
 
 /**
