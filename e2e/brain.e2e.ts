@@ -30,12 +30,10 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   const board = main.getByRole("button", { name: /^Board/u });
   await expect(board).toBeVisible(brainRead);
 
-  // A region of the brain, up close: its notes as neurons, and the way back.
+  // A region of the brain, up close: its notes as neurons, and the way back
+  // on the canvas, the one trail there is.
   await board.click();
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
-  await expect(
-    page.getByRole("navigation", { name: "Breadcrumb" })
-  ).toContainText("Board");
   const trail = main.getByRole("navigation", {
     name: "Where you are in the brain",
   });

@@ -7,9 +7,8 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 
-import { folderHolding, regionGroups } from "../brain/atlas-map.ts";
 import { atlasOf, isRegion, TEAM_FOLDER } from "../brain/brain-atlas.ts";
-import type { Atlas, Region } from "../brain/brain-atlas.ts";
+import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
 import type { BrainData } from "../brain/brain-data.ts";
 import { BrainNav } from "../brain/brain-nav.tsx";
 import { brainSections } from "../brain/brain-sections.ts";
@@ -100,46 +99,17 @@ const crumbsTo = (
   return crumbs;
 };
 
-/** On the brain itself: the part of it that is open, the folder it is narrowed to, and the note in hand there, as its address holds them. */
-interface AtlasAt {
-  region: Region;
-  group?: { key: string; label: string };
-  inHand?: Note;
-}
-
-/** Brain, the part, the folder it is narrowed to, and the note in hand: each but the last leads back to itself. */
-const regionCrumbs = (
-  { region, group, inHand }: AtlasAt,
-  brainLabel: string,
-  regionLabel: string
-): Crumb[] => {
-  const crumbs: Crumb[] = [
-    { label: brainLabel, to: "/brain" },
-    { label: regionLabel, to: "/brain", search: { region: region.id } },
-  ];
-  if (group) {
-    crumbs.push({
-      label: group.label,
-      to: "/brain",
-      search: { region: region.id, group: group.key },
-    });
-  }
-  if (inHand) {
-    crumbs.push({ label: inHand.title });
-  }
-  const last = crumbs.at(-1);
-  if (last) {
-    crumbs[crumbs.length - 1] = { label: last.label };
-  }
-  return crumbs;
-};
-
-/** The part of the atlas open at this address, if any. */
-const atlasAt = (
-  search: { region?: unknown; group?: unknown; note?: unknown },
+/**
+ * The part of the atlas open at this address, if any: as asked, or the one
+ * the note in hand sits in. Its navigation opens to it; the way back through
+ * it stands on the canvas (`AtlasTrail`), not in the header: one trail, not
+ * two, as the prototype has it.
+ */
+const atlasRegion = (
+  search: { region?: unknown; note?: unknown },
   brain: Brain,
   atlas: Atlas
-): AtlasAt | undefined => {
+): RegionId | undefined => {
   const inHand =
     typeof search.note === "string"
       ? brain.notes.find((candidate) => candidate.id === search.note)
@@ -147,19 +117,7 @@ const atlasAt = (
   const regionId = isRegion(search.region)
     ? search.region
     : inHand && atlas.home.get(inHand.id);
-  const region = atlas.regions.find((each) => each.id === regionId);
-  if (!region) {
-    return undefined;
-  }
-  // The folder the region is narrowed to: as asked, or the one the note in hand opens it to, as the brain itself does.
-  const groupKey =
-    typeof search.group === "string"
-      ? search.group
-      : inHand && folderHolding(region.id, atlas, brain, inHand.id);
-  const group = regionGroups(region.id, atlas).find(
-    (each) => each.key === groupKey
-  );
-  return { region, group, inHand };
+  return atlas.regions.find((each) => each.id === regionId)?.id;
 };
 
 const BrainLayout = () => {
@@ -167,8 +125,10 @@ const BrainLayout = () => {
   const loaded = Route.useLoaderData();
   const { noteId, sectionId } = useParams({ strict: false });
   const search = useSearch({ strict: false });
-  // The brain's log, a page of its own beside the brain.
-  const activity = Boolean(useMatchRoute()({ to: "/brain/activity" }));
+  const matchRoute = useMatchRoute();
+  // The brain's log and its memory records, each a page of its own beside the brain.
+  const activity = Boolean(matchRoute({ to: "/brain/activity" }));
+  const memory = Boolean(matchRoute({ to: "/brain/memory" }));
   const brainLabel = t`Brain`;
   if (loaded.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: brainLabel }]} page={loaded} />;
@@ -182,9 +142,9 @@ const BrainLayout = () => {
   const section = brainSections.find(
     (candidate) => candidate.slug === sectionId
   );
-  const onAtlas =
+  const region =
     noteId === undefined && !section
-      ? atlasAt(search, brain, atlas)
+      ? atlasRegion(search, brain, atlas)
       : undefined;
   let crumbs: Crumb[] = [{ label: brainLabel }];
   if (note) {
@@ -199,19 +159,14 @@ const BrainLayout = () => {
       { label: brainLabel, to: "/brain" },
       { label: t({ message: "Activity", context: "the brain's log" }) },
     ];
-  } else if (onAtlas) {
-    crumbs = regionCrumbs(onAtlas, brainLabel, onAtlas.region.name);
+  } else if (memory) {
+    crumbs = [{ label: brainLabel, to: "/brain" }, { label: t`Memory` }];
   }
   return (
     <>
       <SiteHeader crumbs={crumbs} />
       <div className="flex min-h-0 flex-1">
-        <BrainNav
-          atlas={atlas}
-          brain={brain}
-          note={note}
-          region={onAtlas?.region.id}
-        />
+        <BrainNav atlas={atlas} brain={brain} note={note} region={region} />
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
         <div className="relative flex min-w-0 flex-1 flex-col">
           <Outlet />
