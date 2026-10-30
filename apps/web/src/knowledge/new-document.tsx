@@ -74,7 +74,14 @@ const TakenPath = ({ path }: { path: string }) => (
   </FieldError>
 );
 
-const DocumentForm = ({ collectionId }: { collectionId: string }) => {
+const DocumentForm = ({
+  collectionId,
+  onCreated,
+}: {
+  collectionId: string;
+  /** Closes the dialog: the collection's page, and it, stay mounted. */
+  onCreated: () => void;
+}) => {
   const { t } = useLingui();
   const ids = useId();
   const navigate = useNavigate();
@@ -99,6 +106,7 @@ const DocumentForm = ({ collectionId }: { collectionId: string }) => {
       setTaken(outcome.taken);
       return;
     }
+    onCreated();
     await navigate({
       to: "/knowledge/$collection",
       params: { collection: collectionId },
@@ -182,7 +190,14 @@ export const NewDocument = ({ collectionId }: { collectionId: string }) => {
         <Trans>New document</Trans>
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
-        {open ? <DocumentForm collectionId={collectionId} /> : null}
+        {open ? (
+          <DocumentForm
+            collectionId={collectionId}
+            onCreated={() => {
+              setOpen(false);
+            }}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );
