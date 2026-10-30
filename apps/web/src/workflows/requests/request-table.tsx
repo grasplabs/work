@@ -12,12 +12,14 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatNumber, formatPercent } from "../../format.ts";
+import { LoadingLines } from "../../frame/page-states.tsx";
 import { RequestDetail } from "./request-detail.tsx";
 import type { RequestSubject } from "./request-detail.tsx";
 import { NeedMark, useNeedState, useNeedWhy } from "./request-needs.tsx";
@@ -44,9 +46,17 @@ const isView = (value: unknown): value is View =>
   value === "teams" ||
   value === "people";
 
-/** A row's grid: a name, a second cell from where there is room, a count, the chevron. */
+/**
+ * A row: a name, a count and the chevron, with a second cell on a line
+ * of its own under them until there is room for it beside the name.
+ */
 const grid =
-  "grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-6 gap-y-1.5 px-6 py-3 @2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_4.5rem_1rem]";
+  "flex flex-wrap items-center gap-x-6 gap-y-1.5 px-6 py-3 @2xl:flex-nowrap";
+
+/** A row's cells: the name, the second, the count. */
+const nameCell = "min-w-0 flex-1 @2xl:flex-6";
+const secondCell = "order-last basis-full @2xl:order-none @2xl:flex-5";
+const countCell = "w-18 flex-none text-right tabular-nums";
 
 /** The names of a table's columns, from where there is room for them. */
 const Head = ({
@@ -60,12 +70,12 @@ const Head = ({
 }) => (
   <li
     aria-hidden="true"
-    className="text-muted-foreground hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_4.5rem_1rem] gap-x-6 px-6 pb-2 text-xs @2xl:grid"
+    className="text-muted-foreground hidden gap-x-6 px-6 pb-2 text-xs @2xl:flex"
   >
-    <span>{first}</span>
-    <span>{second}</span>
-    <span className="text-right">{third}</span>
-    <span />
+    <span className={nameCell}>{first}</span>
+    <span className={secondCell}>{second}</span>
+    <span className={countCell}>{third}</span>
+    <span className="size-4 flex-none" />
   </li>
 );
 
@@ -75,12 +85,17 @@ const NeedRow = ({ need, onOpen }: { need: Need; onOpen: () => void }) => {
   const state = useNeedState(need);
   return (
     <OpenRow className={grid} onOpen={onOpen}>
-      <span className="min-w-0">{need.label}</span>
-      <span className="text-muted-foreground col-span-3 row-start-2 flex min-w-0 items-center gap-2 @2xl:col-span-1 @2xl:row-start-auto">
+      <span className={nameCell}>{need.label}</span>
+      <span
+        className={cn(
+          "text-muted-foreground flex min-w-0 items-center gap-2",
+          secondCell
+        )}
+      >
         <NeedMark need={need} />
         <span className="truncate">{state ?? why}</span>
       </span>
-      <span className="text-right tabular-nums">
+      <span className={countCell}>
         {formatNumber(need.people ?? need.reach ?? 0)}
       </span>
     </OpenRow>
@@ -92,10 +107,17 @@ const Needs = ({
   needs,
   onOpen,
 }: {
-  needs: Need[] | null;
+  needs: Need[] | null | undefined;
   onOpen: (need: Need) => void;
 }) => {
   const { t } = useLingui();
+  if (needs === undefined) {
+    return (
+      <div className="mt-3 border-t px-6 py-6">
+        <LoadingLines />
+      </div>
+    );
+  }
   if (needs === null) {
     return (
       <p className="text-muted-foreground mt-3 border-t px-6 py-10 text-center">
@@ -205,7 +227,7 @@ const Topics = ({
                   }
             }
           >
-            <span className="flex min-w-0 flex-col">
+            <span className={cn("flex flex-col", nameCell)}>
               <span className="flex min-w-0 items-baseline gap-2">
                 <span className="truncate">{names.topic(topic.key)}</span>
                 <Growth grew={grew} />
@@ -216,7 +238,12 @@ const Topics = ({
                   : t`${plural(people, { one: "# person", other: "# people" })}`}
               </span>
             </span>
-            <span className="hidden items-center gap-1.5 @2xl:flex">
+            <span
+              className={cn(
+                "hidden items-center gap-1.5 @2xl:flex",
+                secondCell
+              )}
+            >
               {topic.tools.map((tool) => (
                 <ToolMark
                   key={tool.key}
@@ -225,9 +252,7 @@ const Topics = ({
                 />
               ))}
             </span>
-            <span className="text-right tabular-nums">
-              {formatNumber(topic.billed)}
-            </span>
+            <span className={countCell}>{formatNumber(topic.billed)}</span>
           </OpenRow>
         );
       })}
@@ -247,7 +272,8 @@ export const RequestTable = ({
 }: {
   page: RequestsPage;
   place: string | null;
-  needs: Need[] | null;
+  /** Undefined while they are read: they are read apart from the report. */
+  needs: Need[] | null | undefined;
   busy: boolean;
   onPerPerson: (on: boolean) => void;
   onOnlyTeam: ((teamId: string) => void) | null;
@@ -257,7 +283,11 @@ export const RequestTable = ({
   const waiting = (needs ?? []).filter(
     ({ status }) => status === null || status.status === "working"
   ).length;
-  const [view, setView] = useState<View>(waiting > 0 ? "needs" : "asked");
+  // Until the person picks one: Needs you while it is read or has
+  // something waiting, otherwise what people ask.
+  const [picked, setPicked] = useState<View>();
+  const view =
+    picked ?? (needs === undefined || waiting > 0 ? "needs" : "asked");
   // The panels opened from one another, the last on top; a row of the table starts afresh.
   const [trail, setTrail] = useState<RequestSubject[]>([]);
   const open = (subject: RequestSubject) => {
@@ -268,7 +298,7 @@ export const RequestTable = ({
       <Tabs
         onValueChange={(value: unknown) => {
           if (isView(value)) {
-            setView(value);
+            setPicked(value);
           }
         }}
         value={view}
