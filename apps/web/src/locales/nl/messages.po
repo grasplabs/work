@@ -4366,6 +4366,10 @@ msgstr "Chat-apps waarin Grasp weet dat jij het bent. Stuur Grasp daar een beric
 msgid "Chat name"
 msgstr "Naam van de chat"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Breedte van de chat"
+
 #: src/chat/chat-switcher.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
@@ -11218,7 +11222,7 @@ msgstr "Open sinds {date}. Tot er een antwoord is, blijft dit onbekend, nooit nu
 msgid "Open since Grasp's go on {since}."
 msgstr "Open sinds het startsein van Grasp op {since}."
 
-#: src/chat/chat-dock.tsx
+#: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat openen"
@@ -15831,6 +15835,10 @@ msgstr "Er zijn nog geen domeinen die je kunt openen. Domeinen maak je in de cha
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Er zijn nog geen workflows om te koppelen."
+
+#: src/chat/dock-frame.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "Hier staat een gesprek. Open de chat om het te zien."
 
 #: src/settings/teams.tsx
 msgid "There is a team with this name already."

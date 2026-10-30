@@ -1,18 +1,12 @@
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { ComponentProps } from "react";
 
 /**
  * The Grasp mark, from the prototype (grasplabs/prototype
  * `packages/grasp/src/components/grasp-mark.tsx`). It takes the text colour,
- * so a token on the element around it colours it; `variant="logo"` draws it
- * in the logo's own green (the canvas on dark). Decorative: the name
- * beside it says what it is.
+ * so it is the ink on the page and the canvas on the sidebar. Decorative:
+ * the name beside it says what it is.
  */
-function GraspMark({
-  className,
-  variant = "inherit",
-  ...props
-}: ComponentProps<"svg"> & { variant?: "inherit" | "logo" }) {
+function GraspMark(props: ComponentProps<"svg">) {
   return (
     <svg
       fill="none"
@@ -20,7 +14,6 @@ function GraspMark({
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       data-slot="grasp-mark"
-      className={cn(variant === "logo" && "text-logo", className)}
       {...props}
     >
       <path d="M15.99 0L13.72 12.51H74.32L76.58 0H15.99Z" fill="currentColor" />

@@ -120,7 +120,7 @@ const PaintedFieldDemo = () => (
     painting="dawn"
     pattern="columns"
   >
-    <p className="type-heading">Three invoices wait on you</p>
+    <p className="type-display">Three invoices wait on you</p>
     <p className="text-muted-foreground text-sm">
       The oldest came in on Monday.
     </p>
