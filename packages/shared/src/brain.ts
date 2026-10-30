@@ -376,8 +376,28 @@ export interface Workspace {
  * onboarding, the brain's records and the connections. Each part as the
  * person may read it; what core has no source for yet comes back empty.
  */
+/**
+ * What a picture of a chat's thinking is drawn from (`brain.thinking`):
+ * the brain's teams, what each said with the team that said it (the one
+ * its source speaks for) and the role of who did, and its workflows with
+ * their hours a week, `null` where they aren't known.
+ */
+export interface ThinkingGround {
+  teams: Pick<Team, "id" | "name">[];
+  statements: (Pick<Statement, "id" | "text" | "kind" | "sourceId"> & {
+    teamId: string;
+    who?: string;
+  })[];
+  workflows: (Pick<Workflow, "id" | "name"> & { hours: number | null })[];
+}
+
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * What a picture of a chat's thinking is drawn from, as `read` gives
+   * it, and nothing else: no Knowledge, so nothing to audit.
+   */
+  thinking: () => Promise<ThinkingGround>;
   /**
    * The board's goals (`Workspace.goals`) alone, for the dashboard, as
    * `read` gives them: every member reads them, each with the workflows

@@ -9,9 +9,9 @@ import { msg } from "@lingui/core/macro";
 
 import type { MapRoom } from "../atlas-map.ts";
 import type { Atlas, RegionId } from "../brain-atlas.ts";
-import type { Brain } from "../brain.ts";
 import { beatsEnd, readFor } from "./beats.ts";
 import type { ThinkingBeat } from "./beats.ts";
+import type { ShapeGround } from "./ground.ts";
 import { hoursAt, hoursBeats, hoursMap } from "./hours.ts";
 import type { HoursFigure } from "./hours.ts";
 import type { ThinkingMap } from "./layout.ts";
@@ -73,15 +73,13 @@ const PACE: Record<ThinkingMove, number> = {
 export const figureAt = (
   steps: readonly ThinkingStep[],
   at: number,
-  ws: Workspace,
-  brain: Brain,
-  atlas: Atlas
+  ground: ShapeGround
 ): ThinkingFigure | undefined => {
   const step = steps[at];
   const figure =
     step?.shape === "hours"
-      ? hoursAt(steps, at, ws, brain)
-      : samePainAt(steps, at, ws, brain, atlas);
+      ? hoursAt(steps, at, ground)
+      : samePainAt(steps, at, ground);
   return figure === undefined || step === undefined
     ? figure
     : { ...figure, lead: readFor(step.text.length) };

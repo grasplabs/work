@@ -76,7 +76,7 @@ export interface CardView {
   letters: number;
   /** Picture units to pixels on screen, at the camera's zoom. */
   text: number;
-  /** The camera, as a CSS transform of the picture's units. */
+  /** The camera, as an SVG `transform` of the picture's units. */
   camera: string;
 }
 
@@ -116,7 +116,7 @@ export const cardView = (map: ThinkingMap, shown: number): CardView => {
           Math.min(NAME_LINE, Math.floor((between - 10) / NAME_PX.letter))
         ),
     text: zoom * scale,
-    camera: `translate(${VIEW.width / 2}px, ${(VIEW.height - room.high / scale) / 2}px) scale(${zoom}) translate(${-(box.left + box.right) / 2}px, ${-(box.top + box.bottom) / 2}px)`,
+    camera: `translate(${VIEW.width / 2} ${(VIEW.height - room.high / scale) / 2}) scale(${zoom}) translate(${-(box.left + box.right) / 2} ${-(box.top + box.bottom) / 2})`,
   };
 };
 

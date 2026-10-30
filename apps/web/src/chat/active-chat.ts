@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from "react";
 
+import { forgetCardGround } from "../brain/thinking/card-ground.ts";
+import { forgetThinking } from "../brain/thinking/log.ts";
+
 // The person's open chats in this tab: `chat`, the one Chat shows and the
 // chat dock on every other page carries on, so what is asked there goes
 // on in Chat and shows in its list; `brain`, the brain's own, which the
@@ -69,8 +72,14 @@ export const setActiveChat = (
   }
 };
 
-/** Forgets every open chat: they were the person's who signed out. */
+/**
+ * Forgets every open chat, and what the tab saw and read of their thinking
+ * (brain/thinking/log.ts, card-ground.ts): they were the person's who
+ * signed out.
+ */
 export const forgetActiveChats = (): void => {
+  forgetThinking();
+  forgetCardGround();
   for (const slot of new Set<ChatSlot>(["chat", "brain", ...active.keys()])) {
     setActiveChat(undefined, slot);
   }

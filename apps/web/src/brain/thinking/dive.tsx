@@ -1,7 +1,5 @@
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
@@ -28,12 +26,12 @@ import {
   viewProjection,
 } from "./dive-scene.ts";
 import type { DiveClear, Pose, Screen } from "./dive-scene.ts";
-import { roundHours } from "./hours.ts";
 import { NAME } from "./layout.ts";
 import type { ThinkingMap, ThinkingNeuron } from "./layout.ts";
 import { markShared } from "./same-pain.ts";
 import { thinkingMap } from "./shapes.ts";
 import type { Thought } from "./shapes.ts";
+import { WorkHours } from "./work-hours.tsx";
 
 // Grasp's thinking as a dive into the brain (grasplabs/prototype
 // `components/knowledge/thinking-dive.tsx`), on the page's own light
@@ -71,19 +69,6 @@ interface Latest {
   still: boolean;
   choose: (at: number) => void;
 }
-
-/** A workflow's hours a week under its name, as the brain counts them; or that they are not known yet. */
-export const WorkHours = ({ hours }: { hours: number | null }) => {
-  const { t } = useLingui();
-  const each = hours === null ? 0 : roundHours(hours);
-  return (
-    <span className="text-muted-foreground font-normal tabular-nums">
-      {hours === null
-        ? t`Hours not known yet`
-        : t`${plural(each, { one: "# hour a week", other: "# hours a week" })}`}
-    </span>
-  );
-};
 
 /** What a neuron's name says: what was said, its shared words underlined and who said it; a workflow, with its hours a week once weighed; or its name. */
 const NameWords = ({ neuron }: { neuron: ThinkingNeuron }) => {

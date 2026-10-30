@@ -1,13 +1,14 @@
+import type { ThinkingGround } from "@grasp-os/shared/brain";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ReactElement } from "react";
 
 import { useLessMotion } from "../brain/less-motion.ts";
-import { useThinkingBrain } from "../brain/thinking/card-brain.ts";
-import type { ThinkingBrain } from "../brain/thinking/card-brain.ts";
+import { useCardGround } from "../brain/thinking/card-ground.ts";
 import {
   CARD_ROOM,
   cardView,
@@ -17,14 +18,16 @@ import {
   threadPath,
   VIEW,
 } from "../brain/thinking/card-print.ts";
-import { WorkHours } from "../brain/thinking/dive.tsx";
+import { cardGround } from "../brain/thinking/ground.ts";
 import { roundHours } from "../brain/thinking/hours.ts";
 import { SAG } from "../brain/thinking/layout.ts";
 import type { ThinkingNeuron } from "../brain/thinking/layout.ts";
+import { useThinkingLog } from "../brain/thinking/log.ts";
 import { thinkAddress } from "../brain/thinking/play.ts";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { thinkingMap } from "../brain/thinking/shapes.ts";
 import { usePlayedThinking } from "../brain/thinking/use-thinking.ts";
+import { WorkHours } from "../brain/thinking/work-hours.tsx";
 
 // Grasp's thinking where the question was asked (GRA-1283; grasplabs/
 // prototype `components/chat/thinking-card.tsx`): on any page but the
@@ -78,13 +81,6 @@ const useWidth = (element: Element | null, fallback: number): number => {
   return width;
 };
 
-/** Sets where a part of the picture stands, as a custom property its class reads, so it moves there. */
-const placeAt =
-  (transform: string) =>
-  (element: SVGGElement | null): void => {
-    element?.style.setProperty("--place", transform);
-  };
-
 /** A neuron of the shape, printed from the brain's own designs; warm while a beat names it, faint while it names another. `text`: picture units to pixels on screen; `letters`: how many a line of its name may take, none where only its hours fit. */
 const ShapeNeuron = ({
   neuron,
@@ -120,13 +116,11 @@ const ShapeNeuron = ({
       )}
     >
       <title>{neuron.label}</title>
-      {/* Its soma and dendrites, in its own radius, so it grows where it stands when the shape moves on. */}
+      {/* Its soma and dendrites, in its own radius, so it grows where it stands when the shape moves on: the transform is an SVG attribute, which the class's transition eases as it changes. */}
       <g
-        className="[transform:var(--place)] transition-transform duration-300 ease-out motion-reduce:transition-none"
+        className="transition-transform duration-300 ease-out motion-reduce:transition-none"
         fill="currentColor"
-        ref={placeAt(
-          `translate(${neuron.x}px, ${-neuron.y}px) scale(${neuron.r})`
-        )}
+        transform={`translate(${neuron.x} ${-neuron.y}) scale(${neuron.r})`}
       >
         {dots.map((dot, at) => (
           <circle cx={dot.x} cy={dot.y} key={at} opacity={dot.a} r={dot.r} />
@@ -163,28 +157,36 @@ const ShapeNeuron = ({
   );
 };
 
-/** The card, once the brain is read. */
+/**
+ * The card, once what it is drawn from is read; `instead` where the
+ * thinking has nothing to show. Its inputs stay the same from chunk to
+ * chunk of the answer (the steps, what was read, when each step arrived),
+ * so the compiler keeps the shape, its layout and each neuron's print, and
+ * draws again only what a beat changes.
+ */
 const Card = ({
   chatId,
   thinking,
-  arrivals,
   live,
   read,
+  instead,
 }: {
   chatId: string;
   thinking: ThinkingOf;
-  arrivals: readonly (number | undefined)[];
   live: boolean;
-  read: ThinkingBrain;
+  read: ThinkingGround;
+  instead: ReactElement | null;
 }) => {
   const { i18n } = useLingui();
   const lessMotion = useLessMotion();
+  const { arrived } = useThinkingLog();
+  const arrivals = thinking.calls.map((call) => arrived.get(call));
   // Seen as it came in this tab, it plays to its end; an answer from before shows the shape it ended in.
   const played = usePlayedThinking(
     `card:${chatId}:${thinking.questionId}`,
     thinking.steps,
     {
-      ...read,
+      ground: cardGround(read),
       still: lessMotion || arrivals.every((at) => at === undefined),
       arrivals,
       open: live,
@@ -196,7 +198,7 @@ const Card = ({
   const shown = useWidth(picture, VIEW.width);
   const { figure } = played;
   if (figure === undefined) {
-    return null;
+    return instead;
   }
   const map = thinkingMap(figure, CARD_ROOM);
   const view = cardView(map, shown);
@@ -225,8 +227,8 @@ const Card = ({
         viewBox={`0 0 ${VIEW.width} ${VIEW.height}`}
       >
         <g
-          className="[transform:var(--place)] transition-transform duration-300 ease-out motion-reduce:transition-none"
-          ref={placeAt(view.camera)}
+          className="transition-transform duration-300 ease-out motion-reduce:transition-none"
+          transform={view.camera}
         >
           {nervesOf(map, view.text).map(({ id, dots }) => (
             <g className="fill-brain-heat" key={id}>
@@ -281,24 +283,27 @@ const Card = ({
 /**
  * An answer's thinking as a card, on any page but the brain: plays as
  * Grasp answers (`live`, each step as it reached the tab), else shows the
- * shape it ended in. Nothing until the brain is read.
+ * shape it ended in. `instead` while what it is drawn from is read, and
+ * where that can't be read or the thinking has nothing to show.
  */
 export const ThinkingCard = ({
   chatId,
   thinking,
-  arrivals,
   live,
+  instead,
 }: {
   chatId: string;
   thinking: ThinkingOf;
-  arrivals: readonly (number | undefined)[];
   live: boolean;
+  instead: ReactElement | null;
 }) => {
-  const read = useThinkingBrain();
-  return read === null ? null : (
+  const read = useCardGround();
+  return read === undefined || read === null ? (
+    instead
+  ) : (
     <Card
-      arrivals={arrivals}
       chatId={chatId}
+      instead={instead}
       live={live}
       read={read}
       thinking={thinking}

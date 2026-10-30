@@ -33,8 +33,16 @@ import {
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import { createContext, Fragment, use, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  createContext,
+  Fragment,
+  lazy,
+  Suspense,
+  use,
+  useEffect,
+  useState,
+} from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import {
@@ -59,9 +67,18 @@ import {
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
-import { ThinkingCard } from "./thinking-card.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
+
+/**
+ * An answer's thinking as a card (thinking-card.tsx), loaded once an
+ * answer shows one: it draws the brain's shapes, which the thread, in the
+ * dock on every page, never loads before.
+ */
+const ThinkingCard = lazy(async () => {
+  const { ThinkingCard: card } = await import("./thinking-card.tsx");
+  return { default: card };
+});
 
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
@@ -696,20 +713,31 @@ export const ChatThread = ({
     results
   );
   const answerThinking = useAnswerThinking(messages, running);
-  // In the brain the dive plays an answer's thinking; anywhere else the answer carries it as a card.
+  // On the brain's atlas the dive plays an answer's thinking; anywhere else,
+  // a note's page in the brain too, the answer carries it as a card.
   const inBrain = useLocation({
-    select: ({ pathname }) =>
-      pathname === "/brain" || pathname.startsWith("/brain/"),
+    select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
   });
   const cardOf = (id: number): ReactNode => {
     const thinking = answerThinking.byReply.get(id);
-    return inBrain || thinking === undefined ? undefined : (
-      <ThinkingCard
-        arrivals={answerThinking.arrivals(thinking)}
-        chatId={chatId}
-        live={doing !== undefined && replies[0]?.id === id}
-        thinking={thinking}
-      />
+    if (inBrain || thinking === undefined) {
+      return undefined;
+    }
+    const live = doing !== undefined && replies[0]?.id === id;
+    // Until the card is there, and where it can't be drawn: the way to see
+    // it in the brain, once the answer is done.
+    const instead: ReactElement | null = live ? null : (
+      <SeeInBrain chatId={chatId} thinking={thinking} />
+    );
+    return (
+      <Suspense fallback={instead}>
+        <ThinkingCard
+          chatId={chatId}
+          instead={instead}
+          live={live}
+          thinking={thinking}
+        />
+      </Suspense>
     );
   };
   const topOf = (id: number): ReactNode => {

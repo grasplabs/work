@@ -15,6 +15,7 @@ import {
   standing,
   viewProjection,
 } from "./dive-scene.ts";
+import { groundOf } from "./ground.ts";
 import { hoursAt, hoursBeats, hoursMap } from "./hours.ts";
 import type { FigureWork, HoursFigure } from "./hours.ts";
 import { liveThinking, thinkingIn, thinkingSchedule } from "./play.ts";
@@ -39,6 +40,7 @@ import type { ThinkingFigure } from "./shapes.ts";
 const ws = testWorkspace();
 const brain = buildBrain(ws);
 const atlas = atlasOf(ws, brain);
+const ground = groundOf(ws, brain, atlas);
 
 const step = (
   move: ThinkingStep["move"],
@@ -67,7 +69,7 @@ const samePain = (
   figure?.shape === "same-pain" ? figure : undefined;
 
 const [teams, said, together] = trace.map((_, at) =>
-  samePain(figureAt(trace, at, ws, brain, atlas))
+  samePain(figureAt(trace, at, ground))
 );
 
 /** Rooms from a phone's to a large monitor's. */
@@ -82,11 +84,11 @@ const ROOMS = [
 describe("the same pain in more than one team", () => {
   it("looks only at what is in the brain", () => {
     const made = [step("said", ["team-finance", "made-up", "st-approvals"])];
-    const shown = samePain(figureAt(made, 0, ws, brain, atlas));
+    const shown = samePain(figureAt(made, 0, ground));
     expect({
       teams: shown?.teams.map(({ id }) => id),
       words: shown?.words.map(({ id }) => id),
-      nothing: figureAt([step("said", ["made-up"])], 0, ws, brain, atlas),
+      nothing: figureAt([step("said", ["made-up"])], 0, ground),
     }).toStrictEqual({
       teams: ["team-finance"],
       words: ["st-approvals"],
@@ -239,8 +241,8 @@ describe("where the hours go", () => {
     };
     const steps = [reading];
     expect({
-      figure: hoursAt(steps, 0, ws, brain),
-      none: hoursAt([{ ...reading, notes: ["made-up"] }], 0, ws, brain),
+      figure: hoursAt(steps, 0, ground),
+      none: hoursAt([{ ...reading, notes: ["made-up"] }], 0, ground),
       title: thinkingTitle(steps)?.message,
       about: aboutRegion(steps, atlas),
     }).toStrictEqual({

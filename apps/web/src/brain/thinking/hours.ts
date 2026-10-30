@@ -1,11 +1,9 @@
-import type { Workspace } from "@grasp-os/shared/brain";
-import { hoursPerWeek } from "@grasp-os/shared/thinking";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 
 import type { MapRoom } from "../atlas-map.ts";
-import type { Brain } from "../brain.ts";
 import { BEAT, inTurn } from "./beats.ts";
 import type { BeatSay, ThinkingBeat } from "./beats.ts";
+import type { ShapeGround } from "./ground.ts";
 import { CAPTION, NAME, PAIR_UNDER, PHONE, RING, TEAM_R } from "./layout.ts";
 import type { ThinkingMap, ThinkingNeuron } from "./layout.ts";
 
@@ -48,23 +46,6 @@ const moves = new Set(["work", "hours", "most"]);
 const isHoursMove = (move: string): move is HoursFigure["move"] =>
   moves.has(move);
 
-/** The workflows the brain knows, each with its note and its hours a week. */
-const workKnown = (ws: Workspace, brain: Brain): FigureWork[] => {
-  const noted = new Set(brain.notes.map(({ id }) => id));
-  return ws.workflows.map((workflow) => {
-    const noteId = ws.candidates.find(
-      (candidate) =>
-        candidate.workflowId === workflow.id && noted.has(candidate.id)
-    )?.id;
-    return {
-      id: workflow.id,
-      ...(noteId === undefined ? {} : { noteId }),
-      name: workflow.name,
-      hours: hoursPerWeek(workflow),
-    };
-  });
-};
-
 /** The first step of the run of hours steps that `at` is in. */
 const runStart = (steps: readonly ThinkingStep[], at: number): number => {
   let first = at;
@@ -82,17 +63,15 @@ const runStart = (steps: readonly ThinkingStep[], at: number): number => {
 export const hoursAt = (
   steps: readonly ThinkingStep[],
   at: number,
-  ws: Workspace,
-  brain: Brain
+  ground: Pick<ShapeGround, "works">
 ): HoursFigure | undefined => {
   const step = steps[at];
   if (step?.shape !== "hours" || !isHoursMove(step.move)) {
     return undefined;
   }
-  const known = workKnown(ws, brain);
   const named = (ids: readonly string[]): FigureWork[] => {
     const asked = new Set(ids);
-    return known.filter(({ id }) => asked.has(id));
+    return ground.works.filter(({ id }) => asked.has(id));
   };
   const works = named(
     steps.slice(runStart(steps, at), at + 1).flatMap(({ notes }) => notes)

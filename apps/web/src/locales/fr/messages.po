@@ -518,7 +518,7 @@ msgstr "{done, plural, one {# question a reçu sa réponse, de la personne qui s
 msgid "{drawn} drawn in the builder"
 msgstr "{drawn} dessinées dans l’éditeur"
 
-#: src/brain/thinking/dive.tsx
+#: src/brain/thinking/work-hours.tsx
 msgid "{each, plural, one {# hour a week} other {# hours a week}}"
 msgstr "{each, plural, one {# heure par semaine} other {# heures par semaine}}"
 
@@ -6558,7 +6558,7 @@ msgstr "Hébergement hors {regions}"
 msgid "Hosted outside all of"
 msgstr "Hébergée hors de toutes"
 
-#: src/brain/thinking/dive.tsx
+#: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Heures pas encore connues"
 

@@ -7,6 +7,7 @@ import { useActiveChat } from "../../chat/active-chat.ts";
 import { useFollowedChat } from "../../chat/chat-watch.ts";
 import type { Atlas, RegionId } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
+import { groundOf } from "./ground.ts";
 import { putThinkingAway, useThinkingLog } from "./log.ts";
 import { liveThinking, parseThink, thinkingIn } from "./play.ts";
 import { aboutRegion, thinkingTitle } from "./shapes.ts";
@@ -100,9 +101,7 @@ export const useBrainThinking = ({
     key = again === undefined ? `live:${live?.questionId}` : `again:${think}`;
   }
   const played = usePlayedThinking(key, steps, {
-    ws,
-    brain,
-    atlas,
+    ground: groundOf(ws, brain, atlas),
     still,
     ...(live === undefined ? {} : { arrivals: live.arrivals, open: live.open }),
     i18n,
