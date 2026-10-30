@@ -230,6 +230,24 @@ describe("from core's audit log", () => {
     });
   });
 
+  it("says which chat app a person acted through", () => {
+    expect(
+      appAuditEventOf(
+        record(9, {
+          ...base,
+          actor: { type: "person", userId: "u1", via: "teams" },
+          action: "connection.connect",
+          detail: { provider: "microsoft", outcome: "connected" },
+        }),
+        directory,
+        accounts
+      )
+    ).toMatchObject({
+      actor: "Eva Bakker, in Microsoft Teams",
+      actorType: "human",
+    });
+  });
+
   it("files what Grasp itself did as automated access", () => {
     expect(
       appAuditEventOf(

@@ -196,6 +196,23 @@ const LogExport = ({ entries }: { entries: StaffLogEntry[] }) => (
   </Button>
 );
 
+/** What an entry says in words, where it says more than its name: who named whom. */
+const Said = ({ entry }: { entry: StaffLogEntry }) => {
+  const { t } = useLingui();
+  if (entry.what !== "interview.referred" || entry.person === null) {
+    return null;
+  }
+  const who = entry.person.name;
+  const named = entry.named?.name;
+  return (
+    <span className="text-muted-foreground w-full text-xs sm:basis-full">
+      {named === undefined
+        ? t`${who} said the work they were asked about isn't theirs. Whom they named isn't on the list.`
+        : t`${who} said the work they were asked about isn't theirs, and named ${named} for it.`}
+    </span>
+  );
+};
+
 const Entries = ({ data }: { data: StaffLog }) => {
   const { i18n } = useLingui();
   const teamName = new Map(data.teams.map(({ id, name }) => [id, name]));
@@ -210,7 +227,7 @@ const Entries = ({ data }: { data: StaffLog }) => {
     <ol>
       {data.entries.map((entry) => (
         <li
-          className="flex flex-col gap-0.5 border-t px-5 py-3 sm:flex-row sm:items-baseline sm:gap-4"
+          className="flex flex-col gap-0.5 border-t px-5 py-3 sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-4"
           key={entry.seq}
         >
           <time
@@ -230,6 +247,7 @@ const Entries = ({ data }: { data: StaffLog }) => {
                 : `${entry.person.name} · ${teamName.get(entry.team) ?? entry.team}`}
             </span>
           )}
+          <Said entry={entry} />
         </li>
       ))}
     </ol>
