@@ -227,6 +227,20 @@ describe(
         rota: false,
         named: { ids: [], names: [], words: false, lead: false },
       });
+      // The interviews it learned from, counted by week, five or more a
+      // week, on the week's Monday: never who gave them, or on which day.
+      expect({
+        mondays: brain.interviewWeeks.every(
+          ({ week }) => new Date(`${week}T00:00:00Z`).getUTCDay() === 1
+        ),
+        fiveOrMore: brain.interviewWeeks.every(
+          ({ interviews }) => interviews >= 5
+        ),
+        counted: brain.interviewWeeks.reduce(
+          (sum, { interviews }) => sum + interviews,
+          0
+        ),
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
@@ -357,6 +371,39 @@ describe(
         earlier: 1,
         still: false,
         drawings: ["Close the ticket."],
+      });
+    });
+
+    it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      await mapped(ids);
+      await told(ids);
+      await answering([fiveToldReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      // Six finished in the week of 5 October, Noor the week after.
+      await runInDurableObject(store, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE interview_states SET completed_at = CASE person WHEN ? THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
+          ids.noor
+        );
+      });
+      const member = await signedInApi(idp, "user");
+      const weeks = async () => {
+        const brain = await member.api.brain.read();
+        return brain.interviewWeeks;
+      };
+      const before = await weeks();
+      await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+      const oneWithdrew = await weeks();
+      await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
+      const twoWithdrew = await weeks();
+      expect({ before, oneWithdrew, twoWithdrew }).toStrictEqual({
+        before: [{ week: "2026-10-05", interviews: 6 }],
+        oneWithdrew: [{ week: "2026-10-05", interviews: 5 }],
+        // The four left of that week stay out, and never join Noor's week,
+        // where the five they would make would tell how many were left.
+        twoWithdrew: [],
       });
     });
 
