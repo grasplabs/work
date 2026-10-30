@@ -305,6 +305,33 @@ export interface Settled {
   sorted: Sorted | null;
 }
 
+/**
+ * Keeps what request `id`'s turn did (its kind, tools and what was
+ * missing) as soon as it answered, before any card of its answer can be
+ * pressed: a press then has the tools it changes, and settling, once the
+ * answer is sorted, keeps what the press said. It still stands as
+ * `stopped`, unbilled, until it is settled.
+ */
+export const heardRequest = async (
+  env: Env,
+  id: string,
+  { calls, cited }: Pick<Settled, "calls" | "cited">
+): Promise<void> => {
+  const heard = heardFrom(calls, cited);
+  try {
+    await drizzle(env.DB)
+      .update(stephenRequests)
+      .set({
+        kind: heard.kind,
+        tools: JSON.stringify(heard.tools),
+        missing: JSON.stringify(heard.missing),
+      })
+      .where(eq(stephenRequests.id, id));
+  } catch (error) {
+    log.warn("stephen_requests.unheard", errorFields(error));
+  }
+};
+
 /** Settles request `id` as its turn ended. */
 export const settleRequest = async (
   env: Env,
@@ -321,10 +348,13 @@ export const settleRequest = async (
       .from(stephenRequests)
       .where(eq(stephenRequests.id, id));
     const before = toolsIn(pressed?.tools ?? "[]");
+    // Kept as `heardRequest` wrote them, in the same order: each stands as
+    // a press left it, and what a press added (a workflow's start) stays.
     const tools = [
-      ...heard.tools.map(
-        (tool) => before.find((each) => each.id === tool.id) ?? tool
-      ),
+      ...heard.tools.map((tool, at) => {
+        const kept = before[at];
+        return kept?.id === tool.id ? kept : tool;
+      }),
       ...before.filter(
         (each) => !heard.tools.some((tool) => tool.id === each.id)
       ),
