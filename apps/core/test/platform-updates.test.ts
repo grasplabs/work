@@ -34,7 +34,7 @@ const newVersion = (): WorkerVersionMetadata => ({
 const change: PlatformChange = {
   by: "staff@grasp.test",
   what: "release",
-  release: "r000123-abcdef0",
+  release: "26.01.123",
   at: "2031-01-02T03:04:00.000Z",
 };
 
@@ -243,7 +243,7 @@ describe("platform updates", () => {
 const rollback: PlatformChange = {
   by: "staff@grasp.test",
   what: "rollback",
-  release: "r000122-fedcba0",
+  release: "26.01.122",
   at: "2031-01-02T04:00:00.000Z",
 };
 

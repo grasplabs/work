@@ -69,6 +69,21 @@ export default defineConfig({
       reportUnusedDisableDirectives: "error",
     },
     rules: {
+      // Controls are closed: a page places them (layout) and nothing else.
+      // A painted field is a container, open for composition: it lays out
+      // what stands on it, with its own room and corners (AGENTS.md, Design).
+      "shadcn/no-restyle": [
+        "error",
+        {
+          allow: ["layout"],
+          contracts: [
+            {
+              pattern: "^PaintedField$",
+              allow: ["layout", "spacing", "shape", "typography"],
+            },
+          ],
+        },
+      ],
       // Picked from Ultracite's anti-slop preset: the rules that stop agents
       // from silencing the type checker. The rest of that preset forces
       // workarounds (no options objects, no `unknown`).

@@ -114,7 +114,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
     ({ id: documentId } = await api.knowledge.saveDocument({
       collectionId,
       path: "leave.md",
-      text: "# Leave\n\nSixteen weeks, **paid**.\n",
+      text: "# Leave\n\nSixteen weeks, **paid**.\n\n## Who\n\nEveryone.\n",
       ifVersion: 0,
     }));
   } finally {
@@ -130,9 +130,10 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   expect(file.suggestedFilename()).toBe("leave.md");
   expect(await textOf(file)).toContain("Sixteen weeks, **paid**.");
 
-  // The page to print: the title, then the text rendered, in a frame of
-  // this origin that keeps its policy, styled by the app's own stylesheets
-  // and set in Geist.
+  // The page to print: the Grasp mark, the title, then the text rendered,
+  // in a frame of this origin that keeps its policy, styled by the app's
+  // own stylesheets: the title and the text's headings in Newsreader
+  // (`type-title`, `type-heading`), the text in Geist.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect
@@ -150,7 +151,18 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^24px .*Geist/u);
+    .toMatch(/^28px "Newsreader Variable"/u);
+  expect(
+    await printed
+      .getByRole("heading", { level: 2, name: "Who" })
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toMatch(/^"Newsreader Variable"/u);
+  expect(
+    await printed
+      .getByText("paid", { exact: true })
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+  ).toMatch(/^"Geist Variable"/u);
+  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Leave");
   await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);

@@ -573,4 +573,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CI_JOB_NAME: publish-release
-      - run: vp run release:upload --release release-out
+      # Published under the month's next id (`YY.MM.N`, from the bucket;
+      # @grasp-os/shared/release-id): only the manifest's id and the
+      # evidence's change from the release job's bundle, never a blob.
+      - run: vp run release:upload --release release-out --assign-id
