@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { MigrationSampleControl } from "../engines/migration-sample.tsx";
 import { makeCurrentFailure } from "../engines/store-change-errors.ts";
 import { storeChangesAnchor } from "../engines/store-changes.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -333,6 +334,11 @@ const ReviewDetails = ({
                     ) : (
                       <p className="text-muted-foreground">{fixtures.text}</p>
                     )}
+                    <MigrationSampleControl
+                      app={review.version.app}
+                      migration={name}
+                      version={review.version.version}
+                    />
                   </li>
                 );
               })}
