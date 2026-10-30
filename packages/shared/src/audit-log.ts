@@ -444,6 +444,31 @@ export interface AuditApi {
    * in the log: it reads what passes already recorded.
    */
   lastVerification: () => Promise<FullVerification | null>;
+  /**
+   * The archived events that match `filter`, newest first, from before
+   * `before`: what retention moved out of the log, while it is kept (until
+   * archive retention purges it). Each page reads one archived stretch, so
+   * it may hold none and still have a next one. Recorded as a search is,
+   * marked as of the archive. Refused with `audit.archive_unreadable` at a
+   * stretch whose archived copy can't be read.
+   */
+  searchArchive: (filter?: AuditFilter, before?: number) => Promise<AuditPage>;
+  /** How long the deployment keeps events and run details. Not recorded. */
+  retention: () => Promise<AuditRetention>;
+}
+
+/**
+ * How long the deployment keeps what it records, in days, as its config
+ * sets it; `null` where that config is invalid, and nothing is then
+ * archived, purged or swept on its account.
+ */
+export interface AuditRetention {
+  /** Events stay in the log, where a search finds them, then are archived. */
+  auditDays: number | null;
+  /** Events are kept in all, archive included, then purged. */
+  archiveDays: number | null;
+  /** A run keeps its details after it ends, then they are removed. */
+  runDays: number | null;
 }
 
 /**
@@ -464,4 +489,6 @@ export const auditErrors = defineErrorFamily({
     "Too many events for one export. Narrow the time range or the filter.",
   "audit.export_interrupted":
     "Older events were archived while exporting. Export again.",
+  "audit.archive_unreadable":
+    "Part of the audit log's archive can't be read. Verify the chain to see where.",
 });

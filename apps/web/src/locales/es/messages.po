@@ -530,6 +530,7 @@ msgid "{daily} a day"
 msgstr "{daily} al día"
 
 #: src/dashboard/signals.tsx
+#: src/settings/audit-archive.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# día} other {# días}}"
 
@@ -2606,6 +2607,10 @@ msgstr "Después"
 msgid "After {most} interviews, it is better split in two"
 msgstr "Tras {most} entrevistas, mejor dividirlo en dos"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Después de que termine una ejecución. Pasado ese tiempo, se eliminan sus entradas, salidas y mensajes."
+
 #. Read by screen readers before the new value.
 #: src/landscape/audit-trail.tsx
 msgid "After:"
@@ -3330,6 +3335,11 @@ msgstr "Aplicaciones por aprobar"
 msgid "Archive"
 msgstr "Archivar"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archivo"
+
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "¿Archivar {name}?"
@@ -3338,6 +3348,10 @@ msgstr "¿Archivar {name}?"
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archivado"
+
+#: src/settings/audit-archive.tsx
+msgid "Archived events"
+msgstr "Eventos archivados"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3590,6 +3604,7 @@ msgstr "Intento {n}"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/audit-archive.tsx
 msgid "Audit trail"
 msgstr "Registro de auditoría"
 
@@ -6095,6 +6110,10 @@ msgstr "Evento"
 msgid "Event timeline"
 msgstr "Cronología de eventos"
 
+#: src/settings/audit-archive.tsx
+msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
+msgstr "Eventos más antiguos de lo que conserva el registro de auditoría, trasladados al archivo. La búsqueda usa los filtros de arriba."
+
 #: src/routes/_shell.landscape.index.tsx
 msgid "Every app your teams use: how Grasp knows about it, what data it touches and who owns it."
 msgstr "Todas las aplicaciones que usan tus equipos: cómo las conoce Grasp, qué datos tocan y quién es responsable."
@@ -6822,6 +6841,10 @@ msgstr "Del arranque con el patrocinador. Lo que se cambie aquí vale desde el s
 msgid "From the permissions people granted and how the app is classified."
 msgstr "Según los permisos que concedieron las personas y cómo se clasifica la aplicación."
 
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "Desde que se registró cada evento, archivo incluido. Pasado ese tiempo, los eventos archivados se eliminan."
+
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
 msgstr "De tus dominios"
@@ -7480,6 +7503,10 @@ msgstr "¿Cuánto te lleva cada una, {name}?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "¿Cuánto tiempo te lleva eso, {name}?"
+
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records, as your deployment is set up. Grasp sets this with you."
+msgstr "Cuánto tiempo conserva Grasp lo que registra, según la configuración de tu despliegue. Grasp lo define contigo."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
@@ -10486,6 +10513,10 @@ msgstr "Aún no guardado. Se intenta de nuevo."
 msgid "Not served"
 msgstr "Sin servir"
 
+#: src/settings/audit-archive.tsx
+msgid "Not set correctly"
+msgstr "No configurado correctamente"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
 msgstr "Aún sin aprobar"
@@ -12780,6 +12811,10 @@ msgstr "Resultados"
 msgid "Resume"
 msgstr "Reanudar"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Conservación"
+
 #: src/landscape/landscape-overview.ts
 msgid "Retention period"
 msgstr "Plazo de conservación"
@@ -13430,6 +13465,10 @@ msgstr "Buscar personas y equipos"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras palabras, o con menos."
 
+#: src/settings/audit-archive.tsx
+msgid "Search the archive"
+msgstr "Buscar en el archivo"
+
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Buscar en la transcripción"
@@ -13437,6 +13476,10 @@ msgstr "Buscar en la transcripción"
 #: src/chat/chat-switcher.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Busca en tus chats y proyectos, y abre uno."
+
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Se busca arriba. Pasado ese tiempo, los eventos pasan al archivo."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -17857,6 +17900,10 @@ msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Dónde"
 
+#: src/settings/audit-archive.tsx
+msgid "Where a period isn’t set correctly, nothing is moved or removed on its account until Grasp corrects it."
+msgstr "Cuando un periodo no está configurado correctamente, no se traslada ni se elimina nada por él hasta que Grasp lo corrija."
+
 #: src/chat/suggestions.tsx
 msgid "Where does the most time still go?"
 msgstr "¿Dónde se va todavía más tiempo?"
@@ -18305,6 +18352,10 @@ msgstr "Flujo de trabajo no encontrado"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Workflow packages"
 msgstr "Paquetes del flujo de trabajo"
+
+#: src/settings/audit-archive.tsx
+msgid "Workflow run details"
+msgstr "Detalles de las ejecuciones de flujos de trabajo"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"
