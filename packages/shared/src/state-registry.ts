@@ -456,6 +456,8 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
+    brain_team_groups: exported(`${core}brain-team-groups.ts`),
+    brain_team_group_saves: exported(`${core}brain-team-groups.ts`),
     // Knowledge's host tables (src/db/core/schema.ts).
     collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),
@@ -788,6 +790,10 @@ const onboarding: DurableObjectState = {
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
     settled_works: exported(`${core}onboarding/store.ts`),
+    more_voices: exported(
+      `${core}onboarding/store.ts`,
+      "The pieces of work the company asked to hear more people about: who is asked next is asked about these first."
+    ),
     checked_differences: exported(
       `${core}onboarding/store.ts`,
       "The differences whose two ways the brain's intake checked five or more people behind, by the drawing it checked."

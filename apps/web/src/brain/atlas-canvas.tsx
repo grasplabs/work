@@ -37,7 +37,7 @@ import {
   WAITING,
 } from "./atlas-map.ts";
 import type { AtlasDots, Exit, Neuron, NeuronMap } from "./atlas-map.ts";
-import { REGION_IDS, REGIONS } from "./brain-atlas.ts";
+import { REGION_IDS } from "./brain-atlas.ts";
 import type { Atlas, RegionId } from "./brain-atlas.ts";
 import type { Brain } from "./brain.ts";
 import type { BrainDots } from "./dot-ink.ts";
@@ -496,56 +496,57 @@ const RegionNames = ({
   keep: Keep;
   onName: (over: Over) => void;
   onGo: (view: AtlasView) => void;
-}) => {
-  const { i18n } = useLingui();
-  return atlas.regions.map((region) => {
-    const up = lifted === region.id;
-    return (
-      <div
-        className={cn(PLACE, up && "z-10")}
-        data-shown="false"
-        key={region.id}
-        ref={keep(`region:${region.id}`)}
-      >
-        <button
-          className={cn(
-            "bg-card focus-visible:ring-ring/50 pointer-events-auto flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium whitespace-nowrap shadow-xs transition-shadow outline-none focus-visible:ring-3",
-            up && "shadow-md"
-          )}
-          onBlur={() => {
-            onName({});
-          }}
-          onClick={() => {
-            onGo({ region: region.id });
-          }}
-          onFocus={() => {
-            onName({ region: region.id });
-          }}
-          onPointerEnter={() => {
-            onName({ region: region.id });
-          }}
-          onPointerLeave={() => {
-            onName({});
-          }}
-          type="button"
+}) =>
+  // A lobe no group of teams fills has no name to show.
+  atlas.regions
+    .filter((region) => region.name !== "")
+    .map((region) => {
+      const up = lifted === region.id;
+      return (
+        <div
+          className={cn(PLACE, up && "z-10")}
+          data-shown="false"
+          key={region.id}
+          ref={keep(`region:${region.id}`)}
         >
-          {i18n._(region.label)}
-          {region.open.length > 0 ? (
-            <span className="bg-status-attention text-primary-foreground rounded-full px-1.5 text-xs tabular-nums">
-              {region.open.length}
-            </span>
+          <button
+            className={cn(
+              "bg-card focus-visible:ring-ring/50 pointer-events-auto flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium whitespace-nowrap shadow-xs transition-shadow outline-none focus-visible:ring-3",
+              up && "shadow-md"
+            )}
+            onBlur={() => {
+              onName({});
+            }}
+            onClick={() => {
+              onGo({ region: region.id });
+            }}
+            onFocus={() => {
+              onName({ region: region.id });
+            }}
+            onPointerEnter={() => {
+              onName({ region: region.id });
+            }}
+            onPointerLeave={() => {
+              onName({});
+            }}
+            type="button"
+          >
+            {region.name}
+            {region.open.length > 0 ? (
+              <span className="bg-status-attention text-primary-foreground rounded-full px-1.5 text-xs tabular-nums">
+                {region.open.length}
+              </span>
+            ) : null}
+          </button>
+          {up ? (
+            <RegionMarks
+              className="bg-popover absolute top-5 left-0 -translate-x-1/2 rounded-md border px-2.5 py-2 whitespace-nowrap shadow-md"
+              region={region}
+            />
           ) : null}
-        </button>
-        {up ? (
-          <RegionMarks
-            className="bg-popover absolute top-5 left-0 -translate-x-1/2 rounded-md border px-2.5 py-2 whitespace-nowrap shadow-md"
-            region={region}
-          />
-        ) : null}
-      </div>
-    );
-  });
-};
+        </div>
+      );
+    });
 
 /** A folder's name over its neurons, when it has several: one neuron says what it is itself. A folder with a note of its own opens it. Left out when the region is one folder. */
 const GroupNames = ({
@@ -609,7 +610,8 @@ const NeuronNames = ({
   const lines = linesClass(map.cell.lines);
   return map.neurons.map((neuron, index) => {
     const question = neuron.kind === "gap";
-    const quiet = question && map.region !== "gaps";
+    // A question sits beside what it is about, quieter than the notes.
+    const quiet = question;
     const up = chosen === index || hovered === index;
     return (
       <div
@@ -650,6 +652,7 @@ const NeuronNames = ({
 
 /** The ways out, pinned along the top, level with the small brain: every other region this one links to, in as many rows as the canvas needs for them to stand apart. Pointing shows which notes take it; a click follows them there. */
 const WayOuts = ({
+  atlas,
   region,
   ways,
   litRegions,
@@ -657,16 +660,16 @@ const WayOuts = ({
   onName,
   onGo,
 }: {
+  atlas: Atlas;
   region: RegionId;
   ways: Exit[];
   litRegions: Set<number>;
   keep: Keep;
   onName: (over: Over) => void;
   onGo: (view: AtlasView) => void;
-}) => {
-  const { i18n } = useLingui();
-  return ways.map((exit, index) => {
-    const to = REGIONS.find((each) => each.id === exit.region);
+}) =>
+  ways.map((exit, index) => {
+    const to = atlas.regions.find((each) => each.id === exit.region);
     return (
       <div
         className={PLACE}
@@ -699,9 +702,7 @@ const WayOuts = ({
           type="button"
         >
           <ArrowUpRightIcon className="text-muted-foreground size-3.5 flex-none" />
-          <span className="truncate">
-            {to ? i18n._(to.label) : exit.region}
-          </span>
+          <span className="truncate">{to?.name ?? exit.region}</span>
           <span className="text-muted-foreground font-normal tabular-nums">
             {exit.count}
           </span>
@@ -709,7 +710,6 @@ const WayOuts = ({
       </div>
     );
   });
-};
 
 /** Nothing to ask of the camera before the drawing starts. */
 const idle = () => {
@@ -974,6 +974,7 @@ export const BrainAtlas = ({
       )}
       {view.region === undefined ? null : (
         <WayOuts
+          atlas={atlas}
           keep={keep}
           litRegions={litRegions}
           onGo={onGo}
