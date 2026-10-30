@@ -571,6 +571,8 @@ const noSlowMotion = {
     },
     messages: {
       slow: "{{ms}} ms is longer than an answer may take ({{limit}} ms). Shorten it, or, if it is rare or seen once, turn the rule off for its file in vite.config.ts with the reason.",
+      unread:
+        "`{{value}}` comes to no time the lint can work out. Write it as a time, or, if it follows something such as a swipe, turn the rule off for its file in vite.config.ts with the reason.",
     },
     schema: [],
   },
@@ -583,9 +585,18 @@ const noSlowMotion = {
       });
     };
     const check = (node: Node, text: string): void => {
-      const ms = findSlowClass(text);
-      if (ms !== undefined) {
-        report(node, ms);
+      const found = findSlowClass(text);
+      if (found === undefined) {
+        return;
+      }
+      if ("ms" in found) {
+        report(node, found.ms);
+      } else {
+        context.report({
+          node,
+          messageId: "unread",
+          data: { value: found.unread },
+        });
       }
     };
     return {

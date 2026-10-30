@@ -52,6 +52,7 @@
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
     "eslint": "catalog:",
+    "lightningcss": "catalog:",
     "secretlint": "catalog:",
     "semver": "catalog:",
     "typescript": "catalog:",
