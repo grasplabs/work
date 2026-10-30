@@ -23,6 +23,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { OutputClassControl } from "./output-class.tsx";
 
 // Whether an engine's apps get its data (core's screen-trust.ts): an
 // admin reads the code of the current version's apps and approves exactly
@@ -253,6 +254,7 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
           </Trans>
         </p>
       )}
+      <OutputClassControl review={review} />
       {screens.length === 0 ? null : (
         <>
           <div className="bg-card overflow-hidden rounded-xl border">
