@@ -2866,7 +2866,9 @@ export class RunHost extends RpcTarget {
       // What it cites, pinned as it was, added to the run's evidence
       // (run-evidence.ts): checked before anything leaves the run from now
       // on. A step replayed returns its recorded pack and records nothing.
-      await recordRunEvidence(this.#env, this.#run, permissionId, pins);
+      await recordRunEvidence(this.#env, this.#run, permissionId, pins, {
+        recalled: true,
+      });
       return pack;
     });
   }

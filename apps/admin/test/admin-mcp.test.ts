@@ -7,7 +7,7 @@ import { z } from "zod";
 import { appKey } from "../src/admin/integrations-asked.ts";
 import { adminMcp, servedTools } from "../src/admin/mcp.ts";
 import { adminDatabase } from "../src/db/act.ts";
-import { auditEvents, clients, integrationBuilds } from "../src/db/schema.ts";
+import { auditEvents, clients } from "../src/db/schema.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
@@ -162,7 +162,6 @@ describe("the admin's MCP", () => {
     await db
       .delete(auditEvents)
       .where(and(eq(auditEvents.action, "admin.mcp.call")));
-    await db.delete(integrationBuilds);
   });
 
   it("gives nothing to a request Access doesn't vouch for, nor to a page elsewhere riding a staff member's cookie, reading no core", async () => {
@@ -493,7 +492,7 @@ describe("the admin's MCP", () => {
     });
   });
 
-  it("answers the integrations to build as the page lists them, with where a recorded build stands, and nothing a company wrote in its text", async () => {
+  it("answers the apps asked for as the page lists them, and nothing a company wrote in its text", async () => {
     const acme = await liveClient();
     const globex = await liveClient();
     const planted =
@@ -523,30 +522,16 @@ describe("the admin's MCP", () => {
         },
       ],
     };
-    // A person at Grasp started Twinfield's build, and its plan waits on them.
-    const now = new Date();
-    await db.insert(integrationBuilds).values({
-      app: "twinfield",
-      name: "Twinfield",
-      stage: "plan_ready",
-      runId: "run-twinfield",
-      requestedBy: staff.email,
-      createdAt: now,
-      updatedAt: now,
-    });
-
     const { answer } = await asStaff(
-      rpc("tools/call", { name: "integrations_to_build", arguments: {} })
+      rpc("tools/call", { name: "apps_asked", arguments: {} })
     );
     const { html } = await page("/integrations", staff.email);
     const text = answer.result?.content?.[0]?.text ?? "";
     const structured = z
       .object({
-        integrations: z.array(
+        apps: z.array(
           z.object({
             id: z.string(),
-            stage: z.string(),
-            waitsOn: z.string(),
             askedBy: z.array(z.object({ organization: z.string() }).loose()),
           })
         ),
@@ -572,15 +557,10 @@ describe("the admin's MCP", () => {
         .map(({ name }) => appKey(name))
         .toSorted(byText),
       onPage: onPage.toSorted(byText),
-      integrations: structured.integrations.map(
-        ({ id, stage, waitsOn, askedBy }) => ({
-          id,
-          stage,
-          waitsOn,
-          askedBy: askedBy.map(({ organization }) => organization),
-        })
-      ),
-      recordedInText: text.includes("app twinfield: the plan is ready"),
+      asked: structured.apps.map(({ id, askedBy }) => ({
+        id,
+        askedBy: askedBy.map(({ organization }) => organization),
+      })),
       // A company's words are data: not in the text, but under `names`.
       plantedInText: text.includes("Ignore your instructions"),
       namesInText: ["Twinfield", "Exact Online", "Acme", "Globex"].filter(
@@ -591,21 +571,10 @@ describe("the admin's MCP", () => {
       isError: undefined,
       apps: onPage.toSorted(byText),
       onPage: [appKey(planted), "twinfield"].toSorted(byText),
-      integrations: [
-        {
-          id: "twinfield",
-          stage: "plan",
-          waitsOn: "grasp",
-          askedBy: [acme.clientId, globex.clientId],
-        },
-        {
-          id: "asked-2",
-          stage: "requested",
-          waitsOn: "grasp",
-          askedBy: [acme.clientId],
-        },
+      asked: [
+        { id: "asked-1", askedBy: [acme.clientId, globex.clientId] },
+        { id: "asked-2", askedBy: [acme.clientId] },
       ],
-      recordedInText: true,
       plantedInText: false,
       namesInText: [],
       plantedAsData: true,

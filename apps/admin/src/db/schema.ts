@@ -131,6 +131,14 @@ export const clients = sqliteTable(
      */
     configChangedAt: timestamp("config_changed_at"),
     /**
+     * The most its model calls may cost in a calendar month, in whole
+     * euros (GRA-141): €250 unless staff set another
+     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
+     * it to its core's model gateway as its deployment budget, which the
+     * gateway enforces before each provider request.
+     */
+    modelSpendCeiling: integer("model_spend_ceiling").notNull().default(250),
+    /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name
      * or email, so the admin never shows one company another's invoices.
@@ -650,62 +658,6 @@ export const clientProvisions = sqliteTable("client_provisions", {
   }),
   /** The staff member who started it. */
   startedBy: text("started_by").notNull(),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
-
-/**
- * An integration Grasp's agent builds into the platform: one row per app,
- * shared by every company that asked for it (src/builds/builds.ts). It
- * moves forward through its stages, each move a conditional write naming
- * the stage it leaves, audited in the same batch, so a late or repeated
- * event never moves it back. Never an app credential, a company's data or
- * anything the agent read: those stay in Secrets Store, the company's
- * deployment and the agent's session.
- */
-export const integrationBuilds = sqliteTable("integration_builds", {
-  /** The app's connector name: its package's, `packages/connectors/<app>`. */
-  app: text().primaryKey(),
-  /** The app as people name it, such as `Personio`. */
-  name: text().notNull(),
-  stage: text({
-    enum: [
-      "asked",
-      "researching",
-      "plan_ready",
-      "credentials",
-      "writing",
-      "in_review",
-      "merged",
-      "needs_person",
-    ],
-  }).notNull(),
-  /** The stage it was in when it came to need a person; null otherwise. */
-  stoppedAt: text("stopped_at"),
-  /** Why it needs a person, as a code; null otherwise. */
-  reason: text(),
-  /** Its build's run (src/builds/workflow.ts). */
-  runId: text("run_id").notNull(),
-  /**
-   * The agent's plan, while it waits for a person or once approved: JSON
-   * (`buildPlanSchema`, src/builds/plan.ts). Its hosts are the only ones
-   * the connector's manifest may name.
-   */
-  plan: text(),
-  /** How many plans the agent has written: a sent-back plan starts the next round. */
-  planRound: integer("plan_round").notNull().default(0),
-  /** What the person who sent the last plan back asked for; null otherwise. */
-  planNote: text("plan_note"),
-  /** The staff member who approved the plan. */
-  approvedBy: text("approved_by"),
-  /** The branch it is written on, `feat/connector-<app>`, once it has a pull request. */
-  branch: text(),
-  /** Its pull request's number in grasplabs/work. */
-  pullRequest: integer("pull_request"),
-  /** The commit its pull request was squash-merged as, on `main`. */
-  mergeCommitSha: text("merge_commit_sha"),
-  /** The staff member who confirmed Build it. */
-  requestedBy: text("requested_by").notNull(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });

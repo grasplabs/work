@@ -331,7 +331,7 @@ export const LogExport = ({ search }: { search: LogSearch }) => {
 };
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
-export const actorOf = (
+const doerOf = (
   actor: AuditActor,
   directory: Directory
 ): { label: string; id?: string } => {
@@ -376,6 +376,26 @@ export const actorOf = (
   }
   // The platform itself: a name, the same in every language.
   return { label: "Grasp" };
+};
+
+/**
+ * Who did it, and, for work a Grasp staff member started (an agent's turn, an
+ * App's or a workflow's step), the staff member it was for.
+ */
+export const actorOf = (
+  actor: AuditActor,
+  directory: Directory
+): { label: string; id?: string } => {
+  const doer = doerOf(actor, directory);
+  if (!("staff" in actor) || actor.staff === undefined) {
+    return doer;
+  }
+  const { label } = doer;
+  const name = personName(directory, actor.staff);
+  return {
+    ...doer,
+    label: i18n._(msg`${label}, started by ${name} (Grasp staff)`),
+  };
 };
 
 /** The event as stored, laid out to read; the stored text if it isn't JSON. */

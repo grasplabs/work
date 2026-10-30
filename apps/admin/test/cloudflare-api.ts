@@ -30,12 +30,14 @@ import {
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
-import {
-  connectGatewayScript,
-  gatewayScriptOf,
-} from "@grasp-os/shared/connect-gateway";
+import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
+import {
+  clientsNamespace,
+  platformWorkerName,
+  stages,
+} from "@grasp-os/shared/names";
 import {
   onboardingSummaryPath,
   onboardingSummaryPurpose,
@@ -66,7 +68,6 @@ import {
   quotaPolicyReportRequestSchema,
 } from "@grasp-os/shared/quota-policy-report";
 import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
-import { clientDispatchNamespace } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import {
@@ -180,15 +181,19 @@ const connectOf = (
   account: AccountState,
   binding: z.infer<typeof bindingsSchema>[number] | undefined
 ): ScriptState | undefined => {
-  if (binding?.service !== connectGatewayScript) {
+  // A stage's gateway forwards into its stage's clients' namespace.
+  const stage = stages.find(
+    (each) => binding?.service === platformWorkerName("connect-gateway", each)
+  );
+  if (stage === undefined) {
     return binding?.service === undefined
       ? undefined
       : account.scripts.get(binding.service);
   }
-  const script = gatewayScriptOf(binding.props);
+  const script = gatewayScriptOf(binding?.props);
   return script === undefined
     ? undefined
-    : account.namespaces.get(clientDispatchNamespace)?.get(script);
+    : account.namespaces.get(clientsNamespace(stage))?.get(script);
 };
 
 /**
@@ -825,6 +830,10 @@ const accountRoutes: Route[] = [
     path: /^\/ai-gateway\/gateways$/u,
     answer: ({ account, json }) => {
       const gateway = { authentication: false, ...json };
+      // One id per account: a second create of it is refused, as the API does.
+      if (account.gateways.some((each) => each.id === json?.id)) {
+        return refusal(400, 7001, "A gateway with this id already exists");
+      }
       account.gateways.push(gateway);
       return envelope(gateway);
     },
@@ -1010,10 +1019,12 @@ export const fakeCloudflareApi = (token: string) => {
   /** Adds an account `member` is a member of, and returns what it holds. */
   const addAccount = (
     name = "Client",
-    member = deployerEmail
+    member = deployerEmail,
+    /** Its id, for an account the admin knows by its own, such as Grasp's. */
+    id = crypto.randomUUID().replaceAll("-", "")
   ): AccountState => {
     const account: AccountState = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id,
       name,
       members: new Map([[member, "accepted"]]),
       d1: [],

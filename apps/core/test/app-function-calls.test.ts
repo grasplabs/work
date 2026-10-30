@@ -10,13 +10,14 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import {
   callAppFunction,
   callRunFunction,
+  invocationFor,
   readFunctionRequest,
 } from "../src/app-functions.ts";
 import type { RunCaller } from "../src/app-functions.ts";
@@ -25,8 +26,12 @@ import type { Release } from "../src/app-releases.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { activeStaffRole } from "../src/auth/identity.ts";
+import { callOperation } from "../src/operations.ts";
+import type { Runner } from "../src/operations.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
+import { hostedRelease } from "../src/release-runner.ts";
 import {
   approveResourceBinding,
   reviewResourceBindings,
@@ -37,13 +42,20 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { published, release } from "./apps.ts";
+import { codeResults, codeStep, chatOf, model, says } from "./agent-chat.ts";
+import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import { signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  whoami,
+} from "./sign-in.ts";
 
 // Another App's public functions through an app resource an App's actions
 // declare (`resource.app`), which reaches nothing until an admin binds it
@@ -247,6 +259,46 @@ export default app({
 });
 
 /** A relay: `relay.go` calls the next App's `relay.go`, and says how far it got. */
+/** An App whose action writes twice, a mutation's commit each time. */
+const touchFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { action, mutation } from "#grasp/server";
+export const touch = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await ctx.db.insert("notes", { title: "touched" });
+    return null;
+  },
+});
+export const touchTwice = action({
+  args: {},
+  returns: v.null(),
+  uses: [touch],
+  handler: async (ctx) => {
+    await ctx.runMutation(touch, {});
+    await ctx.runMutation(touch, {});
+    return null;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { touch, touchTwice } from "./operations/notes.ts";
+import schema from "./schema.ts";
+export default app({
+  name: "Touch",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { notes: { touch, touchTwice } },
+  screens: [],
+  uses: [],
+});
+`,
+};
+
 const relayFiles: Record<string, string> = {
   "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
@@ -1530,6 +1582,203 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
           onBehalfOf: builder.userId,
         },
       ],
+    });
+  });
+
+  it("calls as the Grasp staff member who started the run, under the binding an admin approved, each App down the chain audited as theirs", async () => {
+    const admin = await person("admin");
+    const builder = await signedInApi(idp, "builder");
+    const [first, second] = await Promise.all(
+      ["First", "Second"].map(async (name) => await sealedApp(relayFiles, name))
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Two relays");
+    }
+    const go = JSON.stringify({ contractId: "relay.go", kind: "action" });
+    const { id } = await builder.api.apps.create({ name: "Staff relay" });
+    await published(id);
+    await release(builder, id, {
+      ...relayFiles,
+      "workflows/relayer.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("relayer", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("relay", { description: "Relay", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
+    (await env.APP.callFunction(${go}, {})) as Json
+  )
+);
+`,
+      "workflows/relayer.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./relayer.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: { relay: null }, expect: {} }]);
+`,
+    });
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core } = await openRpc(session);
+    const staff = core.authenticate();
+    const { userId: staffId } = await whoami(session);
+    // What the run did is the client's admins' to read.
+    const reader = await signedInApi(idp, "admin");
+    const relayed = async () => {
+      const run = await staff.workflows.start(id, "relayer");
+      await finished(run.id);
+      const { output } = await reader.api.workflows.status(run.id);
+      return output;
+    };
+
+    // Before an admin approves the binding: nothing reaches the relay.
+    const unbound = await relayed();
+    await approveResourceBinding(env, admin, {
+      app: id,
+      alias: "next",
+      target: { kind: "app", appId: first.app },
+      reviewed: { version: 1 },
+    });
+    await bind(admin, first, second.app, "next");
+    const bound = await relayed();
+    const events = await allEvents();
+    const staffOf = (callee: string) =>
+      callsTo(events, callee).map(({ actor, onBehalfOf }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf,
+      }));
+
+    expect({
+      unbound,
+      bound,
+      // The run's call of the first relay, and the first relay's of the
+      // second: the called App's side says so too.
+      first: staffOf(first.app),
+      second: staffOf(second.app),
+    }).toStrictEqual({
+      unbound: { ok: true, value: "+error:resource.unavailable:undefined" },
+      bound: { ok: true, value: "+++error:resource.unavailable:undefined" },
+      first: [{ actor: "workflow", staff: staffId, onBehalfOf: staffId }],
+      second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
+    });
+  });
+
+  it("refuses a staff-started call's next write once their staff session has ended", async () => {
+    const sealed = await sealedApp(touchFiles, "Touch");
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staffId } = await whoami(session);
+    const role = await activeStaffRole(env, staffId);
+    if (role === undefined) {
+      throw new Error("A staff session");
+    }
+    const hosted = hostedRelease(env, sealed.release);
+    let ended = false;
+    // Their sessions end while the action runs, before its first commit.
+    const run: Runner = async (path, args, channel) => {
+      if (path === "notes.touch" && !ended) {
+        ended = true;
+        await env.DB.prepare(
+          "DELETE FROM sessions WHERE user_id = ? AND staff = 1"
+        )
+          .bind(staffId)
+          .run();
+      }
+      return await hosted.run(path, args, channel);
+    };
+    const invocation = await invocationFor(env, sealed.release, {
+      by: { userId: staffId, role },
+      requestId: crypto.randomUUID(),
+      deadline: Date.now() + 60_000,
+      byStaff: true,
+    });
+    const result = await callOperation(
+      { manifest: sealed.release.app, run },
+      invocation,
+      { path: "notes.touchTwice", kind: "action" },
+      {}
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "permission.person_inactive" },
+    });
+  });
+
+  it("calls as the Grasp staff member whose chat turn called the App, each App down the chain audited as theirs", async () => {
+    const admin = await person("admin");
+    const granting = await signedInApi(idp, "admin");
+    const [first, second] = await Promise.all(
+      ["First", "Second"].map(async (name) => await sealedApp(relayFiles, name))
+    );
+    if (first === undefined || second === undefined) {
+      throw new Error("Two relays");
+    }
+    await bind(admin, first, second.app, "next");
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { userId: staffId } = await whoami(session);
+    const go = JSON.stringify({
+      reference: {
+        resourceId: first.release.manifest.resourceId,
+        resourceVersion: first.release.manifest.resourceVersion,
+        contractId: "relay.go",
+        fingerprint: first.release.fingerprints["relay.go"],
+        kind: "action",
+      },
+      input: {},
+    });
+    const chat = await chatOf(
+      staffId,
+      codeStep(
+        `export default async (self, env) => await env.apps.call(${JSON.stringify(first.app)}, new Blob([${JSON.stringify(go)}]).stream());`
+      ),
+      says("Done.")
+    );
+    await requestGranted(idp, granting, {
+      subject: chat.agent,
+      object: { type: "app", appId: appIdSchema.parse(first.app) },
+      actions: ["read", "write"],
+      binding: "FIRST",
+    });
+
+    // As core's chats send a staff member's question: marked.
+    await chat.stub.send(chat.chat.id, staffId, { text: "Relay", model }, true);
+    const result = await vi.waitFor(
+      async () => {
+        const [returned] = await codeResults(chat.stub, chat.chat.id);
+        expect(returned).toBeDefined();
+        return returned;
+      },
+      { timeout: 20_000 }
+    );
+    const events = await allEvents();
+    const staffOf = (callee: string) =>
+      callsTo(events, callee).map(({ actor, onBehalfOf }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf,
+      }));
+
+    // The chat's call of the first relay is the agent's (`agent.call`).
+    const chatCalls = events
+      .filter(
+        ({ action, actor, detail }) =>
+          action === "agent.call" &&
+          detail.method === "apps.call" &&
+          actor.type === "agent" &&
+          actor.agentId === chat.agent.agentId
+      )
+      .map(({ actor }) => ({
+        actor: actor.type,
+        staff: "staff" in actor ? actor.staff : undefined,
+        onBehalfOf: "onBehalfOf" in actor ? actor.onBehalfOf : undefined,
+      }));
+
+    expect({
+      // The first relay reached the second, which had nowhere further.
+      returned: result?.text.includes("++error:resource.unavailable"),
+      first: chatCalls,
+      second: staffOf(second.app),
+    }).toStrictEqual({
+      returned: true,
+      first: [{ actor: "agent", staff: staffId, onBehalfOf: staffId }],
+      second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
     });
   });
 });

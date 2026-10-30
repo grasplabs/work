@@ -51,9 +51,10 @@ const caller = "ops@grasp.test";
 const policyId = "eu-storage";
 
 /**
- * A release imported for a placed client. Its core binds Workers AI, as
- * the real one does, so an attempt stops at validation
- * (`model_spend_undecided`) before it reaches Cloudflare.
+ * A release imported for a placed client. Its core has a cron trigger,
+ * which Workers for Platforms doesn't document for user Workers, so an
+ * attempt in a shared destination stops at validation
+ * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
 const importedRelease = async (): Promise<string> => {
   const manifest = await release();
@@ -206,7 +207,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       operation: {
         releaseId,
         status: "failed",
-        error: "model_spend_undecided",
+        error: "wfp_schedule_unqualified",
         startedBy: caller,
       },
       placedBy: [caller],
@@ -386,7 +387,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       operation: {
         releaseId,
         status: "failed",
-        error: "model_spend_undecided",
+        error: "wfp_schedule_unqualified",
       },
       run: "errored",
       going: false,
@@ -415,6 +416,32 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       moved: { refused: "placement_changed" },
       anotherRelease: { refused: "operation_release_changed" },
     });
+  });
+
+  it("says an operation left running with no attempt at all is gone, for staff to resume", async () => {
+    await destination();
+    const clientId = await client();
+    const releaseId = await importedRelease();
+    using attempts = followAttempts();
+    await place(clientId, releaseId, null);
+    await latestStopped(attempts);
+    // Running, as an attempt that never recorded its end leaves it, and
+    // no runner holds it any more.
+    await db
+      .update(clientProvisions)
+      .set({ status: "running", error: null })
+      .where(eq(clientProvisions.clientId, clientId));
+    await db.delete(clientRuns).where(eq(clientRuns.clientId, clientId));
+
+    const view = await hostingOf(clientId);
+    const { html } = await page(`/organizations/${clientId}/setup`, caller);
+
+    expect({
+      run: view.run,
+      going: view.going,
+      said: html.includes("run_gone"),
+      words: html.includes("Its attempt is gone, or never started"),
+    }).toStrictEqual({ run: "gone", going: false, said: true, words: true });
   });
 
   it("refuses anyone Access doesn't vouch for, placing and reading nothing", async () => {
