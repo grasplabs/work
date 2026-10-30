@@ -4370,8 +4370,6 @@ msgstr "Naam van de chat"
 msgid "Chat width"
 msgstr "Breedte van de chat"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
 #: src/chat/chat-switcher.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
