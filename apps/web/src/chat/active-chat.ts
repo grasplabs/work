@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from "react";
 
+import { forgetCardGround } from "../brain/thinking/card-ground.ts";
+import { forgetThinking } from "../brain/thinking/log.ts";
+
 // The person's open chats in this tab: `chat`, the one Chat shows and the
 // chat dock on every other page carries on, so what is asked there goes
 // on in Chat and shows in its list; `brain`, the brain's own, which the
@@ -69,8 +72,14 @@ export const setActiveChat = (
   }
 };
 
-/** Forgets every open chat: they were the person's who signed out. */
+/**
+ * Forgets every open chat, and what the tab saw and read of their thinking
+ * (brain/thinking/log.ts, card-ground.ts): they were the person's who
+ * signed out.
+ */
 export const forgetActiveChats = (): void => {
+  forgetThinking();
+  forgetCardGround();
   for (const slot of new Set<ChatSlot>(["chat", "brain", ...active.keys()])) {
     setActiveChat(undefined, slot);
   }
@@ -88,31 +97,6 @@ export const forgetActiveChats = (): void => {
   } catch {
     // See `read`: nothing was kept.
   }
-};
-
-/**
- * The App whose own chat in this tab is `chatId`, if one's is: what Chat
- * knows of a chat past the end of its list, which says it only of the
- * chats it lists.
- */
-export const appOfChat = (chatId: string): string | undefined => {
-  const prefix = keyOf(appSlot(""));
-  let kept: string[] = [];
-  try {
-    kept = Array.from(
-      { length: sessionStorage.length },
-      (_, index) => sessionStorage.key(index) ?? ""
-    ).filter((key) => key.startsWith(prefix));
-  } catch {
-    // See `read`: only the chats this page opened are known.
-  }
-  const apps = new Set([
-    ...kept.map((key) => key.slice(prefix.length)),
-    ...[...active.keys()].flatMap((slot) =>
-      slot.startsWith("app:") ? [slot.slice("app:".length)] : []
-    ),
-  ]);
-  return [...apps].find((app) => activeIn(appSlot(app)) === chatId);
 };
 
 const subscribe = (listener: () => void): (() => void) => {

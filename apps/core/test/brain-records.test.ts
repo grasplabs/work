@@ -31,10 +31,22 @@ import {
 
 const idp = mockIdp();
 
-/** Who works where: what makes the staff list a source the brain has. */
+/**
+ * Who works where: what makes the staff list a source the brain has. Five
+ * accountants, so a source may say an accountant gave it; one head of
+ * finance, who no source may name by role.
+ */
 const roster: RosterInput = {
   teams: [{ id: "finance", name: "Finance", lead: null }],
-  people: [{ id: "ann", name: "Ann", team: "finance", title: "Accountant" }],
+  people: [
+    ...["Ann", "Bo", "Cas", "Dex", "Eli"].map((name) => ({
+      id: name.toLowerCase(),
+      name,
+      team: "finance",
+      title: "Accountant",
+    })),
+    { id: "fay", name: "Fay", team: "finance", title: "Head of finance" },
+  ],
 };
 
 /** One interview's records, under ids no other test uses. */
@@ -110,13 +122,28 @@ describe("the brain's records", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
     const member = await signedInApi(idp, "user");
-    const { ids, records } = interview(unique());
+    const { ids, records: interviewed } = interview(unique());
+    // Given by an accountant, one of five: their role may show.
+    const accountants: BrainRecordInput = {
+      type: "source",
+      id: `${ids.source}-accountants`,
+      kind: "interview",
+      title: "Finance interviews",
+      date: "2026-10-21",
+      who: "Accountant",
+      step: 2,
+      teamIds: ["team-finance"],
+    };
+    const records = [...interviewed, accountants];
 
     let added: unknown;
     const events = await auditedDuring(async () => {
       added = await admin.api.brain.addRecords(records);
     });
     const workspace = await member.api.brain.read();
+    // An admin reads the staff list's roles, so the role of one of five
+    // shows; a member reads the counts only as records give them.
+    const asAdmin = await admin.api.brain.read();
 
     expect({
       added,
@@ -128,6 +155,10 @@ describe("the brain's records", { timeout: 120_000 }, () => {
           detail,
         })),
       source: workspace.sources.find(({ id }) => id === ids.source),
+      byAnAccountant: asAdmin.sources.find(({ id }) => id === accountants.id)
+        ?.who,
+      headOfFinanceToAdmin: asAdmin.sources.find(({ id }) => id === ids.source)
+        ?.who,
       // The staff list a record names, as where it came from: when it came
       // in, for a member who reads nothing else of the onboarding.
       staffList: workspace.sources.find(({ id }) => id === "src-roster"),
@@ -137,14 +168,16 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         [ids.source, "src-roster"].includes(sourceId)
       ),
     }).toStrictEqual({
-      added: { added: 6, unchanged: 0 },
+      added: { added: 7, unchanged: 0 },
       events: [
         {
           actor: "person",
           provenance: records.map(({ type, id }) => `${type}:${id}`),
-          detail: { added: 6 },
+          detail: { added: 7 },
         },
       ],
+      byAnAccountant: "Accountant",
+      headOfFinanceToAdmin: undefined,
       staffList: {
         id: "src-roster",
         kind: "import",
@@ -153,16 +186,19 @@ describe("the brain's records", { timeout: 120_000 }, () => {
         date: new Date().toISOString().slice(0, 10),
         step: 2,
       },
+      // The one head of finance's role would point at them: it stays out,
+      // for every reader.
       source: {
         id: ids.source,
         kind: "interview",
         title: "Finance interview",
         date: "2026-10-20",
-        who: "Head of finance",
         how: "Live, 45 minutes",
         step: 2,
         interviewee: "stakeholder",
         teamIds: ["team-finance"],
+        // One of the brain's own records: an admin may take it out.
+        forgettable: true,
       },
       tool: {
         id: ids.tool,

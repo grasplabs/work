@@ -561,7 +561,8 @@ const Dock = ({
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size. In the brain (its atlas, a region of
+ * which is the chat at full size, and a project's, whose box starts a
+ * chat in the project. In the brain (its atlas, a region of
  * it, a note or a part's page) it is the brain's own chat, kept as the
  * person moves about the brain, as in the prototype
  * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
@@ -580,7 +581,9 @@ export const ChatDock = () => {
   const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
   const loaded = appPage?.loaderData;
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
-  if (pathname === "/") {
+  // Chat is the chat at full size; a project's page has its own box,
+  // which starts a chat in the project.
+  if (pathname === "/" || pathname.startsWith("/projects/")) {
     return null;
   }
   if (pathname === "/brain" || pathname.startsWith("/brain/")) {

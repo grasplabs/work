@@ -1,5 +1,4 @@
 import type { Gap, Workspace } from "@grasp-os/shared/brain";
-import type { I18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -24,7 +23,6 @@ import {
   atlasOf,
   isRegion,
   REGION_IDS,
-  REGIONS,
   signalPaths,
 } from "../brain/brain-atlas.ts";
 import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
@@ -181,12 +179,12 @@ const diveClearOf = (dock: DockMode, drawerWidth: number): number => {
 /** The part of the brain a thinking is about, as the way back names it. */
 const aboutOf = (
   region: RegionId | undefined,
-  i18n: I18n
+  atlas: Atlas
 ): { label: string; region: RegionId } | undefined => {
-  const label = REGIONS.find((each) => each.id === region)?.label;
+  const label = atlas.regions.find((each) => each.id === region)?.name;
   return label === undefined || region === undefined
     ? undefined
-    : { label: i18n._(label), region };
+    : { label, region };
 };
 
 /** Back from a thinking: to the part it is about, or the whole brain. */
@@ -258,7 +256,7 @@ const AtlasPage = () => {
   // The brain's chat, open as a drawer, takes the right of the canvas.
   const dock = useDockMode();
   const drawerWidth = useDockDrawerWidth();
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const { workspace: ws, brain: read } = useBrainData();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/brain/" });
@@ -311,16 +309,16 @@ const AtlasPage = () => {
   const [spot, setSpot] = useState<Spot>();
   const { gap, neuron } = inHandOf(ws, neurons, view.note);
 
-  const regionLabel = REGIONS.find((each) => each.id === region)?.label;
+  const regionName = atlas.regions.find((each) => each.id === region)?.name;
   const trail =
     thinking.title === undefined
       ? trailOf(view, {
           brain: t`Brain`,
-          region: regionLabel === undefined ? undefined : i18n._(regionLabel),
+          region: regionName,
           group: groups.find((each) => each.key === group)?.label,
           inHand: gap?.question ?? neuron?.title ?? neuron?.label,
         })
-      : thinkingTrail(t`Brain`, thinking.title, aboutOf(thinking.about, i18n));
+      : thinkingTrail(t`Brain`, thinking.title, aboutOf(thinking.about, atlas));
 
   // Going anywhere in the brain puts the picture of an answer's thinking away.
   const go = (next: AtlasView) => {
