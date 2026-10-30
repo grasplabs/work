@@ -47,7 +47,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { EllipsisIcon, EraserIcon, TriangleAlertIcon } from "lucide-react";
+import { EllipsisIcon, UserXIcon, TriangleAlertIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -457,7 +457,7 @@ export const CollectionAdminMenu = ({
               setPurging(true);
             }}
           >
-            <EraserIcon />
+            <UserXIcon />
             <Trans>Purge personal data</Trans>
           </DropdownMenuItem>
         </DropdownMenuContent>
