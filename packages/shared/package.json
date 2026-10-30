@@ -126,6 +126,7 @@
     "./record-ids": "./src/record-ids.ts",
     "./redact": "./src/redact.ts",
     "./release": "./src/release.ts",
+    "./release-id": "./src/release-id.ts",
     "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",
     "./names": "./src/names.ts",
