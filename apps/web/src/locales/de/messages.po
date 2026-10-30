@@ -1712,6 +1712,10 @@ msgstr "{unseen} von {total} genannt, nicht im Einsatz gesehen"
 msgid "{used} of {of}"
 msgstr "{used} von {of}"
 
+#: src/chat/context-meter.tsx
+msgid "{used} of {size} tokens of the model's context window ({share})"
+msgstr "{used} von {size} Tokens des Kontextfensters des Modells ({share})"
+
 #: src/landscape/app-table.tsx
 msgid "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
 msgstr "{users, plural, one {{appName} · # Person} other {{appName} · # Personen}}"
@@ -4949,6 +4953,10 @@ msgstr "Umstritten"
 msgctxt "inbox item section"
 msgid "Context"
 msgstr "Kontext"
+
+#: src/chat/context-meter.tsx
+msgid "Context window"
+msgstr "Kontextfenster"
 
 #: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
@@ -15339,6 +15347,14 @@ msgstr "Das Kickoff und die Dokumente, die das Unternehmen geteilt hat."
 #: src/onboarding/work-rules.tsx
 msgid "The last interviews added less than {stop} new facts"
 msgstr "Die letzten Interviews brachten weniger als {stop} neue Fakten"
+
+#: src/chat/context-meter.tsx
+msgid "The latest reply was sent {used} tokens. The model's context window isn't known."
+msgstr "Der letzten Antwort wurden {used} Tokens geschickt. Das Kontextfenster des Modells ist nicht bekannt."
+
+#: src/chat/context-meter.tsx
+msgid "The latest reply wrote {written} tokens and cost {cost}. This chat so far: {total}."
+msgstr "Die letzte Antwort schrieb {written} Tokens und kostete {cost}. Dieser Chat bisher: {total}."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
