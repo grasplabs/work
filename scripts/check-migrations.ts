@@ -5,7 +5,13 @@
  * rising timestamps), so a migration regenerated on a branch can't land
  * behind one main already shipped.
  *
- * Compares with `origin/main`; CI fetches it first.
+ * Compares with `origin/main`; CI fetches it first. What main gained after
+ * the branch left it isn't the branch's doing: a migration main added since
+ * reads as one the branch "deleted" when diffed against main's tip, so the
+ * branch's own changes are read against where it left main (the merge
+ * base). A journal the branch changed is still held to main's tip, so new
+ * migrations are rebased behind the ones main shipped since; the merge
+ * queue tests every pull request on the latest main besides.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -42,6 +48,13 @@ const mainJournal = (file: string): Journal | undefined => {
 
 const errors: string[] = [];
 
+/** Where the branch left main: its own changes are read against this. */
+const base = git("merge-base", "origin/main", "HEAD").trim();
+
+/** Whether the branch changed `file` since it left main. */
+const changedHere = (file: string): boolean =>
+  git("diff", "--name-only", base, "--", file).trim() !== "";
+
 /**
  * Migration folders squashed away in a hard cut: their database was reset
  * once and now applies its migrations from the folder named, so main's
@@ -62,7 +75,7 @@ const changed = git(
   "--name-status",
   "--find-renames",
   "--diff-filter=MDR",
-  "origin/main",
+  base,
   "--",
   "*/migrations/*.sql"
 )
@@ -88,7 +101,7 @@ const movedJournals = new Map(
     "--name-status",
     "--find-renames",
     "--diff-filter=R",
-    "origin/main",
+    base,
     "--",
     "*/migrations/meta/_journal.json"
   )
@@ -106,10 +119,12 @@ const journals = git("ls-files", "*/migrations/meta/_journal.json")
 for (const file of journals) {
   const { entries } = readJournal(file, readFileSync(file, "utf-8"));
   // Objects record each applied migration by index and tag, so the entries
-  // main has must stay exactly as they are, in front of any new ones.
-  for (const [position, shipped] of (
-    mainJournal(movedJournals.get(file) ?? file)?.entries ?? []
-  ).entries()) {
+  // main has must stay exactly as they are, in front of any new ones. A
+  // journal the branch left alone is main's as it was: nothing to hold.
+  const shippedEntries = changedHere(file)
+    ? (mainJournal(movedJournals.get(file) ?? file)?.entries ?? [])
+    : [];
+  for (const [position, shipped] of shippedEntries.entries()) {
     const entry = entries[position];
     if (
       entry?.idx !== shipped.idx ||
