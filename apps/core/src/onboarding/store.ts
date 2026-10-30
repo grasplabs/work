@@ -44,6 +44,7 @@ import type {
   Difference,
   InterviewKind,
   InterviewLocale,
+  FailedMail,
   LinkToSend,
   OnboardingReview,
   OnboardingView,
@@ -3390,6 +3391,7 @@ export class Onboarding extends DurableObject<Env> {
           email: person.email,
           path: taken === undefined ? null : await this.linkOf(person.id),
           fresh: taken === null,
+          failedMail: this.#failedMail(person.id),
         };
       })
     );
@@ -4502,7 +4504,25 @@ export class Onboarding extends DurableObject<Env> {
       },
       participatedAt: taking?.at ?? null,
       withdrawnAt: taking?.withdrawnAt ?? null,
+      failedMail: this.#failedMail(person),
       interviewId: code.linkId,
+    };
+  }
+
+  /**
+   * Someone's latest mail, when it failed for good: what `sendAgain`
+   * sends again. A mail sent or still queued since means it isn't.
+   */
+  #failedMail(person: string): FailedMail | null {
+    const [latest] = mailAbout(this.ctx.storage.sql, person);
+    if (latest?.state !== "failed") {
+      return null;
+    }
+    const [kind] = latest.key.split("/");
+    return {
+      kind: kind === "reminder" ? "reminder" : "link",
+      reason: latest.reason,
+      at: latest.settledAt ?? latest.queuedAt,
     };
   }
 
