@@ -33,7 +33,6 @@ import {
 import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
-import type { HostingPolicyId } from "../hosting/policy.ts";
 import { discordPublicKey, staffIds } from "./discord-settings.ts";
 
 /**
@@ -67,9 +66,6 @@ export interface Readiness {
   /** The required lines that aren't ready. */
   blocking: number;
 }
-
-/** The policy every new organization is placed under today. */
-const policyId: HostingPolicyId = "eu-storage";
 
 /** A step that ends at Deploy platform, for a var in apps/admin/wrangler.jsonc. */
 const varStep = (names: string): string =>
@@ -146,10 +142,11 @@ const domainCheck = (envOf: Env): ReadinessCheck => {
   };
 };
 
-/** What keeps `choice` from taking an organization, in a few words. */
-const problemsOf = ({ id, problems }: DestinationChoice): string =>
-  `${id} (${problems.length} ${problems.length === 1 ? "requirement" : "requirements"} not met)`;
-
+/**
+ * Where new organizations go: the shared destination the admin places
+ * them in by itself (`automaticChoice`, which always picks one when there
+ * is one), or that there's none yet.
+ */
 const destinationCheck = (choices: DestinationChoice[]): ReadinessCheck => {
   const automatic = automaticChoice(choices);
   if (automatic.destinationId !== null) {
@@ -158,29 +155,16 @@ const destinationCheck = (choices: DestinationChoice[]): ReadinessCheck => {
       title: "Hosting destination",
       required: true,
       status: "ready",
-      words: `New organizations are placed in ${automatic.destinationId}, which meets every requirement of ${policyId}.`,
+      words: `New organizations are placed in ${automatic.destinationId}, Grasp's shared destination.`,
     };
   }
-  if (automatic.reason === "several") {
-    return {
-      id: "destination",
-      title: "Hosting destination",
-      required: true,
-      status: "ready",
-      words: `Several shared destinations meet ${policyId}: choose one on each organization's Setup.`,
-      link: "organizations",
-    };
-  }
-  const shared = choices.filter((choice) => choice.shared);
   return {
     id: "destination",
     title: "Hosting destination",
     required: true,
     status: "blocked",
     words:
-      shared.length === 0
-        ? `There's no shared destination to place organizations in. Register the stage's Workers for Platforms namespace as a destination.`
-        : `No shared destination meets every requirement of ${policyId}: ${shared.map(problemsOf).join(", ")}. Each organization's Setup lists what each one misses; record the evidence for each requirement.`,
+      "There's no shared destination to place organizations in yet. The admin records its stage's own Workers for Platforms namespace as one once STAGE names a stage and the deployer's account is set.",
     link: "organizations",
   };
 };
@@ -417,19 +401,14 @@ const discordBotCheck = (envOf: Env): ReadinessCheck => {
 export const readinessOf = async (envOf: Env): Promise<Readiness> => {
   const db = adminDatabase(envOf.DB);
   const [choices, [imported], newestId, missing] = await Promise.all([
-    destinationChoices(db, policyId),
+    destinationChoices(db),
     db.select({ n: count() }).from(releases),
     newestRelease(envOf),
     missingSecrets(envOf, requiredSecrets),
   ]);
-  // The one new organizations go in, or with several, each of them.
+  // The one new organizations go in: what the deployer must reach.
   const automatic = automaticChoice(choices).destinationId;
-  const placeable =
-    automatic === null
-      ? choices
-          .filter(({ shared, problems }) => shared && problems.length === 0)
-          .map(({ id }) => id)
-      : [automatic];
+  const placeable = automatic === null ? [] : [automatic];
   const checks: ReadinessCheck[] = [
     stageCheck(envOf),
     domainCheck(envOf),
