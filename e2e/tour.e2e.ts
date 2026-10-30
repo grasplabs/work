@@ -56,7 +56,7 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
 
   // From the person menu on any page, it begins again on Chat.
   await page.goto("/workflows");
-  await page.getByRole("button", { name: /User$/u }).click();
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: "Take the tour again" }).click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(tour).toContainText("Are you ready?");

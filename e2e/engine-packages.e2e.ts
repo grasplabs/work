@@ -220,7 +220,7 @@ test("shows the packages as the page reads them again, when someone else ended t
     reason: "Replaced.",
   });
   asApprover.core[Symbol.dispose]();
-  await page.getByRole("button", { name: /^P Person/u }).click();
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: /^Language/u }).click();
   await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
 

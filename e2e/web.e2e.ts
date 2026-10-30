@@ -183,7 +183,7 @@ for (const [where, path, landed] of [
     await page.route("**/api/auth/sign-out", async (route) => {
       await route.fulfill({ status: 503, body: "Unavailable" });
     });
-    await page.getByRole("button", { name: /User$/u }).click();
+    await page.getByRole("button", { name: "Person", exact: true }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
     await expect(page.getByText("Signing out didn't work")).toBeVisible();
@@ -191,7 +191,9 @@ for (const [where, path, landed] of [
       page.getByText("You're still signed in. Try again in a moment.")
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
-    await expect(page.getByRole("button", { name: /User$/u })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Person", exact: true })
+    ).toBeVisible();
   });
 }
 
