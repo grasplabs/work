@@ -208,6 +208,94 @@ const lines = {
     fr: "Ouvrir dans Grasp",
     es: "Abrir en Grasp",
   },
+  /** The thumbs under an answer: whether it helped (stephen-requests.ts). */
+  helpful: {
+    en: "Helpful",
+    nl: "Nuttig",
+    de: "Hilfreich",
+    fr: "Utile",
+    es: "Útil",
+  },
+  notHelpful: {
+    en: "Not helpful",
+    nl: "Niet nuttig",
+    de: "Nicht hilfreich",
+    fr: "Pas utile",
+    es: "No es útil",
+  },
+  // The weekly summary of his requests, to an owner or admin who asked
+  // for it (stephen-summary.ts).
+  summaryTitle: {
+    en: "Stephen's week, {from} to {to}",
+    nl: "Stephens week, {from} tot {to}",
+    de: "Stephens Woche, {from} bis {to}",
+    fr: "La semaine de Stephen, du {from} au {to}",
+    es: "La semana de Stephen, del {from} al {to}",
+  },
+  summaryRequests: {
+    en: "{count} requests last week.",
+    nl: "{count} verzoeken vorige week.",
+    de: "{count} Anfragen letzte Woche.",
+    fr: "{count} demandes la semaine dernière.",
+    es: "{count} solicitudes la semana pasada.",
+  },
+  summaryMore: {
+    en: "{count} requests last week, {change} more than the week before.",
+    nl: "{count} verzoeken vorige week, {change} meer dan de week ervoor.",
+    de: "{count} Anfragen letzte Woche, {change} mehr als in der Woche davor.",
+    fr: "{count} demandes la semaine dernière, {change} de plus que la semaine précédente.",
+    es: "{count} solicitudes la semana pasada, un {change} más que la semana anterior.",
+  },
+  summaryFewer: {
+    en: "{count} requests last week, {change} fewer than the week before.",
+    nl: "{count} verzoeken vorige week, {change} minder dan de week ervoor.",
+    de: "{count} Anfragen letzte Woche, {change} weniger als in der Woche davor.",
+    fr: "{count} demandes la semaine dernière, {change} de moins que la semaine précédente.",
+    es: "{count} solicitudes la semana pasada, un {change} menos que la semana anterior.",
+  },
+  summaryHours: {
+    en: "About {hours} hours saved.",
+    nl: "Ongeveer {hours} uur bespaard.",
+    de: "Etwa {hours} Stunden gespart.",
+    fr: "Environ {hours} heures gagnées.",
+    es: "Unas {hours} horas ahorradas.",
+  },
+  summaryNew: {
+    en: "New: “{label}”.",
+    nl: "Nieuw: “{label}”.",
+    de: "Neu: „{label}“.",
+    fr: "Nouveau : « {label} ».",
+    es: "Nuevo: «{label}».",
+  },
+  summaryFixed: {
+    en: "Fixed: “{label}”, asked {requests} times since.",
+    nl: "Opgelost: “{label}”, sindsdien {requests} keer gevraagd.",
+    de: "Behoben: „{label}“, seitdem {requests}-mal gefragt.",
+    fr: "Corrigé : « {label} », demandé {requests} fois depuis.",
+    es: "Resuelto: «{label}», preguntado {requests} veces desde entonces.",
+  },
+  summaryPace: {
+    en: "This month about {pace} of the {included} in your plan.",
+    nl: "Deze maand ongeveer {pace} van de {included} in je abonnement.",
+    de: "Diesen Monat etwa {pace} der {included} in Ihrem Tarif.",
+    fr: "Ce mois-ci, environ {pace} des {included} de votre offre.",
+    es: "Este mes, unas {pace} de las {included} de tu plan.",
+  },
+  summaryOpen: {
+    en: "See it all in Grasp: {url}",
+    nl: "Bekijk alles in Grasp: {url}",
+    de: "Alles in Grasp ansehen: {url}",
+    fr: "Tout voir dans Grasp : {url}",
+    es: "Míralo todo en Grasp: {url}",
+  },
+  /** After a thumb on an answer. */
+  rated: {
+    en: "Thanks for letting me know.",
+    nl: "Bedankt dat je het laat weten.",
+    de: "Danke für Ihre Rückmeldung.",
+    fr: "Merci de me l’avoir dit.",
+    es: "Gracias por decírmelo.",
+  },
 
   // A card of held writes: what would change, before anything does.
 

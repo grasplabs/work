@@ -551,9 +551,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           <AppLogo logo={integration.logo} name={integration.name} />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-medium tracking-tight">
-                {integration.name}
-              </h1>
+              <h1 className="type-title">{integration.name}</h1>
               {integration.listed && !integration.offered ? (
                 <Badge variant="outline">
                   <Trans>Not offered</Trans>
