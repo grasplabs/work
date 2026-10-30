@@ -229,8 +229,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
-  browser,
   context,
+  newContext,
   page,
 }) => {
   const { admin, member } = peopleIn("workspaceSettings");
@@ -248,7 +248,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await expect(zone).toHaveText(/^Amsterdam/u);
   await expect(page.getByText("European Union")).toBeVisible();
 
-  const other = await browser.newContext();
+  const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
   await theirs.goto("/settings/workspace");

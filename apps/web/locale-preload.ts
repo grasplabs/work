@@ -1,5 +1,7 @@
 import type { Plugin } from "vite-plus";
 
+import { localeCookie, pickLocale } from "./src/locale-choice.ts";
+
 // A language's catalog (src/locales/<locale>/messages.po) is a chunk of its
 // own, imported once main.tsx runs (src/i18n.ts): a second round trip
 // before the first page can say anything. This adds a small script to
@@ -11,24 +13,19 @@ import type { Plugin } from "vite-plus";
 
 const catalogPath = /\/locales\/(?<locale>[^/]+)\/messages\.po$/u;
 
-/** The cookie src/i18n.ts keeps the person's choice in. */
-const localeCookie = "grasp-locale";
-
 /**
- * The script: the person's choice, else the first of the browser's
- * languages the app speaks, else English, as src/i18n.ts chooses.
+ * The script, given each language's catalog file: it chooses the language
+ * as src/i18n.ts does, with the same function (src/locale-choice.ts),
+ * from the cookie the choice is kept in and the browser's languages.
  */
-const preloadScript = (catalogs: Record<string, string>): string => `{
+export const preloadScript = (catalogs: Record<string, string>): string => `{
   const catalogs = ${JSON.stringify(catalogs)};
+  const pickLocale = ${pickLocale.toString()};
   const chosen = document.cookie
     .split("; ")
     .find((pair) => pair.startsWith("${localeCookie}="))
     ?.slice(${localeCookie.length + 1});
-  const locale = [
-    chosen,
-    ...navigator.languages.map((tag) => tag.toLowerCase().split("-")[0]),
-    "en",
-  ].find((each) => each !== undefined && Object.hasOwn(catalogs, each));
+  const locale = pickLocale(chosen, navigator.languages, Object.keys(catalogs));
   const link = document.createElement("link");
   link.rel = "modulepreload";
   link.crossOrigin = "";
