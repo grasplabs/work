@@ -17,6 +17,7 @@ import { useFollowedChat } from "../chat/chat-watch.ts";
 import { ComposerNote } from "../chat/composer-note.tsx";
 import { Composer } from "../chat/composer.tsx";
 import { ConnectionRequests } from "../chat/connection-requests.tsx";
+import { ContextMeter } from "../chat/context-meter.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
 import { ProjectShelf } from "../chat/project-shelf.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
@@ -312,6 +313,7 @@ const OpenChat = ({
               running={view.running}
               {...composer}
             />
+            <ContextMeter messages={view.messages} />
             <ComposerNote organizationName={organizationName} />
           </div>
         </section>

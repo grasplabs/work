@@ -1615,6 +1615,10 @@ msgstr "{unseen} de {total} nombradas, sin verse en uso"
 msgid "{used} of {of}"
 msgstr "{used} de {of}"
 
+#: src/chat/context-meter.tsx
+msgid "{used} of {size} tokens of the model's context window ({share})"
+msgstr "{used} de {size} tokens de la ventana de contexto del modelo ({share})"
+
 #: src/onboarding/work-canvas.tsx
 msgid "{usual} min"
 msgstr "{usual} min"
@@ -4562,6 +4566,10 @@ msgstr "Discutida"
 msgctxt "inbox item section"
 msgid "Context"
 msgstr "Contexto"
+
+#: src/chat/context-meter.tsx
+msgid "Context window"
+msgstr "Ventana de contexto"
 
 #: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
@@ -14139,6 +14147,14 @@ msgstr "El kickoff, y los documentos que compartió la empresa."
 #: src/onboarding/work-rules.tsx
 msgid "The last interviews added less than {stop} new facts"
 msgstr "Las últimas entrevistas añadieron menos del {stop} de hechos nuevos"
+
+#: src/chat/context-meter.tsx
+msgid "The latest reply was sent {used} tokens. The model's context window isn't known."
+msgstr "A la última respuesta se le enviaron {used} tokens. No se conoce la ventana de contexto del modelo."
+
+#: src/chat/context-meter.tsx
+msgid "The latest reply wrote {written} tokens and cost {cost}. This chat so far: {total}."
+msgstr "La última respuesta escribió {written} tokens y costó {cost}. Este chat hasta ahora: {total}."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
