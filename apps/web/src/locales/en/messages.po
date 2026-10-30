@@ -3709,6 +3709,7 @@ msgstr "Can’t be read"
 #: src/engines/app-versions.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/knowledge/new-collection.tsx
@@ -4149,6 +4150,7 @@ msgstr "Clear filters"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
@@ -7394,6 +7396,10 @@ msgstr "It stays here for you to read. You can still delete it."
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "It still does not work. You can stop for now and come back later. Your place is kept."
 
+#: src/engines/release-controls.tsx
+msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
+msgstr "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "It takes part from the start. Add its people next and pick its lead: the lead talks first."
@@ -7883,6 +7889,10 @@ msgctxt "filter: teams that don't take part in the interviews"
 msgid "Left out"
 msgstr "Left out"
 
+#: src/engines/release-controls.tsx
+msgid "Legal hold: {hold}"
+msgstr "Legal hold: {hold}"
+
 #: src/brain/memory-page.tsx
 msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
@@ -7938,6 +7948,18 @@ msgstr "Licence"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Licence"
+
+#: src/engines/release-controls.tsx
+msgid "Lift hold"
+msgstr "Lift hold"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold}"
+msgstr "Lift the legal hold {hold}"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold} from version {version}?"
+msgstr "Lift the legal hold {hold} from version {version}?"
 
 #: src/frame/person-menu.tsx
 msgid "Light"
@@ -8534,6 +8556,10 @@ msgstr "Name a model this endpoint serves below and choose it, then test it."
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Name of a new workflow"
+
+#: src/engines/release-controls.tsx
+msgid "Name of the hold, such as a case reference"
+msgstr "Name of the hold, such as a case reference"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
@@ -10870,6 +10896,18 @@ msgctxt "filter: where people reach Stephen"
 msgid "Place"
 msgstr "Place"
 
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold"
+msgstr "Place a legal hold"
+
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold on version {version}?"
+msgstr "Place a legal hold on version {version}?"
+
+#: src/engines/release-controls.tsx
+msgid "Place hold"
+msgstr "Place hold"
+
 #: src/onboarding/place-picker.tsx
 msgid "Places"
 msgstr "Places"
@@ -11819,6 +11857,7 @@ msgstr "Revision {revision} passes the profile and can be published."
 
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revoke"
@@ -11842,6 +11881,18 @@ msgstr "Revoke the packages for {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Revoke the packages for {domain}?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke this version"
+msgstr "Revoke this version"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke version {version}?"
+msgstr "Revoke version {version}?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoked"
+msgstr "Revoked"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"
@@ -14538,6 +14589,14 @@ msgstr "The tools in use"
 msgid "The upload was cancelled."
 msgstr "The upload was cancelled."
 
+#: src/engines/release-controls.tsx
+msgid "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
+msgstr "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
+
+#: src/engines/release-controls.tsx
+msgid "The version is kept, however old, until an admin lifts the hold. The hold is recorded with your reason."
+msgstr "The version is kept, however old, until an admin lifts the hold. The hold is recorded with your reason."
+
 #: src/brain/brain.ts
 msgid "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
 msgstr "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
@@ -16801,6 +16860,7 @@ msgid "Whose numbers to show"
 msgstr "Whose numbers to show"
 
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/knowledge/purge.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "Why"
