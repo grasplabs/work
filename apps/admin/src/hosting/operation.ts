@@ -2973,9 +2973,9 @@ const runOperation = async (
     await complete(db, loaded);
     return undefined;
   } catch (error) {
-    // A resource outside the policy's jurisdiction also marks the
-    // destination (src/hosting/provision.ts): nobody is placed there again
-    // until a person looks.
+    // Any failure, a resource outside the organization's jurisdiction
+    // (src/hosting/provision.ts) included, stops the run here: recorded on
+    // the operation with its step and code, audited, for its Setup to show.
     const code = operationErrorCode(error);
     log.error("provision.failed", {
       operation: operation.id,
