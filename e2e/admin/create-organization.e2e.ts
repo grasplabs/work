@@ -60,3 +60,36 @@ test("staff create an organization in three fields, and watch it set itself up",
       .getByText("Done")
   ).toBeVisible({ timeout: stepMs });
 });
+
+/** The create page's sign-in lookup, as it asks the server. */
+const lookup = (url: URL): boolean =>
+  url.pathname.startsWith("/_serverFn/") &&
+  decodeURIComponent(url.search).includes("domain");
+
+// A sign-in lookup that fails never leaves the form waiting: staff choose
+// by hand, or try the lookup again (src/routes/new-organization.tsx).
+test("offers the sign-in choice and a try again when looking it up fails", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post("/__e2e/seed-create");
+  expect(response.status()).toBe(200);
+  await page.route(lookup, async (route) => {
+    await route.fulfill({ status: 500, body: "unavailable" });
+  });
+
+  await visit(page, "/new-organization");
+  await page.getByLabel("Name").fill(`Acme ${crypto.randomUUID().slice(0, 6)}`);
+  await page.getByLabel("Company email domain").fill("acme.test");
+  await expect(
+    page.getByText("We couldn't look up how acme.test signs in just now.")
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Google Workspace primary domain")
+  ).toBeVisible();
+  await expect(page.getByText("Finding how they sign in…")).toBeHidden();
+
+  await page.unroute(lookup);
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Sign-in: Google Workspace")).toBeVisible();
+});

@@ -245,11 +245,10 @@ const cloudLineStates = (
       return "waiting";
     }
     current = true;
-    if (operation.status === "failed" && !going) {
-      return needsAttention ? "needs_attention" : "retrying";
-    }
+    // Stopped: failed, or left running by a run that has ended or is gone
+    // (a done operation has every line done above).
     if (!going) {
-      return "waiting";
+      return needsAttention ? "needs_attention" : "retrying";
     }
     return retrying ? "retrying" : "doing";
   });
@@ -291,7 +290,15 @@ const overallState = (
   return notStarted ? "waiting" : "working";
 };
 
-/** Client `clientId`'s setting up, or null when there's no such client. */
+/**
+ * Whether `client` has a setting up to show: recorded and not offboarded,
+ * which is neither being set up nor ready to open.
+ */
+const shownAsSettingUp = <T extends { status: string }>(
+  client: T | undefined
+): client is T => client !== undefined && client.status !== "offboarded";
+
+/** Client `clientId`'s setting up, or null when there's no such client or it's offboarded. */
 export const provisioningProgress = async (
   env: Env,
   clientId: string
@@ -306,7 +313,7 @@ export const provisioningProgress = async (
     .from(clients)
     .where(eq(clients.id, clientId))
     .get();
-  if (client === undefined) {
+  if (!shownAsSettingUp(client)) {
     return null;
   }
   const { hosting, jurisdiction } = await clientHostingOf(db, clientId);

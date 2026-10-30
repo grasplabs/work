@@ -51,18 +51,25 @@ const providerWords = {
 
 /**
  * What `lookup` answers for `key`, asked once typing pauses while
- * `enabled`; undefined until it has answered for this very key.
+ * `enabled`, or `failed` when the lookup itself fails; undefined until it
+ * has answered for this very key.
  */
 const usePausedLookup = <T,>(
   key: string,
   enabled: boolean,
-  lookup: (key: string) => Promise<T>
+  lookup: (key: string) => Promise<T>,
+  failed: T
 ): T | undefined => {
   const [found, setFound] = useState<{ key: string; value: T } | null>(null);
   useEffect(() => {
     let current = true;
     const ask = async () => {
-      const value = await lookup(key);
+      let value = failed;
+      try {
+        value = await lookup(key);
+      } catch {
+        // Answered all the same, as failed: nothing waits on it for ever.
+      }
       if (current) {
         setFound({ key, value });
       }
@@ -76,7 +83,7 @@ const usePausedLookup = <T,>(
       current = false;
       clearTimeout(timer);
     };
-  }, [key, enabled, lookup]);
+  }, [key, enabled, lookup, failed]);
   return found?.key === key ? found.value : undefined;
 };
 
@@ -86,24 +93,42 @@ const addressTaken = async (clientId: string): Promise<string | null> => {
   return problem;
 };
 
-/** How a domain's people sign in, as the server finds it. */
-const signInFound = async (domain: string): Promise<DetectedSignIn> =>
-  await detectSignInFn({ data: { domain } });
+/** How a domain's people sign in, as found; `failed` when it couldn't be looked up. */
+type SignInLookup = DetectedSignIn | { provider: null; failed: true };
+
+const lookupFailed: SignInLookup = { provider: null, failed: true };
+
+/** How a domain's people sign in, as the server finds it: its key is the try and the domain. */
+const signInFound = async (key: string): Promise<SignInLookup> =>
+  await detectSignInFn({ data: { domain: key.slice(key.indexOf(" ") + 1) } });
 
 /** The web address as typed, checked by its rule and then by the server for being free. */
 const useAddressProblem = (clientId: string): string | null => {
   const local = clientId === "" ? null : clientIdProblem(clientId);
+  // A check that fails says nothing: creating it still checks.
   const taken = usePausedLookup(
     clientId,
     clientId !== "" && local === null,
-    addressTaken
+    addressTaken,
+    null
   );
   return local ?? taken ?? null;
 };
 
-/** How `domain`'s people sign in, looked up once typing pauses; null while it isn't known yet. */
-const useDetectedSignIn = (domain: string): DetectedSignIn | null =>
-  usePausedLookup(domain, domain.includes("."), signInFound) ?? null;
+/**
+ * How `domain`'s people sign in, looked up once typing pauses, again for
+ * each `attempt`; null while it isn't known yet.
+ */
+const useDetectedSignIn = (
+  domain: string,
+  attempt: number
+): SignInLookup | null =>
+  usePausedLookup(
+    `${attempt} ${domain}`,
+    domain.includes("."),
+    signInFound,
+    lookupFailed
+  ) ?? null;
 
 /** The sign-in line under the domains: what was found, or the choice when nothing was. */
 const SignInLine = ({
@@ -111,11 +136,13 @@ const SignInLine = ({
   detected,
   choice,
   onChoose,
+  onRetry,
 }: {
   domain: string;
-  detected: DetectedSignIn | null;
+  detected: SignInLookup | null;
   choice: SignInChoice | null;
   onChoose: (choice: SignInChoice | null) => void;
+  onRetry: () => void;
 }) => {
   if (domain === "") {
     return null;
@@ -174,7 +201,17 @@ const SignInLine = ({
         value={hand.value}
       />
       <FieldDescription>
-        {`We couldn't tell how ${domain} signs in. `}
+        {detected !== null && "failed" in detected ? (
+          <>
+            {`We couldn't look up how ${domain} signs in just now. `}
+            <Button onClick={onRetry} size="sm" type="button" variant="link">
+              Try again
+            </Button>
+            {" or "}
+          </>
+        ) : (
+          `We couldn't tell how ${domain} signs in. `
+        )}
         <Button
           onClick={() => {
             onChoose({
@@ -200,7 +237,7 @@ const SignInLine = ({
 const signInOf = (
   domains: readonly string[],
   admin: string,
-  detected: DetectedSignIn | null,
+  detected: SignInLookup | null,
   choice: SignInChoice | null
 ) => {
   const base = { domains: [...domains], admins: [admin.trim().toLowerCase()] };
@@ -251,7 +288,8 @@ const NewOrganization = () => {
   const firstDomain = (domains[0] ?? "").trim().toLowerCase();
   const adminEmail = admin ?? (firstDomain === "" ? "" : `@${firstDomain}`);
   const addressProblem = useAddressProblem(clientId);
-  const detected = useDetectedSignIn(firstDomain);
+  const [lookupAttempt, setLookupAttempt] = useState(0);
+  const detected = useDetectedSignIn(firstDomain, lookupAttempt);
   const { busy, failure, run } = useProvisionAction();
   const create = () => {
     void run(async () => {
@@ -385,6 +423,9 @@ const NewOrganization = () => {
               detected={detected}
               domain={firstDomain}
               onChoose={setChoice}
+              onRetry={() => {
+                setLookupAttempt((attempt) => attempt + 1);
+              }}
             />
           </Field>
           <Field>

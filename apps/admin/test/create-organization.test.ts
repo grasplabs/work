@@ -4,9 +4,14 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { cloudflareApi } from "../src/cloudflare/api.ts";
-import { clientPlacements, clientProvisions } from "../src/db/schema.ts";
+import {
+  clientPlacements,
+  clientProvisions,
+  clients,
+} from "../src/db/schema.ts";
 import { signInApps } from "../src/deploy/context.ts";
 import type { DeploySecrets } from "../src/deploy/secrets.ts";
+import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import {
   runClientProvision,
   provisionSteps,
@@ -342,6 +347,68 @@ describe("creating an organization", () => {
         ["Up to date on the newest release", "waiting"],
       ],
     });
+  });
+});
+
+/** A Grasp Cloud client with an operation at its resources step, as `status` leaves it. */
+const recorded = async (
+  status: "running" | "done",
+  clientStatus: "provisioning" | "offboarded" = "provisioning"
+): Promise<string> => {
+  const manifest = await namespaceRelease();
+  const clientId = `acme-${crypto.randomUUID().slice(0, 8)}`;
+  const now = new Date();
+  await db.insert(clients).values({
+    id: clientId,
+    name: clientId,
+    status: clientStatus,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.insert(clientProvisions).values({
+    id: crypto.randomUUID(),
+    clientId,
+    releaseId: manifest.releaseId,
+    status,
+    step: status === "done" ? "route" : "resources",
+    startedBy: staff.email,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return clientId;
+};
+
+/** The first line of `progress` not done yet: where it stands now. */
+const currentState = (
+  progress: Awaited<ReturnType<typeof provisioningProgress>>
+) => progress?.lines.find(({ state }) => state !== "done")?.state;
+
+describe("an organization's progress, read from its records", () => {
+  useStoreSecrets({ deployer: token });
+
+  it("reads an operation left running by a run that's gone as tried again, and as needing a look once Grasp gives up", async () => {
+    const clientId = await recorded("running");
+
+    const tried = await provisioningProgress(env, clientId);
+    await markNeedsAttention(db, clientId, await episodeOf(db, clientId), {
+      reason: "stuck",
+      code: "run_gone",
+    });
+    const givenUp = await provisioningProgress(env, clientId);
+
+    expect({
+      tried: [tried?.state, currentState(tried)],
+      givenUp: [givenUp?.state, currentState(givenUp)],
+    }).toStrictEqual({
+      tried: ["working", "retrying"],
+      givenUp: ["needs_attention", "needs_attention"],
+    });
+  });
+
+  it("shows no setting up for an offboarded organization, never ready to open", async () => {
+    const clientId = await recorded("done", "offboarded");
+
+    await expect(provisioningProgress(env, clientId)).resolves.toBeNull();
   });
 });
 
