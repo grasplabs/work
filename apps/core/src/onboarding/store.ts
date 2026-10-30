@@ -1,7 +1,11 @@
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { OrgRules } from "@grasp-os/shared/admin/onboarding-admin";
 import { addWorkingDays, dayOf } from "@grasp-os/shared/admin/org-record";
-import type { DrawnWork, WorkRecord } from "@grasp-os/shared/admin/org-record";
+import type {
+  DrawnWork,
+  Told,
+  WorkRecord,
+} from "@grasp-os/shared/admin/org-record";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditDetailValue } from "@grasp-os/shared/audit";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -556,13 +560,72 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
     ? null
     : (drawnWorkSchema.safeParse(JSON.parse(stored)).data ?? null);
 
-/** The questions earlier interviews left open, for Stephen to ask when they come up. */
-const openKnown = (drawn: DrawnWork | null): string[] =>
-  drawn === null || drawn.open.length === 0
+/**
+ * What nobody who told a piece of work has said yet, each as a kind of
+ * answer in words of the store's own (GRA-330): the next interview asks
+ * about these when they come up. Never the drawing's own open questions,
+ * which the model writes from what as few as one colleague said, so they
+ * could carry that colleague's words, paraphrased, into someone else's
+ * interview; what fewer than five people said reaches nobody but them.
+ * Only that an answer is missing is told, never what anyone answered.
+ */
+const unknownAnswers: readonly {
+  missing: (told: Told[]) => boolean;
+  ask: string;
+}[] = [
+  {
+    missing: (told) => told.every(({ volume }) => volume === null),
+    ask: "how many come in, in a week or a month",
+  },
+  {
+    missing: (told) =>
+      told.every(
+        ({ takes, stepMinutes }) =>
+          takes === null && (stepMinutes ?? []).length === 0
+      ),
+    ask: "how long one takes",
+  },
+  {
+    missing: (told) => told.every(({ wrong }) => wrong === null),
+    ask: "how many come in wrong or incomplete",
+  },
+  {
+    missing: (told) => told.every((said) => said.waits.length === 0),
+    ask: "where it waits, and for what",
+  },
+  {
+    missing: (told) =>
+      told.every(({ differently }) => differently.length === 0),
+    ask: "what is done when a case is off the normal path",
+  },
+  {
+    missing: (told) => told.every(({ decides }) => !decides),
+    ask: "what they look at to decide",
+  },
+  {
+    missing: (told) => told.every(({ next }) => !next),
+    ask: "who gets it after them",
+  },
+  {
+    missing: (told) => told.every(({ right }) => !right),
+    ask: "what done right looks like",
+  },
+];
+
+/** What nobody has said yet of a piece of work, for Stephen to ask when it comes up. */
+const stillUnknown = (drawn: DrawnWork | null): string[] => {
+  const told = Object.values(drawn?.told ?? {});
+  if (told.length === 0) {
+    return [];
+  }
+  const asks = unknownAnswers
+    .filter(({ missing }) => missing(told))
+    .map(({ ask }) => ask)
+    .slice(0, 4);
+  return asks.length === 0
     ? []
-    : [
-        `What earlier interviews left open, to ask when it comes up: ${drawn.open.slice(0, 4).join(" ")}`,
-      ];
+    : [`Nobody has said yet, so ask when it comes up: ${asks.join("; ")}.`];
+};
 
 const doersSchema = z.array(z.string());
 
@@ -2366,7 +2429,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(kind === "lead" ? [] : openKnown(this.#drawingAskedOf(person.id))),
+      ...(kind === "lead" ? [] : stillUnknown(this.#drawingAskedOf(person.id))),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
