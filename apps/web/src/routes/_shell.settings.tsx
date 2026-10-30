@@ -22,6 +22,7 @@ import {
 import {
   ActivityIcon,
   BellIcon,
+  BrainIcon,
   BuildingIcon,
   CircleHelpIcon,
   CoinsIcon,
@@ -56,6 +57,7 @@ type SettingsPath =
   | "/settings/stephen"
   | "/settings/pulse"
   | "/settings/onboarding"
+  | "/settings/brain"
   | "/settings/audit"
   | "/settings/outcomes"
   | "/settings/billing"
@@ -116,6 +118,8 @@ const groupsFor = ({
           to: "/settings/onboarding",
           icon: MessagesSquareIcon,
         },
+        // Its groups of teams, the brain's regions.
+        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
         ...(staff
           ? []

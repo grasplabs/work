@@ -1,67 +1,62 @@
-import type { Workspace } from "@grasp-os/shared/brain";
-import type { MessageDescriptor } from "@lingui/core";
+import type { TeamGroup, Workspace } from "@grasp-os/shared/brain";
 import { msg, plural, t } from "@lingui/core/macro";
 
-import { formatNumber } from "../format.ts";
-import {
-  given,
-  groupLabel,
-  interviewsFor,
-  sameHandover,
-  unmentionedApps,
-} from "./brain.ts";
+import { formatList } from "../format.ts";
+import { brainLinks } from "./brain-links.ts";
+import type { BrainLink } from "./brain-links.ts";
+import { given, interviewsFor } from "./brain.ts";
 import type { Brain, Note } from "./brain.ts";
 import { latest } from "./history.ts";
 
 /**
- * The brain as an atlas: the same notes as the vault, in the same six parts as its navigation,
- * each in the part of a brain whose job matches what it holds. The vision is the frontal lobe,
- * which plans; the teams the parietal, the body's map of who does what; the gaps the temporal,
- * where memory has its holes; tools and applications the occipital, which sees; the workflows
- * the cerebellum, which runs routines; and the sources (every conversation, document and
- * connection) the brainstem and its spine, through which everything the brain knows came in.
+ * The brain as an atlas, as the prototype has it (`lib/brain-atlas.ts`): the company in the
+ * brain's six regions. Its groups of teams, as the company names them, fill the four lobes, each
+ * team with the work it does. The board, with the vision and its goals, is the frontal lobe, which
+ * plans. And the brainstem with its spine is what came in: every conversation, document and
+ * connection, through which everything the brain knows arrived. Systems, applications and
+ * questions have no region of their own: a question sits beside the team or work it is about.
  *
- * Everything here is a fact derived from the records, as in the rest of the brain: what each part
+ * Everything here is a fact derived from the records, as in the rest of the brain: what each region
  * holds, what is still waiting (a note whose own state says "not yet"), and what is still open (a
- * question someone can answer). Nothing is ranked or scored; lists keep the vault's order.
+ * question someone can answer). Nothing is ranked or scored; lists keep the company's order.
  */
 
 export type RegionId =
-  | "vision"
-  | "teams"
-  | "sources"
-  | "tools"
-  | "workflows"
-  | "gaps";
+  | "frontal"
+  | "parietal"
+  | "temporal"
+  | "occipital"
+  | "cerebellum"
+  | "stem";
+
+/** The regions in the order the brain's dots draw them: front to back and top to bottom, as the brain is seen from its side. */
+export const REGION_IDS: RegionId[] = [
+  "frontal",
+  "parietal",
+  "temporal",
+  "occipital",
+  "cerebellum",
+  "stem",
+];
+
+/** The lobes that hold the company's groups of teams, in the order the groups fill them. */
+export const LOBES: RegionId[] = [
+  "parietal",
+  "occipital",
+  "cerebellum",
+  "temporal",
+];
+
+/** A team's work sits with the team, in a folder of the region named after it: the folder's path starts with this. */
+export const TEAM_FOLDER = "@team";
 
 export interface Region {
   id: RegionId;
-  /** What the part holds, as the reader knows it. */
-  label: MessageDescriptor;
-  /** What that part of a brain does, and so why it holds this. */
-  does: MessageDescriptor;
+  /** Its name: the company's own for a group of teams, the board in front, what came in at the stem. */
+  name: string;
+  /** What it holds, in one line: the teams in it, or what the front and the stem are for. */
+  does: string;
 }
-
-/** The regions, front to back and top to bottom, as the brain is seen from its side. */
-export const REGIONS: Region[] = [
-  // The frontal lobe, the parietal, the temporal, the occipital, the cerebellum, and the stem with its spine. Named as the navigation names its parts.
-  { id: "vision", label: groupLabel.vision, does: msg`Plans and goals` },
-  { id: "teams", label: groupLabel.teams, does: msg`Who does what` },
-  { id: "gaps", label: groupLabel.gaps, does: msg`What is still unknown` },
-  { id: "tools", label: groupLabel.tools, does: msg`What is seen in use` },
-  {
-    id: "workflows",
-    label: groupLabel.candidates,
-    does: msg`Work that could be automated`,
-  },
-  {
-    id: "sources",
-    label: groupLabel.sources,
-    does: msg`What was heard, written and connected`,
-  },
-];
-
-export const REGION_IDS: RegionId[] = REGIONS.map((region) => region.id);
 
 export const isRegion = (value: unknown): value is RegionId =>
   typeof value === "string" && REGION_IDS.some((id) => id === value);
@@ -83,7 +78,10 @@ export interface OpenItem {
 }
 
 export interface AtlasRegion extends Region {
+  /** What it shows: in a lobe, each team and its work in the team's own folder (`TEAM_FOLDER`). */
   notes: Note[];
+  /** The group of teams it holds; none in front and at the stem. */
+  group?: TeamGroup;
   /** What is known in it, in a short fact or two. */
   facts: string[];
   /** Notes whose own state says "not yet": seen but never named, invited but not interviewed. */
@@ -95,46 +93,81 @@ export interface AtlasRegion extends Region {
   links: Partial<Record<RegionId, number>>;
 }
 
+/** One end-to-end line of a link (`BrainLink`): from its piece of work to a team it joins, or from team to team when the work has no team. */
+export interface Nerve {
+  a: string;
+  b: string;
+  link: BrainLink;
+}
+
 export interface Atlas {
   regions: AtlasRegion[];
+  /** The links drawn as nerves, confirmed or proposed, each as the lines it runs along. */
+  nerves: Nerve[];
   /** Every open item once, in the vault's order: gaps, then teams, then the vision, then tools. */
   open: OpenItem[];
-  /** Each note's region; the company has none, as it is the whole brain. */
+  /** Each note's region; the company has none, as it is the whole brain, and neither have tools and gaps, which sit beside the work. */
   home: Map<string, RegionId>;
 }
 
-/** The region a note lives in, by its kind. */
-const regionOfKind = (note: Note): RegionId | undefined => {
-  switch (note.kind) {
-    case "vision":
-    case "goal": {
-      return "vision";
-    }
-    case "team": {
-      return "teams";
-    }
-    case "tool":
-    case "app": {
-      return "tools";
-    }
-    case "candidate": {
-      return "workflows";
-    }
-    case "source":
-    case "channel": {
-      return "sources";
-    }
-    case "gap": {
-      return "gaps";
-    }
-    case "company":
-    case "statement": {
-      return undefined;
-    }
-    default: {
-      return note.kind satisfies never;
-    }
+/** What the front and the stem are called, and what the groups beyond the lobes share. */
+const boardName = msg`Board`;
+const stemName = msg({
+  message: "What came in",
+  context: "the brainstem: every conversation, document and connection",
+});
+
+/**
+ * The company's groups of teams, one for each lobe. The groups it keeps (confirmed, or proposed by
+ * Grasp), then one of its own for every team in none, named after it, as Grasp would propose it.
+ * More groups than lobes: the last lobe holds the rest together.
+ */
+export const groupsOf = (ws: Workspace): TeamGroup[] => {
+  const known = new Set(ws.teams.map((team) => team.id));
+  const kept = ws.teamGroups
+    .map((group) => ({
+      ...group,
+      teamIds: group.teamIds.filter((id) => known.has(id)),
+    }))
+    .filter((group) => group.teamIds.length > 0);
+  const placed = new Set(kept.flatMap((group) => group.teamIds));
+  const all = [
+    ...kept,
+    ...ws.teams
+      .filter((team) => !placed.has(team.id))
+      .map((team): TeamGroup => ({
+        id: `group-${team.id}`,
+        name: team.name,
+        teamIds: [team.id],
+        confirmed: false,
+      })),
+  ];
+  if (all.length <= LOBES.length) {
+    return all;
   }
+  const rest = all.slice(LOBES.length - 1);
+  return [
+    ...all.slice(0, LOBES.length - 1),
+    {
+      id: "group-more",
+      name: t`More teams`,
+      teamIds: rest.flatMap((group) => group.teamIds),
+      confirmed: rest.every((group) => group.confirmed),
+    },
+  ];
+};
+
+/** The team a piece of work belongs to: its workflow's main team, else the first team that told of it. */
+export const teamOfWork = (ws: Workspace, note: Note): string | undefined => {
+  const candidate = ws.candidates.find((each) => each.id === note.id);
+  const workflow =
+    candidate?.workflowId === undefined
+      ? undefined
+      : ws.workflows.find((each) => each.id === candidate.workflowId);
+  return (
+    workflow?.teamId ??
+    note.links.find((id) => ws.teams.some((team) => team.id === id))
+  );
 };
 
 /** Waiting, from the tags the brain already writes. */
@@ -186,74 +219,98 @@ const sourceFacts = (ws: Workspace, notes: Note[]): string[] => {
   ].filter(Boolean);
 };
 
-/** What is known in each part, in a fact or two. What is still waiting is said apart, by `waitingLabelOf`. */
+/** What is known in each region, in a fact or two. What is still waiting is said apart, by `waitingLabelOf`. */
 const factsOf = (region: RegionId, ws: Workspace, notes: Note[]): string[] => {
   const having = (kind: Note["kind"]) =>
     notes.filter((note) => note.kind === kind).length;
-  switch (region) {
-    case "vision": {
-      const goals = having("goal");
-      return [
-        plural(goals, { one: "# goal", other: "# goals" }),
-        given(ws.vision.confirmedAt)
-          ? t`Confirmed by the board`
-          : t`Not confirmed by the board yet`,
-      ];
-    }
-    case "teams": {
-      const teams = having("team");
-      const interviewed = ws.teams.filter(
-        (team) => interviewsFor(ws, team).length > 0
-      ).length;
-      return [
-        plural(teams, { one: "# team", other: "# teams" }),
-        interviewed === teams
-          ? t`All interviewed`
-          : t`${interviewed} of ${teams} interviewed`,
-      ];
-    }
-    case "sources": {
-      return sourceFacts(ws, notes);
-    }
-    case "tools": {
-      // The applications nobody named are not known yet: they are what is still waiting.
-      const named = having("tool");
-      return [
-        plural(named, {
-          one: "# tool named in the interviews",
-          other: "# tools named in the interviews",
-        }),
-      ];
-    }
-    case "workflows": {
-      const workflows = having("candidate");
-      const drawn = notes.filter(
-        (note) => note.kind === "candidate" && note.tags.includes("drawn")
-      ).length;
-      return [
-        plural(workflows, { one: "# workflow", other: "# workflows" }),
-        t`${drawn} drawn in the builder`,
-      ];
-    }
-    case "gaps": {
-      const gaps = notes.filter((note) => note.kind === "gap");
-      const open = gaps.filter((note) => note.tags.includes("open")).length;
-      const answered = gaps.length - open;
-      return [t`${open} still open`, t`${answered} answered`];
-    }
-    default: {
-      return region satisfies never;
-    }
+  if (region === "frontal") {
+    const goals = having("goal");
+    return [
+      plural(goals, { one: "# goal", other: "# goals" }),
+      given(ws.vision.confirmedAt)
+        ? t`Confirmed by the board`
+        : t`Not confirmed by the board yet`,
+    ];
   }
+  if (region === "stem") {
+    return sourceFacts(ws, notes);
+  }
+  const teams = having("team");
+  const work = having("candidate");
+  return teams === 0
+    ? []
+    : [
+        plural(teams, { one: "# team", other: "# teams" }),
+        plural(work, { one: "# piece of work", other: "# pieces of work" }),
+      ];
+};
+
+/** The region a note lives in, and the team whose folder it sits in when it is in a lobe. */
+const placeOf = (
+  ws: Workspace,
+  note: Note,
+  lobeOfTeam: ReadonlyMap<string, RegionId>
+): { region?: RegionId; team?: string } => {
+  if (note.kind === "vision" || note.kind === "goal") {
+    return { region: "frontal" };
+  }
+  if (note.kind === "source" || note.kind === "channel") {
+    return { region: "stem" };
+  }
+  let team: string | undefined;
+  if (note.kind === "team") {
+    team = note.id;
+  } else if (note.kind === "candidate") {
+    team = teamOfWork(ws, note);
+  }
+  const lobe = team === undefined ? undefined : lobeOfTeam.get(team);
+  return lobe === undefined ? {} : { region: lobe, team };
+};
+
+/** What a region is called, and what it holds in a line. */
+const nameOf = (
+  id: RegionId,
+  group: TeamGroup | undefined,
+  ws: Workspace
+): Region => {
+  if (id === "frontal") {
+    return { id, name: t(boardName), does: t`Plans and goals` };
+  }
+  if (id === "stem") {
+    return {
+      id,
+      name: t(stemName),
+      does: t`What was heard, written and connected`,
+    };
+  }
+  const teams = (group?.teamIds ?? []).map(
+    (team) => ws.teams.find((each) => each.id === team)?.name ?? team
+  );
+  return { id, name: group?.name ?? "", does: formatList(teams) };
 };
 
 export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
   const byId = new Map(brain.notes.map((note) => [note.id, note]));
+  const groups = groupsOf(ws);
+  const lobeOfTeam = new Map(
+    groups.flatMap((group, index) => {
+      const lobe = LOBES[index];
+      return lobe === undefined
+        ? []
+        : group.teamIds.map((id) => [id, lobe] as const);
+    })
+  );
+  // Each note's region, and the team whose folder it sits in when it is in a lobe.
   const home = new Map<string, RegionId>();
+  const teamOf = new Map<string, string>();
   for (const note of brain.notes) {
-    const region = regionOfKind(note);
-    if (region) {
-      home.set(note.id, region);
+    const { region, team } = placeOf(ws, note, lobeOfTeam);
+    if (region === undefined) {
+      continue;
+    }
+    home.set(note.id, region);
+    if (team !== undefined) {
+      teamOf.set(note.id, team);
     }
   }
   // What a gap is about, among the notes: a quote it points at is not a subject, only where it was said.
@@ -274,15 +331,12 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
     (each) => !given(each.closedAt) && byId.has(each.id)
   )) {
     const subjects = subjectsOf(gap.about);
-    const where = regionsOf(subjects);
     open.push({
       id: gap.id,
       noteId: gap.id,
       subjects,
-      // Among the gaps, beside what it is about, and with the source it was noticed in.
-      regions: [
-        ...new Set<RegionId>(["gaps", ...where, ...regionsOf([gap.sourceId])]),
-      ],
+      // Beside what it is about, and with the source it was noticed in.
+      regions: regionsOf([...subjects, gap.sourceId]),
       question: gap.question,
       who: gap.owner,
       since: sourceDate(gap.sourceId),
@@ -301,7 +355,7 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
       id: `${team.id}:interview`,
       noteId: team.id,
       subjects: [team.id],
-      regions: ["teams"],
+      regions: regionsOf([team.id]),
       question: t`${name} is invited but not interviewed yet.`,
       who: latest(team.stakeholders)?.role,
     });
@@ -317,7 +371,7 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
         id: "vision:budget",
         noteId: "vision",
         subjects: ["vision"],
-        regions: ["vision"],
+        regions: ["frontal"],
         question: t`The monthly budget for AI is not set yet.`,
         who: board,
       });
@@ -327,7 +381,7 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
         id: "vision:approval",
         noteId: "vision",
         subjects: ["vision"],
-        regions: ["vision"],
+        regions: ["frontal"],
         question: t`Nobody is named yet to approve a new tool.`,
         who: board,
       });
@@ -341,13 +395,25 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
       id: `${note.id}:seen`,
       noteId: note.id,
       subjects: [note.id],
-      regions: ["tools"],
+      regions: regionsOf(
+        ws.tools.find((tool) => tool.id === note.id)?.teamIds ?? []
+      ),
       question: t`${name} is named, but not seen in use yet.`,
     });
   }
 
-  const regions = REGIONS.map((region): AtlasRegion => {
-    const notes = brain.notes.filter((note) => home.get(note.id) === region.id);
+  const regions = REGION_IDS.map((id): AtlasRegion => {
+    const index = LOBES.indexOf(id);
+    const group = index === -1 ? undefined : groups[index];
+    // In a lobe each team is a folder of its own, its work in it: the team's note names the folder.
+    const notes = brain.notes
+      .filter((note) => home.get(note.id) === id)
+      .map((note) => {
+        const team = teamOf.get(note.id);
+        return team === undefined
+          ? note
+          : { ...note, path: [TEAM_FOLDER, team] };
+      });
     const waiting = notes
       .filter(
         (note) =>
@@ -365,32 +431,44 @@ export const atlasOf = (ws: Workspace, brain: Brain): Atlas => {
       if (!a || !b || a === b) {
         continue;
       }
-      if (a === region.id) {
+      if (a === id) {
         links[b] = (links[b] ?? 0) + 1;
       }
-      if (b === region.id) {
+      if (b === id) {
         links[a] = (links[a] ?? 0) + 1;
       }
     }
     return {
-      ...region,
+      ...nameOf(id, group, ws),
+      ...(group === undefined ? {} : { group }),
       notes,
-      facts: factsOf(region.id, ws, notes),
+      facts: factsOf(id, ws, notes),
       waiting,
       waitingLabel: waitingLabelOf(notes, counted),
-      open: open.filter((item) => item.regions.includes(region.id)),
+      open: open.filter((item) => item.regions.includes(id)),
       links,
     };
   });
-  return { regions, open, home };
+  // A link runs from its piece of work to each other team it joins: the work sits in its own team's folder already.
+  const nerves = brainLinks(ws).flatMap((link): Nerve[] => {
+    const own = teamOf.get(link.work);
+    if (own !== undefined) {
+      return link.teams
+        .filter((team) => team !== own)
+        .map((team) => ({ a: link.work, b: team, link }));
+    }
+    return link.teams.slice(1).flatMap((team, index) => {
+      const from = link.teams[index];
+      return from === undefined ? [] : [{ a: from, b: team, link }];
+    });
+  });
+  return { regions, open, home, nerves };
 };
 
 /**
  * The way each statement runs through the brain, as the regions it passes: from the source that
- * heard it, to the team it is about, the tool it names and the workflow it belongs to. What the
- * brain fires when it is seen whole: every pulse is something somebody said, coming up the spine
- * from the sources in the stem. And between them, what is still unknown: from the gaps to each
- * region they are about.
+ * heard it, up the spine from the stem, to the teams it is about and the work it belongs to. What
+ * the brain fires when it is seen whole: every pulse is something somebody said.
  */
 export const signalPaths = (ws: Workspace, atlas: Atlas): RegionId[][] => {
   const paths: RegionId[][] = [];
@@ -398,7 +476,6 @@ export const signalPaths = (ws: Workspace, atlas: Atlas): RegionId[][] => {
     const stops = [
       statement.sourceId,
       ...statement.teamIds,
-      ...statement.toolIds,
       statement.candidateId ?? "",
     ];
     const path: RegionId[] = [];
@@ -412,19 +489,7 @@ export const signalPaths = (ws: Workspace, atlas: Atlas): RegionId[][] => {
       paths.push(path);
     }
   }
-  const links =
-    atlas.regions.find((region) => region.id === "gaps")?.links ?? {};
-  const wired = REGION_IDS.filter((id) => (links[id] ?? 0) > 0).map(
-    (id): RegionId[] => ["gaps", id]
-  );
-  if (wired.length === 0) {
-    return paths;
-  }
-  // One of them after every third statement, each in turn.
-  return paths.flatMap((path, index) => {
-    const gap = wired[Math.floor(index / 3) % wired.length];
-    return index % 3 === 2 && gap ? [path, gap] : [path];
-  });
+  return paths;
 };
 
 /** One line of a story, and the notes it lights up. */
@@ -468,60 +533,68 @@ const visionStory = (ws: Workspace, ids: Ids, line: Line): void => {
   );
 };
 
-const teamsStory = (
+/** A group of teams: who is in it, the work they do, and what is not known yet. */
+const groupStory = (
   ws: Workspace,
   region: AtlasRegion,
   ids: Ids,
   line: Line
 ): void => {
   const teams = ids((note) => note.kind === "team");
-  const count = teams.length;
-  line(
-    plural(count, {
-      one: "# team is in the brain, from the directory.",
-      other: "# teams are in the brain, from the directory.",
-    }),
-    teams
+  if (teams.length === 0) {
+    return;
+  }
+  const names = formatList(
+    region.notes
+      .filter((note) => note.kind === "team")
+      .map((note) => note.title)
   );
-  const { waiting } = region;
-  const left = waiting.length;
+  const work = ids((note) => note.kind === "candidate");
+  const count = work.length;
   line(
-    left === 0
-      ? t`Every one of them is interviewed.`
-      : plural(left, {
-          one: "# of them is not interviewed yet.",
-          other: "# of them are not interviewed yet.",
+    count === 0
+      ? t`${names} work here. No work of theirs came up yet.`
+      : plural(count, {
+          one: `${names} work here, on # piece of work that came up in what people said.`,
+          other: `${names} work here, on # pieces of work that came up in what people said.`,
         }),
-    left === 0 ? teams : waiting
+    [...teams, ...work]
   );
-  const employees = ws.sources.filter(
-    (source) => source.interviewee === "employee"
-  ).length;
-  if (employees > 0) {
-    const spoken = teams.filter((id) =>
-      ws.sources.some(
-        (source) =>
-          source.interviewee === "employee" &&
-          source.teamIds?.includes(id) === true
-      )
-    );
+  const drawn = ids(
+    (note) => note.kind === "candidate" && note.tags.includes("drawn")
+  );
+  const done = drawn.length;
+  if (done > 0) {
     line(
-      plural(employees, {
-        one: "# employee answered as well, by voice or chat.",
-        other: "# employees answered as well, by voice or chat.",
+      plural(done, {
+        one: "# of them is drawn.",
+        other: "# of them are drawn.",
       }),
-      spoken.length > 0 ? spoken : teams
+      drawn
     );
   }
-  const both = sameHandover(ws);
-  if (both) {
-    const nameOf = (id: string) =>
-      ws.teams.find((team) => team.id === id)?.name ?? id;
-    const one = nameOf(both[0]);
-    const other = nameOf(both[1]);
+  const waiting = region.waiting.filter((id) => teams.includes(id));
+  const left = waiting.length;
+  if (left > 0) {
+    line(
+      plural(left, {
+        one: "# team here is not interviewed yet.",
+        other: "# teams here are not interviewed yet.",
+      }),
+      waiting
+    );
+  }
+  // Told from both sides, by the rule the brain's nerves follow (brain-links.ts), so the story never says it while its nerve is still only proposed.
+  const both = brainLinks(ws).find(
+    (link) => link.kind === "handover" && link.bothSides
+  )?.teams;
+  if (both?.some((id) => teams.includes(id)) === true) {
+    const [one = "", other = ""] = both.map(
+      (id) => ws.teams.find((team) => team.id === id)?.name ?? id
+    );
     line(
       t`${one} and ${other} both name the same handover, each from their own side.`,
-      both
+      both.filter((id) => teams.includes(id))
     );
   }
 };
@@ -601,103 +674,6 @@ const sourcesStory = (
   }
 };
 
-const toolsStory = (ws: Workspace, ids: Ids, line: Line): void => {
-  const tools = ids((note) => note.kind === "tool");
-  const named = tools.length;
-  line(
-    plural(named, {
-      one: "# tool was named in the interviews.",
-      other: "# tools were named in the interviews.",
-    }),
-    tools
-  );
-  const apps = ids((note) => note.kind === "app");
-  const unnamed = apps.length;
-  if (unnamed > 0) {
-    line(
-      plural(unnamed, {
-        one: "# more application is in use that nobody named.",
-        other: "# more applications are in use that nobody named.",
-      }),
-      apps
-    );
-  }
-  const [biggest] = unmentionedApps(ws)
-    .filter((app) => app.ai === "tool")
-    .toSorted((a, b) => b.people - a.people);
-  if (biggest) {
-    const { name } = biggest;
-    const people = formatNumber(biggest.people);
-    line(
-      t`The most used AI tool nobody mentioned is ${name}, used by ${people} people.`,
-      [`app-${biggest.id}`]
-    );
-  }
-};
-
-const workflowsStory = (ids: Ids, line: Line): void => {
-  const workflows = ids((note) => note.kind === "candidate");
-  const count = workflows.length;
-  line(
-    plural(count, {
-      one: "# piece of time-consuming work came up in what people said.",
-      other: "# pieces of time-consuming work came up in what people said.",
-    }),
-    workflows
-  );
-  const drawn = ids(
-    (note) => note.kind === "candidate" && note.tags.includes("drawn")
-  );
-  const done = drawn.length;
-  if (done > 0) {
-    line(
-      plural(done, {
-        one: "# of them is drawn in the builder.",
-        other: "# of them are drawn in the builder.",
-      }),
-      drawn
-    );
-  }
-  const waiting = ids(
-    (note) => note.kind === "candidate" && note.tags.includes("not-drawn")
-  );
-  const left = waiting.length;
-  if (left > 0) {
-    line(
-      plural(left, {
-        one: "# is not drawn yet.",
-        other: "# are not drawn yet.",
-      }),
-      waiting
-    );
-  }
-};
-
-const gapsStory = (ids: Ids, line: Line): void => {
-  const open = ids((note) => note.kind === "gap" && note.tags.includes("open"));
-  const asked = open.length;
-  line(
-    plural(asked, {
-      one: "# question is still open, each with who can answer it.",
-      other: "# questions are still open, each with who can answer it.",
-    }),
-    open
-  );
-  const answered = ids(
-    (note) => note.kind === "gap" && note.tags.includes("closed")
-  );
-  const done = answered.length;
-  if (done > 0) {
-    line(
-      plural(done, {
-        one: "# question is answered, by the person who knew.",
-        other: "# questions are answered, by the people who knew.",
-      }),
-      answered
-    );
-  }
-};
-
 /**
  * What a region tells when you go in: three to five lines, each lighting up the notes it is about,
  * in a fixed order, ending with what is still open.
@@ -716,34 +692,12 @@ export const storyOf = (
   const line: Line = (text, notes) => {
     lines.push({ text, notes });
   };
-  switch (regionId) {
-    case "vision": {
-      visionStory(ws, ids, line);
-      break;
-    }
-    case "teams": {
-      teamsStory(ws, region, ids, line);
-      break;
-    }
-    case "sources": {
-      sourcesStory(ws, region, ids, line);
-      break;
-    }
-    case "tools": {
-      toolsStory(ws, ids, line);
-      break;
-    }
-    case "workflows": {
-      workflowsStory(ids, line);
-      break;
-    }
-    case "gaps": {
-      gapsStory(ids, line);
-      break;
-    }
-    default: {
-      regionId satisfies never;
-    }
+  if (regionId === "frontal") {
+    visionStory(ws, ids, line);
+  } else if (regionId === "stem") {
+    sourcesStory(ws, region, ids, line);
+  } else {
+    groupStory(ws, region, ids, line);
   }
   for (const item of region.open) {
     const { question, who } = item;
