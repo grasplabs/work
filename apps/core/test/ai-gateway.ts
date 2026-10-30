@@ -658,6 +658,41 @@ const workersAiBadInput = (
 };
 
 /**
+ * Replies to core's own calls about Stephen's requests (sorting one,
+ * proposing a fix: src/channels/request-sorting.ts, src/stephen-requests.ts),
+ * in the order a test queued them, apart from every gateway's script;
+ * once none is left, a sorting that sorts nothing.
+ */
+export const stephenRequestReplies: GatewayReply[] = [];
+
+const sortsNothing: GatewayReply = {
+  text: JSON.stringify({
+    topic: null,
+    newTopic: null,
+    question: null,
+    newQuestion: null,
+    role: null,
+    answered: true,
+  }),
+  inputTokens: 10,
+  outputTokens: 10,
+};
+
+const metadataSchema = z.object({ purpose: z.string().optional() });
+
+/** Whether a request is one of core's own about Stephen's requests. */
+const isStephenRequests = (headers: Headers): boolean => {
+  try {
+    const { purpose } = metadataSchema.parse(
+      JSON.parse(headers.get("cf-aig-metadata") ?? "{}")
+    );
+    return purpose?.startsWith("stephen.requests.") === true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * A fake AI binding whose gateway answers each request with what `respond`
  * makes of it, given the requests so far, this one last: at once, or once
  * a provider it asks has answered. Its `requests`
@@ -675,17 +710,24 @@ export const answeringGateway = (
   ): Promise<Response> => {
     const request = new Request(input, init);
     const body: unknown = await request.json();
-    requests.push({
-      url: request.url,
-      headers: request.headers,
-      body,
-      signal: request.signal,
-    });
+    // Stephen's request sorting answers apart from the test's script, as
+    // it isn't part of the turn the script is written for.
+    const sorting = isStephenRequests(request.headers);
+    if (!sorting) {
+      requests.push({
+        url: request.url,
+        headers: request.headers,
+        body,
+        signal: request.signal,
+      });
+    }
     const badInput = workersAiBadInput(request.url, body);
     if (badInput !== undefined) {
       return badInput;
     }
-    const reply = await relabelled(await respond(requests), body);
+    const reply = sorting
+      ? (stephenRequestReplies.shift() ?? sortsNothing)
+      : await relabelled(await respond(requests), body);
     if (reply === undefined) {
       throw new Error("The fake gateway has no reply left");
     }

@@ -183,9 +183,7 @@ const Go = ({ gate }: { gate: GateView }) => {
       <div className="flex flex-col gap-4 border-t px-5 py-5">
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex flex-col gap-1">
-            <span className="text-2xl leading-none font-medium tabular-nums">
-              {known}%
-            </span>
+            <span className="type-figure">{known}%</span>
             <span className="text-muted-foreground">
               <Trans>of what Grasp needs is known</Trans>
             </span>

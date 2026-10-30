@@ -20,6 +20,9 @@ import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { LessonsView } from "./lessons-view.tsx";
+import { recordOf } from "./memory-parts.tsx";
+import { RememberDialog } from "./remember-dialog.tsx";
+import { ShareRecord, shareTargets } from "./share-record.tsx";
 
 // The Brain's memory records, as a person inspects and corrects them
 // (GRA-298; the threat model is on the issue): their own, or the shared
@@ -59,12 +62,6 @@ const readFrom = async <T,>(
     return { state: "refused", message: failureText(error) };
   }
 };
-
-/** The record a command's receipt names, if it names one. */
-const recordOf = (receipt: {
-  resourceRefs: readonly { kind: string; memoryId?: string }[];
-}): string | undefined =>
-  receipt.resourceRefs.find((ref) => ref.kind === "memory")?.memoryId;
 
 const StateBadge = ({ state }: { state: Shown["state"] }) => {
   const { t } = useLingui();
@@ -312,11 +309,13 @@ const RetireButton = ({
 const LineagePanel = ({
   memoryId,
   admin,
+  teams,
   onPick,
   onChanged,
 }: {
   memoryId: string;
   admin: boolean;
+  teams: readonly { id: string; name: string }[];
   onPick: (memoryId: string) => void;
   onChanged: (memoryId: string | undefined) => void;
 }) => {
@@ -356,6 +355,8 @@ const LineagePanel = ({
     own && !withheld && record.scope === "person" && record.state !== "retired";
   // One's own, any scope, by them; a shared one by an admin too. One they
   // may no longer read, withheld, only so.
+  // One's own, in their own memory, into a scope they may share with.
+  const shareable = correctable && shareTargets(teams, admin).length > 0;
   const retirable =
     record.state !== "retired" && (own || (admin && record.scope !== "person"));
   return (
@@ -392,6 +393,14 @@ const LineagePanel = ({
       </div>
       {correctable ? (
         <CorrectForm key={record.revision} onDone={onChanged} record={record} />
+      ) : null}
+      {shareable ? (
+        <ShareRecord
+          admin={admin}
+          onShared={onChanged}
+          record={record}
+          teams={teams}
+        />
       ) : null}
       {retirable ? (
         <RetireButton
@@ -473,7 +482,14 @@ const RecordList = ({
 };
 
 /** The Brain's memory page: the records, and the one in hand. */
-export const MemoryPage = ({ admin }: { admin: boolean }) => {
+export const MemoryPage = ({
+  admin,
+  teams,
+}: {
+  admin: boolean;
+  /** The teams the person is in, to share their records with. */
+  teams: readonly { id: string; name: string }[];
+}) => {
   const [tab, setTab] = useState<Tab>("mine");
   const [picked, setPicked] = useState<string>();
   // Read again after a change: what changed shows as it is now.
@@ -485,29 +501,40 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
           <NotebookPenIcon className="size-5" />
           <Trans>Memory</Trans>
         </h1>
-        <Tabs
-          onValueChange={(value: string) => {
-            setTab(value === "shared" || value === "lessons" ? value : "mine");
-            setPicked(undefined);
-          }}
-          value={tab}
-        >
-          <TabsList>
-            <TabsTrigger value="mine">
-              <Trans context="memory records: the person's own">Yours</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="shared">
-              <Trans context="memory records: others' that you read">
-                Shared with you
-              </Trans>
-            </TabsTrigger>
-            <TabsTrigger value="lessons">
-              <Trans context="the Brain's lessons from repeated failures">
-                Lessons
-              </Trans>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap items-center gap-3">
+          <RememberDialog
+            onRemembered={(memoryId) => {
+              setTab("mine");
+              setChanges((count) => count + 1);
+              setPicked(memoryId);
+            }}
+          />
+          <Tabs
+            onValueChange={(value: string) => {
+              setTab(
+                value === "shared" || value === "lessons" ? value : "mine"
+              );
+              setPicked(undefined);
+            }}
+            value={tab}
+          >
+            <TabsList>
+              <TabsTrigger value="mine">
+                <Trans context="memory records: the person's own">Yours</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="shared">
+                <Trans context="memory records: others' that you read">
+                  Shared with you
+                </Trans>
+              </TabsTrigger>
+              <TabsTrigger value="lessons">
+                <Trans context="the Brain's lessons from repeated failures">
+                  Lessons
+                </Trans>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
       {tab === "lessons" ? (
         <LessonsView admin={admin} />
@@ -522,6 +549,7 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
           {picked === undefined ? null : (
             <LineagePanel
               admin={admin}
+              teams={teams}
               key={`${picked}:${changes}`}
               memoryId={picked}
               onChanged={(memoryId) => {

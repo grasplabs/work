@@ -15,6 +15,7 @@ import { useRouter } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { platformName } from "../chat-platforms.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -35,21 +36,6 @@ export interface ChatAccounts {
   accounts: ChannelAccount[];
   pending?: { secret: string; preview: ChannelLinkPreview };
 }
-
-/** Product names, as each platform writes its own; any other as Chat SDK names it. */
-const platformNames: Record<string, string> = {
-  slack: "Slack",
-  whatsapp: "WhatsApp",
-  telegram: "Telegram",
-  discord: "Discord",
-  gchat: "Google Chat",
-  "google-chat": "Google Chat",
-  github: "GitHub",
-  linear: "Linear",
-};
-
-const platformName = (platform: string): string =>
-  platformNames[platform] ?? platform;
 
 /** Why a link links nothing, in the page's language. */
 const useRefusalText = (reason: ChannelLinkRefusal): string => {
