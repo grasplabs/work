@@ -235,8 +235,25 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
       .getByRole("link", { name: "approval", exact: true })
   ).toBeVisible();
 
-  // The waiting run comes first on the Runs tab, with where to decide it.
+  // Runs › Today: the App's workflow has a lane, its waiting run a dot
+  // that follows the item ("Where is it").
   await page.getByRole("tab", { name: "Runs" }).click();
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await expect(page).toHaveURL(/view=today/u);
+  const today = page.getByRole("region", { name: "Today" });
+  await expect(
+    today.getByRole("link", { name: `${name} · approval` }).first()
+  ).toBeVisible(pageRead);
+  await today
+    .getByRole("button", { name: /waits on/u })
+    .first()
+    .click();
+  await expect(
+    today.getByRole("heading", { name: "Where is it" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "All runs", exact: true }).click();
+
+  // The waiting run comes first on the Runs tab, with where to decide it.
   const first = page.getByRole("row").nth(1);
   await expect(first).toContainText("Waiting for a decision", pageRead);
   await first.getByRole("link", { name: "Decide" }).click();

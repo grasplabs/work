@@ -42,6 +42,7 @@ import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 
+import { platformName } from "../chat-platforms.ts";
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
 import type { Directory } from "../directory.ts";
@@ -336,7 +337,12 @@ const doerOf = (
   directory: Directory
 ): { label: string; id?: string } => {
   if (actor.type === "person") {
-    return { label: personName(directory, actor.userId), id: actor.userId };
+    const name = personName(directory, actor.userId);
+    if (actor.via !== undefined) {
+      const app = platformName(actor.via);
+      return { label: i18n._(msg`${name}, in ${app}`), id: actor.userId };
+    }
+    return { label: name, id: actor.userId };
   }
   if (actor.type === "staff") {
     const name = personName(directory, actor.userId);
@@ -345,6 +351,13 @@ const doerOf = (
   if (actor.type === "agent") {
     const { agentId } = actor;
     const person = personName(directory, actor.onBehalfOf);
+    if (actor.via !== undefined) {
+      const app = platformName(actor.via);
+      return {
+        label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
+        id: actor.agentId,
+      };
+    }
     return {
       label: i18n._(msg`Agent ${agentId} for ${person}`),
       id: actor.agentId,
@@ -556,7 +569,7 @@ const RecordRow = ({
       </div>
       <div className="flex flex-none flex-wrap items-center gap-2">
         {record.verified ? null : (
-          <Badge variant="destructive">
+          <Badge variant="attention">
             <Trans>Not verified</Trans>
           </Badge>
         )}

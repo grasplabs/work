@@ -262,6 +262,22 @@ const coreDb: D1State = {
       `${core}channels/signals.ts`,
       "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
     ),
+    stephen_requests: exported(
+      `${core}channels/stephen-requests.ts`,
+      "One record per request Stephen took on outside Grasp, labels only: what he is billed by."
+    ),
+    stephen_request_topics: exported(`${core}channels/request-sorting.ts`),
+    stephen_request_questions: exported(`${core}channels/request-sorting.ts`),
+    stephen_request_needs: exported(`${core}stephen-requests.ts`),
+    stephen_request_proposals: cache(
+      `${core}stephen-requests.ts`,
+      "Grasp's proposals for what Needs you lists, made again when asked."
+    ),
+    stephen_summary_readers: exported(`${core}stephen-requests.ts`),
+    stephen_summaries: transient(
+      `${core}stephen-summary.ts`,
+      "The weekly summaries queued and sent: a week's goes once, from where it is sent."
+    ),
     chat_audiences: exported(`${core}knowledge/access.ts`),
     invitations: exported(auth),
     teams: exported(auth),
@@ -781,6 +797,10 @@ const onboarding: DurableObjectState = {
     brain_sent: exported(
       `${core}onboarding/store.ts`,
       "Who each record the onboarding gave the brain rests on: what deleting an interview takes out of it."
+    ),
+    referrals: exported(
+      `${core}onboarding/store.ts`,
+      "Who said the work they were asked about isn't theirs, until who does what is put right."
     ),
     draw_failures: transient(
       `${core}onboarding/store.ts`,

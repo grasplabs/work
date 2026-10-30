@@ -118,7 +118,8 @@ const appPageFor = async ({
       {null}
     </AppPage>
   );
-  return names.includes("Edit");
+  // An App is changed in its own chat, in the dock: its page offers Publish alone.
+  return names.some((name) => name === "Publish" || name === "Published");
 };
 
 /** The domain page's status controls, as `viewer` sees them. */
@@ -138,7 +139,7 @@ const statusFor = async ({
 describe("an App's changes, offered on its pages", () => {
   afterEach(takenDown);
 
-  it("shows Edit and Publish on the App's page to its builders alone, never to a user of it or to staff", async () => {
+  it("shows Publish on the App's page to its builders alone, never to a user of it or to staff", async () => {
     expect({
       builder: await appPageFor(builder),
       user: await appPageFor(user),

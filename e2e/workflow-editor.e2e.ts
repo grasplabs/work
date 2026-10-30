@@ -11,6 +11,9 @@ import { peopleIn } from "./people.ts";
 // task and JSON Pointer, only a revision that passes publishes, and of two
 // people saving the same revision, the second is told and keeps their text.
 
+/** How long a read from core may take to show. */
+const pageRead = { timeout: 15_000 };
+
 /** A definition of workflow `name`, its one task given `extra` keys. */
 const definition = (
   name: string,
@@ -228,7 +231,7 @@ const routing = (name: string): string =>
 test("a builder sees every declared branch of the checked definition, and a test run marks only the tasks it reached", async ({
   pageOf,
 }) => {
-  const { builder } = peopleIn("workflowDiagram");
+  const { builder, admin } = peopleIn("workflowDiagram");
   const page = await pageOf(builder);
   const name = `routed-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
@@ -298,6 +301,52 @@ test("a builder sees every declared branch of the checked definition, and a test
       exact: false,
     })
   ).toBeVisible();
+
+  // Traces: the run of version 1, opened beside the page, with what it
+  // returned to whoever started it, and each step its journal recorded
+  // laid over its version's diagram.
+  await page.getByRole("tab", { name: "Traces" }).click();
+  await page
+    .getByRole("tabpanel")
+    .getByRole("button", { name: /^Open the run started/u })
+    .last()
+    .click();
+  const steps = page.getByRole("dialog");
+  await expect(steps.getByText("What it returned")).toBeVisible(pageRead);
+  await expect(steps.getByText("Step by step")).toBeVisible(pageRead);
+  await expect(
+    steps
+      .getByRole("region", { name: "What the run of version 1 did" })
+      .getByRole("listitem", { name: "greet-ada" })
+      .getByText("Reached")
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Before it went live, it shows its stage; its builder asks for the
+  // newest version to go live, and it then says that version waits.
+  await page
+    .getByRole("button", { name: `Testing. Change whether ${name} runs` })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Ask to go live with version 2" })
+    .click();
+  await expect(page.getByText("Version 2 waits to go live")).toBeVisible(
+    pageRead
+  );
+
+  // An admin finds it among what needs them, and lets it go live from
+  // its page: it is live, and nothing waits any more.
+  const decides = await pageOf(admin);
+  await decides.goto("/workflows?tab=needs");
+  await decides
+    .getByRole("region", { name: "Waiting for you to let them go live" })
+    .getByRole("link", { name })
+    .click();
+  await decides.getByRole("button", { name: "Approve and go live" }).click();
+  await expect(
+    decides.getByRole("button", { name: /^Live since .*\. Change whether/u })
+  ).toBeVisible(pageRead);
+  await expect(decides.getByText("Version 2 waits to go live")).toBeHidden();
 });
 
 /** A module whose `total` sums whole numbers, as a calculation. */

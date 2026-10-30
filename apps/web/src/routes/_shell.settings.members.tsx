@@ -61,6 +61,7 @@ import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
+import { MembersTabs } from "../settings/members-tabs.tsx";
 import {
   SettingsError,
   SettingsLoading,
@@ -516,10 +517,17 @@ const Members = () => {
   );
 };
 
+/** The members, and for the organization's admins a tab of their teams. */
+const MembersPage = () => (
+  <MembersTabs>
+    <Members />
+  </MembersTabs>
+);
+
 export const Route = createFileRoute("/_shell/settings/members")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
-  component: Members,
+  component: MembersPage,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
       const [members, invitations] = await Promise.all([

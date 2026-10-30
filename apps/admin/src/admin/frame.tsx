@@ -14,6 +14,7 @@
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
  */
+import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 import {
   Sidebar,
   SidebarContent,
@@ -53,7 +54,6 @@ import { useEffect } from "react";
 import type { ComponentType, SVGProps } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
-import { GraspMark } from "./grasp-mark.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { PlatformCounts } from "./platform.ts";
 import { organizationsOf, unreadWords } from "./views.ts";
@@ -297,25 +297,12 @@ const AdminSidebar = ({
   return (
     <Sidebar collapsible="icon" label="Admin" variant="inset">
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              render={<Link to="/" />}
-              size="lg"
-              tooltip="Grasp admin"
-            >
-              <span className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                <GraspMark className="size-4" />
-              </span>
-              <span className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">Grasp</span>
-                <span className="text-muted-foreground truncate text-xs">
-                  Admin
-                </span>
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <BrandHeader
+          render={<Link to="/" />}
+          subtitle="Admin"
+          title="Grasp"
+          tooltip="Grasp admin"
+        />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
