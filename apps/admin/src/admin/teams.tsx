@@ -1079,9 +1079,7 @@ const OneTeam = ({
       <section className="bg-card overflow-hidden rounded-xl border">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-            <h2 className="text-2xl leading-tight font-medium tracking-tight">
-              {each.team.name}
-            </h2>
+            <h2 className="type-title">{each.team.name}</h2>
             {each.team.does === "" ? null : (
               <p className="text-muted-foreground">{each.team.does}</p>
             )}

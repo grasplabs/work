@@ -19,8 +19,11 @@ import {
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
 import { checkOf, turnHeldWrites } from "./held.ts";
+import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
+import { settleRequest, takeRequest } from "./stephen-requests.ts";
+import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -83,6 +86,56 @@ export const appLocale = (raw: unknown): ChannelLocale => {
     ?.toLowerCase();
   return channelLocales.find((each) => each === language) ?? "en";
 };
+
+/** How a request whose turn was refused or failed ended (stephen-requests.ts). */
+const endOfLine: Readonly<Record<RefusedLine, "stopped" | "failed">> = {
+  budget: "stopped",
+  busy: "stopped",
+  removed: "stopped",
+  failed: "failed",
+};
+
+/**
+ * Takes in the message `messageId` as one of Stephen's requests
+ * (stephen-requests.ts), once however often the platform sends it: what
+ * settles it as its turn ends, sorting it first when it was answered, and
+ * the request a thumb on the answer is for, where the door takes one
+ * (Teams). Nothing for a question answered again (no `messageId`).
+ */
+const takenIn = async (
+  env: Env,
+  {
+    platform,
+    userId,
+    messageId,
+    text,
+  }: { platform: string; userId: string; messageId?: string; text: string }
+) => {
+  const requestId =
+    messageId === undefined
+      ? null
+      : await takeRequest(env, { platform, messageId, userId });
+  const settle = async (
+    ended: Omit<Settled, "sorted">,
+    answer?: string
+  ): Promise<void> => {
+    if (requestId === null) {
+      return;
+    }
+    const sorted =
+      answer === undefined
+        ? null
+        : await sortRequest(env, { userId, platform, message: text, answer });
+    await settleRequest(env, requestId, { ...ended, sorted });
+  };
+  const rate =
+    requestId !== null && platform === "teams" ? requestId : undefined;
+  return { settle, rate };
+};
+
+/** How a request whose turn ended without an answer ended. */
+const endOfTurn = (outcome: string): "stopped" | "failed" =>
+  outcome === "cancelled" || outcome === "max_steps" ? "stopped" : "failed";
 
 /** The count a refused or failed turn's line stands for (signals.ts). */
 const signalOfLine: Readonly<Record<RefusedLine, ChannelSignal | null>> = {
@@ -236,13 +289,25 @@ const answerOne = async (
     thread,
     afterward,
     shared,
+    messageId,
   }: Pick<ChannelMessage, "platform" | "userId" | "afterward" | "shared"> & {
     thread: Thread | Conversation;
+    /**
+     * The platform's id for the message, which makes it one of Stephen's
+     * requests (stephen-requests.ts); none for a question answered again.
+     */
+    messageId?: string;
   },
   text: string,
   locale: ChannelLocale
 ): Promise<void> => {
   const startedAt = Date.now();
+  const { settle, rate } = await takenIn(env, {
+    platform,
+    userId,
+    messageId,
+    text,
+  });
   const stopTyping = typingIn(thread);
   // Streamed only in a direct message the platform's SDK handed over.
   const streaming =
@@ -275,11 +340,17 @@ const answerOne = async (
     if (signal !== null) {
       await countSignal(env, platform, signal);
     }
+    await settle({
+      chatId: null,
+      ended: endOfLine[line],
+      calls: [],
+      cited: false,
+    });
     await postIn(env, platform, thread, say(line, locale));
     return;
   }
   stopTyping();
-  const { chatId, answer } = asked;
+  const { chatId, answer, calls } = asked;
   const answered = answer.outcome === "answered";
   const final = shownText(answer.answer);
   let streamed = false;
@@ -288,12 +359,24 @@ const answerOne = async (
   } catch (error) {
     log.warn("channel.stream_refused", { platform, ...errorFields(error) });
   }
+  const cited = answer.cited.length > 0;
   if (!answered || final === "") {
     log.warn("channel.turn_failed", { platform, outcome: answer.outcome });
     await countSignal(env, platform, "failed");
+    await settle({
+      chatId,
+      ended: endOfTurn(answer.outcome),
+      calls,
+      cited,
+    });
     await postIn(env, platform, thread, say("failed", locale));
     return;
   }
+  // Sorted and settled once the person has the answer, as it takes a
+  // model call of its own.
+  const recorded = async () => {
+    await settle({ chatId, ended: "answered", calls, cited }, final);
+  };
   // The starts the turn offered, each on its card, under the answer.
   const offers = async () => {
     await postOffers(env, thread, { chatId, userId }, locale);
@@ -312,9 +395,11 @@ const answerOne = async (
       await postIn(env, platform, thread, final);
       await timed();
       await offers();
+      await recorded();
       return;
     }
     afterward(offers);
+    afterward(recorded);
     return;
   }
   const sources = answer.cited.map(({ title, collectionId, documentId }) => ({
@@ -354,23 +439,40 @@ const answerOne = async (
       env,
       platform,
       thread,
-      answerCard({ locale, text: final, sources, chatUrl })
+      answerCard({
+        locale,
+        text: final,
+        sources,
+        chatUrl,
+        rate,
+      })
     );
     await timed();
     await held();
     await offers();
     await offer();
+    await recorded();
     return;
   }
-  // Under the answer's last words, which Teams gets once this returns.
+  // Under the answer's last words, which Teams gets once this returns,
+  // with the thumbs for it.
   if (sources.length > 0) {
     afterward(
-      async () => await thread.post(sourcesCard({ locale, sources, chatUrl }))
+      async () =>
+        await thread.post(
+          sourcesCard({
+            locale,
+            sources,
+            chatUrl,
+            rate,
+          })
+        )
     );
   }
   afterward(held);
   afterward(offers);
   afterward(offer);
+  afterward(recorded);
 };
 
 /**
@@ -437,7 +539,13 @@ export const answerInChat =
     const { message, thread, kept } = accepted;
     const fallback = appLocale(message.raw);
     if (kept !== undefined) {
-      await answerOne(env, accepted, kept, languageOf(kept, fallback));
+      // What they asked before Grasp knew them: a message of its own.
+      await answerOne(
+        env,
+        { ...accepted, messageId: `${message.id}:kept` },
+        kept,
+        languageOf(kept, fallback)
+      );
     }
     const text = message.text.trim();
     const locale = languageOf(text, fallback);
@@ -448,5 +556,5 @@ export const answerInChat =
       }
       return;
     }
-    await answerOne(env, accepted, text, locale);
+    await answerOne(env, { ...accepted, messageId: message.id }, text, locale);
   };

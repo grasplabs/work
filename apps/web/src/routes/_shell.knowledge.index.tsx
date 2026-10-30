@@ -283,7 +283,7 @@ const Knowledge = () => {
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 md:px-12">
           <header className="flex flex-col gap-2.5">
-            <h1 className="text-2xl font-medium tracking-tight">
+            <h1 className="type-title">
               <Trans>Knowledge</Trans>
             </h1>
             <p className="text-muted-foreground text-sm leading-relaxed">
