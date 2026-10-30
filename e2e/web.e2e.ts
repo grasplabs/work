@@ -312,6 +312,55 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await expect(members.getByText(email)).toHaveCount(0);
 });
 
+test("an admin makes a team, puts someone in it and takes them off, renames it and deletes it", async ({
+  context,
+  page,
+}) => {
+  const { admin, member } = peopleIn("teams");
+  await signInTo(context, admin);
+  await page.goto("/settings/members");
+  await page.getByRole("tab", { name: "Teams" }).click();
+  const teams = page.getByRole("region", { name: "Teams" });
+  const name = `Finance ${crypto.randomUUID().slice(0, 6)}`;
+
+  await teams.getByRole("button", { name: "New team" }).click();
+  const create = page.getByRole("dialog", { name: "New team" });
+  await create.getByRole("textbox", { name: "Name" }).fill(name);
+  await create.getByRole("button", { name: "Create team" }).click();
+  await expect(create).toBeHidden();
+  await expect(teams.getByText(name, { exact: true })).toBeVisible();
+
+  await teams.getByRole("button", { name: `Members of ${name}` }).click();
+  const team = page.getByRole("dialog", { name: `Members of ${name}` });
+  await team.getByRole("combobox", { name: "Add a member" }).click();
+  await page
+    .getByRole("option", { name: `Person (${member.email})`, exact: true })
+    .click();
+  await team.getByRole("button", { name: "Add", exact: true }).click();
+  const inTeam = team.getByRole("list", { name: `Members of ${name}` });
+  await expect(inTeam.getByText(member.email)).toBeVisible();
+  await team.getByRole("button", { name: `Take Person off ${name}` }).click();
+  await expect(team.getByText("Nobody is in this team yet.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(team).toBeHidden();
+
+  const renamed = `${name} and legal`;
+  await teams.getByRole("button", { name: `Actions for ${name}` }).click();
+  await page.getByRole("menuitem", { name: "Rename" }).click();
+  const rename = page.getByRole("dialog", { name: `Rename ${name}` });
+  await rename.getByRole("textbox", { name: "Name" }).fill(renamed);
+  await rename.getByRole("button", { name: "Rename" }).click();
+  await expect(teams.getByText(renamed, { exact: true })).toBeVisible();
+
+  await teams.getByRole("button", { name: `Actions for ${renamed}` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await page
+    .getByRole("dialog", { name: `Delete ${renamed}?` })
+    .getByRole("button", { name: "Delete" })
+    .click();
+  await expect(teams.getByText(renamed, { exact: true })).toHaveCount(0);
+});
+
 test("shows the members page only to someone signed in, and never signs them out for core failing", async ({
   context,
   page,

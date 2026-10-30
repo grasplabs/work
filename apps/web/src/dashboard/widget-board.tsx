@@ -254,9 +254,7 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                 ))}
               </ul>
               <span className="flex w-full flex-col items-center border-t pt-2 text-center">
-                <span className="text-2xl font-medium tabular-nums">
-                  {here.length}
-                </span>
+                <span className="type-figure">{here.length}</span>
                 <span
                   className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs wrap-anywhere hyphens-auto"
                   lang={i18n.locale}

@@ -37,7 +37,7 @@ import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/waiting.ts";
 import {
   AppStatusControls,
   StatusBadge,
@@ -537,7 +537,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
       <div className="flex flex-wrap items-start gap-4">
         <EngineIcon />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h1 className="text-2xl font-medium tracking-tight">{app.name}</h1>
+          <h1 className="type-title">{app.name}</h1>
           {app.description === "" ? null : (
             <p className="text-muted-foreground">{app.description}</p>
           )}
@@ -693,9 +693,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
       />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-0.5">
-          <h1 className="text-2xl font-medium tracking-tight">
-            {listed.subject.name}
-          </h1>
+          <h1 className="type-title">{listed.subject.name}</h1>
           <p className="text-muted-foreground">
             <Trans>
               The packages approved for this domain. You see them because you

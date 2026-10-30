@@ -13,7 +13,12 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -26,6 +31,7 @@ import { MentionLinks } from "../brain/brain-article/mention-links.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
+import { TeamWork } from "../brain/brain-article/team-work.tsx";
 import { Capped, NoteChip } from "../brain/brain-chips.tsx";
 import { dotClass, tintClass } from "../brain/brain-colors.ts";
 import { useBrainData } from "../brain/brain-data.ts";
@@ -47,11 +53,15 @@ import {
   splitTimeline,
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
+import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
+import { labelOf } from "../brain/witness.ts";
+import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
 // prototype links out of the brain, to a workflow on its Workflows page, a
@@ -661,6 +671,7 @@ const NoteBody = ({
   statements: StatementRow[];
   activeId: string | undefined;
 }) => {
+  const { brain } = useBrainData();
   const nameable = nameableFrom(note, byId);
   const article = (
     <Article byId={byId} nameable={nameable} paragraphs={note.article} />
@@ -708,7 +719,11 @@ const NoteBody = ({
         <SourceContentsTable byId={byId} contents={contents} />
       ) : null}
       {article}
-      {statements.length > 0 ? (
+      {note.kind === "team" ? (
+        // A team's page is its work, never its people's words: those live on the work's pages.
+        <TeamWork brain={brain} team={note} ws={workspace} />
+      ) : null}
+      {note.kind !== "team" && statements.length > 0 ? (
         <StatementsByKind
           activeId={activeId}
           kern={kernOf(note.id, statements)}
@@ -744,7 +759,9 @@ const NoteContent = ({
       (candidate) => candidate.id === id
     );
     const place = statement ? placeOf(statement, workspace.sources) : undefined;
-    return statement && place ? [{ statement, place }] : [];
+    return statement && place
+      ? [{ statement, place, who: labelOf(workspace, place.source) }]
+      : [];
   });
   // The statement a link opened, when it is one of this note's.
   const activeId = statements.some((row) => row.statement.id === hash)
@@ -820,6 +837,48 @@ const NoteContent = ({
 };
 
 /**
+ * A piece of work's page: its note, and what Grasp knows about it in its
+ * own sentences (`?knowledge` opens that tab, as the brain's navigation
+ * does).
+ */
+const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
+  const { knowledge } = Route.useSearch();
+  const navigate = useNavigate({ from: "/brain/$noteId" });
+  return (
+    <Tabs
+      onValueChange={(value: string) => {
+        void navigate({
+          search: value === "knowledge" ? { knowledge: true } : {},
+          hash: (previous) => previous ?? "",
+        });
+      }}
+      value={knowledge === true ? "knowledge" : "note"}
+    >
+      <div className="mx-auto w-full max-w-5xl px-6 pt-4">
+        <TabsList variant="line">
+          <TabsTrigger value="note">
+            <Trans context="tab: a piece of work's note in the brain">
+              Note
+            </Trans>
+          </TabsTrigger>
+          <TabsTrigger value="knowledge">
+            <Trans context="tab: what Grasp knows about a piece of work">
+              Knowledge
+            </Trans>
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="note">{children}</TabsContent>
+      <TabsContent value="knowledge">
+        <div className="pb-chat px-6 pt-8">
+          <WorkKnowledgeTab work={note.id} />
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+/**
  * One note, read like a page, the same for every kind (`brain/brain-article/`): the banner of
  * its part with who or what it is, the title and summary, its own text or its conversation, and
  * what was said, one kind at a time. At the side its details (properties and links as one list,
@@ -830,7 +889,9 @@ const NoteContent = ({
 const NotePage = () => {
   const { t } = useLingui();
   const { noteId } = Route.useParams();
-  const { brain, workspace } = useBrainData();
+  const { brain, workspace: read } = useBrainData();
+  const { transcript } = Route.useLoaderData();
+  const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
   const note = brain.notes.find((candidate) => candidate.id === noteId);
@@ -850,17 +911,53 @@ const NotePage = () => {
       />
     );
   }
-  return (
-    <NoteContent
-      byId={new Map(brain.notes.map((candidate) => [candidate.id, candidate]))}
-      hash={hash}
-      key={note.id}
-      note={note}
-      workspace={workspace}
-    />
+  const content = (
+    <>
+      {transcript === undefined ? null : <NotLoaded page={transcript} />}
+      <NoteContent
+        byId={
+          new Map(brain.notes.map((candidate) => [candidate.id, candidate]))
+        }
+        hash={hash}
+        key={note.id}
+        note={note}
+        workspace={workspace}
+      />
+    </>
+  );
+  // A piece of work has what Grasp knows about it beside its note.
+  return note.kind === "candidate" ? (
+    <WorkTabs note={note}>{content}</WorkTabs>
+  ) : (
+    content
   );
 };
 
 export const Route = createFileRoute("/_shell/brain/$noteId")({
+  // `?knowledge` opens a piece of work on what Grasp knows about it.
+  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
+    search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true }
+      : {},
+  // The note's transcript, when its source has one: `brain.read`, which the
+  // layout read, says only how many turns it has.
+  loader: async ({
+    abortController,
+    context: { core },
+    params: { noteId },
+    parentMatchPromise,
+  }) => {
+    const { loaderData } = await parentMatchPromise;
+    const workspace =
+      loaderData?.state === "ready" ? loaderData.data.workspace : undefined;
+    return {
+      transcript: await loadTranscript(
+        core,
+        workspace,
+        noteId,
+        abortController.signal
+      ),
+    };
+  },
   component: NotePage,
 });

@@ -6,12 +6,12 @@ import type { RegionId } from "./brain-atlas.ts";
 
 /** Every region, as the type names them: a new one fails to compile until it's here. */
 const regions: Record<RegionId, true> = {
-  vision: true,
-  teams: true,
-  gaps: true,
-  tools: true,
-  workflows: true,
-  sources: true,
+  frontal: true,
+  parietal: true,
+  temporal: true,
+  occipital: true,
+  cerebellum: true,
+  stem: true,
 };
 
 export const isRegion = (value: unknown): value is RegionId =>
