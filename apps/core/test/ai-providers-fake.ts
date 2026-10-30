@@ -39,6 +39,8 @@ export interface ProviderRequest {
   body: string;
   /** The key it carried, from `x-api-key` or a bearer token. */
   key: string | null;
+  /** Set once its sender dropped it while it waited for an answer (`hang`). */
+  dropped?: true;
 }
 
 export const aiProvidersFake = () => {
@@ -78,7 +80,11 @@ export const aiProvidersFake = () => {
     error: { type: "api_error", message: "Refused by the fake provider" },
   };
   /** How the provider answers `reply`. */
-  const answerOf = async (reply: PlannedReply): Promise<Response> => {
+  const answerOf = async (
+    reply: PlannedReply,
+    request: Request,
+    seenAs: ProviderRequest
+  ): Promise<Response> => {
     if ("status" in reply) {
       return Response.json(reply.body ?? refusal, {
         status: reply.status,
@@ -93,9 +99,18 @@ export const aiProvidersFake = () => {
     }
     if ("hang" in reply) {
       // No answer for longer than any test waits: the request is dropped
-      // by its sender first. A timer, so workerd doesn't take the wait for
-      // a Worker that hung.
-      await scheduler.wait(10 * 60_000);
+      // by its sender first, and it notes that it was. A timer, so workerd
+      // doesn't take the wait for a Worker that hung.
+      const dropped = Promise.withResolvers<true>();
+      request.signal.addEventListener(
+        "abort",
+        () => {
+          seenAs.dropped = true;
+          dropped.resolve(true);
+        },
+        { once: true }
+      );
+      await Promise.race([scheduler.wait(10 * 60_000), dropped.promise]);
       return new Response("Too late", { status: 504 });
     }
     if ("hold" in reply) {
@@ -143,14 +158,15 @@ export const aiProvidersFake = () => {
         return await control(request, url);
       }
       const key = keyOf(request);
-      seen.push({
+      const seenAs: ProviderRequest = {
         host: url.hostname,
         method: request.method,
         path: url.pathname + url.search,
         headers: Object.fromEntries(request.headers),
         body: await request.text(),
         key,
-      });
+      };
+      seen.push(seenAs);
       const reply = key === null ? undefined : plans.get(key)?.shift();
       // A key it was told nothing of: refused, as a provider refuses a key
       // it doesn't know.
@@ -162,7 +178,7 @@ export const aiProvidersFake = () => {
             },
             { status: 401 }
           )
-        : await answerOf(reply);
+        : await answerOf(reply, request, seenAs);
     },
   };
 };

@@ -393,6 +393,8 @@ export const coreProject = (
               modules: true,
               script: connectProvidersScript,
               compatibilityDate: "2026-09-15",
+              // So a fake provider sees its sender drop a request.
+              compatibilityFlags: ["enable_request_signal"],
             },
           ],
         },

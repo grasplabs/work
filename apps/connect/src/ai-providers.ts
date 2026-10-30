@@ -78,6 +78,10 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   Grasp's key to OpenAI goes with `store: false`, set here whatever core
 //   sent, and one that names a stored response or conversation to build
 //   on is refused.
+// - A request left running, and billing, after core gave up on it: core
+//   tells connect to stop it (`modelFetch`'s `stop`) as soon as its caller
+//   cancels, even before the provider answered, and connect stops any at
+//   the call's deadline (and a few seconds) whatever core does.
 // - A provider's answer read as connect's: connect's own refusals carry
 //   `aiRefusedHeader`, which is never passed back from a provider, nor any
 //   other header but the content type, the request's ID and a rate
@@ -564,6 +568,57 @@ const unstoredBody = (
   return new TextEncoder().encode(JSON.stringify({ ...json, store: false }));
 };
 
+/**
+ * A signal that aborts when core stops the request (`modelFetch`'s
+ * `stop`, core's model-transport-connect.ts): a byte arrives, or the
+ * stream breaks, as when core went away; and `release`, once the answer
+ * began, after which cancelling its body stops it. Never aborts without
+ * a stream.
+ */
+const stoppedBy = (
+  stop: unknown
+): { signal: AbortSignal; release: () => void } => {
+  const controller = new AbortController();
+  if (!(stop instanceof ReadableStream)) {
+    return {
+      signal: controller.signal,
+      release: () => {
+        // Nothing listened.
+      },
+    };
+  }
+  const reader = stop.getReader();
+  let released = false;
+  const listen = async () => {
+    try {
+      const { done } = await reader.read();
+      if (done) {
+        return;
+      }
+    } catch {
+      // Broken: core went away.
+    }
+    if (!released) {
+      controller.abort();
+    }
+  };
+  const release = async () => {
+    released = true;
+    try {
+      await reader.cancel();
+    } catch {
+      // Core closed it already.
+    }
+  };
+  void listen();
+  return {
+    signal: controller.signal,
+    release: () => {
+      void release();
+    },
+  };
+};
+
 /** Whether an HTTP status sends the client elsewhere. */
 const isRedirect = (status: number): boolean => status >= 300 && status < 400;
 
@@ -575,7 +630,8 @@ export const modelFetch = async (
   env: Env,
   signingKeys: readonly string[],
   request: unknown,
-  grant: unknown
+  grant: unknown,
+  stop?: unknown
 ): Promise<Response> => {
   if (!(request instanceof Request)) {
     return refused("method");
@@ -614,6 +670,7 @@ export const modelFetch = async (
   if (body === undefined) {
     return refused("stored", claims);
   }
+  const stopped = stoppedBy(stop);
   let answered: Response;
   try {
     answered = await fetch(url, {
@@ -621,11 +678,24 @@ export const modelFetch = async (
       headers: headersFor(request, claims.provider, key),
       body,
       redirect: "manual",
-      signal: AbortSignal.timeout(
-        Math.max(1, claims.notAfter - startedAt + deadlineBackstopMs)
-      ),
+      signal: AbortSignal.any([
+        stopped.signal,
+        AbortSignal.timeout(
+          Math.max(1, claims.notAfter - startedAt + deadlineBackstopMs)
+        ),
+      ]),
     });
   } catch (error) {
+    if (stopped.signal.aborted) {
+      // Core stopped waiting: nobody reads this refusal.
+      log.info("ai.stopped", {
+        provider: claims.provider,
+        credential: claims.credential,
+        request: claims.request,
+        ms: Date.now() - startedAt,
+      });
+      return refused("unreachable", claims);
+    }
     // Never the error's message, which may name the URL: its kind only.
     log.warn("ai.unanswered", {
       provider: claims.provider,
@@ -633,6 +703,8 @@ export const modelFetch = async (
       error: error instanceof Error ? error.name : "unknown",
     });
     return refused("unreachable", claims);
+  } finally {
+    stopped.release();
   }
   log.info("ai.request", {
     provider: claims.provider,

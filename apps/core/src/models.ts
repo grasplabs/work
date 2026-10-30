@@ -304,7 +304,7 @@ const modelGatewayConfig = (env: ModelsEnv): ModelGatewayConfig | undefined => {
  * The deployment's rules. `undefined` for rules that don't parse: every
  * call then fails closed.
  */
-const modelRules = (env: ModelsEnv): ModelRules | undefined => {
+export const modelRules = (env: ModelsEnv): ModelRules | undefined => {
   const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
   if (!parsed.success) {
     log.error("model.rules_invalid", {
@@ -316,8 +316,11 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 };
 
 /**
- * The allowlist and the rules as they apply now, for admins to read
- * (models-rpc.ts): the allowed text models, none while the config doesn't
+ * The deployment's allowlist and rules, before the organization's own
+ * providers: what {@link modelSettings} starts from, and the voices. A
+ * feature never picks a text model from it; it picks through
+ * `modelSettings`, which the gateway checks every call against. The
+ * allowed text models, none while the config doesn't
  * parse, and apart from them the allowed voice models, which only speech
  * takes, so nothing that picks a model for text (a chat, a binding, the
  * kickoff's reading) is offered one; and the rules, `undefined` when they

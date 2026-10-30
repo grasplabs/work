@@ -90,6 +90,52 @@ class ConnectUnansweredError extends Error {
   }
 }
 
+/**
+ * The way core tells connect to stop a request it sent (`modelFetch`'s
+ * `stop`): an AbortSignal can't cross the service binding, a byte stream
+ * can. Connect stops the provider's request when a byte arrives on it, or
+ * when it breaks (core went away); it closing means core saw the answer
+ * begin, and from then on cancelling the answer's body stops it, as for
+ * any fetch.
+ */
+const stopLine = (): {
+  stop: ReadableStream<Uint8Array>;
+  /** Asks connect to stop the request. */
+  cancel: () => void;
+  /** Says the answer began, so there is nothing left to stop this way. */
+  close: () => void;
+} => {
+  const { readable, writable } = new IdentityTransformStream();
+  const writer = writable.getWriter();
+  // Said once, the first of the two ending the line, and never waited
+  // for: the stream holds no byte until connect reads it, and one connect
+  // stopped reading (its request ended) has nothing left to tell.
+  let said = false;
+  const say = async (stopping: boolean): Promise<void> => {
+    if (said) {
+      return;
+    }
+    said = true;
+    try {
+      if (stopping) {
+        await writer.write(new Uint8Array([1]));
+      }
+      await writer.close();
+    } catch {
+      // Connect stopped reading: the request ended there.
+    }
+  };
+  return {
+    stop: readable,
+    cancel: () => {
+      void say(true);
+    },
+    close: () => {
+      void say(false);
+    },
+  };
+};
+
 /** Cancels, unread, the answer to a request its caller stopped waiting for. */
 const cancelLate = async (sent: Promise<Response>): Promise<void> => {
   try {
@@ -120,7 +166,8 @@ const connectFetch =
     headers.delete(ledgerRequestHeader);
     headers.delete(endsAtHeader);
     headers.set("x-request-id", ledgerRequest);
-    // Without the caller's signal, which can't cross the service binding.
+    // Without the caller's signal, which can't cross the service binding:
+    // `stopLine` carries it.
     const body = asked.method === "GET" ? null : await asked.arrayBuffer();
     const request = new Request(asked.url, {
       method: asked.method,
@@ -136,12 +183,15 @@ const connectFetch =
       notAfter: endsAt,
       body: await sha256HexOfBytes(body ?? new ArrayBuffer(0)),
     });
-    // A request cut off here stops being waited for at once, and its
-    // answer, should it come, is cancelled unread.
+    // A request cut off here stops being waited for at once, connect is
+    // told to stop it, so a provider still thinking bills nothing more,
+    // and its answer, should one come anyway, is cancelled unread.
     signal.throwIfAborted();
-    const sent = env.CONNECT.modelFetch(request, grant);
+    const line = stopLine();
+    const sent = env.CONNECT.modelFetch(request, grant, line.stop);
     const aborted = Promise.withResolvers<never>();
     const stop = () => {
+      line.cancel();
       aborted.reject(signal.reason);
     };
     signal.addEventListener("abort", stop, { once: true });
@@ -149,11 +199,13 @@ const connectFetch =
     try {
       answered = await Promise.race([sent, aborted.promise]);
     } catch (error) {
+      line.cancel();
       void cancelLate(sent);
       throw error;
     } finally {
       signal.removeEventListener("abort", stop);
     }
+    line.close();
     if (answered.headers.get(aiRefusedHeader) === "unreachable") {
       await answered.body?.cancel();
       throw new ConnectUnansweredError();

@@ -481,8 +481,18 @@ export default class Connect
     return await aiProviderRoutes(this.env);
   }
 
-  async modelFetch(request: unknown, grant: unknown): Promise<Response> {
-    return await modelFetch(this.env, signingKeys(this.env), request, grant);
+  async modelFetch(
+    request: unknown,
+    grant: unknown,
+    stop?: unknown
+  ): Promise<Response> {
+    return await modelFetch(
+      this.env,
+      signingKeys(this.env),
+      request,
+      grant,
+      stop
+    );
   }
 
   // The catalog (src/catalog.ts): what can be connected.

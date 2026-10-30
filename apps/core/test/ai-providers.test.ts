@@ -37,6 +37,7 @@ import { z } from "zod";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { streamText } from "./ai-gateway.ts";
 import type { Answer } from "./ai-gateway.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
@@ -44,12 +45,15 @@ import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { holdAlarm } from "./interview-link.ts";
+import { agree, fact, mapped, team } from "./onboarding-team.ts";
 import {
   openRpc,
   outcome,
   signedIn,
   signedInApi,
   staffPerson,
+  unique,
 } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
@@ -672,6 +676,94 @@ describe("AI providers", { timeout: 60_000 }, () => {
     });
   });
 
+  describe("Grasp's own work for the organization", () => {
+    it("reads who does the work someone says isn't theirs with the organization's default model", async () => {
+      await holdAlarm();
+      const store = onboardingStore(env);
+      // The team's map is drawn before the organization connects its own
+      // provider, as an onboarding that began on Grasp's models.
+      const ids = await team(["lea", "max", "mia", "mo", "pim"]);
+      await mapped(ids);
+      const works = await store.teamWorks(ids.team);
+      const tickets = works.find(({ name }) => name === "handling new tickets");
+      const rota = works.find(({ name }) => name === "planning the rota");
+      if (tickets === undefined || rota === undefined) {
+        throw new Error("Expected the team's map");
+      }
+      await agree(ids.max, [
+        fact("x1", "who", "Pim handles the new tickets, not Max."),
+        fact("x2", "work", "Max plans the rota with Lea."),
+      ]);
+      const key = await connected(openaiCase);
+      await plan(key, [
+        answered(
+          openaiCase.api,
+          JSON.stringify({ does: rota.id, person: ids.pim })
+        ),
+      ]);
+
+      await store.drawNext();
+
+      const after = await store.teamWorks(ids.team);
+      const sent = await carrying(key);
+      expect({
+        models: sent.map(
+          ({ body }) =>
+            z.object({ model: z.string() }).parse(JSON.parse(body)).model
+        ),
+        ticketsByPim: after
+          .find(({ id }) => id === tickets.id)
+          ?.doers.includes(ids.pim),
+      }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
+    });
+
+    it("proposes the company's groups of teams with the organization's default model", async () => {
+      const key = await connected(openaiCase);
+      const { admin: by } = await admin();
+      const tag = unique();
+      await by.api.onboarding.saveRoster({
+        teams: [
+          { id: `sales-${tag}`, name: "Sales", lead: null },
+          { id: `support-${tag}`, name: "Support", lead: null },
+        ],
+        people: [
+          {
+            id: `ann-${tag}`,
+            name: "Ann Example",
+            team: `sales-${tag}`,
+            title: "Account manager",
+          },
+        ],
+      });
+      const sales = `team-sales-${tag}`;
+      const support = `team-support-${tag}`;
+      await plan(key, [
+        answered(
+          openaiCase.api,
+          JSON.stringify({
+            groups: [{ name: "Customers", teamIds: [sales, support] }],
+          })
+        ),
+      ]);
+
+      const groups = await by.api.brain.proposeTeamGroups();
+
+      const sent = await carrying(key);
+      expect({
+        models: sent.map(
+          ({ body }) =>
+            z.object({ model: z.string() }).parse(JSON.parse(body)).model
+        ),
+        proposed: groups
+          .filter(({ confirmed }) => !confirmed)
+          .map(({ teamIds }) => teamIds.toSorted()),
+      }).toStrictEqual({
+        models: ["gpt-5.4"],
+        proposed: [[sales, support].toSorted()],
+      });
+    });
+  });
+
   describe("falling back", () => {
     it("tries the next model when a provider refuses a call before anything was billed, and audits it", async () => {
       const keys = await fallingBack();
@@ -963,6 +1055,33 @@ describe("AI providers", { timeout: 60_000 }, () => {
         outcome: "failed",
         errorType: "cancelled",
       });
+    });
+
+    it("stops the provider's request when its caller cancels before the answer began", async () => {
+      const key = await connected(each);
+      await plan(key, [{ hang: true }]);
+      const cancel = new AbortController();
+
+      const call = outcome(
+        models(env).call(await callOf(each.model, { signal: cancel.signal }))
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(carrying(key)).resolves.toHaveLength(1);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      cancel.abort();
+
+      await expect(call).resolves.toBe("model.failed");
+      // Long before the call's deadline, which connect would stop it at.
+      await vi.waitFor(
+        async () => {
+          const [request] = await carrying(key);
+          expect(request?.dropped).toBeTruthy();
+        },
+        { timeout: 5000, interval: 50 }
+      );
     });
 
     it("fails a request that takes longer than its timeout", async () => {

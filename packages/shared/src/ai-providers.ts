@@ -395,7 +395,14 @@ export interface AiProviderConnectApi {
    * carrying `aiCredentialPlaceholder` where the key goes, which connect
    * replaces with the key, in that one header. Never follows a redirect.
    * The provider's response as it streams, or connect's own refusal
-   * (`aiRefusedHeader`).
+   * (`aiRefusedHeader`). Stops the request, before its answer began, when
+   * a byte arrives on `stop` or it breaks; `stop` closing says the
+   * answer began (core's model-transport-connect.ts). Without one, only
+   * the call's deadline stops it.
    */
-  modelFetch: (request: Request, grant: string) => Promise<Response>;
+  modelFetch: (
+    request: Request,
+    grant: string,
+    stop?: ReadableStream<Uint8Array>
+  ) => Promise<Response>;
 }
