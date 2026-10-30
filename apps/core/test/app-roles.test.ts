@@ -168,8 +168,17 @@ const asUser = {
 
 /** Whether `person` finds `app` among theirs. */
 const lists = async ({ api }: Person, app: string): Promise<boolean> => {
-  const apps = await api.apps.list();
-  return apps.some(({ id }) => id === app);
+  const [apps, screens] = await Promise.all([
+    api.apps.list(),
+    api.apps.screens(),
+  ]);
+  const listed = apps.some(({ id }) => id === app);
+  // Its screens are listed exactly when it is: someone who can't open the
+  // App never learns its screens, nor that it exists, from them.
+  expect(
+    screens.filter((each) => each.app.id === app).map(({ screen }) => screen)
+  ).toStrictEqual(listed ? ["desk"] : []);
+  return listed;
 };
 
 // Each test releases an App of its own and, through `callsOn`, makes some
@@ -320,6 +329,49 @@ describe("App roles", { timeout: 60_000 }, () => {
         outcome(ben.api.apps.files.read(app)),
       ])
     ).resolves.toStrictEqual(["role.forbidden", "ok", "ok"]);
+    // Ben, now in the team, finds its screens; someone in neither doesn't.
+    const outsider = await personApi("builder");
+    await expect(
+      Promise.all([lists(ben, app), lists(outsider, app)])
+    ).resolves.toStrictEqual([true, false]);
+  });
+
+  it("list a draft's screens to its builders only, and those of the version that is current", async () => {
+    const owner = await personApi("builder");
+    const [user, builder] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const { id: app } = await owner.api.apps.create({
+      name: `Desk ${unique()}`,
+    });
+    const { version } = await owner.api.apps.files.commit(app, files, "One");
+    await owner.api.apps.versions.setCurrent(app, version);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    // A version committed after the current one isn't listed: its screen
+    // opens for nobody yet.
+    await owner.api.apps.files.commit(
+      app,
+      { "screens/later.tsx": "export default () => <p>Later</p>;\n" },
+      "Later"
+    );
+
+    // A draft is its builders' alone, as opening it is.
+    await expect(
+      Promise.all([lists(user, app), lists(builder, app), lists(owner, app)])
+    ).resolves.toStrictEqual([false, true, true]);
+    await expect(outcome(user.api.apps.contents(app))).resolves.toBe(
+      "app.not_found"
+    );
   });
 
   it("keep an App's permissions, and its workflows, to those with a role in it", async () => {
@@ -550,6 +602,8 @@ describe("App roles", { timeout: 60_000 }, () => {
     await expect(outcome(person.api.apps.get(app))).resolves.toBe(
       "app.not_found"
     );
+    // Nor are its screens listed to them any longer.
+    await expect(lists(person, app)).resolves.toBeFalsy();
     const target = { type: "app", id: app };
     const actor = { type: "person", userId: owner.userId };
     expect(
