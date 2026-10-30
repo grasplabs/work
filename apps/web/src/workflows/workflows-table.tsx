@@ -236,6 +236,11 @@ const WorkflowRow = ({
                 <Trans>Version {version}</Trans>
               </span>
             )}
+            {/* Narrow, the status's cell is hidden too, as the prototype
+                keeps the name its room: where it stands goes under it. */}
+            <div className="@sm:hidden">
+              <Status workflow={workflow} />
+            </div>
           </div>
         </div>
       </TableCell>
@@ -266,7 +271,7 @@ const WorkflowRow = ({
           <WorkflowOwnerPicker workflow={workflow} />
         </div>
       </TableCell>
-      <TableCell variant="roomy">
+      <TableCell className="hidden @sm:table-cell" variant="roomy">
         <Status workflow={workflow} />
       </TableCell>
       <TableCell>
@@ -355,7 +360,7 @@ export const WorkflowsTable = ({
             <TableHead className="hidden w-20 @md:table-cell" variant="card">
               <Trans context="column: who owns a workflow">Owner</Trans>
             </TableHead>
-            <TableHead className="w-52" variant="card">
+            <TableHead className="hidden w-52 @sm:table-cell" variant="card">
               <Trans context="column: where a workflow stands">Status</Trans>
             </TableHead>
             <TableHead className="w-9" variant="card">
@@ -414,7 +419,7 @@ const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
  * top, are dashes: core measures no return yet, and keeps no designs.
  */
 const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
-  <dl className="@container grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
+  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
     <Big
       label={<Trans>runs a week by these workflows</Trans>}
       value={formatNumber(handledOf(rows))}
@@ -445,7 +450,9 @@ export const WorkflowsOverview = ({
   }
   const { atWork, onTheWay } = listsOf(rows);
   return (
-    <div className="flex flex-col gap-8">
+    // The container for the numbers' columns: a container query never
+    // applies to the element that is the container.
+    <div className="@container flex flex-col gap-8">
       <Numbers rows={rows} />
       <List
         processes={processes}

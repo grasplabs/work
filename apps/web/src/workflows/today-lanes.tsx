@@ -8,7 +8,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
 import { cssVars } from "../css-vars.ts";
@@ -678,19 +678,23 @@ export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
   const journey = run === undefined ? [] : journeyOf(day, run.key);
   const lit = new Set(journey.map(({ id }) => id));
   const { cutOff, unseen } = day;
+  const headingId = useId();
+  // Over the runs, as the prototype has it: nothing at all on a day no
+  // workflow the reader can see has worked yet.
+  if (day.lanes.length === 0 && cutOff === 0 && unseen === 0) {
+    return null;
+  }
   return (
     <section
-      aria-label={t({
-        message: "Today",
-        context: "the workflows' runs of today, laid out in time",
-      })}
+      aria-labelledby={headingId}
       className="@container flex flex-col gap-3"
     >
-      {day.lanes.length === 0 ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-          <Trans>No workflow you can see has worked today yet.</Trans>
-        </p>
-      ) : (
+      <h2 className="font-medium" id={headingId}>
+        <Trans context="the workflows' runs of today, laid out in time">
+          Today
+        </Trans>
+      </h2>
+      {day.lanes.length === 0 ? null : (
         <>
           <div className="hidden @2xl:block">
             <Lanes chosen={chosen} day={day} lit={lit} onChoose={setChosen} />
