@@ -53,6 +53,10 @@ export const AddAppDialog = ({
   const [query, setQuery] = useState("");
   const typed = query.trim();
   const found = find(beyond(integrations), typed).slice(0, shownMost);
+  // An app the catalog has under exactly that name is never asked for.
+  const named = integrations.some(
+    ({ name }) => name.toLocaleLowerCase() === typed.toLocaleLowerCase()
+  );
   const close = (): void => {
     onOpenChange(false);
     setQuery("");
@@ -84,14 +88,18 @@ export const AddAppDialog = ({
           {/* The catalog holds some 1,500 apps: the list is narrowed here, not by the menu. */}
           <Command shouldFilter={false}>
             <CommandInput
+              aria-label={t`Search the catalog`}
               onValueChange={setQuery}
               placeholder={t`Search the catalog`}
               value={query}
             />
             <CommandList>
-              <CommandEmpty>
-                <Trans>Nothing in the catalog matches “{typed}”.</Trans>
-              </CommandEmpty>
+              {/* Only once something is typed: an empty box matches nothing yet. */}
+              {typed === "" ? null : (
+                <CommandEmpty>
+                  <Trans>Nothing in the catalog matches “{typed}”.</Trans>
+                </CommandEmpty>
+              )}
               {found.length === 0 ? null : (
                 <CommandGroup
                   heading={
@@ -127,7 +135,7 @@ export const AddAppDialog = ({
                   ))}
                 </CommandGroup>
               )}
-              {typed.length < shortestName ? null : (
+              {typed.length < shortestName || named ? null : (
                 <CommandGroup heading={t`Not in the catalog`}>
                   <CommandItem
                     onSelect={() => {

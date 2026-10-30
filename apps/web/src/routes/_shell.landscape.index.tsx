@@ -143,8 +143,7 @@ const LandscapePage = () => {
               </InputGroupAddon>
             </InputGroup>
           </div>
-          {/* The prototype's size: the page's own, not its 14px. */}
-          <span className="text-muted-foreground text-base tabular-nums">
+          <span className="text-muted-foreground tabular-nums">
             {shown.length === total
               ? t`${plural(total, { one: "# app", other: "# apps" })}`
               : t`${plural(total, { one: `${shownCount} of # app`, other: `${shownCount} of # apps` })}`}

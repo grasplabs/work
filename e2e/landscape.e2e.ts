@@ -109,7 +109,13 @@ test("an admin finds a connected app in the landscape, with the engine that uses
   await expect(requesting.getByLabel("App")).toHaveValue("Twinfield");
   await requesting.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Add app" }).click();
-  await adding.getByRole("combobox").fill("google");
+  // One the catalog has under exactly that name is never asked for.
+  await adding
+    .getByRole("combobox", { name: "Search the catalog" })
+    .fill("Google Workspace");
+  await expect(adding.getByRole("option", { name: /^Ask Grasp/u })).toHaveCount(
+    0
+  );
   await adding.getByRole("option", { name: /^Google Workspace/u }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "Google Workspace" })

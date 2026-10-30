@@ -125,10 +125,7 @@ const AppHeader = ({
         <PageHeaderTitle className="min-w-0">
           <span className="block truncate">{app.name}</span>
         </PageHeaderTitle>
-        {/* The prototype's size under the title: the page's own, not its 14px. */}
-        <span className="text-muted-foreground truncate text-base">
-          {about}
-        </span>
+        <span className="text-muted-foreground truncate">{about}</span>
       </div>
       <div className="ml-auto flex items-center gap-2">
         <Await
