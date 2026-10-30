@@ -228,6 +228,10 @@ const scopeNames = [
   "binding",
   "binding_day",
   "person",
+  // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
+  // counted, never limited, and apart from every scope of the
+  // organization's own.
+  "platform",
 ] as const;
 
 /**
@@ -475,12 +479,13 @@ const admissionSchema = z
      * deployment, the workflow, the person, the run, a model binding's
      * month and day): a bound that also keeps a decision's audit event
      * within its detail limit. The person's limit is one more, which the
-     * ledger adds itself (`person`).
+     * ledger adds itself (`person`). Grasp's own (`platform`) goes only
+     * with a run's, never beside the organization's.
      */
     scopes: z
       .array(scopeSchema)
       .min(1)
-      .max(scopeNames.length - 1)
+      .max(scopeNames.length - 2)
       .refine(
         (all) =>
           new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===

@@ -67,8 +67,8 @@ const ask = async (
   });
 };
 
-/** GPT-4o mini TTS at $0.03 per 1,000 characters: 30 micros each. */
-const speechMicrosPerChar = 30;
+/** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
+const lineMicros = (characters: number): number => characters * 80;
 
 /** GPT-4o Transcribe at $0.60 an hour, as the ledger pins it: micros per million seconds. */
 const heardMicrosPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
@@ -94,15 +94,15 @@ const inMonth = (month: string): Env => ({
 const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
-/** One of Stephen's lines said in `month`, on Grasp's key: its characters. */
+/** One of Stephen's lines said in `month`, on Grasp's key: what it cost, in micros. */
 const said = async (month: string): Promise<number> => {
   const text = `Hello there, ${crypto.randomUUID().slice(0, 4)}.`;
   await platformSpeech(inMonth(month), {
     purpose: "onboarding.speech",
     trigger: newPerson(),
     work: { onboarding: true },
-  }).speak({ text, voice: "cedar", language: "en" });
-  return text.length;
+  }).speak({ text, voice: "s3TPKV1kjDlVtZbl4Ksh", language: "en" });
+  return lineMicros(text.length);
 };
 
 /** `seconds` of a recording heard in `month`, on Grasp's key. */
@@ -277,8 +277,8 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "openai/gpt-4o-mini-tts",
-            micros: spoken * speechMicrosPerChar,
+            model: "elevenlabs/eleven_v4",
+            micros: spoken,
           },
           {
             feature: "transcription",
@@ -293,8 +293,8 @@ describe("the organization's AI, for the admin", () => {
         rows: [
           {
             feature: "speech",
-            model: "openai/gpt-4o-mini-tts",
-            micros: spokenBefore * speechMicrosPerChar,
+            model: "elevenlabs/eleven_v4",
+            micros: spokenBefore,
           },
         ],
       },
