@@ -21,7 +21,13 @@ const staff = { email: "staff@grasp.test", sub: "sub-staff" };
 const secrets: DeploySecrets = {
   routerKey: "test-router-key-for-exports",
   clientKey: "test-client-key-for-exports",
-  shared: { connect: { COMPOSIO_API_KEY: "grasp-composio-key" } },
+  shared: {
+    connect: {
+      COMPOSIO_API_KEY: "grasp-composio-key",
+      // Grasp's own AI provider key, shared by its hosted clients alone.
+      OPENAI_API_KEY: "grasp-openai-key",
+    },
+  },
 };
 const now = new Date("2026-10-21T10:00:00.000Z");
 
@@ -126,7 +132,7 @@ describe("exporting a client's key material", () => {
         core: running.core,
         connect: Object.fromEntries(
           Object.entries(running.connect ?? {}).filter(
-            ([name]) => name !== "COMPOSIO_API_KEY"
+            ([name]) => name !== "COMPOSIO_API_KEY" && name !== "OPENAI_API_KEY"
           )
         ),
       },
@@ -155,6 +161,7 @@ describe("exporting a client's key material", () => {
           value === secrets.routerKey ||
           value === secrets.clientKey ||
           value === "grasp-composio-key" ||
+          value === "grasp-openai-key" ||
           theirs.has(value)
       )
     ).toStrictEqual([]);

@@ -1,35 +1,12 @@
 /**
- * The resources a release needs in a client's account, named as its
- * manifest names them (the same in every account) and all in the EU.
- * Each `ensure*` finds a resource before it creates one, so running this
- * again, after a failure part way, creates nothing twice.
+ * The resources a release needs in a client's account, as its manifest
+ * names them (the same in every account) and all in the EU, and whether
+ * it sends mail: what provisioning (src/hosting/operation.ts) and Setup
+ * read of a release.
  */
 import type { ReleaseManifest } from "@grasp-os/shared/release";
 
-import {
-  ensureAiGateway,
-  ensureD1Database,
-  ensureR2Bucket,
-  OutsideEuError,
-} from "../cloudflare/accounts.ts";
-import type { CloudflareApi } from "../cloudflare/api.ts";
-import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
-import { clientGatewayId } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
-import type { DeployErrorCode } from "./errors.ts";
-
-/** What a release's Workers bind to in one account. */
-export interface AccountResources {
-  /** Each D1 database's id, by its name. */
-  databases: Map<string, string>;
-  /** The R2 buckets, by name. */
-  buckets: string[];
-  /**
-   * Whether the sending domain's zone is active, for a release that sends
-   * mail; undefined for one that doesn't.
-   */
-  mailDomainActive?: boolean;
-}
 
 /** Every D1 database the release's Workers bind, by name, once each. */
 export const databaseNames = (manifest: ReleaseManifest): string[] => [
@@ -70,60 +47,3 @@ export const sendsMail = (manifest: ReleaseManifest): boolean =>
   Object.values(manifest.workers).some((worker) =>
     worker.bindings.some(({ type }) => type === "send_email")
   );
-
-/** `task`, with a resource outside the EU turned into the deploy's `code`. */
-const inEu = async <T>(
-  code: DeployErrorCode,
-  task: () => Promise<T>
-): Promise<T> => {
-  try {
-    return await task();
-  } catch (error) {
-    if (error instanceof OutsideEuError) {
-      throw new DeployError(code, error.message, { cause: error });
-    }
-    throw error;
-  }
-};
-
-/**
- * Ensures every D1 database and R2 bucket the release binds exists in the
- * account, in the EU, one at a time, and the client's AI Gateway, which
- * core's `MODEL_GATEWAY` names (src/deploy/core-config.ts): so no deploy
- * points core at a gateway the account doesn't have, however the client
- * came to be. And, for a release that sends mail, the client's sending
- * domain, `mailDomain` (`clientMailDomain`), with Email Sending on in the
- * client's own account, so its `EMAIL` binding sends from the address it
- * is locked to (src/deploy/upload.ts). Throws a `DeployError` for a
- * database or bucket that exists, or was made, elsewhere.
- */
-export const ensureResources = async (
-  api: CloudflareApi,
-  accountId: string,
-  manifest: ReleaseManifest,
-  mailDomain: string
-): Promise<AccountResources> => {
-  const databases = new Map<string, string>();
-  for (const name of databaseNames(manifest)) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-    const database = await inEu(
-      "database_outside_eu",
-      async () => await ensureD1Database(api, accountId, name)
-    );
-    databases.set(name, database.uuid);
-  }
-  const buckets = bucketNames(manifest);
-  for (const name of buckets) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-    await inEu(
-      "bucket_outside_eu",
-      async () => await ensureR2Bucket(api, accountId, name)
-    );
-  }
-  await ensureAiGateway(api, accountId, clientGatewayId);
-  if (!sendsMail(manifest)) {
-    return { databases, buckets };
-  }
-  const sending = await ensureSendingDomain(api, accountId, mailDomain);
-  return { databases, buckets, mailDomainActive: sending.active };
-};

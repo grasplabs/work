@@ -1,10 +1,10 @@
 import {
   clientsNamespace,
-  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import {
   connectVersionPath,
   provisionProbePath,
@@ -96,7 +96,13 @@ const api = cloudflareApi({ token, retryDelayMs: 0 });
 const secrets: DeploySecrets = {
   routerKey: "test-router-key",
   clientKey: "test-client-key",
-  shared: { connect: { COMPOSIO_API_KEY: "composio" } },
+  shared: {
+    connect: {
+      COMPOSIO_API_KEY: "composio",
+      // Grasp's OpenAI key, which the platform AI's defaults use.
+      OPENAI_API_KEY: "grasp-openai-key",
+    },
+  },
 };
 const domain = "grasp.test";
 const context = {
@@ -1298,6 +1304,22 @@ describe("provisioning a placed client", () => {
     }
   );
 
+  it("delivers nothing to an on-prem (workerd) destination, which its operator runs: no Worker, no secret, never Grasp's AI keys", async () => {
+    const manifest = await importRelease("dedicated");
+    const destinationId = await destination({
+      kind: "workerd",
+      accountId: null,
+      namespace: null,
+    });
+    const { held } = await placedOperation(destinationId, manifest);
+    const before = cloudflare.calls.length;
+
+    await expect(failing(held)).resolves.toMatchObject({
+      code: "destination_unsupported",
+    });
+    expect(cloudflare.calls.slice(before)).toStrictEqual([]);
+  });
+
   it("probes a core in the namespace the router binds through that binding, its connect through the gateway, and routes its hostname to its script", async () => {
     // Core binds its connect, as the real one does: through the gateway.
     const manifest = await importRelease(
@@ -1916,7 +1938,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("takes the real release live in Workers for Platforms, its model calls through the destination's gateway held to the client's ceiling, and without mail", async () => {
+  it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI settings on its core and Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
       "workers_for_platforms",
@@ -1939,26 +1961,34 @@ describe("provisioning a placed client", () => {
       held
     );
 
-    const { core } = await scriptsOf(clientId);
+    const { core, connect } = await scriptsOf(clientId);
+    const scripts = account.namespaces.get(clientDispatchNamespace);
     const coreBindings = z
       .array(z.object({ type: z.string(), name: z.string() }).loose())
-      .parse(
-        account.namespaces
-          .get(clientDispatchNamespace)
-          ?.get(core)
-          ?.versions.at(-1)?.metadata.bindings ?? []
-      );
-    const gateway = coreBindings.find(({ name }) => name === "MODEL_GATEWAY");
+      .parse(scripts?.get(core)?.versions.at(-1)?.metadata.bindings ?? []);
+    const platformAi = coreBindings.find(({ name }) => name === "PLATFORM_AI");
+    const aiKeys = (script: string) =>
+      [...(scripts?.get(script)?.versions.at(-1)?.secrets.keys() ?? [])]
+        .filter(
+          (name) => name.endsWith("_API_KEY") && name !== "COMPOSIO_API_KEY"
+        )
+        .toSorted();
     expect({
       operation: await operationOf(clientId),
       // No AI binding: the real core reaches models through connect only.
       ai: coreBindings
         .filter(({ type }) => type === "ai")
         .map(({ name }) => name),
-      // No AI Gateway ensured for a release that binds none; the client's
-      // ceiling still reaches core: €250 a month unless staff set another.
-      gateways: account.gateways.map(({ id }) => id),
-      gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
+      // No AI Gateway is made or read, and core is given no model allowlist.
+      gatewayCalls: cloudflare.calls.filter(({ path }) =>
+        path.includes("/gateways")
+      ).length,
+      modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
+      // Grasp's AI features as the platform chose them: the defaults, none chosen.
+      platformAi: z.object({ json: z.unknown() }).loose().parse(platformAi)
+        .json,
+      // Grasp's key goes to connect, which makes every provider call, never core.
+      keys: { core: aiKeys(core), connect: aiKeys(connect) },
       // Its core goes live without `EMAIL`, so it sends nothing and says
       // so, and no sending domain is set up for it.
       mail: coreBindings.filter(
@@ -1969,11 +1999,10 @@ describe("provisioning a placed client", () => {
     }).toMatchObject({
       operation: { status: "done" },
       ai: [],
-      gateways: [],
-      gateway: {
-        gateway: placedModelGateway("production"),
-        budgets: { deployment: { limit: 250, alertAt: 80 } },
-      },
+      gatewayCalls: 0,
+      modelGateway: false,
+      platformAi: platformAiSchema.parse({}),
+      keys: { core: [], connect: ["OPENAI_API_KEY"] },
       mail: [],
       zones: 0,
       routed: true,

@@ -1,15 +1,22 @@
 /**
  * The vars a placed client's core is uploaded with (src/hosting/operation.ts):
- * what the admin derives for it (src/deploy/core-config.ts), each replaced
- * by the client's setting of the same name, its other settings, and the
- * change core records, checked as core would take them.
+ * what the admin derives for it (src/deploy/core-config.ts) and the
+ * platform's AI settings (`PLATFORM_AI`, src/platform-ai.ts), each
+ * replaced by the client's setting of the same name, its other settings,
+ * and the change core records, checked as core would take them.
  */
+import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
+import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import { deploymentConfigVars } from "@grasp-os/shared/deployment-config";
+import { log } from "@grasp-os/shared/log";
+import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import type { PlatformChange } from "@grasp-os/shared/platform-change";
 import { eq } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, settings } from "../db/schema.ts";
+import { settings } from "../db/schema.ts";
+import { platformAiOf, platformAiProviders } from "../platform-ai.ts";
+import { MissingStoreSecretError } from "./context.ts";
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 
@@ -25,50 +32,43 @@ export const mailSenderOf = (
 ): string => onboardingSender(clientId, context.router.domain).address;
 
 /**
- * `vars` with client's monthly model spend ceiling, `euros`, as its model
- * gateway's deployment budget (core's src/model-budgets.ts), which the
- * gateway enforces before every provider request (GRA-141). A setting's
- * own deployment budget stays only where it's lower, so no setting raises
- * the ceiling. The gateway counts providers' list prices in US dollars:
- * the euros go in as dollars, and since a euro is worth at least about a
- * dollar, spend never passes the ceiling in euros. Without a gateway, core
- * makes no model call, so there's nothing to bound.
+ * The providers Grasp's own key reaches a client's connect for: those
+ * among `connect`, the shared secrets a deploy gives connect
+ * (src/deploy/context.ts), whose platform secret is there.
  */
-export const withSpendCeiling = (
-  vars: Readonly<Record<string, unknown>>,
-  euros: number
-): Record<string, unknown> => {
-  const gateway = vars.MODEL_GATEWAY;
-  if (typeof gateway !== "object" || gateway === null) {
-    return { ...vars };
+export const keyedProviders = (
+  connect: Readonly<Record<string, string>> | undefined
+): ReadonlySet<AiProviderId> =>
+  new Set(
+    aiProviderIds.filter((provider) => {
+      const name = aiProviders[provider].platformSecret;
+      return name !== undefined && connect?.[name] !== undefined;
+    })
+  );
+
+/**
+ * Throws `MissingStoreSecretError` naming the key, recorded as
+ * `store_secret_missing: <name>`, unless every platform feature in
+ * `PLATFORM_AI` (checked already) sends to a provider in `keyed`: core
+ * would fail that feature on every call (`upload.conversion_unavailable`
+ * and the like), so it never goes out that way.
+ */
+const checkPlatformKeys = (
+  clientId: string,
+  value: unknown,
+  keyed: ReadonlySet<AiProviderId>
+): void => {
+  const parsed = platformAiSchema.safeParse(value);
+  if (!parsed.success) {
+    return;
   }
-  const budgets: unknown = Reflect.get(gateway, "budgets");
-  const set: unknown =
-    typeof budgets === "object" && budgets !== null
-      ? Reflect.get(budgets, "deployment")
-      : undefined;
-  const setLimit: unknown =
-    typeof set === "object" && set !== null
-      ? Reflect.get(set, "limit")
-      : undefined;
-  const setAlert: unknown =
-    typeof set === "object" && set !== null
-      ? Reflect.get(set, "alertAt")
-      : undefined;
-  return {
-    ...vars,
-    MODEL_GATEWAY: {
-      ...gateway,
-      budgets: {
-        ...(typeof budgets === "object" && budgets !== null ? budgets : {}),
-        deployment: {
-          limit:
-            typeof setLimit === "number" ? Math.min(setLimit, euros) : euros,
-          alertAt: typeof setAlert === "number" ? setAlert : 80,
-        },
-      },
-    },
-  };
+  for (const { feature, provider } of platformAiProviders(parsed.data)) {
+    const name = aiProviders[provider].platformSecret;
+    if (name !== undefined && !keyed.has(provider)) {
+      log.warn("deploy.platform_key_missing", { clientId, feature, provider });
+      throw new MissingStoreSecretError(name);
+    }
+  }
 };
 
 /** Setting `key`'s value, stored as JSON; `setting_invalid` when it isn't. */
@@ -82,18 +82,21 @@ const settingValue = (key: string, value: string): unknown => {
 };
 
 /**
- * Client `clientId`'s core vars from its `derived` config: each replaced
- * by the client's setting of the same name, its other settings, and
- * `change` as `PLATFORM_CHANGE`, its model spend ceiling as its gateway's
- * deployment budget (`withSpendCeiling`), checked as `coreVars` says, its
- * `MAIL_FROM` against `mailSender`, the address its mail is locked to.
+ * Client `clientId`'s core vars from its `derived` config and the
+ * platform's AI settings as `PLATFORM_AI`: each replaced by the client's
+ * setting of the same name, its other settings, and `change` as
+ * `PLATFORM_CHANGE`, checked as `checkDeployedConfig` says, its
+ * `MAIL_FROM` against `mailSender`, the address its mail is locked to, and
+ * its `PLATFORM_AI` against `keyed`, the providers Grasp's key reaches its
+ * connect for (`keyedProviders`).
  */
 export const configuredCoreVars = async (
   db: AdminDatabase,
   clientId: string,
   derived: Readonly<Record<string, unknown>>,
   change: PlatformChange,
-  mailSender: string
+  mailSender: string,
+  keyed: ReadonlySet<AiProviderId>
 ): Promise<Record<string, unknown>> => {
   const rows = await db
     .select({ key: settings.key, value: settings.value })
@@ -106,30 +109,22 @@ export const configuredCoreVars = async (
       `The setting ${unknown.key} isn't a deployment config var`
     );
   }
-  const client = await db
-    .select({ ceiling: clients.modelSpendCeiling })
-    .from(clients)
-    .where(eq(clients.id, clientId))
-    .get();
-  if (client === undefined) {
-    throw new Error(`No client ${clientId}`);
-  }
-  const vars = withSpendCeiling(
-    {
-      ...derived,
-      ...Object.fromEntries(
-        rows.map(({ key, value }): [string, unknown] => [
-          key,
-          settingValue(key, value),
-        ])
-      ),
-      PLATFORM_CHANGE: change,
-    },
-    client.ceiling
-  );
+  const vars = {
+    ...derived,
+    PLATFORM_AI: await platformAiOf(db),
+    ...Object.fromEntries(
+      rows.map(({ key, value }): [string, unknown] => [
+        key,
+        settingValue(key, value),
+      ])
+    ),
+    PLATFORM_CHANGE: change,
+  };
   // The config that goes out, settings included: never a SIGN_IN no admin
   // can sign in with, nor a var core can't parse, nor a MAIL_FROM its EMAIL
   // binding won't send from.
   checkDeployedConfig(clientId, vars, mailSender);
+  // Nor a platform feature on a provider Grasp has no key for.
+  checkPlatformKeys(clientId, vars.PLATFORM_AI, keyed);
   return vars;
 };

@@ -11,6 +11,7 @@ import type {
   AdminKickoffView,
 } from "@grasp-os/shared/admin-kickoff";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 
 export const base = "https://api.cloudflare.com/client/v4";
@@ -81,7 +82,6 @@ export interface AccountState {
   r2Reports?: string;
   /** The jurisdiction D1 reports for a database it creates, whatever was asked. */
   d1Reports?: string;
-  gateways: Json[];
   /** Its zones, each with the domains Email Sending sends from in it. */
   zones: ZoneState[];
   scripts: Map<string, ScriptState>;
@@ -179,6 +179,11 @@ export interface AccountState {
    * with a redirect elsewhere.
    */
   quotaPolicy?: "absent" | "redirect";
+  /**
+   * What its core answers the admin's signed AI status request with
+   * (@grasp-os/shared/ai-status-report): no provider connected unless set.
+   */
+  ai?: AiStatusReport;
   /**
    * What its core does once a snapshot request arrives, before answering
    * it: waits, as a slow or hanging one does, or throws, as a dropped

@@ -15,9 +15,6 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
-/** Every client's model spend ceiling until staff set another, in euros a month (GRA-141). */
-export const defaultModelSpendCeiling = 250;
-
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
   /** `YY.MM.N` (@grasp-os/shared/release-id); the commit is `commitSha`. */
@@ -133,16 +130,6 @@ export const clients = sqliteTable(
      * already (src/rollout/targets.ts); null while nothing changed.
      */
     configChangedAt: timestamp("config_changed_at"),
-    /**
-     * The most its model calls may cost in a calendar month, in whole
-     * euros (GRA-141): `defaultModelSpendCeiling` unless staff set another
-     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
-     * it to its core's model gateway as its deployment budget, which the
-     * gateway enforces before each provider request.
-     */
-    modelSpendCeiling: integer("model_spend_ceiling")
-      .notNull()
-      .default(defaultModelSpendCeiling),
     /**
      * Where it runs: Grasp's cloud, or its own premises
      * (src/hosting/organization.ts). Fixed once it is provisioned.
@@ -662,4 +649,20 @@ export const clientWatch = sqliteTable("client_watch", {
   readAt: timestamp("read_at").notNull(),
   /** `WatchedSignals` (src/clients/watch.ts), as JSON. */
   signals: text().notNull(),
+});
+
+/**
+ * Which provider and model each of Grasp's own AI features uses, as staff
+ * choose them on Platform → AI (src/platform-ai.ts): one row, `id` 1,
+ * none until staff first choose, when the defaults stand. Every deploy
+ * gives it to the client's core as its `PLATFORM_AI` var. Never a key:
+ * Grasp's provider keys live in Secrets Store and go to connect alone.
+ */
+export const platformAi = sqliteTable("platform_ai", {
+  /** Always 1: there is one platform. */
+  id: integer().primaryKey(),
+  /** `platformAiSchema`'s output (@grasp-os/shared/platform-ai), as JSON. */
+  settings: text().notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });
