@@ -1,11 +1,19 @@
+import type { loadJq as LoadJq } from "jq-wasm";
+
 import { jqProvenance } from "./provenance.ts";
+
+/** jq's runtime, and its compiled module for the runtime to instantiate. */
+interface JqRuntime {
+  loadJq: typeof LoadJq;
+  jqModule: WebAssembly.Module;
+}
 
 /**
  * jq's runtime and its compiled module, loaded at the first run rather
  * than as the Worker starts: an isolate that never evaluates an expression
  * never compiles the WebAssembly (about 1 MB) or the runtime around it.
  */
-const loadRuntime = async () => {
+const loadRuntime = async (): Promise<JqRuntime> => {
   const [{ loadJq }, { default: jqModule }] = await Promise.all([
     import("jq-wasm"),
     import("./jq.wasm"),

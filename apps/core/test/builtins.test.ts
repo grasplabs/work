@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import {
   createExecutionContext,
@@ -7,13 +8,15 @@ import {
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { blueprintsDigestText } from "../src/builtin-digest.ts";
 import {
   builtins,
   builtinsInstaller,
   builtinsRetryMs,
   fingerprintOf,
   installBuiltins,
-  loadRelease,
+  loadBuiltinRelease,
+  thisRelease,
 } from "../src/builtins.ts";
 import worker from "../src/index.ts";
 import {
@@ -39,8 +42,8 @@ import { auditedDuring } from "./sign-in.ts";
 // each test that needs an install forgets the last one first.
 
 /** This release's fingerprint, as an isolate of it works it out. */
-const thisRelease = async (): Promise<string> =>
-  await fingerprintOf(await loadRelease());
+const thisFingerprint = async (): Promise<string> =>
+  await fingerprintOf(thisRelease);
 
 /** Each Grasp skill's current text, by path. */
 const storedSkills = async (): Promise<Record<string, string>> =>
@@ -179,13 +182,13 @@ describe("the built-ins", () => {
       vi.useRealTimers();
       calls.mockRestore();
     }
-    await expect(installed()).resolves.toBe(await thisRelease());
+    await expect(installed()).resolves.toBe(await thisFingerprint());
   });
 
   it("aren't done for an isolate of another release, which asks again a minute later", async () => {
     await forgetInstall(...firstPaths(1));
     const install = builtinsInstaller({
-      ...(await loadRelease()),
+      ...thisRelease,
       skills: otherRelease(...firstPaths(1)),
     });
     const calls = vi.spyOn(env.BUILTINS, "getByName");
@@ -207,6 +210,14 @@ describe("the built-ins", () => {
     }
   });
 
+  it("are fingerprinted by the blueprints the install writes, which an isolate never has to load", async () => {
+    const { blueprints } = await loadBuiltinRelease();
+    expect([
+      blueprints.length > 0,
+      await sha256Hex(blueprintsDigestText(blueprints)),
+    ]).toStrictEqual([true, thisRelease.blueprintsDigest]);
+  });
+
   it("aren't asked for by a request once the isolate's install is done", async () => {
     const calls = vi.spyOn(env.BUILTINS, "getByName");
     try {
@@ -220,12 +231,12 @@ describe("the built-ins", () => {
   it("write nothing when the release is installed already", async () => {
     await forgetInstall(...firstPaths(1));
     await expect(
-      builtins(env).ensureInstalled(await thisRelease())
+      builtins(env).ensureInstalled(await thisFingerprint())
     ).resolves.toBeTruthy();
 
     const events = await auditedDuring(async () => {
       await expect(
-        builtins(env).ensureInstalled(await thisRelease())
+        builtins(env).ensureInstalled(await thisFingerprint())
       ).resolves.toBeTruthy();
     });
     expect(skillSaves(events)).toStrictEqual([]);
@@ -238,9 +249,9 @@ describe("the built-ins", () => {
     const events = await auditedDuring(async () => {
       await expect(
         Promise.all([
-          builtins(env).ensureInstalled(await thisRelease()),
-          builtins(env).ensureInstalled(await thisRelease()),
-          builtins(env).ensureInstalled(await thisRelease()),
+          builtins(env).ensureInstalled(await thisFingerprint()),
+          builtins(env).ensureInstalled(await thisFingerprint()),
+          builtins(env).ensureInstalled(await thisFingerprint()),
         ])
       ).resolves.toStrictEqual([true, true, true]);
     });
@@ -258,7 +269,11 @@ describe("the built-ins", () => {
     const partial = await runInDurableObject(
       builtins(env),
       async (_instance, state) =>
-        await installBuiltins(failing, state.storage, await loadRelease())
+        await installBuiltins(
+          failing,
+          state.storage,
+          await loadBuiltinRelease()
+        )
     );
     // The first skill failed and the second was written, but nothing is
     // recorded as installed.
@@ -271,7 +286,7 @@ describe("the built-ins", () => {
 
     const events = await auditedDuring(async () => {
       await expect(
-        builtins(env).ensureInstalled(await thisRelease())
+        builtins(env).ensureInstalled(await thisFingerprint())
       ).resolves.toBeTruthy();
     });
     expect(skillSaves(events)).toHaveLength(1);

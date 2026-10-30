@@ -5,6 +5,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
 
 import type { BuiltinBlueprint } from "#blueprints";
+import blueprintsDigest from "#blueprints-digest";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
 import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
@@ -46,20 +47,37 @@ import type { GraspSkill } from "./knowledge/grasp-skills.ts";
 // fingerprints): an isolate of the new release that reaches an object
 // still on the old one asks again later, rather than never.
 
-/** What a release installs: this one's unless a test passes another. */
-export interface Release {
-  blueprints: readonly BuiltinBlueprint[];
+/**
+ * What a release's fingerprint is made of: its blueprints by their digest
+ * (src/builtin-digest.ts), and its skills.
+ */
+export interface ReleaseFingerprint {
+  blueprintsDigest: string;
   skills: readonly GraspSkill[];
 }
 
+/** What a release installs: this one's unless a test passes another. */
+export interface Release extends ReleaseFingerprint {
+  blueprints: readonly BuiltinBlueprint[];
+}
+
 /**
- * This release's built-ins. The blueprints load when an install first
- * needs them, not as core starts: they are a few hundred KB of text that
- * most isolates never read (GRA-1349).
+ * This release's fingerprint, without its blueprints: the build works out
+ * their digest, so an isolate checks the install without loading them.
  */
-export const loadRelease = async (): Promise<Release> => {
+export const thisRelease: ReleaseFingerprint = {
+  blueprintsDigest,
+  skills: graspSkills,
+};
+
+/**
+ * This release's built-ins. Only the singleton loads the blueprints, to
+ * install them: a few hundred KB of text that no other isolate reads
+ * (GRA-1349).
+ */
+export const loadBuiltinRelease = async (): Promise<Release> => {
   const { default: blueprints } = await import("#blueprints");
-  return { blueprints, skills: graspSkills };
+  return { ...thisRelease, blueprints };
 };
 
 /** Where the singleton keeps the fingerprint of what it installed. */
@@ -101,32 +119,12 @@ const coreSchema = coreMigrations.entries.at(-1)?.tag ?? null;
 const knowledgeSchema = knowledgeMigrations.entries.at(-1)?.tag ?? null;
 
 /** The fingerprint of what installing `of` writes. */
-export const fingerprintOf = async (of: Release): Promise<string> =>
+export const fingerprintOf = async (of: ReleaseFingerprint): Promise<string> =>
   await sha256Hex(
     canonicalJson({
       schema: coreSchema,
       knowledgeSchema,
-      blueprints: of.blueprints.map(
-        ({
-          id,
-          name,
-          description,
-          collections,
-          permissions,
-          contracts,
-          workflows,
-          files,
-        }) => ({
-          id,
-          name,
-          description,
-          collections: [...collections],
-          permissions: [...permissions],
-          contracts: [...contracts],
-          workflows: [...workflows],
-          files: { ...files },
-        })
-      ),
+      blueprints: of.blueprintsDigest,
       skills: of.skills.map(({ path, text }) => ({ path, text })),
     })
   );
@@ -179,7 +177,7 @@ export class Builtins extends DurableObject<Env> {
       return await installBuiltins(
         this.env,
         this.ctx.storage,
-        await loadRelease()
+        await loadBuiltinRelease()
       );
     } finally {
       this.#installing = undefined;
@@ -201,15 +199,14 @@ export const builtins = (
 export const builtinsRetryMs = 60_000;
 
 /**
- * An isolate's installer of release `of`'s built-ins (this release's when
- * none is given): it starts installing
+ * An isolate's installer of release `of`'s built-ins: it starts installing
  * them in the background, once per isolate. After a partial or failed
  * install, or one of another release than `of`, the first request
  * `builtinsRetryMs` later starts another; the singleton makes that one
  * comparison once everything is in. Core has one, `installBuiltinsOnce`;
  * tests make others, each for an isolate of their own.
  */
-export const builtinsInstaller = (of?: Release) => {
+export const builtinsInstaller = (of: ReleaseFingerprint = thisRelease) => {
   // `started` while an install is under way or `of` is in, and when the
   // next may start after one that wasn't.
   const isolate = { started: false, retryAt: 0 };
@@ -221,7 +218,7 @@ export const builtinsInstaller = (of?: Release) => {
     const install = async (): Promise<void> => {
       let complete = false;
       try {
-        const expected = await fingerprintOf(of ?? (await loadRelease()));
+        const expected = await fingerprintOf(of);
         complete = await builtins(env).ensureInstalled(expected);
       } catch (error) {
         log.error("builtins.install_failed", errorFields(error));
