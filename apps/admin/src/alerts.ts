@@ -5,7 +5,8 @@
  *
  * The channel is the webhook in Secrets Store (`STAFF_ALERTS_WEBHOOK`),
  * a Discord webhook as the morning digest's is (src/discord-webhook.ts),
- * which names the channel. Until someone puts it there, an alert is only
+ * which names the channel. Until someone adds it to the stage's 1Password
+ * Environment and runs Deploy platform, which binds it, an alert is only
  * logged, by its client and kind.
  *
  * Threat model, and how each is closed:

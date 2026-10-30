@@ -4,9 +4,10 @@ import { connectorNameSchema, hostSchema } from "./manifest.ts";
 
 // An approved build plan, signed (GRA-689): when a person at Grasp approves
 // the plan Grasp's agent wrote for a new app's connector, the admin signs
-// it with a key of its own (the admin's src/builds/plan-signing.ts), and
-// the plan and its signature go into the connector's folder on the
-// agent's branch. CI holds the branch to it (scripts/connector-guard.ts):
+// it with a key of its own, and the plan and its signature go into the
+// connector's folder on the agent's branch. Nothing in the admin signs one
+// for now: its integration builds, which held the approved plan, were
+// removed (#1463). CI holds the branch to it (scripts/connector-guard.ts):
 // the signature must verify with the admin's public key, and the
 // connector's manifest may name no host the approved plan doesn't. The
 // agent can't sign a plan of its own: it never holds the key.

@@ -649,10 +649,16 @@ const sessionShape = {
    * For a call of an independent workflow's run, whose trigger names no
    * App's run (`system`): the run lineage its requests count against, by
    * its root, with every other run of the lineage's (model-budgets.ts,
-   * `scopesFor`), so children never start the lineage's requests afresh.
+   * `scopesFor`), so children never start the lineage's requests afresh;
+   * and the workflow the run is of, whose budget it counts against too.
    * From the run's row; set by core's host only, never by App code.
    */
-  lineage: z.strictObject({ rootRunId: z.string().min(1).max(128) }).optional(),
+  lineage: z
+    .strictObject({
+      rootRunId: z.string().min(1).max(128),
+      workflowId: z.string().min(1).max(128),
+    })
+    .optional(),
   /**
    * For a workflow run's call: whose person share of the model requests in
    * flight it takes (model-admission.ts), from the run's row: who started
