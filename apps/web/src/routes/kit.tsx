@@ -79,6 +79,14 @@ import { Label } from "@grasp-os/ui/components/label";
 // a `--mode development` build, which Vite still builds with `DEV` false.
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
+import {
   Popover,
   PopoverContent,
   PopoverDescription,
@@ -153,15 +161,7 @@ import { DotBrain } from "../brain/dot-brain.tsx";
 import type { ShapeKey } from "../brain/dot-shapes.ts";
 import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
 import type { Integration } from "../connections/integrations.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import {
   ErrorState,
   LoadingLines,
@@ -681,18 +681,18 @@ const PageColumn = () => {
         <div className="flex h-64 overflow-hidden rounded-lg border">
           {folded ? (
             <PageSidebar folded label="Documents">
-              <RailExpand
+              <PageSidebarRailExpand
                 label="Expand the documents"
                 onExpand={() => {
                   setFolded(false);
                 }}
               />
-              <RailButton label="New document">
+              <PageSidebarRailButton label="New document">
                 <PlusIcon />
-              </RailButton>
-              <RailDivider />
+              </PageSidebarRailButton>
+              <PageSidebarRailDivider />
               {kitDocuments.map((name) => (
-                <RailButton
+                <PageSidebarRailButton
                   active={name === open}
                   key={name}
                   label={name}
@@ -701,7 +701,7 @@ const PageColumn = () => {
                   }}
                 >
                   <FileTextIcon />
-                </RailButton>
+                </PageSidebarRailButton>
               ))}
             </PageSidebar>
           ) : (

@@ -13,7 +13,7 @@ import {
 } from "@grasp-os/ui/components/collapsible";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 
-import { SetupSection } from "../admin/setup-parts.tsx";
+import { Section } from "../admin/section.tsx";
 import type {
   LineState,
   ProgressLine,
@@ -39,11 +39,11 @@ const durationOf = (from: Date, to: Date): string => {
 };
 
 const badgeVariants: Readonly<
-  Record<LineState, "destructive" | "secondary" | "outline">
+  Record<LineState, "destructive" | "passed" | "outline">
 > = {
   waiting: "outline",
   doing: "outline",
-  done: "secondary",
+  done: "passed",
   retrying: "outline",
   needs_attention: "destructive",
 };
@@ -108,7 +108,7 @@ export const ProvisioningProgressView = ({
 }) => {
   const now = new Date();
   return (
-    <SetupSection
+    <Section
       description={
         progress.readyAt === null
           ? (progress.notice ??
@@ -156,6 +156,6 @@ export const ProvisioningProgressView = ({
           </Collapsible>
         )}
       </div>
-    </SetupSection>
+    </Section>
   );
 };
