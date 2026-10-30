@@ -27,6 +27,7 @@ import {
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
+import { pressedStart } from "./stephen-requests.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
 // Workflows people start by asking Stephen in a chat app. A workflow's
@@ -353,6 +354,13 @@ export const pressOffer = async (
       .update(chatWorkflowOffers)
       .set({ startId: start.id, runId: start.runId })
       .where(eq(chatWorkflowOffers.id, offer.id));
+    // The press is part of the request that offered it, never one of its own.
+    await pressedStart(env, {
+      userId: offer.userId,
+      chatId: offer.chatId,
+      workflowId: offer.workflowId,
+      started: true,
+    });
     return { line: "started", workflow };
   } catch (error) {
     if (!isExpectedError(error)) {
@@ -361,6 +369,12 @@ export const pressOffer = async (
     log.info("channel.start_refused", {
       platform: press.platform,
       ...errorFields(error),
+    });
+    await pressedStart(env, {
+      userId: offer.userId,
+      chatId: offer.chatId,
+      workflowId: offer.workflowId,
+      started: false,
     });
     return { line: "startRefused", workflow };
   }

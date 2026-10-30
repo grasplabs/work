@@ -2,13 +2,14 @@ import { useLingui } from "@lingui/react/macro";
 import {
   createFileRoute,
   Outlet,
+  useMatchRoute,
   useParams,
   useSearch,
 } from "@tanstack/react-router";
 
 import { folderHolding, regionGroups } from "../brain/atlas-map.ts";
-import { atlasOf, REGIONS } from "../brain/brain-atlas.ts";
-import type { Atlas, Region, RegionId } from "../brain/brain-atlas.ts";
+import { atlasOf, TEAM_FOLDER } from "../brain/brain-atlas.ts";
+import type { Atlas, Region } from "../brain/brain-atlas.ts";
 import type { BrainData } from "../brain/brain-data.ts";
 import { BrainNav } from "../brain/brain-nav.tsx";
 import { brainSections } from "../brain/brain-sections.ts";
@@ -37,83 +38,66 @@ import type { Loaded } from "../load-from-core.tsx";
 /** The onboarding steps the brain's folders are grouped under, by their ids in `Note.path`. */
 const steps = new Set(["1 Vision", "2 Inventory"]);
 
-/** Every note in a folder, its own and those of the folders in it. */
-const notesIn = (folder: Folder): Note[] => [
-  ...(folder.note ? [folder.note] : []),
-  ...folder.notes,
-  ...folder.folders.flatMap(notesIn),
-];
-
-/** Where a folder without a page of its own leads: the part of the atlas its notes live in, or the whole brain when they are spread over several. */
-const folderCrumb = (
-  label: string,
-  folder: Folder | undefined,
-  atlas: Atlas
-): Crumb => {
-  const regions = [
-    ...new Set<RegionId>(
-      folder
-        ? notesIn(folder).flatMap((each) => atlas.home.get(each.id) ?? [])
-        : []
-    ),
-  ];
-  const [only] = regions;
-  return regions.length === 1 && only
-    ? { label, to: "/brain", search: { region: only } }
-    : { label, to: "/brain" };
-};
-
 /**
- * Where a note is, as crumbs that each lead somewhere: the brain; its part, which opens the
- * part's page; every folder on the way, to its own note when it has one, else to the part of
- * the brain its notes live in, or the whole brain when they are spread over several; and the
- * note itself, where you are. The numbered steps are how the brain fills, not where you are:
- * they are left out.
+ * Where a note is, as crumbs that each lead somewhere: the brain; its region, which opens it in
+ * the brain; for a piece of work, the team whose work it is; for something that came in, the
+ * folders on the way, each to its own page when it has one; and the note itself, where you are.
+ * A system, an application or a question has no region of its own: the brain, then the note.
  */
 const crumbsTo = (
   shown: Note,
   vault: Folder,
   atlas: Atlas,
-  brainLabel: string,
-  partLabel: (group: (typeof brainSections)[number]["group"]) => string
+  brainLabel: string
 ): Crumb[] => {
   const crumbs: Crumb[] = [{ label: brainLabel, to: "/brain" }];
-  let folder: Folder | undefined = vault;
-  for (const [depth, id] of shown.path.entries()) {
-    const key = shown.path.slice(0, depth + 1).join("/");
-    folder = folder?.folders.find((each) => each.key === key);
-    const part = brainSections.find((candidate) => candidate.key === key);
-    if (part) {
-      crumbs.push({
-        label: partLabel(part.group),
-        to: "/brain/sections/$sectionId",
-        params: { sectionId: part.slug },
-      });
-      continue;
-    }
-    if (steps.has(id)) {
-      continue;
-    }
-    const label = folderName(id);
-    const own = folder?.note;
-    if (own?.id === shown.id) {
-      // The folder's own page: it is where you are.
-      crumbs.push({ label });
-    } else if (own) {
-      crumbs.push({ label, to: "/brain/$noteId", params: { noteId: own.id } });
-    } else {
-      crumbs.push(folderCrumb(label, folder, atlas));
+  const home = atlas.regions.find(
+    (each) => each.id === atlas.home.get(shown.id)
+  );
+  const placed = home?.notes.find((each) => each.id === shown.id);
+  const team =
+    placed?.path[0] === TEAM_FOLDER
+      ? home?.notes.find(
+          (each) => each.kind === "team" && each.id === placed.path[1]
+        )
+      : undefined;
+  // A group of one team is often named after it: the name is said once, for the team.
+  if (home && home.name !== team?.title) {
+    crumbs.push({
+      label: home.name,
+      to: "/brain",
+      search: { region: home.id },
+    });
+  }
+  if (team && shown.kind !== "team") {
+    crumbs.push({
+      label: team.title,
+      to: "/brain/$noteId",
+      params: { noteId: team.id },
+    });
+  }
+  if (home?.id === "stem") {
+    let folder: Folder | undefined = vault;
+    for (const [depth, id] of shown.path.entries()) {
+      const key = shown.path.slice(0, depth + 1).join("/");
+      folder = folder?.folders.find((each) => each.key === key);
+      // The stem is the region itself, and the numbered steps are how the brain fills: neither is where you are.
+      const own = folder?.note;
+      if (depth === 0 || steps.has(id) || own?.id === shown.id) {
+        continue;
+      }
+      crumbs.push(
+        own
+          ? {
+              label: folderName(id),
+              to: "/brain/$noteId",
+              params: { noteId: own.id },
+            }
+          : { label: folderName(id) }
+      );
     }
   }
-  // A folder's own page, such as a source folder, is named after its folder: say it once.
-  if (
-    !(
-      shown.path.length > 0 &&
-      folderName(shown.path.at(-1) ?? "") === shown.title
-    )
-  ) {
-    crumbs.push({ label: shown.title });
-  }
+  crumbs.push({ label: shown.title });
   return crumbs;
 };
 
@@ -164,7 +148,7 @@ const atlasAt = (
   const regionId = isRegion(search.region)
     ? search.region
     : inHand && atlas.home.get(inHand.id);
-  const region = REGIONS.find((each) => each.id === regionId);
+  const region = atlas.regions.find((each) => each.id === regionId);
   if (!region) {
     return undefined;
   }
@@ -184,6 +168,8 @@ const BrainLayout = () => {
   const loaded = Route.useLoaderData();
   const { noteId, sectionId } = useParams({ strict: false });
   const search = useSearch({ strict: false });
+  // The brain's log, a page of its own beside the brain.
+  const activity = Boolean(useMatchRoute()({ to: "/brain/activity" }));
   const brainLabel = t`Brain`;
   if (loaded.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: brainLabel }]} page={loaded} />;
@@ -203,26 +189,30 @@ const BrainLayout = () => {
       : undefined;
   let crumbs: Crumb[] = [{ label: brainLabel }];
   if (note) {
-    crumbs = crumbsTo(
-      note,
-      folderTree(brain.notes),
-      atlas,
-      brainLabel,
-      (group) => i18n._(groupLabel[group])
-    );
+    crumbs = crumbsTo(note, folderTree(brain.notes), atlas, brainLabel);
   } else if (section) {
     crumbs = [
       { label: brainLabel, to: "/brain" },
       { label: i18n._(groupLabel[section.group]) },
     ];
+  } else if (activity) {
+    crumbs = [
+      { label: brainLabel, to: "/brain" },
+      { label: t({ message: "Activity", context: "the brain's log" }) },
+    ];
   } else if (onAtlas) {
-    crumbs = regionCrumbs(onAtlas, brainLabel, i18n._(onAtlas.region.label));
+    crumbs = regionCrumbs(onAtlas, brainLabel, onAtlas.region.name);
   }
   return (
     <>
       <SiteHeader crumbs={crumbs} />
       <div className="flex min-h-0 flex-1">
-        <BrainNav brain={brain} note={note} sectionSlug={section?.slug} />
+        <BrainNav
+          atlas={atlas}
+          brain={brain}
+          note={note}
+          region={onAtlas?.region.id}
+        />
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
         <div className="relative flex min-w-0 flex-1 flex-col">
           <Outlet />

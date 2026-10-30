@@ -837,6 +837,8 @@ const Company = (props: StepProps) => {
       quick: true,
     };
   }
+  // The step's one main action, in lime, as the prototype's
+  // (`onboarding-steps.tsx`): with no sign-in to offer, the list is the way on.
   const listButton = (
     <Button
       className="w-full max-w-sm"
@@ -845,6 +847,7 @@ const Company = (props: StepProps) => {
         list.current?.click();
       }}
       size="xl"
+      variant="highlight"
     >
       {reading === "list" ? (
         <Spinner data-icon="inline-start" />

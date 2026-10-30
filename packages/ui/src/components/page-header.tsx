@@ -36,10 +36,7 @@ function PageHeaderTitle({
   return (
     <h1
       data-slot="page-header-title"
-      className={cn(
-        "font-heading text-2xl font-semibold tracking-tight text-balance",
-        className
-      )}
+      className={cn("type-title", className)}
       {...props}
     >
       {children}

@@ -37,7 +37,7 @@ const ExampleDemo = () => {
   const Example = lazyExamples[name];
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <h1 className="text-2xl font-medium">{name}</h1>
+      <h1 className="type-title">{name}</h1>
       <Suspense>
         <div data-catalog-content="">
           <Example />

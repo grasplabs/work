@@ -9,6 +9,7 @@ import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
 import type { RunFilterStatus } from "./run-filter.ts";
+import type { WorkflowRunStatus } from "./workflow-resources.ts";
 
 export { runFilterStatuses } from "./run-filter.ts";
 export type { RunFilterStatus } from "./run-filter.ts";
@@ -1431,6 +1432,71 @@ export interface ConnectionWorkflows {
 }
 
 /**
+ * Who a run waits on, as its open decision names them: a role, a team, or
+ * the reader themselves (`you`). Only for a wait that is the reader's own.
+ */
+export type TodayWaitsOn =
+  | { kind: "role"; role: string }
+  | { kind: "team"; team: string }
+  | { kind: "you" };
+
+/** One run of a workflow on the company's day (`WorkflowsApi.today`). */
+export interface TodayRun {
+  id: string;
+  /** When it started and ended (ISO 8601); `endedAt` null while it goes on. */
+  startedAt: string;
+  endedAt: string | null;
+  status: WorkflowRunStatus;
+  /**
+   * Whether it went by itself (`alone`) or a person came in (`people`): it
+   * asked someone for a decision, as the handled-versus-alone counts have
+   * it.
+   */
+  went: "alone" | "people";
+  /**
+   * What it waits on now, if it waits on the reader: whom its decision
+   * names, since when, and the decision to answer. A wait on anyone else
+   * shows only as `waitsOnOthers`, with neither whom nor since when.
+   */
+  waits: {
+    decision: string;
+    on: TodayWaitsOn;
+    since: string;
+    asks: string;
+  } | null;
+  /** It waits on someone other than the reader. */
+  waitsOnOthers: boolean;
+  /**
+   * The run it came from, by its lineage: an App run's root, an
+   * independent run's parent; only a run of today the reader sees, null
+   * otherwise.
+   */
+  from: string | null;
+}
+
+/** A workflow that worked today, with its runs of the day, oldest first. */
+export type TodayLane = (
+  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
+  | { kind: "independent"; id: string; name: string }
+) & { runs: TodayRun[] };
+
+/**
+ * The runs of the company's day across the workflows the reader may see,
+ * a lane per workflow that worked: the day in the organization's time
+ * zone, from its midnight to now. A run the reader may not see is counted
+ * (`unseen`), never named, nor its workflow.
+ */
+export interface WorkflowsToday {
+  /** The day's start, and now (ISO 8601). */
+  from: string;
+  now: string;
+  timeZone: string;
+  lanes: TodayLane[];
+  /** Runs of the day in workflows, or of people, the reader may not see. */
+  unseen: number;
+}
+
+/**
  * A signed-in person's workflows. Anyone with a role in the App
  * (`AppsApi`) starts and follows its runs, and its builders cancel them;
  * every call checks the session and the person's role again.
@@ -1484,6 +1550,12 @@ export interface WorkflowsApi {
    * decisions they asked people for.
    */
   activity: (query?: RunActivityQuery) => Promise<RunActivity>;
+  /**
+   * The runs of the company's day across the workflows the person may
+   * see, App and independent alike, a lane per workflow that worked; runs
+   * they may not see only counted.
+   */
+  today: () => Promise<WorkflowsToday>;
   /** One workflow of an App's current version. */
   get: (app: string, workflow: string) => Promise<WorkflowDetail>;
   /**

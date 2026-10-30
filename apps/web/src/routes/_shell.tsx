@@ -3,6 +3,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatDock } from "../chat/chat-dock.tsx";
+import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { loadCoreStatus, readWithin } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
@@ -24,18 +25,21 @@ const Shell = () => {
     // Keyed by who is signed in: someone else signing in on the browser
     // finds no panel of theirs open.
     <AppPanelProvider key={identity.userId}>
-      <AppFrame
-        aside={
-          <>
-            <AppPanelSlot />
-            <ChatDock />
-          </>
-        }
-        core={core}
-        identity={identity}
-      >
-        <Outlet />
-      </AppFrame>
+      {/* The chats window, ⌘K away on every page (chat/chat-switcher.tsx). */}
+      <ChatSwitcherProvider>
+        <AppFrame
+          aside={
+            <>
+              <AppPanelSlot />
+              <ChatDock />
+            </>
+          }
+          core={core}
+          identity={identity}
+        >
+          <Outlet />
+        </AppFrame>
+      </ChatSwitcherProvider>
     </AppPanelProvider>
   );
 };

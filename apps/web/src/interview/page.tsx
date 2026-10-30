@@ -6,6 +6,7 @@ import type {
 import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { MessagesSquareIcon, XIcon } from "lucide-react";
@@ -19,7 +20,6 @@ import {
 import type { ReactNode, RefObject } from "react";
 
 import { formatDay } from "../format.ts";
-import { GraspMark } from "../grasp-mark.tsx";
 import { isLocale } from "../i18n.ts";
 import { LanguageButton } from "../language-picker.tsx";
 import { deleteInterview, isRefused, withdrawInterview } from "./api.ts";
@@ -219,7 +219,7 @@ export const InterviewFrame = ({
       )}
       <div className="flex items-center justify-between sm:contents">
         <div className="flex h-14 items-center gap-2 sm:order-1 sm:flex-1 sm:basis-0">
-          <GraspMark className="text-foreground size-5 flex-none" />
+          <GraspMark className="size-5 flex-none" variant="logo" />
           <SaveNote />
         </div>
         <div className="flex h-14 items-center justify-end sm:order-3 sm:flex-1 sm:basis-0">
@@ -246,14 +246,17 @@ const Stopped = ({
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
-          {t`Your place is kept.`}
-        </h1>
+        <h1 className="type-title">{t`Your place is kept.`}</h1>
         <p className="text-muted-foreground text-balance">
           {t`Open this link again whenever you like, and carry on where you stopped.`}
         </p>
       </div>
-      <Button className="w-full max-w-sm" onClick={onCarryOn} size="xl">
+      <Button
+        className="w-full max-w-sm"
+        onClick={onCarryOn}
+        size="xl"
+        variant="highlight"
+      >
         {t`Carry on now`}
       </Button>
     </Said>
@@ -267,9 +270,7 @@ const Over = ({ room }: { room: number }) => {
   return (
     <Said fill={1} label={t`${who}, drawn in dots.`} room={room} sign="heart">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
-          {t`The interviews are over.`}
-        </h1>
+        <h1 className="type-title">{t`The interviews are over.`}</h1>
         <p className="text-muted-foreground text-balance">
           {t`Thank you for your time.`}
         </p>
@@ -284,10 +285,7 @@ const Deleted = ({ room }: { room: number }) => {
   const who = interviewerNames[useInterviewer()];
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
-      <h1
-        aria-live="polite"
-        className="text-2xl font-medium tracking-tight text-balance"
-      >
+      <h1 aria-live="polite" className="type-title">
         {t`Deleted. Nothing you said is kept.`}
       </h1>
     </Said>
@@ -301,10 +299,7 @@ const Withdrawn = ({ room }: { room: number }) => {
   return (
     <Said label={t`${who}, drawn in dots.`} room={room}>
       <div className="flex flex-col gap-2">
-        <h1
-          aria-live="polite"
-          className="text-2xl font-medium tracking-tight text-balance"
-        >
+        <h1 aria-live="polite" className="type-title">
           {t`You withdrew. Nothing you said is used from now on.`}
         </h1>
         <p className="text-muted-foreground text-balance">
