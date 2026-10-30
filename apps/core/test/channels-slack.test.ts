@@ -167,7 +167,7 @@ const messageFrom = (
 
 /** Someone with a Slack account linked to their Grasp person. */
 const linkedPerson = async () => {
-  const { userId } = await signedInApi(idp, "user");
+  const { userId, api } = await signedInApi(idp, "user");
   const slackUser = `U${unique()}`;
   await drizzle(env.DB).insert(channelAccounts).values({
     id: crypto.randomUUID(),
@@ -177,7 +177,7 @@ const linkedPerson = async () => {
     linkedAt: new Date(),
     linkedHow: "sign_in_link",
   });
-  return { userId, slackUser };
+  return { userId, slackUser, api };
 };
 
 const callSchema = z.array(
@@ -197,6 +197,12 @@ const slackSawIn = async (channel: string) => {
 };
 
 const refused = { status: 401, text: "Unauthorized", handed: [] };
+
+/** Which app each of a person's listed chats came through. */
+const viaOf = async (api: Awaited<ReturnType<typeof linkedPerson>>["api"]) => {
+  const listed = await api.chats.list();
+  return listed.map(({ via }) => via).toSorted();
+};
 
 describe("a request Slack didn't sign for the client's app", () => {
   it("is refused unsigned, signed with another secret, or changed after signing", async () => {
@@ -360,9 +366,9 @@ describe("who gets in from Slack", () => {
 });
 
 describe("a linked person's question in Slack", () => {
-  it("gets the same answer as the same question in Teams, in their own Slack chat", async () => {
+  it("gets the same answer as the same question in Teams, in their own Slack chat, which their list says came through Slack", async () => {
     const answer = "Parental leave lasts sixteen weeks.";
-    const { userId, slackUser } = await linkedPerson();
+    const { userId, slackUser, api } = await linkedPerson();
     await pointAtGateway(
       workspace(env, personalWorkspaceId(userId)),
       fakeGateway(says(answer))
@@ -380,6 +386,9 @@ describe("a linked person's question in Slack", () => {
     const teamsAnswer = JSON.stringify(
       activities.filter(({ type }) => type === "message")
     );
+    // Each person's list says which app their chat came through, and a
+    // chat started in Grasp itself is Grasp's own.
+    const inGrasp = await api.chats.create("Leave questions");
     expect({
       slack: slackPosts.some(
         ({ method, fields, authorized }) =>
@@ -388,6 +397,15 @@ describe("a linked person's question in Slack", () => {
           JSON.stringify(fields).includes(answer)
       ),
       teams: teamsAnswer.includes(answer),
-    }).toStrictEqual({ slack: true, teams: true });
+      created: inGrasp.via,
+      listedForSlackPerson: await viaOf(api),
+      listedForTeamsPerson: await viaOf(inTeams.api),
+    }).toStrictEqual({
+      slack: true,
+      teams: true,
+      created: "web",
+      listedForSlackPerson: ["slack", "web"],
+      listedForTeamsPerson: ["teams"],
+    });
   });
 });
