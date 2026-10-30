@@ -57,6 +57,13 @@
       "when": 1793311307388,
       "tag": "0007_provider_routes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793349706935,
+      "tag": "0008_platform_feature",
+      "breakpoints": true
     }
   ]
 }
