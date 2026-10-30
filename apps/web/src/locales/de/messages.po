@@ -15855,6 +15855,10 @@ msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Domänen entstehen im Chat: Beschreiben Sie einen Teil Ihrer Arbeit, und Grasp baut die Workflows und Apps dazu."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Legen Sie eine mit „Neue Domäne“ an, oder beschreiben Sie im Chat einen Teil Ihrer Arbeit, und Grasp baut ihre Workflows und Apps."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Es gibt noch keine Workflows zum Verknüpfen."
