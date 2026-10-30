@@ -35,6 +35,7 @@ import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
 import { Route as ShellAppsNewRouteImport } from './routes/_shell.apps.new'
 import { Route as ShellBrainIndexRouteImport } from './routes/_shell.brain.index'
 import { Route as ShellBrainNoteIdRouteImport } from './routes/_shell.brain.$noteId'
+import { Route as ShellBrainActivityRouteImport } from './routes/_shell.brain.activity'
 import { Route as ShellBrainMemoryRouteImport } from './routes/_shell.brain.memory'
 import { Route as ShellDomainsIndexRouteImport } from './routes/_shell.domains.index'
 import { Route as ShellEnginesIndexRouteImport } from './routes/_shell.engines.index'
@@ -53,10 +54,12 @@ import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboar
 import { Route as ShellOnboardingOpenRouteImport } from './routes/_shell.onboarding.open'
 import { Route as ShellOnboardingStephenRouteImport } from './routes/_shell.onboarding.stephen'
 import { Route as ShellPoliciesIndexRouteImport } from './routes/_shell.policies.index'
+import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.settings.approvals'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
+import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
 import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
@@ -70,6 +73,7 @@ import { Route as ShellSettingsStephenRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
+import { Route as ShellWorkflowsRequestsRouteImport } from './routes/_shell.workflows.requests'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
@@ -230,6 +234,11 @@ const ShellBrainNoteIdRoute = ShellBrainNoteIdRouteImport.update({
   path: '/$noteId',
   getParentRoute: () => ShellBrainRoute,
 } as any)
+const ShellBrainActivityRoute = ShellBrainActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => ShellBrainRoute,
+} as any)
 const ShellBrainMemoryRoute = ShellBrainMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
@@ -324,6 +333,11 @@ const ShellPoliciesIndexRoute = ShellPoliciesIndexRouteImport.update({
   path: '/policies/',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -342,6 +356,11 @@ const ShellSettingsAuditRoute = ShellSettingsAuditRouteImport.update({
 const ShellSettingsBillingRoute = ShellSettingsBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsBrainRoute = ShellSettingsBrainRouteImport.update({
+  id: '/brain',
+  path: '/brain',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
 const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
@@ -408,6 +427,11 @@ const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
 const ShellWorkflowsWorkflowRoute = ShellWorkflowsWorkflowRouteImport.update({
   id: '/workflows/$workflow',
   path: '/workflows/$workflow',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellWorkflowsRequestsRoute = ShellWorkflowsRequestsRouteImport.update({
+  id: '/workflows/requests',
+  path: '/workflows/requests',
   getParentRoute: () => ShellRoute,
 } as any)
 const KitComponentsNameRoute = KitComponentsNameRouteImport.update({
@@ -608,6 +632,7 @@ export interface FileRoutesByFullPath {
   '/apps/$app': typeof ShellAppsAppRoute
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
+  '/brain/activity': typeof ShellBrainActivityRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -619,9 +644,11 @@ export interface FileRoutesByFullPath {
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
+  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -634,6 +661,7 @@ export interface FileRoutesByFullPath {
   '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
@@ -697,6 +725,7 @@ export interface FileRoutesByTo {
   '/apps/$app': typeof ShellAppsAppRoute
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
+  '/brain/activity': typeof ShellBrainActivityRoute
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -707,9 +736,11 @@ export interface FileRoutesByTo {
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
+  '/settings/brain': typeof ShellSettingsBrainRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -722,6 +753,7 @@ export interface FileRoutesByTo {
   '/settings/stephen': typeof ShellSettingsStephenRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
@@ -790,6 +822,7 @@ export interface FileRoutesById {
   '/_shell/apps/$app': typeof ShellAppsAppRoute
   '/_shell/apps/new': typeof ShellAppsNewRoute
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
+  '/_shell/brain/activity': typeof ShellBrainActivityRoute
   '/_shell/brain/memory': typeof ShellBrainMemoryRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
@@ -801,9 +834,11 @@ export interface FileRoutesById {
   '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/_shell/onboarding/open': typeof ShellOnboardingOpenRoute
   '/_shell/onboarding/stephen': typeof ShellOnboardingStephenRoute
+  '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
+  '/_shell/settings/brain': typeof ShellSettingsBrainRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
   '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -816,6 +851,7 @@ export interface FileRoutesById {
   '/_shell/settings/stephen': typeof ShellSettingsStephenRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/_shell/workflows/requests': typeof ShellWorkflowsRequestsRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
@@ -884,6 +920,7 @@ export interface FileRouteTypes {
     | '/apps/$app'
     | '/apps/new'
     | '/brain/$noteId'
+    | '/brain/activity'
     | '/brain/memory'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -895,9 +932,11 @@ export interface FileRouteTypes {
     | '/onboarding/notes'
     | '/onboarding/open'
     | '/onboarding/stephen'
+    | '/projects/$projectId'
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
+    | '/settings/brain'
     | '/settings/members'
     | '/settings/models'
     | '/settings/notifications'
@@ -910,6 +949,7 @@ export interface FileRouteTypes {
     | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
+    | '/workflows/requests'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps/'
@@ -973,6 +1013,7 @@ export interface FileRouteTypes {
     | '/apps/$app'
     | '/apps/new'
     | '/brain/$noteId'
+    | '/brain/activity'
     | '/brain/memory'
     | '/integrations/$integration'
     | '/knowledge/$collection'
@@ -983,9 +1024,11 @@ export interface FileRouteTypes {
     | '/onboarding/notes'
     | '/onboarding/open'
     | '/onboarding/stephen'
+    | '/projects/$projectId'
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
+    | '/settings/brain'
     | '/settings/members'
     | '/settings/models'
     | '/settings/notifications'
@@ -998,6 +1041,7 @@ export interface FileRouteTypes {
     | '/settings/stephen'
     | '/settings/workspace'
     | '/workflows/$workflow'
+    | '/workflows/requests'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps'
@@ -1065,6 +1109,7 @@ export interface FileRouteTypes {
     | '/_shell/apps/$app'
     | '/_shell/apps/new'
     | '/_shell/brain/$noteId'
+    | '/_shell/brain/activity'
     | '/_shell/brain/memory'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
@@ -1076,9 +1121,11 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/notes'
     | '/_shell/onboarding/open'
     | '/_shell/onboarding/stephen'
+    | '/_shell/projects/$projectId'
     | '/_shell/settings/approvals'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
+    | '/_shell/settings/brain'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
     | '/_shell/settings/notifications'
@@ -1091,6 +1138,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/stephen'
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
+    | '/_shell/workflows/requests'
     | '/kit_/components/$name'
     | '/kit_/examples/$name'
     | '/_shell/apps/'
@@ -1334,6 +1382,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellBrainNoteIdRouteImport
       parentRoute: typeof ShellBrainRoute
     }
+    '/_shell/brain/activity': {
+      id: '/_shell/brain/activity'
+      path: '/activity'
+      fullPath: '/brain/activity'
+      preLoaderRoute: typeof ShellBrainActivityRouteImport
+      parentRoute: typeof ShellBrainRoute
+    }
     '/_shell/brain/memory': {
       id: '/_shell/brain/memory'
       path: '/memory'
@@ -1460,6 +1515,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellPoliciesIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/projects/$projectId': {
+      id: '/_shell/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ShellProjectsProjectIdRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings/': {
       id: '/_shell/settings/'
       path: '/'
@@ -1486,6 +1548,13 @@ declare module '@tanstack/react-router' {
       path: '/billing'
       fullPath: '/settings/billing'
       preLoaderRoute: typeof ShellSettingsBillingRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/brain': {
+      id: '/_shell/settings/brain'
+      path: '/brain'
+      fullPath: '/settings/brain'
+      preLoaderRoute: typeof ShellSettingsBrainRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/members': {
@@ -1577,6 +1646,13 @@ declare module '@tanstack/react-router' {
       path: '/workflows/$workflow'
       fullPath: '/workflows/$workflow'
       preLoaderRoute: typeof ShellWorkflowsWorkflowRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/workflows/requests': {
+      id: '/_shell/workflows/requests'
+      path: '/workflows/requests'
+      fullPath: '/workflows/requests'
+      preLoaderRoute: typeof ShellWorkflowsRequestsRouteImport
       parentRoute: typeof ShellRoute
     }
     '/kit_/components/$name': {
@@ -1794,6 +1870,7 @@ declare module '@tanstack/react-router' {
 
 interface ShellBrainRouteChildren {
   ShellBrainNoteIdRoute: typeof ShellBrainNoteIdRoute
+  ShellBrainActivityRoute: typeof ShellBrainActivityRoute
   ShellBrainMemoryRoute: typeof ShellBrainMemoryRoute
   ShellBrainIndexRoute: typeof ShellBrainIndexRoute
   ShellBrainSectionsSectionIdRoute: typeof ShellBrainSectionsSectionIdRoute
@@ -1801,6 +1878,7 @@ interface ShellBrainRouteChildren {
 
 const ShellBrainRouteChildren: ShellBrainRouteChildren = {
   ShellBrainNoteIdRoute: ShellBrainNoteIdRoute,
+  ShellBrainActivityRoute: ShellBrainActivityRoute,
   ShellBrainMemoryRoute: ShellBrainMemoryRoute,
   ShellBrainIndexRoute: ShellBrainIndexRoute,
   ShellBrainSectionsSectionIdRoute: ShellBrainSectionsSectionIdRoute,
@@ -1852,6 +1930,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsApprovalsRoute: typeof ShellSettingsApprovalsRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
+  ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
   ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
@@ -1872,6 +1951,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsApprovalsRoute: ShellSettingsApprovalsRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
+  ShellSettingsBrainRoute: ShellSettingsBrainRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
   ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,
@@ -1935,7 +2015,9 @@ interface ShellRouteChildren {
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellLandscapeAppIdRoute: typeof ShellLandscapeAppIdRouteWithChildren
+  ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
+  ShellWorkflowsRequestsRoute: typeof ShellWorkflowsRequestsRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellDomainsIndexRoute: typeof ShellDomainsIndexRoute
   ShellEnginesIndexRoute: typeof ShellEnginesIndexRoute
@@ -1974,7 +2056,9 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellLandscapeAppIdRoute: ShellLandscapeAppIdRouteWithChildren,
+  ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
+  ShellWorkflowsRequestsRoute: ShellWorkflowsRequestsRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellDomainsIndexRoute: ShellDomainsIndexRoute,
   ShellEnginesIndexRoute: ShellEnginesIndexRoute,

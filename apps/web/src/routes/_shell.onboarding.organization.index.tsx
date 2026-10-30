@@ -257,9 +257,7 @@ const Figures = ({ organization }: { organization: StaffOrganization }) => {
           key={figure.key}
         >
           <span className="text-muted-foreground text-xs">{figure.label}</span>
-          <span className="text-xl font-medium tabular-nums">
-            {figure.value}
-          </span>
+          <span className="type-figure">{figure.value}</span>
           <span className="text-muted-foreground text-xs">{figure.sub}</span>
         </div>
       ))}
