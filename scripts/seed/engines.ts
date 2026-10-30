@@ -340,13 +340,13 @@ const mortgageFiles: WorkflowSeed = {
   },
   tests: suite({
     "hands a complete file over once an adviser takes it": `const run = await desk.start(workflows.mortgageFiles, { client: "Fam. Bakker", loan: 41500000, chase: [] });
-await decider.respond(run, "accept", { approved: true });
+await decider.respond(run, "accept-ask", { approved: true });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
   output: { client: "Fam. Bakker", loan: 41500000, handedOver: true, adviser: "fixture-decider" },
 });`,
     "keeps the file when no adviser takes it": `const run = await desk.start(workflows.mortgageFiles, { client: "T. Kok", loan: 28000000, chase: [] });
-await decider.respond(run, "accept", { approved: false });
+await decider.respond(run, "accept-ask", { approved: false });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
   output: { client: "T. Kok", loan: 28000000, handedOver: false, adviser: null },
@@ -623,7 +623,7 @@ t.equal(await t.runs.untilTerminal(run), {
   output: { client: "R. Bos", about: "A late answer", acknowledgeBy: "2026-10-13", compensation: 0, approvedBy: null },
 });`,
     "asks compliance for larger compensation": `const run = await desk.start(workflows.complaints, { client: "M. Hendriks", about: "The valuation", compensation: 75000, received: "2026-10-05" });
-await decider.respond(run, "approve-compensation", { approved: true });
+await decider.respond(run, "approve-compensation-ask", { approved: true });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
   output: { client: "M. Hendriks", about: "The valuation", acknowledgeBy: "2026-10-07", compensation: 75000, approvedBy: "fixture-decider" },
@@ -820,7 +820,7 @@ t.equal(await t.runs.untilTerminal(run), {
   output: { invoice: "KPN-2291", account: "4300 Software and data", amount: 48600, approved: true, approvedBy: null },
 });`,
     "asks finance to approve an invoice above the limit": `const run = await desk.start(workflows.supplierInvoices, { supplier: "Kantoorhuis Utrecht", invoice: "KU-1043", description: "Office rent", amount: 418000, vatNumber: "NL812345678B01" });
-await decider.respond(run, "approve", { approved: true });
+await decider.respond(run, "approve-ask", { approved: true });
 t.equal(await t.runs.untilTerminal(run), {
   status: "completed",
   output: { invoice: "KU-1043", account: "4100 Housing", amount: 418000, approved: true, approvedBy: "fixture-decider" },
@@ -1083,7 +1083,7 @@ const kycReview: WorkflowSeed = {
     "clears a low-risk client at once": `const run = await desk.start(workflows.kycReview, { client: "Fam. Willems", country: "NL", politicallyExposed: false, identity: "passport" });
 t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { client: "Fam. Willems", risk: "low", cleared: true, clearedBy: null } });`,
     "asks an officer to clear a politically exposed client": `const run = await desk.start(workflows.kycReview, { client: "S. de Jong", country: "NL", politicallyExposed: true, identity: "passport" });
-await decider.respond(run, "enhanced-review", { approved: true });
+await decider.respond(run, "enhanced-review-ask", { approved: true });
 t.equal(await t.runs.untilTerminal(run), { status: "completed", output: { client: "S. de Jong", risk: "high", cleared: true, clearedBy: "fixture-decider" } });`,
     "refuses a client without an identity document": `const run = await desk.start(workflows.kycReview, { client: "T. Kok", country: "NL", politicallyExposed: false });
 ${failsInItsCalculation}`,

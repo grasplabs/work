@@ -5,7 +5,10 @@
  * definition and its compute modules), which each domain App binds under
  * an alias. A definition is written here as data and sent as JSON text.
  */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowNamespace,
+  workflowResourceErrors,
+} from "@grasp-os/shared/workflow-resources";
 
 /** A JSON Schema, as a definition's input, output and parameters hold one. */
 export type JsonSchema = Record<string, unknown>;
@@ -106,9 +109,20 @@ export const computeTask = (
 });
 
 /**
+ * The error a decision nobody answered before its deadline fails its call
+ * with, as a catch sees it: a runtime error titled with the code's message
+ * (core's resource-errors.ts).
+ */
+const unansweredTitle = workflowResourceErrors.create(
+  "workflow.decision_timed_out"
+).message;
+
+/**
  * Task `id` asking the person, team or role in parameter `param` to
  * decide through decision binding `binding`, about `input`, with
- * `prompt`; its outcome kept in the context as `decision`.
+ * `prompt`; its outcome kept in the context as `decision`. Nobody
+ * answering before its deadline counts as not approved, as a no: the run
+ * goes on, never fails for it.
  */
 export const decisionTask = (
   id: string,
@@ -127,15 +141,40 @@ export const decisionTask = (
   }
 ) => ({
   [id]: {
-    call: "grasp.decision",
-    with: {
-      binding,
-      recipients: `\${ [$params.${param}] }`,
-      prompt,
-      input,
+    try: [
+      {
+        [`${id}-ask`]: {
+          call: "grasp.decision",
+          with: {
+            binding,
+            recipients: `\${ [$params.${param}] }`,
+            prompt,
+            input,
+          },
+          timeout: { after: { days } },
+          export: { as: "${ $context + {decision: .} }" },
+        },
+      },
+    ],
+    // Only the deadline passing unanswered: any other failure fails the
+    // run, as it should.
+    catch: {
+      errors: {
+        with: {
+          type: "https://open-workflow-specification.org/spec/1.0.0/errors/runtime",
+        },
+      },
+      as: "unanswered",
+      when: `\${ $unanswered.title == ${JSON.stringify(unansweredTitle)} }`,
+      do: [
+        {
+          [`${id}-unanswered`]: {
+            set: "${ . }",
+            export: { as: "${ $context + {decision: {approved: false}} }" },
+          },
+        },
+      ],
     },
-    timeout: { after: { days } },
-    export: { as: "${ $context + {decision: .} }" },
   },
 });
 
