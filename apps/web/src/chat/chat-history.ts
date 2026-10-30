@@ -4,7 +4,8 @@ import type { ChatSummary } from "@grasp-os/shared/chat";
 // `lib/chat-history.ts`): by when each was last used, today, the last
 // seven days and earlier, with that time as short as a row has room for.
 // Core lists them the most recently used first, and searches what was said
-// in them (`chats.search`); a search by title alone needs nothing from it.
+// in them (`chats.search`); a search by title alone reads the words as core
+// does (`@grasp-os/shared/chat-search`).
 
 export type ChatPeriod = "today" | "week" | "earlier";
 
@@ -68,16 +69,4 @@ export const whenShort = (
     day: "numeric",
     month: "short",
   }).format(at);
-};
-
-const whitespace = /\s+/u;
-
-/** Whether every word of `search` is somewhere in `texts`, in any case. */
-export const hasEvery = (search: string, ...texts: string[]): boolean => {
-  const hay = texts.join(" ").toLowerCase();
-  return search
-    .toLowerCase()
-    .split(whitespace)
-    .filter((word) => word !== "")
-    .every((word) => hay.includes(word));
 };

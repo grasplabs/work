@@ -1,7 +1,7 @@
 import type { ChatProject, ChatSummary } from "@grasp-os/shared/chat";
 import { describe, expect, it } from "vite-plus/test";
 
-import { groupChats, hasEvery, whenShort } from "./chat-history.ts";
+import { groupChats, whenShort } from "./chat-history.ts";
 import { projectsByUse } from "./project-shelf.tsx";
 
 // The person's chats as the ⌘K window and the empty chat show core's list:
@@ -68,14 +68,6 @@ describe("chat history", () => {
       thisWeek: "Tue",
       earlier: "29 Sept",
     });
-  });
-
-  it("needs every word searched for, wherever each is, in any case", () => {
-    expect({
-      both: hasEvery("board REPORT", "Board", "the report"),
-      one: hasEvery("board lease", "Board report"),
-      none: hasEvery(" ", "anything"),
-    }).toStrictEqual({ both: true, one: false, none: true });
   });
 
   it("puts the project used last first, and an unused one by when it was made", () => {

@@ -66,7 +66,7 @@ import {
 } from "../chat/chat-menus.tsx";
 import { documentAccept, documentProblem } from "../chat/chat-projects.ts";
 import type { DocumentProblem } from "../chat/chat-projects.ts";
-import { ChatSwitcher } from "../chat/chat-switcher.tsx";
+import { ChatSwitcherButton } from "../chat/chat-switcher.tsx";
 import { Composer } from "../chat/composer.tsx";
 import { DeleteChatDialog } from "../chat/delete-chat-dialog.tsx";
 import { ProjectDialog } from "../chat/project-dialog.tsx";
@@ -530,13 +530,7 @@ const Project = () => {
   return (
     <>
       <SiteHeader
-        actions={
-          <ChatSwitcher
-            activeId={undefined}
-            chats={chats}
-            projects={projects}
-          />
-        }
+        actions={<ChatSwitcherButton />}
         crumbs={[{ label: t`Chat`, to: "/" }, { label: name }]}
       />
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-4 text-sm md:p-6 lg:flex-row lg:items-start">

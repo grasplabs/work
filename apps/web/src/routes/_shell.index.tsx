@@ -11,7 +11,7 @@ import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatMore } from "../chat/chat-more.tsx";
-import { ChatSwitcher, HeaderIcon } from "../chat/chat-switcher.tsx";
+import { ChatSwitcherButton, HeaderIcon } from "../chat/chat-switcher.tsx";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { ComposerNote } from "../chat/composer-note.tsx";
 import { Composer } from "../chat/composer.tsx";
@@ -354,11 +354,7 @@ const Chat = () => {
           // Quiet icons, named when pointed at: the other chats, a new one,
           // the side panel and more for this one.
           <div className="flex items-center gap-0.5">
-            <ChatSwitcher
-              activeId={chat?.id}
-              chats={chats}
-              projects={projects}
-            />
+            <ChatSwitcherButton />
             {chat === undefined ? null : (
               <>
                 <HeaderIcon

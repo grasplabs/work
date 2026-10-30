@@ -17,13 +17,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { ChatSwitcher } from "./chat-switcher.tsx";
+import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 
 // The ⌘K window against core's chats as the page reaches them over RPC,
-// faked: it opens with the keys, lists the person's chats by when they
-// were last used, narrows them by title at once as the person types, then
-// to what core found was said, showing where; and a project on the left
-// shows its chats alone, with the way to its page.
+// faked: it opens with the keys on any page, lists the person's chats by
+// when they were last used, narrows them by title at once as the person
+// types, then to what core found was said, showing where, each chat as
+// core lists it now; and a project on the left shows its chats alone,
+// with the way to its page, and asks core to look in it alone.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -59,12 +60,20 @@ const projects: ChatProject[] = [
   },
 ];
 
-/** The window's opener, whose core finds `found` for any search. */
-const shown = async (found: (query: string) => Promise<ChatSearchHit[]>) => {
-  const asked: string[] = [];
+/**
+ * A page in the frame, with nothing of the chats on it, whose core lists
+ * `listed` and finds `found` for any search.
+ */
+const shown = async (
+  found: (query: string) => Promise<ChatSearchHit[]>,
+  listed: ChatSummary[] = [board, lease, travel]
+) => {
+  const asked: { query: string; projectId: string | null }[] = [];
   const chats = {
-    search: async (query: string) => {
-      asked.push(query);
+    list: async () => await Promise.resolve(listed),
+    projects: async () => await Promise.resolve(projects),
+    search: async (query: string, projectId: string | null = null) => {
+      asked.push({ query, projectId });
       return await found(query);
     },
   };
@@ -76,11 +85,9 @@ const shown = async (found: (query: string) => Promise<ChatSearchHit[]>) => {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <ChatSwitcher
-          activeId={undefined}
-          chats={[board, lease, travel]}
-          projects={projects}
-        />
+        <ChatSwitcherProvider>
+          <p>Any page</p>
+        </ChatSwitcherProvider>
       ),
     }),
     history: createMemoryHistory(),
@@ -126,6 +133,14 @@ const press = async (init: KeyboardEventInit): Promise<void> => {
   });
 };
 
+/** Opens the window with `keys`, once it has read the chats. */
+const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
+  await press(keys);
+  await vi.waitFor(() => {
+    expect(rows().length).toBeGreaterThan(0);
+  });
+};
+
 /** Types `text` into the window's search, as a person would. */
 const type = async (text: string): Promise<void> => {
   const input = dialog()?.querySelector<HTMLInputElement>("[cmdk-input]");
@@ -158,7 +173,7 @@ describe("the chats window", () => {
     const { asked } = await shown(async () => await answer.promise);
     expect(dialog()).toBeNull();
 
-    await press({ key: "k", metaKey: true });
+    await openWindow({ key: "k", metaKey: true });
     expect(rows()).toStrictEqual([
       "Board reportQ4 board ·",
       "Lease of the office",
@@ -169,7 +184,7 @@ describe("the chats window", () => {
     await type("lease");
     expect(rows()).toStrictEqual(["Lease of the office"]);
     await vi.waitFor(() => {
-      expect(asked).toStrictEqual(["lease"]);
+      expect(asked).toStrictEqual([{ query: "lease", projectId: null }]);
     });
 
     await act(async () => {
@@ -189,9 +204,22 @@ describe("the chats window", () => {
     expect(dialog()?.querySelector("mark")?.textContent).toBe("lease");
   });
 
-  it("shows one project's chats alone, with the way to its page", async () => {
-    await shown(async () => await Promise.resolve([]));
-    await press({ key: "k", ctrlKey: true });
+  it("shows a chat found as core lists it now, renamed or moved since", async () => {
+    const renamed = { ...lease, title: "Office lease 2027", projectId: "p-1" };
+    await shown(
+      async () => await Promise.resolve([{ chat: lease, said: null }]),
+      [board, renamed, travel]
+    );
+    await openWindow({ key: "k", metaKey: true });
+    await type("office");
+    await vi.waitFor(() => {
+      expect(rows()).toStrictEqual(["Office lease 2027Q4 board ·"]);
+    });
+  });
+
+  it("shows one project's chats alone, with the way to its page, and looks in it alone", async () => {
+    const { asked } = await shown(async () => await Promise.resolve([]));
+    await openWindow({ key: "k", ctrlKey: true });
 
     const scope = [...(dialog()?.querySelectorAll("nav button") ?? [])].find(
       (button) => button.textContent?.startsWith("Q4 board")
@@ -208,6 +236,11 @@ describe("the chats window", () => {
       rows: ["Board report"],
       pressed: "true",
       page: "Instructions and files",
+    });
+
+    await type("minutes");
+    await vi.waitFor(() => {
+      expect(asked).toStrictEqual([{ query: "minutes", projectId: "p-1" }]);
     });
 
     // The same keys close it again.

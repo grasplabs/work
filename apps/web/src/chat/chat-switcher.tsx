@@ -3,6 +3,7 @@ import type {
   ChatSearchHit,
   ChatSummary,
 } from "@grasp-os/shared/chat";
+import { hasEvery } from "@grasp-os/shared/chat-search";
 import { failureText } from "@grasp-os/shared/errors";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -32,13 +33,20 @@ import {
   MessagesSquareIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  use,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import { setActiveChat } from "./active-chat.ts";
-import { groupChats, hasEvery, whenShort } from "./chat-history.ts";
+import { setActiveChat, useActiveChat } from "./active-chat.ts";
+import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
 import {
   ChatMenu,
@@ -51,16 +59,21 @@ import { ProjectDialog } from "./project-dialog.tsx";
 
 // The person's chats and projects in one window, one quiet icon and ⌘K
 // away, in place of a list beside the chat (grasplabs/prototype
-// `components/chat/chat-switcher.tsx`). On the left, a new chat, all chats
-// and each project with how many chats it holds, and a new project at
-// its foot (on a phone, one row that scrolls sideways); on the right, the
+// `components/chat/chat-switcher.tsx`). The window is the frame's, on
+// every page (`ChatSwitcherProvider`, mounted in the shell): ⌘K opens it
+// anywhere, and a page's header may show the icon that does too
+// (`ChatSwitcherButton`). It reads the chats and projects as it opens, and
+// again after a change made in it. On the left, a new chat, all chats and
+// each project with how many chats it holds, and a new project at its
+// foot (on a phone, one row that scrolls sideways); on the right, the
 // chats of what is chosen there by when they were last used, each with
 // when that was and, in all chats, its project. A search on top narrows
 // them to the chats with every word in their title, their project's name
 // or what was said in them: by title at once, then by what was said as
-// core finds it (`chats.search`), a chat found that way showing where.
-// The keys move through the chats and Enter opens one; a row's three dots,
-// where it is pointed at, rename it, move it or delete it.
+// core finds it (`chats.search`, in the project chosen), a chat found that
+// way showing where. The keys move through the chats and Enter opens one;
+// a row's three dots, where it is pointed at, rename it, move it or
+// delete it.
 
 const periodLabel: Record<ChatPeriod, MessageDescriptor> = {
   today: msg({ message: "Today", context: "chats from today" }),
@@ -168,6 +181,7 @@ const ChatRow = ({
   projectName,
   now,
   onOpen,
+  onChanged,
   onNewProject,
   onDelete,
 }: {
@@ -178,6 +192,8 @@ const ChatRow = ({
   projectName: string | undefined;
   now: Date;
   onOpen: () => void;
+  /** It was renamed or moved: the window reads the chats again. */
+  onChanged: () => void;
   onNewProject: () => void;
   onDelete: () => void;
 }) => {
@@ -194,7 +210,10 @@ const ChatRow = ({
           maxLength={chatTitleMaxLength}
           onDone={(name) => {
             setRenaming(false);
-            void rename(name);
+            void (async () => {
+              await rename(name);
+              onChanged();
+            })();
           }}
           value={chat.title}
         />
@@ -231,7 +250,10 @@ const ChatRow = ({
         chat={chat}
         onDelete={onDelete}
         onMove={(projectId) => {
-          void move(projectId);
+          void (async () => {
+            await move(projectId);
+            onChanged();
+          })();
         }}
         onNewProject={onNewProject}
         onRename={() => {
@@ -244,9 +266,13 @@ const ChatRow = ({
   );
 };
 
-/** What core found for a search: the query it was asked, and the chats. */
+/**
+ * What core found for a search: the query it was asked, in which project
+ * (none for all chats), and the chats.
+ */
 interface Found {
   query: string;
+  projectId: string | undefined;
   hits: ChatSearchHit[];
 }
 
@@ -266,9 +292,10 @@ const useSaidSearch = () => {
     },
     []
   );
-  const search = (text: string): void => {
+  const search = (text: string, projectId: string | undefined): void => {
     const query = text.trim();
-    latest.current = query;
+    const asked = `${projectId ?? ""}\n${query}`;
+    latest.current = asked;
     window.clearTimeout(timer.current);
     setFailure(undefined);
     if (query === "") {
@@ -278,13 +305,14 @@ const useSaidSearch = () => {
       void (async () => {
         try {
           const hits = await core.withSession(
-            async (session) => await session.chats.search(query)
+            async (session) =>
+              await session.chats.search(query, projectId ?? null)
           );
-          if (latest.current === query) {
-            setFound({ query, hits });
+          if (latest.current === asked) {
+            setFound({ query, projectId, hits });
           }
         } catch (error) {
-          if (latest.current === query) {
+          if (latest.current === asked) {
             setFailure(failureText(error));
           }
         }
@@ -292,6 +320,34 @@ const useSaidSearch = () => {
     }, searchRestMs);
   };
   return { found, failure, search };
+};
+
+/** The person's chats and projects, read as the window opens. */
+interface Listed {
+  chats: ChatSummary[];
+  projects: ChatProject[];
+}
+
+/** Reads the person's chats and projects from core, again on each `read`. */
+const useListed = () => {
+  const core = useCore();
+  const [listed, setListed] = useState<Listed>();
+  const [failure, setFailure] = useState<string>();
+  const read = (): void => {
+    void (async () => {
+      try {
+        const [chats, projects] = await core.withSession(
+          async (session) =>
+            await Promise.all([session.chats.list(), session.chats.projects()])
+        );
+        setListed({ chats, projects });
+        setFailure(undefined);
+      } catch (error) {
+        setFailure(failureText(error));
+      }
+    })();
+  };
+  return { listed, failure, read };
 };
 
 /** A new project, for the chat that asked for it (moved into it) or none. */
@@ -316,8 +372,8 @@ const NewProject = ({
           }
         }}
         onSaved={(projectId) => {
-          onDone(projectId);
           if (chatId === undefined) {
+            onDone(projectId);
             return;
           }
           void (async () => {
@@ -329,6 +385,7 @@ const NewProject = ({
             } catch (error) {
               setFailure(failureText(error));
             }
+            onDone(projectId);
           })();
         }}
         open={open}
@@ -338,22 +395,140 @@ const NewProject = ({
   );
 };
 
+/** Opens (or closes) the frame's chats window. */
+const OpenChats = createContext<(open: boolean) => void>(() => {
+  // Outside the frame there is no window to open.
+});
+
 /**
- * The quiet icon that opens the window, and the window, opened with ⌘K or
- * Ctrl K too.
+ * The chats the window lists: those of all chats or of `project`, and
+ * with a search, those whose title or project holds every word until
+ * core has answered it; then what core `found`, each chat as `chats`
+ * has it, so a rename or a move made since shows.
  */
-export const ChatSwitcher = ({
+const shownChats = ({
   chats,
   projects,
-  activeId,
+  project,
+  query,
+  found,
 }: {
   chats: readonly ChatSummary[];
   projects: readonly ChatProject[];
-  activeId: string | undefined;
+  project: ChatProject | undefined;
+  query: string;
+  found: Found | undefined;
+}): ChatSummary[] => {
+  const inScope = (chat: ChatSummary): boolean =>
+    project === undefined || chat.projectId === project.id;
+  if (query === "") {
+    return chats.filter(inScope);
+  }
+  if (found === undefined) {
+    return chats
+      .filter(inScope)
+      .filter((chat) =>
+        hasEvery(
+          query,
+          chat.title,
+          projects.find(({ id }) => id === chat.projectId)?.name ?? ""
+        )
+      );
+  }
+  const byId = new Map(chats.map((chat) => [chat.id, chat]));
+  return found.hits
+    .flatMap(({ chat }) => byId.get(chat.id) ?? [])
+    .filter(inScope);
+};
+
+/**
+ * The column on the left: a new chat (in the project chosen), all chats,
+ * each project with how many chats it holds, and a new project.
+ */
+const ScopeColumn = ({
+  chats,
+  projects,
+  project,
+  onChoose,
+  onNewChat,
+  onNewProject,
+}: {
+  chats: readonly ChatSummary[];
+  projects: readonly ChatProject[];
+  project: ChatProject | undefined;
+  onChoose: (projectId?: string) => void;
+  onNewChat: () => void;
+  onNewProject: () => void;
+}) => {
+  const { t } = useLingui();
+  const projectName = project?.name;
+  const projectsLabel = t`Projects`;
+  return (
+    <nav
+      aria-label={projectsLabel}
+      className="bg-muted/40 flex flex-none gap-1 overflow-x-auto border-b p-2 md:w-56 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-r md:border-b-0 md:p-3"
+    >
+      <Button
+        className="flex-none md:mb-3 md:justify-start"
+        onClick={onNewChat}
+        size="sm"
+        variant="outline"
+      >
+        <PlusIcon data-icon="inline-start" />
+        {projectName === undefined ? (
+          <Trans>New chat</Trans>
+        ) : (
+          <Trans>New chat in {projectName}</Trans>
+        )}
+      </Button>
+      <Scope
+        chosen={project === undefined}
+        count={chats.length}
+        icon={<MessagesSquareIcon />}
+        label={t`All chats`}
+        onChoose={() => {
+          onChoose();
+        }}
+      />
+      <span className="text-muted-foreground hidden px-2 pt-3 pb-1 text-xs md:block">
+        {projectsLabel}
+      </span>
+      {projects.map((each) => (
+        <Scope
+          chosen={each.id === project?.id}
+          count={chats.filter(({ projectId }) => projectId === each.id).length}
+          icon={<FolderIcon />}
+          key={each.id}
+          label={each.name}
+          onChoose={() => {
+            onChoose(each.id);
+          }}
+        />
+      ))}
+      <Button
+        className="flex-none md:mt-auto md:justify-start"
+        onClick={onNewProject}
+        size="sm"
+        variant="ghost"
+      >
+        <FolderPlusIcon data-icon="inline-start" />
+        <Trans>New project</Trans>
+      </Button>
+    </nav>
+  );
+};
+
+/** The window and what it shows, while it is open. */
+const ChatWindow = ({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const activeId = useActiveChat();
   const [search, setSearch] = useState("");
   // All chats (`undefined`), or one project's, by its ID.
   const [scope, setScope] = useState<string>();
@@ -361,87 +536,64 @@ export const ChatSwitcher = ({
   const [creating, setCreating] = useState<{ chatId?: string }>();
   const [deleting, setDeleting] = useState<ChatSummary>();
   const said = useSaidSearch();
-  const shortcut = shortcutLabel();
-
-  const show = (next: boolean): void => {
-    if (next) {
+  const listing = useListed();
+  const [readOnOpen, setReadOnOpen] = useState(false);
+  // Read again each time it opens, so it shows what changed elsewhere.
+  if (open !== readOnOpen) {
+    setReadOnOpen(open);
+    if (open) {
       setSearch("");
       setScope(undefined);
     }
-    setOpen(next);
-  };
+  }
+  const read = useEffectEvent(() => {
+    listing.read();
+  });
   useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (!isShortcut(event)) {
-        return;
-      }
-      event.preventDefault();
-      setOpen((was) => {
-        if (!was) {
-          setSearch("");
-          setScope(undefined);
-        }
-        return !was;
-      });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    if (open) {
+      read();
+    }
+  }, [open]);
 
+  const chats = listing.listed?.chats ?? [];
+  const projects = listing.listed?.projects ?? [];
   const project = projects.find(({ id }) => id === scope);
   const nameOf = (chat: ChatSummary): string | undefined =>
     projects.find(({ id }) => id === chat.projectId)?.name;
-  const inScope = (chat: ChatSummary): boolean =>
-    project === undefined || chat.projectId === project.id;
   const query = search.trim();
   const searching = query !== "";
-  // While core looks through what was said, the chats whose title or
-  // project holds every word; then what core found.
-  const answered = said.found?.query === query ? said.found : undefined;
+  const answered =
+    said.found?.query === query && said.found.projectId === project?.id
+      ? said.found
+      : undefined;
   const hits = new Map((answered?.hits ?? []).map((hit) => [hit.chat.id, hit]));
-  let shown = chats.filter(inScope);
-  if (searching) {
-    shown =
-      answered === undefined
-        ? shown.filter((chat) =>
-            hasEvery(query, chat.title, nameOf(chat) ?? "")
-          )
-        : answered.hits.map(({ chat }) => chat).filter(inScope);
-  }
   const now = new Date();
-  const groups = groupChats(shown, now);
+  const groups = groupChats(
+    shownChats({ chats, projects, project, query, found: answered }),
+    now
+  );
+  const choose = (projectId?: string): void => {
+    setScope(projectId);
+    said.search(search, projectId);
+  };
   const openChat = (chatId: string): void => {
-    show(false);
+    onOpenChange(false);
     void navigate({ to: "/", search: { chat: chatId } });
   };
   const newChat = (): void => {
-    show(false);
+    onOpenChange(false);
     setActiveChat(undefined);
     void navigate({
       to: "/",
       search: project === undefined ? {} : { project: project.id },
     });
   };
-  const projectName = project?.name;
-  const projectsLabel = t`Projects`;
-
   return (
     <>
-      <HeaderIcon
-        label={t`Chats`}
-        onClick={() => {
-          show(true);
-        }}
-        shortcut={shortcut}
-      >
-        <MessagesSquareIcon />
-      </HeaderIcon>
       <CommandDialog
         className="top-1/8 sm:max-w-3xl"
         description={t`Search your chats and projects, and open one.`}
-        onOpenChange={show}
+        onOpenChange={onOpenChange}
         open={open}
         title={t`Chats`}
       >
@@ -456,69 +608,23 @@ export const ChatSwitcher = ({
             aria-label={t`Search chats and projects`}
             onValueChange={(value) => {
               setSearch(value);
-              said.search(value);
+              said.search(value, scope);
             }}
             placeholder={t`Search chats and projects`}
             size="lg"
             value={search}
           />
           <div className="flex h-112 min-h-0 flex-col md:flex-row">
-            <nav
-              aria-label={projectsLabel}
-              className="bg-muted/40 flex flex-none gap-1 overflow-x-auto border-b p-2 md:w-56 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-r md:border-b-0 md:p-3"
-            >
-              <Button
-                className="flex-none md:mb-3 md:justify-start"
-                onClick={newChat}
-                size="sm"
-                variant="outline"
-              >
-                <PlusIcon data-icon="inline-start" />
-                {projectName === undefined ? (
-                  <Trans>New chat</Trans>
-                ) : (
-                  <Trans>New chat in {projectName}</Trans>
-                )}
-              </Button>
-              <Scope
-                chosen={project === undefined}
-                count={chats.length}
-                icon={<MessagesSquareIcon />}
-                label={t`All chats`}
-                onChoose={() => {
-                  setScope(undefined);
-                }}
-              />
-              <span className="text-muted-foreground hidden px-2 pt-3 pb-1 text-xs md:block">
-                {projectsLabel}
-              </span>
-              {projects.map((each) => (
-                <Scope
-                  chosen={each.id === scope}
-                  count={
-                    chats.filter(({ projectId }) => projectId === each.id)
-                      .length
-                  }
-                  icon={<FolderIcon />}
-                  key={each.id}
-                  label={each.name}
-                  onChoose={() => {
-                    setScope(each.id);
-                  }}
-                />
-              ))}
-              <Button
-                className="flex-none md:mt-auto md:justify-start"
-                onClick={() => {
-                  setCreating({});
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                <FolderPlusIcon data-icon="inline-start" />
-                <Trans>New project</Trans>
-              </Button>
-            </nav>
+            <ScopeColumn
+              chats={chats}
+              onChoose={choose}
+              onNewChat={newChat}
+              onNewProject={() => {
+                setCreating({});
+              }}
+              project={project}
+              projects={projects}
+            />
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {project === undefined ? null : (
                 <div className="flex items-center gap-2 border-b py-2 pr-2 pl-5">
@@ -528,7 +634,7 @@ export const ChatSwitcher = ({
                   <Link
                     className={buttonVariants({ size: "sm", variant: "ghost" })}
                     onClick={() => {
-                      show(false);
+                      onOpenChange(false);
                     }}
                     params={{ projectId: project.id }}
                     to="/projects/$projectId"
@@ -538,15 +644,17 @@ export const ChatSwitcher = ({
                   </Link>
                 </div>
               )}
-              <ErrorText>{said.failure}</ErrorText>
+              <ErrorText>{listing.failure ?? said.failure}</ErrorText>
               <CommandList fill>
-                <CommandEmpty>
-                  {searching ? (
-                    <Trans>No chat has that.</Trans>
-                  ) : (
-                    <Trans>No chats here yet.</Trans>
-                  )}
-                </CommandEmpty>
+                {listing.listed === undefined ? null : (
+                  <CommandEmpty>
+                    {searching ? (
+                      <Trans>No chat has that.</Trans>
+                    ) : (
+                      <Trans>No chats here yet.</Trans>
+                    )}
+                  </CommandEmpty>
+                )}
                 {groups.map((group) => (
                   <CommandGroup
                     heading={i18n._(periodLabel[group.period])}
@@ -559,6 +667,9 @@ export const ChatSwitcher = ({
                         hit={hits.get(chat.id)}
                         key={chat.id}
                         now={now}
+                        onChanged={() => {
+                          listing.read();
+                        }}
                         onDelete={() => {
                           setDeleting(chat);
                         }}
@@ -585,8 +696,9 @@ export const ChatSwitcher = ({
         chatId={creating?.chatId}
         onDone={(projectId) => {
           setCreating(undefined);
+          listing.read();
           if (projectId !== undefined) {
-            setScope(projectId);
+            choose(projectId);
           }
         }}
         open={creating !== undefined}
@@ -598,11 +710,59 @@ export const ChatSwitcher = ({
           onOpenChange={(next) => {
             if (!next) {
               setDeleting(undefined);
+              listing.read();
             }
           }}
           open
         />
       )}
     </>
+  );
+};
+
+/**
+ * The frame's chats window, on every page: ⌘K or Ctrl K opens it (and
+ * closes it again), as does a page's {@link ChatSwitcherButton}.
+ */
+export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
+  const [open, setOpen] = useState(false);
+  const toggle = useEffectEvent(() => {
+    setOpen(!open);
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!isShortcut(event)) {
+        return;
+      }
+      event.preventDefault();
+      toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+  return (
+    <OpenChats value={setOpen}>
+      {children}
+      <ChatWindow onOpenChange={setOpen} open={open} />
+    </OpenChats>
+  );
+};
+
+/** The quiet icon in a page's header that opens the chats window. */
+export const ChatSwitcherButton = () => {
+  const { t } = useLingui();
+  const setOpen = use(OpenChats);
+  return (
+    <HeaderIcon
+      label={t`Chats`}
+      onClick={() => {
+        setOpen(true);
+      }}
+      shortcut={shortcutLabel()}
+    >
+      <MessagesSquareIcon />
+    </HeaderIcon>
   );
 };
