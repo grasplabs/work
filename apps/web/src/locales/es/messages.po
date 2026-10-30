@@ -11263,10 +11263,17 @@ msgstr "Resumen"
 msgid "Own list or tool"
 msgstr "Lista o herramienta propia"
 
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by {name}"
+msgstr "Responsable: {name}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Owned by {owner}"
 msgstr "Responsable: {owner}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by someone else"
+msgstr "Responsable: otra persona"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx

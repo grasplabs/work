@@ -22,7 +22,7 @@ import {
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -117,14 +117,18 @@ const StepLine = ({ step }: { step: TraceStep }) => {
 const RunTraceDetail = ({
   workflow,
   runId,
+  onStatus,
 }: {
   workflow: string;
   runId: string;
+  /** The run's status, as each read of its trace says it. */
+  onStatus: (status: string) => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const [trace, setTrace] = useState<WorkflowRunTrace>();
   const [failure, setFailure] = useState<string>();
+  const told = useEffectEvent(onStatus);
 
   useEffect(() => {
     let stopped = false;
@@ -146,6 +150,7 @@ const RunTraceDetail = ({
         drawn = followed.diagram;
         setTrace(followed);
         setFailure(undefined);
+        told(read.status);
         if (!settled(read)) {
           timer = setTimeout(() => {
             void follow();
@@ -359,6 +364,8 @@ export const Traces = ({
 }) => {
   const { t } = useLingui();
   const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
+  // The opened run's status, as its followed trace last said it.
+  const [traced, setTraced] = useState<{ runId: string; status: string }>();
   return (
     <div className="flex flex-col gap-6">
       <ToggleGroup
@@ -401,13 +408,24 @@ export const Traces = ({
           setOpened(null);
         }}
         opened={opened}
+        status={
+          traced !== undefined && traced.runId === opened?.id
+            ? traced.status
+            : null
+        }
         steps={
           opened === null ? null : (
             <section className="flex flex-col gap-3">
               <h3 className="text-muted-foreground">
                 <Trans>What it did</Trans>
               </h3>
-              <RunTraceDetail runId={opened.id} workflow={workflow} />
+              <RunTraceDetail
+                onStatus={(status) => {
+                  setTraced({ runId: opened.id, status });
+                }}
+                runId={opened.id}
+                workflow={workflow}
+              />
             </section>
           )
         }
