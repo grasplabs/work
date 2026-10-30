@@ -39,6 +39,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { AppErrors } from "../engines/app-errors.tsx";
 import {
   AppStatusControls,
   StatusBadge,
@@ -600,6 +601,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
+          {app.role === "builder" ? (
+            <TabsTrigger value="errors">
+              <Trans>Errors</Trans>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="workflows">
           <div className="pt-4">
@@ -671,6 +677,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             <Members app={app} identity={identity} members={members} />
           </div>
         </TabsContent>
+        {app.role === "builder" ? (
+          <TabsContent value="errors">
+            <div className="pt-4">
+              <AppErrors app={app} />
+            </div>
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );
