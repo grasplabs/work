@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Input } from "@grasp-os/ui/components/input";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -636,7 +637,7 @@ const WorkflowView = ({
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="flex min-w-0 grow basis-96 flex-col gap-2">
-            <h1 className="type-title">{summary.workflow}</h1>
+            <PageHeaderTitle>{summary.workflow}</PageHeaderTitle>
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
                 render={

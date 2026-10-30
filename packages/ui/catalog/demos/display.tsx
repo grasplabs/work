@@ -80,6 +80,7 @@ import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { SuccessMark } from "@grasp-os/ui/components/success-mark";
 import {
   Table,
@@ -355,9 +356,24 @@ const SuccessMarkDemo = () => (
   </div>
 );
 
+const StatDemo = () => (
+  <dl className="flex gap-8">
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-sm">Hours handed back</dt>
+      <Stat render={<dd />}>1,284</Stat>
+    </div>
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-muted-foreground text-sm">Waiting on you</dt>
+      <Stat render={<dd />} variant="attention">
+        3
+      </Stat>
+    </div>
+  </dl>
+);
+
 const GraspMarkDemo = () => (
   <div className="flex items-center gap-2">
-    <GraspMark className="size-6" variant="logo" />
+    <GraspMark className="size-6" />
     <span className="font-medium">Grasp</span>
   </div>
 );
@@ -375,6 +391,7 @@ export const displayDemos = {
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
   "grasp-mark": GraspMarkDemo,
+  stat: StatDemo,
   item: ItemDemo,
   kbd: KbdDemo,
   progress: ProgressDemo,
