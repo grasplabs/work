@@ -21,6 +21,7 @@ import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { showThinkingName } from "./agent-thinking.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
@@ -737,6 +738,11 @@ export interface Turn {
    */
   events?: () => Message[];
   /**
+   * The tool that shows the turn's thinking in the brain (agent-thinking.ts),
+   * for a chat whose agent may read the brain; none for any other.
+   */
+  thinking?: AgentTool;
+  /**
    * The code runs whose results may not reach the model now: the chat's
    * agent, for its person, can no longer read something one of them read
    * (workspace.ts). Asked before every model request, after `whyStop`, so
@@ -1117,6 +1123,10 @@ interface Progress {
   asking?: { response: AssistantMessage; calls: number };
   /** Why the turn was stopped before a request, if it was. */
   stopped?: Error;
+  /** Steps of thinking shown in the brain this turn. */
+  thought: number;
+  /** Whether the turn asked once for an answer in words after its thinking. */
+  askedForWords: boolean;
   /** The runs the next request withholds, read as it was prepared. */
   withheld: ReadonlySet<string>;
 }
@@ -1169,6 +1179,37 @@ const textOf = (message: AssistantMessage | undefined): string =>
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("");
 
+/**
+ * Responses kept for the answer once a turn shows its thinking: a step of
+ * thinking is refused once only these are left, so the rounds spent on it
+ * never leave none for the answer.
+ */
+const answerSteps = 2;
+
+/** Why a step of thinking isn't shown, if it isn't: the turn's last rounds are the answer's. */
+const thinkingRefusalOf = (
+  tool: string,
+  progress: Progress
+): string | undefined =>
+  tool === showThinkingName && progress.steps + answerSteps >= maxSteps
+    ? "Not shown: the rounds left are for your answer. Write it now, in words."
+    : undefined;
+
+/** What a turn that only showed its thinking is asked, once, before it ends. */
+const wordsPlease =
+  "You showed your thinking in the brain, but wrote no answer. Now write your answer to the person in words.";
+
+/**
+ * Whether the turn showed its thinking and ended without a word: it is
+ * asked once for its answer.
+ */
+const wantsWords = (progress: Progress): boolean =>
+  !progress.askedForWords &&
+  progress.thought > 0 &&
+  progress.last?.stopReason === "stop" &&
+  textOf(progress.last).trim() === "" &&
+  progress.steps < maxSteps;
+
 const outcomeOf = (
   last: AssistantMessage | undefined,
   steps: number,
@@ -1208,6 +1249,7 @@ export const runTurn = async ({
   whyStop,
   events,
   withheld,
+  thinking: thinkingTool,
 }: Turn): Promise<TurnResult> => {
   // In a chat app, no links in the agent's own words: links come from code.
   const ownWords = context.channel !== undefined;
@@ -1219,11 +1261,18 @@ export const runTurn = async ({
     { role: "user", content: question, timestamp: Date.now() },
     ...filesNote(files, Date.now()),
   ];
-  const progress: Progress = { steps: 0, runs: 0, withheld: new Set() };
+  const progress: Progress = {
+    steps: 0,
+    runs: 0,
+    withheld: new Set(),
+    thought: 0,
+    askedForWords: false,
+  };
   const thinking = thinkingClock();
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
+    ...(thinkingTool === undefined ? [] : [thinkingTool]),
   ];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
@@ -1233,6 +1282,16 @@ export const runTurn = async ({
   const asked = measureTurns([...history, ...prompts], room);
   const taken = async (): Promise<Message[]> =>
     await Promise.resolve(events?.() ?? []);
+  // Before the turn would end: what happened meanwhile, or, once, the
+  // answer a turn that only showed its thinking still owes in words.
+  const followUps = async (): Promise<AgentMessage[]> => {
+    const happened = await taken();
+    if (happened.length > 0 || !wantsWords(progress)) {
+      return happened;
+    }
+    progress.askedForWords = true;
+    return [{ role: "system", content: wordsPlease, timestamp: Date.now() }];
+  };
   if ((asked.sizes.at(-1) ?? 0) > asked.budget) {
     throw agentErrors.create("agent.question_too_long");
   }
@@ -1264,7 +1323,7 @@ export const runTurn = async ({
         ),
       toolExecution: "sequential",
       getSteeringMessages: taken,
-      getFollowUpMessages: taken,
+      getFollowUpMessages: followUps,
       // Checked again before every model request.
       // What is withheld is read here too, once a request: a result of the
       // turn under way can't be withheld, as the provider takes the latest
@@ -1283,10 +1342,12 @@ export const runTurn = async ({
       },
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
         // Reading a declaration runs no code: only the turn's steps bound it.
-        const runsCode = toolCall.name !== "readApi";
+        // Showing thinking runs none either, but leaves the answer room.
+        const runsCode =
+          toolCall.name !== "readApi" && toolCall.name !== showThinkingName;
         const reason = runsCode
           ? refusal(progress, assistantMessage)
-          : undefined;
+          : thinkingRefusalOf(toolCall.name, progress);
         if (runsCode && reason === undefined) {
           progress.runs += 1;
         }
@@ -1309,6 +1370,13 @@ export const runTurn = async ({
           ownWords ? inOwnWords(event.message) : event.message,
           event.message.role === "assistant" ? thinking.take() : undefined
         );
+      }
+      if (
+        event.type === "tool_execution_end" &&
+        event.toolName === showThinkingName &&
+        !event.isError
+      ) {
+        progress.thought += 1;
       }
       if (event.type === "tool_execution_update") {
         const update: unknown = event.partialResult;

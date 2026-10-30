@@ -12,6 +12,7 @@ import {
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
+  runChatSources,
   runEvidenceHolds,
   resourceRunMailCalls,
   runMailCalls,
@@ -482,6 +483,8 @@ export const sweepWorkflowStartDetails = async (
     db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
     // And whose evidence it held: no release of its left to check.
     db.delete(runEvidenceHolds).where(inArray(runEvidenceHolds.runId, due)),
+    // And what the chat that had it started had read (workflow-starts.ts).
+    db.delete(runChatSources).where(inArray(runChatSources.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who
     // answered, when and how stay.

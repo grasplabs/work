@@ -15,29 +15,52 @@ import { useFull, WidgetBlock } from "./widget-block.tsx";
 // most, each with what one run of it cost. Settings → AI spend has the
 // rest: budgets, each binding and the reservations held for review.
 
-/** A workflow that spent this month: its name, which opens it, its engine, and what a run cost. */
+/** A workflow that spent this month, by its name, which opens it while core still has it. */
+const WorkflowName = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
+  const name = workflow.name ?? workflow.workflowId;
+  if (workflow.appId === null) {
+    return workflow.name === null ? (
+      <span className="truncate">{name}</span>
+    ) : (
+      <Link
+        className="truncate hover:underline"
+        params={{ workflow: workflow.workflowId }}
+        to="/workflows/$workflow"
+      >
+        {name}
+      </Link>
+    );
+  }
+  return workflow.appName === null ? (
+    <span className="truncate">{name}</span>
+  ) : (
+    <Link
+      className="truncate hover:underline"
+      params={{ app: workflow.appId, workflow: workflow.workflowId }}
+      to="/workflows/$app/$workflow"
+    >
+      {name}
+    </Link>
+  );
+};
+
+/** A workflow that spent this month: its name, its engine for an App's, and what a run cost. */
 const SpendLine = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
   const { t } = useLingui();
-  const name = workflow.workflowId;
-  const domain = workflow.appName ?? workflow.appId;
+  const domain =
+    workflow.appId === null ? null : (workflow.appName ?? workflow.appId);
   const perRun = costPerRun(workflow);
   const amount = dollars(workflow.amount);
   const each = perRun === null ? null : dollars(perRun);
   return (
     <li className="flex items-baseline gap-3 border-t py-2">
       <span className="flex min-w-0 flex-1 flex-col">
-        {workflow.appName === null ? (
-          <span className="truncate">{name}</span>
-        ) : (
-          <Link
-            className="truncate hover:underline"
-            params={{ app: workflow.appId, workflow: name }}
-            to="/workflows/$app/$workflow"
-          >
-            {name}
-          </Link>
+        <WorkflowName workflow={workflow} />
+        {domain === null ? null : (
+          <span className="text-muted-foreground truncate text-xs">
+            {domain}
+          </span>
         )}
-        <span className="text-muted-foreground truncate text-xs">{domain}</span>
       </span>
       <span className="flex flex-none flex-col items-end">
         <span className="tabular-nums">
@@ -62,7 +85,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   return (
     <>
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-2xl font-medium tabular-nums">{total}</span>
+        <span className="type-figure">{total}</span>
         <span className="text-muted-foreground text-xs">
           <Trans>for every model call this month</Trans>
         </span>

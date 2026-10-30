@@ -11,8 +11,8 @@
  * with its targets and audit event, in one batch.
  */
 import { log } from "@grasp-os/shared/log";
-import { releaseIdSchema } from "@grasp-os/shared/release";
 import type { LimitRaise } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
   eq,

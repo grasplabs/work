@@ -12,6 +12,10 @@
  * only after such a request, as one whose create answer was lost; one
  * nobody asked for is someone else's, and stops the run rather than be
  * adopted because its name matches (spec 39.2). Nothing here deletes.
+ *
+ * Whichever call answered, only a resource the provider reports in the
+ * jurisdiction the inventory records (the organization's) is used: one
+ * anywhere else stops the run (`resource_outside_jurisdiction`).
  */
 import { and, eq, isNull } from "drizzle-orm";
 
@@ -28,7 +32,6 @@ import { clientResources } from "../db/schema.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
-  assertPlaceable,
   clientInventory,
   destinationOf,
   InventoryError,
@@ -36,7 +39,23 @@ import {
   recordProviderId,
 } from "./inventory.ts";
 import type { ClientResource } from "./inventory.ts";
-import { hostingPolicyIdSchema } from "./policy.ts";
+
+/**
+ * Throws unless `resource` is where the inventory records it: the
+ * provider's jurisdiction for it, `default` for none.
+ */
+const assertInJurisdiction = (
+  resource: ClientResource,
+  reported: string | null | undefined
+): void => {
+  const observed = typeof reported === "string" ? reported : "default";
+  if (observed !== resource.jurisdiction) {
+    throw new InventoryError(
+      "resource_outside_jurisdiction",
+      `${resource.physicalName} is in ${observed}, not ${resource.jurisdiction}`
+    );
+  }
+};
 
 /** What the provider reports of a database or bucket. */
 interface Observed {
@@ -180,11 +199,6 @@ export const ensureClientResources = async (
   if (placement === undefined) {
     throw new InventoryError("not_placed", `${clientId} isn't placed`);
   }
-  await assertPlaceable(
-    db,
-    placement.destinationId,
-    hostingPolicyIdSchema.parse(placement.policyId)
-  );
   const destination = await destinationOf(db, placement.destinationId);
   if (destination.kind === "workerd" || destination.accountId === null) {
     throw new InventoryError(
@@ -196,11 +210,11 @@ export const ensureClientResources = async (
 
   for (const resource of await clientInventory(db, clientId)) {
     const provider = providerFor(api, accountId, resource.kind);
-    if (
-      provider === undefined ||
-      resource.lifecycle !== "allocated" ||
-      resource.providerId !== null
-    ) {
+    if (provider === undefined || resource.lifecycle !== "allocated") {
+      continue;
+    }
+    // Made by an earlier attempt, and checked then.
+    if (resource.providerId !== null) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
@@ -219,12 +233,7 @@ export const ensureClientResources = async (
     }
     // Whichever call answered, only what the provider reports in the
     // recorded jurisdiction is used: one set at creation isn't relabelled.
-    if (observed.jurisdiction !== resource.jurisdiction) {
-      throw new InventoryError(
-        "resource_outside_jurisdiction",
-        `${resource.physicalName} is in ${observed.jurisdiction ?? "no jurisdiction"}, not ${resource.jurisdiction}`
-      );
-    }
+    assertInJurisdiction(resource, observed.jurisdiction);
     // oxlint-disable-next-line no-await-in-loop -- persisted before the next
     await recordProviderId(
       db,

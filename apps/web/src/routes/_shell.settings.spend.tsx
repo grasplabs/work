@@ -64,9 +64,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span className="text-muted-foreground text-xs">{sub}</span>
   </div>
 );
@@ -125,9 +123,12 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     return i18n._(msg`All calls`);
   }
   if (of.type === "workflow") {
-    const { workflowId } = of;
+    const workflow = of.name ?? of.workflowId;
+    if (of.appId === null) {
+      return workflow;
+    }
     const engine = of.appName ?? of.appId;
-    return i18n._(msg`${workflowId} in ${ph({ domain: engine })}`);
+    return i18n._(msg`${workflow} in ${ph({ domain: engine })}`);
   }
   if (of.type === "run") {
     const { runId } = of;
@@ -135,19 +136,27 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
       return i18n._(msg`Run ${runId}`);
     }
     // Runs of one workflow told apart by when each started, and its ID.
-    const { workflowId } = of;
-    const engine = of.appName ?? of.appId ?? "";
+    const workflow = of.workflowName ?? of.workflowId;
     const started = formatDateTime(of.startedAt);
     const shortId = runId.slice(0, shortRunId);
+    const rootId = of.rootRunId?.slice(0, shortRunId);
+    if (of.appId === null) {
+      // An independent workflow's run in another run's chain.
+      return rootId === undefined
+        ? i18n._(msg`Run ${shortId} of ${workflow}, started ${started}`)
+        : i18n._(
+            msg`Run ${shortId} of ${workflow}, started ${started}, in the run chain started by run ${rootId}`
+          );
+    }
+    const engine = of.appName ?? of.appId;
     // An account in another run's lineage: never shown as its root.
-    if (of.rootRunId !== null) {
-      const rootId = of.rootRunId.slice(0, shortRunId);
+    if (rootId !== undefined) {
       return i18n._(
-        msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}, in the run chain started by run ${rootId}`
+        msg`Run ${shortId} of ${workflow} in ${ph({ domain: engine })}, started ${started}, in the run chain started by run ${rootId}`
       );
     }
     return i18n._(
-      msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}`
+      msg`Run ${shortId} of ${workflow} in ${ph({ domain: engine })}, started ${started}`
     );
   }
   return of.name ?? of.userId;
@@ -247,14 +256,14 @@ const WorkflowsThisMonth = ({ spend }: { spend: ModelMonthSpend }) => {
       ) : (
         <ul>
           {spend.workflows.map(
-            ({ appId, appName, workflowId, amount, runs }) => (
+            ({ appId, appName, workflowId, name, amount, runs }) => (
               <li
                 className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-6 border-t px-5 py-3"
                 key={JSON.stringify([appId, workflowId])}
               >
                 <span className="truncate">
                   {spenderName(
-                    { type: "workflow", appId, appName, workflowId },
+                    { type: "workflow", appId, appName, workflowId, name },
                     i18n
                   )}
                 </span>

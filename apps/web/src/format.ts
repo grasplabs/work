@@ -75,28 +75,28 @@ export const formatEuro = (value: number): string =>
     maximumFractionDigits: 0,
   }).format(value);
 
-/** Bytes in a kilobyte and a megabyte, as file sizes are shown. */
-const kilobyte = 1024;
-const megabyte = kilobyte * kilobyte;
+/** The largest unit `formatBytes` steps up to, and the ones under it. */
+const byteUnits = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
+const bytesPerUnit = 1024;
 
-/**
- * A file's size as the page's language writes it: "512 byte", "48 kB",
- * "2.4 MB", one decimal under 10 and none past it.
- */
+/** A file's size as the page's language writes it: "512 bytes", "1.5 MB". */
 export const formatBytes = (bytes: number): string => {
   let value = bytes;
-  let unit = "byte";
-  if (bytes >= megabyte) {
-    value = bytes / megabyte;
-    unit = "megabyte";
-  } else if (bytes >= kilobyte) {
-    value = bytes / kilobyte;
-    unit = "kilobyte";
+  let unit = 0;
+  while (value >= bytesPerUnit && unit < byteUnits.length - 1) {
+    value /= bytesPerUnit;
+    unit += 1;
   }
   return new Intl.NumberFormat(i18n.locale, {
     style: "unit",
-    unit,
-    unitDisplay: "short",
-    maximumFractionDigits: value < 10 ? 1 : 0,
+    unit: byteUnits[unit],
+    unitDisplay: unit === 0 ? "long" : "short",
+    maximumFractionDigits: unit === 0 ? 0 : 1,
   }).format(value);
 };
+
+/** A time of day as the page's language writes it, such as "14:05" or "2:05 PM". */
+export const formatTime = (value: string | number | Date): string =>
+  new Intl.DateTimeFormat(i18n.locale, { timeStyle: "short" }).format(
+    new Date(value)
+  );

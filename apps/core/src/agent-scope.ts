@@ -53,6 +53,13 @@ export interface AgentScope {
   via?: ChatChannel;
   /** The code run the stub was made for: it answers only while that runs. */
   runId: string;
+  /**
+   * That a Grasp staff member asked the turn this works in, in their own
+   * chat (GRA-1088), as core marked the turn from their session: its
+   * authority carries it (`chatAuthority`). Never from what the code or
+   * the page sends.
+   */
+  staff?: boolean;
 }
 
 /** One typed API the agent's code can call. */
@@ -102,7 +109,8 @@ export const workspaceAgentIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,64}$/u);
 export const chatAuthority = ({
   agentId: stored,
   personId,
-}: Pick<AgentScope, "agentId" | "personId">): Authority => {
+  staff,
+}: Pick<AgentScope, "agentId" | "personId" | "staff">): Authority => {
   const agentId = workspaceAgentIdSchema.safeParse(stored);
   if (!agentId.success) {
     // No agent core names: nowhere an agent can work.
@@ -112,6 +120,7 @@ export const chatAuthority = ({
     subject: { type: "agent", agentId: agentId.data },
     onBehalfOf: personId,
     mode: "interactive",
+    ...(staff === true ? { staff } : {}),
   });
 };
 

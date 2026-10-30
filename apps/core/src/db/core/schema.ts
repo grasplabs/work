@@ -724,6 +724,13 @@ export const apps = sqliteTable("apps", {
     staff: boolean;
   }>(),
   createdAt: timestamp("created_at").notNull(),
+  /**
+   * When it was removed (app-removal.ts), and by whom: a removed App is a
+   * tombstone, kept so what names it stays history, and answers nothing.
+   * Null while it is an App.
+   */
+  removedAt: timestamp("removed_at"),
+  removedBy: text("removed_by"),
 });
 
 /**
@@ -1689,6 +1696,18 @@ export const workflowRuns = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     version: integer().notNull(),
     startedBy: text("started_by"),
+    /**
+     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
+     * then their user ID, not a member's. Written once, by `startRun`,
+     * from the starter's own session, never from what it was asked; never
+     * for a run another run, a trigger or an agent started. The run's
+     * authority carries it, so its person passes the active-member gate
+     * only while they are still staff, and what it does is audited as
+     * started by "(Grasp staff)".
+     */
+    startedByStaff: integer("started_by_staff", { mode: "boolean" })
+      .notNull()
+      .default(false),
     status: text({
       // `starting`: written, its engine instance not yet known to exist
       // (src/workflows/runs.ts, `startRun`).
@@ -2436,6 +2455,27 @@ export const runEvidenceHolds = sqliteTable(
     primaryKey({ columns: [table.runId, table.heldRunId] }),
     index("run_evidence_holds_held_run_id_idx").on(table.heldRunId),
   ]
+);
+
+/**
+ * What the chat whose agent had a run started had read (GRA-1093;
+ * workflow-starts.ts): each of its sources still unwithheld then, with the
+ * chat's scope, copied once as the start is admitted. Before anything
+ * leaves the run, the host checks the chat's agent may still read them all
+ * for its person (history-access.ts, `readableSources`): a run is held to
+ * what its input may carry. Goes with the run's details.
+ */
+export const runChatSources = sqliteTable(
+  "run_chat_sources",
+  {
+    runId: text("run_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sourceId] })]
 );
 
 /**

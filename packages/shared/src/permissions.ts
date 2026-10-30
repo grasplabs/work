@@ -306,6 +306,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The landscape's Entra app (connect's providers.ts).
   "MICROSOFT_LANDSCAPE_CLIENT_ID",
   "MICROSOFT_LANDSCAPE_CLIENT_SECRET",
+  // The periods model budgets count in, which tests set (core's
+  // src/model-budgets.ts).
+  "MODEL_BUDGET_DAY",
+  "MODEL_BUDGET_MONTH",
   "MODEL_GATEWAY",
   "MODEL_LEDGER",
   "ONBOARDING",
@@ -597,6 +601,15 @@ export const authoritySchema = z
      * SB9). An agent has none.
      */
     appVersion: z.int().positive().optional(),
+    /**
+     * Work a Grasp staff member started (GRA-1088): set only by core's
+     * hosts, from the mark core wrote when staff started it (a run's
+     * `started_by_staff`, a turn's own), never from what a caller sends.
+     * Its person passes the active-member gate only while they are staff
+     * now (core's `requireActivePerson`), and its audit events say
+     * "(Grasp staff)". Never copied to work it starts.
+     */
+    staff: z.literal(true).optional(),
   })
   .refine(
     ({ subject, appVersion }) =>

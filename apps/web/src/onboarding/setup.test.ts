@@ -288,9 +288,9 @@ describe("what needs the admin", () => {
     const done = settledAs(fresh, "mail", true);
     const again = settledAs(done, "mail", false);
     expect({
-      fresh: openItems(fresh.settled),
-      done: openItems(done.settled),
-      again: openItems(again.settled),
+      fresh: openItems(fresh.settled, true),
+      done: openItems(done.settled, true),
+      again: openItems(again.settled, true),
       unchanged: settledAs(done, "mail", true) === done,
     }).toStrictEqual({
       fresh: ["mail"],
