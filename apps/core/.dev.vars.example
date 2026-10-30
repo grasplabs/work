@@ -22,3 +22,9 @@ GMAIL_PUBSUB_AUDIENCE=
 GMAIL_PUBSUB_SERVICE_ACCOUNT=
 GMAIL_PUBSUB_SUBSCRIPTION=
 GMAIL_PUBSUB_TOPIC=
+# Optional: what Settings › Security › Chat apps tells people to write to
+# (src/channels/where.ts): the WhatsApp number as people dial it
+# (`+31 20 123 4567`), and the Telegram bot's username without the `@`.
+# Unset, those apps are listed without an address.
+WHATSAPP_NUMBER=
+TELEGRAM_BOT_USERNAME=
