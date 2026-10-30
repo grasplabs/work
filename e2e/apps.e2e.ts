@@ -312,6 +312,9 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Members and roles",
         "Models",
         "AI spend",
+        // The company's groups of teams, the brain's regions: right after
+        // AI spend, as in the prototype.
+        "Brain",
         // Who can reach Stephen and what he may do for whom.
         "Stephen",
         "Pulse",
