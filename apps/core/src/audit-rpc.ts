@@ -13,6 +13,7 @@ import type {
   AuditFilter,
   AuditPage,
   AuditRecord,
+  AuditRetention,
   ChainVerification,
   FullVerification,
   ParsedAuditFilter,
@@ -30,7 +31,12 @@ import {
 } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { actorIdsOf, auditLog } from "./audit-log.ts";
+import {
+  actorIdsOf,
+  archiveRetentionDays,
+  auditLog,
+  auditRetentionDays,
+} from "./audit-log.ts";
 import type { SearchRange } from "./audit-log.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
@@ -40,6 +46,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { auditStaffRoute } from "./staff-audit.ts";
+import { runRetentionDays } from "./workflows/engine.ts";
 
 // Reading the audit log (threat model section 13, R16): admins search it,
 // export it and verify its chain. Admins see all of it, so an export holds
@@ -559,6 +566,47 @@ export class AuditRpc extends CoreRpcTarget implements AuditApi {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       return await auditLog(this.#env).lastFullVerification();
+    });
+  }
+
+  async searchArchive(
+    filter?: AuditFilter,
+    before?: number
+  ): Promise<AuditPage> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      const parsed = parseFilter(filter);
+      const cursor = parsePosition(before);
+      const page = await auditLog(this.#env).searchArchive({
+        filter: parsed,
+        ...(cursor === undefined ? {} : { before: cursor }),
+        limit: searchPageSize,
+      });
+      if ("unreadable" in page) {
+        throw auditErrors.create("audit.archive_unreadable");
+      }
+      // Recorded as a search of the log is: the first page, and every
+      // later one that returns something.
+      if (cursor === undefined || page.records.length > 0) {
+        await recordRead(this.#env, person, "audit.searched", {
+          ...filterDetail(parsed),
+          archive: true,
+          ...(cursor === undefined ? {} : { before: cursor }),
+          records: page.records.length,
+        });
+      }
+      return page;
+    });
+  }
+
+  async retention(): Promise<AuditRetention> {
+    return await withPerson(this.#check, (person) => {
+      requireAdmin(person);
+      return {
+        auditDays: auditRetentionDays(this.#env) ?? null,
+        archiveDays: archiveRetentionDays(this.#env) ?? null,
+        runDays: runRetentionDays(this.#env) ?? null,
+      };
     });
   }
 }
