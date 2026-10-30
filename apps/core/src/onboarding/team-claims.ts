@@ -155,7 +155,13 @@ const promptOf = (facts: readonly Labelled[]): string => {
 /** Longest a claim may be: one short sentence. */
 export const claimCharsMax = 240;
 
-const sentences = new Intl.Segmenter("und", { granularity: "sentence" });
+// Made at first use: a sentence segmenter loads ICU's break rules, about
+// 15 ms of CPU that core would otherwise spend as it starts.
+let sentences: Intl.Segmenter | undefined;
+const sentencesOf = (line: string): number => {
+  sentences ??= new Intl.Segmenter("und", { granularity: "sentence" });
+  return [...sentences.segment(line)].length;
+};
 
 /**
  * A claim's words, when they are a claim: one sentence (by
@@ -182,7 +188,7 @@ const claimOf = (value: string): string | null => {
     first !== "-" &&
     !line.includes("  ") &&
     body.every(allowed) &&
-    [...sentences.segment(line)].length === 1
+    sentencesOf(line) === 1
     ? line
     : null;
 };
