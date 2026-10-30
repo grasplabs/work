@@ -264,6 +264,7 @@ export const whatsAppNumber = {
   appSecret: "acme-whatsapp-app-secret-for-tests",
   phoneNumberId: "106540352242922",
   verifyToken: "acme-whatsapp-verify-token-for-tests",
+  number: "+31 20 123 4567",
   accessToken: "acme-whatsapp-access-token-for-tests",
 } as const;
 
@@ -275,6 +276,7 @@ export const telegramBot = {
   webhookSecret: "acme-telegram-webhook-secret-for-tests",
   token: "7140326550:AAH-acme-telegram-token-for-tests",
   id: 7_140_326_550,
+  username: "acme_stephen_bot",
 } as const;
 
 /**

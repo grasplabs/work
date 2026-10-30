@@ -222,13 +222,15 @@ const chatAccounts = async (
 ): Promise<Loaded<ChatAccounts>> => {
   const secret = pendingChatLink();
   return await loadFromCore(core, async (session) => {
-    const [accounts, preview] = await Promise.all([
+    const [reach, accounts, preview] = await Promise.all([
+      session.channelAccounts.reach(),
       session.channelAccounts.list(),
       secret === undefined
         ? undefined
         : session.channelAccounts.preview(secret),
     ]);
     return {
+      reach,
       accounts,
       ...(secret === undefined || preview === undefined
         ? {}

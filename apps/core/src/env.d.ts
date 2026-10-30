@@ -30,11 +30,23 @@ interface __BaseEnv_Env {
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_VERIFY_TOKEN?: string;
   /**
+   * The number itself, as people dial it (`+31 20 123 4567`): what
+   * Settings › Security › Chat apps tells them to message. The id above
+   * is Meta's, not the number. Unset, it says only that WhatsApp is set up.
+   */
+  WHATSAPP_NUMBER?: string;
+  /**
    * The secret the client's Telegram bot's webhook was registered with, a
    * Worker secret: Telegram sends it with every update
    * (src/channels/telegram.ts). Unset, Telegram's door answers 404.
    */
   TELEGRAM_WEBHOOK_SECRET?: string;
+  /**
+   * The bot's username, without the `@` (`acme_stephen_bot`): what
+   * Settings › Security › Chat apps tells people to look for. Unset, it
+   * says only that Telegram is set up.
+   */
+  TELEGRAM_BOT_USERNAME?: string;
   /**
    * Stephen's own Gmail mailbox, which people email, and the Pub/Sub push
    * that tells its door of new mail (src/channels/gmail.ts): the push's
