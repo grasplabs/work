@@ -2,9 +2,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -137,22 +137,22 @@ const AreaSidebar = ({ current }: { current: AreaSection }) => {
   if (folded) {
     return (
       <PageSidebar folded label={label}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the sections`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
+        <PageSidebarRailDivider />
         {sections.map(({ to, label: name, icon: Icon }) => (
-          <RailButton
+          <PageSidebarRailButton
             active={to === current.to}
             key={to}
             label={i18n._(name)}
             render={<Link to={to} />}
           >
             <Icon />
-          </RailButton>
+          </PageSidebarRailButton>
         ))}
       </PageSidebar>
     );

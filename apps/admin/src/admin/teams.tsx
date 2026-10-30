@@ -1107,10 +1107,7 @@ const OneTeam = ({
                 {team.tools.map((tool) => (
                   <li key={tool.name}>
                     <Badge variant="outline">
-                      {tool.name}
-                      <span className="text-muted-foreground tabular-nums">
-                        {tool.works}
-                      </span>
+                      {`${tool.name} · ${tool.works}`}
                     </Badge>
                   </li>
                 ))}

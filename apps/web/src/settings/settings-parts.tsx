@@ -1,14 +1,14 @@
 import {
-  Panel,
-  PanelBody,
-  PanelDescription,
-  PanelHeader,
-  PanelHeading,
-  PanelRow,
-  PanelRowControl,
-  PanelRowLabel,
-  PanelTitle,
-} from "@grasp-os/ui/components/panel";
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardRow,
+  CardRowControl,
+  CardRowLabel,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
@@ -36,18 +36,18 @@ export const SettingsSection = ({
   // Named by its title, so it is a region of the page.
   const id = useId();
   return (
-    <Panel aria-labelledby={id}>
-      <PanelHeader>
-        <PanelHeading>
-          <PanelTitle id={id}>{title}</PanelTitle>
-          {description === undefined ? null : (
-            <PanelDescription>{description}</PanelDescription>
-          )}
-        </PanelHeading>
-        {action}
-      </PanelHeader>
+    <Card aria-labelledby={id} render={<section />} variant="panel">
+      <CardHeader>
+        <CardTitle>
+          <h2 id={id}>{title}</h2>
+        </CardTitle>
+        {description === undefined ? null : (
+          <CardDescription>{description}</CardDescription>
+        )}
+        {action === undefined ? null : <CardAction>{action}</CardAction>}
+      </CardHeader>
       {children}
-    </Panel>
+    </Card>
   );
 };
 
@@ -64,8 +64,8 @@ export const SettingsRow = ({
   htmlFor?: string;
   children: ReactNode;
 }) => (
-  <PanelRow>
-    <PanelRowLabel>
+  <CardRow>
+    <CardRowLabel>
       {htmlFor === undefined ? (
         <span>{label}</span>
       ) : (
@@ -74,19 +74,19 @@ export const SettingsRow = ({
       {description === undefined ? null : (
         <p className="text-muted-foreground">{description}</p>
       )}
-    </PanelRowLabel>
-    <PanelRowControl>{children}</PanelRowControl>
-  </PanelRow>
+    </CardRowLabel>
+    <CardRowControl>{children}</CardRowControl>
+  </CardRow>
 );
 
 /** What fills a section's card below its heading: rows' worth of room. */
 export const SettingsBody = ({ children }: { children: ReactNode }) => (
-  <PanelBody>{children}</PanelBody>
+  <CardContent>{children}</CardContent>
 );
 
 /** A section while its read is slow: its card, with skeletons where its title and rows will be. */
 export const SettingsLoading = () => (
-  <Panel>
+  <Card variant="panel">
     <div className="flex flex-col gap-2 px-5 py-4">
       <Skeleton className="h-4 w-40" />
       <Skeleton className="h-4 w-72 max-w-full" />
@@ -94,7 +94,7 @@ export const SettingsLoading = () => (
     <SettingsBody>
       <LoadingLines lines={4} />
     </SettingsBody>
-  </Panel>
+  </Card>
 );
 
 /**
@@ -102,11 +102,11 @@ export const SettingsLoading = () => (
  * Settings layout, rather than a page of its own with a second header.
  */
 export const SettingsError = ({ error }: ErrorComponentProps) => (
-  <Panel>
+  <Card variant="panel">
     <ErrorState
       heading="h2"
       reason={useRouteErrorReason(error)}
       reload={isFileGone(error)}
     />
-  </Panel>
+  </Card>
 );

@@ -6,7 +6,11 @@
  * own (src/rollout/functions.ts), audited there; the page is read again
  * after each, whether it worked or not.
  */
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import { Label } from "@grasp-os/ui/components/label";
@@ -524,28 +528,28 @@ export const Targets = ({
             <p>
               {`Rolling ${confirming.ring === undefined ? (names.get(confirming.clientId) ?? confirming.clientId) : ringWords(confirming.ring)} back puts the shared secrets it ran before back. If you revoked them at their providers, its people can't sign in or reach their connections until the next secrets rollout.`}
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  runRollback(confirming);
-                }}
-                size="sm"
-                variant="destructive"
-              >
-                Roll back anyway
-              </Button>
-              <Button
-                onClick={() => {
-                  setConfirming(null);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                Keep the new secrets
-              </Button>
-            </div>
           </AlertDescription>
+          <AlertAction placement="below">
+            <Button
+              disabled={busy}
+              onClick={() => {
+                runRollback(confirming);
+              }}
+              size="sm"
+              variant="destructive"
+            >
+              Roll back anyway
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(null);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Keep the new secrets
+            </Button>
+          </AlertAction>
         </Alert>
       )}
       {failure === null ? null : <Refusal>{failure}</Refusal>}

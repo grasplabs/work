@@ -20,12 +20,12 @@ import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import type { ModelSpendReport } from "@grasp-os/shared/model-spend-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
-import { PanelBody } from "@grasp-os/ui/components/panel";
 import {
   Table,
   TableBody,
@@ -950,7 +950,7 @@ const ModelSpend = ({
     description="What its model calls may cost in a calendar month. Its core's model gateway refuses a call that would go past it."
     title="Model spend"
   >
-    <PanelBody>
+    <CardContent>
       <Await
         fallback={<p>{`Ceiling: ${euros(ceiling)} a month.`}</p>}
         promise={spend}
@@ -962,7 +962,7 @@ const ModelSpend = ({
         clientId={clientId}
         refresh={refresh}
       />
-    </PanelBody>
+    </CardContent>
   </Section>
 );
 
@@ -1505,7 +1505,7 @@ const Releases = ({
           ]}
         />
         {client === null ? null : (
-          <PanelBody>
+          <CardContent>
             <RingChange
               clientId={clientId}
               refresh={refresh}
@@ -1520,7 +1520,7 @@ const Releases = ({
                 releases={imported}
               />
             ) : null}
-          </PanelBody>
+          </CardContent>
         )}
         <RollBack clientId={clientId} refresh={refresh} rollout={rollout} />
       </Section>
@@ -1677,9 +1677,9 @@ const TeamsBotSection = ({
         />
       )}
       {bot === null ? null : (
-        <PanelBody>
+        <CardContent>
           <TeamsPackageDownload clientId={clientId} />
-        </PanelBody>
+        </CardContent>
       )}
       <TeamsBotChange bot={bot} clientId={clientId} refresh={refresh} />
       <SealedSecretChange

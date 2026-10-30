@@ -30,9 +30,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import {
   Pagination,
@@ -198,16 +198,16 @@ const PageSidebarDemo = () => {
       <PageSidebar folded={folded} label="Knowledge">
         {folded ? (
           <>
-            <RailExpand
+            <PageSidebarRailExpand
               label="Expand the sidebar"
               onExpand={() => {
                 setFolded(false);
               }}
             />
-            <RailDivider />
-            <RailButton active label="Policies">
+            <PageSidebarRailDivider />
+            <PageSidebarRailButton active label="Policies">
               <BookOpenIcon />
-            </RailButton>
+            </PageSidebarRailButton>
           </>
         ) : (
           <>

@@ -20,6 +20,7 @@
  */
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -34,9 +35,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import {
   Select,
@@ -205,7 +206,7 @@ const RailItem = ({
       fuzzy: section !== "overview",
     }) !== false;
   return (
-    <RailButton
+    <PageSidebarRailButton
       active={active}
       label={label}
       render={<SectionLink clientId={clientId} section={section} />}
@@ -221,7 +222,7 @@ const RailItem = ({
           />
         ) : null}
       </span>
-    </RailButton>
+    </PageSidebarRailButton>
   );
 };
 
@@ -295,13 +296,13 @@ const OrgColumn = ({
     <PageSidebar folded={folded} label={name} landmark="navigation">
       {folded ? (
         <>
-          <RailExpand
+          <PageSidebarRailExpand
             label="Expand the sections"
             onExpand={() => {
               setFolded(false);
             }}
           />
-          <RailDivider />
+          <PageSidebarRailDivider />
           <RailItem
             clientId={clientId}
             section="overview"
@@ -309,7 +310,7 @@ const OrgColumn = ({
           />
           {sectionGroups.map((group) => (
             <Fragment key={group.id}>
-              <RailDivider />
+              <PageSidebarRailDivider />
               {group.sections.map((section) => (
                 <RailItem
                   clientId={clientId}
@@ -337,13 +338,13 @@ const OrgColumn = ({
           <PageSidebarBody joined>
             {view === null ? (
               // Nothing of it is known now: where to see why, in sight on every section.
-              <SectionLink
-                className="text-status-attention hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex-none rounded-md px-2 py-1.5 text-xs outline-none focus-visible:ring-3"
-                clientId={clientId}
-                section="setup"
+              <Badge
+                className="mb-2"
+                render={<SectionLink clientId={clientId} section="setup" />}
+                variant="attention"
               >
                 Not read now: see its Setup
-              </SectionLink>
+              </Badge>
             ) : (
               <Knowing clientId={clientId} view={view} />
             )}

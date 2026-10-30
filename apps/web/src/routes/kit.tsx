@@ -82,9 +82,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import {
   Popover,
@@ -681,18 +681,18 @@ const PageColumn = () => {
         <div className="flex h-64 overflow-hidden rounded-lg border">
           {folded ? (
             <PageSidebar folded label="Documents">
-              <RailExpand
+              <PageSidebarRailExpand
                 label="Expand the documents"
                 onExpand={() => {
                   setFolded(false);
                 }}
               />
-              <RailButton label="New document">
+              <PageSidebarRailButton label="New document">
                 <PlusIcon />
-              </RailButton>
-              <RailDivider />
+              </PageSidebarRailButton>
+              <PageSidebarRailDivider />
               {kitDocuments.map((name) => (
-                <RailButton
+                <PageSidebarRailButton
                   active={name === open}
                   key={name}
                   label={name}
@@ -701,7 +701,7 @@ const PageColumn = () => {
                   }}
                 >
                   <FileTextIcon />
-                </RailButton>
+                </PageSidebarRailButton>
               ))}
             </PageSidebar>
           ) : (

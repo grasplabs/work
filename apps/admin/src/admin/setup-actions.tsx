@@ -12,8 +12,13 @@
  * and everything its audit log keeps of it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldDescription,
@@ -25,7 +30,6 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import { PanelBody } from "@grasp-os/ui/components/panel";
 import {
   Table,
   TableBody,
@@ -333,7 +337,7 @@ export const RollBack = ({
     );
   };
   return (
-    <PanelBody>
+    <CardContent>
       <p className="text-muted-foreground">
         {`Rolling it back from ${rollout.releaseId ?? "the secrets rollout"} puts back what it ran before, and waits for it.`}
       </p>
@@ -346,26 +350,26 @@ export const RollBack = ({
               revoked them at their providers, its people can&apos;t sign in or
               reach their connections until the next secrets rollout.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy}
-                onClick={rollBack}
-                size="sm"
-                variant="destructive"
-              >
-                Roll back anyway
-              </Button>
-              <Button
-                onClick={() => {
-                  setConfirming(false);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                Keep the new secrets
-              </Button>
-            </div>
           </AlertDescription>
+          <AlertAction placement="below">
+            <Button
+              disabled={busy}
+              onClick={rollBack}
+              size="sm"
+              variant="destructive"
+            >
+              Roll back anyway
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(false);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Keep the new secrets
+            </Button>
+          </AlertAction>
         </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
@@ -386,7 +390,7 @@ export const RollBack = ({
           <Failure failure={failure} />
         </div>
       )}
-    </PanelBody>
+    </CardContent>
   );
 };
 
@@ -470,7 +474,7 @@ export const ApplySettings = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <PanelBody>
+    <CardContent>
       <p>{pendingWords(configPending, pinned)}</p>
       {active ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -496,7 +500,7 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </PanelBody>
+    </CardContent>
   );
 };
 
@@ -781,7 +785,7 @@ export const RotateSecrets = ({
     });
   };
   return (
-    <PanelBody>
+    <CardContent>
       {confirming ? (
         <Alert variant="destructive">
           <TriangleAlertIcon aria-hidden />
@@ -790,26 +794,26 @@ export const RotateSecrets = ({
               Its people all sign in again once the next deploy makes the new
               secrets live.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy}
-                onClick={rotate}
-                size="sm"
-                variant="destructive"
-              >
-                Rotate them
-              </Button>
-              <Button
-                onClick={() => {
-                  setConfirming(false);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                Keep them
-              </Button>
-            </div>
           </AlertDescription>
+          <AlertAction placement="below">
+            <Button
+              disabled={busy}
+              onClick={rotate}
+              size="sm"
+              variant="destructive"
+            >
+              Rotate them
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(false);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Keep them
+            </Button>
+          </AlertAction>
         </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
@@ -833,7 +837,7 @@ export const RotateSecrets = ({
           ) : null}
         </div>
       )}
-    </PanelBody>
+    </CardContent>
   );
 };
 

@@ -74,7 +74,6 @@ import {
 } from "@grasp-os/ui/components/questionnaire";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Suggestion, Suggestions } from "@grasp-os/ui/components/suggestions";
 import {
   Trace,
   TraceCollapsible,
@@ -302,19 +301,6 @@ const TraceDemo = () => (
   </Trace>
 );
 
-const SuggestionsDemo = () => (
-  <div className="flex flex-col gap-6">
-    <Suggestions aria-label="Questions to start with">
-      <Suggestion>Where does the most time still go?</Suggestion>
-      <Suggestion disabled>What waits on me today?</Suggestion>
-    </Suggestions>
-    <Suggestions aria-label="Questions to start from" variant="card">
-      <Suggestion>Who needs Grasp today?</Suggestion>
-      <Suggestion>Prepare the next call with Acme</Suggestion>
-    </Suggestions>
-  </div>
-);
-
 export const chatDemos = {
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
@@ -325,6 +311,5 @@ export const chatDemos = {
   "prompt-input": PromptInputDemo,
   questionnaire: QuestionnaireDemo,
   shimmer: ShimmerDemo,
-  suggestions: SuggestionsDemo,
   trace: TraceDemo,
 };

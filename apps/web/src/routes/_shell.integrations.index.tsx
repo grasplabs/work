@@ -11,9 +11,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import {
   Select,
@@ -159,13 +159,13 @@ const RailChoice = ({
   const { icon: Icon, label } = choice;
   const count = formatNumber(choice.count);
   return (
-    <RailButton
+    <PageSidebarRailButton
       active={selected}
       label={t`${label} · ${count}`}
       render={<Link search={searchFor(choice.filter, q)} to="/integrations" />}
     >
       <Icon />
-    </RailButton>
+    </PageSidebarRailButton>
   );
 };
 
@@ -186,13 +186,13 @@ const Filters = ({
   if (folded) {
     return (
       <PageSidebar folded label={t`Filter integrations`}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the filters`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
+        <PageSidebarRailDivider />
         {fixed.map((choice) => (
           <RailChoice
             choice={choice}
@@ -201,7 +201,7 @@ const Filters = ({
             selected={sameFilter(choice.filter, filter)}
           />
         ))}
-        <RailDivider />
+        <PageSidebarRailDivider />
         {categories.map((choice) => (
           <RailChoice
             choice={choice}

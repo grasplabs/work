@@ -158,7 +158,7 @@ const isDatabase = (value: unknown): value is D1Database =>
   "batch" in value;
 
 /** The real D1 databases the fake keeps its databases in (vite.test.config.ts). */
-const clientD1Count = 32;
+const clientD1Count = 24;
 
 /** The real D1 database number `slot`. */
 const clientD1 = (slot: number): D1Database => {
@@ -212,6 +212,11 @@ const slots = new Map<string, number>();
 /** Frees every slot, once a test's accounts are gone (test/cloudflare-api.ts). */
 export const forgetDatabases = (): void => {
   slots.clear();
+};
+
+/** Frees the slot of the fake database `uuid`, once it is deleted. */
+export const forgetDatabase = (uuid: string): void => {
+  slots.delete(uuid);
 };
 
 /**

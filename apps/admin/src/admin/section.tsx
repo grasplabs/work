@@ -1,25 +1,25 @@
 /**
- * A titled part of an admin page on a card of its own: the kit's panel,
- * as the workspace's settings draw theirs (apps/web/src/settings/
+ * A titled part of an admin page on a card of its own: the kit's panel
+ * card, as the workspace's settings draw theirs (apps/web/src/settings/
  * settings-parts.tsx, `SettingsSection`). Its title, a line on what it
  * holds, and beside them what can be done there (`action`); under them
  * its rows or body. Named by its title, so it is a region of the page.
  */
 import {
+  Card,
+  CardAction,
+  CardDescription,
+  CardHeader,
+  CardRow,
+  CardRowControl,
+  CardRowLabel,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
 } from "@grasp-os/ui/components/empty";
-import {
-  Panel,
-  PanelDescription,
-  PanelHeader,
-  PanelHeading,
-  PanelRow,
-  PanelRowControl,
-  PanelRowLabel,
-  PanelTitle,
-} from "@grasp-os/ui/components/panel";
 import type { ReactNode } from "react";
 
 export const Section = ({
@@ -36,18 +36,18 @@ export const Section = ({
   action?: ReactNode;
   children?: ReactNode;
 }) => (
-  <Panel aria-label={title} id={id}>
-    <PanelHeader>
-      <PanelHeading>
-        <PanelTitle>{title}</PanelTitle>
-        {description === undefined ? null : (
-          <PanelDescription>{description}</PanelDescription>
-        )}
-      </PanelHeading>
-      {action}
-    </PanelHeader>
+  <Card aria-label={title} id={id} render={<section />} variant="panel">
+    <CardHeader>
+      <CardTitle>
+        <h2>{title}</h2>
+      </CardTitle>
+      {description === undefined ? null : (
+        <CardDescription>{description}</CardDescription>
+      )}
+      {action === undefined ? null : <CardAction>{action}</CardAction>}
+    </CardHeader>
     {children}
-  </Panel>
+  </Card>
 );
 
 /** One row of a section: what it is and why on the left, where it stands on the right. */
@@ -60,15 +60,15 @@ export const SectionRow = ({
   description?: string;
   children: ReactNode;
 }) => (
-  <PanelRow>
-    <PanelRowLabel>
+  <CardRow>
+    <CardRowLabel>
       <span>{label}</span>
       {description === undefined ? null : (
         <p className="text-muted-foreground">{description}</p>
       )}
-    </PanelRowLabel>
-    <PanelRowControl>{children}</PanelRowControl>
-  </PanelRow>
+    </CardRowLabel>
+    <CardRowControl>{children}</CardRowControl>
+  </CardRow>
 );
 
 /**
@@ -76,11 +76,11 @@ export const SectionRow = ({
  * the workspace's cards say it (the kit's small empty state on a panel).
  */
 export const EmptySection = ({ children }: { children: ReactNode }) => (
-  <Panel>
+  <Card variant="panel">
     <Empty size="sm">
       <EmptyHeader>
         <EmptyDescription>{children}</EmptyDescription>
       </EmptyHeader>
     </Empty>
-  </Panel>
+  </Card>
 );

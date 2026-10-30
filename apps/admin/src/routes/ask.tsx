@@ -50,7 +50,7 @@ const AskPage = () => {
         }
         page="Ask Grasp"
       />
-      <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col text-sm">
+      <div className="flex min-h-0 flex-1 flex-col text-sm">
         <h1 className="sr-only">Ask Grasp</h1>
         <AskChat
           about={name}

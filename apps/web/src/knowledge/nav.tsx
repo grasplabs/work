@@ -10,9 +10,9 @@ import {
   PageSidebar,
   PageSidebarBody,
   PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
@@ -543,23 +543,23 @@ export const KnowledgeNav = ({
   if (folded) {
     return (
       <PageSidebar folded label={t`Knowledge`}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the navigation`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
-        <RailButton
+        <PageSidebarRailDivider />
+        <PageSidebarRailButton
           active={at.collection === undefined}
           label={t`Knowledge`}
           render={<Link search={{}} to="/knowledge" />}
         >
           <LibraryIcon />
-        </RailButton>
+        </PageSidebarRailButton>
         {data.collections.state === "ready"
           ? data.collections.data.map((collection) => (
-              <RailButton
+              <PageSidebarRailButton
                 active={collection.id === at.collection}
                 key={collection.id}
                 label={collection.name}
@@ -572,7 +572,7 @@ export const KnowledgeNav = ({
                 }
               >
                 <CollectionIcon collection={collection} />
-              </RailButton>
+              </PageSidebarRailButton>
             ))
           : null}
       </PageSidebar>

@@ -184,10 +184,14 @@ export const shadcnComponents = {
       "CardDescription",
       "CardFooter",
       "CardHeader",
+      "CardRow",
+      "CardRowControl",
+      "CardRowLabel",
       "CardTitle",
+      "cardVariants",
     ],
     changes:
-      "Rests on the page with the brand's long soft shadow (`shadow-block`).",
+      'Rests on the page with the brand\'s long soft shadow (`shadow-block`). `variant="panel"` is a part of a page on a card of its own: a hairline round it, its header, then rows (`CardRow`) or a body, each under a line.',
   },
   carousel: {
     status: "supported",
@@ -964,31 +968,9 @@ export const graspComponents = {
       "PageSidebar",
       "PageSidebarBody",
       "PageSidebarTop",
-      "RailButton",
-      "RailDivider",
-      "RailExpand",
-    ],
-  },
-  suggestions: {
-    status: "supported",
-    summary:
-      'Questions to start a conversation from, each a button that asks it: `quiet` rows of muted text under a chat\'s box, or `variant="card"` rows on a card with a chevron.',
-    exports: ["Suggestion", "Suggestions", "suggestionsVariants"],
-  },
-  panel: {
-    status: "supported",
-    summary:
-      "A part of a page on a card of its own: a header with its title, a line on what it holds and its action, then its rows or body, each under a line.",
-    exports: [
-      "Panel",
-      "PanelBody",
-      "PanelDescription",
-      "PanelHeader",
-      "PanelHeading",
-      "PanelRow",
-      "PanelRowControl",
-      "PanelRowLabel",
-      "PanelTitle",
+      "PageSidebarRailButton",
+      "PageSidebarRailDivider",
+      "PageSidebarRailExpand",
     ],
   },
 } as const satisfies Record<string, SupportedEntry>;

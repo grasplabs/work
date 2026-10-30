@@ -8,7 +8,7 @@
 import { briefOf } from "@grasp-os/shared/admin/admin-brief";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import { PanelBody } from "@grasp-os/ui/components/panel";
+import { CardContent } from "@grasp-os/ui/components/card";
 import { Link } from "@tanstack/react-router";
 import { SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -71,7 +71,7 @@ export const OrgBrief = ({
       description={`${where}. ${percent}% of what Grasp needs is known.`}
       title="Before the next call"
     >
-      <PanelBody>
+      <CardContent>
         {brief.bringUp.length > 0 ? (
           <BriefList title="Bring up">
             {brief.bringUp.map((need, index) => (
@@ -127,7 +127,7 @@ export const OrgBrief = ({
         brief.opportunities.length === 0 ? (
           <p className="text-muted-foreground">Nothing to bring up.</p>
         ) : null}
-      </PanelBody>
+      </CardContent>
     </Section>
   );
 };

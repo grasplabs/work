@@ -6,9 +6,9 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@grasp-os/ui/lib/utils";
 
-function PageHeader({ className, ...props }: React.ComponentProps<"div">) {
+function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
   return (
-    <div
+    <header
       data-slot="page-header"
       className={cn("flex min-w-0 flex-wrap items-end gap-3", className)}
       {...props}
@@ -77,7 +77,10 @@ function PageHeaderActions({
   return (
     <div
       data-slot="page-header-actions"
-      className={cn("ml-auto flex items-center gap-2", className)}
+      className={cn(
+        "ml-auto flex shrink-0 flex-wrap items-center gap-2",
+        className
+      )}
       {...props}
     />
   );

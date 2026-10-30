@@ -5,7 +5,12 @@
  * each a page of its own under Platform, as the admin's Releases and
  * Rollouts pages were before the admin took them in.
  */
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
+import {
+  NavigationMenu,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+} from "@grasp-os/ui/components/navigation-menu";
 import {
   getRouteApi,
   Link,
@@ -34,7 +39,7 @@ export const rolloutsCrumb: Crumb = {
   link: <Link to="/platform/rollouts" />,
 };
 
-/** Platform's places, in the order its tabs show them. */
+/** Platform's places, in the order its navigation shows them. */
 const platformPlaces = [
   { to: "/platform", label: "Overview" },
   { to: "/platform/releases", label: "Releases" },
@@ -43,8 +48,8 @@ const platformPlaces = [
 ] as const;
 
 /**
- * Platform's places as tabs under a page's title, as the workspace's
- * pages show theirs: the one shown, or the one above it, marked. Its
+ * Platform's places as links under a page's title, looking as line tabs
+ * do: the one shown, or the one above it, is the current page. Its
  * overview is only itself.
  */
 export const PlatformNav = () => {
@@ -54,20 +59,23 @@ export const PlatformNav = () => {
       ({ to }) => matchRoute({ to, fuzzy: to !== "/platform" }) !== false
     )?.to ?? "/platform";
   return (
-    <Tabs value={shown}>
-      <TabsList aria-label="Platform" variant="line">
+    <NavigationMenu aria-label="Platform">
+      <NavigationMenuList variant="line">
         {platformPlaces.map(({ to, label }) => (
-          <TabsTrigger
-            key={to}
-            nativeButton={false}
-            render={<Link to={to} />}
-            value={to}
-          >
-            {label}
-          </TabsTrigger>
+          <NavigationMenuItem key={to}>
+            <NavigationMenuLink
+              active={to === shown}
+              render={
+                <Link activeOptions={{ exact: to === "/platform" }} to={to} />
+              }
+              variant="line"
+            >
+              {label}
+            </NavigationMenuLink>
+          </NavigationMenuItem>
         ))}
-      </TabsList>
-    </Tabs>
+      </NavigationMenuList>
+    </NavigationMenu>
   );
 };
 

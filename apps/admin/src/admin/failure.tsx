@@ -18,7 +18,7 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link, useMatch, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { RotateCcwIcon, SearchXIcon, TriangleAlertIcon } from "lucide-react";
 
@@ -57,15 +57,28 @@ const Back = ({ label, to }: { label: string; to: BackTo }) => (
 /** Where a page that isn't there leads back to. */
 type BackTo = "/" | "/platform/rollouts";
 
-/** A part of a page that failed, said plainly where it would be. */
-export const RouteFailure = ({ reset }: ErrorComponentProps) => (
+/**
+ * The level of a failure's title, as the workspace's `ErrorState` has it:
+ * `h1` where it stands for the whole page, `h2` under a section's own
+ * heading (an organization's, whose page keeps its title and column).
+ */
+type FailureHeading = "h1" | "h2";
+
+/** What failed, said plainly, with a way to try again. */
+export const FailureState = ({
+  reset,
+  heading: Heading = "h2",
+}: {
+  reset: () => void;
+  heading?: FailureHeading;
+}) => (
   <Empty role="alert">
     <EmptyHeader>
       <EmptyMedia variant="icon">
         <TriangleAlertIcon />
       </EmptyMedia>
       <EmptyTitle>
-        <h2>This couldn’t be shown</h2>
+        <Heading>This couldn’t be shown</Heading>
       </EmptyTitle>
       <EmptyDescription>
         Reading it failed just now. The rest of the admin still works.
@@ -76,6 +89,27 @@ export const RouteFailure = ({ reset }: ErrorComponentProps) => (
     </EmptyContent>
   </Empty>
 );
+
+/** Where an organization's sections are: under its own page, which stays. */
+const sectionRoutes = "/organizations/$clientId/";
+
+/**
+ * A route that failed, said plainly where it would be: in an
+ * organization's section, under its page's title and column; any other,
+ * a whole page, so under the bar with the sidebar's trigger, as its `h1`.
+ */
+export const RouteFailure = ({ reset }: ErrorComponentProps) => {
+  const failed: string = useMatch({ strict: false }).routeId ?? "";
+  if (failed.startsWith(sectionRoutes)) {
+    return <FailureState reset={reset} />;
+  }
+  return (
+    <>
+      <AdminHeader page="This page didn’t load" />
+      <FailureState heading="h1" reset={reset} />
+    </>
+  );
+};
 
 /** The admin's frame itself couldn't be read: said plainly, with a way back. */
 export const FrameFailure = ({ reset }: ErrorComponentProps) => (

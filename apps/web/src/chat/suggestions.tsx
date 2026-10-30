@@ -1,4 +1,4 @@
-import { Suggestion, Suggestions } from "@grasp-os/ui/components/suggestions";
+import { Item, ItemGroup } from "@grasp-os/ui/components/item";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -25,21 +25,34 @@ export const StartingQuestions = ({
 }) => {
   const { t, i18n } = useLingui();
   return (
-    <Suggestions aria-label={t`Questions to start with`}>
+    <ItemGroup
+      aria-label={t`Questions to start with`}
+      render={<ul />}
+      spacing="tight"
+    >
       {suggestions.map((suggestion) => {
         const question = i18n._(suggestion);
         return (
-          <Suggestion
-            disabled={disabled}
-            key={suggestion.id}
-            onClick={() => {
-              onPick(question);
-            }}
-          >
-            {question}
-          </Suggestion>
+          <li key={suggestion.id}>
+            <Item
+              onClick={() => {
+                onPick(question);
+              }}
+              render={
+                <button
+                  aria-label={question}
+                  disabled={disabled}
+                  type="button"
+                />
+              }
+              size="sm"
+              variant="quiet"
+            >
+              {question}
+            </Item>
+          </li>
         );
       })}
-    </Suggestions>
+    </ItemGroup>
   );
 };

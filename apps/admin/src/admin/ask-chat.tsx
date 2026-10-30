@@ -15,10 +15,15 @@ import {
   InputGroupAddon,
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+} from "@grasp-os/ui/components/item";
 import { PromptInputSubmit } from "@grasp-os/ui/components/prompt-input";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
-import { Suggestion, Suggestions } from "@grasp-os/ui/components/suggestions";
-import { CopyIcon, RotateCcwIcon } from "lucide-react";
+import { ChevronRightIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { askGraspFn } from "./ask-functions.ts";
@@ -257,18 +262,32 @@ export const AskChat = ({
           </h2>
           <div className="flex flex-col gap-3">
             <Composer onSend={send} onStop={stop} waiting={waiting} />
-            <Suggestions aria-label="Questions to start from" variant="card">
+            <ItemGroup
+              aria-label="Questions to start from"
+              render={<ul />}
+              variant="card"
+            >
               {startersFor(about).map((starter) => (
-                <Suggestion
-                  key={starter}
-                  onClick={() => {
-                    send(starter);
-                  }}
-                >
-                  {starter}
-                </Suggestion>
+                <li key={starter}>
+                  <Item
+                    onClick={() => {
+                      send(starter);
+                    }}
+                    render={<button aria-label={starter} type="button" />}
+                    size="sm"
+                    variant="row"
+                  >
+                    <ItemContent>{starter}</ItemContent>
+                    <ItemActions>
+                      <ChevronRightIcon
+                        aria-hidden="true"
+                        className="text-muted-foreground"
+                      />
+                    </ItemActions>
+                  </Item>
+                </li>
               ))}
-            </Suggestions>
+            </ItemGroup>
           </div>
         </div>
       </div>
