@@ -1,4 +1,9 @@
-import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  Message,
+  ToolResultMessage,
+  Usage,
+} from "@earendil-works/pi-ai";
 import { chatCitationsMax, citedQuoteMax } from "@grasp-os/shared/chat";
 import type {
   ChatCitation,
@@ -9,13 +14,28 @@ import type {
   ChatReplyEnd,
   ChatReplyUsage,
 } from "@grasp-os/shared/chat";
+import { thinkingStepSchema } from "@grasp-os/shared/thinking";
+import type { ThinkingStep } from "@grasp-os/shared/thinking";
 
+import { showThinkingName } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
 // reads it: their questions, the agent's answers with the code it ran and
 // what the model thought before them, and each code step's result. The
 // agent's instructions, and the APIs and the memory it was shown, stay out.
+
+/**
+ * The step of thinking a `show_thinking` call showed, as core accepted it
+ * (agent-thinking.ts); none for another call's result, or one refused.
+ */
+const thinkingOf = (message: ToolResultMessage): ThinkingStep | undefined => {
+  if (message.toolName !== showThinkingName || message.isError) {
+    return undefined;
+  }
+  const step = thinkingStepSchema.safeParse(message.details);
+  return step.success ? step.data : undefined;
+};
 
 /** The text parts of a message's content, joined. */
 const textOf = (
@@ -441,6 +461,7 @@ export const chatMessageOf = (
     };
   }
   if (message.role === "toolResult") {
+    const thinking = thinkingOf(message);
     return {
       id,
       role: "result",
@@ -448,6 +469,7 @@ export const chatMessageOf = (
       text: textOf(message.content),
       failed: message.isError,
       at,
+      ...(thinking === undefined ? {} : { thinking }),
     };
   }
   return undefined;

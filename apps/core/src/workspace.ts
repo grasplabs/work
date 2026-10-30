@@ -1,3 +1,4 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { isAppLayout } from "@grasp-os/compiler";
 import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
@@ -101,9 +102,11 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
+import type { ThinkingBrain } from "./agent-thinking.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
+import { memberOf } from "./auth/identity.ts";
 import {
   drainCaptures,
   eraseCaptured,
@@ -112,6 +115,7 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
+import { readThinkingBrain } from "./brain-rpc.ts";
 import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
@@ -1546,6 +1550,7 @@ export class Workspace extends DurableObject<Env> {
       // The turn's answer is the last response it keeps.
       let answer: number | undefined;
       const textSoFar = onText === undefined ? undefined : throttled(onText);
+      const readsBrain = await hasBrainGrant(this.env, authority);
       // Loaded at the first turn, not as core starts: the loop brings Pi
       // and TypeBox (GRA-1349).
       const { runTurn } = await import("./agent.ts");
@@ -1573,7 +1578,8 @@ export class Workspace extends DurableObject<Env> {
         codeTimeoutMs: codeTimeoutMs(this.env),
         // The Brain's recall before the first request, under the agent's
         // own grant, as its code would recall (GRA-1029).
-        recallFirst: await hasBrainGrant(this.env, authority),
+        recallFirst: readsBrain,
+        ...(await this.#thinking(readsBrain, shared, personId)),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
@@ -4819,6 +4825,37 @@ export class Workspace extends DurableObject<Env> {
       )
       .toArray();
     return row?.chars ?? 0;
+  }
+
+  /**
+   * The tool that shows the turn's thinking in the brain, as the person
+   * reads the brain: only in their own chat, by an agent that may read it.
+   */
+  async #thinking(
+    readsBrain: boolean,
+    shared: boolean,
+    personId: string
+  ): Promise<{ thinking?: AgentTool }> {
+    if (!readsBrain || shared) {
+      return {};
+    }
+    // Loaded with the turn, as the agent loop is: it brings TypeBox.
+    const { showThinking } = await import("./agent-thinking.ts");
+    return {
+      thinking: showThinking(async () => await this.#brainOf(personId)),
+    };
+  }
+
+  /**
+   * The brain as `personId` may read it now, as the brain page reads it for
+   * them: what a step of the chat's thinking may name (agent-thinking.ts).
+   */
+  async #brainOf(personId: string): Promise<ThinkingBrain> {
+    const person = await memberOf(this.env.DB, personId);
+    if (person === undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    return await readThinkingBrain(this.env, person);
   }
 
   #transcript(chatId: ChatId): Message[] {
