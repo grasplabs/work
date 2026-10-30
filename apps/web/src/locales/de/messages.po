@@ -2196,6 +2196,7 @@ msgstr "Konto"
 msgid "Action"
 msgstr "Aktion"
 
+#: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -2210,6 +2211,10 @@ msgstr "Aktionen für {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
 msgstr "Aktionen für {who}"
+
+#: src/engines/app-versions.tsx
+msgid "Actions for version {version}"
+msgstr "Aktionen für Version {version}"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3658,6 +3663,10 @@ msgstr "Nach Workflow"
 msgid "By workflow run"
 msgstr "Nach Workflow-Lauf"
 
+#: src/engines/app-versions.tsx
+msgid "by you"
+msgstr "von Ihnen"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Ein Modell aufgerufen"
@@ -3695,7 +3704,9 @@ msgstr "Nicht lesbar"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-remove.tsx
 #: src/engines/app-status.tsx
+#: src/engines/app-versions.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
@@ -4747,6 +4758,10 @@ msgctxt "kind of app"
 msgid "CRM"
 msgstr "CRM"
 
+#: src/engines/app-versions.tsx
+msgid "Current"
+msgstr "Aktuell"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Aktueller Tarif"
@@ -4885,6 +4900,7 @@ msgstr "Version der Definition"
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/engines/app-remove.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
 msgstr "Löschen"
@@ -4902,6 +4918,7 @@ msgstr "„{title}“ löschen?"
 msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Das Interview von {first} endgültig löschen, mit allem, was gesagt wurde?"
 
+#: src/engines/app-remove.tsx
 #: src/settings/teams.tsx
 msgid "Delete {name}?"
 msgstr "{name} löschen?"
@@ -4909,6 +4926,10 @@ msgstr "{name} löschen?"
 #: src/onboarding/interview-actions.tsx
 msgid "Delete and start over"
 msgstr "Löschen und neu beginnen"
+
+#: src/engines/app-remove.tsx
+msgid "Delete for good"
+msgstr "Endgültig löschen"
 
 #: src/interview/closed.tsx
 msgid "Delete it"
@@ -7301,6 +7322,10 @@ msgstr "Er hat noch keinen Schritt aufgezeichnet."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "Es ist endgültig weg und lässt sich nicht zurückholen. Das Audit-Protokoll hält fest, dass und von wem es entfernt wurde, nie, was es war."
 
+#: src/engines/app-remove.tsx
+msgid "It is gone for good: its apps, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
+msgstr "Sie ist endgültig weg: ihre Apps, Versionen und Mitglieder und was ihr erlaubt war. Ihre Speicher und deren Datensätze bleiben, ebenso die Workflows, die ihr nicht gehören."
+
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "Es ist keine davon"
@@ -7433,6 +7458,10 @@ msgstr "Ihr Zugriff ist abgelaufen. Das Grasp-Team kann sie nicht neu verbinden:
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Domänen und Agenten behalten ihre Berechtigungen dafür."
 
+#: src/engines/app-versions.tsx
+msgid "Its apps and workflows run on it from now on. Grasp checks and builds it first, and refuses if the version that runs changed since you looked."
+msgstr "Ihre Apps und Workflows laufen ab jetzt darauf. Grasp prüft und baut sie zuerst und lehnt ab, wenn sich die laufende Version geändert hat, seit Sie nachgesehen haben."
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts, statt ohne Budget zu laufen. Binde sie erneut, um ihr Budget neu festzulegen."
@@ -7529,6 +7558,10 @@ msgstr "Jede Person darin wird gefragt, was sie macht"
 #: src/onboarding/organization-words.ts
 msgid "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
 msgstr "Die Personen bekommen ihre Links ohne Wartezeit, und Stephen fragt jede, welche Arbeit sie macht. Mit einer Teamleitung fragt er zuerst sie, welche Arbeit es gibt."
+
+#: src/engines/app-versions.tsx
+msgid "Its permissions on connections, to start workflows and to call other domains wait for an admin to grant them again."
+msgstr "Ihre Berechtigungen für Verbindungen, zum Starten von Workflows und zum Aufrufen anderer Domänen warten darauf, dass ein Admin sie erneut erteilt."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "its retries"
@@ -8082,6 +8115,10 @@ msgctxt "thinking effort"
 msgid "Low"
 msgstr "Niedrig"
 
+#: src/engines/app-versions.tsx
+msgid "Made"
+msgstr "Erstellt"
+
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Made by {person} on {date}."
 msgstr "Erstellt von {person} am {date}."
@@ -8131,6 +8168,10 @@ msgstr "Einen Workflow daraus machen"
 msgid "Make admin"
 msgstr "Zum Admin machen"
 
+#: src/engines/app-versions.tsx
+msgid "Make current"
+msgstr "Aktuell machen"
+
 #: src/engines/new-domain-dialog.tsx
 msgid "Make domain"
 msgstr "Domäne anlegen"
@@ -8142,6 +8183,10 @@ msgstr "Version {version} aktuell machen"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Version {version} aktuell machen und veröffentlichen"
+
+#: src/engines/app-versions.tsx
+msgid "Make version {version} current?"
+msgstr "Version {version} aktuell machen?"
 
 #: src/inbox/items.ts
 msgid "Make version {version} of {name} live?"
@@ -9103,6 +9148,10 @@ msgstr "Für dieses Interview ist keine Textversion festgehalten."
 #: src/workflows/files-and-apps.tsx
 msgid "No version uses it yet"
 msgstr "Noch keine Version nutzt es"
+
+#: src/engines/app-versions.tsx
+msgid "No version yet: its builders make the first in a chat."
+msgstr "Noch keine Version: Ihre Entwickler erstellen die erste in einem Chat."
 
 #: src/dashboard/spend-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
@@ -11851,6 +11900,18 @@ msgstr "Rolle von {who}"
 msgid "Roles"
 msgstr "Rollen"
 
+#: src/engines/app-versions.tsx
+msgid "Roll back"
+msgstr "Zurücksetzen"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to this version"
+msgstr "Auf diese Version zurücksetzen"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to version {version}?"
+msgstr "Auf Version {version} zurücksetzen?"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Rome"
@@ -12592,6 +12653,10 @@ msgstr "Mehr zeigen · noch {left}"
 #: src/dashboard/failed-workflows.tsx
 msgid "Show older"
 msgstr "Ältere anzeigen"
+
+#: src/engines/app-versions.tsx
+msgid "Show older versions"
+msgstr "Ältere Versionen anzeigen"
 
 #: src/dashboard/widget-ask.tsx
 msgid "Show only the failed runs."
@@ -15447,6 +15512,10 @@ msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speiche
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speichers ändert, aktuell gemacht werden, weder in dieser Domäne noch in einer anderen, die den Speicher nutzt. Kein Datensatz ist schuld, es gibt also nichts zu korrigieren: Verwerfen Sie die Änderung, damit der Speicher wieder Änderungen annimmt."
 
+#: src/engines/app-versions.tsx
+msgid "Up for review"
+msgstr "Zur Prüfung"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
 msgstr "Bis {upTo} Minuten"
@@ -15541,6 +15610,7 @@ msgstr "Jetzt prüfen"
 msgid "Verify the chain"
 msgstr "Kette prüfen"
 
+#: src/engines/app-versions.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -15608,6 +15678,10 @@ msgstr "Version {waiting} wartet darauf, live zu gehen"
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Zu prüfende Version: {version}"
+
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Versions"
+msgstr "Versionen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -15948,6 +16022,7 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "Was hereinkam"
 
+#: src/engines/app-versions.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -17077,6 +17152,10 @@ msgstr "Von einem Modell geschrieben: {0}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Notiert"
+
+#: src/engines/app-versions.tsx
+msgid "Written in a chat"
+msgstr "In einem Chat geschrieben"
 
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"
