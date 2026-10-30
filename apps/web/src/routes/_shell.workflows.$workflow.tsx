@@ -268,6 +268,33 @@ type WorkflowTab =
   | "parameters"
   | "versions";
 
+/**
+ * The draft the page goes by: its editor's last save or read (`edited`),
+ * or the page's own read when that is at a later revision (read again
+ * after a publication).
+ */
+const latestDraftOf = (
+  loaded: Loaded<WorkflowDraft> | undefined,
+  edited: WorkflowDraft | undefined
+): WorkflowDraft | undefined => {
+  const read = loaded?.state === "ready" ? loaded.data : undefined;
+  if (edited === undefined) {
+    return read;
+  }
+  return read !== undefined && read.revision > edited.revision ? read : edited;
+};
+
+/**
+ * The checkpoint a test on recent items runs: none before the draft's
+ * first edit (revision 0 is the current version's definition).
+ */
+const testedCheckpointOf = (
+  draft: WorkflowDraft | undefined
+): number | null => {
+  const saved = draft?.checkpoint?.revision ?? 0;
+  return saved > 0 ? saved : null;
+};
+
 const WorkflowResourceView = ({
   resource,
   draft,
@@ -299,11 +326,10 @@ const WorkflowResourceView = ({
   // Files and apps reads what no other tab needs: only once it is opened,
   // then kept while another tab shows.
   const [filesOpened, setFilesOpened] = useState(false);
-  // A test on recent items runs a saved checkpoint: none before the
-  // draft's first edit (revision 0 is the current version's definition).
-  const saved =
-    draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
-  const checkpoint = saved > 0 ? saved : null;
+  // The draft as its editor last saved or read it, beside the page's read:
+  // whichever is at the later revision is the draft the page goes by.
+  const [edited, setEdited] = useState<WorkflowDraft>();
+  const checkpoint = testedCheckpointOf(latestDraftOf(draft, edited));
   return (
     <>
       <Tabs
@@ -357,6 +383,7 @@ const WorkflowResourceView = ({
                 <DefinitionEditor
                   currentVersion={currentVersion}
                   loaded={draft.data}
+                  onDraft={setEdited}
                   onVersionMoved={() => {
                     void router.invalidate();
                   }}

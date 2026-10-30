@@ -127,12 +127,15 @@ export const DefinitionEditor = ({
   workflow,
   loaded,
   currentVersion,
+  onDraft,
   onPublished,
   onVersionMoved,
 }: {
   workflow: string;
   loaded: WorkflowDraft;
   currentVersion: number | null;
+  /** The draft as a save or a read here left it: its checkpoint, for a test. */
+  onDraft: (draft: WorkflowDraft) => void;
   onPublished: (version: WorkflowResourceVersion) => void;
   /** Someone published another version: the page reads the workflow again. */
   onVersionMoved: () => void;
@@ -140,6 +143,11 @@ export const DefinitionEditor = ({
   const core = useCore();
   const { t } = useLingui();
   const [draft, setDraft] = useState(loaded);
+  // What a save or a read here left, here and on the page around it.
+  const took = (next: WorkflowDraft): void => {
+    setDraft(next);
+    onDraft(next);
+  };
   const [text, setText] = useState(loaded.source);
   const [modules, setModules] = useState(loaded.modules);
   const [busy, setBusy] = useState(false);
@@ -167,7 +175,7 @@ export const DefinitionEditor = ({
             modules,
           })
       );
-      setDraft(saved);
+      took(saved);
       setOutcome({ kind: "saved" });
     } catch (error) {
       setOutcome(
@@ -188,7 +196,7 @@ export const DefinitionEditor = ({
       const latest = await core.withSession(
         async (session) => await session.workflowResources.draft(workflow)
       );
-      setDraft(latest);
+      took(latest);
       if (replace) {
         setText(latest.source);
         setModules(latest.modules);
