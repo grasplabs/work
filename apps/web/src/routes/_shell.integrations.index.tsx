@@ -1,5 +1,6 @@
 import { catalogGroups } from "@grasp-os/shared/connect";
 import type { CatalogGroup } from "@grasp-os/shared/connect";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -42,6 +43,7 @@ import type {
 } from "../connections/integrations.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
+import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
@@ -510,7 +512,8 @@ const FilterSelect = ({
 };
 
 const Integrations = () => {
-  const { catalog, connections, uses, requests } = Route.useLoaderData();
+  const { catalog, connections, requests, toRevoke, uses } =
+    Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
   const { q, connectionError, connection } = search;
@@ -608,6 +611,14 @@ const Integrations = () => {
                 </Button>
               </div>
             </div>
+            <RevocationsByHand
+              nameOf={(provider) =>
+                integrations.find(
+                  (each) => each.source === "native" && each.id === provider
+                )?.name ?? provider
+              }
+              toDos={toRevoke}
+            />
             <div className="md:hidden">
               <FilterSelect choices={choices} filter={filter} q={q} />
             </div>
@@ -664,6 +675,14 @@ export const Route = createFileRoute("/_shell/integrations/")({
       core,
       async (session) => await session.connections.appRequests()
     ),
+    // Admins' and Grasp staff's only, and never waited for either.
+    toRevoke:
+      identity.staff || isAdmin(identity.role)
+        ? loadFromCore(
+            core,
+            async (session) => await session.connections.revocationsByHand()
+          )
+        : undefined,
   }),
   pendingComponent: PageLoading,
   component: Integrations,

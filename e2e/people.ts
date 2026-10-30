@@ -281,6 +281,7 @@ const cast = {
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
+  revokesByHand: { admin: "admin", owner: "user" },
   workspaceSettings: { admin: "admin", member: "user" },
   memberInvites: { admin: "admin" },
   roleChange: { admin: "admin", one: "user" },

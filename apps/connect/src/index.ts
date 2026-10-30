@@ -30,6 +30,8 @@ import type {
   Disconnect,
   RequireClassRights,
   DisconnectPersonal,
+  RevocationByHand,
+  RevocationsByHand,
   ErasePersonal,
   FinishConnection,
   HeldCall,
@@ -154,6 +156,7 @@ import {
 import type { HeldAction } from "./pending.ts";
 import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
+import { revocationsByHand } from "./revocations-by-hand.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
 export { ConnectorEgress } from "./egress.ts";
@@ -378,6 +381,13 @@ export default class Connect
 
   async disconnect(request: Disconnect): Promise<{ revoked: boolean }> {
     return await disconnect(this.env, request);
+  }
+
+  /** The revokes at a provider connect couldn't make (src/revocations-by-hand.ts). */
+  async revocationsByHand(
+    request: RevocationsByHand
+  ): Promise<RevocationByHand[]> {
+    return await revocationsByHand(this.env, request);
   }
 
   async disconnectPersonal(

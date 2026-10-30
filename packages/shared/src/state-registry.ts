@@ -579,6 +579,10 @@ const connectDb: D1State = {
       `${connect}revocations.ts`,
       "Revokes a provider still owes, the tokens kept until they go through: an obligation a move must keep."
     ),
+    given_up_revocations: exported(
+      `${connect}revocations-by-hand.ts`,
+      "Revokes Grasp gave up on, for an admin to make by hand: a move must keep them."
+    ),
     erased_people: exported(
       `${connect}person-erasure.ts`,
       "Whose erasure began, which keeps connect from making anything of theirs again: a move must keep it."
