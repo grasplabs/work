@@ -112,6 +112,34 @@ test("every section of an organization not set up yet says so, moving between th
   expect(failures).toStrictEqual([]);
 });
 
+test("an organization's column folds to a rail of its sections, which still lead to each, and opens again", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  const column = page.getByRole("navigation", { name: "Answering Acme" });
+
+  await column.getByRole("button", { name: "Fold the sections" }).click();
+  // Folded, each section is a link named by its title, the open one marked.
+  await expect(
+    column.getByRole("link", { name: "Overview", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await column.getByRole("link", { name: "Details", exact: true }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`${sectionPath(answered, "details")}$`, "u")
+  );
+  await expect(
+    column.getByRole("link", { name: "Details", exact: true })
+  ).toHaveAttribute("aria-current", "page");
+
+  await column.getByRole("button", { name: "Expand the sections" }).click();
+  await expect(
+    column.getByRole("heading", { name: "Answering Acme" })
+  ).toBeVisible();
+  await expect(column.getByRole("link", { name: /^Details/u })).toBeVisible();
+});
+
 /** Makes the admin's server function `fn` fail as `mode` says, or none with null. */
 const fault = async (
   request: APIRequestContext,

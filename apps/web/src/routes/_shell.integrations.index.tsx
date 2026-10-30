@@ -8,6 +8,14 @@ import {
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
 import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  PageSidebarRailButton,
+  PageSidebarRailDivider,
+  PageSidebarRailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -46,15 +54,7 @@ import { RequestedApps } from "../connections/requested-apps.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -158,13 +158,13 @@ const RailChoice = ({
   const { icon: Icon, label } = choice;
   const count = formatNumber(choice.count);
   return (
-    <RailButton
+    <PageSidebarRailButton
       active={selected}
       label={t`${label} · ${count}`}
       render={<Link search={searchFor(choice.filter, q)} to="/integrations" />}
     >
       <Icon />
-    </RailButton>
+    </PageSidebarRailButton>
   );
 };
 
@@ -185,13 +185,13 @@ const Filters = ({
   if (folded) {
     return (
       <PageSidebar folded label={t`Filter integrations`}>
-        <RailExpand
+        <PageSidebarRailExpand
           label={t`Expand the filters`}
           onExpand={() => {
             setFolded(false);
           }}
         />
-        <RailDivider />
+        <PageSidebarRailDivider />
         {fixed.map((choice) => (
           <RailChoice
             choice={choice}
@@ -200,7 +200,7 @@ const Filters = ({
             selected={sameFilter(choice.filter, filter)}
           />
         ))}
-        <RailDivider />
+        <PageSidebarRailDivider />
         {categories.map((choice) => (
           <RailChoice
             choice={choice}
