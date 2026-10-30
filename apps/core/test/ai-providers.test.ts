@@ -32,6 +32,7 @@ import {
   it,
   vi,
 } from "vite-plus/test";
+import { z } from "zod";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
@@ -724,6 +725,34 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
       expect(failed).toBe("model.failed");
       await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
+    it("never falls back once an earlier request of the call was billed: a paid answer that missed its schema, then a refusal", async () => {
+      const keys = await fallingBack();
+      // The first answer is paid for but isn't the JSON asked for; asked
+      // again, the provider refuses the call's credentials.
+      await plan(keys.openai, [
+        answered("openai-responses", "Not JSON."),
+        { status: 401 },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", '{"ok":true}')]);
+      const trigger = newPerson();
+
+      const failed = await outcome(
+        models(env).call({
+          ...(await callOf(openaiCase.model, { trigger })),
+          schema: z.object({ ok: z.boolean() }),
+        })
+      );
+
+      expect(failed).toBe("model.failed");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(2);
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+      const events = await auditedFor(trigger.userId, 2);
+      expect(events.map(({ action }) => action)).toStrictEqual([
+        "model.call",
+        "model.call",
+      ]);
     });
 
     it("falls back in an agent's loop too, before anything streamed", async () => {
