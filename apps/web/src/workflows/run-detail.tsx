@@ -24,13 +24,24 @@ import { runDotOf, runStatusLabels } from "./run-status.ts";
 // own (`workflowResources.run`) and again until it ends: the list carries
 // no result, as only the person it acted for and the organization's admins
 // see what it returned or why it failed (it can hold what the run read for
-// them). Everyone else is told so, rather than shown nothing.
+// them). Everyone else is told so, rather than shown nothing. Where its
+// steps show under it, they follow the run (`status`): the run is read
+// again only when its status moves, never on a second timer of its own.
 
 /** How often a run still going is read again. */
 const followMs = 1500;
 
 /** Whether `run` has ended: nothing about it changes after. */
 const ended = (run: WorkflowResourceRun): boolean => run.endedAt !== null;
+
+/**
+ * Whether a run's facts are read again on their own timer: only while it
+ * goes on, and only where no steps follow it (`status`).
+ */
+const readsAgain = (
+  run: WorkflowResourceRun,
+  status: string | null | undefined
+): boolean => status === undefined && !ended(run);
 
 /** A label over what it names, in a run's facts. */
 const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -90,17 +101,23 @@ export const RunResultView = ({
   );
 };
 
-/** Run `opened`, read again until it ends: its facts, then its result. */
+/**
+ * Run `opened`: its facts, then its result. Read again until it ends, or,
+ * given `status` (what its followed steps last said of it; null before
+ * they said anything), once each time that moves.
+ */
 const RunFacts = ({
   workflow,
   opened,
   names,
   admin,
+  status,
 }: {
   workflow: string;
   opened: WorkflowResourceRun;
   names: Names;
   admin: boolean;
+  status: string | null | undefined;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -121,7 +138,7 @@ const RunFacts = ({
         }
         setRun(read);
         setFailure(undefined);
-        if (!ended(read)) {
+        if (readsAgain(read, status)) {
           timer = setTimeout(() => {
             void follow();
           }, followMs);
@@ -142,7 +159,7 @@ const RunFacts = ({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [core, opened.id, workflow]);
+  }, [core, opened.id, workflow, status]);
 
   const seesResult = run.principal === names.me || admin;
   return (
@@ -191,6 +208,7 @@ export const RunSheet = ({
   admin,
   onClose,
   steps,
+  status,
 }: {
   workflow: string;
   opened: WorkflowResourceRun | null;
@@ -199,6 +217,11 @@ export const RunSheet = ({
   admin: boolean;
   onClose: () => void;
   steps?: ReactNode;
+  /**
+   * Where `steps` follow the run: its status as they last read it (null
+   * before they did), so the run's facts are not read on a timer too.
+   */
+  status?: string | null;
 }) => {
   const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
   return (
@@ -230,6 +253,7 @@ export const RunSheet = ({
                 admin={admin}
                 names={names}
                 opened={opened}
+                status={status}
                 workflow={workflow}
               />
             )}
