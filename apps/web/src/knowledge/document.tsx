@@ -420,9 +420,7 @@ export const DocumentView = ({
                   />
                 </div>
               </div>
-              <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
-                {doc.title}
-              </h1>
+              <h1 className="type-title wrap-break-word">{doc.title}</h1>
               {doc.description === "" ? null : (
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   {doc.description}
@@ -455,7 +453,7 @@ export const DocumentView = ({
       </div>
       <aside
         aria-label={t`Details`}
-        className="bg-sidebar hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-4 pb-6 2xl:flex"
+        className="bg-muted/50 hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-4 pb-6 2xl:flex"
       >
         {details}
       </aside>

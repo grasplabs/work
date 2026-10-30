@@ -6,12 +6,13 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn, teamMadeBy } from "./people.ts";
 
 // The Knowledge page: a person finds a document by searching, reads it
 // rendered (nothing in it runs, its `[[links]]` open here) with what links
 // to it, edits it into a new version, meets an edit saved since in another
-// tab instead of overwriting it, and restores an earlier version; and
+// tab instead of overwriting it, and restores an earlier version; makes
+// collections and documents; purges personal data, previewed first; and
 // uploads files, following each until it is ready or failed. Search,
 // versions and extraction themselves are core's tests.
 
@@ -441,4 +442,151 @@ test("someone who may only read a collection is offered no upload, edit or resto
     .click();
   await expect(sheet).toBeHidden();
   await expect(page).toHaveURL(/\/knowledge\/[^/?]+$/u);
+});
+
+test("a person makes a private collection and a document in it, and an admin a sensitive one for a team", async ({
+  pageOf,
+}) => {
+  const { admin, member } = peopleIn("knowledgeCreate");
+  const tag = crypto.randomUUID().slice(0, 8);
+  const team = `Finance ${tag}`;
+  await teamMadeBy(admin, team);
+
+  // Anyone makes a collection only they read: nothing else is offered.
+  const page = await pageOf(member);
+  await page.goto("/knowledge");
+  await page.getByRole("button", { name: "New collection" }).click();
+  const dialog = page.getByRole("dialog", { name: "New collection" });
+  await expect(dialog.getByRole("radio")).toHaveCount(1);
+  await expect(dialog.getByRole("radio", { name: /^Only me/u })).toBeChecked();
+  const mine = `Notes ${tag}`;
+  await dialog.getByLabel("Name").fill(mine);
+  await dialog.getByLabel("When to use it").fill("My own notes.");
+  await dialog.getByRole("button", { name: "Create collection" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: mine })).toBeVisible(
+    pageRead
+  );
+  await expect(page.getByText("Only the owner")).toBeVisible();
+
+  // A new document starts with its name, in its folders, and opens.
+  await page.getByRole("button", { name: "New document" }).click();
+  const newDocument = page.getByRole("dialog", { name: "New document" });
+  await newDocument.getByLabel("Name").fill("meetings/kickoff");
+  await newDocument.getByRole("button", { name: "Create document" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "kickoff" })
+  ).toBeVisible(pageRead);
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+
+  // The same path again is taken, and nothing is overwritten.
+  await page.getByRole("link", { name: mine }).first().click();
+  await page.getByRole("button", { name: "New document" }).click();
+  await newDocument.getByLabel("Name").fill("meetings/kickoff");
+  await newDocument.getByRole("button", { name: "Create document" }).click();
+  await expect(
+    newDocument.getByText(
+      "This collection has a document at meetings/kickoff.md already."
+    )
+  ).toBeVisible();
+
+  // An admin shares one with a team, marked sensitive.
+  const adminPage = await pageOf(admin);
+  await adminPage.goto("/knowledge");
+  await adminPage.getByRole("button", { name: "New collection" }).click();
+  const adminDialog = adminPage.getByRole("dialog", { name: "New collection" });
+  const shared = `Ledgers ${tag}`;
+  await adminDialog.getByLabel("Name").fill(shared);
+  const create = adminDialog.getByRole("button", {
+    name: "Create collection",
+  });
+  await adminDialog.getByRole("radio", { name: /^Chosen teams/u }).click();
+  // Teams without a team chosen: nothing to create yet.
+  await expect(create).toBeDisabled();
+  await adminDialog.getByRole("checkbox", { name: team }).click();
+  await adminDialog.getByRole("switch", { name: /^Sensitive/u }).click();
+  await create.click();
+  await expect(
+    adminPage.getByRole("heading", { level: 1, name: shared })
+  ).toBeVisible(pageRead);
+  await expect(adminPage.getByText("Teams", { exact: true })).toBeVisible();
+  await expect(
+    adminPage.getByText("Sensitive", { exact: true }).first()
+  ).toBeVisible();
+});
+
+test("an admin purges a person's name from a collection, seeing what goes first, while a member is offered no purge", async ({
+  pageOf,
+}) => {
+  const { admin, member } = peopleIn("knowledgePurge");
+  const name = `Tomasz${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
+  const { core, api } = apiOf(admin);
+  let collectionId: string;
+  let documentId: string;
+  try {
+    ({ id: collectionId } = await api.knowledge.createCollection({
+      name: `Offboarding ${crypto.randomUUID()}`,
+      access: "everyone",
+    }));
+    await api.knowledge.saveDocument({
+      collectionId,
+      path: "team.md",
+      text: `# Team\n\n${name} leads payroll.\n`,
+      ifVersion: 0,
+    });
+    ({ id: documentId } = await api.knowledge.saveDocument({
+      collectionId,
+      path: "team.md",
+      text: `# Team\n\n${name} leads payroll and pensions.\n`,
+      ifVersion: 1,
+    }));
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // A member reads the collection, and has no menu to purge it with.
+  const reader = await pageOf(member);
+  await reader.goto(`/knowledge/${collectionId}`);
+  await expect(reader.getByRole("heading", { level: 1 })).toBeVisible(pageRead);
+  await expect(
+    reader.getByRole("button", { name: "Collection actions" })
+  ).toHaveCount(0);
+
+  const page = await pageOf(admin);
+  await page.goto(`/knowledge/${collectionId}`);
+  await page.getByRole("button", { name: "Collection actions" }).click();
+  await page.getByRole("menuitem", { name: "Purge personal data" }).click();
+  const dialog = page.getByRole("dialog", { name: /^Purge personal data/u });
+  await dialog.getByLabel("What to remove").fill(`${name}\n`);
+  await dialog
+    .getByRole("radio", { name: "Someone left the organization" })
+    .click();
+  await dialog.getByRole("button", { name: "Preview the purge" }).click();
+
+  // The preview says what goes, and nothing has changed yet.
+  await expect(dialog.getByText("1 document rewritten")).toBeVisible();
+  await expect(dialog.getByText("2 versions rewritten")).toBeVisible();
+  await expect(dialog.getByText("2 occurrences removed")).toBeVisible();
+  const { core: checking, api: check } = apiOf(admin);
+  try {
+    const before = await check.knowledge.getDocument(documentId);
+    expect(before.version.text).toContain(name);
+  } finally {
+    checking[Symbol.dispose]();
+  }
+
+  await dialog.getByRole("button", { name: "Purge for good" }).click();
+  await expect(dialog.getByText("1 document purged")).toBeVisible();
+  await expect(dialog.getByText("2 versions purged")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Every version reads without the name.
+  await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
+  await expect(
+    page.getByText("(removed) leads payroll and pensions.")
+  ).toBeVisible(pageRead);
+  await page.goto(`/knowledge/${collectionId}?doc=${documentId}&version=1`);
+  await expect(page.getByText("(removed) leads payroll.")).toBeVisible(
+    pageRead
+  );
+  await expect(page.getByText(name)).toHaveCount(0);
 });
