@@ -12,6 +12,7 @@ import {
   GlobeIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
+  MailWarningIcon,
   PackageIcon,
   PencilLineIcon,
   RocketIcon,
@@ -70,6 +71,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  stoppedEvents: msg({
+    message: "Not hearing",
+    context: "inbox item kind: a mailbox or drive connect stopped hearing",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -94,6 +99,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
+  stoppedEvents: MailWarningIcon,
   decision: ScaleIcon,
 };
 
