@@ -3,7 +3,7 @@ import "@grasp-os/chat/workerd";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { lastWeeks, weekOf } from "@grasp-os/shared/stephen-requests";
 import type { WeeklySummary } from "@grasp-os/shared/stephen-requests";
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { activeMember } from "./auth/auth.ts";
@@ -31,9 +31,12 @@ import { summaryFor, teamsChatOf } from "./stephen-requests.ts";
 //
 // Queued as an outbox: one row per week and reader, written once, then
 // sent from there and marked, so a week's summary goes once even when the
-// clock runs twice; one that can't be sent is tried again a few times,
-// then ends failed with its reason. Only to someone who is still an admin
-// as it is queued; never to anyone else.
+// clock runs twice: a run claims a row for as long as a send may take
+// before it sends it, so a second run, or one restarted, passes it by.
+// One that can't be sent is tried again a few times, then ends failed
+// with its reason. Only to someone who is an admin asking for it as it
+// is queued, and still is as it is sent; never to anyone else. A late
+// one sums up the week it was queued for.
 
 /** From this hour on a Monday, in the company's time zone, the week's summaries are queued. */
 const fromHour = 7;
@@ -43,6 +46,9 @@ const attemptsMax = 5;
 
 /** Most summaries one run sends. */
 const sendMax = 20;
+
+/** How long a run holds a summary it sends: longer than any send takes. */
+const claimMs = 10 * 60_000;
 
 /** The hour `at` is in, in `timeZone`; in UTC should the zone be unknown. */
 const hourIn = (timeZone: string, at: Date): number => {
@@ -130,12 +136,39 @@ const escaped = (text: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-/** Sends one queued summary; what became of it. */
+/**
+ * Whether `personId` may still have the summary as `via` sends it: still
+ * an admin, and still asking for it that way. Checked as it is sent, not
+ * only as it was queued.
+ */
+const stillReader = async (
+  env: Env,
+  personId: string,
+  via: "teams" | "email"
+): Promise<boolean> => {
+  const found = await drizzle(env.DB)
+    .select({ one: sql<number>`1` })
+    .from(stephenSummaryReaders)
+    .where(
+      and(
+        eq(stephenSummaryReaders.personId, personId),
+        eq(stephenSummaryReaders.via, via),
+        activeMember(personId, ["admin"])
+      )
+    )
+    .get();
+  return found !== undefined;
+};
+
+/** Sends one queued summary, of the week it was queued for; what became of it. */
 const sendOne = async (
   env: Env,
-  row: { personId: string; via: "teams" | "email" }
+  row: { week: string; personId: string; via: "teams" | "email" }
 ): Promise<{ sent: boolean; reason: string | null; retry: boolean }> => {
-  const summary = await summaryFor(env, row.personId);
+  if (!(await stillReader(env, row.personId, row.via))) {
+    return { sent: false, reason: "not_reader", retry: false };
+  }
+  const summary = await summaryFor(env, row.personId, row.week);
   const origin = signInConfig(env)?.origin;
   const link = origin === undefined ? null : `${origin}/workflows/requests`;
   if (row.via === "teams") {
@@ -206,15 +239,23 @@ export const sendStephenSummaries = async (
       WHERE ${activeMember(stephenSummaryReaders.personId, ["admin"])}
       ON CONFLICT DO NOTHING`);
   }
+  // Free to take: queued, and not claimed by a run still within its lease.
+  const free = and(
+    eq(stephenSummaries.state, "queued"),
+    or(
+      isNull(stephenSummaries.claimedUntil),
+      lt(stephenSummaries.claimedUntil, now)
+    )
+  );
+  // One whose every try was taken by a run that never came back ends failed.
+  await db
+    .update(stephenSummaries)
+    .set({ state: "failed", reason: "unfinished", settledAt: now })
+    .where(and(free, gte(stephenSummaries.attempts, attemptsMax)));
   const queued = await db
     .select()
     .from(stephenSummaries)
-    .where(
-      and(
-        eq(stephenSummaries.state, "queued"),
-        lt(stephenSummaries.attempts, attemptsMax)
-      )
-    )
+    .where(and(free, lt(stephenSummaries.attempts, attemptsMax)))
     .orderBy(asc(stephenSummaries.queuedAt))
     .limit(sendMax);
   for (const row of queued) {
@@ -223,12 +264,16 @@ export const sendStephenSummaries = async (
       eq(stephenSummaries.personId, row.personId),
       eq(stephenSummaries.state, "queued")
     );
-    // Taken before it is sent: a second run passes it by.
+    // Claimed before it is sent, for as long as a send may take: another
+    // run passes it by until the claim ends, so it goes once.
     // oxlint-disable-next-line no-await-in-loop -- one at a time
     const taken = await db
       .update(stephenSummaries)
-      .set({ attempts: row.attempts + 1 })
-      .where(and(key, eq(stephenSummaries.attempts, row.attempts)));
+      .set({
+        attempts: row.attempts + 1,
+        claimedUntil: new Date(now.getTime() + claimMs),
+      })
+      .where(and(key, free, eq(stephenSummaries.attempts, row.attempts)));
     if (taken.meta.changes === 0) {
       continue;
     }
@@ -243,6 +288,9 @@ export const sendStephenSummaries = async (
     const ended =
       outcome.sent || !outcome.retry || row.attempts + 1 >= attemptsMax;
     if (!ended) {
+      // Free again for the next run to try.
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await db.update(stephenSummaries).set({ claimedUntil: null }).where(key);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one at a time

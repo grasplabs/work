@@ -593,6 +593,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           }}
         />
         <Tabs
+          size="sm"
           onValueChange={(next: Tab) => {
             void navigate({
               replace: true,
