@@ -249,8 +249,8 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
 
 /**
  * Writes the built-ins in `dirs` into `out`, in id order, and their digest
- * (src/builtin-digest.ts) next to it, or refuses when two share an id. Leaves an unchanged module as it is, so its time stays
- * the same.
+ * (src/builtin-digest.ts) next to it, or refuses when two share an id.
+ * Leaves an unchanged module as it is, so its time stays the same.
  */
 export const writeBlueprints = (
   dirs: readonly string[],

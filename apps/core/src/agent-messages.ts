@@ -4,6 +4,12 @@ import type { Message } from "@earendil-works/pi-ai";
 // Kept out of agent.ts so reading stored messages doesn't load the agent
 // loop (Pi and TypeBox), which a chat loads at its first turn.
 
+/**
+ * The tool by which a turn shows its thinking in the brain
+ * (agent-thinking.ts), as its stored calls and results name it.
+ */
+export const showThinkingName = "show_thinking";
+
 const messageRoles = new Set<unknown>([
   "system",
   "user",
