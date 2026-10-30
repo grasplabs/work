@@ -365,6 +365,7 @@ const cast = {
   brain: { member: "user" },
   brainTranscript: { member: "user" },
   brainMemoryShare: { admin: "admin", one: "user", two: "user" },
+  brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
   workflowTeam: { admin: "admin", builder: "builder", member: "user" },
   brainChat: { member: "user" },
