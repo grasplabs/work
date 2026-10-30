@@ -377,6 +377,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         running: false,
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
     });
   }
@@ -411,6 +412,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         running: false,
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
     });
   }
@@ -596,6 +598,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         lastAt: chat.lastAt.toISOString(),
         projectId: chat.projectId,
         appId: chat.appId,
+        via: chat.via,
       };
       try {
         await chats.send(
