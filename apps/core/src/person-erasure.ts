@@ -1,3 +1,4 @@
+import { preparePurge, purge } from "@grasp-os/brain/purge";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
@@ -43,6 +44,8 @@ import {
   subjectKeyVersion,
   subjectsOf,
 } from "./erased-people.ts";
+import { brainOf } from "./knowledge/ports.ts";
+import { coreErasure } from "./knowledge/rpc.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import { cancelRunsStartedBy } from "./workflows/controls.ts";
@@ -193,6 +196,44 @@ const identity: ErasureStep = {
         )`
       ),
     ]);
+  },
+};
+
+/**
+ * What the Brain and Knowledge hold of them (GRA-1185), through the
+ * Brain's own personal purge, the one way it erases a person (purge.ts),
+ * as an admin's purge on the Knowledge page runs it, for the admin who
+ * asked: their memories, their outcomes with the Brain's tombstone that
+ * keeps them from coming back, their Personal collection with every
+ * version, section, transcript and payload, core's copies of what they
+ * gave (`coreErasure`), and the search index. It is one batch, safe to run
+ * again, so a failure leaves the area pending and the clock runs it again.
+ * Derived projections are GRA-309's, which the purge reaches as it grows.
+ */
+const brain: ErasureStep = {
+  area: "brain",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({ requestedBy: personErasures.requestedBy })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    const by = {
+      actor: { type: "person" as const, userId: erasure.requestedBy },
+      userId: erasure.requestedBy,
+    };
+    const input = {
+      type: "personal" as const,
+      userId,
+      reason: "erasure_request" as const,
+    };
+    const onErase = coreErasure(env);
+    const plan = await preparePurge(brainOf(env), by, input, onErase);
+    await purge(brainOf(env), by, input, plan.token, onErase);
+    await completed(db, userId, "brain");
   },
 };
 
@@ -468,6 +509,7 @@ const steps: readonly ErasureStep[] = [
   apps,
   interview,
   runs,
+  brain,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */

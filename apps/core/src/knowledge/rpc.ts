@@ -128,7 +128,7 @@ const allOf = (copies: readonly Copies[]): Copies => ({
  * from them, the Apps collection's entries and each person's Personal
  * collection.
  */
-const coreErasure = (env: Env): OnErase => {
+export const coreErasure = (env: Env): OnErase => {
   const readings = documentReadingErasure(env);
   return {
     ...allOf([
