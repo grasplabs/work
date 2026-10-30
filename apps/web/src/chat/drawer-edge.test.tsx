@@ -27,7 +27,8 @@ const widest = 461;
 const margin = 8;
 
 let root: Root | undefined;
-let previewed: number[] = [];
+/** How wide the drawer shows now, as the edge last showed it. */
+let shown: number | undefined;
 let closed = 0;
 
 const Drawer = () => {
@@ -41,7 +42,7 @@ const Drawer = () => {
       }}
       onDragging={setDragging}
       onPreview={(next) => {
-        previewed.push(next);
+        shown = next;
       }}
       width={width}
     />
@@ -88,7 +89,7 @@ const drag = async (wanted: number, letGo = true): Promise<void> => {
 describe(DrawerEdge, () => {
   beforeEach(async () => {
     setDockDrawerWidth(dockDrawer.normal);
-    previewed = [];
+    shown = undefined;
     closed = 0;
     Reflect.set(window, "innerWidth", windowWidth);
     const host = document.createElement("div");
@@ -114,11 +115,13 @@ describe(DrawerEdge, () => {
 
   it("is a separator that says how wide the drawer is, and how wide it may be", () => {
     expect({
+      name: edge().getAttribute("aria-label"),
       now: edge().getAttribute("aria-valuenow"),
       least: edge().getAttribute("aria-valuemin"),
       most: edge().getAttribute("aria-valuemax"),
       focusable: edge().tabIndex,
     }).toStrictEqual({
+      name: "Chat width",
       now: "442",
       least: "340",
       most: String(widest),
@@ -139,9 +142,9 @@ describe(DrawerEdge, () => {
     await drag(400, false);
     const whileDragged = dockDrawerWidth();
     await pointer("pointerup", 400);
-    expect({ whileDragged, previewed, kept: dockDrawerWidth() }).toStrictEqual({
+    expect({ whileDragged, shown, kept: dockDrawerWidth() }).toStrictEqual({
       whileDragged: dockDrawer.normal,
-      previewed: [400, 400],
+      shown: 400,
       kept: 400,
     });
   });
@@ -152,12 +155,21 @@ describe(DrawerEdge, () => {
   });
 
   it("gives a little under its least width, and goes back to it when let go", async () => {
-    await drag(300);
-    expect({ previewed, kept: dockDrawerWidth(), closed }).toStrictEqual({
-      previewed: [328, 340],
-      kept: dockDrawer.least,
-      closed: 0,
+    await drag(300, false);
+    const givingWay = shown;
+    await pointer("pointerup", 300);
+    expect({ givingWay, shown, kept: dockDrawerWidth(), closed }).toStrictEqual(
+      { givingWay: 328, shown: 340, kept: dockDrawer.least, closed: 0 }
+    );
+  });
+
+  it("says how wide the drawer may be again when the window is resized", async () => {
+    await act(async () => {
+      Reflect.set(window, "innerWidth", 800);
+      window.dispatchEvent(new Event("resize"));
+      await Promise.resolve();
     });
+    expect(edge().getAttribute("aria-valuemax")).toBe("360");
   });
 
   it("closes when pulled well past its least width", async () => {

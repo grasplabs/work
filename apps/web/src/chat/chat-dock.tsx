@@ -15,8 +15,8 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { RefObject, ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -28,16 +28,8 @@ import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
-import {
-  dockDrawer,
-  dockDrawerWidth,
-  setDockDrawerWidth,
-  setDockMode,
-  settledDrawerWidth,
-  useDockDrawerWidth,
-  useDockMode,
-  widestDockDrawer,
-} from "./dock-mode.ts";
+import { OpenChat, useDockWidth, useUnfoldOnPointer } from "./dock-frame.tsx";
+import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
@@ -297,37 +289,29 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
   );
 };
 
-/**
- * How wide the frame or the drawer is, as a variable the dock's class
- * reads (no inline style): the frame always as the drawer is at first, the
- * drawer as its edge was dragged. A window made narrower takes the drawer
- * in with it. Returns what the edge sets the width with while it is
- * dragged.
- */
-const useDockWidth = (
-  dock: RefObject<HTMLElement | null>,
-  drawer: boolean
-): ((width: number) => void) => {
-  const drawerWidth = useDockDrawerWidth();
-  const width = drawer ? drawerWidth : dockDrawer.normal;
-  useLayoutEffect(() => {
-    dock.current?.style.setProperty("--dock-width", `${width}px`);
-  }, [dock, width]);
-  useEffect(() => {
-    const fit = (): void => {
-      setDockDrawerWidth(
-        settledDrawerWidth(dockDrawerWidth(), widestDockDrawer(innerWidth))
-      );
-    };
-    fit();
-    addEventListener("resize", fit);
-    return () => {
-      removeEventListener("resize", fit);
-    };
-  }, []);
-  return (next) => {
-    dock.current?.style.setProperty("--dock-width", `${next}px`);
-  };
+// One tree in every mode, so the box, and the draft in it, stays as the
+// dock opens, grows or folds away. As in the prototype's corner chat
+// (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
+// 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
+// kept 16 pixels off every edge of the window and rising out of the bar
+// as it opens; the drawer as wide as its edge was dragged. Each is a
+// white card on `shadow-lifted`, with no glow, blur or ring round it.
+const dockLook = (mode: DockMode): { place: string; look: string } => {
+  let place =
+    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
+  let look =
+    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
+  if (mode === "drawer") {
+    place =
+      "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
+    look =
+      "bg-card pointer-events-auto relative flex h-full w-(--dock-width) max-w-full flex-col border-l text-sm";
+  } else if (mode === "frame") {
+    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
+    look =
+      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
+  }
+  return { place, look };
 };
 
 /**
@@ -368,31 +352,21 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
     focusBox();
   };
   // A click into the folded box, with a conversation behind it, opens the
-  // chat on it: the box is the way in, with no arrow of its own. A click
-  // counts even with the cursor already in the box. Only a pointer opens
-  // it: tabbing into the box is to type in it, and sending opens the chat.
+  // chat on it, even with the cursor already in the box. Tabbing into the
+  // box is to type in it; the keyboard's way in is the box's own button
+  // (OpenChat), which the box's description names.
   const open = mode !== "bar";
   const unfolds = !open && chatId !== undefined;
-  useEffect(() => {
-    const element = dock.current;
-    const unfold = (event: Event): void => {
-      if (event.target instanceof HTMLTextAreaElement) {
-        setDockMode("frame");
-      }
-    };
-    if (unfolds) {
-      element?.addEventListener("pointerdown", unfold);
-    }
-    return () => {
-      element?.removeEventListener("pointerdown", unfold);
-    };
-  }, [unfolds]);
+  useUnfoldOnPointer(dock, unfolds);
   const showWidth = useDockWidth(dock, mode === "drawer");
+  const dockId = useId();
+  const hintId = useId();
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
     <Composer
       {...composer}
       compact
+      describedBy={unfolds ? hintId : undefined}
       label={words.title}
       onSend={() => {
         if (mode === "bar") {
@@ -402,35 +376,26 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
       }}
       placeholder={words.placeholder}
       running={view.running}
-    />
+    >
+      {unfolds ? (
+        <OpenChat
+          controls={dockId}
+          hint={hintId}
+          onOpen={() => {
+            moveTo("frame");
+          }}
+        />
+      ) : null}
+    </Composer>
   );
   const drawer = mode === "drawer";
-  // One tree in every mode, so the box, and the draft in it, stays as the
-  // dock opens, grows or folds away. As in the prototype's corner chat
-  // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
-  // 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
-  // kept 16 pixels off every edge of the window and rising out of the bar
-  // as it opens; the drawer as wide as its edge was dragged. Each is a
-  // white card on `shadow-lifted`, with no glow, blur or ring round it.
-  let place =
-    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
-  let look =
-    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
-  if (drawer) {
-    place =
-      "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
-    look =
-      "bg-card pointer-events-auto relative flex h-full w-(--dock-width) max-w-full flex-col border-l text-sm";
-  } else if (open) {
-    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
-    look =
-      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
-  }
+  const { place, look } = dockLook(mode);
   return (
     <div className={place}>
       <section
         aria-label={open ? words.title : undefined}
         className={look}
+        id={dockId}
         ref={dock}
       >
         {drawer ? (

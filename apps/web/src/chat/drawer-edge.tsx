@@ -1,6 +1,6 @@
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { useRef } from "react";
+import { useRef, useSyncExternalStore } from "react";
 
 import {
   draggedDrawerWidth,
@@ -22,6 +22,17 @@ import {
 /** How far the drawer's right edge is in from the window's, in pixels (its `right-2`). */
 const margin = 8;
 
+const onResize = (listener: () => void): (() => void) => {
+  addEventListener("resize", listener);
+  return () => {
+    removeEventListener("resize", listener);
+  };
+};
+
+/** The widest the drawer may be in the window as it is now, again as the window is resized. */
+const useWidest = (): number =>
+  useSyncExternalStore(onResize, () => widestDockDrawer(innerWidth));
+
 export const DrawerEdge = ({
   width,
   dragging,
@@ -38,13 +49,14 @@ export const DrawerEdge = ({
   onClose: () => void;
 }) => {
   const { t } = useLingui();
+  const widest = useWidest();
   // Where the drag has the drawer now, kept when it is let go.
   const dragged = useRef(width);
   return (
     <div
-      aria-label={t`Drag to make the chat wider or narrower`}
+      aria-label={t`Chat width`}
       aria-orientation="vertical"
-      aria-valuemax={widestDockDrawer(innerWidth)}
+      aria-valuemax={widest}
       aria-valuemin={dockDrawer.least}
       aria-valuenow={width}
       className="group/edge focus-visible:ring-ring/50 absolute inset-y-0 -left-1.5 z-10 flex w-3 cursor-col-resize touch-none justify-center rounded-full outline-none focus-visible:ring-3"
@@ -55,9 +67,7 @@ export const DrawerEdge = ({
         // The arrows are the edge's own here: the page under it doesn't move.
         event.preventDefault();
         event.stopPropagation();
-        setDockDrawerWidth(
-          steppedDrawerWidth(width, event.key, widestDockDrawer(innerWidth))
-        );
+        setDockDrawerWidth(steppedDrawerWidth(width, event.key, widest));
       }}
       onPointerCancel={() => {
         onPreview(width);
@@ -74,7 +84,7 @@ export const DrawerEdge = ({
         }
         const next = draggedDrawerWidth(
           innerWidth - margin - event.clientX,
-          widestDockDrawer(innerWidth)
+          widest
         );
         if (next === "closed") {
           event.currentTarget.releasePointerCapture(event.pointerId);
@@ -89,10 +99,7 @@ export const DrawerEdge = ({
       onPointerUp={() => {
         onDragging(false);
         // Let go while it was giving way: back to its least width.
-        const settled = settledDrawerWidth(
-          dragged.current,
-          widestDockDrawer(innerWidth)
-        );
+        const settled = settledDrawerWidth(dragged.current, widest);
         onPreview(settled);
         setDockDrawerWidth(settled);
       }}

@@ -3809,6 +3809,10 @@ msgstr "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it se
 msgid "Chat name"
 msgstr "Chat name"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Chat width"
+
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chats"
@@ -5148,10 +5152,6 @@ msgstr "Draft"
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Drafts, events and files of their own, after they press a card."
-
-#: src/chat/drawer-edge.tsx
-msgid "Drag to make the chat wider or narrower"
-msgstr "Drag to make the chat wider or narrower"
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -9852,6 +9852,7 @@ msgstr "Open since {date}. Until it is answered, this stays unknown, never zero.
 msgid "Open since Grasp's go on {since}."
 msgstr "Open since Grasp's go on {since}."
 
+#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Open the chat"
@@ -13843,6 +13844,10 @@ msgstr "There are no domains you can open yet. Domains are made in chat: describ
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "There are no workflows to link yet."
+
+#: src/chat/chat-dock.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "There is a conversation here. Open the chat to see it."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."

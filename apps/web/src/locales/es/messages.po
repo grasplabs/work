@@ -3809,6 +3809,10 @@ msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp
 msgid "Chat name"
 msgstr "Nombre del chat"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Ancho del chat"
+
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chats"
@@ -5148,10 +5152,6 @@ msgstr "Borrador"
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Sus propios borradores, eventos y archivos, después de pulsar una tarjeta."
-
-#: src/chat/drawer-edge.tsx
-msgid "Drag to make the chat wider or narrower"
-msgstr "Arrastra para hacer el chat más ancho o más estrecho"
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -9852,6 +9852,7 @@ msgstr "Abierta desde el {date}. Hasta que se responda, el dato sigue siendo des
 msgid "Open since Grasp's go on {since}."
 msgstr "Abierta desde el visto bueno de Grasp el {since}."
 
+#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Abrir el chat"
@@ -13843,6 +13844,10 @@ msgstr "Aún no hay dominios que puedas abrir. Los dominios se crean en el chat:
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Aún no hay flujos de trabajo que vincular."
+
+#: src/chat/chat-dock.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "Aquí hay una conversación. Abre el chat para verla."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."

@@ -3809,6 +3809,10 @@ msgstr "Chat-Apps, in denen Grasp weiß, dass Sie es sind. Schreiben Sie Grasp i
 msgid "Chat name"
 msgstr "Name des Chats"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Breite des Chats"
+
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chats"
@@ -5148,10 +5152,6 @@ msgstr "Entwurf"
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Eigene Entwürfe, Termine und Dateien, nachdem die Person eine Karte bestätigt."
-
-#: src/chat/drawer-edge.tsx
-msgid "Drag to make the chat wider or narrower"
-msgstr "Ziehen, um den Chat breiter oder schmaler zu machen"
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Draw again"
@@ -9852,6 +9852,7 @@ msgstr "Offen seit {date}. Bis zur Antwort bleibt das unbekannt, nie null."
 msgid "Open since Grasp's go on {since}."
 msgstr "Offen seit dem Go von Grasp am {since}."
 
+#: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
@@ -13843,6 +13844,10 @@ msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Domänen entstehen
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Es gibt noch keine Workflows zum Verknüpfen."
+
+#: src/chat/chat-dock.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "Hier gibt es ein Gespräch. Öffnen Sie den Chat, um es zu sehen."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
