@@ -222,22 +222,6 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   await expect(
     page.getByRole("link", { name: "Open full page" })
   ).toHaveAttribute("href", `/domains/${app}/apps/counter/full`);
-
-  // An old link to the screen still leads to it, from before apps were
-  // engines and from before engines were Domains, and to its full page.
-  await page.goto(`/apps/${app}/screens/counter`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
-  );
-  await counterScreen(page);
-  await page.goto(`/engines/${app}/apps/counter`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
-  );
-  await page.goto(`/engines/${app}/apps/counter/full`);
-  await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter/full$`, "u")
-  );
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
@@ -328,11 +312,11 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   });
 });
 
-test("an old link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
+test("a link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
   page,
   pageOf,
 }) => {
-  await page.goto(`/apps/${app}/screens/counter`);
+  await page.goto(`/domains/${app}/apps/counter`);
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
@@ -353,10 +337,6 @@ test("someone with the user role finds no engine to open", async ({
   pageOf,
 }) => {
   const page = await pageOf(user);
-  // An old link to one engine, from before they were Domains, leads to
-  // that Domain.
-  await page.goto("/engines/some-engine");
-  await expect(page).toHaveURL(/\/domains\/some-engine$/u);
   // An old link to the list leads to the Domains.
   await page.goto("/apps");
   await expect(page).toHaveURL(/\/domains$/u);
@@ -372,7 +352,7 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  await page.goto("/sign-in?returnTo=%2Fengines");
+  await page.goto("/sign-in?returnTo=%2Fdomains");
   await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/domains");
 
