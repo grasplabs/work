@@ -21,7 +21,7 @@ const NewAppRoute = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const crumbs = [
-    { label: t`Apps`, to: "/apps" as const },
+    { label: t`Domains`, to: "/domains" as const },
     { label: t`New app` },
   ];
   if (page.state !== "ready") {

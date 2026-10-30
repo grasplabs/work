@@ -162,16 +162,18 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  // On the Apps page it is a tile, which opens the App's own page.
+  // On the Apps page its app is a tile, under its domain's name, which
+  // opens the app in its domain.
   await nav.getByRole("link", { name: "Apps" }).click();
   const tile = page
     .getByRole("list", { name: "Apps" })
     .getByRole("listitem")
     .filter({ hasText: name });
-  await expect(tile).toContainText("Counts clicks");
-  await tile.getByRole("link", { name }).click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
-  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await tile.getByRole("link", { name: "counter" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
+  );
+  await counterScreen(page);
 
   await nav.getByRole("link", { name: "Domains" }).click();
 

@@ -26,7 +26,6 @@ export type Crumb =
         | "/brain"
         | "/knowledge"
         | "/domains"
-        | "/apps"
         | "/workflows"
         | "/integrations"
         | "/landscape"

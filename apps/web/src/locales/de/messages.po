@@ -1348,10 +1348,6 @@ msgstr "{redesign} in Neugestaltung"
 msgid "{request} a request"
 msgstr "{request} pro Anfrage"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "{responsible} · Made on {made}"
-msgstr "{responsible} · Erstellt am {made}"
-
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -3292,9 +3288,7 @@ msgstr "Freigabe für neue Tools benannt"
 
 #: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
-#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -5712,6 +5706,8 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
+#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -8901,10 +8897,6 @@ msgstr "Von keinem davon"
 msgid "Made by one of"
 msgstr "Von einem davon"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "Made on {made}"
-msgstr "Erstellt am {made}"
-
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Erstellt mit Grasp am {date}"
@@ -9701,10 +9693,6 @@ msgstr "Noch kein Connector"
 msgid "No data"
 msgstr "Keine Daten"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "No design yet"
-msgstr "Noch kein Entwurf"
-
 #: src/routes/_shell.settings.models.tsx
 msgid "No domain has a model bound to it."
 msgstr "An keine Domäne ist ein Modell gebunden."
@@ -9726,7 +9714,6 @@ msgstr "Noch keine Domänen"
 msgid "No domains yet. Domains are made in chat."
 msgstr "Noch keine Domänen. Domänen entstehen im Chat."
 
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No drafts."
 msgstr "Keine Entwürfe."
@@ -9930,10 +9917,6 @@ msgstr "Keine Berechtigungen."
 #: src/policies/policies-table.tsx
 msgid "No policies yet. Upload one to have Grasp propose its rules."
 msgstr "Noch keine Richtlinien. Laden Sie eine hoch, damit Grasp ihre Regeln vorschlägt."
-
-#: src/routes/_shell.apps.index.tsx
-msgid "No published apps yet"
-msgstr "Noch keine veröffentlichten Apps"
 
 #: src/settings/pulse.ts
 msgctxt "Pulse status"
@@ -10624,7 +10607,6 @@ msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notizen"
 
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Nothing archived."
 msgstr "Nichts archiviert."
@@ -12124,10 +12106,6 @@ msgstr "Eine Version von {contract} veröffentlichen"
 #: src/engines/resource-bindings.tsx
 msgid "Publish as"
 msgstr "Veröffentlichen als"
-
-#: src/routes/_shell.apps.index.tsx
-msgid "Publish one from its page, and the people it is shared with can open it."
-msgstr "Veröffentlichen Sie eine auf ihrer Seite, dann können die Personen, mit denen sie geteilt ist, sie öffnen."
 
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
@@ -15099,6 +15077,10 @@ msgstr "Die App wird in der App-Landschaft gekennzeichnet, damit die verantwortl
 #: src/screens/screen-frame.tsx
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite der Domäne erneut genehmigen."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "The apps of some domains couldn't be read."
+msgstr "Die Apps einiger Domänen konnten nicht gelesen werden."
 
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."

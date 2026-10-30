@@ -13,43 +13,54 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
 import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import type { Painting, Pattern } from "@grasp-os/ui/components/painted-field";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
+import {
+  Tile,
+  TileContent,
+  TileField,
+  TileMeta,
+  TileSheet,
+  TileSheetBar,
+  TileTitle,
+} from "@grasp-os/ui/components/tile";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { GlobeIcon, LayoutGridIcon, PlusIcon, SearchIcon } from "lucide-react";
+import {
+  CogIcon,
+  GlobeIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  SearchIcon,
+} from "lucide-react";
 import { useState } from "react";
 
-import type { Session } from "../core.ts";
-import { readPeople } from "../directory.ts";
 import { statusLabel } from "../engines/app-status.tsx";
-import { formatDate } from "../format.ts";
+import { listDomains } from "../engines/listed-domains.ts";
+import type { ListedDomain } from "../engines/listed-domains.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { OwnerAvatar } from "../landscape/owner.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { openableApps } from "../workflows/reads.ts";
 
 // The Apps page (grasplabs/prototype `components/apps/apps-overview.tsx`):
-// every App the person can open, as an app, each on a painted field, the
-// newest first; a tile opens the App's own page. The same Apps are the
-// Domains page's domains: there each is a part of the business, here what
-// people work in. Split by where they stand (published, draft, archived)
-// only when more than one of those holds any, and searchable once there
-// are enough to need it. New app starts one in the chat, for who builds.
+// the apps of every domain the person can open, each a tile on a painted
+// field that opens the app in its domain (/domains/$engine/apps/$screen).
+// An app is what people read for one of a domain's screens; the domains
+// themselves are the Domains page's. The newest domain's apps come first.
+// Split by where their domain stands (published, draft) only when both
+// hold apps, and searchable once there are enough to need it; the tabs
+// count what the search leaves. An archived domain's apps aren't listed:
+// nobody works in them until it is restored. New app starts one in the
+// chat, for who builds.
 //
-// Not as the prototype: a tile shows its App's bar, not a picture of its
-// screen (our screens are built and run sandboxed when opened); it says
-// when the App was made, as core keeps no time it was last edited; and it
-// has no menu of its own, as the App's page has the same actions.
+// Core has no one read of every domain's screens: the page reads each
+// domain's contents (`listDomains`), as the Domains page does.
+//
+// Not as the prototype: a tile shows the app's bar, not a picture of its
+// screen (screens are built and run sandboxed when opened), and has no
+// menu, owner or time edited, which core keeps per domain, not per app.
 
 /** From this many apps on the page it offers a search: with fewer, every name is in view anyway. */
 const searchFrom = 7;
@@ -67,38 +78,39 @@ const fields = [
   { painting: "stone", pattern: "rows" },
 ] as const satisfies readonly { painting: Painting; pattern: Pattern }[];
 
-/** The tabs after All, in the prototype's order. */
-const statuses = [
-  "published",
-  "draft",
-  "archived",
-] as const satisfies readonly AppStatus[];
+/** The tabs after All, in the prototype's order; an archived domain's apps aren't listed. */
+const statuses = ["published", "draft"] as const satisfies readonly AppStatus[];
+type Listed = (typeof statuses)[number];
 
 /** Every app at once, as the page opens. */
 const everyApp = "all";
-type Shown = AppStatus | typeof everyApp;
+type Shown = Listed | typeof everyApp;
 
-interface ListedApp {
-  app: App;
-  /**
-   * Who answers for it, by name; none when core doesn't name them to
-   * the person in time, as an ID says nothing to them.
-   */
-  responsible: string | undefined;
+/** One app: a screen of a domain. */
+interface DomainApp {
+  domain: App & { status: Listed };
+  screen: string;
 }
 
-/** The person's Apps, the newest first, each with who answers for it. */
-const listApps = async (session: Session): Promise<ListedApp[]> => {
-  const [apps, people] = await Promise.all([
-    openableApps(session),
-    readPeople(session),
-  ]);
-  return apps
-    .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map((app) => ({
-      app,
-      responsible: people.get(app.responsible),
-    }));
+const isListed = (domain: App): domain is App & { status: Listed } =>
+  domain.status !== "archived";
+
+/** The apps of the domains, the newest domain's first, and whether any domain's couldn't be read. */
+const appsOf = (
+  domains: readonly ListedDomain[]
+): { apps: DomainApp[]; unread: boolean } => {
+  const newest = domains.toSorted((a, b) =>
+    b.app.createdAt.localeCompare(a.app.createdAt)
+  );
+  const apps = newest.flatMap(({ app, contents }) =>
+    isListed(app) && contents !== undefined
+      ? contents.screens.map((screen) => ({ domain: app, screen }))
+      : []
+  );
+  const unread = domains.some(
+    ({ app, contents }) => isListed(app) && contents === undefined
+  );
+  return { apps, unread };
 };
 
 /** New app, in lime: the page's one action. */
@@ -132,120 +144,44 @@ const FirstApp = ({ builds }: { builds: boolean }) => (
   </PaintedField>
 );
 
-/** What a tab with nothing in it says: what would stand there. */
-const EmptyTab = ({ status }: { status: AppStatus }) => {
-  if (status === "published") {
-    return (
-      <>
-        <EmptyTitle>
-          <Trans>No published apps yet</Trans>
-        </EmptyTitle>
-        <EmptyDescription>
-          <Trans>
-            Publish one from its page, and the people it is shared with can open
-            it.
-          </Trans>
-        </EmptyDescription>
-      </>
-    );
-  }
-  if (status === "archived") {
-    return (
-      <EmptyTitle>
-        <Trans>Nothing archived.</Trans>
-      </EmptyTitle>
-    );
-  }
-  return (
-    <EmptyTitle>
-      <Trans>No drafts.</Trans>
-    </EmptyTitle>
-  );
-};
-
-/**
- * One app: its bar on a painted field, the sheet running off the field's
- * foot as the brand shows the product, then its name, what it is for,
- * who answers for it and when it was made. The whole tile opens it.
- */
+/** One app: its bar on a painted field, then its name, which opens it, and its domain. */
 const AppTile = ({
-  listed: { app, responsible },
+  app: { domain, screen },
   field,
 }: {
-  listed: ListedApp;
+  app: DomainApp;
   field: (typeof fields)[number];
-}) => {
-  const made = formatDate(app.createdAt);
-  return (
-    <article className="group/app relative flex flex-col gap-3.5">
-      <PaintedField
-        className="aspect-video rounded-xl px-6 pt-6"
-        painting={field.painting}
-        pattern={field.pattern}
+}) => (
+  <Tile>
+    <TileField painting={field.painting} pattern={field.pattern}>
+      {domain.status === "published" ? (
+        <Badge variant="passed">
+          <GlobeIcon data-icon="inline-start" />
+          {statusLabel(domain.status)}
+        </Badge>
+      ) : null}
+      <TileSheet>
+        <TileSheetBar icon={<LayoutGridIcon />}>{screen}</TileSheetBar>
+      </TileSheet>
+    </TileField>
+    <TileContent>
+      <TileTitle
+        render={
+          <Link
+            params={{ engine: domain.id, screen }}
+            to="/domains/$engine/apps/$screen"
+          />
+        }
       >
-        <span
-          aria-hidden="true"
-          className="bg-background shadow-lifted flex h-full flex-col rounded-t-lg transition-transform motion-safe:group-hover/app:-translate-y-1"
-        >
-          {app.currentVersion === null ? (
-            <span className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-2 text-xs">
-              <LayoutGridIcon className="size-5" />
-              <Trans>No design yet</Trans>
-            </span>
-          ) : (
-            <span className="flex items-center gap-2 border-b px-3 py-2 text-xs font-medium">
-              <span className="bg-muted inline-flex size-5 flex-none items-center justify-center rounded-md">
-                <LayoutGridIcon className="size-3" />
-              </span>
-              <span className="truncate">{app.name}</span>
-            </span>
-          )}
-        </span>
-        {app.status === "draft" ? null : (
-          <Badge
-            className="absolute top-3 left-3"
-            variant={app.status === "published" ? "passed" : "default"}
-          >
-            {app.status === "published" ? (
-              <GlobeIcon data-icon="inline-start" />
-            ) : null}
-            {statusLabel(app.status)}
-          </Badge>
-        )}
-      </PaintedField>
-      <div className="flex min-w-0 flex-col gap-1 px-0.5">
-        <Link
-          className="focus-visible:after:ring-ring/50 truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-3"
-          params={{ app: app.id }}
-          to="/apps/$app"
-        >
-          {app.name}
-        </Link>
-        {app.description === "" ? null : (
-          <span className="text-muted-foreground line-clamp-2 text-pretty">
-            {app.description}
-          </span>
-        )}
-        <span className="text-muted-foreground mt-1 flex min-w-0 items-center gap-2 text-xs">
-          {responsible === undefined ? (
-            <span className="truncate">
-              <Trans>Made on {made}</Trans>
-            </span>
-          ) : (
-            <>
-              <OwnerAvatar name={responsible} />
-              <span className="truncate">
-                <Trans>
-                  {responsible} · Made on {made}
-                </Trans>
-              </span>
-            </>
-          )}
-        </span>
-      </div>
-    </article>
-  );
-};
+        {screen}
+      </TileTitle>
+      <TileMeta>
+        <CogIcon aria-hidden="true" />
+        <span className="truncate">{domain.name}</span>
+      </TileMeta>
+    </TileContent>
+  </Tile>
+);
 
 const AppsOverview = () => {
   const { t } = useLingui();
@@ -256,43 +192,44 @@ const AppsOverview = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Apps` }]} page={page} />;
   }
-  const listed = page.data;
+  const { apps, unread } = appsOf(page.data);
   const builds = canBuild(identity.role);
   const holding = statuses.filter((status) =>
-    listed.some(({ app }) => app.status === status)
+    apps.some(({ domain }) => domain.status === status)
   );
   const choosing = holding.length > 1;
-  const searching = listed.length >= searchFrom;
+  const searching = apps.length >= searchFrom;
   const asked = searching ? query.trim() : "";
   const needle = asked.toLocaleLowerCase();
-  const shownApps = listed.filter(
-    ({ app }) =>
-      (shown === everyApp || !choosing || app.status === shown) &&
-      (needle === "" || app.name.toLocaleLowerCase().includes(needle))
+  // What the search leaves, which the tabs count.
+  const found = apps.filter(
+    ({ domain, screen }) =>
+      needle === "" ||
+      screen.toLocaleLowerCase().includes(needle) ||
+      domain.name.toLocaleLowerCase().includes(needle)
   );
+  const countOf = (status: Shown): number =>
+    status === everyApp
+      ? found.length
+      : found.filter(({ domain }) => domain.status === status).length;
+  const shownApps =
+    shown === everyApp || !choosing
+      ? found
+      : found.filter(({ domain }) => domain.status === shown);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Apps` }]} />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
-        <PageHeader>
-          <PageHeaderContent>
-            <PageHeaderTitle>
-              <Trans>Apps</Trans>
-            </PageHeaderTitle>
-            <PageHeaderDescription>
-              <Trans>
-                Screens made for a team or one person, standing on your
-                workflows.
-              </Trans>
-            </PageHeaderDescription>
-          </PageHeaderContent>
-          {/* With no app yet the field below asks for the first one instead. */}
-          {builds && listed.length > 0 ? (
-            <PageHeaderActions>
-              <NewAppLink />
-            </PageHeaderActions>
-          ) : null}
-        </PageHeader>
+      <Page wide>
+        <PageHeading
+          // With no app yet the field below asks for the first one instead.
+          action={builds && apps.length > 0 ? <NewAppLink /> : undefined}
+          description={
+            <Trans>
+              Screens made for a team or one person, standing on your workflows.
+            </Trans>
+          }
+          title={<Trans>Apps</Trans>}
+        />
         {choosing || searching ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             {choosing ? (
@@ -307,17 +244,14 @@ const AppsOverview = () => {
                   <TabsTrigger value={everyApp}>
                     <Trans context="filter: every app">All</Trans>
                     <span className="text-muted-foreground tabular-nums">
-                      {listed.length}
+                      {countOf(everyApp)}
                     </span>
                   </TabsTrigger>
                   {holding.map((status) => (
                     <TabsTrigger key={status} value={status}>
                       {statusLabel(status)}
                       <span className="text-muted-foreground tabular-nums">
-                        {
-                          listed.filter(({ app }) => app.status === status)
-                            .length
-                        }
+                        {countOf(status)}
                       </span>
                     </TabsTrigger>
                   ))}
@@ -343,43 +277,42 @@ const AppsOverview = () => {
             ) : null}
           </div>
         ) : null}
-        {listed.length === 0 ? <FirstApp builds={builds} /> : null}
-        {listed.length > 0 && shownApps.length > 0 ? (
+        {unread ? (
+          <p className="text-muted-foreground">
+            <Trans>The apps of some domains couldn&apos;t be read.</Trans>
+          </p>
+        ) : null}
+        {apps.length === 0 ? <FirstApp builds={builds} /> : null}
+        {shownApps.length > 0 ? (
           <ul
             aria-label={t`Apps`}
             className="grid grid-cols-1 gap-x-5 gap-y-9 sm:grid-cols-2 lg:grid-cols-3"
           >
-            {shownApps.map((each, index) => (
-              <li className="min-w-0" key={each.app.id}>
+            {shownApps.map((app, index) => (
+              <li className="min-w-0" key={`${app.domain.id}/${app.screen}`}>
                 <AppTile
+                  app={app}
                   field={fields[index % fields.length] ?? fields[0]}
-                  listed={each}
                 />
               </li>
             ))}
           </ul>
         ) : null}
-        {listed.length > 0 && shownApps.length === 0 ? (
+        {apps.length > 0 && shownApps.length === 0 ? (
           <Empty>
             <EmptyHeader>
-              {asked === "" && shown !== everyApp ? (
-                <EmptyTab status={shown} />
-              ) : (
-                <>
-                  <EmptyTitle>
-                    <Trans>No app is called “{asked}”</Trans>
-                  </EmptyTitle>
-                  <EmptyDescription>
-                    <Trans>
-                      Search for another name, or look under another tab.
-                    </Trans>
-                  </EmptyDescription>
-                </>
-              )}
+              <EmptyTitle>
+                <Trans>No app is called “{asked}”</Trans>
+              </EmptyTitle>
+              <EmptyDescription>
+                <Trans>
+                  Search for another name, or look under another tab.
+                </Trans>
+              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}
-      </div>
+      </Page>
     </>
   );
 };
@@ -387,5 +320,6 @@ const AppsOverview = () => {
 export const Route = createFileRoute("/_shell/apps/")({
   pendingComponent: PageLoading,
   component: AppsOverview,
-  loader: async ({ context: { core } }) => await loadFromCore(core, listApps),
+  loader: async ({ context: { core } }) =>
+    await loadFromCore(core, listDomains),
 });
