@@ -56,6 +56,8 @@ const itemVariants = cva(
         default: "border-transparent",
         outline: "border-border",
         muted: "bg-muted/50 border-transparent",
+        // A row of a card list, under a line.
+        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0",
       },
       size: {
         default: "gap-3.5 px-4 py-3.5",
@@ -63,6 +65,10 @@ const itemVariants = cva(
         xs: "gap-2 px-2.5 py-2 in-data-[slot=dropdown-menu-content]:p-0",
       },
     },
+    compoundVariants: [
+      // In line with the title of a settings card above the rows.
+      { variant: "row", size: "default", className: "gap-3 px-5 py-3" },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

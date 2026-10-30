@@ -16,6 +16,7 @@ import {
   EmptyDescription,
   EmptyHeader,
 } from "@grasp-os/ui/components/empty";
+import { Item } from "@grasp-os/ui/components/item";
 import {
   Sheet,
   SheetContent,
@@ -28,13 +29,12 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon, PlusIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { Mark } from "../brain/region-marks.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { AppLogo } from "../connections/app-logo.tsx";
+import { AddLogo, AppLogo } from "../connections/app-logo.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
@@ -115,57 +115,60 @@ const Row = ({
   </li>
 );
 
+/** Whether he is on in a place, as a dot before its line, as the prototype's places have it. */
+const stateDot = {
+  on: "bg-foreground size-2 flex-none rounded-full",
+  off: "border-muted-foreground size-2 flex-none rounded-full border",
+} as const;
+
 /**
  * A row that opens its panel: a logo, a name, one fact, and the chevron.
- * A place's fact has the brain's mark before it, as the prototype's
- * places: filled where he is on there, hollow where he is off.
+ * A place's fact has a dot before it: filled where he is on there, hollow
+ * where he is off.
  */
 const OpenRow = ({
   logo,
   name,
   line,
-  mark,
+  state,
   onOpen,
 }: {
   logo: ReactNode;
   name: string;
   line: string;
-  mark?: "known" | "waiting";
+  state?: keyof typeof stateDot;
   onOpen?: () => void;
-}) => {
-  const body = (
-    <>
+}) => (
+  <li>
+    <Item
+      onClick={onOpen}
+      render={
+        onOpen === undefined ? undefined : (
+          // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the row's name and line are its words, as the Item's children
+          <button type="button" />
+        )
+      }
+      variant="row"
+    >
       {logo}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium">{name}</span>
         <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
-          {mark === undefined ? null : <Mark state={mark} />}
+          {state === undefined ? null : (
+            <span aria-hidden="true" className={stateDot[state]} />
+          )}
           <span className="truncate">{line}</span>
         </span>
       </span>
-    </>
-  );
-  if (onOpen === undefined) {
-    return (
-      <li className="flex items-center gap-3 border-t px-5 py-3">{body}</li>
-    );
-  }
-  return (
-    <li className="border-t">
-      <button
-        className="hover:bg-accent focus-visible:bg-accent flex w-full items-center gap-3 px-5 py-3 text-left outline-none"
-        onClick={onOpen}
-        type="button"
-      >
-        {body}
+      {onOpen === undefined ? null : (
         <ChevronRightIcon
           aria-hidden="true"
           className="text-muted-foreground size-4 flex-none"
         />
-      </button>
-    </li>
-  );
-};
+      )}
+    </Item>
+  </li>
+);
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -377,42 +380,44 @@ export const StephenSettings = ({
         description={t`Each place only narrows who reaches him there, and whether he does things for people there or only answers.`}
         title={t`Where people reach him`}
       >
-        <ul>
+        <ul className="border-t">
           <OpenRow
             line={t`On · for everyone with Grasp`}
             logo={<AppLogo logo="/favicon.svg" name="Grasp" />}
-            mark="known"
             name={t`Grasp's chat`}
+            state="on"
           />
           {reach.places.map((place) => (
             <OpenRow
               key={place.place}
               line={place.audience.who === "nobody" ? t`Off` : t`On`}
               logo={<PlaceLogo place={place.place} size="default" />}
-              mark={place.audience.who === "nobody" ? "waiting" : "known"}
               name={placeName(place.place)}
               onOpen={() => {
                 setOpened({ kind: "place", id: place.place });
               }}
+              state={place.audience.who === "nobody" ? "off" : "on"}
             />
           ))}
           {editable && toAdd.length > 0 ? (
-            <li className="border-t">
+            <li>
               <DropdownMenu>
                 <DropdownMenuTrigger
                   disabled={!can}
                   render={
-                    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the trigger gives it its words, "Add a place", as children
-                    <button
-                      className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent flex w-full items-center gap-3 px-5 py-3 text-left outline-none disabled:opacity-50"
-                      type="button"
+                    <Item
+                      render={
+                        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- "Add a place" is its words, as the trigger's children
+                        <button type="button" />
+                      }
+                      variant="row"
                     />
                   }
                 >
-                  <span className="flex size-9 flex-none items-center justify-center rounded-md border border-dashed">
-                    <PlusIcon aria-hidden="true" className="size-4" />
+                  <AddLogo />
+                  <span className="text-muted-foreground">
+                    <Trans>Add a place</Trans>
                   </span>
-                  <Trans>Add a place</Trans>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
                   {toAdd.map((place) => (
@@ -476,7 +481,7 @@ export const StephenSettings = ({
         description={t`What he can do in each system, as one pack, with each person's own sign-in.`}
         title={t`Apps`}
       >
-        <ul>
+        <ul className="border-t">
           {reach.apps.map(({ app }) => {
             const pack = packs.get(app);
             const done = formatNumber(pack?.done ?? 0);

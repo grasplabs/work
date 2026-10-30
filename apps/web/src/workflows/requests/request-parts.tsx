@@ -31,7 +31,17 @@ const placeNames: Readonly<Record<string, string>> = {
   gmail: "Gmail",
 };
 
-/** Logos the deployment serves, by the platform or provider they are of. */
+/**
+ * Logos the deployment serves, by the platform or provider they are of
+ * (`apps/web/public/logos`). Where each comes from:
+ * - microsoft-teams.svg, slack.svg, whatsapp.svg and gmail.svg: the
+ *   gilbarbara/logos set, through @iconify-json/logos, CC0, as the
+ *   prototype bundles them.
+ * - microsoft.svg and google.svg: the marks of Microsoft's and Google's own
+ *   sign-in button guidelines, drawn as plain SVG.
+ * The trademarks stay with their owners; they are shown only to name the
+ * place or provider.
+ */
 const logos: Readonly<Record<string, string>> = {
   teams: "/logos/microsoft-teams.svg",
   slack: "/logos/slack.svg",

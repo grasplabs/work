@@ -14,11 +14,14 @@ import { useRouteErrorReason } from "../route-error.tsx";
 export const SettingsSection = ({
   title,
   description,
+  media,
   action,
   children,
 }: {
   title: string;
   description?: ReactNode;
+  /** A picture before the title, such as Stephen's head: the title then stands in line with it. */
+  media?: ReactNode;
   action?: ReactNode;
   children?: ReactNode;
 }) => {
@@ -30,7 +33,14 @@ export const SettingsSection = ({
       className="bg-card overflow-hidden rounded-xl border text-sm"
     >
       {/* Where there is no room beside it, what can be done goes under the title, so the line under the title keeps its width. */}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4">
+      <div
+        className={
+          media === undefined
+            ? "flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-5 py-4"
+            : "flex flex-wrap items-center justify-between gap-x-3 gap-y-3 px-5 py-4"
+        }
+      >
+        {media}
         <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
           <h2 className="font-medium" id={id}>
             {title}

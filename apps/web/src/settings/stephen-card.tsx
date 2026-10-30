@@ -20,11 +20,12 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber, formatPercent } from "../format.ts";
 import { useAskGrasp } from "../workflows/requests/request-needs.tsx";
+import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
 import { AudienceControl, audienceOf, chosenOf } from "./stephen-audience.tsx";
 import { StephenAvatar } from "./stephen-avatar.tsx";
 
@@ -157,37 +158,31 @@ export const StephenCard = ({
 }) => {
   const { t } = useLingui();
   const [pausing, setPausing] = useState(false);
-  const titleId = useId();
   return (
-    <section
-      aria-labelledby={titleId}
-      className="bg-card overflow-hidden rounded-xl border text-sm"
+    <SettingsSection
+      action={
+        <span className="flex items-center gap-3">
+          <span className="text-muted-foreground">
+            {reach.on ? t`On` : t`Paused outside Grasp`}
+          </span>
+          <Switch
+            aria-label={t`Stephen outside Grasp`}
+            checked={reach.on}
+            disabled={!can}
+            onCheckedChange={(on) => {
+              if (on) {
+                void onReach(true, reach.audience);
+                return;
+              }
+              setPausing(true);
+            }}
+          />
+        </span>
+      }
+      media={<StephenAvatar />}
+      title="Stephen"
     >
-      <div className="flex items-center gap-3 px-5 py-4">
-        <StephenAvatar />
-        <h2 className="min-w-0 flex-1 font-medium" id={titleId}>
-          Stephen
-        </h2>
-        <span className="text-muted-foreground">
-          {reach.on ? t`On` : t`Paused outside Grasp`}
-        </span>
-        <Switch
-          aria-label={t`Stephen outside Grasp`}
-          checked={reach.on}
-          disabled={!can}
-          onCheckedChange={(on) => {
-            if (on) {
-              void onReach(true, reach.audience);
-              return;
-            }
-            setPausing(true);
-          }}
-        />
-      </div>
-      <div className="flex flex-col gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-        <span>
-          <Trans>Who can talk to him</Trans>
-        </span>
+      <SettingsRow label={t`Who can talk to him`}>
         <AudienceControl
           editable={can}
           key={JSON.stringify(reach.audience)}
@@ -199,7 +194,7 @@ export const StephenCard = ({
             await onReach(reach.on, audienceOf(chosen));
           }}
         />
-      </div>
+      </SettingsRow>
       {week === null ? null : <Usage week={week} />}
       {week === null || week.unanswered.length === 0 ? null : (
         <div className="border-t px-5 pt-3 pb-1">
@@ -240,6 +235,6 @@ export const StephenCard = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </SettingsSection>
   );
 };
