@@ -14,10 +14,13 @@ import {
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import { useRouteContext } from "@tanstack/react-router";
 import { ThumbsDownIcon, UsersIcon } from "lucide-react";
+import { useState } from "react";
 
 import { setActiveChat } from "../../chat/active-chat.ts";
 import { setDockMode } from "../../chat/dock-mode.ts";
+import { readChoice, resolveChoice } from "../../chat/model-choice.ts";
 import type { Session } from "../../core.ts";
 import { ErrorText } from "../../error-text.tsx";
 import { formatDay, formatNumber, formatPercent } from "../../format.ts";
@@ -139,13 +142,31 @@ export const NeedMark = ({ need }: { need: Need }) => {
   );
 };
 
-/** Asks Grasp, in a new chat in the corner, what `prompt` says. */
-const askGrasp = async (session: Session, title: string, prompt: string) => {
-  const [model] = await session.chats.models();
-  const chat = await session.chats.create(title);
-  if (model !== undefined) {
-    await session.chats.send(chat.id, { text: prompt, model });
+/**
+ * Asks Grasp, in a new chat in the corner, what `prompt` says, with the
+ * model and effort `userId` last chose; null, making no chat, when no
+ * model is set up to ask with.
+ */
+const askGrasp = async (
+  session: Session,
+  userId: string,
+  title: string,
+  prompt: string
+): Promise<string | null> => {
+  const [models, efforts] = await Promise.all([
+    session.chats.models(),
+    session.chats.efforts(),
+  ]);
+  if (models.length === 0) {
+    return null;
   }
+  const { model, effort } = resolveChoice(models, efforts, readChoice(userId));
+  const chat = await session.chats.create(title);
+  await session.chats.send(chat.id, {
+    text: prompt,
+    model,
+    ...(effort === undefined ? {} : { effort }),
+  });
   return chat.id;
 };
 
@@ -154,11 +175,19 @@ const askGrasp = async (session: Session, title: string, prompt: string) => {
  * opens it; resolves whether it was asked.
  */
 export const useAskGrasp = () => {
+  const { t } = useLingui();
+  const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
+  const [noModel, setNoModel] = useState(false);
   const ask = async (title: string, prompt: string): Promise<boolean> => {
+    setNoModel(false);
     const chatId = await run(
-      async (session) => await askGrasp(session, title, prompt)
+      async (session) => await askGrasp(session, identity.userId, title, prompt)
     );
+    if (chatId === null) {
+      setNoModel(true);
+      return false;
+    }
     if (chatId === undefined) {
       return false;
     }
@@ -166,7 +195,13 @@ export const useAskGrasp = () => {
     setDockMode("frame");
     return true;
   };
-  return { busy, failure, ask };
+  return {
+    busy,
+    failure:
+      failure ??
+      (noModel ? t`No model is set up for this deployment yet.` : undefined),
+    ask,
+  };
 };
 
 /** Why it waits, where it stands, and what Grasp proposes. */
@@ -183,10 +218,12 @@ export const NeedPart = ({ need }: { need: Need }) => {
         </span>
         {state === null ? null : <span>{state}</span>}
       </p>
-      <section className="bg-muted flex flex-col gap-2 rounded-lg border p-4">
-        <h3 className="text-muted-foreground text-xs">{t`Grasp proposes`}</h3>
-        <p>{need.proposal ?? t`Grasp is still working out a proposal.`}</p>
-      </section>
+      {need.proposal !== null || need.proposing ? (
+        <section className="bg-muted flex flex-col gap-2 rounded-lg border p-4">
+          <h3 className="text-muted-foreground text-xs">{t`Grasp proposes`}</h3>
+          <p>{need.proposal ?? t`Grasp is still working out a proposal.`}</p>
+        </section>
+      ) : null}
     </div>
   );
 };

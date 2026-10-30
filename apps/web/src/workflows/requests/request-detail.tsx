@@ -25,6 +25,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { ArrowLeftIcon } from "lucide-react";
@@ -61,8 +62,9 @@ export type RequestSubject =
   | { kind: "team" | "topic" | "person" | "question"; id: string }
   | { kind: "need"; need: Need };
 
-const row =
-  "grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-4 px-4 py-2.5";
+/** A row: what it is (`nameCell`), its count, the chevron. */
+const row = "flex items-center gap-x-4 px-4 py-2.5";
+const nameCell = "min-w-0 flex-1";
 
 /** The report narrowed to a subject, as core folds it. */
 type Narrowed =
@@ -231,7 +233,9 @@ const TopicsPart = ({
           key={each.key}
           onOpen={opener({ kind: "topic", id: each.key })}
         >
-          <span className="truncate">{names.topic(each.key)}</span>
+          <span className={cn("truncate", nameCell)}>
+            {names.topic(each.key)}
+          </span>
           <Count value={each.billed} />
         </OpenRow>
       ))}
@@ -270,7 +274,9 @@ const TeamsPart = ({
           key={each.key}
           onOpen={opener({ kind: "team", id: each.key })}
         >
-          <span className="truncate">{names.team(each.key)}</span>
+          <span className={cn("truncate", nameCell)}>
+            {names.team(each.key)}
+          </span>
           <Count value={countOf(each)} />
         </OpenRow>
       ))}
@@ -296,7 +302,7 @@ const ToolsPart = ({
         const name = names.tool(each.key);
         return (
           <OpenRow className={row} key={each.key}>
-            <span className="flex min-w-0 items-center gap-2">
+            <span className={cn("flex items-center gap-2", nameCell)}>
               <ToolMark label={name} tool={each.key} />
               <span className="truncate">{name}</span>
             </span>
@@ -328,7 +334,7 @@ const PlacesPart = ({ report }: { report: RequestsReport }) => {
         .toSorted((a, b) => b[1] - a[1])
         .map(([place, count]) => (
           <OpenRow className={row} key={place}>
-            <span className="flex min-w-0 items-center gap-2">
+            <span className={cn("flex items-center gap-2", nameCell)}>
               <PlaceLogo place={place} />
               <span className="truncate">{placeName(place)}</span>
             </span>
@@ -361,7 +367,7 @@ const QuestionsPart = ({
           key={each.question}
           onOpen={opener({ kind: "question", id: each.question })}
         >
-          <span className="flex min-w-0 items-baseline gap-2">
+          <span className={cn("flex items-baseline gap-2", nameCell)}>
             <span className="min-w-0">{names.question(each.question)}</span>
             {before === null ? null : (
               <Growth

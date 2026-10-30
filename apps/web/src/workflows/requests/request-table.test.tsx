@@ -12,6 +12,7 @@ import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
@@ -115,6 +116,7 @@ const leave: Need = {
   missing: [{ id: "afas.leave", why: "actionOff" }],
   role: null,
   proposal: "Turn on Request leave in AFAS.",
+  proposing: false,
   status: null,
   since: null,
 };
@@ -144,7 +146,16 @@ const shown = async (page: RequestsPage, needs: Need[]) => {
       }) => Promise<T>
     ): Promise<T> => await action({ stephenRequests }),
   };
-  const rootRoute = createRootRoute({
+  const rootRoute = createRootRoute();
+  // The shell, as the page is under it: who is signed in.
+  const shell = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "_shell",
+    beforeLoad: () => ({ identity: { userId: "owner" } }),
+  });
+  const table = createRoute({
+    getParentRoute: () => shell,
+    path: "/",
     component: () => (
       <RequestTable
         busy={false}
@@ -162,7 +173,7 @@ const shown = async (page: RequestsPage, needs: Need[]) => {
     ),
   });
   const router = createRouter({
-    routeTree: rootRoute,
+    routeTree: rootRoute.addChildren([shell.addChildren([table])]),
     history: createMemoryHistory(),
     context: { core },
   });

@@ -6,6 +6,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
@@ -20,6 +21,19 @@ import { OpenRow, ShareBar, useRequestNames } from "./request-parts.tsx";
 
 /** Rows of people shown before "Show more": a screen's worth. */
 const pageRows = 20;
+
+/**
+ * A team's row: its name, its requests and the chevron, with how many
+ * asked on a line of its own under them until there is room for that and
+ * its bar beside the name.
+ */
+const teamRow =
+  "flex flex-wrap items-center gap-x-6 gap-y-1 px-6 py-3 @2xl:flex-nowrap";
+const nameCell = "min-w-0 flex-1";
+const askedCell =
+  "order-last basis-full @2xl:order-none @2xl:w-36 @2xl:flex-none";
+const barCell = "hidden w-36 flex-none @2xl:block";
+const countCell = "w-18 flex-none text-right tabular-nums";
 
 /** The teams, including the quiet ones; the folded ones are one row that opens nothing. */
 export const RequestTeams = ({
@@ -45,15 +59,17 @@ export const RequestTeams = ({
     <ul className="@container mt-3">
       <li
         aria-hidden="true"
-        className="text-muted-foreground hidden grid-cols-[minmax(0,1fr)_9rem_9rem_4.5rem_1rem] gap-x-6 px-6 pb-2 text-xs @2xl:grid"
+        className="text-muted-foreground hidden gap-x-6 px-6 pb-2 text-xs @2xl:flex"
       >
-        <span>{t({ message: "Team", context: "column" })}</span>
-        <span>{t`People who asked`}</span>
-        <span />
-        <span className="text-right">
+        <span className={nameCell}>
+          {t({ message: "Team", context: "column" })}
+        </span>
+        <span className={askedCell}>{t`People who asked`}</span>
+        <span className={barCell} />
+        <span className={countCell}>
           {t({ message: "Requests", context: "column: billed requests" })}
         </span>
-        <span />
+        <span className="size-4 flex-none" />
       </li>
       {rows.map((row) => {
         const asked = formatNumber(row.people);
@@ -61,7 +77,7 @@ export const RequestTeams = ({
         const name = names.team(row.key);
         return (
           <OpenRow
-            className="grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-6 gap-y-1 px-6 py-3 @2xl:grid-cols-[minmax(0,1fr)_9rem_9rem_4.5rem_1rem]"
+            className={teamRow}
             key={row.key}
             onOpen={
               row.key === elsewhere
@@ -71,19 +87,22 @@ export const RequestTeams = ({
                   }
             }
           >
-            <span className="truncate">{name}</span>
-            <span className="text-muted-foreground col-span-3 row-start-2 text-xs tabular-nums @2xl:col-span-1 @2xl:row-start-auto @2xl:text-sm">
+            <span className={cn("truncate", nameCell)}>{name}</span>
+            <span
+              className={cn(
+                "text-muted-foreground text-xs tabular-nums @2xl:text-sm",
+                askedCell
+              )}
+            >
               {row.reach > 0 ? t`${asked} of ${of}` : asked}
             </span>
-            <span className="hidden @2xl:block">
+            <span className={barCell}>
               <ShareBar
                 label={t`Share of ${name} who asked`}
                 share={row.reach > 0 ? row.people / row.reach : 0}
               />
             </span>
-            <span className="col-start-2 row-start-1 text-right tabular-nums @2xl:col-start-auto @2xl:row-start-auto">
-              {formatNumber(row.billed)}
-            </span>
+            <span className={countCell}>{formatNumber(row.billed)}</span>
           </OpenRow>
         );
       })}
@@ -184,13 +203,13 @@ export const RequestPeople = ({
       <ul>
         {rows.slice(0, shown).map((row) => (
           <OpenRow
-            className="grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-6 px-6 py-2.5"
+            className="flex items-center gap-x-6 px-6 py-2.5"
             key={row.key}
             onOpen={() => {
               onOpen(row.key);
             }}
           >
-            <span className="truncate">{row.name}</span>
+            <span className="min-w-0 flex-1 truncate">{row.name}</span>
             <span className="tabular-nums">{formatNumber(row.billed)}</span>
           </OpenRow>
         ))}
