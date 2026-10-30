@@ -7,6 +7,7 @@ import type {
   ScreenBundle,
   ScreenProblem,
 } from "./screens.ts";
+import type { ThinkingStep } from "./thinking.ts";
 import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -403,6 +404,12 @@ export type ChatMessage =
       text: string;
       failed: boolean;
       at: string;
+      /**
+       * A step of thinking the brain showed (`show_thinking`, see
+       * `ThinkingStep`), for the result of a call that showed one; none
+       * for any other.
+       */
+      thinking?: ThinkingStep;
     };
 
 /**
