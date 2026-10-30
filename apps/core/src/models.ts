@@ -5,9 +5,7 @@ import type {
   FetchFunction,
   Message,
   Model,
-  ProviderHeaders,
   SimpleStreamOptions,
-  StreamFunction,
   ThinkingLevel,
   TranscriptContext,
   Usage,
@@ -21,9 +19,6 @@ import {
   createAiBindingFetch,
 } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
-import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
-import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
@@ -92,6 +87,12 @@ import {
   lineageModelRequests,
   scopesFor,
 } from "./model-budgets.ts";
+import {
+  catalogWindowOf,
+  maxTokensOf,
+  parseModelRef,
+} from "./model-catalog.ts";
+import type { ModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   Admitted as LedgerAdmitted,
@@ -107,12 +108,23 @@ import {
   listPricesOf,
   microsPerDollar,
   pinnedPrice,
-  regionalPricesOf,
 } from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import {
+  cloudflareAiGateway,
+  gatewayBase,
+  gatewayHeaders,
+  withRequestId,
+} from "./model-transport-cloudflare.ts";
+import { streamRoute } from "./model-transport.ts";
+import type {
+  ModelTransport,
+  RouteMetadata,
+  TransportRoute,
+} from "./model-transport.ts";
 import {
   charactersOf,
   hearingPricesOf,
@@ -125,140 +137,32 @@ import type { HearingRef, VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
-// The model gateway: every model call in a deployment goes through here, and
-// from here through the deployment's AI Gateway, never straight to a
-// provider. Core holds no provider key: AI Gateway pays with Workers AI,
-// Unified Billing (Cloudflare credits) or the client's own keys stored in
-// the gateway, and core reaches it over the AI binding, which needs no token
-// either. Every request is audited as metadata only: who or what asked, why,
-// the model, tokens and cost, never the prompt or the answer. The event goes
-// through the audit outbox, so a request that was answered (and paid for)
-// is recorded even when the audit log can't take it for a moment.
+// The model gateway: every model call in a deployment goes through here,
+// and from here through the deployment's model transport
+// (model-transport.ts), never straight to a provider. Cloudflare AI Gateway
+// over the AI binding is the transport now (model-transport-cloudflare.ts):
+// core holds no provider key. Every request is audited as metadata only:
+// who or what asked, why, the model, tokens and cost, never the prompt or
+// the answer. The event goes through the audit outbox, so a request that
+// was answered (and paid for) is recorded even when the audit log can't
+// take it for a moment.
 //
 // Before anything is sent, a call is checked against the deployment's
 // allowlist and its other rules (model-rules.ts). A refused call is
-// audited too, with the reason, and nothing is sent.
-//
-// Only providers whose pi adapter takes a custom fetch can ride the binding.
-// Google's refuses one, so Google models would need a gateway token over
-// HTTPS, and aren't offered.
+// audited too, with the reason, and nothing is sent. The transport only
+// says where an admitted request goes: the rules, the budgets, the
+// ledger's admission of every provider request and the audit log are the
+// gateway's, the same whatever the transport.
 //
 // Claude in the EU (GRA-702): Anthropic's own API can't be pinned to the
-// EU (its `inference_geo` is `us` or `global`), and neither can AI
-// Gateway's route to it. Claude in Amazon Bedrock serves the same Messages
-// API at `https://bedrock-mantle.<region>.api.aws/anthropic`, so pi's
-// Anthropic adapter speaks to it unchanged. AI Gateway reaches it as a
-// custom provider of the deployment's gateway, `custom-bedrock-eu`, whose
-// base URL is Frankfurt's endpoint (`eu-central-1`) and which holds the
-// Bedrock key, as `custom-elevenlabs-eu` does for ElevenLabs's EU host:
-// core still holds no key. Each model is asked for by its EU inference
-// profile (`eu.anthropic.<model>`), which routes only within the EU's
-// regions. Bedrock keeps neither prompts nor answers unless the account
-// turns invocation logging on, and the gateway logs metadata only
-// (`cf-aig-collect-log-payload`): zero retention is the AWS account's
-// setting and the contract's, not a request's.
-
-/**
- * The Claude models Bedrock serves through its EU inference profile, by
- * their Anthropic IDs. Not Claude Fable 5.1 (regional only in us-east-1)
- * or Claude Fable 5, which Anthropic serves only with 30-day retention.
- */
-const euClaudeModels = [
-  "claude-opus-5-5",
-  "claude-sonnet-5-5",
-  "claude-haiku-5-5",
-  "claude-opus-5",
-  "claude-sonnet-5",
-  "claude-opus-4-8",
-] as const;
-
-/**
- * pi's Anthropic catalog entry for each EU model, pointed at Bedrock: sent
- * as its EU inference profile, at Bedrock's regional prices.
- */
-const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
-  Object.fromEntries(
-    euClaudeModels.map((id) => {
-      const model = ANTHROPIC_MODELS[id];
-      return [
-        id,
-        {
-          ...model,
-          id: `eu.anthropic.${id}`,
-          cost: regionalPricesOf(model.cost),
-        },
-      ];
-    })
-  );
-
-/*
- * pi's adapter for each API, loaded the first time a model is called: they
- * bring the providers' SDKs, which would cost every isolate's startup
- * (Cloudflare caps the CPU a Worker's startup may use).
- */
-const anthropicMessages = async (): Promise<
-  StreamFunction<"anthropic-messages", SimpleStreamOptions>
-> => {
-  const { streamSimple } =
-    await import("@earendil-works/pi-ai/api/anthropic-messages");
-  return streamSimple;
-};
-const openaiResponses = async (): Promise<
-  StreamFunction<"openai-responses", SimpleStreamOptions>
-> => {
-  const { streamSimple } =
-    await import("@earendil-works/pi-ai/api/openai-responses");
-  return streamSimple;
-};
-const openaiCompletions = async (): Promise<
-  StreamFunction<"openai-completions", SimpleStreamOptions>
-> => {
-  const { streamSimple } =
-    await import("@earendil-works/pi-ai/api/openai-completions");
-  return streamSimple;
-};
-
-/**
- * The providers the gateway offers, by their AI Gateway path: the pi adapter
- * for the API their native endpoint speaks, and pi's catalog of their
- * models, which gives each model's limits and prices.
- */
-const providers = {
-  anthropic: {
-    stream: anthropicMessages,
-    catalog: ANTHROPIC_MODELS,
-    path: "anthropic",
-  },
-  openai: {
-    stream: openaiResponses,
-    catalog: OPENAI_MODELS,
-    path: "openai",
-  },
-  // Claude in Amazon Bedrock, in the EU, through the gateway's custom
-  // provider for it (above).
-  "bedrock-eu": {
-    stream: anthropicMessages,
-    catalog: bedrockEuModels,
-    path: "custom-bedrock-eu",
-  },
-  // Workers AI's own OpenAI-compatible endpoint, not the gateway's
-  // cross-provider /compat layer, which drops provider features.
-  "workers-ai": {
-    stream: openaiCompletions,
-    catalog: CLOUDFLARE_WORKERS_AI_MODELS,
-    path: "workers-ai/v1",
-  },
-} as const;
-type Provider = keyof typeof providers;
-
-const isProvider = (value: string): value is Provider =>
-  Object.hasOwn(providers, value);
-
-/**
- * Workers AI counts the answer's cap against the model's window and refuses
- * a request whose total is over it, so answers are capped well below.
- */
-const workersAiMaxTokens = 32_768;
+// EU (its `inference_geo` is `us` or `global`). Claude in Amazon Bedrock
+// serves the same Messages API at
+// `https://bedrock-mantle.<region>.api.aws/anthropic`, so pi's Anthropic
+// adapter speaks to it unchanged, each model asked for by its EU inference
+// profile (`eu.anthropic.<model>`, model-catalog.ts), which routes only
+// within the EU's regions. Bedrock keeps neither prompts nor answers
+// unless the account turns invocation logging on: zero retention is the
+// AWS account's setting and the contract's, not a request's.
 
 /**
  * How long an answer may be when the call doesn't say: enough for a long
@@ -306,33 +210,6 @@ const maxTimeoutMs = 15 * 60_000;
  * that didn't connect; the provider SDKs back off in between.
  */
 const maxRetries = 2;
-
-interface ModelRef {
-  provider: Provider;
-  id: string;
-  /** pi's descriptor, which points at the provider's own endpoint. */
-  catalog: Model<Api>;
-}
-
-/**
- * A model as the gateway names it: `<provider>/<model>`, such as
- * `anthropic/claude-sonnet-5` or
- * `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Only models in pi's
- * catalog, so every call has a price.
- */
-const parseModelRef = (ref: string): ModelRef | undefined => {
-  const slash = ref.indexOf("/");
-  const provider = ref.slice(0, slash);
-  const id = ref.slice(slash + 1);
-  if (slash === -1 || !isProvider(provider)) {
-    return undefined;
-  }
-  const catalog: Readonly<Record<string, Model<Api>>> =
-    providers[provider].catalog;
-  // Own keys only, so `constructor` and the like are no model.
-  const model = Object.hasOwn(catalog, id) ? catalog[id] : undefined;
-  return model === undefined ? undefined : { provider, id, catalog: model };
-};
 
 /**
  * A model the gateway offers: a text model of pi's catalog, a voice model
@@ -658,10 +535,16 @@ const sessionShape = {
    * For a call of an independent workflow's run, whose trigger names no
    * App's run (`system`): the run lineage its requests count against, by
    * its root, with every other run of the lineage's (model-budgets.ts,
-   * `scopesFor`), so children never start the lineage's requests afresh.
+   * `scopesFor`), so children never start the lineage's requests afresh;
+   * and the workflow the run is of, whose budget it counts against too.
    * From the run's row; set by core's host only, never by App code.
    */
-  lineage: z.strictObject({ rootRunId: z.string().min(1).max(128) }).optional(),
+  lineage: z
+    .strictObject({
+      rootRunId: z.string().min(1).max(128),
+      workflowId: z.string().min(1).max(128),
+    })
+    .optional(),
   /**
    * For a workflow run's call: whose person share of the model requests in
    * flight it takes (model-admission.ts), from the run's row: who started
@@ -798,23 +681,6 @@ export interface ModelAnswer<Output> {
   cost: number;
 }
 
-/** The most tokens `ref`'s answers may take, as the gateway sends them. */
-const maxTokensOf = (ref: ModelRef): number =>
-  ref.provider === "workers-ai"
-    ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
-    : ref.catalog.maxTokens;
-
-/**
- * The model, pointed at the deployment's gateway over the AI binding: the
- * gateway's route for the provider's native API, the same path as over
- * HTTPS minus the account, which the binding carries.
- */
-const gatewayModel = (gateway: string, ref: ModelRef): Model<Api> => ({
-  ...ref.catalog,
-  baseUrl: `https://workers-binding.ai/ai-gateway/gateways/${gateway}/${providers[ref.provider].path}`,
-  maxTokens: maxTokensOf(ref),
-});
-
 /**
  * The longest answer model `<provider>/<model>` can usefully give one
  * request (`usableAnswer`); undefined for a model the gateway doesn't
@@ -828,35 +694,6 @@ export const usableAnswerTokens = (model: string): number | undefined => {
     ? undefined
     : usableAnswer({ ...ref.catalog, maxTokens: maxTokensOf(ref) });
 };
-
-const gatewayHeaders = (call: Session): ProviderHeaders => ({
-  // The binding authenticates the request. pi still wants auth before it
-  // sends, and the gateway strips this placeholder. The nulls drop the
-  // SDKs' own auth headers, which the gateway would take for a caller's
-  // provider key instead of using its stored ones.
-  "cf-aig-authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`,
-  Authorization: null,
-  "x-api-key": null,
-  // The gateway logs metadata, never prompts or answers.
-  "cf-aig-collect-log-payload": "false",
-  // Never an answer from the gateway's cache, whatever the gateway is set
-  // to (one the admin adopted keeps its settings): a cached answer is
-  // one person's, and would be served to another.
-  "cf-aig-skip-cache": "true",
-  // So the gateway's log can be searched by why and for what kind of
-  // caller; identifiers only, like the audit event.
-  "cf-aig-metadata": JSON.stringify({
-    purpose: call.purpose,
-    actor: call.trigger.type,
-    ...(call.requestId === undefined ? {} : { requestId: call.requestId }),
-    // One entry, not two: the gateway keeps five, and the provider
-    // request's ID (`withRequestId`) comes after these. A run ID holds no
-    // slash (`noSlash`), so the first one splits it from the step.
-    ...(call.runStep === undefined
-      ? {}
-      : { runStep: `${call.runStep.runId}/${call.runStep.step}` }),
-  }),
-});
 
 const noUsage: Usage = {
   input: 0,
@@ -979,11 +816,13 @@ interface Admitted {
   judged: Judged;
 }
 
-/** An admitted request's way to the model at the deployment's gateway. */
+/** An admitted request's way to the model, through the deployment's transport. */
 interface Route extends Admitted {
   model: Model<Api>;
-  /** The AI binding's fetch, which reaches the gateway. */
-  transport: FetchFunction;
+  /** The way to the model: its endpoint, headers and fetch (model-transport.ts). */
+  endpoint: TransportRoute;
+  /** Whether the transport's provider SDKs retry a refused request themselves. */
+  sdkRetries: boolean;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
   /**
@@ -1196,29 +1035,6 @@ const refusalOf = (text: string): ProviderRefusal => {
     code: codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code")),
     internalCode: typeof internalCode === "number" ? internalCode : undefined,
     paths: paths.length === 0 ? undefined : paths.join(" "),
-  };
-};
-
-/**
- * The request as Workers AI takes it. pi sends an assistant message that
- * only calls tools with `null` content, as OpenAI's API allows, but Workers
- * AI's models take text only and refuse the request (400, "Type mismatch
- * of '/messages/2/content', 'string' not in 'null'"): every request after
- * an agent's first tool call failed. Such content goes as empty text.
- */
-const workersAiPayload = (payload: unknown): unknown => {
-  if (!(isRecord(payload) && Array.isArray(payload.messages))) {
-    return undefined;
-  }
-  return {
-    ...payload,
-    messages: payload.messages.map((message: unknown) =>
-      isRecord(message) &&
-      message.role === "assistant" &&
-      message.content === null
-        ? { ...message, content: "" }
-        : message
-    ),
   };
 };
 
@@ -1841,28 +1657,6 @@ const admitWaiting = async (
   }
 };
 
-/** `init` with the provider request's ID in the gateway log's metadata. */
-const withRequestId = (
-  init: RequestInit | undefined,
-  id: string
-): RequestInit => {
-  const headers = new Headers(init?.headers);
-  let metadata: unknown = undefined;
-  try {
-    metadata = JSON.parse(headers.get("cf-aig-metadata") ?? "{}");
-  } catch {
-    metadata = {};
-  }
-  headers.set(
-    "cf-aig-metadata",
-    JSON.stringify({
-      ...(isRecord(metadata) ? metadata : {}),
-      providerRequest: id,
-    })
-  );
-  return { ...init, headers };
-};
-
 /**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
@@ -1873,7 +1667,7 @@ const open = async (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { model, ref, call, transport } = route;
+  const { endpoint } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -1919,7 +1713,10 @@ const open = async (
     try {
       // Only this request's own answer says whether it was rate-limited.
       response.rateLimited = undefined;
-      answered = await transport(input, withRequestId(init, admitted.id));
+      answered = await endpoint.fetch(
+        input,
+        endpoint.tagged(init, admitted.id)
+      );
     } catch (error) {
       response.settled.push(
         await settleAdmitted(route, admitted, { by: "unknown" })
@@ -1950,25 +1747,18 @@ const open = async (
     response.pending = admitted;
     return answered;
   };
-  // SAFETY: the provider picks both the adapter and the catalog the model
-  // comes from, so the model always speaks the adapter's API.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const adapter = (await providers[ref.provider].stream()) as StreamFunction<
-    Api,
-    SimpleStreamOptions
-  >;
-  const events = adapter(model, context, {
+  const { model, call } = route;
+  const events = await streamRoute(endpoint, context, {
     fetch: measured,
-    headers: gatewayHeaders(call),
     maxTokens: answerTokens(call, model),
-    maxRetries: route.providerRetries === false ? 0 : maxRetries,
+    maxRetries:
+      route.providerRetries === false || !route.sdkRetries ? 0 : maxRetries,
     // Without a level pi turns reasoning off.
     reasoning: thinkingOf(model, call.effort),
     signal,
-    onPayload: ref.provider === "workers-ai" ? workersAiPayload : undefined,
     onResponse: ({ status, headers }) => {
       response.status = status;
-      response.logId = headers["cf-aig-log-id"];
+      response.logId = endpoint.logIdOf(headers);
     },
   });
   return { events, response };
@@ -2717,25 +2507,49 @@ const scopesNowOf = (
   };
 };
 
+/** What a request tells its transport about itself: identifiers only. */
+const metadataOf = (
+  call: Pick<Session, "purpose" | "trigger" | "requestId"> & {
+    runStep?: Session["runStep"];
+  }
+): RouteMetadata => ({
+  purpose: call.purpose,
+  actor: call.trigger.type,
+  requestId: call.requestId,
+  runStep: call.runStep,
+});
+
+/**
+ * The deployment's model transport: its AI Gateway over the AI binding.
+ * None on plain workerd (on-prem), which has no AI binding.
+ */
+const modelTransport = (
+  env: ModelsEnv,
+  config: ModelGatewayConfig
+): ModelTransport | undefined =>
+  typeof env.AI?.fetch === "function"
+    ? cloudflareAiGateway(env.AI, config.gateway)
+    : undefined;
+
 /**
  * Checks a request against the deployment's config and rules, before
- * anything is sent, and routes it to the model at the gateway.
+ * anything is sent, and routes it to the model through the deployment's
+ * transport.
  */
 const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const config = modelGatewayConfig(env);
-  // Plain workerd (on-prem) has no AI binding, so no gateway either.
   const rules = modelRules(env);
-  if (
-    config === undefined ||
-    rules === undefined ||
-    typeof env.AI?.fetch !== "function"
-  ) {
+  const transport =
+    config === undefined ? undefined : modelTransport(env, config);
+  if (config === undefined || rules === undefined || transport === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
   const ref = config.models.includes(call.model)
     ? parseModelRef(call.model)
     : undefined;
-  if (ref === undefined) {
+  const endpoint =
+    ref === undefined ? undefined : transport.route(ref, metadataOf(call));
+  if (ref === undefined || endpoint === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
   try {
@@ -2753,7 +2567,7 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   if (
     call.binding !== undefined &&
     call.maxTokens !== undefined &&
-    call.maxTokens > usableAnswer(gatewayModel(config.gateway, ref))
+    call.maxTokens > usableAnswer(endpoint.model)
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
@@ -2785,13 +2599,14 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   // trigger and work context, which core's host sets: never from App code.
   const { disclose } = shareIdentity(call);
   const place = crypto.randomUUID();
-  const model = gatewayModel(config.gateway, ref);
+  const { model } = endpoint;
   return {
     call,
     ref,
     judged: verdict.judged,
     model,
-    transport: createAiBindingFetch(env.AI),
+    endpoint,
+    sdkRetries: transport.capabilities.sdkRetries,
     bound: (body) => textBound(call, model, body),
     price,
     place,
@@ -2995,16 +2810,8 @@ const chargedAnswer = (
  * tokens, from the catalog of the providers the gateway offers; none for
  * a model it doesn't offer (core's own words, `grasp`).
  */
-export const contextWindowOf = (model: string): number | undefined => {
-  for (const { catalog } of Object.values(providers)) {
-    const models: Readonly<Record<string, Model<Api>>> = catalog;
-    const found = Object.hasOwn(models, model) ? models[model] : undefined;
-    if (found !== undefined && found.contextWindow > 0) {
-      return found.contextWindow;
-    }
-  }
-  return undefined;
-};
+export const contextWindowOf = (model: string): number | undefined =>
+  catalogWindowOf(model);
 
 /**
  * Streams one admitted request to `out`, event by event, and records it
@@ -3396,7 +3203,7 @@ const admitSpeech = async (
     judged: verdict.judged,
     price,
     transport: createAiBindingFetch(env.AI),
-    url: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    url: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
     body: JSON.stringify({
       text: call.text,
       model_id: ref.id,
@@ -3437,7 +3244,9 @@ const speechRequest = (
   };
   // The gateway's own headers, without the auth placeholders pi's SDKs
   // need dropped: this request has none of theirs.
-  for (const [name, value] of Object.entries(gatewayHeaders(route.call))) {
+  for (const [name, value] of Object.entries(
+    gatewayHeaders(metadataOf(route.call))
+  )) {
     if (value !== null) {
       headers[name] = value;
     }
@@ -3694,7 +3503,7 @@ const voiceGatewayRoute = (
 ): VoiceGatewayRoute => {
   const token = env.AI_GATEWAY_TOKEN;
   return {
-    base: `https://workers-binding.ai/ai-gateway/gateways/${config.gateway}/${config.voice?.provider ?? nativeVoiceProvider}`,
+    base: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}`,
     transport: createAiBindingFetch(ai),
     headers: {
       "cf-aig-authorization": `Bearer ${

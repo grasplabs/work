@@ -27,6 +27,7 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import { daysUntil } from "./teams-bot.ts";
 import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";
 import { lastWatched } from "./watch.ts";
@@ -68,6 +69,8 @@ export interface ClientSetup {
     rotatedAt: Date | null;
     rotationLiveAt: Date | null;
     configChangedAt: Date | null;
+    /** The most its model calls may cost a month, in whole euros (GRA-141). */
+    modelSpendCeiling: number;
   } | null;
   /** How its people sign in, as its record has it; null without one. */
   signIn: ClientSignInRecord | null;
@@ -75,6 +78,12 @@ export interface ClientSetup {
   signInOverridden: boolean;
   /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
   teamsBot: TeamsBot | null;
+  /**
+   * Days until its Teams bot's secret expires, read now: negative once it
+   * has; null without a bot. Microsoft refuses every send once it has, and
+   * Stephen goes silent in Teams.
+   */
+  teamsBotSecretDays: number | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
   /**
@@ -135,6 +144,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.place",
   "client.provision_placed",
   "client.ring",
+  "client.model_spend_ceiling",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
@@ -253,6 +263,7 @@ export const getClientSetup = async (
       rotatedAt: clients.rotatedAt,
       rotationLiveAt: clients.rotationLiveAt,
       configChangedAt: clients.configChangedAt,
+      modelSpendCeiling: clients.modelSpendCeiling,
     })
     .from(clients)
     .where(eq(clients.id, clientId));
@@ -275,6 +286,10 @@ export const getClientSetup = async (
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
     teamsBot: settings?.teamsBot ?? null,
+    teamsBotSecretDays:
+      settings?.teamsBot === null || settings?.teamsBot === undefined
+        ? null
+        : daysUntil(settings.teamsBot.secretExpiresOn, new Date()),
     configPending: settings?.configPending ?? false,
     sealedSecrets,
     watched,

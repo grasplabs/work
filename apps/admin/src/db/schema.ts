@@ -15,6 +15,9 @@ import {
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
+/** Every client's model spend ceiling until staff set another, in euros a month (GRA-141). */
+export const defaultModelSpendCeiling = 250;
+
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
   /** `r<run6>-<sha7>`. */
@@ -130,6 +133,31 @@ export const clients = sqliteTable(
      * already (src/rollout/targets.ts); null while nothing changed.
      */
     configChangedAt: timestamp("config_changed_at"),
+    /**
+     * The most its model calls may cost in a calendar month, in whole
+     * euros (GRA-141): `defaultModelSpendCeiling` unless staff set another
+     * (src/clients/model-ceiling.ts). Every deploy and provisioning gives
+     * it to its core's model gateway as its deployment budget, which the
+     * gateway enforces before each provider request.
+     */
+    modelSpendCeiling: integer("model_spend_ceiling")
+      .notNull()
+      .default(defaultModelSpendCeiling),
+    /**
+     * Where it runs: Grasp's cloud, or its own premises
+     * (src/hosting/organization.ts). Fixed once it is provisioned.
+     */
+    hosting: text({ enum: ["grasp_cloud", "on_prem"] })
+      .notNull()
+      .default("grasp_cloud"),
+    /**
+     * Where Grasp Cloud keeps its data: the EU jurisdiction, or none. Every
+     * database, bucket and Durable Object is created there; fixed once it
+     * is provisioned.
+     */
+    jurisdiction: text({ enum: ["eu", "none"] })
+      .notNull()
+      .default("eu"),
     /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name
@@ -440,65 +468,13 @@ export const hostingDestinations = sqliteTable("hosting_destinations", {
   accountId: text("account_id"),
   /** Its Workers for Platforms dispatch namespace; null otherwise. */
   namespace: text(),
-  /** The hosting policies it may serve, by id: JSON (src/hosting/policy.ts). */
-  policies: text().notNull(),
-  /**
-   * What staff verified it does, each with its evidence: JSON
-   * (`destinationCapabilitiesSchema`, src/hosting/policy.ts). A capability
-   * it doesn't list is unknown, which no policy accepts.
-   */
-  capabilities: text().notNull(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 
 /**
- * Every capability of a destination as staff declared it, each time they
- * saved it (src/hosting/inventory.ts): written in the same batch as the
- * destination, never updated or deleted. A save records every capability,
- * the ones it doesn't list as `unknown`, so a destination's latest row per
- * capability is what its `capabilities` say. The evidence as it parsed
- * (`evidenceSchema`, src/hosting/policy.ts), flattened.
- */
-export const destinationCapabilityEvidence = sqliteTable(
-  "destination_capability_evidence",
-  {
-    /** Rising: the order the declarations were saved in. */
-    id: integer().primaryKey({ autoIncrement: true }),
-    destinationId: text("destination_id")
-      .notNull()
-      .references(() => hostingDestinations.id),
-    /** A capability (src/hosting/policy.ts). */
-    capability: text().notNull(),
-    /** `unknown`: the save didn't list it, and it has no evidence. */
-    status: text({ enum: ["verified", "unsupported", "unknown"] }).notNull(),
-    /** What the evidence was observed against; null when unknown. */
-    subjectKind: text("subject_kind", {
-      enum: ["source", "candidate", "release", "profile"],
-    }),
-    subjectId: text("subject_id"),
-    procedure: text(),
-    observedAt: timestamp("observed_at"),
-    /** Who the evidence says observed it. */
-    recordedBy: text("recorded_by"),
-    /** Where the full record is. */
-    record: text(),
-    /** Who saved it: a staff member's email, or `system`. */
-    declaredBy: text("declared_by").notNull(),
-    declaredAt: timestamp("declared_at").notNull(),
-  },
-  (table) => [
-    index("destination_capability_evidence_idx").on(
-      table.destinationId,
-      table.capability,
-      table.id
-    ),
-  ]
-);
-
-/**
- * The destination a client runs in and the policy it runs under, and the
- * opaque deployment id its resources' names are made from. Set once:
+ * The destination a client runs in, and the opaque deployment id its
+ * resources' names are made from. Set once:
  * moving a client elsewhere, or to another jurisdiction, is a migration
  * to new resources, never a change of this row (src/hosting/inventory.ts).
  */
@@ -511,7 +487,6 @@ export const clientPlacements = sqliteTable("client_placements", {
   destinationId: text("destination_id")
     .notNull()
     .references(() => hostingDestinations.id),
-  policyId: text("policy_id").notNull(),
   placedBy: text("placed_by").notNull(),
   placedAt: timestamp("placed_at").notNull(),
 });
@@ -655,80 +630,24 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
- * An integration Grasp's agent builds into the platform: one row per app,
- * shared by every company that asked for it (src/builds/builds.ts). It
- * moves forward through its stages, each move a conditional write naming
- * the stage it leaves, audited in the same batch, so a late or repeated
- * event never moves it back. Never an app credential, a company's data or
- * anything the agent read: those stay in Secrets Store, the company's
- * deployment and the agent's session.
+ * The platform's own settings that staff choose (src/platform-settings.ts):
+ * one row, `id` 1. Which organization is Grasp's own is chosen on
+ * Platform, audited; Grasp's own public settings live in wrangler.jsonc
+ * per stage, and secrets in the stage's 1Password Environment.
  */
-export const integrationBuilds = sqliteTable("integration_builds", {
-  /** The app's connector name: its package's, `packages/connectors/<app>`. */
-  app: text().primaryKey(),
-  /** The app as people name it, such as `Personio`. */
-  name: text().notNull(),
-  stage: text({
-    enum: [
-      "asked",
-      "researching",
-      "plan_ready",
-      "credentials",
-      "writing",
-      "in_review",
-      "merged",
-      "needs_person",
-    ],
-  }).notNull(),
-  /** The stage it was in when it came to need a person; null otherwise. */
-  stoppedAt: text("stopped_at"),
-  /** Why it needs a person, as a code; null otherwise. */
-  reason: text(),
-  /** Its build's run (src/builds/workflow.ts). */
-  runId: text("run_id").notNull(),
+export const platformSettings = sqliteTable("platform_settings", {
+  /** Always 1: there is one platform. */
+  id: integer().primaryKey(),
   /**
-   * The agent's plan, while it waits for a person or once approved: JSON
-   * (`buildPlanSchema`, src/builds/plan.ts). Its hosts are the only ones
-   * the connector's manifest may name.
+   * Grasp's own organization: the client whose core answers Ask Grasp
+   * (src/admin/ask.ts). Null until staff choose one. Not a reference: a
+   * client discarded later leaves it naming one the admin no longer has,
+   * which Ask Grasp says.
    */
-  plan: text(),
-  /** How many plans the agent has written: a sent-back plan starts the next round. */
-  planRound: integer("plan_round").notNull().default(0),
-  /** What the person who sent the last plan back asked for; null otherwise. */
-  planNote: text("plan_note"),
-  /** The staff member who approved the plan. */
-  approvedBy: text("approved_by"),
-  /** The branch it is written on, `feat/connector-<app>`, once it has a pull request. */
-  branch: text(),
-  /** Its pull request's number in grasplabs/work. */
-  pullRequest: integer("pull_request"),
-  /** The commit its pull request was squash-merged as, on `main`. */
-  mergeCommitSha: text("merge_commit_sha"),
-  /** The staff member who confirmed Build it. */
-  requestedBy: text("requested_by").notNull(),
-  createdAt: timestamp("created_at").notNull(),
+  graspClientId: text("grasp_client_id"),
+  updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
-
-/**
- * When the admin last told staff of each kind of alert about each client
- * (src/alerts.ts): an alert of the same client and kind within its window
- * isn't sent again, so a storm is one message. Nothing of what an alert
- * said is kept.
- */
-export const staffAlerts = sqliteTable(
-  "staff_alerts",
-  {
-    clientId: text("client_id").notNull(),
-    /**
-     * The alert's kind, such as `test`, and its subject when it has one:
-     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
-     */
-    kind: text().notNull(),
-    sentAt: timestamp("sent_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
-);
 
 /**
  * What the admin's watch last read of how each client's Stephen fares

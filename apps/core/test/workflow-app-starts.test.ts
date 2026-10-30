@@ -17,11 +17,7 @@ import {
   sdkProtocolVersion,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import {
-  appIdSchema,
-  chatIdSchema,
-  workspaceIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -46,9 +42,11 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
+import { personOf } from "../src/connections.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { appHost } from "../src/durable-objects.ts";
+import { appHost, workspace } from "../src/durable-objects.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Runner } from "../src/operations.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
@@ -80,6 +78,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // Starting independent workflows from an App's server functions
@@ -685,6 +684,9 @@ const ended = async (
   );
 
 const hour = 3_600_000;
+
+/** The sleep step a waiting fixture's run sleeps in. */
+const sleepStep = "task:pause";
 
 /** The outbox's entries as settled: whether they are, and as what. */
 const settledOf = async (store: OpenStore) => {
@@ -1298,18 +1300,24 @@ const detailsOf = async (name: string, target: string) => {
     .map(({ detail }) => detail);
 };
 
-/** An agent of a chat of its own, granted `write` on the fixture's App. */
+/**
+ * An agent of a real chat of Bob's, of its own, granted `write` on the
+ * fixture's App: a start its call makes is held to what that chat read.
+ */
 const agentOf = async (
   fx: Fixture
 ): Promise<{
   agent: CallingAgent;
   permissionId: string;
 }> => {
-  const agent: CallingAgent = {
-    agentId: `agent-${unique()}`,
-    workspaceId: workspaceIdSchema.parse(crypto.randomUUID()),
-    chatId: chatIdSchema.parse(crypto.randomUUID()),
-  };
+  const agentId = `agent-${unique()}`;
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const chat = await workspace(env, workspaceId).createChat(
+    "Questions",
+    fx.bob.userId,
+    agentId
+  );
+  const agent: CallingAgent = { agentId, workspaceId, chatId: chat.id };
   const asked = await requestPermission(
     env,
     fx.ada,
@@ -1323,6 +1331,46 @@ const agentOf = async (
   );
   await grantPermission(env, fx.admin, asked.id, { version: null });
   return { agent, permissionId: asked.id };
+};
+
+/**
+ * A real chat of Bob's whose code read an everyone handbook, and its
+ * agent, granted `write` on the fixture's App and `read` on the handbook
+ * (`readId`).
+ */
+const chatThatRead = async (fx: Fixture) => {
+  const { agent } = await agentOf(fx);
+  const stub = workspace(env, agent.workspaceId);
+  const created = { id: agent.chatId };
+  const handbook = await createCollection(env, fx.admin, {
+    name: `Handbook ${unique()}`,
+    access: "everyone",
+  });
+  await runInDurableObject(stub, (_object, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', ?, NULL)",
+      created.id,
+      handbook.id
+    );
+  });
+  const asked = await requestPermission(
+    env,
+    fx.ada,
+    {
+      subject: { type: "agent", agentId: agent.agentId },
+      object: { type: "collection", collectionId: handbook.id },
+      actions: ["read"],
+      binding: "HANDBOOK",
+    },
+    rolesOf(fx.ada)
+  );
+  await grantPermission(env, fx.admin, asked.id, { version: null });
+  return {
+    agent,
+    stub,
+    chat: { id: created.id, read: handbook.id },
+    readId: asked.id,
+  };
 };
 
 describe("what a start rechecks, and records", () => {
@@ -1415,6 +1463,143 @@ describe("what a start rechecks, and records", () => {
         { settled: true, undeliverable: "workflow.start_denied" },
       ],
       receipts: 1,
+    });
+  });
+
+  it("delivers no start an agent's call staged once its chat is deleted, as its sources went with it", async () => {
+    const fx = await fixture();
+    const { agent } = await agentOf(fx);
+    const kept = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent }
+    );
+    await runDurableObjectAlarm(objectOf(fx.store));
+    const before = await settledOf(fx.store);
+    const staged = await call(
+      fx,
+      fx.bob,
+      "requests.submit",
+      { who: "Bob" },
+      { agent }
+    );
+    // Deleted by its person between the commit and the start's delivery.
+    await workspace(env, agent.workspaceId).deleteChat(
+      agent.chatId,
+      fx.bob.userId,
+      await personOf(env, fx.bob),
+      { type: "person", userId: fx.bob.userId }
+    );
+    await runDurableObjectAlarm(objectOf(fx.store));
+
+    expect({
+      calls: [kept.ok, staged.ok],
+      before,
+      after: await settledOf(fx.store),
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      calls: [true, true],
+      // Its chat still there: delivered.
+      before: [{ settled: true, undeliverable: null }],
+      // Gone since: refused, never admitted unheld.
+      after: [
+        { settled: true, undeliverable: null },
+        { settled: true, undeliverable: "workflow.start_denied" },
+      ],
+      receipts: 1,
+    });
+  });
+
+  it("holds the run an agent's call started to what its chat had read: refused once the agent may no longer read it", async () => {
+    const fx = await fixture();
+    const { agent, stub, chat, readId } = await chatThatRead(fx);
+    /** A run of the App's follow-up, as the agent's call starts it. */
+    const ranFor = async () => {
+      const started = await call(
+        fx,
+        fx.bob,
+        "requests.kickOff",
+        { who: "Bob" },
+        { agent }
+      );
+      const handle = started.ok
+        ? handleSchema["~standard"].validate(started.value)
+        : undefined;
+      const runId =
+        handle !== undefined && "value" in handle ? handle.value.runId : null;
+      const run = await ended(fx, runId);
+      return {
+        status: run.status,
+        code: run.status === "failed" ? (run.error?.code ?? null) : null,
+      };
+    };
+
+    const kept = await ranFor();
+    await revokePermission(env, fx.admin, readId);
+    const revoked = await ranFor();
+    // A concurrent turn of the chat sees the revoke and withholds the
+    // handbook, after the agent's call already took what it read.
+    await runInDurableObject(stub, (_object, state) => {
+      state.storage.sql.exec(
+        "UPDATE chat_run_sources SET withheld_at = ? WHERE chat_id = ?",
+        Date.now(),
+        chat.id
+      );
+    });
+    const withheld = await ranFor();
+    const pinned = await env.DB.prepare(
+      "SELECT DISTINCT source_id AS source, chat_id AS chat FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(agent.agentId)
+      .all<{ source: string; chat: string }>();
+
+    expect({ kept, revoked, withheld, pinned: pinned.results }).toStrictEqual({
+      // Its chat's reads still readable: it runs to its end.
+      kept: { status: "completed", code: null },
+      // The agent's grant on what its chat read revoked: its output, which
+      // its input may have carried, never leaves it.
+      revoked: { status: "failed", code: "brain.revoked" },
+      // Withheld from its chat since: still held to it, so refused too.
+      withheld: { status: "failed", code: "brain.revoked" },
+      pinned: [{ source: chat.read, chat: chat.id }],
+    });
+  });
+
+  it("refuses a run an agent's call started once its chat's read is revoked while it waits, before its output leaves", async () => {
+    const fx = await fixture(true);
+    const { agent, readId } = await chatThatRead(fx);
+    const started = await call(
+      fx,
+      fx.bob,
+      "requests.kickOff",
+      { who: "Bob" },
+      { agent }
+    );
+    const handle = started.ok
+      ? handleSchema["~standard"].validate(started.value)
+      : undefined;
+    const runId =
+      handle !== undefined && "value" in handle ? handle.value.runId : null;
+    if (runId === null) {
+      throw new Error("No run");
+    }
+    // Admitted and asleep, its source still readable.
+    await sleeping(runId, sleepStep);
+    await revokePermission(env, fx.admin, readId);
+    await woken(runId, sleepStep);
+    const run = await ended(fx, runId);
+
+    expect({
+      status: run.status,
+      code: run.status === "failed" ? (run.error?.code ?? null) : null,
+      output: run.output ?? null,
+    }).toStrictEqual({
+      // Revoked mid-run: what its input may carry never leaves it.
+      status: "failed",
+      code: "brain.revoked",
+      output: null,
     });
   });
 

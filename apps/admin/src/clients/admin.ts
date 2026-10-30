@@ -57,7 +57,7 @@ import type { Crm } from "../crm/crm.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientAdminReads } from "../db/schema.ts";
-import { deploySecrets } from "../deploy/context.ts";
+import { deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
@@ -65,7 +65,7 @@ import { defaultLiveReadLimits, eachLimited } from "../live-reads.ts";
 import { proposalOf, roomsAccess, roomsLinks } from "../proposal/proposal.ts";
 import type { Proposal } from "../proposal/proposal.ts";
 import type { CoreAddress } from "./core-address.ts";
-import { clientGrid, healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
+import { clientGrid, healthTimeoutMs, routeOf } from "./grid.ts";
 import type { GridRow } from "./grid.ts";
 
 const encoder = new TextEncoder();

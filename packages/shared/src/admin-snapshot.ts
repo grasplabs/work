@@ -366,7 +366,7 @@ export const adminSnapshotSchema = z.object({
   integrations: adminIntegrationsSchema.nullable(),
   /**
    * The apps the company asked Grasp to add, oldest first: what Grasp's
-   * admin lists as integrations to build. None from a core that doesn't
+   * admin lists as apps asked for. None from a core that doesn't
    * send them yet.
    */
   asked: z.array(adminAppAskedSchema).default([]),

@@ -223,6 +223,61 @@ describe("routing", () => {
     await expect(response.text()).resolves.toContain('<div id="root">');
   });
 
+  it("lets a browser keep a hashed file for a year, and every page only once checked again", async () => {
+    // The static files as a dispatch namespace answers them: max-age=0 for
+    // every one (GRA-430), and index.html for any path that isn't a file.
+    const files: Record<string, { body: string; type: string }> = {
+      "/assets/index-DkT3x9aQ.js": {
+        body: "export {};",
+        type: "text/javascript",
+      },
+      "/assets/index-C2bWq7Zp.css": { body: "body{}", type: "text/css" },
+      "/favicon.svg": { body: "<svg/>", type: "image/svg+xml" },
+    };
+    const assets = assetsThat((request) => {
+      const file = files[new URL(request.url).pathname] ?? {
+        body: '<div id="root"></div>',
+        type: "text/html",
+      };
+      return new Response(file.body, {
+        headers: {
+          "content-type": file.type,
+          "cache-control": "public, max-age=0, must-revalidate",
+        },
+      });
+    });
+    /** The cache-control core answers `path` with. */
+    const cacheOf = async (path: string) => {
+      const response = await worker.fetch(
+        presenting(`https://core${path}`, env.ROUTER_SECRET),
+        { ...env, ASSETS: assets },
+        createExecutionContext()
+      );
+      await response.body?.cancel();
+      return response.headers.get("cache-control");
+    };
+    const year = "public, max-age=31536000, immutable";
+
+    expect({
+      script: await cacheOf("/assets/index-DkT3x9aQ.js"),
+      style: await cacheOf("/assets/index-C2bWq7Zp.css"),
+      index: await cacheOf("/"),
+      route: await cacheOf("/apps/some-app"),
+      // A hashed name the build doesn't have answers index.html: never
+      // kept, or a release could never replace it.
+      missing: await cacheOf("/assets/gone-Zz99Yy88.js"),
+      // Not named by its hash: as the static files answered it.
+      unhashed: await cacheOf("/favicon.svg"),
+    }).toStrictEqual({
+      script: year,
+      style: year,
+      index: "no-cache",
+      route: "no-cache",
+      missing: "no-cache",
+      unhashed: "public, max-age=0, must-revalidate",
+    });
+  });
+
   it("answers unknown API routes with a 404 error, not the frontend", async () => {
     const paths = ["/api", "/api/", "/api/unknown"];
     const errors = await Promise.all(
