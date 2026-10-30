@@ -751,23 +751,23 @@ export const runningTotal = (
 
 /* ── Over RPC ─────────────────────────────────────────────────────────── */
 
+/** The requests a plan includes each month. */
+const includedSchema = z.number().int().min(0).max(100_000_000);
+
+/** The minutes a request of one kind saves. */
+const minutesSchema = z.number().int().min(0).max(600);
+
 /** What the company set for Stephen's requests: kept in org settings, beside billing. */
 export const stephenRequestSettingsSchema = z.strictObject({
   /** The requests the plan includes each month; null without a plan that counts them. */
-  requestsIncluded: z
-    .number()
-    .int()
-    .min(0)
-    .max(100_000_000)
-    .nullable()
-    .default(null),
+  requestsIncluded: includedSchema.nullable().default(null),
   /** The minutes a request of each kind saves, where the company set its own. */
   minutesSaved: z
     .strictObject({
-      answered: z.number().int().min(0).max(600).optional(),
-      lookedUp: z.number().int().min(0).max(600).optional(),
-      changed: z.number().int().min(0).max(600).optional(),
-      workflow: z.number().int().min(0).max(600).optional(),
+      answered: minutesSchema.optional(),
+      lookedUp: minutesSchema.optional(),
+      changed: minutesSchema.optional(),
+      workflow: minutesSchema.optional(),
     })
     .default({}),
   /**
@@ -779,8 +779,26 @@ export const stephenRequestSettingsSchema = z.strictObject({
 export type StephenRequestSettings = z.output<
   typeof stephenRequestSettingsSchema
 >;
-export type StephenRequestSettingsInput = z.input<
-  typeof stephenRequestSettingsSchema
+
+/**
+ * A change to the settings: only what it names changes, so two owners
+ * changing different settings at once both keep theirs. A kind's minutes
+ * set to null go back to the default.
+ */
+export const stephenRequestSettingsChangeSchema = z.strictObject({
+  requestsIncluded: includedSchema.nullable().optional(),
+  minutesSaved: z
+    .strictObject({
+      answered: minutesSchema.nullable().optional(),
+      lookedUp: minutesSchema.nullable().optional(),
+      changed: minutesSchema.nullable().optional(),
+      workflow: minutesSchema.nullable().optional(),
+    })
+    .optional(),
+  requestsPerPerson: z.boolean().optional(),
+});
+export type StephenRequestSettingsChange = z.input<
+  typeof stephenRequestSettingsChangeSchema
 >;
 
 /** The settings until an owner sets them. */
@@ -874,6 +892,8 @@ export interface Need {
   role: string | null;
   /** Grasp's proposal, in the viewer's language; null until one could be made. */
   proposal: string | null;
+  /** Whether Grasp is making the proposal it lacks: false with one, or with no model to make it. */
+  proposing: boolean;
   status: { status: NeedStatus; at: string; by: string } | null;
   /**
    * What happened since its status was set: the requests about it since,
@@ -909,6 +929,12 @@ export interface WeeklySummary {
   teamsOpen: boolean;
 }
 
+/** The requests billed this month, the whole company's, against what the plan includes (null without a plan that counts them). */
+export interface MonthBilled {
+  billed: number;
+  included: number | null;
+}
+
 /** Stephen's week, for the card on top of Settings › Stephen. */
 export interface StephenWeek {
   /** People who asked him something these seven days, and people who may reach him. */
@@ -937,11 +963,17 @@ export interface StephenRequestsApi {
   report: (filter: RequestsFilter) => Promise<RequestsPage>;
   /** What the company set: the plan's requests, minutes saved, people one by one. */
   settings: () => Promise<StephenRequestSettings>;
-  /** Changes them: the organization's own admins (owners) only; turning people one by one on or off is audited. */
+  /**
+   * Changes what `change` names and nothing else: the organization's own
+   * admins (owners) only, each setting changed audited on its own.
+   */
   updateSettings: (
-    settings: StephenRequestSettingsInput
+    change: StephenRequestSettingsChange
   ) => Promise<StephenRequestSettings>;
-  /** What to fix, with Grasp's proposal in `locale` and each item's status. */
+  /**
+   * What to fix, with Grasp's proposal in `locale` and each item's status.
+   * Proposals not made yet are made after it answers (`proposing`).
+   */
   needs: (locale: string) => Promise<Need[]>;
   /** Sets, or clears (null), what is being done about a need. */
   setNeedStatus: (key: string, status: NeedStatus | null) => Promise<void>;
@@ -951,6 +983,8 @@ export interface StephenRequestsApi {
   setSummary: (via: SummaryVia | null) => Promise<void>;
   /** Stephen's week, for Settings › Stephen. */
   week: () => Promise<StephenWeek>;
+  /** The requests billed this month and what the plan includes, for Settings › Billing. */
+  billed: () => Promise<MonthBilled>;
 }
 
 /** Why a call on Stephen's requests was refused. */

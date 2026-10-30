@@ -12,6 +12,19 @@ export interface Member {
 }
 
 /**
+ * One of the organization's teams, as admins manage them: who is in it,
+ * by user ID. Teams are made and changed through Better Auth's
+ * organization routes (`/api/auth/organization/*`), which audit each
+ * change; this is only how an admin reads them all, as Better Auth lists
+ * a team's members only to those in it.
+ */
+export interface OrganizationTeam {
+  id: string;
+  name: string;
+  memberIds: string[];
+}
+
+/**
  * An admin's invitation, not taken up yet: the role `email` gets when they
  * first sign in through the organization's IdP. Grasp sends no email;
  * whoever invites tells them.
@@ -76,6 +89,8 @@ export interface ErasurePreview {
  */
 export interface MembersApi {
   list: () => Promise<Member[]>;
+  /** The organization's teams by name, each with its members. */
+  teams: () => Promise<OrganizationTeam[]>;
   /**
    * Removes the member with `userId`. Removing someone already removed
    * finishes what the first removal left undone (disconnecting their

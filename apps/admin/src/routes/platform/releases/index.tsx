@@ -92,9 +92,6 @@ const EveryRelease = ({
             <TableRow>
               <TableHead variant="card">Version</TableHead>
               <TableHead variant="card">Release</TableHead>
-              <TableHead className="hidden @2xl:table-cell" variant="card">
-                Commit
-              </TableHead>
               <TableHead className="hidden @xl:table-cell" variant="card">
                 Built (UTC)
               </TableHead>
@@ -122,15 +119,11 @@ const EveryRelease = ({
                       >
                         {releaseTitle(release.notes) || release.id}
                       </Link>
+                      {/* The commit next to the id: the id says when, the commit what. */}
                       <span className="text-muted-foreground font-mono text-xs">
-                        {release.id}
+                        {`${release.id} · ${release.commitSha.slice(0, 7)}`}
                       </span>
                     </div>
-                  </TableCell>
-                  <TableCell className="hidden @2xl:table-cell" variant="card">
-                    <span className="font-mono text-xs">
-                      {release.commitSha.slice(0, 7)}
-                    </span>
                   </TableCell>
                   <TableCell className="hidden @xl:table-cell" variant="card">
                     <span className="text-muted-foreground tabular-nums">

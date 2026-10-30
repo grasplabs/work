@@ -16,15 +16,18 @@ import {
   quietTeams,
   rangeSpan,
   requestsFilterSchema,
+  requestKinds,
   requestsReport,
   spanBefore,
   stephenRequestErrors,
+  stephenRequestSettingsChangeSchema,
   stephenRequestSettingsSchema,
   summaryVias,
   weekOf as weekStart,
 } from "@grasp-os/shared/stephen-requests";
 import type {
   MissingTool,
+  MonthBilled,
   Need,
   NeedKind,
   NeedStatus,
@@ -34,12 +37,13 @@ import type {
   RequestsReport,
   StephenRequest,
   StephenRequestSettings,
-  StephenRequestSettingsInput,
+  StephenRequestSettingsChange,
   StephenRequestsApi,
   StephenWeek,
   SummaryVia,
   WeeklySummary,
 } from "@grasp-os/shared/stephen-requests";
+import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -148,53 +152,93 @@ const requireOwner = (by: Identity): void => {
   }
 };
 
-/** Replaces the settings, an owner's: written only while they still are one, with its audit event. */
+/** The settings a change can name, in the order their events are recorded. */
+const settingFields = [
+  "requestsIncluded",
+  "minutesSaved",
+  "requestsPerPerson",
+] as const;
+
+/** The settings `change` changes against `before`: those it names with another value. */
+const changedFields = (
+  before: StephenRequestSettings,
+  change: StephenRequestSettingsChange
+): (typeof settingFields)[number][] => {
+  const minutes = change.minutesSaved;
+  const changed = {
+    requestsIncluded:
+      change.requestsIncluded !== undefined &&
+      change.requestsIncluded !== before.requestsIncluded,
+    minutesSaved:
+      minutes !== undefined &&
+      requestKinds.some(
+        (kind) =>
+          minutes[kind] !== undefined &&
+          (minutes[kind] ?? null) !== (before.minutesSaved[kind] ?? null)
+      ),
+    requestsPerPerson:
+      change.requestsPerPerson !== undefined &&
+      change.requestsPerPerson !== before.requestsPerPerson,
+  };
+  return settingFields.filter((field) => changed[field]);
+};
+
+/**
+ * Changes what `input` names of the settings, an owner's: written only
+ * while they still are one, merged into the row as it is when written
+ * (`json_patch`), so a change made meanwhile to another setting stays.
+ * Each setting changed is its own audit event, by who changed it.
+ */
 const saveRequestSettings = async (
   env: Env,
   by: Identity,
   input: unknown
 ): Promise<StephenRequestSettings> => {
   requireOwner(by);
-  const parsed = stephenRequestSettingsSchema.safeParse(input);
+  const parsed = stephenRequestSettingsChangeSchema.safeParse(input);
   if (!parsed.success) {
     throw stephenRequestErrors.create("stephen_requests.settings_invalid");
   }
-  const next = parsed.data;
-  const before = await readRequestSettings(env);
-  const fields = (
-    ["requestsIncluded", "minutesSaved", "requestsPerPerson"] as const
-  ).filter(
-    (field) => JSON.stringify(before[field]) !== JSON.stringify(next[field])
-  );
-  const value = JSON.stringify(next);
+  const change = parsed.data;
+  const fields = changedFields(await readRequestSettings(env), change);
+  const patch = JSON.stringify(change);
+  const patched = sql`json_patch(${orgSettings.value}, ${patch})`;
   const now = Date.now();
   const db = drizzle(env.DB);
   const whileOwner = db
     .select({
       kind: sql<string>`${settingsKind}`.as("kind"),
-      value: sql<string>`${value}`.as("value"),
+      value:
+        sql<string>`json_patch(${JSON.stringify(noRequestSettings)}, ${patch})`.as(
+          "value"
+        ),
       updatedAt: sql<Date>`${now}`.as("updated_at"),
     })
     .from(sql`(SELECT 1)`)
     .where(activeMember(by.userId, ["admin"]));
-  const perPersonChanged = fields.includes("requestsPerPerson");
+  // Each event only once the one before it was kept: the first once the
+  // row changed, so a change that changed nothing records nothing.
+  const events = fields.map((field) =>
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action:
+        field === "requestsPerPerson"
+          ? `stephen_requests.per_person.${change.requestsPerPerson === true ? "turned_on" : "turned_off"}`
+          : "stephen_requests.settings.updated",
+      target: { type: "organization", id: organizationId },
+      detail: { field },
+    })
+  );
   const [written] = await auditedBatch(env, db, [
     db
       .insert(orgSettings)
       .select(whileOwner)
       .onConflictDoUpdate({
         target: orgSettings.kind,
-        set: { value, updatedAt: new Date(now) },
-        setWhere: sql`${orgSettings.value} <> ${value}`,
+        set: { value: patched, updatedAt: new Date(now) },
+        setWhere: sql`${patched} <> ${orgSettings.value}`,
       }),
-    outboxedIfChanged(db, {
-      actor: actorOf(by),
-      action: perPersonChanged
-        ? `stephen_requests.per_person.${next.requestsPerPerson ? "turned_on" : "turned_off"}`
-        : "stephen_requests.settings.updated",
-      target: { type: "organization", id: organizationId },
-      detail: { fields: fields.join(",") },
-    }),
+    ...events,
   ]);
   if (written.meta.changes === 0) {
     const still = await db.get<{ admin: number }>(
@@ -531,7 +575,10 @@ const pageOf = async (
 };
 
 /** A need as Needs you lists it, before its label, proposal, status and since. */
-type Found = Omit<Need, "label" | "proposal" | "status" | "since">;
+type Found = Omit<
+  Need,
+  "label" | "proposal" | "proposing" | "status" | "since"
+>;
 
 const blank: Pick<
   Found,
@@ -770,16 +817,78 @@ interface NeedNames {
   teams: ReadonlyMap<string, string>;
 }
 
-/** Grasp's proposals for `found` in `language`: those kept, and up to a few made now for `proposer`. */
+/**
+ * The proposals being made in this isolate, by language and need: a read
+ * while one is made doesn't ask the model for it again. Another isolate
+ * may; the first kept wins.
+ */
+const beingMade = new Set<string>();
+
+/** Makes and keeps Grasp's proposals for `needs`, one after another, for `proposer`. */
+const makeProposals = async (
+  env: Env,
+  proposer: Identity,
+  needs: readonly Found[],
+  names: NeedNames,
+  language: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  for (const need of needs) {
+    const making = `${language}:${need.key}`;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a few, one after another
+      const proposal = await proposeFor(
+        env,
+        proposer,
+        need,
+        {
+          topic:
+            need.topic === null ? null : (names.topics.get(need.topic) ?? null),
+          question:
+            need.question === null
+              ? null
+              : (names.questions.get(need.question)?.name ?? null),
+          team:
+            need.teamId === null
+              ? null
+              : (names.teams.get(need.teamId) ?? null),
+        },
+        language
+      );
+      if (proposal !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- kept as it is made
+        await db
+          .insert(stephenRequestProposals)
+          .values({
+            key: need.key,
+            locale: language,
+            text: proposal,
+            createdAt: new Date(),
+          })
+          .onConflictDoNothing();
+      }
+    } catch (error) {
+      log.warn("stephen_requests.proposal_unkept", errorFields(error));
+    } finally {
+      beingMade.delete(making);
+    }
+  }
+};
+
+/**
+ * Grasp's proposals for `found` in `language`: those kept, and whether
+ * the rest are being made. Up to a few are made for `proposer` after the
+ * read answers, so Needs you never waits on the model; the rest the next
+ * read makes. None without a proposer (the weekly summary's) or a model.
+ */
 const proposalsFor = async (
   env: Env,
   proposer: Identity | null,
   found: readonly Found[],
   names: NeedNames,
   language: string
-): Promise<Map<string, string>> => {
-  const db = drizzle(env.DB);
-  const rows = await db
+): Promise<{ proposals: Map<string, string>; proposing: boolean }> => {
+  const rows = await drizzle(env.DB)
     .select({
       key: stephenRequestProposals.key,
       text: stephenRequestProposals.text,
@@ -787,45 +896,24 @@ const proposalsFor = async (
     .from(stephenRequestProposals)
     .where(eq(stephenRequestProposals.locale, language));
   const proposals = new Map(rows.map((row) => [row.key, row.text]));
-  if (proposer === null) {
-    return proposals;
+  const model = modelForRole(gatewaySettings(env), "quick", {
+    sensitive: true,
+  });
+  if (proposer === null || model === undefined) {
+    return { proposals, proposing: false };
   }
   const missing = found
-    .filter(({ key }) => !proposals.has(key))
+    .filter(
+      ({ key }) => !(proposals.has(key) || beingMade.has(`${language}:${key}`))
+    )
     .slice(0, proposalsPerRead);
-  for (const need of missing) {
-    // oxlint-disable-next-line no-await-in-loop -- a few, one after another
-    const proposal = await proposeFor(
-      env,
-      proposer,
-      need,
-      {
-        topic:
-          need.topic === null ? null : (names.topics.get(need.topic) ?? null),
-        question:
-          need.question === null
-            ? null
-            : (names.questions.get(need.question)?.name ?? null),
-        team:
-          need.teamId === null ? null : (names.teams.get(need.teamId) ?? null),
-      },
-      language
-    );
-    if (proposal !== null) {
-      proposals.set(need.key, proposal);
-      // oxlint-disable-next-line no-await-in-loop -- kept as it is made
-      await db
-        .insert(stephenRequestProposals)
-        .values({
-          key: need.key,
-          locale: language,
-          text: proposal,
-          createdAt: new Date(),
-        })
-        .onConflictDoNothing();
-    }
+  for (const { key } of missing) {
+    beingMade.add(`${language}:${key}`);
   }
-  return proposals;
+  if (missing.length > 0) {
+    waitUntil(makeProposals(env, proposer, missing, names, language));
+  }
+  return { proposals, proposing: true };
 };
 
 /**
@@ -887,17 +975,25 @@ const needsOf = async (
     questions,
     teams: new Map(companyTeams.map((row) => [row.id, row.name])),
   };
-  const proposals = await proposalsFor(env, proposer, found, names, language);
+  const { proposals, proposing } = await proposalsFor(
+    env,
+    proposer,
+    found,
+    names,
+    language
+  );
   const statusOf = new Map(statuses.map((row) => [row.key, row]));
   return found.map((need): Need => {
     const status = statusOf.get(need.key);
+    const proposal = proposals.get(need.key) ?? null;
     return {
       ...need,
       label:
         need.teamId === null
           ? (questions.get(need.question ?? "")?.name ?? "")
           : (names.teams.get(need.teamId) ?? ""),
-      proposal: proposals.get(need.key) ?? null,
+      proposal,
+      proposing: proposing && proposal === null,
       status:
         status === undefined
           ? null
@@ -1083,6 +1179,30 @@ const packOf = (tool: string): string => {
   return pack;
 };
 
+/**
+ * The requests billed this month, counted in the database, and what the
+ * plan includes: one number for Settings › Billing, without the report.
+ */
+const billedOf = async (env: Env): Promise<MonthBilled> => {
+  const month = rangeSpan("month", await companyDay(env));
+  const [settings, counted] = await Promise.all([
+    readRequestSettings(env),
+    drizzle(env.DB)
+      .select({ billed: sql<number>`count(*)` })
+      .from(stephenRequests)
+      .where(
+        and(
+          gte(stephenRequests.day, month.from),
+          lte(stephenRequests.day, month.to),
+          // Billed: what he finished (`requestsReport`'s billed).
+          eq(stephenRequests.outcome, "done")
+        )
+      )
+      .get(),
+  ]);
+  return { billed: counted?.billed ?? 0, included: settings.requestsIncluded };
+};
+
 /** Stephen's week, for the card on top of Settings › Stephen. */
 const weekOf = async (env: Env): Promise<StephenWeek> => {
   const today = await companyDay(env);
@@ -1201,11 +1321,11 @@ export class StephenRequestsRpc
   }
 
   async updateSettings(
-    settings: StephenRequestSettingsInput
+    change: StephenRequestSettingsChange
   ): Promise<StephenRequestSettings> {
     return await withPerson(
       this.#check,
-      async (by) => await saveRequestSettings(this.#env, by, settings)
+      async (by) => await saveRequestSettings(this.#env, by, change)
     );
   }
 
@@ -1236,6 +1356,13 @@ export class StephenRequestsRpc
   async setSummary(via: SummaryVia | null): Promise<void> {
     await withPerson(this.#check, async (by) => {
       await setSummary(this.#env, by, via);
+    });
+  }
+
+  async billed(): Promise<MonthBilled> {
+    return await withPerson(this.#check, async (by) => {
+      requireReader(by);
+      return await billedOf(this.#env);
     });
   }
 

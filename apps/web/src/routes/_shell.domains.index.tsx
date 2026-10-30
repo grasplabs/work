@@ -242,7 +242,7 @@ const Engines = () => {
       <SiteHeader crumbs={[{ label: t`Domains` }]} />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-medium tracking-tight">
+          <h1 className="type-title">
             <Trans>Domains</Trans>
           </h1>
           <p className="text-muted-foreground">

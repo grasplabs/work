@@ -1,3 +1,4 @@
+import { BRAND } from "@grasp-os/ui/lib/brand";
 import { useLayoutEffect, useRef } from "react";
 
 import { ALPHAS, bucketOf, HEATS, lightness, palette, rgb } from "./dot-ink.ts";
@@ -135,7 +136,7 @@ const play = (
   const styles = palette(element);
   const background = rgb(
     getComputedStyle(element).getPropertyValue("--background").trim() ||
-      "#fcfcfb"
+      BRAND.canvas
   );
   const ground = `rgb(${background.join(", ")})`;
 

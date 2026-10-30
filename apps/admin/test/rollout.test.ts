@@ -2781,7 +2781,7 @@ describe("rolling out a release that raises a platform limit", () => {
     const later = await placedRelease("feat(core): keeps a raise", {
       platformLimits: raised,
       previousRelease: {
-        releaseId: "r999999999-abcdef0",
+        releaseId: "26.01.999999999",
         platformLimits: raised,
       },
     });
