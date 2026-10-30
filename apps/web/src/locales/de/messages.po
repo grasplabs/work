@@ -3477,6 +3477,10 @@ msgstr "Klären Sie vor der Freigabe mit dem Anbieter, wo Daten gespeichert und 
 msgid "Ask to go live with version {askable}"
 msgstr "Bitten, Version {askable} live zu schalten"
 
+#: src/settings/where-stephen.tsx
+msgid "Ask your admin where to write to Stephen there."
+msgstr "Fragen Sie Ihren Admin, wo Sie Stephen dort schreiben können."
+
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
 msgid "Asked"
@@ -6551,6 +6555,10 @@ msgstr "Finanzdaten"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Find a team or a person"
 msgstr "Team oder Person finden"
+
+#: src/settings/where-stephen.tsx
+msgid "Find Stephen under Apps in your Slack workspace."
+msgstr "Sie finden Stephen unter „Apps“ in Ihrem Slack-Workspace."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -11075,6 +11083,7 @@ msgstr "Nur die Admins Ihrer Organisation können eine Änderung an einem Speich
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Öffnen"
 
@@ -11140,6 +11149,10 @@ msgstr "Öffnen"
 #: src/workflows/diagram-doors.tsx
 msgid "Open {name}"
 msgstr "{name} öffnen"
+
+#: src/settings/where-stephen.tsx
+msgid "Open a chat with Stephen, or search for him in Teams’ apps."
+msgstr "Öffnen Sie einen Chat mit Stephen oder suchen Sie ihn unter den Apps in Teams."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -11225,6 +11238,10 @@ msgstr "Offen seit {date}. Bis zur Antwort bleibt das unbekannt, nie null."
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Offen seit dem Go von Grasp am {since}."
+
+#: src/settings/where-stephen.tsx
+msgid "Open Stephen in {app}, in a new tab"
+msgstr "Stephen in {app} öffnen, in einem neuen Tab"
 
 #: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
@@ -17949,6 +17966,10 @@ msgstr "Wo die Workflows stehen"
 #: src/landscape/app-cells.tsx
 msgid "Where this app comes up"
 msgstr "Wo diese App vorkommt"
+
+#: src/settings/where-stephen.tsx
+msgid "Where to reach Stephen"
+msgstr "Wo Sie Stephen erreichen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"

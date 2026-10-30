@@ -240,8 +240,10 @@ export const coreProject = (
             WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
             WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
             WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
+            WHATSAPP_NUMBER: whatsAppNumber.number,
             // The client's Telegram bot (src/channels/telegram.ts).
             TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
+            TELEGRAM_BOT_USERNAME: telegramBot.username,
             // Stephen's Gmail mailbox and its push, so its door is open too.
             GMAIL_MAILBOX: gmailAccount.mailbox,
             GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,

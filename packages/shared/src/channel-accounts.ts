@@ -113,6 +113,24 @@ export type ChannelLinkOutcome =
 export type ChannelUnlinked = "unlinked" | "not_found";
 
 /**
+ * Where the signed-in person reaches Stephen in one chat app: one the
+ * deployment set up, where he answers them. Only what the app shows
+ * anyone who looks for him there, never a secret.
+ */
+export interface ChannelReach {
+  /** The platform, by its Chat SDK adapter's name (`telegram`). */
+  platform: string;
+  /**
+   * What to look for there: the WhatsApp number, the Telegram bot's
+   * `@name`, the Gmail address. `null` where the app finds him by name
+   * alone (Teams, Slack) or the deployment didn't say.
+   */
+  address: string | null;
+  /** A link that opens a chat with him there, where the app has one. */
+  href: string | null;
+}
+
+/**
  * The signed-in person's own chat accounts, over `/rpc`; never anyone
  * else's. Grasp staff link none: they aren't the company's people.
  */
@@ -125,4 +143,6 @@ export interface ChannelAccountsApi {
   link: (secret: string) => Promise<ChannelLinkOutcome>;
   /** Unlinks one of theirs, by its {@link ChannelAccount.id}. Audited. */
   unlink: (id: string) => Promise<ChannelUnlinked>;
+  /** Where they reach Stephen: each chat app set up that he answers them in. */
+  reach: () => Promise<ChannelReach[]>;
 }
