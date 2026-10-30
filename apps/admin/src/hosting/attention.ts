@@ -146,9 +146,11 @@ export const needsAttentionOf = async (
 
 /**
  * Records that client `clientId` needs a person for `reason`, once in
- * `episode`: written only while no such event is since the episode
- * started, in one statement, so two runs at once record it once. Whether
- * this call recorded it.
+ * `episode`: written only while `episode` is still the current one (no
+ * staff action on it since it started) and no such event is since it
+ * started, in one statement, so two runs at once record it once and none
+ * lands in an episode staff have since started afresh. Whether this call
+ * recorded it.
  */
 export const markNeedsAttention = async (
   db: AdminDatabase,
@@ -164,7 +166,7 @@ export const markNeedsAttention = async (
   const recorded = await db
     .insert(auditEvents)
     .select(
-      sql`SELECT ${id}, ${Date.now()}, 'system', ${needsAttentionAction}, ${clientId}, ${reason}, ${detail} WHERE NOT EXISTS (SELECT 1 FROM ${auditEvents} WHERE ${auditEvents.clientId} = ${clientId} AND ${auditEvents.action} = ${needsAttentionAction} AND ${auditEvents.at} > ${episode.startedAt.getTime()})`
+      sql`SELECT ${id}, ${Date.now()}, 'system', ${needsAttentionAction}, ${clientId}, ${reason}, ${detail} WHERE NOT EXISTS (SELECT 1 FROM ${auditEvents} WHERE ${auditEvents.clientId} = ${clientId} AND ${auditEvents.action} = ${needsAttentionAction} AND ${auditEvents.at} > ${episode.startedAt.getTime()}) AND NOT EXISTS (SELECT 1 FROM ${auditEvents} WHERE ${auditEvents.clientId} = ${clientId} AND ${inArray(auditEvents.action, byHandActions)} AND ${auditEvents.actor} <> 'system' AND ${auditEvents.at} > ${episode.startedAt.getTime()})`
     )
     .returning({ id: auditEvents.id });
   return recorded.length > 0;

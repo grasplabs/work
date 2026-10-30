@@ -14,6 +14,8 @@ import { clientGrid } from "../src/clients/grid.ts";
 import { auditEvents, clientProvisions, releases } from "../src/db/schema.ts";
 import {
   autoResumeAction,
+  episodeOf,
+  markNeedsAttention,
   needsAttentionAction,
 } from "../src/hosting/attention.ts";
 import { retryProvisioningFn } from "../src/hosting/functions.ts";
@@ -24,6 +26,7 @@ import {
 import { failureCause } from "../src/hosting/words.ts";
 import { createClient } from "../src/provision/control.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
+import worker from "../src/server.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -375,6 +378,78 @@ describe("provisioning that heals itself", () => {
       starts: 1,
     });
     await terminated(runs.started.at(-1) ?? "");
+  });
+
+  it("asks a person to look when resuming is refused for something lasting, and only waits on another run", async () => {
+    const clientId = await added();
+    await stopped(clientId, await startedByStaff(clientId), "probe_unanswered");
+    // Its scripts ran a Durable Object migration no newer release has, so
+    // the newer release resuming would take it to is refused, and stays so.
+    await db
+      .update(clientProvisions)
+      .set({ progress: JSON.stringify({ migrated: { core: "v99" } }) })
+      .where(eq(clientProvisions.clientId, clientId));
+    await importedRelease();
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
+
+    const lasting = await reconcileClient(env, clientId, later());
+    const recorded = await detailsOf(clientId, needsAttentionAction);
+
+    expect({ lasting, starts: runs.started.length, recorded }).toStrictEqual({
+      lasting: "needs_staff",
+      starts: 0,
+      recorded: [{ attempts: 0, code: "release_behind_migration" }],
+    });
+  });
+
+  it("records no attention in an episode staff have since started afresh", async () => {
+    const clientId = await added();
+    await stopped(clientId, await startedByStaff(clientId), "probe_unanswered");
+    const stale = await episodeOf(db, clientId);
+    // Staff act on it before the reconciler records anything.
+    await scheduler.wait(2);
+    await stopped(clientId, await startedByStaff(clientId), "probe_unanswered");
+
+    const recorded = await markNeedsAttention(db, clientId, stale, {
+      reason: "stuck",
+      code: "probe_unanswered",
+    });
+
+    expect({
+      recorded,
+      events: await detailsOf(clientId, needsAttentionAction),
+    }).toStrictEqual({ recorded: false, events: [] });
+  });
+
+  it("reconciles on the cron even when importing releases fails", async () => {
+    const clientId = await added();
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
+    const failing = new Proxy(env.RELEASES, {
+      get: (target, name): unknown => {
+        if (name === "list" || name === "get" || name === "head") {
+          return async () => await Promise.reject(new Error("R2 is down"));
+        }
+        const value: unknown = Reflect.get(target, name, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await worker.scheduled?.(
+      {
+        cron: "*/5 * * * *",
+        scheduledTime: Date.now(),
+        noRetry: () => {},
+      },
+      { ...env, RELEASES: failing }
+    );
+    const resumes = await detailsOf(clientId, autoResumeAction);
+
+    // Every client still being provisioned is looked at: this one resumed.
+    expect(resumes).toHaveLength(1);
+    for (const runId of runs.started) {
+      // oxlint-disable-next-line no-await-in-loop -- a few runs
+      await terminated(runId);
+    }
   });
 
   it("starts one attempt when two runs look at once", async () => {

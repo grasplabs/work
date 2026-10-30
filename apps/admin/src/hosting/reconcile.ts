@@ -30,7 +30,7 @@
  * its own to drift.
  */
 import { log } from "@grasp-os/shared/log";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { adminDatabase, audit } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
@@ -83,20 +83,28 @@ const isDue = ({ attempts, lastAttemptAt }: Episode, now: Date): boolean => {
   return now.getTime() - lastAttemptAt.getTime() >= delay;
 };
 
-/** Whether release `candidate` was built after release `than`. */
-const isNewer = async (
+/**
+ * The newest release that fits client `clientId` among those built after
+ * its operation's recorded one (`newestFittingRelease`, the one ordering
+ * of releases: when built, then id); null when none newer fits, or it has
+ * no operation.
+ */
+const newerFittingRelease = async (
   db: AdminDatabase,
-  candidate: string,
-  than: string
-): Promise<boolean> => {
-  const rows = await db
+  clientId: string
+): Promise<string | null> => {
+  const operation = await provisionOf(db, clientId);
+  if (operation === undefined) {
+    return null;
+  }
+  const recorded = await db
     .select({ id: releases.id, builtAt: releases.builtAt })
     .from(releases)
-    .where(inArray(releases.id, [candidate, than]));
-  const builtAt = new Map(
-    rows.map(({ id, builtAt: at }) => [id, at.getTime()])
-  );
-  return (builtAt.get(candidate) ?? 0) > (builtAt.get(than) ?? 0);
+    .where(eq(releases.id, operation.releaseId))
+    .get();
+  return recorded === undefined
+    ? null
+    : await newestFittingRelease(db, clientId, recorded);
 };
 
 /**
@@ -111,24 +119,26 @@ export const resumeProvisioning = async (
   env: Env,
   actor: Actor,
   clientId: string
-): Promise<string> => {
-  const db = adminDatabase(env.DB);
-  const [operation, newest] = await Promise.all([
-    provisionOf(db, clientId),
-    newestFittingRelease(db, clientId),
-  ]);
-  const runs = operation?.releaseId;
-  const releaseId =
-    newest !== null &&
-    (runs === undefined || newest === runs || (await isNewer(db, newest, runs)))
-      ? newest
-      : (runs ?? null);
-  return await placeAndProvision(env, actor, {
+): Promise<string> =>
+  await placeAndProvision(env, actor, {
     clientId,
-    releaseId,
+    // The newest release that fits, else the one it runs: as a retry
+    // from Setup picks it (src/hosting/placement.ts).
+    releaseId: null,
     destinationId: null,
   });
-};
+
+/**
+ * Refusals of a resume that mean another run has the client, or got there
+ * first, so waiting for it is right; every other refusal (a release behind
+ * a migration, a destination it can't use) lasts until a person acts.
+ */
+const competingCodes: ReadonlySet<string> = new Set([
+  "already_running",
+  "other_run_held",
+  "runner_replaced",
+  "operation_running",
+]);
 
 /** What the reconciler did with one client. */
 export type Reconciled =
@@ -155,17 +165,9 @@ const causeOf = async (
   if (cause !== "release") {
     return cause;
   }
-  const [operation, newest] = await Promise.all([
-    provisionOf(db, clientId),
-    newestFittingRelease(db, clientId),
-  ]);
-  const runs = operation?.releaseId;
-  return newest !== null &&
-    runs !== undefined &&
-    newest !== runs &&
-    (await isNewer(db, newest, runs))
-    ? "retry"
-    : "release";
+  return (await newerFittingRelease(db, clientId)) === null
+    ? "release"
+    : "retry";
 };
 
 /** Looks at client `clientId` once at `now`, and resumes it or tells staff as it needs. */
@@ -219,7 +221,16 @@ export const reconcileClient = async (
       error instanceof InventoryError
     ) {
       log.info("provision.auto_resume_refused", { clientId, code: error.code });
-      return "refused";
+      // Another run got there first, or something passing: wait for it.
+      if (competingCodes.has(error.code)) {
+        return "refused";
+      }
+      // Something that won't pass by waiting: a person looks.
+      await markNeedsAttention(db, clientId, episode, {
+        reason: "needs_person",
+        code: error.code,
+      });
+      return "needs_staff";
     }
     throw error;
   }

@@ -34,6 +34,7 @@
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
  */
+import { log } from "@grasp-os/shared/log";
 import handler from "@tanstack/react-start/server-entry";
 import { env as workerEnv, waitUntil } from "cloudflare:workers";
 
@@ -48,6 +49,7 @@ import {
 import { adminMcp, adminMcpPath } from "./admin/mcp.ts";
 import { watchCron, watchStephen } from "./clients/watch.ts";
 import { adminDatabase } from "./db/act.ts";
+import { errorCode } from "./deploy/errors.ts";
 import { reconcileProvisioning } from "./hosting/reconcile.ts";
 import { movedPageRedirect } from "./moved-pages.ts";
 import { importReleases } from "./releases/import.ts";
@@ -90,7 +92,13 @@ export default {
       await watchStephen(env, new Date(controller.scheduledTime));
       return;
     }
-    await importReleases(env.RELEASES, adminDatabase(env.DB));
+    // An import that fails never keeps stuck provisioning from resuming:
+    // logged by its code, and reconciling runs all the same.
+    try {
+      await importReleases(env.RELEASES, adminDatabase(env.DB));
+    } catch (error) {
+      log.error("releases.import_failed", { error: errorCode(error) });
+    }
     // After the import: a client waiting for a newer release takes it.
     await reconcileProvisioning(env, new Date(controller.scheduledTime));
   },
