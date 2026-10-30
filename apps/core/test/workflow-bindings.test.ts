@@ -31,8 +31,13 @@ import {
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
+import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
-import { grantPermission, requestPermission } from "../src/permissions.ts";
+import {
+  grantPermission,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
 import { standingOf } from "../src/screen-trust.ts";
 import { pendingWorkflowBindings } from "../src/workflow-binding-requests.ts";
 import {
@@ -315,6 +320,20 @@ const definitionOf = ({
       { finish: { set: { status: "done" } } },
     ],
   });
+
+/** An action of a workflow's that reads Knowledge through `docs`. */
+const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
+
+export const look = action({
+  args: {},
+  returns: v.object({ status: v.string() }),
+  uses: [resource.knowledge("docs", { operations: ["search"] })],
+  handler: async (ctx) => {
+    const hits = await ctx.resources.docs.search({ text: "leave" });
+    return { status: String(hits.length) };
+  },
+});
+`;
 
 /** A workflow `owner` created and published as `draft` at version 1. */
 const workflowOf = async (owner: Person, model?: string) => {
@@ -1049,6 +1068,130 @@ describe("bindings waiting on an admin", () => {
       // Version 2 still waits: an approval serves the version reviewed alone.
       after: [waiting(2, false)],
       started: "ok",
+    });
+  });
+
+  it("offer a knowledge binding the workflow's own collection grants only, and approve no target that wouldn't serve as the Approve lands", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const key = `docs-${unique()}`;
+    await publishCatalogContract(env, admin, { key, kind: "knowledge" });
+    const handbook = await createCollection(env, admin, {
+      name: "Handbook",
+      access: "everyone",
+    });
+    const reading = async () => {
+      const workflow = await createWorkflowResource(
+        env,
+        ada,
+        `read-${unique()}`
+      );
+      await publishWorkflowVersion(env, ada, workflow.id, {
+        definition: JSON.stringify({
+          document: {
+            dsl: "1.0.3",
+            namespace: workflowNamespace,
+            name: workflow.name,
+            version: "1.0.0",
+            title: workflow.name,
+            metadata: {
+              grasp: {
+                profile: "grasp-open-workflow/1",
+                params: {},
+                bindings: {
+                  look: {
+                    kind: "operation",
+                    contract: "local:code/look.ts#look",
+                  },
+                  docs: { kind: "knowledge", contract: key },
+                },
+              },
+            },
+          },
+          input: { schema: objectSchema({ who: { type: "string" } }) },
+          output: { schema: objectSchema({ status: { type: "string" } }) },
+          do: [
+            {
+              look: {
+                call: "grasp.operation",
+                with: { binding: "look", arguments: {} },
+              },
+            },
+          ],
+        }),
+        basedOn: null,
+        modules: { "code/look.ts": lookModule },
+      });
+      const permissionId = await granted(ada, admin, {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "collection", collectionId: handbook.id },
+        actions: ["read"],
+        binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
+      });
+      return { workflow, permissionId };
+    };
+    const { workflow, permissionId } = await reading();
+    // Another workflow's grant on the same collection: never this one's.
+    const other = await reading();
+    const asked = await requestGoLive(env, ada, workflow.id, {
+      version: 1,
+      revision: 0,
+    });
+    await decideGoLive(env, admin, workflow.id, {
+      version: 1,
+      verdict: "approve",
+      revision: asked.revision,
+    });
+    const offeredOf = async () => {
+      const pending = await pendingWorkflowBindings(env, admin);
+      return pending
+        .filter((each) => each.workflow.id === workflow.id)
+        .flatMap((each) =>
+          each.bindings
+            .filter(({ alias }) => alias === "docs")
+            .map(({ offered }) => offered)
+        );
+    };
+    const approve = async (target: unknown) =>
+      await outcome(
+        approveWorkflowBinding(env, admin, workflow.id, {
+          alias: "docs",
+          target,
+          reviewed: { version: 1 },
+        })
+      );
+
+    const before = await offeredOf();
+    const othersGrant = await approve({
+      kind: "knowledge",
+      permissionId: other.permissionId,
+    });
+    // Revoked after it was offered, before the Approve lands.
+    await revokePermission(env, admin, permissionId);
+    const revokedSinceOffered = await approve({
+      kind: "knowledge",
+      permissionId,
+    });
+    const approvals = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_binding_approvals WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .first<{ count: number }>();
+
+    expect({
+      before,
+      othersGrant,
+      revokedSinceOffered,
+      approvals: approvals?.count,
+      after: await offeredOf(),
+    }).toStrictEqual({
+      before: [
+        [{ target: { kind: "knowledge", permissionId }, label: "Handbook" }],
+      ],
+      othersGrant: "workflow.binding_invalid",
+      revokedSinceOffered: "workflow.binding_invalid",
+      approvals: 0,
+      after: [[]],
     });
   });
 
