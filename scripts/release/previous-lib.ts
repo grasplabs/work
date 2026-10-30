@@ -1,45 +1,24 @@
 /**
- * Finding the release published before the one CI builds now
- * (previous-release.ts): the newest CI release published to the bucket
- * with a lower run number. Not the parent commit: pushes to main keep only the newest
- * pending run, so a burst of merges can leave commits unpublished, and a
- * limit one of them raised is raised over the release before them.
+ * Finding the release published before the one CI publishes now
+ * (previous-release.ts): the newest release the bucket holds, by id
+ * (@grasp-os/shared/release-id). Not the parent commit: pushes to main
+ * keep only the newest pending run, so a burst of merges can leave
+ * commits unpublished, and a limit one of them raised is raised over the
+ * release before them. CI's publish takes the next id after it, so it is
+ * the release before by id too.
  */
-
-const ciRelease = /^r(?<run>\d+)-[0-9a-f]{7}$/u;
+import {
+  compareReleaseIds,
+  parsePublishedReleaseId,
+} from "@grasp-os/shared/release-id";
 
 /**
- * The CI releases among `ids` with a run before `beforeRun`, newest
- * first: the release before is the first of them whose manifest exists
- * (an upload that stopped halfway leaves blobs under a prefix, but no
- * manifest, and was never published).
+ * The published releases among `ids`, newest first: the release before is
+ * the first of them whose manifest exists (an upload that stopped halfway
+ * leaves its limit evidence under a prefix, but no manifest, and was never
+ * published). Local builds (`dev-`) never count.
  */
-export const earlierReleaseIds = (
-  ids: readonly string[],
-  beforeRun: number
-): string[] =>
+export const newestReleaseIds = (ids: readonly string[]): string[] =>
   ids
-    .map((id) => ({
-      id,
-      run: Number(ciRelease.exec(id)?.groups?.run ?? Number.NaN),
-    }))
-    .filter(({ run }) => run < beforeRun)
-    .toSorted((one, other) => other.run - one.run)
-    .map(({ id }) => id);
-
-const prefixPattern = /<Prefix>releases\/(?<id>[^/<]+)\/<\/Prefix>/gu;
-const truncatedPattern = /<IsTruncated>true<\/IsTruncated>/u;
-const tokenPattern =
-  /<NextContinuationToken>(?<token>[^<]+)<\/NextContinuationToken>/u;
-
-/** One page of an S3 ListObjectsV2 of `releases/` by `/`: the ids, and the next page's token. */
-export const parseReleaseListing = (
-  xml: string
-): { ids: string[]; next: string | undefined } => ({
-  ids: [...xml.matchAll(prefixPattern)].flatMap(({ groups }) =>
-    groups?.id === undefined ? [] : [groups.id]
-  ),
-  next: truncatedPattern.test(xml)
-    ? tokenPattern.exec(xml)?.groups?.token
-    : undefined,
-});
+    .filter((id) => parsePublishedReleaseId(id) !== undefined)
+    .toSorted((one, other) => compareReleaseIds(other, one));

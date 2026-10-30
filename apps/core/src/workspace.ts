@@ -104,7 +104,6 @@ import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
 import {
   drainCaptures,
   eraseCaptured,
@@ -187,6 +186,7 @@ import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
 import { gatewaySettings, models } from "./models.ts";
+import { personRole } from "./permissions.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { PreviewUpdates } from "./preview-updates.ts";
@@ -1116,9 +1116,15 @@ export class Workspace extends DurableObject<Env> {
       });
     }
     if (restricted) {
-      // As restricted.ts records a chat entering restricted mode.
+      // As restricted.ts records a chat entering restricted mode, its
+      // agent for a Grasp staff member when staff asked for the fix
+      // (GRA-1088): `by` is core's, made from the caller's own session.
+      const staff = by?.type === "staff";
       this.#outboxEntry({
-        actor: delegateActorOf(chatAuthority({ agentId, personId }), via),
+        actor: delegateActorOf(
+          chatAuthority({ agentId, personId, staff }),
+          via
+        ),
         action: "context.restricted",
         target: { type: "chat", id },
         provenance: carried.slice(0, auditProvenanceMaxItems),
@@ -1449,7 +1455,8 @@ export class Workspace extends DurableObject<Env> {
     chat: Chat,
     question: Question,
     started?: () => void,
-    onText?: (text: string) => unknown
+    onText?: (text: string) => unknown,
+    staff = false
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1482,7 +1489,9 @@ export class Workspace extends DurableObject<Env> {
       this.#lastMessageId(chat.id)
     );
     try {
-      if (!(await memberRole(this.env.DB, personId))) {
+      // A Grasp staff member's turn (`send`'s `staff`) asks for staff whose
+      // staff session is still valid, in place of a member (GRA-1088).
+      if ((await personRole(this.env, personId, staff)) === undefined) {
         throw permissionErrors.create("permission.person_inactive");
       }
       if (this.#storedChars(chat.id) > maxChatChars) {
@@ -1492,7 +1501,14 @@ export class Workspace extends DurableObject<Env> {
       // `workspace` in durable-objects.ts), and whose agent acts in it, as
       // the chat stored it.
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
-      const scope = { workspaceId, agentId, chatId: chat.id, personId, via };
+      const scope = {
+        workspaceId,
+        agentId,
+        chatId: chat.id,
+        personId,
+        via,
+        staff,
+      };
       // The organization's agent, acting for the chat's person, in this chat:
       // the audit log's actor, and the rules' context (its restricted mode).
       const authority = chatAuthority(scope);
@@ -1538,7 +1554,7 @@ export class Workspace extends DurableObject<Env> {
         context,
         scope,
         whyStop: async () =>
-          (await memberRole(this.env.DB, personId)) === undefined
+          (await personRole(this.env, personId, staff)) === undefined
             ? permissionErrors.create("permission.person_inactive")
             : undefined,
         runs: {
@@ -1618,7 +1634,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Asks `personId`'s own chat's agent a question (`ask`), and resolves
-   * once the turn is under way; refused as `ask` refuses one that can't
+   * once the turn is under way; `staff` when they are a Grasp staff member,
+   * as core's caller read it from their own session (GRA-1088); refused as `ask` refuses one that can't
    * start. The turn goes on with nobody waiting: its messages go to the
    * chat's watchers as they come, and why it stopped, if it stopped short
    * of an answer, with the chat's state (`ChatUpdate.stopped`).
@@ -1626,11 +1643,12 @@ export class Workspace extends DurableObject<Env> {
   async send(
     chatId: unknown,
     personId: string,
-    question: Question
+    question: Question,
+    staff = false
   ): Promise<void> {
     const chat = this.#ownChat(chatId, personId);
     const started = Promise.withResolvers<boolean>();
-    const ended = this.#sentTurn(chat, question, started);
+    const ended = this.#sentTurn(chat, question, started, staff);
     this.#sent.add(ended);
     void this.#forget(ended);
     await started.promise;
@@ -1646,14 +1664,21 @@ export class Workspace extends DurableObject<Env> {
   async #sentTurn(
     chat: Chat,
     question: Question,
-    started: PromiseWithResolvers<boolean>
+    started: PromiseWithResolvers<boolean>,
+    staff: boolean
   ): Promise<void> {
     let underWay = false;
     try {
-      await this.#turn(chat, question, () => {
-        underWay = true;
-        started.resolve(true);
-      });
+      await this.#turn(
+        chat,
+        question,
+        () => {
+          underWay = true;
+          started.resolve(true);
+        },
+        undefined,
+        staff
+      );
     } catch (error) {
       if (!underWay) {
         started.reject(error);
@@ -2634,6 +2659,41 @@ export class Workspace extends DurableObject<Env> {
       });
       return [];
     }
+  }
+
+  /**
+   * What chat `chatId` has read: each source of its code runs, once. What a
+   * run its agent had started copies (GRA-1093, workflow-starts.ts), as
+   * whatever its input carries came from those. Withheld ones too
+   * (`#withheldRuns`): a concurrent turn may withhold one after the agent's
+   * call already carried it, and one withheld is unreadable now, so the
+   * run is refused at once. Fail closed: a chat with a source it can't read
+   * starts runs that release nothing until it can read it again.
+   *
+   * `null` for a chat this object doesn't hold, or holds no more, or is
+   * deleting (`deleteChat`): its sources are gone with it, so no start of
+   * its agent's can be held to them, and the caller refuses the start.
+   */
+  heldSourcesOf(chatId: unknown): string[] | null {
+    const parsed = chatIdSchema.safeParse(chatId);
+    if (!parsed.success || this.#deleting.has(parsed.data)) {
+      return null;
+    }
+    const id = parsed.data;
+    const held = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(eq(chats.id, id))
+      .get();
+    if (held === undefined) {
+      return null;
+    }
+    return this.#db
+      .selectDistinct({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(eq(chatRunSources.chatId, id))
+      .all()
+      .map(({ sourceId }) => sourceId);
   }
 
   /**

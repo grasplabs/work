@@ -1,23 +1,17 @@
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
-  FieldContent,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
-  FieldTitle,
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
 import {
   createFileRoute,
   Link,
@@ -25,174 +19,303 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  domainsOrAdmins,
-  prefillOf,
-  startingPointsOf,
-} from "../admin/new-organization.ts";
-import type { StartingPoint } from "../admin/new-organization.ts";
+import { domainOfEmail, slugOf } from "../admin/new-organization.ts";
 import { AdminPage } from "../admin/page.tsx";
-import { ringChoices, ringWords } from "../admin/platform-parts.tsx";
-import { formatDate } from "../admin/words.ts";
-import { signInOf, textOf } from "../clients/sign-in-fields.tsx";
-import type { WonDeal } from "../crm/attio.ts";
-import { fetchWonDeals } from "../crm/functions.ts";
-import { clientIdProblem } from "../provision/client-id.ts";
-import { startClient } from "../provision/functions.ts";
+import { HostingChoice } from "../hosting/hosting-choice.tsx";
+import type { OrganizationHosting } from "../hosting/organization.ts";
+import { clientIdProblem, maxClientIdLength } from "../provision/client-id.ts";
+import {
+  checkClientIdFn,
+  detectSignInFn,
+  fetchCreateOptions,
+  startClient,
+} from "../provision/functions.ts";
+import type { DetectedSignIn } from "../provision/sign-in-detect.ts";
 import { useProvisionAction } from "../provision/use-action.ts";
 import { InvalidFieldError } from "../use-action.ts";
 
-/** Where the organization starts from: by hand, or a deal won in Attio; Rooms is still to come. */
-const StartFrom = ({
-  starts,
-  value,
-  onChange,
-}: {
-  starts: readonly StartingPoint[];
-  value: StartingPoint["id"];
-  onChange: (value: StartingPoint["id"]) => void;
-}) => (
-  <FieldSet>
-    <FieldLegend variant="label">Start from</FieldLegend>
-    <FieldDescription>
-      What a deal or a proposal knows is filled in below, to put right before it
-      is added.
-    </FieldDescription>
-    <RadioGroup
-      name="startFrom"
-      onValueChange={(next) => {
-        const start = starts.find((each) => each.id === next);
-        if (start !== undefined) {
-          onChange(start.id);
-        }
-      }}
-      value={value}
-    >
-      {starts.map((start) => (
-        <FieldLabel htmlFor={`start-${start.id}`} key={start.id}>
-          <Field
-            data-disabled={start.unavailable !== null}
-            orientation="horizontal"
-          >
-            <RadioGroupItem
-              disabled={start.unavailable !== null}
-              id={`start-${start.id}`}
-              value={start.id}
-            />
-            <FieldContent>
-              <FieldTitle>{start.label}</FieldTitle>
-              <FieldDescription>
-                {start.unavailable ?? start.description}
-              </FieldDescription>
-            </FieldContent>
-          </Field>
-        </FieldLabel>
-      ))}
-    </RadioGroup>
-  </FieldSet>
-);
+/** How long typing pauses before the address or domain is looked up. */
+const lookupPauseMs = 400;
 
-/** A won deal in a line: what it is called, its company and the day it was won. */
-const dealLabel = (deal: WonDeal): string =>
-  [
-    deal.title === "" ? deal.name : `${deal.title}, ${deal.name}`,
-    deal.on === null ? "" : `won ${formatDate(deal.on)}`,
-  ]
-    .filter((part) => part !== "")
-    .join(" · ");
+/** How its people sign in: found from its domain, or chosen by hand when that found nothing. */
+type SignInChoice =
+  | { by: "detected"; found: DetectedSignIn }
+  | { by: "hand"; provider: "google" | "microsoft"; value: string };
 
-/** Which won deal it starts from: its company fills in the fields below. */
-const DealChoice = ({
-  deals,
-  dealId,
-  onChange,
-}: {
-  deals: readonly WonDeal[];
-  dealId: string;
-  onChange: (dealId: string) => void;
-}) => (
-  <Field>
-    <FieldLabel htmlFor="org-deal">The deal</FieldLabel>
-    <NativeSelect
-      className="w-full"
-      id="org-deal"
-      onChange={(event) => {
-        onChange(event.currentTarget.value);
-      }}
-      value={dealId}
-    >
-      {deals.map((deal) => (
-        <NativeSelectOption key={deal.dealId} value={deal.dealId}>
-          {dealLabel(deal)}
-        </NativeSelectOption>
-      ))}
-    </NativeSelect>
-    <FieldDescription>
-      Its company is linked to the organization, so Details reads it from Attio.
-    </FieldDescription>
-  </Field>
-);
+const providerWords = {
+  google: "Google Workspace",
+  microsoft: "Microsoft 365",
+} as const;
 
 /**
- * Adding an organization, ported from the prototype's dialog as a page of
- * the admin's own: who it is, who goes through the onboarding (its first
- * admin, who the prototype sent a link and who here signs in with the
- * company's own Microsoft or Google), and the ring rollouts reach it in.
- * Adding it records it, with no account of its own (`client.create`); its
- * Setup then places it in a hosting destination and provisions it there,
- * on the release staff choose.
- *
- * Left out, as the admin keeps nowhere to put them yet: its website,
- * what it is, its language, who decided on Grasp, and marking it a test.
+ * What `lookup` answers for `key`, asked once typing pauses while
+ * `enabled`, or `failed` when the lookup itself fails; undefined until it
+ * has answered for this very key.
+ */
+const usePausedLookup = <T,>(
+  key: string,
+  enabled: boolean,
+  lookup: (key: string) => Promise<T>,
+  failed: T
+): T | undefined => {
+  const [found, setFound] = useState<{ key: string; value: T } | null>(null);
+  useEffect(() => {
+    let current = true;
+    const ask = async () => {
+      let value = failed;
+      try {
+        value = await lookup(key);
+      } catch {
+        // Answered all the same, as failed: nothing waits on it for ever.
+      }
+      if (current) {
+        setFound({ key, value });
+      }
+    };
+    const timer = enabled
+      ? setTimeout(() => {
+          void ask();
+        }, lookupPauseMs)
+      : undefined;
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [key, enabled, lookup, failed]);
+  return found?.key === key ? found.value : undefined;
+};
+
+/** Whether an address is free, as the server says. */
+const addressTaken = async (clientId: string): Promise<string | null> => {
+  const { problem } = await checkClientIdFn({ data: { clientId } });
+  return problem;
+};
+
+/** How a domain's people sign in, as found; `failed` when it couldn't be looked up. */
+type SignInLookup = DetectedSignIn | { provider: null; failed: true };
+
+const lookupFailed: SignInLookup = { provider: null, failed: true };
+
+/** How a domain's people sign in, as the server finds it: its key is the try and the domain. */
+const signInFound = async (key: string): Promise<SignInLookup> =>
+  await detectSignInFn({ data: { domain: key.slice(key.indexOf(" ") + 1) } });
+
+/** The web address as typed, checked by its rule and then by the server for being free. */
+const useAddressProblem = (clientId: string): string | null => {
+  const local = clientId === "" ? null : clientIdProblem(clientId);
+  // A check that fails says nothing: creating it still checks.
+  const taken = usePausedLookup(
+    clientId,
+    clientId !== "" && local === null,
+    addressTaken,
+    null
+  );
+  return local ?? taken ?? null;
+};
+
+/**
+ * How `domain`'s people sign in, looked up once typing pauses, again for
+ * each `attempt`; null while it isn't known yet.
+ */
+const useDetectedSignIn = (
+  domain: string,
+  attempt: number
+): SignInLookup | null =>
+  usePausedLookup(
+    `${attempt} ${domain}`,
+    domain.includes("."),
+    signInFound,
+    lookupFailed
+  ) ?? null;
+
+/** The sign-in line under the domains: what was found, or the choice when nothing was. */
+const SignInLine = ({
+  domain,
+  detected,
+  choice,
+  onChoose,
+  onRetry,
+}: {
+  domain: string;
+  detected: SignInLookup | null;
+  choice: SignInChoice | null;
+  onChoose: (choice: SignInChoice | null) => void;
+  onRetry: () => void;
+}) => {
+  if (domain === "") {
+    return null;
+  }
+  if (choice?.by !== "hand" && detected === null) {
+    return (
+      <p className="text-muted-foreground text-sm">Finding how they sign in…</p>
+    );
+  }
+  if (
+    choice?.by !== "hand" &&
+    detected !== null &&
+    detected.provider !== null
+  ) {
+    return (
+      <p className="text-sm">
+        {`Sign-in: ${providerWords[detected.provider]} `}
+        <Button
+          onClick={() => {
+            onChoose({
+              by: "hand",
+              provider: detected.provider === "google" ? "microsoft" : "google",
+              value: "",
+            });
+          }}
+          size="sm"
+          type="button"
+          variant="link"
+        >
+          change
+        </Button>
+      </p>
+    );
+  }
+  const hand =
+    choice?.by === "hand"
+      ? choice
+      : { by: "hand" as const, provider: "google" as const, value: "" };
+  return (
+    <Field>
+      <FieldLabel htmlFor="org-sign-in">
+        {hand.provider === "google"
+          ? "Google Workspace primary domain"
+          : "Microsoft Entra tenant id"}
+      </FieldLabel>
+      <Input
+        id="org-sign-in"
+        onChange={(event) => {
+          onChoose({ ...hand, value: event.currentTarget.value });
+        }}
+        placeholder={
+          hand.provider === "google"
+            ? domain
+            : "00000000-0000-0000-0000-000000000000"
+        }
+        value={hand.value}
+      />
+      <FieldDescription>
+        {detected !== null && "failed" in detected ? (
+          <>
+            {`We couldn't look up how ${domain} signs in just now. `}
+            <Button onClick={onRetry} size="sm" type="button" variant="link">
+              Try again
+            </Button>
+            {" or "}
+          </>
+        ) : (
+          `We couldn't tell how ${domain} signs in. `
+        )}
+        <Button
+          onClick={() => {
+            onChoose({
+              ...hand,
+              provider: hand.provider === "google" ? "microsoft" : "google",
+              value: "",
+            });
+          }}
+          size="sm"
+          type="button"
+          variant="link"
+        >
+          {hand.provider === "google"
+            ? "Use Microsoft 365 instead"
+            : "Use Google Workspace instead"}
+        </Button>
+      </FieldDescription>
+    </Field>
+  );
+};
+
+/** The sign-in a choice comes to, as the server takes it; why not, when it can't be. */
+const signInOf = (
+  domains: readonly string[],
+  admin: string,
+  detected: SignInLookup | null,
+  choice: SignInChoice | null
+) => {
+  const base = { domains: [...domains], admins: [admin.trim().toLowerCase()] };
+  if (choice?.by === "hand") {
+    if (choice.value.trim() === "") {
+      throw new InvalidFieldError(
+        choice.provider === "google"
+          ? "Give its Google Workspace primary domain."
+          : "Give its Microsoft Entra tenant id."
+      );
+    }
+    return choice.provider === "google"
+      ? { ...base, googleHostedDomain: choice.value.trim().toLowerCase() }
+      : { ...base, entraTenantId: choice.value.trim().toLowerCase() };
+  }
+  if (detected?.provider === "google") {
+    return { ...base, googleHostedDomain: detected.googleHostedDomain };
+  }
+  if (detected?.provider === "microsoft") {
+    return { ...base, entraTenantId: detected.entraTenantId };
+  }
+  throw new InvalidFieldError("Choose how its people sign in.");
+};
+
+/**
+ * Adding an organization: its name, its web address (made from the name
+ * as it is typed, the platform's domain shown after it), its company's
+ * email domains, whose first one tells how its people sign in, its first
+ * admin, and where it is hosted. Everything else (its ring, its model
+ * spend ceiling, Teams and Rooms) has a default, put right later on its
+ * Setup. Creating it starts setting it up at once, and opens its Setup,
+ * where its progress shows.
  */
 const NewOrganization = () => {
-  const { won } = Route.useLoaderData();
+  const { clientDomain } = Route.useLoaderData();
   const router = useRouter();
   const navigate = useNavigate();
-  const starts = startingPointsOf(won);
-  const deals = won.state === "read" ? won.deals : [];
-  // A deal won and not added yet is what an organization most likely
-  // starts from: the latest is chosen, to change or put right.
-  const [startFrom, setStartFrom] = useState<StartingPoint["id"]>(
-    deals.length > 0 ? "attio" : "hand"
-  );
-  const [dealId, setDealId] = useState(deals[0]?.dealId ?? "");
-  const deal =
-    startFrom === "attio"
-      ? deals.find((each) => each.dealId === dealId)
-      : undefined;
-  const prefill =
-    deal === undefined
-      ? { name: "", clientId: "", domains: "" }
-      : prefillOf(deal);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState<string | null>(null);
+  const [domains, setDomains] = useState<string[]>([""]);
+  const [admin, setAdmin] = useState<string | null>(null);
+  const [hosting, setHosting] = useState<OrganizationHosting>({
+    hosting: "grasp_cloud",
+    jurisdiction: "eu",
+  });
+  const [choice, setChoice] = useState<SignInChoice | null>(null);
+  const clientId = address ?? slugOf(name);
+  const firstDomain = (domains[0] ?? "").trim().toLowerCase();
+  const adminEmail = admin ?? (firstDomain === "" ? "" : `@${firstDomain}`);
+  const addressProblem = useAddressProblem(clientId);
+  const [lookupAttempt, setLookupAttempt] = useState(0);
+  const detected = useDetectedSignIn(firstDomain, lookupAttempt);
   const { busy, failure, run } = useProvisionAction();
-  const add = (form: FormData) => {
-    const clientId = textOf(form, "clientId");
-    const name = textOf(form, "name");
-    form.set(
-      "domains",
-      domainsOrAdmins(textOf(form, "domains"), textOf(form, "admins"))
-    );
+  const create = () => {
     void run(async () => {
-      // The server's own rule, said before anything is sent.
       const problem = clientIdProblem(clientId);
       if (problem !== null) {
         throw new InvalidFieldError(problem);
       }
+      const typed = domains
+        .map((domain) => domain.trim().toLowerCase())
+        .filter((domain) => domain !== "");
+      if (!typed.includes(domainOfEmail(adminEmail))) {
+        throw new InvalidFieldError(
+          "Its first admin's email must be at one of its email domains."
+        );
+      }
       const result = await startClient({
         data: {
           clientId,
-          name,
-          ring: Number(textOf(form, "ring")),
-          signIn: signInOf(form),
-          ...(deal === undefined ? {} : { attioCompanyId: deal.companyId }),
+          name: name.trim(),
+          ...hosting,
+          signIn: signInOf(typed, adminEmail, detected, choice),
         },
       });
       if (result.clientId !== null) {
-        // The organizations stand a minute (src/routes/admin.tsx): read them
-        // again, so the one just added is among them.
+        // The organizations stand a minute (src/routes/__root.tsx): read
+        // them again, so the one just added is among them.
         await router.invalidate({
           filter: (match) => match.routeId === rootRouteId,
           sync: true,
@@ -207,127 +330,124 @@ const NewOrganization = () => {
   };
   return (
     <AdminPage
-      description="Its first admin signs in with the company's own Microsoft or Google, and goes through the onboarding from there."
+      description="Grasp sets it up as soon as you create it."
       title="New organization"
     >
       <form
         className="flex max-w-xl flex-col gap-6"
         onSubmit={(event) => {
           event.preventDefault();
-          add(new FormData(event.currentTarget));
+          create();
         }}
       >
         <FieldGroup>
-          <StartFrom
-            onChange={setStartFrom}
-            starts={starts}
-            value={startFrom}
-          />
-          {startFrom === "attio" ? (
-            <DealChoice dealId={dealId} deals={deals} onChange={setDealId} />
-          ) : null}
           <Field>
             <FieldLabel htmlFor="org-name">Name</FieldLabel>
             <Input
-              defaultValue={prefill.name}
+              autoComplete="organization"
               id="org-name"
-              // Keyed by the deal: the field starts again from the one chosen.
-              key={`name-${deal?.dealId ?? ""}`}
               maxLength={100}
-              name="name"
+              onChange={(event) => {
+                setName(event.currentTarget.value);
+              }}
               required
+              value={name}
             />
-            <FieldDescription>
-              The company, as Grasp&apos;s staff know it.
-            </FieldDescription>
+          </Field>
+          <Field data-invalid={addressProblem !== null}>
+            <FieldLabel htmlFor="org-address">Web address</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                aria-describedby="org-address-hint"
+                aria-invalid={addressProblem !== null}
+                autoCapitalize="none"
+                id="org-address"
+                maxLength={maxClientIdLength}
+                onChange={(event) => {
+                  setAddress(event.currentTarget.value.toLowerCase());
+                }}
+                required
+                spellCheck={false}
+                value={clientId}
+              />
+              <InputGroupAddon align="inline-end" id="org-address-hint">
+                {`.${clientDomain ?? "…"}`}
+              </InputGroupAddon>
+            </InputGroup>
+            {addressProblem === null ? (
+              <FieldDescription>
+                Where its people open Grasp. It can&apos;t change later.
+              </FieldDescription>
+            ) : (
+              <FieldError>{addressProblem}</FieldError>
+            )}
           </Field>
           <Field>
-            <FieldLabel htmlFor="org-id">Its address</FieldLabel>
+            <FieldLabel htmlFor="org-domain-0">Company email domain</FieldLabel>
+            {domains.map((domain, index) => (
+              <Input
+                aria-label={index === 0 ? undefined : "Another email domain"}
+                autoCapitalize="none"
+                id={`org-domain-${index}`}
+                // The fields are added and never reordered: their place is their identity.
+                key={index}
+                onChange={(event) => {
+                  const next = event.currentTarget.value;
+                  setDomains(
+                    domains.map((each, at) => (at === index ? next : each))
+                  );
+                  if (index === 0) {
+                    setChoice(null);
+                  }
+                }}
+                placeholder={index === 0 ? "acme.com" : "acme.de"}
+                required={index === 0}
+                spellCheck={false}
+                value={domain}
+              />
+            ))}
+            <div>
+              <Button
+                onClick={() => {
+                  setDomains([...domains, ""]);
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Add another domain
+              </Button>
+            </div>
+            <SignInLine
+              choice={choice}
+              detected={detected}
+              domain={firstDomain}
+              onChoose={setChoice}
+              onRetry={() => {
+                setLookupAttempt((attempt) => attempt + 1);
+              }}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="org-admin">
+              First admin&apos;s email
+            </FieldLabel>
             <Input
-              defaultValue={prefill.clientId}
-              id="org-id"
-              key={`id-${deal?.dealId ?? ""}`}
-              maxLength={50}
-              name="clientId"
+              autoCapitalize="none"
+              id="org-admin"
+              onChange={(event) => {
+                setAdmin(event.currentTarget.value);
+              }}
               required
+              spellCheck={false}
+              type="email"
+              value={adminEmail}
             />
             <FieldDescription>
-              Its hostname: lowercase letters, digits and dashes. It can&apos;t
-              change.
+              They become its admin when they first sign in.
             </FieldDescription>
           </Field>
-          <FieldSet>
-            <FieldLegend variant="label">
-              Who goes through the onboarding
-            </FieldLegend>
-            <Field>
-              <FieldLabel htmlFor="org-admins">Email</FieldLabel>
-              <Input id="org-admins" name="admins" required />
-              <FieldDescription>
-                They get the admin role when they first sign in. More than one,
-                separated by commas.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="org-domains">Email domains</FieldLabel>
-              <Input
-                defaultValue={prefill.domains}
-                id="org-domains"
-                key={`domains-${deal?.dealId ?? ""}`}
-                name="domains"
-              />
-              <FieldDescription>
-                The domains its people sign in with, separated by commas. Left
-                empty, the admins&apos; own.
-              </FieldDescription>
-            </Field>
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">How its people sign in</FieldLegend>
-            <Field>
-              <FieldLabel htmlFor="org-entra">Entra tenant id</FieldLabel>
-              <Input id="org-entra" name="entraTenantId" />
-              <FieldDescription>
-                If its people sign in with Microsoft.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="org-google">
-                Google Workspace domain
-              </FieldLabel>
-              <Input id="org-google" name="googleHostedDomain" />
-              <FieldDescription>
-                Its primary domain, if its people sign in with Google.
-              </FieldDescription>
-            </Field>
-          </FieldSet>
-          <FieldSet>
-            <FieldLegend variant="label">Where its Grasp runs</FieldLegend>
-            <FieldDescription>
-              Its Setup places it in a hosting destination, the one that meets
-              its hosting policy, and provisions it there on the release you
-              choose.
-            </FieldDescription>
-            <Field>
-              <FieldLabel htmlFor="org-ring">Ring</FieldLabel>
-              <NativeSelect
-                className="w-full"
-                defaultValue="1"
-                id="org-ring"
-                name="ring"
-              >
-                {ringChoices(0).map((ring) => (
-                  <NativeSelectOption key={ring} value={String(ring)}>
-                    {ringWords(ring)}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>
-                When rollouts reach it: Alpha (our own deployments) first, then
-                Beta, then Production.
-              </FieldDescription>
-            </Field>
-          </FieldSet>
+          <HostingChoice onChange={setHosting} value={hosting} />
         </FieldGroup>
         {failure === null ? null : (
           <p className="text-destructive text-sm" role="alert">
@@ -335,8 +455,8 @@ const NewOrganization = () => {
           </p>
         )}
         <div className="flex items-center gap-2">
-          <Button disabled={busy} type="submit">
-            Add organization
+          <Button disabled={busy || addressProblem !== null} type="submit">
+            Create organization
           </Button>
           <Button
             nativeButton={false}
@@ -356,7 +476,7 @@ const NewOrganization = () => {
  * organizations/, where `new` could be a client's id.
  */
 export const Route = createFileRoute("/new-organization")({
-  loader: async () => ({ won: await fetchWonDeals() }),
+  loader: async () => await fetchCreateOptions(),
   head: () => ({ meta: [{ title: "New organization" }] }),
   component: NewOrganization,
 });

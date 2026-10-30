@@ -32,6 +32,8 @@ import { useEffect, useState } from "react";
 
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { ReadinessBanner } from "../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../admin/readiness.ts";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
@@ -561,6 +563,7 @@ const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
   const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const readiness = Route.useLoaderData();
   const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
@@ -583,6 +586,7 @@ const Overview = () => {
       overview
       title="Organizations"
     >
+      <ReadinessBanner readiness={readiness} />
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
@@ -669,5 +673,6 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: async () => await fetchReadiness(),
   component: Overview,
 });

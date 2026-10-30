@@ -322,12 +322,8 @@ const prepare = (input: AuditEvent): Incoming => {
   return { id: parsed.id, event };
 };
 
-/**
- * The IDs an actor is found by: the person's, staff member's or agent's,
- * the App's (for its screens, server code and workflow runs alike) and the
- * workflow run's.
- */
-export const actorIdsOf = (actor: AuditActor): string[] => {
+/** The IDs `actorIdsOf` finds an actor by, but for whom it acted for. */
+const ownIdsOf = (actor: AuditActor): string[] => {
   switch (actor.type) {
     case "person":
     case "staff": {
@@ -353,6 +349,18 @@ export const actorIdsOf = (actor: AuditActor): string[] => {
     }
   }
 };
+
+/**
+ * The IDs an actor is found by: the person's, staff member's or agent's,
+ * the App's (for its screens, server code and workflow runs alike) and the
+ * workflow run's; and, first, the Grasp staff member who started the work
+ * (GRA-1088), so a search by their ID finds what agents, Apps and runs
+ * did for them too. The most specific comes last.
+ */
+export const actorIdsOf = (actor: AuditActor): string[] => [
+  ...("staff" in actor && actor.staff !== undefined ? [actor.staff] : []),
+  ...ownIdsOf(actor),
+];
 
 /** Whether an event is the actor, action and type the filter asks for. */
 const matchesWho = (filter: ParsedAuditFilter, event: AuditEvent): boolean =>

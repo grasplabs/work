@@ -2,8 +2,7 @@
  * A client's hosting's server functions, behind the Access check every
  * request passes (src/access.ts). Placing and provisioning acts as the
  * verified staff member the request comes from, and answers a refusal as
- * its code (`PlaceRefusal`), with the requirements a destination misses,
- * which the page words; anything else fails.
+ * its code (`PlaceRefusal`), which the page words; anything else fails.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
@@ -11,6 +10,8 @@ import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { ProvisionError } from "../provision/errors.ts";
+import { DiscardError, discardClient } from "./discard.ts";
+import type { DiscardErrorCode } from "./discard.ts";
 import { InventoryError } from "./inventory.ts";
 import {
   deletePlacedClient,
@@ -27,48 +28,46 @@ import {
   placeInputSchema,
 } from "./placement.ts";
 import type { PlaceRefusal } from "./placement.ts";
-import { hostingPolicyIdSchema } from "./policy.ts";
-import type { PlacementProblem } from "./policy.ts";
+import { provisioningProgress } from "./progress.ts";
+import { resumeProvisioning } from "./reconcile.ts";
 import { releasePlacedClient } from "./workflow.ts";
 
 /** What placing and provisioning answers: the attempt it started, or why it was refused. */
 export type PlaceResult =
-  | { runId: string; refused: null; problems: [] }
-  | { runId: null; refused: PlaceRefusal; problems: PlacementProblem[] };
+  | { runId: string; refused: null }
+  | { runId: null; refused: PlaceRefusal };
 
 /** `error` as a refusal, or null for anything that isn't one. */
 const refusalOf = (error: unknown): PlaceResult | null => {
-  if (error instanceof InventoryError) {
-    return { runId: null, refused: error.code, problems: [...error.problems] };
-  }
   if (
+    error instanceof InventoryError ||
     error instanceof PlacementError ||
     error instanceof ProvisionOperationError
   ) {
-    return { runId: null, refused: error.code, problems: [] };
+    return { runId: null, refused: error.code };
   }
   if (
     error instanceof ProvisionError &&
     (error.code === "already_running" || error.code === "not_provisioning")
   ) {
-    return { runId: null, refused: error.code, problems: [] };
+    return { runId: null, refused: error.code };
   }
   return null;
 };
 
+/** A client's setting up, line by line, as its progress view shows it. */
+export const fetchProvisioningProgress = createServerFn({ method: "GET" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(async ({ data }) => await provisioningProgress(env, data.clientId));
+
 export const fetchClientHosting = createServerFn({ method: "GET" })
-  .validator(
-    z.object({ clientId: z.string().min(1), policyId: hostingPolicyIdSchema })
-  )
-  .handler(
-    async ({ data }) =>
-      await getClientHosting(env, data.clientId, data.policyId)
-  );
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(async ({ data }) => await getClientHosting(env, data.clientId));
 
 /** Runs `start`, which answers the attempt it started, a refusal as its code. */
 const attempt = async (start: () => Promise<string>): Promise<PlaceResult> => {
   try {
-    return { runId: await start(), refused: null, problems: [] };
+    return { runId: await start(), refused: null };
   } catch (error) {
     const refusal = refusalOf(error);
     if (refusal === null) {
@@ -113,7 +112,6 @@ export const placeAndProvisionFn = createServerFn({ method: "POST" })
       return {
         runId: await placeAndProvision(env, context.staff, data),
         refused: null,
-        problems: [],
       };
     } catch (error) {
       const refusal = refusalOf(error);
@@ -123,6 +121,20 @@ export const placeAndProvisionFn = createServerFn({ method: "POST" })
       return refusal;
     }
   });
+
+/**
+ * Setup's "Retry now": resumes the client's provisioning as the signed-in
+ * staff member, as the reconciler would (`resumeProvisioning`), at once
+ * and starting its episode afresh, so its automatic retries count again.
+ */
+export const retryProvisioningFn = createServerFn({ method: "POST" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(
+    async ({ data, context }): Promise<PlaceResult> =>
+      await attempt(
+        async () => await resumeProvisioning(env, context.staff, data.clientId)
+      )
+  );
 
 /** What offboarding or deleting answers: what it did, or why it was refused. */
 export type OffboardResult =
@@ -168,6 +180,29 @@ export const deletePlacedClientFn = createServerFn({ method: "POST" })
           })
       )
   );
+
+/** What discarding answers: done, or why it was refused. */
+export interface DiscardResult {
+  refused: DiscardErrorCode | null;
+}
+
+/**
+ * Discarding a client that was never placed and has nothing anywhere
+ * (src/hosting/discard.ts): its record goes, audited, and its id is free.
+ */
+export const discardClientFn = createServerFn({ method: "POST" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(async ({ data, context }): Promise<DiscardResult> => {
+    try {
+      await discardClient(env, context.staff, data.clientId);
+      return { refused: null };
+    } catch (error) {
+      if (error instanceof DiscardError) {
+        return { refused: error.code };
+      }
+      throw error;
+    }
+  });
 
 /** Every offboarded placed client, for Platform's Offboarded page. */
 export const fetchOffboardedClients = createServerFn({ method: "GET" }).handler(

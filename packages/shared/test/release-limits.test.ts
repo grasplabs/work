@@ -9,7 +9,7 @@ import type { LimitEvidence, ReleaseLimits } from "../src/release.ts";
 
 const commit = "a".repeat(40);
 const otherCommit = "b".repeat(40);
-const releaseId = "r000200-aaaaaaa";
+const releaseId = "26.01.200";
 
 const evidence = (
   limit: string,
@@ -32,7 +32,7 @@ const raising = (limitEvidence: LimitEvidence[]): ReleaseLimits => ({
   commit,
   platformLimits: { workflowSteps: 2000, workflowBranches: 8 },
   previousRelease: {
-    releaseId: "r000199-bbbbbbb",
+    releaseId: "26.01.199",
     platformLimits: { workflowSteps: 1000, workflowBranches: 8 },
   },
   limitEvidence,
@@ -73,7 +73,7 @@ describe("a release's limit evidence", () => {
   it("refuses evidence replayed from another commit, release or capacity run", () => {
     const replays: [Partial<LimitEvidence>, RegExp][] = [
       [{ commit: otherCommit }, /is for commit b+, not the release's/u],
-      [{ releaseId: "r000199-bbbbbbb" }, /is for release r000199-bbbbbbb/u],
+      [{ releaseId: "26.01.199" }, /is for release 26.01.199/u],
       [
         {
           capacityRun: {
@@ -190,10 +190,10 @@ describe("evidence across several releases", () => {
     const from = { workflowSteps: 1000 };
     const to = { workflowSteps: 2000 };
     const first = evidence("workflowSteps", 2000, {
-      releaseId: "r000100-aaaaaaa",
+      releaseId: "26.01.100",
     });
     const again = evidence("workflowSteps", 2000, {
-      releaseId: "r000300-aaaaaaa",
+      releaseId: "26.01.300",
       profile: "workerd",
     });
     expect(

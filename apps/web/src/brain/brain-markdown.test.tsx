@@ -63,6 +63,51 @@ describe(noteMarkdown, () => {
     );
   });
 
+  it("never quotes a team’s claim, and says it rests on five or more people", () => {
+    const claimId = "onb-st-0123456789abcdef0123456789abcdef";
+    const team = note("team-service");
+    const [first] = team.timeline;
+    if (!first) {
+      throw new Error("No event");
+    }
+    const claim: Note = {
+      ...team,
+      id: claimId,
+      kind: "statement",
+      title: "Tickets come in through Zendesk",
+      timeline: [
+        {
+          ...first,
+          quotes: [
+            {
+              statementId: claimId,
+              sourceId: "onb-src-ops",
+              text: "Tickets come in through Zendesk",
+              own: true,
+            },
+            {
+              statementId: "st-inbox",
+              sourceId: "src-service",
+              text: "Every email is routed by hand",
+              own: false,
+            },
+          ],
+        },
+      ],
+    };
+    const text = noteMarkdown(claim, options);
+    expect(text).toContain(
+      "# Tickets come in through Zendesk\n\n*Said by five or more people*\n"
+    );
+    expect(text).toContain(
+      `  - [Tickets come in through Zendesk](https://grasp.example/brain/onb-src-ops#${claimId}) (Said by five or more people)`
+    );
+    expect(text).toContain(
+      "  - [“Every email is routed by hand”](https://grasp.example/brain/src-service#st-inbox)"
+    );
+    expect(text).not.toContain("“Tickets come in through Zendesk”");
+  });
+
   it("includes an interview’s article and its transcript by topic, and workflows link to the Workflows page", () => {
     const source = ws.sources.find(
       (candidate) => candidate.id === "src-compliance"

@@ -29,6 +29,7 @@
  *   that fails): run again, it goes on; what's gone counts as deleted.
  * - Anyone but staff: the server functions are behind Access.
  */
+import { deploymentPrefix } from "@grasp-os/shared/names";
 import { and, asc, count, eq, isNull } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
@@ -296,7 +297,7 @@ const assertOwned = (row: ClientResource, placement: ClientPlacement): void => {
   if (
     row.owner !== placement.deploymentId ||
     row.destinationId !== placement.destinationId ||
-    !row.physicalName.startsWith(`g${placement.deploymentId}-`)
+    !row.physicalName.startsWith(deploymentPrefix(placement.deploymentId))
   ) {
     throw new OffboardingError(
       "resource_not_owned",
