@@ -775,10 +775,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} van {workflows} workflows bekend"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -4106,10 +4102,6 @@ msgstr "Ga daar verder. Heb je dat apparaat niet meer? Vraag degene die je de li
 msgid "Case {name}, when it holds"
 msgstr "Geval {name}, als het geldt"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Categorieën"
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Category"
@@ -4821,6 +4813,11 @@ msgid "Connected"
 msgstr "Gekoppeld"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Verbonden"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Gekoppeld"
@@ -4859,6 +4856,10 @@ msgstr "Gekoppeld op"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Gekoppeld, direct"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow"
+msgstr "Verbonden, door geen workflow gebruikt"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6143,6 +6144,10 @@ msgstr "Elke maandagochtend, naar jou"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Elke maandag: uren, runs en wat er wacht."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Alle andere apps die Grasp kan verbinden."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6311,10 +6316,6 @@ msgstr "Uitzonderingen"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Uitzonderingen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Filters uitklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6526,11 +6527,6 @@ msgstr "Integraties filteren"
 msgid "Filters"
 msgstr "Filters"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filters"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Financiën"
@@ -6654,10 +6650,6 @@ msgstr "Markeert of blokkeert de apps die de regel overtreden."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Chat inklappen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Filters inklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -9154,6 +9146,11 @@ msgstr "Meer over deze koppelingen"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "Meer over deze koppeling"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Meer apps"
 
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
@@ -14033,6 +14030,10 @@ msgstr "Iemand anders"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Someone has to sign in again before Grasp can work in these."
+msgstr "Iemand moet zich opnieuw aanmelden voordat Grasp hierin kan werken."
+
 #: src/knowledge/purge.tsx
 msgid "Someone left the organization"
 msgstr "Iemand heeft de organisatie verlaten"
@@ -14405,6 +14406,11 @@ msgstr "Nog open: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Nog open: {question} {who} kan het beantwoorden."
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that have to be connected before Grasp can work in them"
+msgid "Still to connect"
+msgstr "Nog te verbinden"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"

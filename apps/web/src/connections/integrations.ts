@@ -1,4 +1,3 @@
-import { catalogGroups } from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -295,48 +294,6 @@ export const find = (
   ];
 };
 
-/**
- * One kind of app on the page: the company's own (connected) apps of it,
- * then the catalog's others.
- */
-export interface IntegrationSection {
-  group: CatalogGroup;
-  own: Integration[];
-  others: Integration[];
-}
-
-/**
- * The page's sections, as the prototype's: one per kind of app, in Grasp's
- * order, the connected apps first in each and the catalog's others after
- * them. Connected shows only what is connected; a kind shows only itself.
- */
-export const sectionsOf = (
-  integrations: readonly Integration[],
-  filter: IntegrationFilter,
-  search?: string
-): IntegrationSection[] => {
-  const found = find(
-    integrations.filter((integration) => keeps(filter, integration)),
-    search
-  );
-  return catalogGroups
-    .map((group) => {
-      const ofGroup = found.filter(
-        (integration) => integration.group === group
-      );
-      return {
-        group,
-        own: ofGroup.filter(
-          (integration) => stateOf(integration) !== "not_connected"
-        ),
-        others: ofGroup.filter(
-          (integration) => stateOf(integration) === "not_connected"
-        ),
-      };
-    })
-    .filter(({ own, others }) => own.length + others.length > 0);
-};
-
 /** How many integrations each kind of app holds. */
 export const countByGroup = (
   integrations: readonly Integration[]
@@ -459,4 +416,54 @@ export const workflowsOf = (
       oneSecond.localeCompare(otherSecond)
     );
   });
+};
+
+/**
+ * The page's sections, by where each app stands, as the prototype's
+ * (`routes/integrations/index.tsx`): what still has to be connected, what is
+ * connected and used, what is connected though no workflow uses it, and
+ * then the catalog's other apps. Each in `find`'s order.
+ */
+export interface IntegrationSections {
+  /** Connected, but someone has to sign in again before Grasp can work in it. */
+  toConnect: Integration[];
+  /** Connected and used by a workflow; every connected one while that isn't known. */
+  connected: Integration[];
+  /** Connected, and used by no workflow the person can open. */
+  unused: Integration[];
+  /** The catalog's apps nobody connected. */
+  others: Integration[];
+}
+
+/**
+ * The sections the filter and the search leave. Which workflows use each
+ * connection is read on its own (`uses`): until it is, or if it can't be,
+ * every connected app counts as used, so none is called unused wrongly.
+ */
+export const sectionsOf = (
+  integrations: readonly Integration[],
+  filter: IntegrationFilter,
+  search?: string,
+  uses?: readonly ConnectionWorkflows[]
+): IntegrationSections => {
+  const found = find(
+    integrations.filter((integration) => keeps(filter, integration)),
+    search
+  );
+  const connected = found.filter(
+    (integration) =>
+      stateOf(integration) === "shared" || stateOf(integration) === "personal"
+  );
+  const used = (integration: Integration): boolean =>
+    uses === undefined || workflowsOf(integration, uses).length > 0;
+  return {
+    toConnect: found.filter(
+      (integration) => stateOf(integration) === "needs_reauth"
+    ),
+    connected: connected.filter(used),
+    unused: connected.filter((integration) => !used(integration)),
+    others: found.filter(
+      (integration) => stateOf(integration) === "not_connected"
+    ),
+  };
 };

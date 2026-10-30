@@ -775,10 +775,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} of {workflows} workflows known"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -4106,10 +4102,6 @@ msgstr "Carry on there. Lost that device? Ask whoever sent you the link for a ne
 msgid "Case {name}, when it holds"
 msgstr "Case {name}, when it holds"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Categories"
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Category"
@@ -4821,6 +4813,11 @@ msgid "Connected"
 msgstr "Connected"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Connected"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Connected"
@@ -4859,6 +4856,10 @@ msgstr "Connected on"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Connected, direct"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow"
+msgstr "Connected, used by no workflow"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6143,6 +6144,10 @@ msgstr "Every Monday morning, to you"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Every Monday: hours, runs, and what is waiting."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Every other app Grasp can connect to."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6311,10 +6316,6 @@ msgstr "Exceptions"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Exceptions"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Expand the filters"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6526,11 +6527,6 @@ msgstr "Filter integrations"
 msgid "Filters"
 msgstr "Filters"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filters"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Finance"
@@ -6654,10 +6650,6 @@ msgstr "Flags or blocks the apps that break it."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Fold the chat away"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Fold the filters"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -9154,6 +9146,11 @@ msgstr "More about these connections"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "More about this connection"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "More apps"
 
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
@@ -14033,6 +14030,10 @@ msgstr "Someone else"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Someone has to sign in again before Grasp can work in these."
+msgstr "Someone has to sign in again before Grasp can work in these."
+
 #: src/knowledge/purge.tsx
 msgid "Someone left the organization"
 msgstr "Someone left the organization"
@@ -14405,6 +14406,11 @@ msgstr "Still open: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Still open: {question} {who} can answer it."
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that have to be connected before Grasp can work in them"
+msgid "Still to connect"
+msgstr "Still to connect"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"

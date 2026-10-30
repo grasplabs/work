@@ -190,27 +190,6 @@ describe("filters, search and sections", () => {
     ).toStrictEqual(["linear", "zapier"]);
   });
 
-  it("makes a section per kind of app, in Grasp's order, connected apps first", () => {
-    expect(
-      sectionsOf(all, { show: "all" }).map(({ group, own, others }) => ({
-        group,
-        own: own.map(({ id }) => id),
-        others: others.map(({ id }) => id),
-      }))
-    ).toStrictEqual([
-      { group: "Email and calendar", own: ["google"], others: ["microsoft"] },
-      { group: "CRM", own: [], others: ["hubspot"] },
-    ]);
-  });
-
-  it("shows only what is connected under Connected", () => {
-    expect(
-      sectionsOf(all, { show: "connected" }).flatMap(({ own, others }) =>
-        [...own, ...others].map(({ id }) => id)
-      )
-    ).toStrictEqual(["google"]);
-  });
-
   it("rounds a count down to say more than it", () => {
     expect(roundedDown(1487)).toBe(1400);
     expect(roundedDown(187)).toBe(150);
@@ -309,6 +288,79 @@ const independent = (name: string): ConnectionWorkflow => ({
   kind: "independent",
   id: `workflow-${name}`,
   name,
+});
+
+/** Each section's apps, by ID. */
+const ids = (sections: ReturnType<typeof sectionsOf>) => ({
+  toConnect: sections.toConnect.map(({ id }) => id),
+  connected: sections.connected.map(({ id }) => id),
+  unused: sections.unused.map(({ id }) => id),
+  others: sections.others.map(({ id }) => id),
+});
+
+describe(sectionsOf, () => {
+  const used = connection("microsoft", "shared", "active");
+  const idle = connection("slack", "personal", "active");
+  const lapsed = connection("google", "shared", "needs_reauth");
+  const all = integrationsOf(
+    [
+      entry("microsoft", ["Email"], { group: "Email and calendar" }),
+      entry("slack", ["Chat"], { group: "Chat" }),
+      entry("google", ["Email"], { group: "Email and calendar" }),
+      entry("hubspot", ["CRM"], { group: "CRM" }),
+    ],
+    [used, idle, lapsed]
+  );
+  const uses = [
+    { connectionId: used.id, workflows: [independent("Digest")] },
+    { connectionId: lapsed.id, workflows: [independent("Calendar")] },
+  ];
+
+  it("puts each app under where it stands: to sign in to again, used, unused, or not connected", () => {
+    expect(
+      ids(sectionsOf(all, { show: "all" }, undefined, uses))
+    ).toStrictEqual({
+      toConnect: ["google"],
+      connected: ["microsoft"],
+      unused: ["slack"],
+      others: ["hubspot"],
+    });
+  });
+
+  it("calls nothing unused until it is known which workflows use what", () => {
+    expect(ids(sectionsOf(all, { show: "all" }))).toStrictEqual({
+      toConnect: ["google"],
+      connected: ["microsoft", "slack"],
+      unused: [],
+      others: ["hubspot"],
+    });
+  });
+
+  it("keeps only what the filter and the search leave", () => {
+    expect(
+      ids(sectionsOf(all, { show: "connected" }, undefined, uses))
+    ).toStrictEqual({
+      toConnect: ["google"],
+      connected: ["microsoft"],
+      unused: ["slack"],
+      others: [],
+    });
+    expect(
+      ids(
+        sectionsOf(
+          all,
+          { show: "group", group: "Email and calendar" },
+          "goo",
+          uses
+        )
+      )
+    ).toStrictEqual({
+      toConnect: ["google"],
+      connected: [],
+      unused: [],
+      others: [],
+    });
+  });
 });
 
 describe(workflowsOf, () => {

@@ -42,23 +42,22 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   const { mine, expired } = seededConnections();
   const page = await pageOf(user);
 
-  // The list: Microsoft 365 is among its kind of app, connected for them,
-  // and needs signing in again; it stays so under Connected.
+  // The list: Microsoft 365 is connected for them but needs signing in
+  // again, so it is still to connect; it stays so when the filter keeps
+  // only what is connected.
   await page.goto("/integrations");
   const search = page.getByRole("searchbox", { name: "Search integrations" });
   await search.fill("micro");
   await expect(page).toHaveURL(/[?&]q=micro/u);
-  const mail = page.getByRole("region", { name: /^Email and calendar/u });
+  const toConnect = page.getByRole("region", { name: /^Still to connect/u });
   await expect(
-    mail.getByRole("link", { name: "Microsoft 365", exact: true })
+    toConnect.getByRole("link", { name: "Microsoft 365", exact: true })
   ).toBeVisible();
-  await page
-    .getByRole("complementary", { name: "Filter integrations" })
-    .getByRole("link", { name: /^Connected/u })
-    .click();
+  await page.getByRole("combobox", { name: "Filter integrations" }).click();
+  await page.getByRole("option", { name: /^Connected/u }).click();
   await expect(page).toHaveURL(/show=connected/u);
   await expect(
-    mail.getByRole("button", { name: "Sign in to Microsoft 365 again" })
+    toConnect.getByRole("button", { name: "Sign in to Microsoft 365 again" })
   ).toBeVisible();
   // A search that matches nothing says so.
   await search.fill("no such app at all");
