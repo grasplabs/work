@@ -124,6 +124,53 @@ describe("a change held with Undo", () => {
     expect(sent).toStrictEqual(["went on leaving approved"]);
   });
 
+  it("goes at once when the tab is reloaded or closed, and has the browser ask first", async () => {
+    const sent: string[] = [];
+    await shown(sent);
+    await press("Approve");
+    await waited(1000);
+    const unload = new Event("beforeunload", { cancelable: true });
+    await act(async () => {
+      dispatchEvent(unload);
+      await Promise.resolve();
+    });
+    // The page stays, if the person does: the change is no longer held.
+    await waited(seconds * 1000);
+    await left();
+    expect({ sent, asked: unload.defaultPrevented }).toStrictEqual({
+      sent: ["went approved"],
+      asked: true,
+    });
+  });
+
+  it("goes at once when the page is hidden on its way out with no question asked", async () => {
+    const sent: string[] = [];
+    await shown(sent);
+    await press("Approve");
+    await act(async () => {
+      dispatchEvent(new Event("pagehide"));
+      await Promise.resolve();
+    });
+    await waited(seconds * 1000);
+    await left();
+    expect(sent).toStrictEqual(["went on leaving approved"]);
+  });
+
+  it("asks nothing of the browser when nothing is held", async () => {
+    const sent: string[] = [];
+    await shown(sent);
+    const unload = new Event("beforeunload", { cancelable: true });
+    await act(async () => {
+      dispatchEvent(unload);
+      dispatchEvent(new Event("pagehide"));
+      await Promise.resolve();
+    });
+    expect({ sent, asked: unload.defaultPrevented }).toStrictEqual({
+      sent: [],
+      asked: false,
+    });
+  });
+
   it("never goes once taken back, whether the page stays or goes", async () => {
     const sent: string[] = [];
     await shown(sent);
