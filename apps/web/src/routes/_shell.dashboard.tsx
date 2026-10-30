@@ -1,4 +1,3 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
@@ -11,6 +10,7 @@ import { programmeLine } from "../dashboard/report.ts";
 import { ToDo } from "../dashboard/to-do.tsx";
 import { WidgetBoard } from "../dashboard/widget-board.tsx";
 import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 
@@ -40,22 +40,18 @@ const DashboardPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
-      <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <PageHeaderTitle>
-              <Trans>Dashboard</Trans>
-            </PageHeaderTitle>
-            <p className="text-muted-foreground text-sm">
-              {line ?? (
-                <Trans>
-                  What waits on you, each with its next step, and what could be
-                  better.
-                </Trans>
-              )}
-            </p>
-          </div>
-        </div>
+      <Page wide>
+        <PageHeading
+          description={
+            line ?? (
+              <Trans>
+                What waits on you, each with its next step, and what could be
+                better.
+              </Trans>
+            )
+          }
+          title={<Trans>Dashboard</Trans>}
+        />
         <ToDo identity={identity} waiting={waiting} />
         {next === undefined ||
         line === undefined ||
@@ -95,7 +91,7 @@ const DashboardPage = () => {
             }
           </Await>
         )}
-      </div>
+      </Page>
     </>
   );
 };

@@ -58,6 +58,8 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { SlidersHorizontalIcon, WorkflowIcon } from "lucide-react";
 import { useState } from "react";
 
+import { EmptySection } from "./section.tsx";
+
 const all = "all";
 
 /** Each standing in words, as the list and its filter say it. */
@@ -321,11 +323,7 @@ export const OrgWorkflows = ({ view }: { view: AdminView }) => {
     } else if (view.told) {
       none = "None found yet. They show up here as the interviews come in.";
     }
-    return (
-      <section className="bg-card text-muted-foreground rounded-xl border px-5 py-4">
-        {none}
-      </section>
-    );
+    return <EmptySection>{none}</EmptySection>;
   }
 
   const list = workflowListOf(view);
@@ -428,9 +426,7 @@ export const OrgWorkflows = ({ view }: { view: AdminView }) => {
         </div>
 
         {shown.length === 0 ? (
-          <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-            No workflow matches.
-          </p>
+          <EmptySection>No workflow matches.</EmptySection>
         ) : (
           <div className="bg-card @container overflow-hidden rounded-xl border">
             <Table className="table-fixed">

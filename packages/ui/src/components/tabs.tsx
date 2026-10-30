@@ -7,16 +7,23 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
 // The room between the tabs and what they show: `none` where the row of
-// tabs sits in a bar of its own, ruled off from the panel under it.
+// tabs sits in a bar of its own, ruled off from the panel under it. The
+// size of the text in them: the page's (`default`), or `sm` where the
+// tabs and what they show are a record's details, as an integration's.
 const tabsVariants = cva("group/tabs flex data-horizontal:flex-col", {
   variants: {
     spacing: {
       default: "gap-2",
       none: "gap-0",
     },
+    size: {
+      default: "",
+      sm: "text-sm",
+    },
   },
   defaultVariants: {
     spacing: "default",
+    size: "default",
   },
 });
 
@@ -24,6 +31,7 @@ function Tabs({
   className,
   orientation = "horizontal",
   spacing = "default",
+  size = "default",
   ...props
 }: TabsPrimitive.Root.Props & VariantProps<typeof tabsVariants>) {
   return (
@@ -31,8 +39,9 @@ function Tabs({
       data-slot="tabs"
       data-orientation={orientation}
       data-spacing={spacing}
+      data-size={size}
       orientation={orientation}
-      className={cn(tabsVariants({ spacing }), className)}
+      className={cn(tabsVariants({ spacing, size }), className)}
       {...props}
     />
   );
@@ -114,8 +123,9 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         // In the pill bar the open tab is ink. Once the thumb has measured the tab it is the
         // tab's ground and glides between tabs, and the tab itself stays clear, above it; until
         // then (Base UI keeps the thumb `hidden`) the tab is ink itself, so it never reads as
-        // light text on white. Each holds in dark too, over the tab's dark look above.
-        "group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:z-10 group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:[--muted-foreground:color-mix(in_oklab,var(--primary-foreground)_62%,transparent)] dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent",
+        // light text on white. Each holds in dark too, over the tab's dark look above, and in
+        // dark the measured thumb's clear tab outranks the dark ink as it does in light.
+        "group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:z-10 group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:[--muted-foreground:color-mix(in_oklab,var(--primary-foreground)_62%,transparent)] dark:group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent",
         "after:bg-foreground after:absolute after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:-bottom-1.25 group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-vertical/tabs:group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
         className
       )}

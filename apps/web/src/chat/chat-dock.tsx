@@ -17,13 +17,14 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { buildsApp } from "../engines/app-role.ts";
 import { ErrorText } from "../error-text.tsx";
+import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -63,7 +64,7 @@ interface Offered {
 /** The models a question may name, as core lists them, with their efforts. */
 const readModels = async (
   core: CoreConnection,
-  signal?: AbortSignal
+  signal: AbortSignal
 ): Promise<Loaded<Offered>> =>
   await loadFromCore(
     core,
@@ -76,40 +77,6 @@ const readModels = async (
     },
     signal
   );
-
-/**
- * The models a question may name, read once the dock is shown and again
- * on `retry`, as after core was out of reach.
- */
-const useModels = (): {
-  models: Loaded<Offered> | undefined;
-  retry: () => void;
-} => {
-  const core = useCore();
-  const [models, setModels] = useState<Loaded<Offered>>();
-  useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await readModels(core, left.signal);
-      if (!left.signal.aborted) {
-        setModels(loaded);
-      }
-    };
-    void read();
-    return () => {
-      left.abort();
-    };
-  }, [core]);
-  return {
-    models,
-    retry: () => {
-      setModels(undefined);
-      void (async () => {
-        setModels(await readModels(core));
-      })();
-    },
-  };
-};
 
 /** Why nothing can be asked yet, if that is so: the models are what a question names. */
 const useNoModels = (
@@ -408,14 +375,19 @@ const Dock = ({
   slot,
   words,
   app,
+  models,
+  retry,
 }: {
   slot: ChatSlot;
   words: DockWords;
   app?: string;
+  /** The models a question may name; none while they are read. */
+  models: Loaded<Offered> | undefined;
+  /** Reads the models again, as after core was out of reach. */
+  retry: () => void;
 }) => {
   const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
-  const { models, retry } = useModels();
   const noModels = useNoModels(models);
   // Core out of reach or refusing may pass: the read can be asked for again.
   const canRetry = models !== undefined && models.state !== "ready";
@@ -454,7 +426,9 @@ const Dock = ({
   // (OpenChat), which the box's description names.
   const open = mode !== "bar";
   const unfolds = !open && ways.opens(chatId);
-  useUnfoldOnPointer(dock, unfolds);
+  useUnfoldOnPointer(dock, unfolds, () => {
+    moveTo("frame");
+  });
   const showWidth = useDockWidth(dock, mode === "drawer");
   const dockId = useId();
   const hintId = useId();
@@ -581,15 +555,22 @@ export const ChatDock = () => {
   const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
   const loaded = appPage?.loaderData;
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
-  // Chat is the chat at full size; a project's page has its own box,
-  // which starts a chat in the project.
-  if (pathname === "/" || pathname.startsWith("/projects/")) {
+  // Read here, once for every page, not by each dock: the brain's dock, each
+  // App's and the chat's take each other's place between pages, and each
+  // read them again when it did. Chat is the chat at full size, and a
+  // project's page has its own box, which starts a chat in the project:
+  // neither shows a dock, nor reads its models.
+  const shown = !(pathname === "/" || pathname.startsWith("/projects/"));
+  const { value: models, readAgain } = useFrameRead(readModels, shown);
+  if (!shown) {
     return null;
   }
   if (pathname === "/brain" || pathname.startsWith("/brain/")) {
     return (
       <Dock
         key="brain"
+        models={models}
+        retry={readAgain}
         slot="brain"
         words={{
           title: t`Ask the brain`,
@@ -611,6 +592,8 @@ export const ChatDock = () => {
       <Dock
         app={id}
         key={`app:${id}`}
+        models={models}
+        retry={readAgain}
         slot={appSlot(id)}
         words={{
           title: name,
@@ -623,6 +606,8 @@ export const ChatDock = () => {
   return (
     <Dock
       key="chat"
+      models={models}
+      retry={readAgain}
       slot="chat"
       words={{
         title: t`Ask Grasp`,
