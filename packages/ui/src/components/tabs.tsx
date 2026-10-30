@@ -49,7 +49,7 @@ const tabsListVariants = cva(
     variants: {
       variant: {
         // The brand book's pill bar: a white bar with a hairline round it.
-        default: "bg-card ring-hairline ring-1",
+        default: "bg-card ring-foreground/10 ring-1",
         line: "gap-1 bg-transparent",
       },
       // A row of tabs inside a dashboard block, where every line of height counts.
@@ -111,8 +111,11 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
         "text-foreground/60 hover:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring dark:text-muted-foreground dark:hover:text-foreground relative inline-flex h-[calc(100%-1px)] flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
-        // In the pill bar the thumb is the open tab's ground: the tab itself stays clear, above it, in the thumb's ink.
-        "group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:z-10 group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:[--muted-foreground:color-mix(in_oklab,var(--primary-foreground)_62%,transparent)] dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-transparent",
+        // In the pill bar the open tab is ink. Once the thumb has measured the tab it is the
+        // tab's ground and glides between tabs, and the tab itself stays clear, above it; until
+        // then (Base UI keeps the thumb `hidden`) the tab is ink itself, so it never reads as
+        // light text on white. Each holds in dark too, over the tab's dark look above.
+        "group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:bg-primary dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:text-primary-foreground group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:z-10 group-data-horizontal/tabs:group-has-[[data-slot=tabs-thumb]:not([hidden])]/tabs-list:data-active:bg-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:[--muted-foreground:color-mix(in_oklab,var(--primary-foreground)_62%,transparent)] dark:group-data-horizontal/tabs:group-data-[variant=default]/tabs-list:data-active:border-transparent",
         "after:bg-foreground after:absolute after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:-bottom-1.25 group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-vertical/tabs:group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
         className
       )}
