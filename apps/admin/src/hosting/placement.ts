@@ -19,9 +19,8 @@ import type { Stage } from "@grasp-os/shared/names";
 import { asc, count, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
-import type { AdminDatabase } from "../db/act.ts";
+import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   clientPlacements,
   clients,
@@ -448,7 +447,7 @@ const resumeRelease = async (
  */
 export const placeAndProvision = async (
   env: Env,
-  staff: Staff,
+  staff: Actor,
   input: PlaceInput
 ): Promise<string> => {
   const db = adminDatabase(env.DB);
@@ -566,7 +565,7 @@ export const startDestination = async (
  */
 export const provisionIfReady = async (
   env: Env,
-  staff: Staff,
+  staff: Actor,
   clientId: string
 ): Promise<
   { runId: string; notStarted: null } | { runId: null; notStarted: string }

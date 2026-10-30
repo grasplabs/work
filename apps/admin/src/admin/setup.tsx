@@ -35,7 +35,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowRightIcon,
@@ -56,14 +56,20 @@ import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
+import { retryProvisioningFn } from "../hosting/functions.ts";
 import type { ClientHostingView } from "../hosting/placement.ts";
-import { notStartedWords, operationErrorWords } from "../hosting/words.ts";
+import {
+  notStartedWords,
+  operationErrorWords,
+  placeRefusals,
+} from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
-import { ringWords } from "./platform-parts.tsx";
+import { thenRefresh, useAction } from "../use-action.ts";
+import { attentionWords, ringWords } from "./platform-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -183,6 +189,11 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
 
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 type PlatformNeed =
+  | {
+      kind: "attention";
+      attention: NonNullable<ProvisioningView["needsAttention"]>;
+      view: ProvisioningView;
+    }
   | { kind: "provisioning"; view: ProvisioningView }
   | { kind: "not_started"; why: ProvisioningView["notStarted"] }
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
@@ -237,7 +248,15 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   const { provisioning, rollout, behind } = setup;
   const needs: PlatformNeed[] = [];
   if (provisioning.phase === "failed") {
-    needs.push({ kind: "provisioning", view: provisioning });
+    needs.push(
+      provisioning.needsAttention === null
+        ? { kind: "provisioning", view: provisioning }
+        : {
+            kind: "attention",
+            attention: provisioning.needsAttention,
+            view: provisioning,
+          }
+    );
   }
   if (provisioning.phase === "placing") {
     needs.push({ kind: "not_started", why: provisioning.notStarted });
@@ -262,13 +281,29 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
 
 /** A need in a sentence. */
 const needWords = (need: PlatformNeed): ReactNode => {
+  if (need.kind === "attention") {
+    const { attention, view } = need;
+    const code = attention.code ?? view.stopped?.error ?? null;
+    return (
+      <>
+        {attentionWords[attention.reason]}
+        {code === null ? null : (
+          <>
+            {" "}
+            <ErrorCode code={code} />
+            {` ${operationErrorWords(code)}`}
+          </>
+        )}
+      </>
+    );
+  }
   if (need.kind === "provisioning") {
     const { view } = need;
     return view.stopped === null ? (
-      "Stopped: resume it from Hosting."
+      "Stopped: Grasp is retrying it by itself."
     ) : (
       <>
-        {`Stopped after its ${view.stopped.step} step, resume it from Hosting: `}
+        {`Stopped after its ${view.stopped.step} step; Grasp is retrying it by itself: `}
         <ErrorCode code={view.stopped.error} />
         {` ${operationErrorWords(view.stopped.error)}`}
       </>
@@ -653,6 +688,39 @@ const Checklist = ({
   );
 };
 
+/**
+ * Retry now: resumes its provisioning as the staff member
+ * (`retryProvisioningFn`), which starts a new episode of automatic
+ * retries and clears what needed attention.
+ */
+const RetryNow = ({ clientId }: { clientId: string }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(placeRefusals);
+  const retry = () => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await retryProvisioningFn({ data: { clientId } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+        Retry now
+      </Button>
+      {failure === null ? null : (
+        <span className="text-destructive text-sm" role="alert">
+          {failure}
+        </span>
+      )}
+    </span>
+  );
+};
+
 /** Where what a need says is seen to: the rollout's page, or the tab it is done on. */
 const NeedAction = ({
   clientId,
@@ -694,6 +762,9 @@ const NeedAction = ({
           Its releases
         </TabLink>
       );
+    }
+    case "attention": {
+      return <RetryNow clientId={clientId} />;
     }
     case "provisioning":
     case "not_started":
