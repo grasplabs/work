@@ -1,4 +1,6 @@
 import { CloudflareApiError } from "../cloudflare/api.ts";
+import { ClientDomainUnsetError } from "./client-domain.ts";
+import { MissingStoreSecretError } from "./context.ts";
 
 /**
  * Why a deploy stopped, as its `client_deploys` row and audit event record
@@ -111,14 +113,25 @@ export class DeployError extends Error {
   }
 }
 
+/** What a secret missing from Secrets Store is recorded as, before its name. */
+export const storeSecretMissing = "store_secret_missing";
+
 /**
  * A failure as the admin records it: a code, never a message. A step's own
- * failure has its `DeployError` code; the API's is `cloudflare_<status>`
+ * failure has its `DeployError` code; a secret missing from Secrets Store
+ * is `store_secret_missing: <its name>`, no client domain
+ * `client_domain_unset`; the API's is `cloudflare_<status>`
  * and its error codes; anything else is `unexpected`.
  */
 export const errorCode = (error: unknown): string => {
   if (error instanceof DeployError) {
     return error.code;
+  }
+  if (error instanceof MissingStoreSecretError) {
+    return `${storeSecretMissing}: ${error.secret}`;
+  }
+  if (error instanceof ClientDomainUnsetError) {
+    return "client_domain_unset";
   }
   if (error instanceof CloudflareApiError) {
     return ["cloudflare", error.status, ...error.codes].join("_");

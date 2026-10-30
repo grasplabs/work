@@ -10,12 +10,19 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
-import { and, asc, count, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { apps, teamMembers, users, workflowRuns } from "./db/core/schema.ts";
+import {
+  apps,
+  teamMembers,
+  users,
+  workflowResourceRuns,
+  workflowResources,
+  workflowRuns,
+} from "./db/core/schema.ts";
 import { personOf } from "./model-admission.ts";
 import { modelLedger, personTeamsMost } from "./model-ledger.ts";
 import type {
@@ -120,9 +127,9 @@ export interface BudgetInput {
   trigger: AuditActor;
   /**
    * For an independent workflow's run, whose trigger names no App's run:
-   * its lineage's root (models.ts, `lineage`).
+   * its lineage's root, and its workflow (models.ts, `lineage`).
    */
-  lineage?: { rootRunId: string };
+  lineage?: { rootRunId: string; workflowId: string };
   work?:
     | { authority: Authority }
     | { onboarding: true }
@@ -196,11 +203,49 @@ interface Scoped {
   requests?: number;
 }
 
+/** A workflow a workflow budget counts: an App's, in its App; or an independent one (`appId` null). */
+interface BudgetWorkflow {
+  appId: string | null;
+  workflowId: string;
+}
+
+/**
+ * A workflow budget's key: an App's workflow by its App and its ID in
+ * it, an independent workflow by its ID alone, so neither is ever
+ * counted as the other.
+ */
+const workflowKeySchema = z.union([
+  z.tuple([z.string(), z.string()]),
+  z.tuple([z.string()]),
+]);
+
+/** The key `workflow` is counted by. */
+const workflowKey = ({ appId, workflowId }: BudgetWorkflow): string =>
+  JSON.stringify(appId === null ? [workflowId] : [appId, workflowId]);
+
+/** The workflow a workflow budget's `key` counts; none for a bad key. */
+const workflowOf = (key: string): BudgetWorkflow | undefined => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(key);
+  } catch {
+    return undefined;
+  }
+  const workflow = workflowKeySchema.safeParse(parsed).data;
+  if (workflow === undefined) {
+    return undefined;
+  }
+  const [first, second] = workflow;
+  return second === undefined
+    ? { appId: null, workflowId: first }
+    : { appId: first, workflowId: second };
+};
+
 /**
  * The workflow and run lineage scopes of a workflow's call: an App run's,
- * by its trigger; an independent workflow's run, by its lineage's root
- * alone, as it has no App's workflow to count under. Either way its
- * lineage's requests are held to `requests`, every run of it together.
+ * by its trigger; an independent workflow's run, by its workflow and its
+ * lineage's root (`lineage`). Either way its lineage's requests are held
+ * to `requests`, every run of it together.
  */
 const workflowScopes = (
   budgets: Budgets,
@@ -211,6 +256,15 @@ const workflowScopes = (
     return independent === undefined
       ? []
       : [
+          {
+            scope: "workflow",
+            key: workflowKey({
+              appId: null,
+              workflowId: independent.workflowId,
+            }),
+            budget: budgets?.workflow,
+            names: { workflow: independent.workflowId },
+          },
           {
             scope: "run",
             key: independent.rootRunId,
@@ -224,7 +278,7 @@ const workflowScopes = (
   return [
     {
       scope: "workflow",
-      key: JSON.stringify([trigger.appId, trigger.workflowId]),
+      key: workflowKey(trigger),
       budget: budgets?.workflow,
       names: { app: trigger.appId, workflow: trigger.workflowId },
     },
@@ -400,32 +454,35 @@ export const bindingRequestMicros = (
 export const hasBudget = (scopes: readonly LedgerScope[]): boolean =>
   scopes.some(({ limitMicros }) => limitMicros !== null);
 
-/** A workflow budget's key, as `scopesFor` writes it: its App and workflow. */
-const workflowKeySchema = z.tuple([z.string(), z.string()]);
+/** A root run, as core still has it: an App's, or an independent workflow's (`appId` null). */
+interface NamedRun extends BudgetWorkflow {
+  startedAt: Date;
+  rootRunId: string | null;
+}
 
-/** The App and workflow a workflow budget's `key` counts; none for a bad key. */
-const workflowOf = (key: string): [string, string] | undefined => {
-  try {
-    return workflowKeySchema.safeParse(JSON.parse(key)).data;
-  } catch {
-    return undefined;
-  }
-};
-
-/** Names of Apps and people, and root runs' App and workflow, by ID, as core still has them. */
+/**
+ * Names of Apps, independent workflows and people, and root runs, by ID,
+ * as core still has them.
+ */
 interface Names {
   apps: ReadonlyMap<string, string>;
+  workflows: ReadonlyMap<string, string>;
   people: ReadonlyMap<string, string>;
-  runs: ReadonlyMap<
-    string,
-    {
-      appId: string;
-      workflowId: string;
-      startedAt: Date;
-      rootRunId: string | null;
-    }
-  >;
+  runs: ReadonlyMap<string, NamedRun>;
 }
+
+/** The name of `workflow`: an App's workflow's is its ID; an independent one's, null once it is gone. */
+const workflowNameOf = (
+  { appId, workflowId }: BudgetWorkflow,
+  names: Pick<Names, "workflows">
+): string | null =>
+  appId === null ? (names.workflows.get(workflowId) ?? null) : workflowId;
+
+/** The name of `appId`'s App; null for none, or once it is gone. */
+const appNameOf = (
+  appId: string | null,
+  names: Pick<Names, "apps">
+): string | null => (appId === null ? null : (names.apps.get(appId) ?? null));
 
 /** What a spend row counted, by its scope and key; none for a bad key. */
 const spenderOf = (
@@ -446,8 +503,9 @@ const spenderOf = (
       runId: key,
       rootRunId: run?.rootRunId ?? null,
       appId: run?.appId ?? null,
-      appName: run === undefined ? null : (names.apps.get(run.appId) ?? null),
+      appName: appNameOf(run?.appId ?? null, names),
       workflowId: run?.workflowId ?? null,
+      workflowName: run === undefined ? null : workflowNameOf(run, names),
       startedAt: run?.startedAt.toISOString() ?? null,
     };
   }
@@ -455,55 +513,122 @@ const spenderOf = (
   if (workflow === undefined) {
     return undefined;
   }
-  const [appId, workflowId] = workflow;
   return {
     type: "workflow",
-    appId,
-    appName: names.apps.get(appId) ?? null,
-    workflowId,
+    ...workflow,
+    name: workflowNameOf(workflow, names),
+    appName: appNameOf(workflow.appId, names),
   };
 };
 
-/** The names of the Apps, people and root runs `rows` count spend for. */
-const namesOf = async (
+/** The root runs `runIds` name, App runs and independent workflows' runs alike. */
+const runsOf = async (
   db: DrizzleD1Database,
-  rows: readonly { scope: ModelBudgetScope; key: string }[]
-): Promise<Names> => {
-  const runIds = rows
-    .filter(({ scope }) => scope === "run")
-    .map(({ key }) => key);
-  const runRows =
-    runIds.length === 0
-      ? []
-      : await db
-          .select({
-            id: workflowRuns.id,
-            appId: workflowRuns.appId,
-            workflowId: workflowRuns.workflowId,
-            startedAt: workflowRuns.createdAt,
-            rootRunId: workflowRuns.rootRunId,
-          })
-          .from(workflowRuns)
-          .where(inArray(workflowRuns.id, runIds));
+  runIds: readonly string[]
+): Promise<Map<string, NamedRun>> => {
+  if (runIds.length === 0) {
+    return new Map();
+  }
+  const [appRuns, independentRuns] = await Promise.all([
+    db
+      .select({
+        id: workflowRuns.id,
+        appId: workflowRuns.appId,
+        workflowId: workflowRuns.workflowId,
+        startedAt: workflowRuns.createdAt,
+        rootRunId: workflowRuns.rootRunId,
+      })
+      .from(workflowRuns)
+      .where(inArray(workflowRuns.id, [...runIds])),
+    db
+      .select({
+        id: workflowResourceRuns.id,
+        workflowId: workflowResourceRuns.workflowResourceId,
+        startedAt: workflowResourceRuns.createdAt,
+        rootRunId: workflowResourceRuns.rootRunId,
+      })
+      .from(workflowResourceRuns)
+      .where(inArray(workflowResourceRuns.id, [...runIds])),
+  ]);
+  const runs = new Map<string, NamedRun>();
+  for (const { id, ...run } of appRuns) {
+    runs.set(id, run);
+  }
+  for (const { id, rootRunId, ...run } of independentRuns) {
+    // An independent run is the root of its own lineage by its own ID.
+    runs.set(id, {
+      ...run,
+      appId: null,
+      rootRunId: rootRunId === id ? null : rootRunId,
+    });
+  }
+  return runs;
+};
+
+/** The names of the Apps and independent workflows `workflows` are in or are. */
+const workflowNamesOf = async (
+  db: DrizzleD1Database,
+  workflows: readonly BudgetWorkflow[]
+): Promise<Pick<Names, "apps" | "workflows">> => {
   const appIds = [
-    ...new Set([
-      ...rows.flatMap(({ scope, key }) => {
-        const workflow = scope === "workflow" ? workflowOf(key) : undefined;
-        return workflow === undefined ? [] : [workflow[0]];
-      }),
-      ...runRows.map(({ appId }) => appId),
-    ]),
+    ...new Set(
+      workflows.flatMap(({ appId }) => (appId === null ? [] : [appId]))
+    ),
   ];
-  const userIds = rows
-    .filter(({ scope }) => scope === "user")
-    .map(({ key }) => key);
-  const [appRows, userRows] = await Promise.all([
+  const workflowIds = [
+    ...new Set(
+      workflows.flatMap(({ appId, workflowId }) =>
+        appId === null ? [workflowId] : []
+      )
+    ),
+  ];
+  const [appRows, workflowRows] = await Promise.all([
     appIds.length === 0
       ? []
       : db
           .select({ id: apps.id, name: apps.name })
           .from(apps)
           .where(inArray(apps.id, appIds)),
+    workflowIds.length === 0
+      ? []
+      : db
+          .select({ id: workflowResources.id, name: workflowResources.name })
+          .from(workflowResources)
+          // A deleted workflow is gone: its spend stays, by its ID, with
+          // no name, so nothing links to it.
+          .where(
+            and(
+              inArray(workflowResources.id, workflowIds),
+              isNull(workflowResources.deletedAt)
+            )
+          ),
+  ]);
+  return {
+    apps: new Map(appRows.map(({ id, name }) => [id, name])),
+    workflows: new Map(workflowRows.map(({ id, name }) => [id, name])),
+  };
+};
+
+/** The names of the Apps, workflows, people and root runs `rows` count spend for. */
+const namesOf = async (
+  db: DrizzleD1Database,
+  rows: readonly { scope: ModelBudgetScope; key: string }[]
+): Promise<Names> => {
+  const runs = await runsOf(
+    db,
+    rows.filter(({ scope }) => scope === "run").map(({ key }) => key)
+  );
+  const userIds = rows
+    .filter(({ scope }) => scope === "user")
+    .map(({ key }) => key);
+  const [named, userRows] = await Promise.all([
+    workflowNamesOf(db, [
+      ...rows.flatMap(({ scope, key }) => {
+        const workflow = scope === "workflow" ? workflowOf(key) : undefined;
+        return workflow === undefined ? [] : [workflow];
+      }),
+      ...runs.values(),
+    ]),
     userIds.length === 0
       ? []
       : db
@@ -512,14 +637,9 @@ const namesOf = async (
           .where(inArray(users.id, userIds)),
   ]);
   return {
-    apps: new Map(appRows.map(({ id, name }) => [id, name])),
+    ...named,
     people: new Map(userRows.map(({ id, name }) => [id, name])),
-    runs: new Map(
-      runRows.map(({ id, appId, workflowId, startedAt, rootRunId }) => [
-        id,
-        { appId, workflowId, startedAt, rootRunId },
-      ])
-    ),
+    runs,
   };
 };
 
@@ -586,11 +706,76 @@ const monthBounds = (month: string): { from: Date; until: Date } => {
 };
 
 /**
+ * The runs of `workflows` started in `month`, of any version, by each
+ * one's key: an App's workflow's runs, and an independent workflow's.
+ */
+const monthRunsOf = async (
+  db: DrizzleD1Database,
+  workflows: readonly BudgetWorkflow[],
+  month: string
+): Promise<Map<string, number>> => {
+  const { from, until } = monthBounds(month);
+  const appIds = [
+    ...new Set(
+      workflows.flatMap(({ appId }) => (appId === null ? [] : [appId]))
+    ),
+  ];
+  const workflowIds = workflows.flatMap(({ appId, workflowId }) =>
+    appId === null ? [workflowId] : []
+  );
+  const [appRuns, independentRuns] = await Promise.all([
+    appIds.length === 0
+      ? []
+      : db
+          .select({
+            appId: workflowRuns.appId,
+            workflowId: workflowRuns.workflowId,
+            runs: count(),
+          })
+          .from(workflowRuns)
+          .where(
+            and(
+              inArray(workflowRuns.appId, appIds),
+              gte(workflowRuns.createdAt, from),
+              lt(workflowRuns.createdAt, until)
+            )
+          )
+          .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+    workflowIds.length === 0
+      ? []
+      : db
+          .select({
+            workflowId: workflowResourceRuns.workflowResourceId,
+            runs: count(),
+          })
+          .from(workflowResourceRuns)
+          .where(
+            and(
+              inArray(workflowResourceRuns.workflowResourceId, workflowIds),
+              gte(workflowResourceRuns.createdAt, from),
+              lt(workflowResourceRuns.createdAt, until)
+            )
+          )
+          .groupBy(workflowResourceRuns.workflowResourceId),
+  ]);
+  return new Map([
+    ...appRuns.map(
+      ({ runs, ...workflow }) => [workflowKey(workflow), runs] as const
+    ),
+    ...independentRuns.map(
+      ({ runs, workflowId }) =>
+        [workflowKey({ appId: null, workflowId }), runs] as const
+    ),
+  ]);
+};
+
+/**
  * What the models cost in `month`, budget or not: every scope is counted
  * by the ledger, whether or not it limits spend (`scopesFor`). The
  * deployment's total, and the workflows that spent most (at most
- * `modelSpendListed`), each with its App's name where core still has it
- * and its runs started in the month: for admins to read (models-rpc.ts).
+ * `modelSpendListed`), an App's and an independent one's alike, each
+ * with its name and its App's where core still has them, and its runs
+ * started in the month: for admins to read (models-rpc.ts).
  */
 export const monthSpend = async (
   env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
@@ -611,46 +796,27 @@ export const monthSpend = async (
     return workflow === undefined ? [] : [{ workflow, spentMicros }];
   });
   const listed = rows.slice(0, modelSpendListed);
-  const appIds = [...new Set(listed.map(({ workflow }) => workflow[0]))];
   const db = drizzle(env.DB);
-  const { from, until } = monthBounds(month);
-  const [appRows, runRows] =
-    appIds.length === 0
-      ? [[], []]
-      : await Promise.all([
-          db
-            .select({ id: apps.id, name: apps.name })
-            .from(apps)
-            .where(inArray(apps.id, appIds)),
-          db
-            .select({
-              app: workflowRuns.appId,
-              workflow: workflowRuns.workflowId,
-              runs: count(),
-            })
-            .from(workflowRuns)
-            .where(
-              and(
-                inArray(workflowRuns.appId, appIds),
-                gte(workflowRuns.createdAt, from),
-                lt(workflowRuns.createdAt, until)
-              )
-            )
-            .groupBy(workflowRuns.appId, workflowRuns.workflowId),
-        ]);
-  const names = new Map(appRows.map(({ id, name }) => [id, name]));
-  const runs = new Map(
-    runRows.map((row) => [JSON.stringify([row.app, row.workflow]), row.runs])
-  );
+  const [names, runs] = await Promise.all([
+    workflowNamesOf(
+      db,
+      listed.map(({ workflow }) => workflow)
+    ),
+    monthRunsOf(
+      db,
+      listed.map(({ workflow }) => workflow),
+      month
+    ),
+  ]);
   return {
     month,
     total: total / microsPerDollar,
-    workflows: listed.map(({ workflow: [appId, workflowId], spentMicros }) => ({
-      appId,
-      appName: names.get(appId) ?? null,
-      workflowId,
+    workflows: listed.map(({ workflow, spentMicros }) => ({
+      ...workflow,
+      name: workflowNameOf(workflow, names),
+      appName: appNameOf(workflow.appId, names),
       amount: spentMicros / microsPerDollar,
-      runs: runs.get(JSON.stringify([appId, workflowId])) ?? 0,
+      runs: runs.get(workflowKey(workflow)) ?? 0,
     })),
     more: rows.length > modelSpendListed,
   };
