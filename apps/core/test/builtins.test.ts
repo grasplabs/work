@@ -13,7 +13,7 @@ import {
   builtinsRetryMs,
   fingerprintOf,
   installBuiltins,
-  release,
+  loadRelease,
 } from "../src/builtins.ts";
 import worker from "../src/index.ts";
 import {
@@ -39,7 +39,8 @@ import { auditedDuring } from "./sign-in.ts";
 // each test that needs an install forgets the last one first.
 
 /** This release's fingerprint, as an isolate of it works it out. */
-const thisRelease = async (): Promise<string> => await fingerprintOf(release);
+const thisRelease = async (): Promise<string> =>
+  await fingerprintOf(await loadRelease());
 
 /** Each Grasp skill's current text, by path. */
 const storedSkills = async (): Promise<Record<string, string>> =>
@@ -184,7 +185,7 @@ describe("the built-ins", () => {
   it("aren't done for an isolate of another release, which asks again a minute later", async () => {
     await forgetInstall(...firstPaths(1));
     const install = builtinsInstaller({
-      ...release,
+      ...(await loadRelease()),
       skills: otherRelease(...firstPaths(1)),
     });
     const calls = vi.spyOn(env.BUILTINS, "getByName");
@@ -257,7 +258,7 @@ describe("the built-ins", () => {
     const partial = await runInDurableObject(
       builtins(env),
       async (_instance, state) =>
-        await installBuiltins(failing, state.storage, release)
+        await installBuiltins(failing, state.storage, await loadRelease())
     );
     // The first skill failed and the second was written, but nothing is
     // recorded as installed.

@@ -4,7 +4,6 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
 
-import builtinBlueprints from "#blueprints";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
@@ -53,10 +52,14 @@ export interface Release {
   skills: readonly GraspSkill[];
 }
 
-/** This release's built-ins. */
-export const release: Release = {
-  blueprints: builtinBlueprints,
-  skills: graspSkills,
+/**
+ * This release's built-ins. The blueprints load when an install first
+ * needs them, not as core starts: they are a few hundred KB of text that
+ * most isolates never read (GRA-1349).
+ */
+export const loadRelease = async (): Promise<Release> => {
+  const { default: blueprints } = await import("#blueprints");
+  return { blueprints, skills: graspSkills };
 };
 
 /** Where the singleton keeps the fingerprint of what it installed. */
@@ -173,7 +176,11 @@ export class Builtins extends DurableObject<Env> {
 
   async #install(): Promise<boolean> {
     try {
-      return await installBuiltins(this.env, this.ctx.storage, release);
+      return await installBuiltins(
+        this.env,
+        this.ctx.storage,
+        await loadRelease()
+      );
     } finally {
       this.#installing = undefined;
     }
@@ -194,14 +201,15 @@ export const builtins = (
 export const builtinsRetryMs = 60_000;
 
 /**
- * An isolate's installer of release `of`'s built-ins: it starts installing
+ * An isolate's installer of release `of`'s built-ins (this release's when
+ * none is given): it starts installing
  * them in the background, once per isolate. After a partial or failed
  * install, or one of another release than `of`, the first request
  * `builtinsRetryMs` later starts another; the singleton makes that one
  * comparison once everything is in. Core has one, `installBuiltinsOnce`;
  * tests make others, each for an isolate of their own.
  */
-export const builtinsInstaller = (of: Release = release) => {
+export const builtinsInstaller = (of?: Release) => {
   // `started` while an install is under way or `of` is in, and when the
   // next may start after one that wasn't.
   const isolate = { started: false, retryAt: 0 };
@@ -213,7 +221,7 @@ export const builtinsInstaller = (of: Release = release) => {
     const install = async (): Promise<void> => {
       let complete = false;
       try {
-        const expected = await fingerprintOf(of);
+        const expected = await fingerprintOf(of ?? (await loadRelease()));
         complete = await builtins(env).ensureInstalled(expected);
       } catch (error) {
         log.error("builtins.install_failed", errorFields(error));

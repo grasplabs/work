@@ -11,14 +11,16 @@ import type {
   Usage,
 } from "@earendil-works/pi-ai";
 import {
-  clampThinkingLevel,
-  getSupportedThinkingLevels,
-} from "@earendil-works/pi-ai";
-import {
   CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
   createAiBindingFetch,
 } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+// From Pi's `models` entry, not its index: the index brings TypeBox and
+// every other part of Pi, which core would otherwise load as it starts.
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+} from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {

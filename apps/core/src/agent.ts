@@ -20,6 +20,7 @@ import { memoryCharactersPerToken } from "@grasp-os/shared/memory";
 import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
+import { isMessage } from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
@@ -716,18 +717,6 @@ export interface Turn {
    */
   withheld?: () => Promise<ReadonlySet<string>>;
 }
-
-const messageRoles = new Set<unknown>([
-  "system",
-  "user",
-  "assistant",
-  "toolResult",
-]);
-
-/** One of pi's own messages, the only kind this loop makes and keeps. */
-export const isMessage = (
-  message: AgentMessage | { role?: unknown }
-): message is Message => messageRoles.has(message.role);
 
 /**
  * Characters of a transcript's JSON to a token, for sizing without a
