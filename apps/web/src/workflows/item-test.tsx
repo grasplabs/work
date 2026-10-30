@@ -141,6 +141,8 @@ export const ItemTest = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
+  const headingId = useId();
+  const answersId = useId();
   const [answers, setAnswers] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -223,9 +225,9 @@ export const ItemTest = ({
 
   const most = maxItemTestItems;
   return (
-    <section aria-labelledby="item-test" className="flex flex-col gap-3">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h2 className="font-medium" id="item-test">
+        <h2 className="font-medium" id={headingId}>
           <Trans>Test revision {revision} on recent items</Trans>
         </h2>
         <p className="text-muted-foreground">
@@ -237,11 +239,11 @@ export const ItemTest = ({
         </p>
       </div>
       <div className="flex flex-col gap-2">
-        <Label htmlFor="item-test-answers">
+        <Label htmlFor={answersId}>
           <Trans>What its calls answer</Trans>
         </Label>
         <Textarea
-          id="item-test-answers"
+          id={answersId}
           onChange={(event) => {
             setAnswers(event.target.value);
           }}
