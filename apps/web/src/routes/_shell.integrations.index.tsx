@@ -52,8 +52,9 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`): one
-// column of lists by where each app stands. First what is still to be
-// connected (here: what someone has to sign in to again), then what is
+// column of lists by where each app stands. First what someone has to
+// sign in to again (the prototype's first list, what is still to connect,
+// Grasp can't tell: its workflows name connections), then what is
 // connected and used, what is connected though no workflow uses it, and
 // what was asked for; then the catalog's other apps, some 1,500 in all,
 // drawn as they come near. One control filters them all, to what is
@@ -169,7 +170,7 @@ const Rows = ({
   ));
 
 /**
- * The company's own apps, by where they stand: still to sign in to again,
+ * The company's own apps, by where they stand: to sign in to again,
  * connected and used, and connected though no workflow uses them. Which
  * workflows use what comes on its own (`uses`); until it does, every
  * connected app is under Connected.
@@ -187,20 +188,11 @@ const OwnSections = ({
   return (
     <>
       <IntegrationsSection
-        about={t`Someone has to sign in again before Grasp can work in these.`}
-        count={sections.toConnect.length}
-        id="to-connect"
-        title={t({
-          message: "Still to connect",
-          context:
-            "apps that have to be connected before Grasp can work in them",
-        })}
+        count={sections.lapsed.length}
+        id="lapsed"
+        title={t`Needs someone to sign in again`}
       >
-        <Rows
-          identity={identity}
-          integrations={sections.toConnect}
-          uses={uses}
-        />
+        <Rows identity={identity} integrations={sections.lapsed} uses={uses} />
       </IntegrationsSection>
       <IntegrationsSection
         count={sections.connected.length}
@@ -219,7 +211,7 @@ const OwnSections = ({
       <IntegrationsSection
         count={sections.unused.length}
         id="unused"
-        title={t`Connected, used by no workflow`}
+        title={t`Connected, used by no workflow you can open`}
       >
         <Rows identity={identity} integrations={sections.unused} uses={uses} />
       </IntegrationsSection>
@@ -437,7 +429,7 @@ const Integrations = () => {
   // stand then, and the count of what shows, which doesn't change after.
   const first = sectionsOf(integrations, filter, q);
   const shown =
-    first.toConnect.length +
+    first.lapsed.length +
     first.connected.length +
     first.unused.length +
     first.others.length;
@@ -500,7 +492,7 @@ const Integrations = () => {
               <div className="w-full @md:w-48">
                 <FilterSelect choices={choices} filter={filter} q={q} />
               </div>
-              <div className="w-40 @md:w-56">
+              <div className="min-w-0 flex-1 @md:w-56 @md:flex-none">
                 <Search q={q} />
               </div>
               <Button

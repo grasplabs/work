@@ -449,15 +449,14 @@ const Subtitle = ({ integration }: { integration: Integration }) => {
   const { t } = useLingui();
   const about = aboutOf(integration);
   const newest = newestOf(integration);
-  // The prototype's size under the title: the page's own, not its 14px.
   if (newest === undefined) {
     return about === undefined ? null : (
-      <p className="text-muted-foreground text-base">{about}</p>
+      <p className="text-muted-foreground">{about}</p>
     );
   }
   const date = formatDayMonth(newest.createdAt);
   return (
-    <p className="text-muted-foreground text-base">
+    <p className="text-muted-foreground">
       {about === undefined
         ? t`Connected ${date}`
         : t({

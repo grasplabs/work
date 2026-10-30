@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { formatNumber } from "../format.ts";
+import { SectionTitle } from "../frame/page.tsx";
 
 // One list on the Integrations page, as the prototype draws it
 // (`routes/integrations/index.tsx`, `Section`): its name, how many apps it
@@ -31,15 +32,9 @@ export const IntegrationsSection = ({
       className="flex flex-col gap-2"
     >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2
-          className="flex items-baseline gap-2 font-medium"
-          id={`integrations-${id}`}
-        >
+        <SectionTitle count={formatNumber(count)} id={`integrations-${id}`}>
           {title}
-          <span className="text-muted-foreground text-xs font-normal tabular-nums">
-            {formatNumber(count)}
-          </span>
-        </h2>
+        </SectionTitle>
         {about === undefined ? null : (
           <p className="text-muted-foreground">{about}</p>
         )}

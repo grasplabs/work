@@ -4858,8 +4858,8 @@ msgid "Connected, direct"
 msgstr "Connecté, en direct"
 
 #: src/routes/_shell.integrations.index.tsx
-msgid "Connected, used by no workflow"
-msgstr "Connectées, utilisées par aucun workflow"
+msgid "Connected, used by no workflow you can open"
+msgstr "Connectées, utilisées par aucun workflow que vous pouvez ouvrir"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -9374,6 +9374,7 @@ msgstr "Reconnexion nécessaire"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Quelqu’un doit se reconnecter"
@@ -14030,10 +14031,6 @@ msgstr "Quelqu’un d’autre"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Quelqu’un d’autre s’est connecté sur ce navigateur, cette application a donc été arrêtée. Réessayez pour l’ouvrir au nom de la personne connectée maintenant."
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Someone has to sign in again before Grasp can work in these."
-msgstr "Quelqu’un doit se reconnecter avant que Grasp puisse y travailler."
-
 #: src/knowledge/purge.tsx
 msgid "Someone left the organization"
 msgstr "Quelqu’un a quitté l’organisation"
@@ -14406,11 +14403,6 @@ msgstr "En suspens : {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "En suspens : {question} {who} peut y répondre."
-
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "apps that have to be connected before Grasp can work in them"
-msgid "Still to connect"
-msgstr "À connecter"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"

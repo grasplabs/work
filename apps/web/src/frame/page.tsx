@@ -55,7 +55,28 @@ export const PageHeading = ({
   </div>
 );
 
-/** A section title inside a page. */
-export const SectionTitle = ({ children }: { children: ReactNode }) => (
-  <h2 className="text-sm font-medium">{children}</h2>
-);
+/**
+ * A section title inside a page; with `count`, how many it holds beside
+ * it, small and quiet, as the prototype's Integrations lists have it.
+ */
+export const SectionTitle = ({
+  children,
+  count,
+  id,
+}: {
+  children: ReactNode;
+  count?: string;
+  id?: string;
+}) =>
+  count === undefined ? (
+    <h2 className="text-sm font-medium" id={id}>
+      {children}
+    </h2>
+  ) : (
+    <h2 className="flex items-baseline gap-2 text-sm font-medium" id={id}>
+      {children}
+      <span className="text-muted-foreground text-xs font-normal tabular-nums">
+        {count}
+      </span>
+    </h2>
+  );

@@ -292,7 +292,7 @@ const independent = (name: string): ConnectionWorkflow => ({
 
 /** Each section's apps, by ID. */
 const ids = (sections: ReturnType<typeof sectionsOf>) => ({
-  toConnect: sections.toConnect.map(({ id }) => id),
+  lapsed: sections.lapsed.map(({ id }) => id),
   connected: sections.connected.map(({ id }) => id),
   unused: sections.unused.map(({ id }) => id),
   others: sections.others.map(({ id }) => id),
@@ -316,11 +316,11 @@ describe(sectionsOf, () => {
     { connectionId: lapsed.id, workflows: [independent("Calendar")] },
   ];
 
-  it("puts each app under where it stands: to sign in to again, used, unused, or not connected", () => {
+  it("puts each app under where it stands: its relied-on connection lapsed, used, unused, or not connected", () => {
     expect(
       ids(sectionsOf(all, { show: "all" }, undefined, uses))
     ).toStrictEqual({
-      toConnect: ["google"],
+      lapsed: ["google"],
       connected: ["microsoft"],
       unused: ["slack"],
       others: ["hubspot"],
@@ -329,7 +329,7 @@ describe(sectionsOf, () => {
 
   it("calls nothing unused until it is known which workflows use what", () => {
     expect(ids(sectionsOf(all, { show: "all" }))).toStrictEqual({
-      toConnect: ["google"],
+      lapsed: ["google"],
       connected: ["microsoft", "slack"],
       unused: [],
       others: ["hubspot"],
@@ -340,7 +340,7 @@ describe(sectionsOf, () => {
     expect(
       ids(sectionsOf(all, { show: "connected" }, undefined, uses))
     ).toStrictEqual({
-      toConnect: ["google"],
+      lapsed: ["google"],
       connected: ["microsoft"],
       unused: ["slack"],
       others: [],
@@ -355,8 +355,32 @@ describe(sectionsOf, () => {
         )
       )
     ).toStrictEqual({
-      toConnect: ["google"],
+      lapsed: ["google"],
       connected: [],
+      unused: [],
+      others: [],
+    });
+  });
+
+  it("calls an app lapsed only when the connection relied on did, not a spare beside one that works", () => {
+    const working = connection("notion", "shared", "active");
+    const spare = connection("notion", "shared", "needs_reauth");
+    const ownOnly = connection("zoom", "personal", "needs_reauth");
+    const usedSpare = connection("jira", "personal", "needs_reauth");
+    const jiraShared = connection("jira", "shared", "active");
+    const apps = integrationsOf(
+      [entry("notion", []), entry("zoom", []), entry("jira", [])],
+      [working, spare, ownOnly, usedSpare, jiraShared]
+    );
+    const workflows = [
+      { connectionId: usedSpare.id, workflows: [independent("Sync")] },
+      { connectionId: working.id, workflows: [independent("Notes")] },
+    ];
+    expect(
+      ids(sectionsOf(apps, { show: "all" }, undefined, workflows))
+    ).toStrictEqual({
+      lapsed: ["zoom", "jira"],
+      connected: ["notion"],
       unused: [],
       others: [],
     });

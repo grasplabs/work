@@ -420,13 +420,16 @@ export const workflowsOf = (
 
 /**
  * The page's sections, by where each app stands, as the prototype's
- * (`routes/integrations/index.tsx`): what still has to be connected, what is
- * connected and used, what is connected though no workflow uses it, and
- * then the catalog's other apps. Each in `find`'s order.
+ * (`routes/integrations/index.tsx`): what someone has to sign in to again,
+ * what is connected and used, what is connected though no workflow the
+ * person can open uses it, and then the catalog's other apps. Each in
+ * `find`'s order. The prototype's "Still to connect" (an app a workflow
+ * names that nobody connected) has no counterpart: Grasp's workflows name
+ * connections, never apps that aren't there.
  */
 export interface IntegrationSections {
-  /** Connected, but someone has to sign in again before Grasp can work in it. */
-  toConnect: Integration[];
+  /** The connection the company relies on lapsed: someone has to sign in again. */
+  lapsed: Integration[];
   /** Connected and used by a workflow; every connected one while that isn't known. */
   connected: Integration[];
   /** Connected, and used by no workflow the person can open. */
@@ -434,6 +437,35 @@ export interface IntegrationSections {
   /** The catalog's apps nobody connected. */
   others: Integration[];
 }
+
+/** Whether a connection's access ran out. */
+const ranOut = ({ status }: { status: string }): boolean =>
+  status === "needs_reauth";
+
+/**
+ * Whether the connection the company relies on for `integration` lapsed:
+ * every shared one (or, with none shared, every one the person has), or
+ * one a workflow uses. A lapsed spare beside one that works isn't.
+ */
+export const reliedOnLapsed = (
+  integration: Integration,
+  uses?: readonly ConnectionWorkflows[]
+): boolean => {
+  const { connections } = integration;
+  const shared = connections.filter(({ scope }) => scope === "shared");
+  const relied = shared.length > 0 ? shared : connections;
+  if (relied.length > 0 && relied.every(ranOut)) {
+    return true;
+  }
+  const usedIds = new Set(
+    (uses ?? [])
+      .filter(({ workflows }) => workflows.length > 0)
+      .map(({ connectionId }) => connectionId)
+  );
+  return connections.some(
+    (connection) => ranOut(connection) && usedIds.has(connection.id)
+  );
+};
 
 /**
  * The sections the filter and the search leave. Which workflows use each
@@ -450,20 +482,15 @@ export const sectionsOf = (
     integrations.filter((integration) => keeps(filter, integration)),
     search
   );
-  const connected = found.filter(
-    (integration) =>
-      stateOf(integration) === "shared" || stateOf(integration) === "personal"
-  );
+  const own = found.filter((integration) => integration.connections.length > 0);
+  const lapsed = own.filter((integration) => reliedOnLapsed(integration, uses));
+  const connected = own.filter((integration) => !lapsed.includes(integration));
   const used = (integration: Integration): boolean =>
     uses === undefined || workflowsOf(integration, uses).length > 0;
   return {
-    toConnect: found.filter(
-      (integration) => stateOf(integration) === "needs_reauth"
-    ),
+    lapsed,
     connected: connected.filter(used),
     unused: connected.filter((integration) => !used(integration)),
-    others: found.filter(
-      (integration) => stateOf(integration) === "not_connected"
-    ),
+    others: found.filter((integration) => integration.connections.length === 0),
   };
 };
