@@ -818,7 +818,7 @@ export const runAtlas = (
       fired += 1;
       const points = path.map((region) => pulsePoint(region));
       // What a source heard comes up the spine first.
-      if (path[0] === "sources") {
+      if (path[0] === "stem") {
         points.unshift(...SPINE_UP);
       }
       pulses.push({ born: time, points });

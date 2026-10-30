@@ -784,6 +784,26 @@ export const testWorkspace = (): Workspace => ({
       stakeholders: [],
     },
   ],
+  // The company's groups as its admin confirmed them; revenue is in none yet.
+  teamGroups: [
+    {
+      id: "group-front",
+      name: "Front office",
+      teamIds: ["team-service", "team-mortgage", "team-onboarding"],
+      confirmed: true,
+    },
+    {
+      id: "group-back",
+      name: "Back office",
+      teamIds: ["team-finance", "team-compliance"],
+      confirmed: true,
+    },
+  ],
+  // The interviews the brain learned from, five or more a week.
+  interviewWeeks: [
+    { week: "2026-08-24", interviews: 9 },
+    { week: "2026-08-31", interviews: 12 },
+  ],
   tools: [
     {
       id: "tool-outlook",
