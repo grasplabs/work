@@ -9,6 +9,7 @@
     "dev": "node scripts/dev.ts",
     "seed": "node scripts/seed.ts",
     "seed:admin": "node scripts/seed-admin.ts",
+    "seed:onboarding": "node scripts/seed-onboarding.ts",
     "e2e": "playwright test",
     "e2e:admin": "playwright test -c playwright.admin.config.ts",
     "smoke:workerd": "node scripts/workerd-smoke.ts",

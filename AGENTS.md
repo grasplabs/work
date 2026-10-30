@@ -34,6 +34,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
 - `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
 - `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, engines with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
+- `vp run seed:onboarding`: on a fresh `vp run dev` instead of `vp run seed`, the same company halfway through its onboarding (`scripts/seed-onboarding.ts`): day 8 of 14 of the interviews, most leads heard, one team quiet, Grasp at 75% of the 80% go. Admin at `/setup` as admin@acme.test, Grasp's side at `/onboarding` as staff@grasp.test
 - `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`
 - `vp run -r db:generate`: generate migrations after changing a schema
 
