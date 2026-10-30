@@ -1,11 +1,8 @@
-import { jsonVar } from "@grasp-os/shared/config";
-import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { contextWindowOf, gatewaySettings } from "../src/models.ts";
-import { gatewayProvider } from "./brain-gateway-provider.ts";
-import type { AiFetch, ModelExchange } from "./brain-gateway-provider.ts";
+import { parseModelRef } from "../src/model-catalog.ts";
+import { contextWindowOf } from "../src/models.ts";
 import {
   brainArms,
   charged,
@@ -18,6 +15,8 @@ import type {
   BrainProvider,
   BrainReport,
 } from "./brain-harness.ts";
+import { realProvider, realProviderTakes } from "./brain-real-provider.ts";
+import type { ModelExchange } from "./brain-real-provider.ts";
 import { summarizeArm } from "./brain-scoring.ts";
 import { stubReader } from "./brain-stub-model.ts";
 import { brainFamilies, brainTasks } from "./fixtures/brain-tasks.ts";
@@ -26,9 +25,10 @@ import { testBinding } from "./test-env.ts";
 
 // The Brain baseline against a real model (GRA-676), on request only:
 // vite.brain-model.config.ts says how to run it. The harness runs as in CI;
-// only the provider differs (brain-gateway-provider.ts), with the model the
-// run names (`BRAIN_MODEL`, the deployment default if unset) listed first
-// in its gateway, and the run's budget as the ledger's deployment limit.
+// only the provider differs (brain-real-provider.ts): the provider's own
+// API, with the real key the run was given (`BRAIN_MODEL_KEY`), the model
+// the run names (`BRAIN_MODEL`) the one the organization chose, and the
+// run's budget as the ledger's deployment limit.
 // The estimate first runs the dev split against the stub, priced as that
 // model, to project what a run costs. Each reports on the run's output as
 // JSON lines.
@@ -49,30 +49,19 @@ const settings = z
   })
   .parse(testBinding("BRAIN_MODEL"));
 
-// Taken before the harness points any object at its stand-in gateway:
-// objects share the env, so `env.AI` is the stand-in from then on.
-const realAi: unknown = Reflect.get(env, "AI");
-
-const isAiFetch = (value: unknown): value is AiFetch =>
-  typeof value === "object" &&
-  value !== null &&
-  "fetch" in value &&
-  typeof value.fetch === "function";
-
-/** The deployment's gateway config, as core reads it. */
-const deploymentGateway = z
-  .object({ gateway: z.string(), models: z.array(z.string()).min(1) })
-  .loose()
-  .parse(jsonVar(Reflect.get(env, "MODEL_GATEWAY")));
+/** The provider's real key, for a run only: never committed. */
+const realKey = z
+  .string()
+  .min(1)
+  .optional()
+  .parse(testBinding("BRAIN_MODEL_KEY"));
 
 /**
- * The model under test, which the run's gateway lists first, so its chats
- * ask it. One the gateway doesn't offer (not a ref of a provider it
- * reaches, or not in its catalog, so without a price) is refused before
- * anything is sent: the gateway would otherwise ask the next one listed.
+ * The model under test, the one the organization chooses, so its chats
+ * ask it. One the gateway doesn't offer (not in its catalog, so without a
+ * price) is refused before anything is sent.
  */
-const [firstAllowed] = gatewaySettings(env).models;
-if (firstAllowed !== settings.model) {
+if (parseModelRef(settings.model) === undefined) {
   throw new Error(
     `The gateway doesn't offer ${settings.model}: name one of its catalog as <provider>/<model>`
   );
@@ -110,10 +99,7 @@ describe("the Brain baseline against a real model", () => {
   it.runIf(settings.mode === "estimate")(
     "estimates a run's cost from the dev split, spending nothing",
     async () => {
-      const setup: BrainModelSetup = {
-        model: testedModel,
-        config: deploymentGateway,
-      };
+      const setup: BrainModelSetup = { model: testedModel, rules: {} };
       const requests: { arm: string; inputTokens: number }[] = [];
       // The stub, each answer counted as long as a real one may be.
       const respond: BrainProvider = (turn) => {
@@ -213,28 +199,30 @@ describe("the Brain baseline against a real model", () => {
           "Commit your changes first: a run pins the commit it ran"
         );
       }
-      if (!isAiFetch(realAi)) {
-        throw new TypeError(
-          "The AI binding isn't remote: run with BRAIN_MODEL_MODE=run"
+      if (realKey === undefined) {
+        throw new Error(
+          `A real-model run needs BRAIN_MODEL_KEY, the key of ${testedModel}'s provider`
+        );
+      }
+      if (!realProviderTakes(testedModel)) {
+        throw new Error(
+          `A real run reaches Anthropic, Mistral and OpenRouter models, not ${testedModel}`
         );
       }
       const exchanges: ModelExchange[] = [];
       const setup: BrainModelSetup = {
         model: testedModel,
-        config: {
-          ...deploymentGateway,
-          // The run's budget, as the ledger enforces it on every request.
-          budgets: { deployment: { limit: budgetUsd, alertAt: 99 } },
-        },
+        // The run's budget, as the ledger enforces it on every request.
+        rules: { budgets: { deployment: { limit: budgetUsd, alertAt: 99 } } },
       };
       const report = await runBrainBaseline(await setUpBrainCompany(idp), {
         split: settings.split,
         openSealed: settings.split === "sealed",
         repeats: settings.repeats,
-        respond: gatewayProvider(realAi, (exchange) => {
+        respond: realProvider(realKey, (exchange) => {
           exchanges.push(exchange);
         }),
-        providerName: `ai-gateway/${deploymentGateway.gateway}`,
+        providerName: testedModel.slice(0, testedModel.indexOf("/")),
         modelSetup: setup,
         build: settings.build,
       });

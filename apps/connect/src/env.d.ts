@@ -130,6 +130,15 @@ interface __BaseEnv_Env {
    */
   AI_PRIVATE_HOSTS?: string;
   /**
+   * On-prem only: the origin every request to a fixed AI provider goes to
+   * instead of the provider's own host, its path unchanged and the
+   * provider's host in `x-forwarded-host`, such as the deployment's egress
+   * proxy, or the e2e stack's fake providers. It must be a host
+   * `AI_PRIVATE_HOSTS` names; set anywhere else, every such request is
+   * refused (src/ai-providers.ts).
+   */
+  AI_PROVIDER_ORIGIN?: string;
+  /**
    * `none` on workerd and on-prem, which have no Cloudflare jurisdiction:
    * the clock's object is then taken from the plain namespace
    * (src/clock.ts). Unset or any other value means the EU. Never set in

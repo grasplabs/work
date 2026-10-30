@@ -21,6 +21,7 @@ import {
 } from "./background-calls.ts";
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
+import { stopModelProviders } from "./model-provider.ts";
 import { closeOpenSockets } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
@@ -88,6 +89,10 @@ if (await installBuiltinsFirst()) {
 }
 
 afterEach(closeOpenSockets);
+
+// The model providers a file's tests answer for stop looking for requests
+// once its tests are done (model-provider.ts).
+afterAll(stopModelProviders);
 
 // Setup files' afterAll hooks run last: once the file's tests and their
 // hooks are done, it waits for the calls they left going

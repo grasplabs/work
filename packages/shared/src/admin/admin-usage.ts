@@ -30,8 +30,8 @@ import { present } from "./present.ts";
 
 /**
  * What does the work: the three models that read and write (the careful one, the quick one and
- * the small one), Stephen's voice, and his ears; and any other model a deployment calls (core's
- * own default is Workers AI's), counted with no price, for the admin has none for it.
+ * the small one), Stephen's voice, and his ears; and any other model a deployment calls (an
+ * organization's own, say), counted with no price, for the admin has none for it.
  */
 export const MODELS = [
   "opus",

@@ -1,19 +1,11 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { PoliciesApi, RuleInput } from "@grasp-os/shared/policies";
 import { env } from "cloudflare:workers";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -59,21 +51,24 @@ const outsideEu: RuleInput = {
 };
 
 /** A model's answer: `reading` as its JSON. */
-const answer = (reading: unknown): GatewayReply => ({
+const answer = (reading: unknown): ProviderReply => ({
   text: JSON.stringify(reading),
   inputTokens: 1200,
   outputTokens: 300,
 });
 
+/** The model the organization chose, asked through chat completions. */
+const readingModel = "mistral/mistral-large-latest";
+
 /** What the model answers a policy it finds nothing in. */
 const nothingFound = answer({ summary: "", proposals: [], unchecked: [] });
 
-/** The gateway's next answers, then {@link nothingFound} for every request after. */
-let script: GatewayReply[] = [];
-let gatewayRequests: readonly GatewayRequest[] = [];
+/** The provider's next answers, then {@link nothingFound} for every request after. */
+let script: ProviderReply[] = [];
+let providerRequests: readonly SentRequest[] = [];
 
 /** A request's messages, as the model's provider takes them. */
-const messagesOf = ({ body }: GatewayRequest) =>
+const messagesOf = ({ body }: SentRequest) =>
   z
     .object({
       messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
@@ -81,7 +76,7 @@ const messagesOf = ({ body }: GatewayRequest) =>
     .parse(body).messages;
 
 /** What a request asked the model: its instructions, and the rest. */
-const askedOf = (request: GatewayRequest) => {
+const askedOf = (request: SentRequest) => {
   const messages = messagesOf(request);
   const instructions = messages.filter(({ role }) => role === "system");
   return {
@@ -91,7 +86,7 @@ const askedOf = (request: GatewayRequest) => {
 };
 
 /** The policy a request sent the model, as the one message's JSON. */
-const policySent = (request: GatewayRequest | undefined) => {
+const policySent = (request: SentRequest | undefined) => {
   const content =
     request === undefined
       ? undefined
@@ -106,16 +101,17 @@ const statusesOf = ({ rules }: { rules: { status: string }[] }): string[] =>
   rules.map(({ status }) => status);
 
 describe("the company's policies", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     script = [];
-    const gateway = answeringGateway(() => script.shift() ?? nothingFound);
-    gatewayRequests = gateway.requests;
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    // A model whose API takes the instructions as a message of their own.
+    const provider = await answeringProvider(
+      () => script.shift() ?? nothingFound,
+      { models: [readingModel] }
+    );
+    providerRequests = provider.requests;
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
     await env.DB.batch([
       env.DB.prepare("DELETE FROM policy_exceptions"),
       env.DB.prepare("DELETE FROM policy_rules"),
@@ -382,7 +378,7 @@ describe("the company's policies", () => {
       text: `${said.replace("customer data", "customer\ndata")}\n\n${review} ${sentinel}.`,
     });
     const book = await member.api.policies.book();
-    const [request] = gatewayRequests;
+    const [request] = providerRequests;
     const asked = request === undefined ? undefined : askedOf(request);
 
     expect({
@@ -396,7 +392,7 @@ describe("the company's policies", () => {
       unchecked: uploaded.unchecked,
       read: book.policies.map(({ proposals }) => proposals.length),
       rules: book.rules,
-      requests: gatewayRequests.length,
+      requests: providerRequests.length,
       textInInstructions: asked?.system.includes(sentinel),
       textInMessage: asked?.messages.includes(sentinel),
     }).toStrictEqual({
@@ -434,8 +430,8 @@ describe("the company's policies", () => {
       ...handbook,
       text: injection,
     });
-    const sent = gatewayRequests.map(askedOf);
-    const policy = policySent(gatewayRequests[0]);
+    const sent = providerRequests.map(askedOf);
+    const policy = policySent(providerRequests[0]);
     const afterwards = await admin.api.policies.book();
     script = [nothingFound];
     const again = await admin.api.policies.readAgain(failed.id);

@@ -96,7 +96,7 @@ describe("model requests", () => {
         // US-only inference costs 1.1x on Claude 4.6 and later.
         body({ messages: [text], inference_geo: "us" }),
         holding({ type: "audio", source: { data: "x" } }),
-        // Workers AI's own vision input.
+        // A top-level image input.
         body({ messages: [text], image: [1, 2, 3] }),
         ...Object.entries({
           n: 2,

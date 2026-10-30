@@ -12,7 +12,7 @@ import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
 import { deploymentStaysInEu, models } from "../models.ts";
-import type { ModelAnswer, ModelsEnv } from "../models.ts";
+import type { ModelAnswer } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import {
   boundedInCore,
@@ -419,7 +419,7 @@ type ConversionSettings = Exclude<
  */
 const platformConverter =
   (
-    env: ModelsEnv,
+    env: Env,
     { provider, model }: ConversionSettings,
     trigger: AuditActor
   ): Extractor =>
@@ -475,7 +475,7 @@ export type ExtractorName = "platform" | "local";
  * (`upload.conversion_unavailable`), never read another way unasked.
  */
 export const extractorFor = (
-  env: ModelsEnv & LocalExtractorEnv,
+  env: Env & LocalExtractorEnv,
   collection: { sensitive: boolean },
   mediaType: UploadMediaType,
   trigger: AuditActor

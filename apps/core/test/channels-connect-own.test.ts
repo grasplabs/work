@@ -12,7 +12,14 @@ import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import { coreOrigin } from "./sign-in.ts";
-import { member, messageFrom, post, reached, watched } from "./teams-door.ts";
+import {
+  member,
+  memberAnsweredBy,
+  messageFrom,
+  post,
+  reached,
+  watched,
+} from "./teams-door.ts";
 import { connectDb } from "./test-env.ts";
 
 // A member's own Microsoft 365, connected from Teams (src/channels/
@@ -125,7 +132,7 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
     );
     // What was asked was asked again, once.
     expect(
-      ann.gateway.requests.filter((request) =>
+      ann.provider.requests.filter((request) =>
         JSON.stringify(request).includes("What's on my calendar?")
       ).length
     ).toBeGreaterThanOrEqual(2);
@@ -141,7 +148,7 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
 
   it("carries nothing on when someone else finishes the flow, or the account isn't theirs", async () => {
     const ann = await member(idp, says("Not yet."), says("Never shown."));
-    const mallory = await member(idp, says("Never shown either."));
+    const mallory = await memberAnsweredBy(idp, ann.provider);
     await post(messageFrom(ann.teams, { text: "What's on my calendar?" }));
     const before = await reached(ann.teams.conversation);
 

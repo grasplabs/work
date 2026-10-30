@@ -48,7 +48,7 @@ interface __BaseEnv_Env {
   GMAIL_PUBSUB_SUBSCRIPTION?: string;
   GMAIL_PUBSUB_TOPIC?: string;
   GOOGLE_CLIENT_SECRET?: string;
-  /** The model gateway (src/models.ts): JSON. */
+  /** The model gateway's rules (src/models.ts, src/model-rules.ts): JSON. */
   MODEL_GATEWAY?: unknown;
   /**
    * Each of Grasp's own AI features' provider and model, as shared's

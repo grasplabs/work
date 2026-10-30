@@ -22,7 +22,7 @@ import { z } from "zod";
 import { budgetPeriods, budgetSpend, monthSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings, modelSettings } from "./models.ts";
+import { modelRules, modelSettings } from "./models.ts";
 import { personLimitsIn, setPersonLimit } from "./person-limits.ts";
 import { modelBindingSpend } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -186,7 +186,7 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
 
   /** Grasp's budgets, as the console set them; `invalid` when they don't parse. */
   #budgets() {
-    const { rules } = gatewaySettings(this.#env);
+    const rules = modelRules(this.#env);
     return rules === undefined ? ("invalid" as const) : rules.budgets;
   }
 

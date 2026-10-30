@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { createCollection } from "../src/knowledge/collection-rules.ts";
-import { streamText } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -17,6 +16,7 @@ import {
   waitingInOutbox,
   whileLogDown,
 } from "./maintenance.ts";
+import { streamText } from "./model-provider.ts";
 import { plan } from "./platform-providers.ts";
 import {
   auditedDuring,

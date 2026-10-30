@@ -27,12 +27,9 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 // never sent out to be converted (knowledge/extract.ts): it is what the
 // client agreed to.
 //
-// "Hosted in the EU" is the config's word for a model: the client's
-// provider serves it in the EU (its EU data residency, with the keys AI
-// Gateway stores for it). Every call, one that must stay in the EU too,
-// still goes through AI Gateway, which can't be pinned to the EU: it passes
-// the request on and logs its metadata only (models.ts). A direct EU route
-// comes later, through connect.
+// "Hosted in the EU" is the config's word for a model: its provider serves
+// it in the EU. Every call goes to the provider's own API through connect
+// (model-transport-connect.ts), with nothing in between that keeps it.
 //
 // A call carries sensitive data when its context is in restricted mode
 // (restricted.ts), which is sticky: once a chat or an App has read a

@@ -49,9 +49,6 @@ import {
 
 const idp = mockIdp();
 
-/** The one model the tests' gateway allows (vite.config.ts). */
-const testModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-
 /** A test file, from the fixtures the test assets serve. */
 const fixture = async (name: string): Promise<Uint8Array> => {
   const response = await env.ASSETS.fetch(`https://assets/uploads/${name}`);
@@ -308,16 +305,14 @@ const wordFile = (document: string, styles: string): Uint8Array => {
 // Vitest's default five seconds on a loaded runner. Sixty fits the
 // longest, with room for signing in.
 describe("uploads", { timeout: 60_000 }, () => {
-  // Every test here runs as a deployment whose config keeps everything in
+  // Every test here runs as a deployment whose rules keep everything in
   // the EU, so each file is extracted in the sandbox, whatever its
   // collection. Which extractor a file gets is upload-routing.test.ts's.
   let gatewayBefore: unknown;
   beforeAll(() => {
     gatewayBefore = env.MODEL_GATEWAY;
     env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [testModel],
-      eu: { models: [testModel], deployment: true },
+      eu: { models: ["mistral/mistral-large-latest"], deployment: true },
     };
   });
 

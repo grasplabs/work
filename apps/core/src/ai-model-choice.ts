@@ -14,9 +14,7 @@ import { parseModelRef } from "./model-catalog.ts";
 // them (models.ts): which providers it connected, from connect, which holds
 // their keys (`aiProviderRoutes`, never a key), and the models its admins
 // chose, its default and fallbacks, kept beside its other settings
-// (`org_settings`, kind `ai_models`). Once it connected a provider, these
-// models are the ones its calls may use, in place of the deployment's
-// allowlist (`MODEL_GATEWAY`).
+// (`org_settings`, kind `ai_models`): the only models its calls may use.
 
 /** The setting's kind in `org_settings`. */
 export const aiModelsKind = "ai_models";

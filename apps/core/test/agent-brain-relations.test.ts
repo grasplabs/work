@@ -286,7 +286,7 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     });
     const [found] = await admin.api.knowledge.entities({ query: thing });
     const entityId = found?.id ?? "-";
-    const { stub, gateway, agent, newChat } = await personalChatsOf(
+    const { stub, provider, agent, newChat } = await personalChatsOf(
       person.userId,
       reading(`env.brain.entities({ query: ${JSON.stringify(thing)} })`),
       says("Noted."),
@@ -323,9 +323,9 @@ describe("a chat's entity and relation reads", setUpTime, () => {
     await explained.ask("Go.");
     /** Whether the next turn of `chat` still sent `handed`. */
     const nextTurn = async (chat: typeof entities, handed: string) => {
-      const before = gateway.requests.length;
+      const before = provider.requests.length;
       await chat.ask("And now?");
-      const body = JSON.stringify(gateway.requests[before]?.body);
+      const body = JSON.stringify(provider.requests[before]?.body);
       return {
         handed: body.includes(handed),
         withheld: body.includes(withheldResult),

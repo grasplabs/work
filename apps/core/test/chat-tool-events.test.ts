@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, model, pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import { codeStep, model, configureObject, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The calls a chat's code makes to its agent's APIs, as the chat streams
@@ -31,12 +31,13 @@ type Person = Awaited<ReturnType<typeof person>>;
 const objectOf = ({ userId }: { userId: string }) =>
   workspace(env, personalWorkspaceId(userId));
 
-/** Points `someone`'s chats at a fake gateway that answers `replies`. */
+/** Answers `someone`'s chats with `replies`, from a fake provider. */
 const answering = async (
   someone: { userId: string },
-  ...replies: GatewayReply[]
+  ...replies: ProviderReply[]
 ) => {
-  await pointAtGateway(objectOf(someone), fakeGateway(...replies));
+  await fakeProvider(...replies);
+  await configureObject(objectOf(someone));
 };
 
 /** Follows a chat, keeping every update. */

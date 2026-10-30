@@ -98,7 +98,7 @@ const unboundedFields = [
   "modalities",
   "audio",
   "prediction",
-  // Workers AI's vision input, billed by what it shows.
+  // A top-level image input, billed by what it shows.
   "image",
   // Hosted execution and servers the provider runs, and bills, itself.
   "container",

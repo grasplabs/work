@@ -113,8 +113,8 @@ export const requests = sqliteTable(
      */
     leaseEndsAt: integer("lease_ends_at"),
     /**
-     * The way it went (models.ts): its transport (`connect`, or
-     * `cloudflare-ai-gateway`), the provider and the provider's region
+     * The way it went (models.ts): its transport (`connect`), the
+     * provider and the provider's region
      * (@grasp-os/shared/ai-providers). Metadata only; null for one admitted
      * before routes were recorded, and for a voice model's.
      */

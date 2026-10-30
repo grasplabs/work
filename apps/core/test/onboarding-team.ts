@@ -11,15 +11,15 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { answering, answeringWith, approveAgreed } from "./interview-link.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // A team on its way through the onboarding into the brain, as the tests
 // of the brain's intake (brain-intake.test.ts) and of deleting an
 // interview (interview-deletion.test.ts) share it: Lea leads Ops, with
 // Max, Mia, Mo, Noor, Pim and Rik; her map, their agreements, and the drawing of
-// their tickets, with AI Gateway faked behind the AI binding.
+// their tickets, with the model provider faked behind connect.
 
 const dayMs = 24 * 60 * 60 * 1000;
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -159,7 +159,7 @@ export const agree = async (
 };
 
 /** The map: tickets, by Max, Mia and Mo, and the rota, Lea's own. */
-export const mapReply = (ids: Ids): GatewayReply => ({
+export const mapReply = (ids: Ids): ProviderReply => ({
   text: JSON.stringify({
     does: "Answers customers' questions",
     works: [
@@ -189,7 +189,7 @@ export const mapReply = (ids: Ids): GatewayReply => ({
 export const ticketsReply = (
   ids: Ids,
   last = "Send the answer."
-): GatewayReply => ({
+): ProviderReply => ({
   text: JSON.stringify({
     starts: "A customer email arrives as a ticket in Zendesk.",
     starts_by: [ids.max],
@@ -253,7 +253,7 @@ export const fiveToldReply = (
   last = "Send the answer.",
   minutesFrom = 5,
   decides = "The priority of the ticket."
-): GatewayReply => {
+): ProviderReply => {
   const five = [ids.max, ids.mia, ids.mo, ids.noor, ids.pim];
   return {
     text: JSON.stringify({
@@ -408,7 +408,7 @@ export interface FakeClaim {
   says?: readonly string[];
   /** Its words as the check is asked about them, once names are taken out: `text`, unless given. */
   checked?: string;
-  /** Every check of it fails at the gateway. */
+  /** Every check of it fails at the provider. */
   fails?: true;
 }
 
@@ -449,7 +449,7 @@ export type PartJudge = (
 const agrees: PartJudge = () => true;
 
 /** What a request gave the model as data between `<tag>` and `</tag>`, parsed; none when it gave none. */
-const dataOf = (request: GatewayRequest | undefined, tag: string): unknown => {
+const dataOf = (request: SentRequest | undefined, tag: string): unknown => {
   // The request as sent, read back to its text: the data is JSON in it.
   const sent: string = JSON.stringify(request?.body ?? null);
   const found = new RegExp(`<${tag}>\\\\n(?<data>.*?)\\\\n</${tag}>`, "u").exec(
@@ -464,7 +464,7 @@ const dataOf = (request: GatewayRequest | undefined, tag: string): unknown => {
 };
 
 /** The facts a claims request showed the model, by label. */
-const shownIn = (request: GatewayRequest | undefined) =>
+const shownIn = (request: SentRequest | undefined) =>
   shownSchema
     .parse(dataOf(request, "facts") ?? [])
     .flatMap(({ facts }) => facts);
@@ -476,11 +476,11 @@ const shownIn = (request: GatewayRequest | undefined) =>
  */
 const claimsOrCheck =
   (
-    claims: (request: GatewayRequest | undefined) => unknown,
+    claims: (request: SentRequest | undefined) => unknown,
     says: (claim: string, fact: string) => boolean | "fails",
     part: PartJudge = agrees
   ) =>
-  (requests: readonly GatewayRequest[]): GatewayReply => {
+  (requests: readonly SentRequest[]): ProviderReply => {
     const request = requests.at(-1);
     const data = dataOf(request, "data");
     const check = checkSchema.safeParse(data);
@@ -601,7 +601,7 @@ export const zendeskClaim: FakeClaim = {
 /**
  * The onboarding giving the brain `ids`' team, with the model putting
  * `claims` together: a team an earlier test left due goes first, as the
- * alarm would give it. What reached the gateway for that team alone.
+ * alarm would give it. What reached the provider for that team alone.
  */
 export const intake = async (
   ids: { team: string },

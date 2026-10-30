@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
@@ -9,7 +8,7 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
@@ -31,9 +30,9 @@ import { callingRunOf } from "../src/workflows/resource-authority.ts";
 import { callKnowledge } from "../src/workflows/resource-reads.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { runObject } from "./runs.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
@@ -43,7 +42,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // document erased), a model call carrying it is refused before the gateway
 // is asked, and so is the run's output: it fails as `brain.revoked`.
 
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
 
 /** A member of the organization with `role`, as their session has them. */
 const idp = mockIdp();
@@ -642,20 +642,14 @@ const takingParent = async (by: Identity, admin: Identity, made: Made) => {
 };
 
 describe("a JSON workflow's recalled evidence", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("refuses its model call and its output once what it recalled can't be read, though it may as long as it can", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const gateway = fakeGateway({
+    const provider = await fakeProviderFor([allowedModel], {
       text: '{"line":"Ask first."}',
       inputTokens: 10,
       outputTokens: 5,
     });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
     /**
      * A run of a new recalling workflow (`asks` a model or ends with what
      * it recalled), `between` its recall and what follows.
@@ -664,11 +658,11 @@ describe("a JSON workflow's recalled evidence", () => {
       const made = await recallingWorkflow(ada, admin, then);
       const runId = await startedHolding(ada, made);
       await between?.(made);
-      const asked = gateway.requests.length;
+      const asked = provider.requests.length;
       const run = await ended(ada, made.workflow.id, runId);
       return {
         ...endOf(made, run),
-        asked: gateway.requests.length - asked,
+        asked: provider.requests.length - asked,
         model: then === "model" ? await modelOutcomesOf(runId) : [],
         children: await childrenOf(runId),
       };

@@ -64,13 +64,8 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 /** The transcription model sockets listen with, the platform's default. */
 const transcriptionModel = "openai/gpt-4o-transcribe";
 
-const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-
-/** The deployment's gateway: no voice model needs allowing. */
-const gatewayConfig = {
-  gateway: "grasp-os-test",
-  models: [textModel],
-};
+/** A model the rules may name instead: one that doesn't listen. */
+const textModel = "mistral/mistral-large-latest";
 
 /** What a session answers, as far as these tests read it: the device's key. */
 const sessionKey = z.object({ key: z.string().optional() });
@@ -89,8 +84,8 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns under `config` over the gateway's and the platform's
- * AI settings `platform`, budgets counted in `month`, and the realtime
+ * What `run` returns under the deployment's rules `config` and the
+ * platform's AI settings `platform`, budgets counted in `month`, and the realtime
  * sockets OpenAI's fake took meanwhile.
  */
 const relaying = async <T>(
@@ -107,7 +102,7 @@ const relaying = async <T>(
     month: env.MODEL_BUDGET_MONTH,
   };
   const { length: known } = await realtimeSockets();
-  env.MODEL_GATEWAY = { ...gatewayConfig, ...config };
+  env.MODEL_GATEWAY = config;
   Reflect.set(env, "PLATFORM_AI", platform);
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
@@ -1040,7 +1035,6 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       },
       {
         config: {
-          models: [textModel, transcriptionModel],
           eu: { deployment: true, models: [transcriptionModel] },
         },
       }

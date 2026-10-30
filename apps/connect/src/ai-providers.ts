@@ -92,6 +92,12 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   both ends and passes each message on as it comes, keeping and logging
 //   none; when either end closes, so does the other, and both close at the
 //   grant's deadline.
+// - A relay that sends the keys somewhere else (`AI_PROVIDER_ORIGIN`, where
+//   an on-prem deployment's fixed-provider requests go instead of the
+//   provider's own host): taken only on-prem, only at a private host the
+//   deployment's own config names (`AI_PRIVATE_HOSTS`), and only as an
+//   origin. Set anywhere it can't be taken, every fixed-provider request
+//   is refused rather than sent to the provider it was meant to avoid.
 
 /** The vault context a provider's key is sealed under: its row and destination. */
 const contextOf = (provider: AiProviderId, baseUrl: string | null): string =>
@@ -115,6 +121,64 @@ const policyOf = (env: Env): EndpointPolicy => ({
     .map((host) => host.trim().toLowerCase())
     .filter((host) => host !== ""),
 });
+
+/**
+ * Where a fixed provider's requests go instead of its own host
+ * (`AI_PROVIDER_ORIGIN`): none when unset; `refused` when set where it
+ * can't be taken, off-prem, at a host the deployment doesn't name, or as
+ * more than an origin. On-prem, an egress proxy of the deployment's own;
+ * in the e2e stack, its fake providers (e2e/model-fake.ts), so no request
+ * of a test reaches a provider.
+ */
+const relayOf = (
+  env: Env,
+  policy: EndpointPolicy
+): URL | "refused" | undefined => {
+  const value = env.AI_PROVIDER_ORIGIN?.trim() ?? "";
+  if (value === "") {
+    return undefined;
+  }
+  const checked = checkEndpoint(value, policy);
+  if (
+    "refused" in checked ||
+    !checked.privateHost ||
+    checked.url.pathname !== "/" ||
+    checked.url.search !== "" ||
+    checked.url.hash !== ""
+  ) {
+    return "refused";
+  }
+  return checked.url;
+};
+
+/**
+ * Where a request for `url` is sent: `url` itself, or, through a relay,
+ * the same path and query at the relay's origin, with the provider's host
+ * in `x-forwarded-host`. A custom endpoint is never relayed: its base URL
+ * is the organization's own. `refused` when a relay is set but can't be
+ * taken.
+ */
+const sendingOf = (
+  env: Env,
+  url: URL,
+  provider: AiProviderId
+): { to: URL; forwardedHost?: string } | "refused" => {
+  if (provider === "openai-compatible") {
+    return { to: url };
+  }
+  const relay = relayOf(env, policyOf(env));
+  if (relay === "refused") {
+    log.warn("ai.relay_refused", { provider });
+    return "refused";
+  }
+  if (relay === undefined) {
+    return { to: url };
+  }
+  return {
+    to: new URL(`${url.pathname}${url.search}`, relay),
+    forwardedHost: url.host,
+  };
+};
 
 /**
  * A custom endpoint's base URL as kept: checked by the endpoint guard,
@@ -616,6 +680,14 @@ export const modelFetch = async (
   if (!isModelEndpoint(url, claims.provider, base)) {
     return refused("path", claims);
   }
+  const sending = sendingOf(env, url, claims.provider);
+  if (sending === "refused") {
+    return refused("endpoint", claims);
+  }
+  const headers = headersFor(request, claims.provider, key);
+  if (sending.forwardedHost !== undefined) {
+    headers.set("x-forwarded-host", sending.forwardedHost);
+  }
   const startedAt = Date.now();
   const asked = await request.arrayBuffer();
   if ((await sha256HexOfBytes(asked)) !== claims.body) {
@@ -627,9 +699,9 @@ export const modelFetch = async (
   }
   let answered: Response;
   try {
-    answered = await fetch(url, {
+    answered = await fetch(sending.to, {
       method: "POST",
-      headers: headersFor(request, claims.provider, key),
+      headers,
       body,
       redirect: "manual",
       signal: AbortSignal.timeout(
@@ -739,11 +811,21 @@ export const modelSocket = async (
   ) {
     return refused("path", claims);
   }
+  const sending = sendingOf(env, url, claims.provider);
+  if (sending === "refused") {
+    return refused("endpoint", claims);
+  }
   const startedAt = Date.now();
   let answered: Response;
   try {
-    answered = await fetch(url, {
-      headers: { upgrade: "websocket", authorization: `Bearer ${key}` },
+    answered = await fetch(sending.to, {
+      headers: {
+        upgrade: "websocket",
+        authorization: `Bearer ${key}`,
+        ...(sending.forwardedHost === undefined
+          ? {}
+          : { "x-forwarded-host": sending.forwardedHost }),
+      },
       redirect: "manual",
       signal: AbortSignal.timeout(socketOpenMs),
     });

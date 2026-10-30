@@ -6,7 +6,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { extractUpload, originalKey } from "../src/knowledge/uploads.ts";
-import { streamText } from "./ai-gateway.ts";
 import type { PlannedReply } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -15,6 +14,7 @@ import {
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { streamText } from "./model-provider.ts";
 import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -29,9 +29,6 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // the ledger and the audit log are real.
 
 const idp = mockIdp();
-
-/** The one model the tests' gateway allows (vite.config.ts). */
-const testModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** A test file, from the fixtures the test assets serve. */
 const fixture = async (name: string): Promise<Uint8Array> => {
@@ -103,7 +100,7 @@ const timesSent = async (upload: Upload): Promise<number> => {
   ).length;
 };
 
-/** Runs `run` with `config` as the deployment's gateway config. */
+/** Runs `run` with `config` as the deployment's rules for model calls. */
 const withDeployment = async (
   config: unknown,
   run: () => Promise<void>
@@ -131,11 +128,9 @@ const withPlatformAi = async <T>(
   }
 };
 
-/** A gateway config whose rules keep every call of the deployment in the EU. */
+/** Rules that keep every call of the deployment in the EU. */
 const euOnly = {
-  gateway: "grasp-os-test",
-  models: [testModel],
-  eu: { models: [testModel], deployment: true },
+  eu: { models: ["mistral/mistral-large-latest"], deployment: true },
 };
 
 /** A collection of the person's own, normal: not sensitive. */
@@ -285,7 +280,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
     ],
     [
       "the platform's settings don't parse",
-      { conversion: { provider: "workers-ai", model: "toMarkdown" } },
+      { conversion: { provider: "no-such-provider", model: "toMarkdown" } },
     ],
   ])(
     "fails a PDF at once while %s, sending nothing, never read another way",
@@ -403,17 +398,10 @@ describe("upload routing", { timeout: 60_000 }, () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
     const name = newName("pdf");
-    const { AI: ai } = env;
-    Reflect.set(env, "AI", undefined);
-    let upload: Upload;
-    try {
-      upload = await withPlatformAi(
-        { conversion: { provider: "local" } },
-        async () => await uploadedTo(person.api, collectionId, name)
-      );
-    } finally {
-      Reflect.set(env, "AI", ai);
-    }
+    const upload = await withPlatformAi(
+      { conversion: { provider: "local" } },
+      async () => await uploadedTo(person.api, collectionId, name)
+    );
 
     expect({
       sent: await carrying(name),

@@ -1,8 +1,7 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { runActorOf } from "@grasp-os/shared/audit";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { models } from "../src/models.ts";
 import { quotaPolicy } from "../src/workflows/quotas.ts";
@@ -26,7 +25,7 @@ import {
   statusOf,
   stepCall,
   times,
-  withGateway,
+  withProvider,
 } from "./run-lineages.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -57,7 +56,7 @@ describe("run lineages", { timeout: 90_000 }, () => {
       workflow: "reader",
     });
 
-    const result = await withGateway(
+    const result = await withProvider(
       undefined,
       times(20, cheapAnswer),
       async (fake) => {
@@ -123,20 +122,24 @@ describe("run lineages", { timeout: 90_000 }, () => {
     const root = `run-${crypto.randomUUID()}`;
     const actor = runActorOf({ runId: root, app, workflow: "reader" });
 
-    const result = await withGateway(
+    const replies = [
+      cheapAnswer,
+      cheapAnswer,
+      { status: 429, headers: { "retry-after": "1" } },
+      cheapAnswer,
+    ];
+    const result = await withProvider(
       undefined,
-      [cheapAnswer, cheapAnswer, { status: 500 }, cheapAnswer],
-      async (fake) => {
-        const ai: AiBinding = env.AI;
+      (requests) => {
         // The operator lowers a lineage's requests to the 3 this one has
-        // sent, as its third goes out: the provider then fails it, and
-        // the call tries again.
-        vi.spyOn(ai, "fetch").mockImplementation(async (...args) => {
-          if (fake.requests.length === 2) {
-            setPolicy({ ...configuredLimits, lineageModelRequests: 3 });
-          }
-          return await fake.binding.fetch(...args);
-        });
+        // sent, as its third reaches the provider: the provider refuses it
+        // for its rate, and the gateway tries again.
+        if (requests.length === 3) {
+          setPolicy({ ...configuredLimits, lineageModelRequests: 3 });
+        }
+        return replies[requests.length - 1];
+      },
+      async (fake) => {
         try {
           const before = await allAtOnce(times(2, actor), work);
           const retried = await callFor(work, actor);
@@ -171,34 +174,38 @@ describe("run lineages", { timeout: 90_000 }, () => {
     });
     const behind = runActorOf({ runId: behindRun, app, workflow: "reader" });
 
-    const result = await withGateway(undefined, [cheapAnswer], async (fake) => {
-      const policyDown = await outcome(
-        models({
-          ...env,
-          DB: onPolicyRead(() => {
-            throw new Error("D1_ERROR: the database is unavailable");
-          }),
-        }).call(stepCall(work, unreadable))
-      );
-      // The ledger saw a generation core never recorded: core's database
-      // restored from before it, say.
-      const { generation } = await quotaPolicy(env);
-      await setLedgerGeneration(generation + 1_000_000);
-      try {
-        const ledgerAhead = await callFor(work, behind);
-        return {
-          policyDown,
-          ledgerAhead,
-          refused: [
-            ...(await refusalsOf(unreadableRun)),
-            ...(await refusalsOf(behindRun)),
-          ],
-          sent: fake.requests.length,
-        };
-      } finally {
-        await setLedgerGeneration();
+    const result = await withProvider(
+      undefined,
+      [cheapAnswer],
+      async (fake) => {
+        const policyDown = await outcome(
+          models({
+            ...env,
+            DB: onPolicyRead(() => {
+              throw new Error("D1_ERROR: the database is unavailable");
+            }),
+          }).call(stepCall(work, unreadable))
+        );
+        // The ledger saw a generation core never recorded: core's database
+        // restored from before it, say.
+        const { generation } = await quotaPolicy(env);
+        await setLedgerGeneration(generation + 1_000_000);
+        try {
+          const ledgerAhead = await callFor(work, behind);
+          return {
+            policyDown,
+            ledgerAhead,
+            refused: [
+              ...(await refusalsOf(unreadableRun)),
+              ...(await refusalsOf(behindRun)),
+            ],
+            sent: fake.requests.length,
+          };
+        } finally {
+          await setLedgerGeneration();
+        }
       }
-    });
+    );
 
     expect(result).toStrictEqual({
       policyDown: "model.quota_policy_unavailable",
@@ -218,35 +225,39 @@ describe("run lineages", { timeout: 90_000 }, () => {
     const root = `run-${crypto.randomUUID()}`;
     const actor = runActorOf({ runId: root, app, workflow: "reader" });
 
-    const result = await withGateway(undefined, [cheapAnswer], async (fake) => {
-      // Another request already came to the ledger under the operator's
-      // next policy, which this call's first read of the policy misses:
-      // it is set only as that read reaches the database.
-      const next = policyGeneration() + 1;
-      await setLedgerGeneration(next);
-      const raced = { ...env };
-      let changed = false;
-      raced.DB = onPolicyRead(() => {
-        if (!changed) {
-          changed = true;
-          raced.QUOTA_LIMITS = {
-            generation: setPolicy(configuredLimits),
-            limits: configuredLimits,
+    const result = await withProvider(
+      undefined,
+      [cheapAnswer],
+      async (fake) => {
+        // Another request already came to the ledger under the operator's
+        // next policy, which this call's first read of the policy misses:
+        // it is set only as that read reaches the database.
+        const next = policyGeneration() + 1;
+        await setLedgerGeneration(next);
+        const raced = { ...env };
+        let changed = false;
+        raced.DB = onPolicyRead(() => {
+          if (!changed) {
+            changed = true;
+            raced.QUOTA_LIMITS = {
+              generation: setPolicy(configuredLimits),
+              limits: configuredLimits,
+            };
+          }
+        });
+        try {
+          const call = await outcome(models(raced).call(stepCall(work, actor)));
+          return {
+            call,
+            recorded: await generationsOf(root),
+            next,
+            sent: fake.requests.length,
           };
+        } finally {
+          await setLedgerGeneration();
         }
-      });
-      try {
-        const call = await outcome(models(raced).call(stepCall(work, actor)));
-        return {
-          call,
-          recorded: await generationsOf(root),
-          next,
-          sent: fake.requests.length,
-        };
-      } finally {
-        await setLedgerGeneration();
       }
-    });
+    );
 
     expect(result).toStrictEqual({
       call: "ok",
@@ -266,7 +277,7 @@ describe("run lineages", { timeout: 90_000 }, () => {
     const victim = runIdSchema.parse(`run-${crypto.randomUUID()}`);
     const victimActor = runActorOf({ runId: victim, app, workflow: "reader" });
 
-    const result = await withGateway(
+    const result = await withProvider(
       undefined,
       [...times(100, cheapAnswer), dearTotal],
       async () => {

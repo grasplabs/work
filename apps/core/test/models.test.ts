@@ -1,24 +1,23 @@
 import { Type } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
-// AI Gateway is the outside system here: a fake behind the AI binding
+// The provider behind connect is the outside system here: a fake that
 // answers in each provider's own wire format. Everything else is real,
-// down to the audit log.
+// connect and the ledger down to the audit log.
 
 /**
  * The most core's own work may add before an answer's first words reach
@@ -31,38 +30,35 @@ import { outcome, signedInApi } from "./sign-in.ts";
  */
 const firstTokenBudgetMs = 500;
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** A model that doesn't think, on chat completions. */
+const mistral = "mistral/mistral-large-latest";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const openai = "openai/gpt-5.4";
-/** Claude in Amazon Bedrock, through its EU profile. */
-const bedrockEu = "bedrock-eu/claude-sonnet-5-5";
 
-const config = {
-  gateway: "grasp-os-test",
-  models: [workersAi, anthropic, openai, bedrockEu],
-};
+/** The models the organization chose here: its default, then its fallbacks. */
+const chosen = [mistral, anthropic, openai];
 
-const answer = (text: string): GatewayReply => ({
+const answer = (text: string): ProviderReply => ({
   text,
   inputTokens: 1000,
   outputTokens: 100,
 });
 
 /**
- * Core's env with the fake gateway and the given config, which sets no
- * rules beyond the allowlist: model-rules.test.ts tests them.
+ * Core's env with the provider answering with `replies` for `models`, the
+ * organization's choice, and `rules` as the deployment's, none by
+ * default: model-rules.test.ts tests them.
  */
-const withGateway = (
-  replies: GatewayReply[],
-  modelGateway: unknown = config
+const withProvider = async (
+  replies: ProviderReply[],
+  {
+    rules,
+    models: choice = chosen,
+  }: { rules?: unknown; models?: string[] } = {}
 ) => {
-  const gateway = fakeGateway(...replies);
-  const gatewayEnv: ModelsEnv = {
-    ...env,
-    AI: gateway.binding,
-    MODEL_GATEWAY: modelGateway,
-  };
-  return { gateway, gatewayEnv };
+  const provider = await fakeProviderFor(choice, ...replies);
+  const providerEnv: Env = { ...env, MODEL_GATEWAY: rules };
+  return { provider, providerEnv };
 };
 
 const idp = mockIdp();
@@ -106,24 +102,23 @@ const newPerson = () =>
 
 // Efforts: Claude Opus 4.8 and GPT-5.6 Sol take all five levels; GPT-5.4 none
 // past xhigh, Claude Sonnet 4.5 none past high, Claude Opus 4.6 all but
-// xhigh, GLM-5.3 Flash (a default model) low, high and max only, and
-// DeepSeek V4.1 Flash (the other) high and max only. Llama 3.3 doesn't
-// think.
+// xhigh, and Mistral Small high only. Mistral Large doesn't think.
 const opus = "anthropic/claude-opus-4-8";
 const opus46 = "anthropic/claude-opus-4-6";
 const sol = "openai/gpt-5.6-sol";
-const glm = "workers-ai/@cf/zai-org/glm-5.3-flash";
+const mistralSmall = "mistral/mistral-small-latest";
+/** A model whose window is small: GPT-4's 8,192 tokens. */
+const smallWindow = "openai/gpt-4";
 
 /** The request body a call to `model` at `effort` sent the provider. */
 const sentAt = async (
   model: string,
   effort?: ModelCall<undefined>["effort"]
 ): Promise<unknown> => {
-  const { gateway, gatewayEnv } = withGateway([answer("Hello.")], {
-    gateway: "grasp-os-test",
+  const { provider, providerEnv } = await withProvider([answer("Hello.")], {
     models: [model],
   });
-  await models(gatewayEnv).call({
+  await models(providerEnv).call({
     model,
     input: "Say hello.",
     effort,
@@ -131,7 +126,7 @@ const sentAt = async (
     trigger: newPerson(),
     work: work(),
   });
-  return gateway.requests[0]?.body;
+  return provider.requests[0]?.body;
 };
 
 /** The audit events triggered by `userId`, once `count` have arrived. */
@@ -167,17 +162,14 @@ const refuse = (): never => {
 describe("model gateway", { timeout: 30_000 }, () => {
   beforeEach(makeWork);
 
-  it.each([
-    [workersAi, "/workers-ai/v1/chat/completions"],
-    [anthropic, "/anthropic/v1/messages"],
-    [openai, "/openai/responses"],
-    [bedrockEu, "/custom-bedrock-eu/v1/messages"],
-  ])(
-    "answers a chat call to %s through the deployment's AI Gateway",
-    async (model, route) => {
-      const { gateway, gatewayEnv } = withGateway([answer("Hello, Ada.")]);
+  it.each([mistral, anthropic, openai])(
+    "answers a chat call to %s, sending it the whole conversation",
+    async (model) => {
+      const { provider, providerEnv } = await withProvider([
+        answer("Hello, Ada."),
+      ]);
 
-      const result = await models(gatewayEnv).call({
+      const result = await models(providerEnv).call({
         model,
         system: "Greet people by name.",
         messages: [
@@ -195,15 +187,9 @@ describe("model gateway", { timeout: 30_000 }, () => {
         output: undefined,
         usage: { inputTokens: 1000, outputTokens: 100 },
       });
-      const routes = gateway.requests.map(({ url }) => {
-        const { origin, pathname } = new URL(url);
-        return `${origin}${pathname}`;
-      });
-      expect(routes).toStrictEqual([
-        `https://workers-binding.ai/ai-gateway/gateways/grasp-os-test${route}`,
-      ]);
+      expect(provider.requests).toHaveLength(1);
       // The whole conversation went along, not only the last turn.
-      const body = JSON.stringify(gateway.requests[0]?.body);
+      const body = JSON.stringify(provider.requests[0]?.body);
       for (const text of [
         "Greet people by name.",
         "Hi, I'm Ada.",
@@ -214,30 +200,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
   );
 
-  it("answers a call with the config the console gives a new deployment", async () => {
-    const [model] = defaultGatewayModels;
-    const { gateway, gatewayEnv } = withGateway([answer("Hello.")], {
-      gateway: "grasp-os",
-      models: defaultGatewayModels,
-    });
-
-    const result = await models(gatewayEnv).call({
-      model,
-      messages: [{ role: "user", content: "Say hello." }],
-      purpose: "chat.turn",
-      trigger: newPerson(),
-      work: work(),
-    });
-
-    expect({
-      text: result.text,
-      gateways: gateway.requests.map(
-        ({ url }) => new URL(url).pathname.split("/")[3]
-      ),
-    }).toStrictEqual({ text: "Hello.", gateways: ["grasp-os"] });
-  });
-
-  it("asks a model that thinks for max effort with each provider's own parameter", async () => {
+  it("asks a model that thinks for an effort with each provider's own parameter", async () => {
     await expect(sentAt(opus, "max")).resolves.toMatchObject({
       thinking: { type: "adaptive" },
       output_config: { effort: "max" },
@@ -245,8 +208,8 @@ describe("model gateway", { timeout: 30_000 }, () => {
     await expect(sentAt(sol, "max")).resolves.toMatchObject({
       reasoning: { effort: "max" },
     });
-    await expect(sentAt(glm, "max")).resolves.toMatchObject({
-      reasoning_effort: "max",
+    await expect(sentAt(mistralSmall, "high")).resolves.toMatchObject({
+      reasoning_effort: "high",
     });
   });
 
@@ -256,22 +219,23 @@ describe("model gateway", { timeout: 30_000 }, () => {
       gpt54: await sentAt(openai, "max"),
       sonnet45: await sentAt(anthropic, "max"),
       opus46: await sentAt(opus46, "xhigh"),
-      glm: await sentAt(glm, "medium"),
+      mistralSmall: await sentAt(mistralSmall, "medium"),
     }).toStrictEqual({
       gpt54: await sentAt(openai, "xhigh"),
       sonnet45: await sentAt(anthropic, "high"),
       opus46: await sentAt(opus46, "max"),
-      glm: await sentAt(glm, "high"),
+      mistralSmall: await sentAt(mistralSmall, "max"),
     });
   });
 
   it("asks for medium effort when a call names none, and a model that doesn't think as before", async () => {
-    for (const model of [opus, sol, glm, anthropic]) {
+    // One request at a time: a provider connected for the next stops
+    // answering the last.
+    for (const model of [opus, sol, mistralSmall, anthropic]) {
       // oxlint-disable-next-line no-await-in-loop -- one model at a time
-      await expect(sentAt(model)).resolves.toStrictEqual(
-        // oxlint-disable-next-line no-await-in-loop -- one model at a time
-        await sentAt(model, "medium")
-      );
+      const unnamed = await sentAt(model);
+      // oxlint-disable-next-line no-await-in-loop -- one model at a time
+      expect(unnamed).toStrictEqual(await sentAt(model, "medium"));
     }
     await expect(sentAt(opus)).resolves.toMatchObject({
       output_config: { effort: "medium" },
@@ -279,20 +243,19 @@ describe("model gateway", { timeout: 30_000 }, () => {
     await expect(sentAt(sol)).resolves.toMatchObject({
       reasoning: { effort: "medium" },
     });
-    await expect(sentAt(workersAi, "max")).resolves.toStrictEqual(
-      await sentAt(workersAi)
-    );
+    const maxOfNone = await sentAt(mistral, "max");
+    expect(maxOfNone).toStrictEqual(await sentAt(mistral));
   });
 
   it("records in the audit log the effort each request asked its model for", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway(
+    const { providerEnv } = await withProvider(
       [answer("One"), answer("Two"), answer("Three")],
-      { gateway: "grasp-os-test", models: [opus, openai, workersAi] }
+      { models: [opus, openai, mistral] }
     );
-    for (const model of [opus, openai, workersAi]) {
+    for (const model of [opus, openai, mistral]) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
-      await models(gatewayEnv).call({
+      await models(providerEnv).call({
         model,
         input: "Think hard.",
         effort: "max",
@@ -303,7 +266,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
 
     const events = await auditedFor(trigger.userId, 3);
-    // GPT-5.4 has no max; Llama 3.3 doesn't think.
+    // GPT-5.4 has no max; Mistral Large doesn't think.
     expect(
       Object.fromEntries(
         events.map(({ model, detail }) => [model?.model, detail.effort])
@@ -311,66 +274,16 @@ describe("model gateway", { timeout: 30_000 }, () => {
     ).toStrictEqual({
       "claude-opus-4-8": "max",
       "gpt-5.4": "xhigh",
-      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": null,
+      "mistral-large-latest": null,
     });
   });
 
-  it("sends no provider key, so the gateway uses the keys it stores, and takes no answer from its cache", async () => {
-    const { gateway, gatewayEnv } = withGateway([
-      answer("One"),
-      answer("Two"),
-      answer("Three"),
-    ]);
-    for (const model of [workersAi, anthropic, openai]) {
-      // One model after another, as a person would.
-      // oxlint-disable-next-line no-await-in-loop
-      await models(gatewayEnv).call({
-        model,
-        input: "Count.",
-        purpose: "chat.turn",
-        trigger: newPerson(),
-        work: work(),
-      });
-    }
-
-    for (const { headers } of gateway.requests) {
-      expect(headers.get("authorization")).toBeNull();
-      expect(headers.get("x-api-key")).toBeNull();
-      expect(headers.get("cf-aig-authorization")).toBe(
-        "Bearer cloudflare-gateway-binding"
-      );
-      expect({
-        // The gateway logs metadata only, never the prompt or the answer.
-        logsPayload: headers.get("cf-aig-collect-log-payload"),
-        // Nor answers from its cache, however the gateway is set: an
-        // answer it kept would be someone else's.
-        skipsCache: headers.get("cf-aig-skip-cache"),
-      }).toStrictEqual({ logsPayload: "false", skipsCache: "true" });
-      // Identifiers only: why, for what kind of caller, and the provider
-      // request's own ID, which the model ledger keeps it under.
-      const { providerRequest, ...metadata } = z
-        .object({ providerRequest: z.uuid() })
-        .catchall(z.unknown())
-        .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "null"));
-      expect([metadata, typeof providerRequest]).toStrictEqual([
-        { purpose: "chat.turn", actor: "person" },
-        "string",
-      ]);
-    }
-    // Nor could core send one: its env holds no provider key or gateway token.
-    expect(
-      Object.keys(env).filter((name) =>
-        /API_KEY|API_TOKEN|ANTHROPIC|OPENAI|GEMINI|AI_GATEWAY/u.test(name)
-      )
-    ).toStrictEqual([]);
-  });
-
   it("returns structured output parsed with the call's schema", async () => {
-    const { gatewayEnv } = withGateway([
+    const { providerEnv } = await withProvider([
       answer('```json\n{ "vendor": "Acme", "total": 42.5 }\n```'),
     ]);
 
-    const result = await models(gatewayEnv).call({
+    const result = await models(providerEnv).call({
       model: anthropic,
       system: "Read the invoice.",
       input: { invoice: "Acme, total 42.50" },
@@ -385,13 +298,13 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("asks once more when the answer doesn't match the schema", async () => {
     const trigger = newPerson();
-    const { gateway, gatewayEnv } = withGateway([
+    const { provider, providerEnv } = await withProvider([
       answer("The total is 42."),
       answer('{ "total": 42 }'),
     ]);
 
-    const result = await models(gatewayEnv).call({
-      model: workersAi,
+    const result = await models(providerEnv).call({
+      model: mistral,
       input: "What's the total?",
       schema: z.object({ total: z.number() }),
       purpose: "workflow.step",
@@ -405,8 +318,8 @@ describe("model gateway", { timeout: 30_000 }, () => {
       usage: { inputTokens: 2000, outputTokens: 200 },
     });
     // The second request shows the model its answer and why it didn't fit.
-    expect(gateway.requests).toHaveLength(2);
-    expect(JSON.stringify(gateway.requests[1]?.body)).toMatch(
+    expect(provider.requests).toHaveLength(2);
+    expect(JSON.stringify(provider.requests[1]?.body)).toMatch(
       /The total is 42\..*isn't JSON/u
     );
     const events = await auditedFor(trigger.userId, 2);
@@ -420,15 +333,15 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("fails when the answer doesn't match the schema the second time either", async () => {
     const trigger = newPerson();
-    const { gateway, gatewayEnv } = withGateway([
+    const { provider, providerEnv } = await withProvider([
       answer('{ "total": "forty-two" }'),
       answer('{ "total": "still forty-two" }'),
     ]);
 
     await expect(
       outcome(
-        models(gatewayEnv).call({
-          model: workersAi,
+        models(providerEnv).call({
+          model: mistral,
           input: "What's the total?",
           schema: z.object({ total: z.number() }),
           purpose: "workflow.step",
@@ -437,19 +350,18 @@ describe("model gateway", { timeout: 30_000 }, () => {
         })
       )
     ).resolves.toBe("model.invalid_output");
-    expect(gateway.requests).toHaveLength(2);
+    expect(provider.requests).toHaveLength(2);
     // The feedback names what didn't fit.
-    expect(JSON.stringify(gateway.requests[1]?.body)).toContain("total");
+    expect(JSON.stringify(provider.requests[1]?.body)).toContain("total");
     await expect(auditedFor(trigger.userId, 2)).resolves.toHaveLength(2);
   });
 
-  it("refuses a model the deployment doesn't allow, before anything is sent", async () => {
-    const { gateway, gatewayEnv } = withGateway([], {
-      gateway: "grasp-os-test",
-      models: [workersAi],
+  it("refuses a model the organization didn't choose, before anything is sent", async () => {
+    const { provider, providerEnv } = await withProvider([], {
+      models: [mistral],
     });
     const call = async (model: string) =>
-      await models(gatewayEnv).call({
+      await models(providerEnv).call({
         model,
         input: "Hello.",
         purpose: "chat.turn",
@@ -457,28 +369,31 @@ describe("model gateway", { timeout: 30_000 }, () => {
         work: work(),
       });
 
-    // A model the gateway offers, but not this deployment.
+    // A model the gateway offers, but not one the organization chose.
     await expect(outcome(call(anthropic))).resolves.toBe("model.not_allowed");
     // A provider the gateway doesn't offer at all.
     await expect(outcome(call("google/gemini-3-pro"))).resolves.toBe(
       "model.not_allowed"
     );
-    await expect(
-      outcome(call("@cf/meta/llama-3.3-70b-instruct-fp8-fast"))
-    ).resolves.toBe("model.not_allowed");
+    // A model with no provider named.
+    await expect(outcome(call("mistral-large-latest"))).resolves.toBe(
+      "model.not_allowed"
+    );
     await expect(call(anthropic)).rejects.toMatchObject({
       message: "This deployment doesn't allow that model.",
       details: { model: anthropic },
     });
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
-  it("answers through the account's default gateway with the default models while no config is set", async () => {
-    const [model] = defaultGatewayModels;
-    const { gateway, gatewayEnv } = withGateway([answer("Hello.")]);
-    gatewayEnv.MODEL_GATEWAY = undefined;
+  it("answers the organization's chosen models with no rules while MODEL_GATEWAY isn't set", async () => {
+    const { provider, providerEnv } = await withProvider([
+      answer("Hello."),
+      answer("Hello again."),
+    ]);
+    providerEnv.MODEL_GATEWAY = undefined;
     const call = async (to: string) =>
-      await models(gatewayEnv).call({
+      await models(providerEnv).call({
         model: to,
         input: "Say hello.",
         purpose: "chat.turn",
@@ -486,33 +401,31 @@ describe("model gateway", { timeout: 30_000 }, () => {
         work: work(),
       });
 
-    await expect(call(model)).resolves.toMatchObject({ text: "Hello." });
-    await expect(outcome(call(anthropic))).resolves.toBe("model.not_allowed");
-    expect(
-      gateway.requests.map(({ url }) => new URL(url).pathname.split("/")[3])
-    ).toStrictEqual(["default"]);
+    await expect(call(mistral)).resolves.toMatchObject({ text: "Hello." });
+    await expect(call(openai)).resolves.toMatchObject({
+      text: "Hello again.",
+    });
+    expect(provider.requests).toHaveLength(2);
   });
 
   it.each([
-    ["config that isn't JSON", "{"],
-    ["no gateway", { models: [workersAi] }],
-    ["no models", { gateway: "grasp-os-test", models: [] }],
+    ["rules that aren't JSON", "{"],
+    ["a budget below nothing", { budgets: { user: { limit: -1 } } }],
     [
-      "a model pi doesn't know",
-      { gateway: "grasp-os-test", models: ["anthropic/claude-9"] },
+      "a model the gateway doesn't offer",
+      { sensitive: { models: ["anthropic/claude-9"], connections: [] } },
     ],
   ])(
-    "refuses every call with %s: the gateway is off",
-    async (_, modelGateway) => {
-      const { gateway, gatewayEnv } = withGateway(
-        [answer("Hi.")],
-        modelGateway
-      );
+    "refuses every call with %s: the gateway fails closed",
+    async (_, rules) => {
+      const { provider, providerEnv } = await withProvider([answer("Hi.")], {
+        rules,
+      });
 
       await expect(
         outcome(
-          models(gatewayEnv).call({
-            model: workersAi,
+          models(providerEnv).call({
+            model: mistral,
             input: "Hello.",
             purpose: "chat.turn",
             trigger: newPerson(),
@@ -520,23 +433,29 @@ describe("model gateway", { timeout: 30_000 }, () => {
           })
         )
       ).resolves.toBe("model.unconfigured");
-      expect(gateway.requests).toStrictEqual([]);
+      expect(provider.requests).toStrictEqual([]);
     }
   );
 
-  it("takes its config as the JSON text a .dev.vars file sets", async () => {
-    const { gatewayEnv } = withGateway([answer("Hi.")], JSON.stringify(config));
-    await expect(
-      outcome(
-        models(gatewayEnv).call({
-          model: workersAi,
+  it("takes its rules as the JSON text a .dev.vars file sets", async () => {
+    const { providerEnv } = await withProvider([answer("Hi.")], {
+      rules: JSON.stringify({ eu: { deployment: true, models: [mistral] } }),
+    });
+    const call = async (model: string) =>
+      await outcome(
+        models(providerEnv).call({
+          model,
           input: "Hello.",
           purpose: "chat.turn",
           trigger: newPerson(),
           work: work(),
         })
-      )
-    ).resolves.toBe("ok");
+      );
+
+    expect({
+      inEu: await call(mistral),
+      outside: await call(anthropic),
+    }).toStrictEqual({ inEu: "ok", outside: "model.eu_only" });
   });
 
   it.each([
@@ -558,21 +477,21 @@ describe("model gateway", { timeout: 30_000 }, () => {
       { input: "Hi.", trigger: { type: "admin" } },
     ],
   ])("refuses a call with %s", async (_, fields) => {
-    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+    const { provider, providerEnv } = await withProvider([answer("Hi.")]);
     // SAFETY: invalid on purpose: what a caller that isn't type-checked (a
     // workflow isolate, say) could send, which the gateway must refuse.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const call = {
-      model: workersAi,
+      model: mistral,
       purpose: "chat.turn",
       trigger: newPerson(),
       work: work(),
       ...fields,
     } as ModelCall<undefined>;
-    await expect(outcome(models(gatewayEnv).call(call))).resolves.toBe(
+    await expect(outcome(models(providerEnv).call(call))).resolves.toBe(
       "model.invalid_call"
     );
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
   it.each([
@@ -596,11 +515,11 @@ describe("model gateway", { timeout: 30_000 }, () => {
     "sends a call whose provenance has %s, and records as much of it as fits",
     async (_, provenance, { kept, dropped }) => {
       const trigger = newPerson();
-      const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+      const { provider, providerEnv } = await withProvider([answer("Hi.")]);
 
       await expect(
         outcome(
-          models(gatewayEnv).call({
+          models(providerEnv).call({
             model: anthropic,
             input: "Hi.",
             purpose: "chat.turn",
@@ -611,7 +530,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
         )
       ).resolves.toBe("ok");
 
-      expect(gateway.requests).toHaveLength(1);
+      expect(provider.requests).toHaveLength(1);
       const [event] = await auditedFor(trigger.userId, 1);
       expect({
         provenance: event?.provenance,
@@ -625,7 +544,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("audits every call as metadata: who asked, why, model, tokens, cost, provenance", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([
+    const { providerEnv } = await withProvider([
       {
         text: "It's due on 1 October.",
         inputTokens: 1_000_000,
@@ -633,7 +552,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
       },
     ]);
 
-    await models(gatewayEnv).call({
+    await models(providerEnv).call({
       model: anthropic,
       input: "When is the Acme invoice due?",
       purpose: "chat.turn",
@@ -661,7 +580,6 @@ describe("model gateway", { timeout: 30_000 }, () => {
         purpose: "chat.turn",
         outcome: "answered",
         attempt: 1,
-        gatewayLogId: "log-1",
       },
     });
     // At Claude Sonnet 4.5's long-context prices, as its prompt is past
@@ -675,12 +593,12 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("says when an answer stopped at the model's output limit", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([
+    const { providerEnv } = await withProvider([
       { ...answer("The first part of a long"), truncated: true },
     ]);
 
-    const result = await models(gatewayEnv).call({
-      model: workersAi,
+    const result = await models(providerEnv).call({
+      model: mistral,
       input: "Write a long essay.",
       purpose: "chat.turn",
       trigger,
@@ -698,21 +616,28 @@ describe("model gateway", { timeout: 30_000 }, () => {
   it.each([
     [anthropic, 401, "authentication_error", 1, "model.failed"],
     [openai, 402, "insufficient_quota", 1, "model.failed"],
-    // Refused for a moment: tried twice more before it is told it is
-    // rate-limited, not that it failed.
-    [workersAi, 429, "rate_limit_error", 3, "model.rate_limited"],
-    [anthropic, 503, "overloaded_error", 3, "model.failed"],
+    // Refused for a moment: tried twice more, after the wait it asks for,
+    // before it is told it is rate-limited, not that it failed.
+    [mistral, 429, "rate_limit_error", 3, "model.rate_limited"],
+    // Never asked again: the provider may have taken it on, and billed it.
+    [anthropic, 503, "overloaded_error", 1, "model.failed"],
   ])(
     "audits a call to %s the provider refuses with %i, with the status and error type only",
     async (model, status, errorType, requests, told) => {
       const trigger = newPerson();
-      const { gateway, gatewayEnv } = withGateway(
-        Array.from({ length: requests }, () => ({ status, errorType }))
+      const { provider, providerEnv } = await withProvider(
+        Array.from({ length: requests }, () => ({
+          status,
+          errorType,
+          headers: { "retry-after": "1" },
+        })),
+        // No fallback to try instead.
+        { models: [model] }
       );
 
       await expect(
         outcome(
-          models(gatewayEnv).call({
+          models(providerEnv).call({
             model,
             input: "Hello.",
             purpose: "chat.turn",
@@ -721,7 +646,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
           })
         )
       ).resolves.toBe(told);
-      expect(gateway.requests).toHaveLength(requests);
+      expect(provider.requests).toHaveLength(requests);
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event).toMatchObject({
         action: "model.call",
@@ -733,18 +658,21 @@ describe("model gateway", { timeout: 30_000 }, () => {
   );
 
   it("reads a rate limit's wait from retry-after when retry-after-ms is blank, held to core's most", async () => {
-    const { gatewayEnv } = withGateway(
+    const { providerEnv } = await withProvider(
       Array.from({ length: 3 }, () => ({
         status: 429,
         errorType: "rate_limit_error",
         headers: { "retry-after-ms": " ", "retry-after": "61" },
-      }))
+      })),
+      { models: [mistral] }
     );
 
-    const told = await models(gatewayEnv)
+    const told = await models(providerEnv)
       .call({
-        model: workersAi,
+        model: mistral,
         input: "Hello.",
+        // Too soon for the wait, so it is told it.
+        timeoutMs: 10_000,
         purpose: "chat.turn",
         trigger: newPerson(),
         work: work(),
@@ -760,15 +688,22 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it("tells a call whose last request was lost that it failed, not that it was rate-limited before", async () => {
-    const { gatewayEnv } = withGateway([
-      { status: 429, errorType: "rate_limit_error" },
-      { hang: true },
-    ]);
+    const { providerEnv } = await withProvider(
+      [
+        {
+          status: 429,
+          errorType: "rate_limit_error",
+          headers: { "retry-after": "1" },
+        },
+        { hang: true },
+      ],
+      { models: [mistral] }
+    );
 
     await expect(
       outcome(
-        models(gatewayEnv).call({
-          model: workersAi,
+        models(providerEnv).call({
+          model: mistral,
           input: "Hello.",
           timeoutMs: 5000,
           purpose: "chat.turn",
@@ -779,58 +714,13 @@ describe("model gateway", { timeout: 30_000 }, () => {
     ).resolves.toBe("model.failed");
   });
 
-  it("tells a call cut off while it waited out a rate limit that it failed, not that it was rate-limited", async () => {
-    const { gatewayEnv } = withGateway([
-      {
-        status: 429,
-        errorType: "rate_limit_error",
-        headers: { "retry-after-ms": "4000" },
-      },
-      { text: "Too late.", inputTokens: 10, outputTokens: 5 },
-    ]);
-
-    await expect(
-      outcome(
-        models(gatewayEnv).call({
-          model: workersAi,
-          input: "Hello.",
-          timeoutMs: 1500,
-          purpose: "chat.turn",
-          trigger: newPerson(),
-          work: work(),
-        })
-      )
-    ).resolves.toBe("model.failed");
-  });
-
-  it("answers when the provider refuses for a moment, then answers", async () => {
-    const trigger = newPerson();
-    const { gateway, gatewayEnv } = withGateway([
-      { status: 429, errorType: "rate_limit_error" },
-      answer("Hi."),
-    ]);
-
-    const result = await models(gatewayEnv).call({
-      model: anthropic,
-      input: "Hello.",
-      purpose: "chat.turn",
-      trigger,
-      work: work(),
-    });
-
-    expect(result.text).toBe("Hi.");
-    expect(gateway.requests).toHaveLength(2);
-    const [event] = await auditedFor(trigger.userId, 1);
-    expect(event?.detail).toMatchObject({ outcome: "answered", status: 200 });
-  });
-
   it("fails a call that takes longer than its timeout, and audits it", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([{ hang: true }]);
+    const { providerEnv } = await withProvider([{ hang: true }]);
 
     await expect(
       outcome(
-        models(gatewayEnv).call({
+        models(providerEnv).call({
           model: openai,
           input: "Hello.",
           timeoutMs: 100,
@@ -848,14 +738,14 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it("leaves no timer behind once a call has answered", async () => {
-    const { gatewayEnv } = withGateway([answer("Hello.")]);
+    const { providerEnv } = await withProvider([answer("Hello.")]);
     // The call's own deadline, told apart from any other timer the isolate
     // sets meanwhile (an outbox drain, say) by a timeout nothing else uses.
     const timeoutMs = 47_123;
     const set = vi.spyOn(globalThis, "setTimeout");
     const cleared = vi.spyOn(globalThis, "clearTimeout");
     try {
-      await models(gatewayEnv).call({
+      await models(providerEnv).call({
         model: anthropic,
         input: "Hello.",
         timeoutMs,
@@ -879,7 +769,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it("caps the answer's length at the call's limit, or a default, never above what the model can answer", async () => {
-    const { gateway, gatewayEnv } = withGateway([
+    const { provider, providerEnv } = await withProvider([
       answer("One"),
       answer("Two"),
       answer("Three"),
@@ -887,7 +777,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     for (const maxTokens of [500, undefined, 10_000_000]) {
       // One after another, as a person would.
       // oxlint-disable-next-line no-await-in-loop
-      await models(gatewayEnv).call({
+      await models(providerEnv).call({
         model: openai,
         input: "Write something.",
         maxTokens,
@@ -897,7 +787,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
       });
     }
 
-    const sentLimits = gateway.requests.map(
+    const sentLimits = provider.requests.map(
       ({ body }) =>
         z.object({ max_output_tokens: z.number() }).parse(body)
           .max_output_tokens
@@ -908,33 +798,37 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it("keeps a small window's default answer to a quarter of it, so the request has room", async () => {
-    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+    const { provider, providerEnv } = await withProvider([answer("Hi.")], {
+      models: [smallWindow],
+    });
 
-    await models(gatewayEnv).call({
-      model: workersAi,
+    await models(providerEnv).call({
+      model: smallWindow,
       input: "Write something.",
       purpose: "chat.turn",
       trigger: newPerson(),
       work: work(),
     });
 
-    // Llama 3.3's window is 24,000 tokens, which Workers AI counts the
-    // answer's cap against.
-    expect(gateway.requests.map(({ body }) => body)).toMatchObject([
-      { max_completion_tokens: 6000 },
+    // GPT-4's window is 8,192 tokens, which OpenAI counts the answer's
+    // cap against.
+    expect(provider.requests.map(({ body }) => body)).toMatchObject([
+      { max_output_tokens: 2048 },
     ]);
   });
 
   it("refuses a call through a binding that asks for more than the model can answer, never cutting it short", async () => {
-    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+    const { provider, providerEnv } = await withProvider([answer("Hi.")], {
+      models: [smallWindow],
+    });
     const working = work();
     const appId =
       "context" in working && working.context.type === "app"
         ? working.context.appId
         : undefined;
     const call = async (maxTokens: number) =>
-      await models(gatewayEnv).call({
-        model: workersAi,
+      await models(providerEnv).call({
+        model: smallWindow,
         input: "Write something.",
         maxTokens,
         purpose: "app.resource",
@@ -947,25 +841,25 @@ describe("model gateway", { timeout: 30_000 }, () => {
         },
       });
 
-    // A quarter of Llama 3.3's 24,000-token window, and one token more.
-    await expect(call(6001)).rejects.toMatchObject({
+    // A quarter of GPT-4's 8,192-token window, and one token more.
+    await expect(call(2049)).rejects.toMatchObject({
       code: "model.answer_too_long",
     });
-    expect(gateway.requests).toStrictEqual([]);
-    await call(6000);
-    expect(gateway.requests.map(({ body }) => body)).toMatchObject([
-      { max_completion_tokens: 6000 },
+    expect(provider.requests).toStrictEqual([]);
+    await call(2048);
+    expect(provider.requests.map(({ body }) => body)).toMatchObject([
+      { max_output_tokens: 2048 },
     ]);
   });
 
   it("keeps a paid answer when the audit log is down, and appends its event later", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([answer("Hello, Ada.")]);
+    const { providerEnv } = await withProvider([answer("Hello, Ada.")]);
     const logDown = new Proxy(env.AUDIT_LOG, {
       get: () => refuse,
     });
 
-    const result = await models({ ...gatewayEnv, AUDIT_LOG: logDown }).call({
+    const result = await models({ ...providerEnv, AUDIT_LOG: logDown }).call({
       model: anthropic,
       input: "Say hello.",
       purpose: "chat.turn",
@@ -982,7 +876,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("keeps a paid answer when the database refuses its audit event, and appends the event straight to the log", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([answer("Hello, Ada.")]);
+    const { providerEnv } = await withProvider([answer("Hello, Ada.")]);
     // Reads still work, so the rules can check where the call works; every
     // write, the audit event's among them, is refused.
     const databaseDown = new Proxy(env.DB, {
@@ -999,7 +893,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
       },
     });
 
-    const result = await models({ ...gatewayEnv, DB: databaseDown }).call({
+    const result = await models({ ...providerEnv, DB: databaseDown }).call({
       model: anthropic,
       input: "Say hello.",
       purpose: "chat.turn",
@@ -1011,23 +905,6 @@ describe("model gateway", { timeout: 30_000 }, () => {
     const [event] = await auditedFor(trigger.userId, 1);
     expect(event).toMatchObject({ action: "model.call", actor: trigger });
   });
-
-  it("refuses every call as having no provider on a deployment without the AI binding, such as plain workerd, until the organization connects one", async () => {
-    const { gatewayEnv } = withGateway([answer("Hi.")]);
-    const { AI: _, ...withoutAi } = gatewayEnv;
-
-    await expect(
-      outcome(
-        models(withoutAi).call({
-          model: workersAi,
-          input: "Hello.",
-          purpose: "chat.turn",
-          trigger: newPerson(),
-          work: work(),
-        })
-      )
-    ).resolves.toBe("model.no_provider");
-  });
 });
 
 /**
@@ -1035,11 +912,11 @@ describe("model gateway", { timeout: 30_000 }, () => {
  * in milliseconds; `release` lets the provider write the rest.
  */
 const firstWordsMs = async (
-  gatewayEnv: ModelsEnv,
+  providerEnv: Env,
   question: string,
   release: () => void
 ): Promise<number | undefined> => {
-  const agent = await models(gatewayEnv).agent({
+  const agent = await models(providerEnv).agent({
     model: anthropic,
     purpose: "chat.turn",
     trigger: newPerson(),
@@ -1082,11 +959,11 @@ describe("model gateway for agents", () => {
       tools: [codeTool],
     });
 
-  it.each([workersAi, anthropic, openai])(
+  it.each([mistral, anthropic, openai])(
     "streams a tool call from %s through the gateway, and audits the request",
     async (model) => {
       const trigger = newPerson();
-      const { gateway, gatewayEnv } = withGateway([
+      const { provider, providerEnv } = await withProvider([
         {
           text: "Let me check.",
           toolCalls: [
@@ -1096,7 +973,7 @@ describe("model gateway for agents", () => {
           outputTokens: 100,
         },
       ]);
-      const agent = await models(gatewayEnv).agent({
+      const agent = await models(providerEnv).agent({
         model,
         purpose: "chat.turn",
         trigger,
@@ -1110,25 +987,20 @@ describe("model gateway for agents", () => {
       }
       const final = await stream.result();
 
-      const [request] = gateway.requests;
+      const [request] = provider.requests;
       expect({
         streamed: types.has("toolcall_end"),
         stopReason: final.stopReason,
         toolCalls: final.content.flatMap((block) =>
           block.type === "toolCall" ? [[block.name, block.arguments]] : []
         ),
-        // The tool went along, to the deployment's gateway.
-        gateway: new URL(request?.url ?? "").pathname.split("/")[3],
+        // The tool went along.
         offered: JSON.stringify(request?.body).includes("Runs code."),
-        // A loop's requests too: never an answer from the gateway's cache.
-        skipsCache: request?.headers.get("cf-aig-skip-cache"),
       }).toStrictEqual({
         streamed: true,
         stopReason: "toolUse",
         toolCalls: [["executeCode", { code: "1 + 1" }]],
-        gateway: "grasp-os-test",
         offered: true,
-        skipsCache: "true",
       });
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event).toMatchObject({
@@ -1139,10 +1011,10 @@ describe("model gateway for agents", () => {
     }
   );
 
-  it.each([workersAi, anthropic, openai])(
+  it.each([mistral, anthropic, openai])(
     "goes on after a tool call that came with no text, with its result, on %s",
     async (model) => {
-      const { gateway, gatewayEnv } = withGateway([
+      const { provider, providerEnv } = await withProvider([
         {
           text: "",
           toolCalls: [
@@ -1153,7 +1025,7 @@ describe("model gateway for agents", () => {
         },
         answer("It is 2."),
       ]);
-      const agent = await models(gatewayEnv).agent({
+      const agent = await models(providerEnv).agent({
         model,
         purpose: "chat.turn",
         trigger: newPerson(),
@@ -1188,7 +1060,7 @@ describe("model gateway for agents", () => {
         text: answered.content.flatMap((block) =>
           block.type === "text" ? [block.text] : []
         ),
-        requests: gateway.requests.length,
+        requests: provider.requests.length,
       }).toStrictEqual({
         called: "toolUse",
         answered: "stop",
@@ -1201,25 +1073,28 @@ describe("model gateway for agents", () => {
   it("logs what a refusal says went wrong, and never its message, which may quote the prompt or a key", async () => {
     const prompt = "What is in the merger memo?";
     const key = "sk-live-4f9a8b7c6d5e4f3a";
-    const problem = `AiError: Bad input: Type mismatch of '/messages/2/content', 'string' not in 'null', near '${prompt}' (key ${key})`;
-    const { gatewayEnv } = withGateway([
-      {
-        status: 400,
-        body: {
-          name: "AiError",
-          internalCode: 5006,
-          httpCode: 400,
-          message: problem,
-          description: problem,
+    const problem = `Invalid 'messages[2].content': near '${prompt}' (key ${key})`;
+    const { providerEnv } = await withProvider(
+      [
+        {
+          status: 400,
+          body: {
+            error: {
+              type: "invalid_request_error",
+              code: "invalid_value",
+              message: problem,
+            },
+          },
         },
-      },
-    ]);
+      ],
+      { models: [mistral] }
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {
       // Kept for the test to read.
     });
     try {
-      const agent = await models(gatewayEnv).agent({
-        model: workersAi,
+      const agent = await models(providerEnv).agent({
+        model: mistral,
         purpose: "chat.turn",
         trigger: newPerson(),
         work: work(),
@@ -1234,12 +1109,11 @@ describe("model gateway for agents", () => {
               .success
         );
       expect({ answer: failed.errorMessage, logged }).toMatchObject({
-        answer: "The model call failed (400).",
+        answer: "The model call failed (400 invalid_request_error).",
         logged: {
           status: 400,
-          providerErrorName: "AiError",
-          providerInternalCode: 5006,
-          providerErrorPaths: "/messages/2/content",
+          providerErrorType: "invalid_request_error",
+          providerErrorCode: "invalid_value",
         },
       });
       const text = JSON.stringify(logged);
@@ -1252,15 +1126,14 @@ describe("model gateway for agents", () => {
     }
   });
 
-  it("refuses a model the deployment doesn't allow before the loop sends anything", async () => {
-    const { gateway, gatewayEnv } = withGateway([], {
-      gateway: "grasp-os-test",
-      models: [workersAi],
+  it("refuses a model the organization didn't choose before the loop sends anything", async () => {
+    const { provider, providerEnv } = await withProvider([], {
+      models: [mistral],
     });
 
     await expect(
       outcome(
-        models(gatewayEnv).agent({
+        models(providerEnv).agent({
           model: anthropic,
           purpose: "chat.turn",
           trigger: newPerson(),
@@ -1268,13 +1141,13 @@ describe("model gateway for agents", () => {
         })
       )
     ).resolves.toBe("model.not_allowed");
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
   it("admits each request by the rules as they stand then, and audits a refusal", async () => {
     const trigger = newPerson();
-    const { gateway, gatewayEnv } = withGateway([answer("One.")]);
-    const agent = await models(gatewayEnv).agent({
+    const { provider, providerEnv } = await withProvider([answer("One.")]);
+    const agent = await models(providerEnv).agent({
       model: anthropic,
       purpose: "chat.turn",
       trigger,
@@ -1282,20 +1155,18 @@ describe("model gateway for agents", () => {
     });
 
     await agent.stream(agent.model, withTool("First.")).result();
-    // The deployment stops allowing the model while the loop runs.
-    gatewayEnv.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [workersAi],
-    };
+    // The deployment's rules come to keep calls in the EU while the loop
+    // runs, and the model isn't hosted there.
+    providerEnv.MODEL_GATEWAY = { eu: { deployment: true, models: [mistral] } };
     const second = await agent
       .stream(agent.model, withTool("Second."))
       .result();
 
     expect(second).toMatchObject({
       stopReason: "error",
-      errorMessage: "The model call was refused (model.not_allowed).",
+      errorMessage: "The model call was refused (model.eu_only).",
     });
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
     const events = await auditedFor(trigger.userId, 2);
     expect(events.map(({ action }) => action).toSorted()).toStrictEqual([
       "model.call",
@@ -1305,10 +1176,12 @@ describe("model gateway for agents", () => {
 
   it("ends a refused request with a failure in its own words, and audits it", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([
-      { status: 401, errorType: "authentication_error" },
-    ]);
-    const agent = await models(gatewayEnv).agent({
+    const { providerEnv } = await withProvider(
+      [{ status: 401, errorType: "authentication_error" }],
+      // No fallback to try instead.
+      { models: [anthropic] }
+    );
+    const agent = await models(providerEnv).agent({
       model: anthropic,
       purpose: "chat.turn",
       trigger,
@@ -1331,9 +1204,12 @@ describe("model gateway for agents", () => {
 
   it("records what fed each request, as the loop has read it by then", async () => {
     const trigger = newPerson();
-    const { gatewayEnv } = withGateway([answer("One."), answer("Two.")]);
+    const { providerEnv } = await withProvider([
+      answer("One."),
+      answer("Two."),
+    ]);
     const read: string[] = [];
-    const agent = await models(gatewayEnv).agent(
+    const agent = await models(providerEnv).agent(
       { model: anthropic, purpose: "chat.turn", trigger, work: work() },
       () => read
     );
@@ -1349,8 +1225,8 @@ describe("model gateway for agents", () => {
   });
 
   it("sends nothing for a request cancelled before it starts", async () => {
-    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
-    const agent = await models(gatewayEnv).agent({
+    const { provider, providerEnv } = await withProvider([answer("Hi.")]);
+    const agent = await models(providerEnv).agent({
       model: anthropic,
       purpose: "chat.turn",
       trigger: newPerson(),
@@ -1364,13 +1240,13 @@ describe("model gateway for agents", () => {
       .result();
 
     expect(final.stopReason).toBe("aborted");
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
   it("stops a request its caller cancels, and audits it as cancelled", async () => {
     const trigger = newPerson();
-    const { gateway, gatewayEnv } = withGateway([{ hang: true }]);
-    const agent = await models(gatewayEnv).agent({
+    const { provider, providerEnv } = await withProvider([{ hang: true }]);
+    const agent = await models(providerEnv).agent({
       model: openai,
       purpose: "chat.turn",
       trigger,
@@ -1383,7 +1259,7 @@ describe("model gateway for agents", () => {
     });
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -1409,7 +1285,7 @@ describe("model gateway for agents", () => {
   it("relays an answer's first words while the provider is still writing, with little of core's own work before them", async () => {
     const warm = Promise.withResolvers<boolean>();
     const measured = Promise.withResolvers<boolean>();
-    const { gatewayEnv } = withGateway([
+    const { providerEnv } = await withProvider([
       {
         ...answer("Warming up the ledger."),
         pause: { at: 7, until: warm.promise },
@@ -1422,10 +1298,10 @@ describe("model gateway for agents", () => {
 
     // The first turn starts the ledger and the rest; the second is a turn
     // as a conversation has them.
-    await firstWordsMs(gatewayEnv, "Hello.", () => {
+    await firstWordsMs(providerEnv, "Hello.", () => {
       warm.resolve(true);
     });
-    const firstMs = await firstWordsMs(gatewayEnv, "Good morning.", () => {
+    const firstMs = await firstWordsMs(providerEnv, "Good morning.", () => {
       measured.resolve(true);
     });
 

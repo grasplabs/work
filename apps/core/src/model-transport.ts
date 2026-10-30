@@ -36,16 +36,11 @@ import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 // - Capabilities: which providers a transport reaches, and what it can
 //   promise about payload logging and caching (`TransportCapabilities`).
 
-/** The ways a deployment can reach its models. */
-export const transportKinds = [
-  /** Cloudflare AI Gateway, over the AI binding (model-transport-cloudflare.ts). */
-  "cloudflare-ai-gateway",
-  /**
-   * The provider's own API, through connect, which holds the key
-   * (model-transport-connect.ts).
-   */
-  "connect",
-] as const;
+/**
+ * The ways a deployment can reach its models: the provider's own API,
+ * through connect, which holds the key (model-transport-connect.ts).
+ */
+export const transportKinds = ["connect"] as const;
 export type TransportKind = (typeof transportKinds)[number];
 
 /** What a transport can do, as the gateway and the admin read it. */
@@ -63,21 +58,6 @@ export interface TransportCapabilities {
    * another.
    */
   sharedCacheOff: boolean;
-  /**
-   * Whether pi's provider SDKs retry a refused request themselves (429 or
-   * 5xx), each retry admitted by the ledger on its own. Otherwise the
-   * gateway retries only what can't have been billed (models.ts).
-   */
-  sdkRetries: boolean;
-}
-
-/** What a request says about itself to the transport: identifiers only. */
-export interface RouteMetadata {
-  purpose: string;
-  /** The kind of caller: a person, an agent, a workflow. */
-  actor: string;
-  requestId: string | undefined;
-  runStep: { runId: string; step: string } | undefined;
 }
 
 /** One model reached one way: everything the gateway needs to send to it. */
@@ -114,7 +94,7 @@ export interface ModelTransport {
   kind: TransportKind;
   capabilities: TransportCapabilities;
   /** The route to `ref`, or `undefined` when this transport doesn't reach it. */
-  route: (ref: ModelRef, metadata: RouteMetadata) => TransportRoute | undefined;
+  route: (ref: ModelRef) => TransportRoute | undefined;
 }
 
 /**
@@ -165,7 +145,6 @@ export interface StreamOptions {
   /** The gateway's fetch around the route's: admission, accounting. */
   fetch: FetchFunction;
   maxTokens: number;
-  maxRetries: number;
   reasoning: SimpleStreamOptions["reasoning"];
   signal: AbortSignal;
   onResponse: (response: {
@@ -189,7 +168,9 @@ export const streamRoute = async (
     fetch: options.fetch,
     headers: route.headers,
     maxTokens: options.maxTokens,
-    maxRetries: options.maxRetries,
+    // pi's provider SDKs never retry: the gateway retries only what can't
+    // have been billed (models.ts), each retry admitted by the ledger.
+    maxRetries: 0,
     reasoning: options.reasoning,
     signal: options.signal,
     onPayload: route.onPayload,
