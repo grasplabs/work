@@ -36,13 +36,13 @@ import type { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { clients, settings } from "../db/schema.ts";
-import { clientDomain, deploySecrets } from "../deploy/context.ts";
+import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import { within } from "../live-reads.ts";
 import { isConfigPending } from "../rollout/targets.ts";
 import type { CoreAddress } from "./core-address.ts";
-import { healthTimeoutMs, ifStored, routeOf } from "./grid.ts";
+import { healthTimeoutMs, routeOf } from "./grid.ts";
 
 const encoder = new TextEncoder();
 

@@ -14,6 +14,7 @@ import { actIfChanged, adminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain, signInApps } from "../deploy/context.ts";
 import { clientSignInSchema, missingSignInApp } from "../deploy/core-config.ts";
+import { hostingKinds, jurisdictions } from "../hosting/organization.ts";
 import { ProvisionError } from "./errors.ts";
 
 /** What staff fill in to add a client. */
@@ -28,8 +29,15 @@ export const provisionInputSchema = z.object({
    * record's id, linked as Details links one (src/crm/link.ts).
    */
   attioCompanyId: z.string().trim().toLowerCase().pipe(z.uuid()).optional(),
+  /**
+   * Where it runs (src/hosting/organization.ts): Grasp Cloud unless staff
+   * choose its own premises, and for Grasp Cloud, its data in the EU
+   * unless staff untick it. Both fixed once it is provisioned.
+   */
+  hosting: z.enum(hostingKinds).default("grasp_cloud"),
+  jurisdiction: z.enum(jurisdictions).default("eu"),
 });
-export type ProvisionInput = z.infer<typeof provisionInputSchema>;
+export type ProvisionInput = z.input<typeof provisionInputSchema>;
 
 /**
  * Records the client `input` describes, as `staff`, being provisioned and
@@ -70,6 +78,8 @@ export const createClient = async (
         name: parsed.name,
         ring: parsed.ring,
         signIn: JSON.stringify(parsed.signIn),
+        hosting: parsed.hosting,
+        jurisdiction: parsed.jurisdiction,
         attioCompanyId: parsed.attioCompanyId ?? null,
         createdBy: staff.email,
         createdAt: now,
@@ -81,6 +91,8 @@ export const createClient = async (
       clientId,
       detail: {
         ring: parsed.ring,
+        hosting: parsed.hosting,
+        jurisdiction: parsed.jurisdiction,
         ...(parsed.attioCompanyId === undefined
           ? {}
           : { attioCompany: parsed.attioCompanyId }),

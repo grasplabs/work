@@ -465,7 +465,9 @@ describe("an organization's company in Attio, without Attio's key", () => {
     noordkade();
     const { html } = await page("/new-organization");
     expect({
-      why: html.includes("Not yet: the admin isn&#x27;t connected to Attio."),
+      why: html.includes(
+        "Not yet: the admin isn&#x27;t connected to Attio. Add ATTIO_READ_KEY to the stage’s 1Password Environment, then run Deploy platform."
+      ),
       offered: html.includes("Noordkade Finance: Business"),
       requests: attio.requests,
     }).toStrictEqual({
@@ -481,7 +483,9 @@ describe("an organization's company in Attio, without Attio's key", () => {
     await link(clientId, companyId);
     const { main } = await detailsOf(clientId);
     expect({
-      line: main.includes("Attio isn’t connected yet."),
+      line: main.includes(
+        "Attio isn’t connected yet. Once it is, this fills in by itself. Add ATTIO_READ_KEY to the stage’s 1Password Environment, then run Deploy platform."
+      ),
       requests: attio.requests,
     }).toStrictEqual({ line: true, requests: 0 });
   });

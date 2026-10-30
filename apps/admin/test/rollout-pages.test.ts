@@ -70,7 +70,6 @@ const recordClient = async (ring: number, pinnedReleaseId?: string) => {
       accountId: account.id,
       namespace: null,
     }),
-    policyId: "eu-storage",
   });
   return id;
 };

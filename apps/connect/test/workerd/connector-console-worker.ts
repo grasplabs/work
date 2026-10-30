@@ -13,6 +13,9 @@ import { loadConnector } from "../../src/connector-isolate.ts";
 // - `/path/<name>`, `/loud-path/<name>`: one way a connector's code can
 //   have workerd report an error with its message, through `loadConnector`
 //   and as it is.
+// - `/node`: what a connector has of Node.js: nothing (GRA-939).
+// - `/marked`: a connector's own Response with the header a thrown error
+//   crosses under.
 
 /** What a connector holds that no log may carry, by route. */
 const values = {
@@ -58,9 +61,7 @@ export default {
  * value its route's name.
  */
 const paths: Readonly<Record<string, (value: string) => string>> = {
-  setImmediate: (value) => `setImmediate(() => {
-      throw new Error(${JSON.stringify(value)});
-    });`,
+  thrown: (value) => `throw new Error(${JSON.stringify(value)});`,
   waitUntil: (value) =>
     `ctx.waitUntil(Promise.reject(new Error(${JSON.stringify(value)})));`,
 };
@@ -110,10 +111,54 @@ const answerOf = async (route: string, env: ConnectEnv): Promise<unknown> => {
             env: {},
             globalOutbound: env.EGRESS,
           });
-    const response = await stub
+    try {
+      const response = await stub
+        .getEntrypoint()
+        .fetch("https://connector.internal/mcp");
+      return await response.text();
+    } catch (error) {
+      // What connect's MCP client gets of a throw: the error, as it was.
+      return error instanceof Error && error.message === value
+        ? value
+        : "another error";
+    }
+  }
+  if (route === "/marked") {
+    // A connector's own Response carrying the header a thrown error crosses
+    // under: still its Response, without that header.
+    const response = await loadConnector(
+      env.LOADER,
+      'export default { fetch: () => new Response("own", { headers: { "x-grasp-thrown": "1" } }) };\n',
+      env.EGRESS
+    )
       .getEntrypoint()
       .fetch("https://connector.internal/mcp");
-    return await response.text();
+    return `${await response.text()},${String(response.headers.get("x-grasp-thrown"))}`;
+  }
+  if (route === "/node") {
+    // A connector has no Node.js (`isolateBase`): no `setImmediate`, no
+    // `process`, no `node:timers`.
+    const globals = await loadConnector(
+      env.LOADER,
+      'export default { fetch: () => new Response([typeof setImmediate, typeof process].join(",")) };\n',
+      env.EGRESS
+    )
+      .getEntrypoint()
+      .fetch("https://connector.internal/mcp");
+    let timers: string;
+    try {
+      await loadConnector(
+        env.LOADER,
+        'import { setTimeout } from "node:timers";\nexport default { fetch: () => new Response(typeof setTimeout) };\n',
+        env.EGRESS
+      )
+        .getEntrypoint()
+        .fetch("https://connector.internal/mcp");
+      timers = "loaded";
+    } catch {
+      timers = "refused";
+    }
+    return `${await globals.text()},${timers}`;
   }
   if (route !== "/control") {
     // workerd's readiness probe, and anything else: no isolate.

@@ -62,8 +62,9 @@ export const findD1Database = async (
 };
 
 /**
- * Creates the D1 database `name` in `jurisdiction`. A POST, so it isn't
- * retried after a lost answer: the caller finds what it made by its name.
+ * Creates the D1 database `name` in `jurisdiction`, or in none when it is
+ * `default` (R2's name for no jurisdiction). A POST, so it isn't retried
+ * after a lost answer: the caller finds what it made by its name.
  */
 export const createD1Database = async (
   api: CloudflareApi,
@@ -75,7 +76,7 @@ export const createD1Database = async (
     {
       method: "POST",
       path: `/accounts/${accountId}/d1/database`,
-      json: { name, jurisdiction },
+      json: jurisdiction === "default" ? { name } : { name, jurisdiction },
     },
     d1Schema
   );
