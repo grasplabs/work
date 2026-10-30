@@ -864,6 +864,11 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
 /** A task's body: its single key's value, as the profile reads it. */
 const stepBodySchema = z.record(z.string(), z.json());
 
+/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
+export const workflowRunTraceOptionsSchema = z
+  .strictObject({ doors: z.boolean().default(true) })
+  .default({ doors: true });
+
 /**
  * One step of a draft edited from the canvas (`editStep`), as the next
  * revision over `expectedRevision`: `change` replaces the body of the task
@@ -1053,7 +1058,11 @@ export interface WorkflowDraft {
   checkpoint: {
     revision: number;
     source: string;
-    /** Drawn from the checkpoint's own JSON, as it passed. */
+    /**
+     * Drawn from the checkpoint's own JSON, as it passed. An edit that
+     * didn't pass leaves an earlier edit the checkpoint, as the editor
+     * already holds it: its answer draws that diagram without doors.
+     */
     diagram: WorkflowDiagram;
   } | null;
   editedBy: string | null;
@@ -1213,8 +1222,17 @@ export interface WorkflowResourcesApi {
   activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
-  /** What run `runId` did, over its version's diagram, for builders. */
-  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
+  /**
+   * What run `runId` did, over its version's diagram, for builders. With
+   * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
+   * without its doors: a trace followed while the run goes keeps the
+   * diagram its first read drew, as the run's version never changes.
+   */
+  runTrace: (
+    id: string,
+    runId: string,
+    options?: unknown
+  ) => Promise<WorkflowRunTrace>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for

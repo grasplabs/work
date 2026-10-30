@@ -31,6 +31,22 @@ type Outcome =
   | { kind: "published"; version: number }
   | { kind: "failed"; reason: string };
 
+/**
+ * `saved`, an edit's answer, keeping the checkpoint `held` already drew
+ * when the edit left it as it was (it didn't pass): its diagram, doors
+ * and all, which the answer draws without doors (`WorkflowDraft`).
+ */
+const withHeldCheckpoint = (
+  held: WorkflowDraft,
+  saved: WorkflowDraft
+): WorkflowDraft => {
+  const kept =
+    saved.checkpoint !== null &&
+    saved.checkpoint.revision === held.checkpoint?.revision &&
+    saved.checkpoint.source === held.checkpoint.source;
+  return kept ? { ...saved, checkpoint: held.checkpoint } : saved;
+};
+
 /** One problem core found, where it is, and what to change. */
 const Problem = ({ problem }: { problem: WorkflowDefinitionProblem }) => (
   <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
@@ -167,7 +183,7 @@ export const DefinitionEditor = ({
             modules,
           })
       );
-      setDraft(saved);
+      setDraft(withHeldCheckpoint(draft, saved));
       setOutcome({ kind: "saved" });
     } catch (error) {
       setOutcome(
