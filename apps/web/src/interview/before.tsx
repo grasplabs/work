@@ -1,6 +1,7 @@
 import { interviewerNames, interviewers } from "@grasp-os/shared/onboarding";
 import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -319,9 +320,9 @@ const About = ({
         />
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <h1 className="type-title">
+        <PageHeaderTitle>
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
-        </h1>
+        </PageHeaderTitle>
         <dl className="w-full text-left">
           {rows.map((row) => (
             <div

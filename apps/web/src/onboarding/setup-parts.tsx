@@ -1,5 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { CheckIcon } from "lucide-react";
@@ -341,9 +343,9 @@ export const Heading = ({
   return (
     <div className="flex flex-col gap-2">
       {/* A title that takes two lines breaks them evenly, never leaving one word alone on the second. */}
-      <h1 className="type-title outline-none" ref={heading} tabIndex={-1}>
+      <PageHeaderTitle ref={heading} tabIndex={-1}>
         {title}
-      </h1>
+      </PageHeaderTitle>
       {sentence === undefined ? null : (
         // Two lines kept in every language, and the sentence's own room once answered, so nothing below moves; once it made way, none.
         <p
@@ -581,7 +583,7 @@ export const useSayFollowing = (
 /** A number with what it counts. */
 export const Figure = ({ value, label }: { value: string; label: string }) => (
   <div className="flex flex-col rounded-xl border p-4">
-    <span className="type-figure">{value}</span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );

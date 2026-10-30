@@ -2,6 +2,7 @@ import type {
   ModelMonthSpend,
   WorkflowMonthSpend,
 } from "@grasp-os/shared/models";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
@@ -85,7 +86,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   return (
     <>
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="type-figure">{total}</span>
+        <Stat>{total}</Stat>
         <span className="text-muted-foreground text-xs">
           <Trans>for every model call this month</Trans>
         </span>
