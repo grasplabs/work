@@ -113,7 +113,7 @@ const start = async (
     tools: allowed,
     consent: composioConsentText,
     origin: clientOrigin,
-    returnTo: "/connections",
+    returnTo: "/integrations",
     ...options,
   });
   return url;
@@ -425,7 +425,7 @@ describe("connecting a Composio toolkit", () => {
           tools: allowed,
           consent: composioConsentText,
           origin: clientOrigin,
-          returnTo: "/connections",
+          returnTo: "/integrations",
         })
       )
     ).resolves.toBe("connection.provider_unavailable");

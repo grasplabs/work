@@ -301,7 +301,7 @@ export const startApp = async (
     provider: "sample-oauth",
     scope,
     origin: clientOrigin,
-    returnTo: "/connections",
+    returnTo: "/integrations",
   });
   return new URL(url);
 };

@@ -67,8 +67,7 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 // then the catalog's others, some 1,500 in all, drawn as they come near.
 // The filter and the search are in the address. Each app opens its own
 // page, where it is connected and managed. Core's callback sends a flow
-// that failed back here (through `/connections`), with
-// `connectionError=<code>`.
+// that failed back here, with `connectionError=<code>`.
 
 /** What the address holds: the search, the filter, and a failed flow's code. */
 interface IntegrationsSearch {
