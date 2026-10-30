@@ -1,3 +1,5 @@
+import { BRAND } from "@grasp-os/ui/lib/brand";
+
 import {
   atlasBody,
   atlasCount,
@@ -134,7 +136,7 @@ const inks = (element: HTMLElement): string[] => {
   const styles = palette(element);
   const [r, g, b] = rgb(
     getComputedStyle(element).getPropertyValue("--status-attention").trim() ||
-      "#d0561c"
+      BRAND.amber
   );
   for (let a = 0; a < ALPHAS; a += 1) {
     styles.push(`rgba(${r}, ${g}, ${b}, ${(a / (ALPHAS - 1)).toFixed(3)})`);

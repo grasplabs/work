@@ -116,7 +116,7 @@ const Big = ({
     <dt className="text-muted-foreground">{label}</dt>
     <dd
       className={cn(
-        "text-2xl tabular-nums",
+        "type-figure",
         tone === "done" && "text-status-agreed",
         tone === "attention" && "text-status-attention"
       )}

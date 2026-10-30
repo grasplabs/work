@@ -5326,3 +5326,114 @@ export const policyExceptions = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.ruleId, table.appId] })]
 );
+
+/**
+ * One request Stephen took on outside Grasp (channels/stephen-requests.ts):
+ * labels and a day, never the words of the message or of his answer, and
+ * never the time of day. Kept by the place's own id for the message, so a
+ * resend counts once. Only `done` is billed. Kept 13 months, and gone with
+ * the person when they are erased (person-erasure.ts).
+ */
+export const stephenRequests = sqliteTable(
+  "stephen_requests",
+  {
+    /** `<platform>:<the platform's id for the message>`. */
+    id: text().primaryKey(),
+    /** `YYYY-MM-DD`, in the organization's time zone. */
+    day: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    teamId: text("team_id"),
+    /**
+     * The person's chat it was answered in, only to find the request a
+     * later press on one of its cards belongs to; never shown.
+     */
+    chatId: text("chat_id"),
+    kind: text({
+      enum: ["answered", "lookedUp", "changed", "workflow"],
+    }).notNull(),
+    outcome: text({
+      enum: ["done", "unanswered", "notPossible", "stopped", "failed"],
+    }).notNull(),
+    topicId: text("topic_id"),
+    questionId: text("question_id"),
+    /** `[{ id, ok }]`: the tools he called, in order. */
+    tools: text().notNull(),
+    /** `[{ id, why }]`: the tools it would have taken that are off or missing. */
+    missing: text().notNull(),
+    rating: text({ enum: ["up", "down"] }),
+  },
+  (table) => [
+    index("stephen_requests_day_idx").on(table.day),
+    index("stephen_requests_person_idx").on(table.personId, table.chatId),
+    index("stephen_requests_question_idx").on(table.questionId),
+  ]
+);
+
+/** The company's topics Stephen's requests are sorted into (channels/request-sorting.ts). */
+export const stephenRequestTopics = sqliteTable("stephen_request_topics", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * A question people ask Stephen, in Grasp's own wording, without names or
+ * details, with the role best placed to answer it. A page names it only
+ * once five or more people asked it.
+ */
+export const stephenRequestQuestions = sqliteTable(
+  "stephen_request_questions",
+  {
+    id: text().primaryKey(),
+    topicId: text("topic_id").notNull(),
+    wording: text().notNull(),
+    role: text(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("stephen_request_questions_topic_idx").on(table.topicId)]
+);
+
+/** What an owner or admin is doing about one thing Needs you lists (stephen-requests.ts). */
+export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
+  key: text().primaryKey(),
+  status: text({ enum: ["working", "fixed", "leftAsIs"] }).notNull(),
+  statusBy: text("status_by").notNull(),
+  statusAt: timestamp("status_at").notNull(),
+});
+
+/** Grasp's proposal for one thing Needs you lists, in one language, made once. */
+export const stephenRequestProposals = sqliteTable(
+  "stephen_request_proposals",
+  {
+    key: text().notNull(),
+    locale: text().notNull(),
+    text: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.key, table.locale] })]
+);
+
+/** Where an owner or admin has the weekly summary of Stephen's requests go. */
+export const stephenSummaryReaders = sqliteTable("stephen_summary_readers", {
+  personId: text("person_id").primaryKey(),
+  via: text({ enum: ["teams", "email"] }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** One weekly summary, queued for one reader and sent from there once (stephen-summary.ts). */
+export const stephenSummaries = sqliteTable(
+  "stephen_summaries",
+  {
+    /** The Monday of the week it sums up. */
+    week: text().notNull(),
+    personId: text("person_id").notNull(),
+    via: text({ enum: ["teams", "email"] }).notNull(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    reason: text(),
+    queuedAt: timestamp("queued_at").notNull(),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.week, table.personId] })]
+);

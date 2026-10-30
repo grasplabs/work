@@ -11,6 +11,7 @@ import type {
   Stakeholder,
   Team,
   TeamGroup,
+  ThinkingGround,
   Tool,
   Transcript,
   Vision,
@@ -29,6 +30,8 @@ import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { hoursPerWeek } from "@grasp-os/shared/thinking";
+import type { WorkKnowledge } from "@grasp-os/shared/work-knowledge";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -58,6 +61,7 @@ import {
   brainTranscript,
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
+import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -947,14 +951,16 @@ const witnessed = (teams: readonly Team[], source: Source): Source => {
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
-const readBrainCore = async (
-  env: Env,
-  person: Pick<Identity, "role">
-): Promise<{
+interface BrainCore {
   facts: OnboardingFacts | null;
   records: ReturnType<typeof withSuccessors>;
   teams: Workspace["teams"];
-}> => {
+}
+
+const readBrainCore = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<BrainCore> => {
   const [facts, held] = await Promise.all([
     onboardingFacts(env, person),
     readBrainRecords(env),
@@ -982,35 +988,15 @@ export const readThinkingBrain = async (
   };
 };
 
-/** The brain's workspace, as `person` may read it. */
-export const readBrain = async (
+/**
+ * The sources the brain's records came from, but Knowledge's transcripts:
+ * an admin reads the onboarding's; a member only those the records they
+ * read name, so a fact shows where it came from.
+ */
+const recordSources = async (
   env: Env,
-  person: Identity
-): Promise<Workspace> => {
-  const [
-    { facts, records, teams },
-    name,
-    connections,
-    transcribed,
-    groups,
-    weeks,
-  ] = await Promise.all([
-    readBrainCore(env, person),
-    organizationName(env),
-    connectionsOf(env, person),
-    knowledgeTranscriptSources(env, person),
-    teamGroupsOf(env),
-    onboardingStore(env).interviewWeeks(),
-  ]);
-
-  const company: Company = {
-    name,
-    sector: facts === null ? "" : kickoffSaid(facts.kickoff, "business"),
-    people: facts?.view.roster?.people.length ?? 0,
-  };
-
-  // A member reads the onboarding's sources only as the records it reads
-  // name them: when each came in, so a fact shows where it came from.
+  { facts, records, teams }: BrainCore
+): Promise<Source[]> => {
   const named = new Set(
     [
       ...[...records.tools, ...records.statements, ...records.gaps].map(
@@ -1033,6 +1019,31 @@ export const readBrain = async (
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
+  return [...sources, ...records.sources];
+};
+
+/** The brain's workspace, as `person` may read it. */
+export const readBrain = async (
+  env: Env,
+  person: Identity
+): Promise<Workspace> => {
+  const [core, name, connections, transcribed, groups, weeks] =
+    await Promise.all([
+      readBrainCore(env, person),
+      organizationName(env),
+      connectionsOf(env, person),
+      knowledgeTranscriptSources(env, person),
+      teamGroupsOf(env),
+      onboardingStore(env).interviewWeeks(),
+    ]);
+  const { facts, records, teams } = core;
+  const sources = await recordSources(env, core);
+
+  const company: Company = {
+    name,
+    sector: facts === null ? "" : kickoffSaid(facts.kickoff, "business"),
+    people: facts?.view.roster?.people.length ?? 0,
+  };
 
   return {
     company,
@@ -1049,7 +1060,7 @@ export const readBrain = async (
     }),
     interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...records.sources, ...transcribed].map((source) =>
+    sources: [...sources, ...transcribed].map((source) =>
       witnessed(teams, source)
     ),
     statements: records.statements,
@@ -1059,6 +1070,43 @@ export const readBrain = async (
     connections,
     landscape: [],
     policies: [],
+  };
+};
+
+/**
+ * What a picture of a chat's thinking is drawn from, as `person` may read
+ * it (`brain.thinking`): the teams, what each said with the team whose
+ * source said it, and the workflows with their hours a week. Narrower than
+ * `readBrain`: no Knowledge, nothing else of the brain.
+ */
+export const readThinkingGround = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<ThinkingGround> => {
+  const core = await readBrainCore(env, person);
+  const { records, teams } = core;
+  const read = await recordSources(env, core);
+  const sources = new Map(
+    read.map((source) => [source.id, witnessed(teams, source)])
+  );
+  return {
+    teams: teams.map(({ id, name }) => ({ id, name })),
+    statements: records.statements.map((statement) => {
+      const source = sources.get(statement.sourceId);
+      return {
+        id: statement.id,
+        text: statement.text,
+        kind: statement.kind,
+        sourceId: statement.sourceId,
+        teamId: source?.teamIds?.[0] ?? statement.teamIds[0] ?? "",
+        ...(source?.who === undefined ? {} : { who: source.who }),
+      };
+    }),
+    workflows: records.workflows.map((workflow) => ({
+      id: workflow.id,
+      name: workflow.name,
+      hours: hoursPerWeek(workflow),
+    })),
   };
 };
 
@@ -1080,10 +1128,43 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     this.#check = check;
   }
 
+  async work(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await workKnowledge(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
+  }
+
+  async askMorePeople(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await askMorePeople(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
+  }
+
   async read(): Promise<Workspace> {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async thinking(): Promise<ThinkingGround> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readThinkingGround(this.#env, person)
     );
   }
 

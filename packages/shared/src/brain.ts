@@ -17,6 +17,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
+import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
@@ -432,12 +433,32 @@ export interface Workspace {
 }
 
 /**
+ * What a picture of a chat's thinking is drawn from (`brain.thinking`):
+ * the brain's teams, what each said with the team that said it (the one
+ * its source speaks for) and the role of who did, and its workflows with
+ * their hours a week, `null` where they aren't known.
+ */
+export interface ThinkingGround {
+  teams: Pick<Team, "id" | "name">[];
+  statements: (Pick<Statement, "id" | "text" | "kind" | "sourceId"> & {
+    teamId: string;
+    who?: string;
+  })[];
+  workflows: (Pick<Workflow, "id" | "name"> & { hours: number | null })[];
+}
+
+/**
  * The brain's workspace, assembled by core from what it holds: the
  * onboarding, the brain's records and the connections. Each part as the
  * person may read it; what core has no source for yet comes back empty.
  */
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * What a picture of a chat's thinking is drawn from, as `read` gives
+   * it, and nothing else: no Knowledge, so nothing to audit.
+   */
+  thinking: () => Promise<ThinkingGround>;
   /**
    * The board's goals (`Workspace.goals`) alone, for the dashboard, as
    * `read` gives them: every member reads them, each with the workflows
@@ -493,6 +514,16 @@ export interface BrainApi {
    * for the company's admins.
    */
   redactGapAnswer: (gapId: string) => Promise<Gap>;
+  /**
+   * What Grasp knows about a piece of work, in its own sentences, for
+   * everyone signed in (`WorkKnowledge`): never a quote, a name or a day.
+   */
+  work: (id: string) => Promise<WorkKnowledge>;
+  /**
+   * Asks to hear more people about a piece of work in Stephen's next
+   * interviews: for the company's admins.
+   */
+  askMorePeople: (id: string) => Promise<WorkKnowledge>;
 }
 
 /** Why a brain call was refused. */
@@ -500,6 +531,7 @@ export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
   "brain.team_groups_invalid":
     "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
+  "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
 
 /**

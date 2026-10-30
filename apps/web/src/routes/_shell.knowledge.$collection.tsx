@@ -308,7 +308,7 @@ const CollectionView = () => {
             <>
               <header className="flex flex-col gap-2.5">
                 <div className="flex items-start justify-between gap-3">
-                  <h1 className="text-2xl font-medium tracking-tight">
+                  <h1 className="type-title">
                     {collection.data.collection.name}
                   </h1>
                   {isMemberAdmin(identity) ? (

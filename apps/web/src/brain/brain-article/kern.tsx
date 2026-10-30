@@ -114,7 +114,7 @@ export const BannerHeader = ({
         )}
       </Panel>
       <span className="flex flex-col gap-0.5">
-        <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
+        <h1 className="type-title wrap-break-word">
           {note.kind === "statement"
             ? statementWords(note.id, note.title)
             : note.title}
