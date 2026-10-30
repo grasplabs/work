@@ -1,11 +1,13 @@
 import type { Message } from "@earendil-works/pi-ai";
+import { hasEvery } from "@grasp-os/shared/chat-search";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { hasEvery, saidOf, snippetOf } from "../src/chat-search.ts";
+import { saidOf, snippetOf } from "../src/chat-search.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { searchHitsMax } from "../src/workspace.ts";
 import { model, pointAtGateway, says, transcript } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { Answer } from "./ai-gateway.ts";
@@ -83,6 +85,12 @@ describe("what a search looks through", () => {
       word: snippetOf(said, "june landlord"),
       none: snippetOf(said, "june"),
       short: snippetOf("Lease ends", "ends"),
+      // A letter whose lower case is longer leaves the rest where it was.
+      dotted: snippetOf("İİİİ İstanbul Lojistik ends in March", "lojistik"),
+      stretch: snippetOf("the lease ends", "lease", {
+        before: true,
+        after: true,
+      }),
     }).toStrictEqual({
       phrase: {
         before: "…and then the Hoogvliet ",
@@ -97,6 +105,12 @@ describe("what a search looks through", () => {
       },
       none: null,
       short: { before: "Lease ", found: "ends", after: "" },
+      dotted: {
+        before: "İİİİ İstanbul ",
+        found: "Lojistik",
+        after: " ends in March",
+      },
+      stretch: { before: "…the ", found: "lease", after: " ends…" },
     });
   });
 
@@ -173,19 +187,17 @@ describe("chats.search", () => {
       bySaid: [
         {
           title: "Invoices",
-          said: "When does the Hoogvliet [lease] end? The lease with Hoogvliet ends on 31 March 2027.",
+          said: "When does the Hoogvliet [lease] end?",
         },
       ],
-      byProjectAndSaid: [
-        { title: "Travel", said: "Book the train to [Lyon] Booked." },
-      ],
+      byProjectAndSaid: [{ title: "Travel", said: "Book the train to [Lyon]" }],
       byTitle: [{ title: "Invoices", said: null }],
       notEveryWord: [],
       latestFirst: [
-        { title: "Travel", said: "Book [the] train to Lyon Booked." },
+        { title: "Travel", said: "Book [the] train to Lyon" },
         {
           title: "Invoices",
-          said: "When does [the] Hoogvliet lease end? The lease with Hoogvliet ends on 31 March 2027.",
+          said: "When does [the] Hoogvliet lease end?",
         },
       ],
       nothing: [],
@@ -204,7 +216,7 @@ describe("chats.search", () => {
       ben: await found(ben, "hoogvliet"),
       admin: await found(admin, "hoogvliet"),
     }).toStrictEqual({
-      ann: [{ title: "Lease", said: "[Hoogvliet] terms? Hoogvliet renews." }],
+      ann: [{ title: "Lease", said: "[Hoogvliet] terms?" }],
       ben: [],
       admin: [],
     });
@@ -223,14 +235,65 @@ describe("chats.search", () => {
     });
 
     await expect(found(ann, "mira")).resolves.toStrictEqual([
-      { title: "Older", said: "Who signs for Hoogvliet? [Mira] does." },
+      { title: "Older", said: "[Mira] does." },
     ]);
     await ask(ann, chat.id, "And for Lyon?", says("Jonas."));
     await expect(found(ann, "hoogvliet jonas")).resolves.toStrictEqual([
       {
         title: "Older",
-        said: "Who signs for [Hoogvliet]? Mira does. And for Lyon? Jonas.",
+        said: "Who signs for [Hoogvliet]?",
       },
     ]);
+  });
+
+  it("looks in one project before it keeps a page's worth", async () => {
+    const ann = await person();
+    const project = await ann.chats.createProject("Lyon office");
+    await ann.chats.create("Lease in Lyon", project.id);
+    // Each more recent than the project's, and one more than a page holds.
+    await Promise.all(
+      Array.from(
+        { length: searchHitsMax },
+        async (_, index) => await ann.chats.create(`Lease ${index}`)
+      )
+    );
+
+    const everywhere = await ann.chats.search("lease");
+    const inProject = await ann.chats.search("lease", project.id);
+    expect({
+      everywhere: everywhere.length,
+      lyonAmongThem: everywhere.some(({ chat }) => chat.projectId !== null),
+      inProject: inProject.map(({ chat }) => chat.title),
+    }).toStrictEqual({
+      everywhere: searchHitsMax,
+      lyonAmongThem: false,
+      inProject: ["Lease in Lyon"],
+    });
+  });
+
+  it("keeps finding what was said in a chat longer than one row holds", async () => {
+    const ann = await person();
+    const chat = await ann.chats.create("Long");
+    // Three answers of 600,000 characters: together, said and folded, far
+    // past the 2 MB a Durable Object's SQLite keeps in one row.
+    const long = `${"lease ".repeat(3000)}Hoogvliet signs ${"lease ".repeat(97_000)}`;
+    for (const part of ["one", "two", "three"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn after another, as a person asks
+      await ask(ann, chat.id, `Part ${part}`, says(long));
+    }
+    await ask(ann, chat.id, "Who pays?", says("Mira pays."));
+
+    expect({
+      last: await found(ann, "mira"),
+      inTheMiddle: await found(ann, "hoogvliet"),
+    }).toStrictEqual({
+      last: [{ title: "Long", said: "[Mira] pays." }],
+      inTheMiddle: [
+        {
+          title: "Long",
+          said: `…${"lease ".repeat(4)}[Hoogvliet] signs ${"lease ".repeat(10)}lea…`,
+        },
+      ],
+    });
   });
 });

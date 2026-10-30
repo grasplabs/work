@@ -622,7 +622,7 @@ const workspaces: DurableObjectState = {
     chat_messages: exported(`${core}workspace.ts`),
     chat_search_text: exported(
       `${core}workspace.ts`,
-      "Each chat's words as its search reads them, kept as its messages are stored; it moves with them, as nothing writes it again for messages already stored."
+      "Each message's words as a search reads them, kept as it is stored (or by the first search after, for one stored before); it moves with them, as nothing writes it again for messages already read."
     ),
     chat_sources: exported(`${core}workspace.ts`),
     chat_run_sources: exported(`${core}workspace.ts`),

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a7d4cbe9-ba5c-4197-bec3-032b67903d69",
+  "id": "6aa67b29-3613-46c9-9ff0-bf78a5fe80a4",
   "prevId": "21afbce1-55a6-4ccc-b9b1-7958d65c627c",
   "tables": {
     "audit_outbox": {
@@ -1166,10 +1166,17 @@
     "chat_search_text": {
       "name": "chat_search_text",
       "columns": {
+        "message_id": {
+          "name": "message_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
         "chat_id": {
           "name": "chat_id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -1188,8 +1195,30 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "chat_search_text_chat": {
+          "name": "chat_search_text_chat",
+          "columns": [
+            "chat_id",
+            "message_id"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
+        "chat_search_text_message_id_chat_messages_id_fk": {
+          "name": "chat_search_text_message_id_chat_messages_id_fk",
+          "tableFrom": "chat_search_text",
+          "tableTo": "chat_messages",
+          "columnsFrom": [
+            "message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "chat_search_text_chat_id_chats_id_fk": {
           "name": "chat_search_text_chat_id_chats_id_fk",
           "tableFrom": "chat_search_text",

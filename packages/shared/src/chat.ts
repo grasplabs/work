@@ -671,11 +671,15 @@ export interface ChatsApi {
   /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
   /**
-   * The person's own chats that hold every word of `query` in their title,
-   * their project's name or what was said in them, the most recently
-   * active first: at most a page's worth. Never anyone else's.
+   * The person's own chats, in project `projectId` when one is named, that
+   * hold every word of `query` in their title, their project's name or
+   * what was said in them, the most recently active first: at most a
+   * page's worth. Never anyone else's.
    */
-  search: (query: string) => Promise<ChatSearchHit[]>;
+  search: (
+    query: string,
+    projectId?: string | null
+  ) => Promise<ChatSearchHit[]>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
   /**

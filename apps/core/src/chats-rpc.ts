@@ -323,14 +323,26 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     );
   }
 
-  async search(query: string): Promise<ChatSearchHit[]> {
+  async search(
+    query: string,
+    projectId?: string | null
+  ): Promise<ChatSearchHit[]> {
     return await withPerson(this.#check, async ({ userId }) => {
-      if (typeof query !== "string") {
+      if (
+        typeof query !== "string" ||
+        (projectId !== undefined &&
+          projectId !== null &&
+          typeof projectId !== "string")
+      ) {
         throw agentErrors.create("agent.invalid_request");
       }
       // Only the signed-in person's own object, and only their chats in it:
       // nobody searches another person's, an admin no more than anyone.
-      return await this.#chatsOf(userId).searchChats(userId, query);
+      return await this.#chatsOf(userId).searchChats(
+        userId,
+        query,
+        projectId ?? null
+      );
     });
   }
 

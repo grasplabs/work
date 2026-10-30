@@ -151,19 +151,29 @@ export const chatMessages = sqliteTable(
 );
 
 /**
- * What was said in each chat, as plain text (chat-search.ts): its
- * questions and answers in order, and the same folded to lower case,
- * which a search looks through. Added to as each message is stored; a
- * chat kept before it existed gets its row the first time it's needed.
+ * What each message of a chat said, as plain text (chat-search.ts), and
+ * the same folded to lower case, which a search looks through: empty for
+ * a message that said nothing (a step's result). One row per message, cut
+ * to `saidMax`, so no row outgrows what a Durable Object's SQLite keeps
+ * in one, however long the chat. Written as each message is stored; a
+ * message kept before it existed gets its row the first time a search
+ * needs it.
  */
-export const chatSearchText = sqliteTable("chat_search_text", {
-  chatId: text("chat_id")
-    .$type<ChatId>()
-    .primaryKey()
-    .references(() => chats.id),
-  said: text().notNull(),
-  folded: text().notNull(),
-});
+export const chatSearchText = sqliteTable(
+  "chat_search_text",
+  {
+    messageId: integer("message_id")
+      .primaryKey()
+      .references(() => chatMessages.id),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    said: text().notNull(),
+    folded: text().notNull(),
+  },
+  (table) => [index("chat_search_text_chat").on(table.chatId, table.messageId)]
+);
 
 /**
  * What a chat's agent has read from, each source once: the collections and
