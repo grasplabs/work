@@ -873,12 +873,13 @@ export const graspComponents = {
   "page-header": {
     status: "supported",
     summary:
-      "A page's title, in the serif, its description and actions. The title's `render` makes it another heading.",
+      "A page's title, in the serif, its description, small marks under it (`PageHeaderMeta`) and actions. The title's `render` makes it another heading; the description's `lines` option keeps it to two lines.",
     exports: [
       "PageHeader",
       "PageHeaderActions",
       "PageHeaderContent",
       "PageHeaderDescription",
+      "PageHeaderMeta",
       "PageHeaderTitle",
     ],
   },
