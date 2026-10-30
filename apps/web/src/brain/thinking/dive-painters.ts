@@ -1,5 +1,5 @@
 import { LIGHT } from "../atlas-map.ts";
-import { rgb } from "../dot-ink.ts";
+import { rgb, token } from "../dot-ink.ts";
 import { brainCloud } from "../dot-shapes.ts";
 import { seeded } from "../reveal-motion.ts";
 import { focal } from "./dive-scene.ts";
@@ -44,19 +44,19 @@ interface Inks {
   open: Vec3;
 }
 
-const inksOf = (element: HTMLElement): Inks => {
-  const read = (name: string, fallback: string): Vec3 => {
-    const [r, g, b] = rgb(
-      getComputedStyle(element).getPropertyValue(name).trim() || fallback
-    );
-    return [r / 255, g / 255, b / 255];
-  };
-  return {
-    ink: read("--brain-ink", "#1a1a19"),
-    warm: read("--brain-heat", "#e5572b"),
-    open: read("--status-attention", "#d0561c"),
-  };
+/** A colour as the theme resolves it where `element` stands, 0 to 1. */
+const unit = (color: string): Vec3 => {
+  const [r, g, b] = rgb(color);
+  return [r / 255, g / 255, b / 255];
 };
+
+// The ink at rest is the text's own colour where the dive stands, as the
+// dot ink's (dot-ink.ts); the rest are the theme's tokens, never a copy.
+const inksOf = (element: HTMLElement): Inks => ({
+  ink: unit(getComputedStyle(element).color),
+  warm: unit(token(element, "--brain-heat")),
+  open: unit(token(element, "--status-attention")),
+});
 
 /** The colours as they are now, read again when the theme changes. */
 const watchedInks = (holder: HTMLElement): { now: Inks; stop: () => void } => {

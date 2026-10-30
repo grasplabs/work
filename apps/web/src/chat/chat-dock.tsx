@@ -12,13 +12,12 @@ import {
 } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
-  ChevronUpIcon,
   Maximize2Icon,
   MessagesSquareIcon,
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -33,8 +32,10 @@ import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
-import { dockDrawerClass, setDockMode, useDockMode } from "./dock-mode.ts";
+import { OpenChat, useDockWidth, useUnfoldOnPointer } from "./dock-frame.tsx";
+import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
+import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
 import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
@@ -44,9 +45,12 @@ import type { AskOptions } from "./use-ask.ts";
 // prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
 // the person's open chat, so what is asked anywhere goes on there and shows
 // in its list, and a new chat here is a new one there. A slim bar to ask in;
-// sending, or its arrow, opens a frame around it with the conversation,
-// which grows into a drawer down the right side and back, or folds away to
-// the bar. The thread and the box are the chat's own (thread.tsx,
+// sending, or a click into it with a chat behind it, opens a frame around
+// it with the conversation, which grows into a drawer down the right side
+// (its edge dragged to make it wider or narrower) and back, or folds away
+// to the bar. Folded or open, it is a white card with the brand's soft
+// shadow; its surfaces share one rounding and its controls another, and
+// what is in it keeps 20 pixels from every edge. The thread and the box are the chat's own (thread.tsx,
 // composer.tsx), and the chat is the same watch as on Chat (chat-watch.ts).
 // What the agent builds is in Chat's side panel: "Open in chat" opens it.
 
@@ -166,8 +170,8 @@ const DockHeader = ({
     <header
       className={
         mode === "drawer"
-          ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-1.5 pl-4"
-          : "flex flex-none items-center gap-0.5 border-b py-1.5 pr-1.5 pl-4"
+          ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-2.5 pl-5"
+          : "flex h-13 flex-none items-center gap-0.5 border-b pr-2.5 pl-5"
       }
     >
       <h2 className="flex-1 font-medium">{title}</h2>
@@ -244,11 +248,12 @@ const DockThread = ({
   // Before anything is asked: a chat not made yet, or one made empty (an
   // App's, opened before its first question).
   if (chatId === undefined || (view.loaded && view.messages.length === 0)) {
-    return <p className="text-muted-foreground flex-1 p-4">{empty}</p>;
+    return <p className="text-muted-foreground flex-1 p-5">{empty}</p>;
   }
   return (
     <ChatThread
       chatId={chatId}
+      compact
       loaded={view.loaded || failure !== undefined}
       messages={view.messages}
       onRetry={onRetry}
@@ -297,6 +302,31 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
       }}
     />
   );
+};
+
+// One tree in every mode, so the box, and the draft in it, stays as the
+// dock opens, grows or folds away. As in the prototype's corner chat
+// (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
+// 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
+// kept 16 pixels off every edge of the window and rising out of the bar
+// as it opens; the drawer as wide as its edge was dragged. Each is a
+// white card on `shadow-lifted`, with no glow, blur or ring round it.
+const dockLook = (mode: DockMode): { place: string; look: string } => {
+  let place =
+    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
+  let look =
+    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
+  if (mode === "drawer") {
+    place =
+      "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
+    look =
+      "bg-card pointer-events-auto relative flex h-full w-(--dock-width) max-w-full flex-col border-l text-sm";
+  } else if (mode === "frame") {
+    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
+    look =
+      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
+  }
+  return { place, look };
 };
 
 /** The chat of App `app` the person changes it in, made the first time. */
@@ -383,7 +413,6 @@ const Dock = ({
   words: DockWords;
   app?: string;
 }) => {
-  const { t } = useLingui();
   const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
   const { models, retry } = useModels();
@@ -411,17 +440,30 @@ const Dock = ({
     ways.options
   );
   const mode = useDockMode();
+  const drawerWidth = useDockDrawerWidth();
+  // While the drawer's edge is dragged, nothing eases.
+  const [dragging, setDragging] = useState(false);
   const moveTo = (next: DockMode): void => {
     setDockMode(next);
     focusBox();
     ways.onMoved(next, chatId);
   };
+  // A click into the folded box, with a conversation behind it, opens the
+  // chat on it, even with the cursor already in the box. Tabbing into the
+  // box is to type in it; the keyboard's way in is the box's own button
+  // (OpenChat), which the box's description names.
   const open = mode !== "bar";
+  const unfolds = !open && ways.opens(chatId);
+  useUnfoldOnPointer(dock, unfolds);
+  const showWidth = useDockWidth(dock, mode === "drawer");
+  const dockId = useId();
+  const hintId = useId();
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
     <Composer
       {...composer}
       compact
+      describedBy={unfolds ? hintId : undefined}
       label={words.title}
       onSend={() => {
         if (mode === "bar") {
@@ -432,48 +474,38 @@ const Dock = ({
       placeholder={words.placeholder}
       running={view.running}
     >
-      {!open && ways.opens(chatId) ? (
-        <Button
-          aria-label={t`Open the chat`}
-          onClick={() => {
+      {unfolds ? (
+        <OpenChat
+          controls={dockId}
+          hint={hintId}
+          onOpen={() => {
             moveTo("frame");
           }}
-          size="icon-xs"
-          title={t`Open the chat`}
-          type="button"
-          variant="ghost"
-        >
-          <ChevronUpIcon />
-        </Button>
+        />
       ) : null}
     </Composer>
   );
   const drawer = mode === "drawer";
-  // One tree in every mode, so the box, and the draft in it, stays as the
-  // dock opens, grows or folds away. As in the prototype's corner chat
-  // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
-  // 416 typed in, as round as the box in it; the frame and the drawer
-  // 442 wide, the frame kept 16 pixels off every edge of the window and
-  // rising out of the bar as it opens.
-  let place =
-    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
-  let look =
-    "chat-glow bg-background/80 pointer-events-auto w-80 max-w-full rounded-md text-sm backdrop-blur-md transition-all duration-300 ease-out focus-within:w-104 motion-reduce:transition-none";
-  if (drawer) {
-    place =
-      "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
-    look = `bg-background pointer-events-auto flex h-full ${dockDrawerClass} max-w-full flex-col border-l text-sm`;
-  } else if (open) {
-    place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
-    look = `chat-glow bg-background/80 animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full ${dockDrawerClass} max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md duration-300 ease-out motion-reduce:animate-none`;
-  }
+  const { place, look } = dockLook(mode);
   return (
     <div className={place}>
       <section
         aria-label={open ? words.title : undefined}
         className={look}
+        id={dockId}
         ref={dock}
       >
+        {drawer ? (
+          <DrawerEdge
+            dragging={dragging}
+            onClose={() => {
+              moveTo("frame");
+            }}
+            onDragging={setDragging}
+            onPreview={showWidth}
+            width={drawerWidth}
+          />
+        ) : null}
         {open ? (
           <DockHeader
             chatId={chatId}
@@ -498,7 +530,11 @@ const Dock = ({
           />
         ) : null}
         {open ? <DockQuestions slot={slot} /> : null}
-        <div className={open ? "flex flex-none flex-col gap-1 p-3" : undefined}>
+        <div
+          className={
+            open ? "flex flex-none flex-col gap-1 px-5 pt-2 pb-5" : undefined
+          }
+        >
           {box}
           <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (
@@ -525,7 +561,8 @@ const Dock = ({
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size. In the brain (its atlas, a region of
+ * which is the chat at full size, and a project's, whose box starts a
+ * chat in the project. In the brain (its atlas, a region of
  * it, a note or a part's page) it is the brain's own chat, kept as the
  * person moves about the brain, as in the prototype
  * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
@@ -544,7 +581,9 @@ export const ChatDock = () => {
   const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
   const loaded = appPage?.loaderData;
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
-  if (pathname === "/") {
+  // Chat is the chat at full size; a project's page has its own box,
+  // which starts a chat in the project.
+  if (pathname === "/" || pathname.startsWith("/projects/")) {
     return null;
   }
   if (pathname === "/brain" || pathname.startsWith("/brain/")) {
