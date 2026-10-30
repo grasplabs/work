@@ -54,12 +54,26 @@ describe("grasp/no-slow-motion", () => {
       ["700"],
     ],
     ["an element.animate duration, bare", "el.animate([], 600);", ["600"]],
+    [
+      "a duration multiplied in calc()",
+      '<div className="duration-[calc(2*200ms)]" />',
+      ["400"],
+    ],
+    [
+      "a duration it can't work out",
+      '<div className="duration-[calc(var(--strength)*400ms)]" />',
+      ["`calc(var(--strength)*400ms)`"],
+    ],
   ])("refuses %s over 300 ms", (_name, code, ms) => {
     expect(refused(code)).toStrictEqual(ms);
   });
 
   it.each([
     ["a quick Tailwind duration", '<div className="duration-200" />'],
+    [
+      "a duration divided in calc()",
+      '<div className="duration-[calc(600ms/3)]" />',
+    ],
     ["a quick bare element.animate", "el.animate([], 250);"],
     ["a toast's time, which is not motion", "toast({ duration: 4000 });"],
     [

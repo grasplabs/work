@@ -8,15 +8,23 @@ describe(findSlowClass, () => {
     ["data-open:duration-450 ease-out", 450],
     ["ease-out duration-[0.35s]", 350],
     ["duration-[400ms]", 400],
-    ["duration-[calc(var(--strength)*400ms)]", 400],
+    ["duration-[calc(2*200ms)]", 400],
+    ["duration-[calc(1s_-_500ms)]", 500],
   ])("finds the slow duration in %j", (classes, ms) => {
-    expect(findSlowClass(classes)).toBe(ms);
+    expect(findSlowClass(classes)).toStrictEqual({ ms });
+  });
+
+  it("says when a duration comes to no time it can work out", () => {
+    expect(
+      findSlowClass("duration-[calc(var(--strength)*400ms)]")
+    ).toStrictEqual({ unread: "calc(var(--strength)*400ms)" });
   });
 
   it.each([
     "transition-opacity duration-200",
     "duration-300",
-    "duration-[calc(var(--strength)*250ms)]",
+    "duration-[calc(600ms/3)]",
+    "duration-[calc(1s_-_700ms)]",
     "animate-spin duration-1000",
     "a duration-500ms word in a sentence",
   ])("lets %j through", (classes) => {
