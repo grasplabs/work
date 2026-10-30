@@ -15,7 +15,7 @@ const steps = info.platformLimits.workflowSteps ?? 0;
 
 /** The release before, with `workflowSteps` lower: one raise. */
 const before = {
-  releaseId: "r000000-0000000",
+  releaseId: "25.12.1",
   platformLimits: { ...info.platformLimits, workflowSteps: steps - 1 },
 };
 

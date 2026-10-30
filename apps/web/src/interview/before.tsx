@@ -21,6 +21,7 @@ import {
   voiceLevel,
 } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
+import { usePromise } from "./words.ts";
 
 // Before the interview (prototype `interview-intro.tsx`): first which
 // language, then who they talk with, Stephen or Claire, then what this is,
@@ -46,7 +47,7 @@ const Line = ({
 }) => {
   const said = useSaidOf(text);
   const className =
-    "animate-in fade-in slide-in-from-bottom-2 max-w-lg text-2xl font-medium tracking-tight text-balance duration-500";
+    "type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500";
   return (
     <div
       aria-live="polite"
@@ -101,7 +102,12 @@ const Language = ({ room, onNext }: { room: number; onNext: () => void }) => {
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line heading text={question} />
         <LanguageChoice onPick={keepGoing} picked />
-        <Button className="w-full max-w-sm" onClick={onNext} size="xl">
+        <Button
+          className="w-full max-w-sm"
+          onClick={onNext}
+          size="xl"
+          variant="highlight"
+        >
           {t`Continue`}
         </Button>
       </div>
@@ -289,11 +295,12 @@ const About = ({
   const other = interviewers.find((each) => each !== interviewer) ?? "stephen";
   const otherName = interviewerNames[other];
   const { body, size } = useHead(room, headSizes.talking);
+  const promise = usePromise();
   const rows = [
     { about: t`What we do`, text: useWhatWeDo(kind) },
     {
       about: t`Your words`,
-      text: t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together.`,
+      text: `${t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept.`} ${promise}`,
     },
     {
       about: t`Your choice`,
@@ -312,7 +319,7 @@ const About = ({
         />
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <h1 className="type-title">
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
         </h1>
         <dl className="w-full text-left">
@@ -327,7 +334,12 @@ const About = ({
           ))}
         </dl>
         <div className="flex w-full max-w-sm flex-col items-center gap-3">
-          <Button className="w-full" onClick={onNext} size="xl">
+          <Button
+            className="w-full"
+            onClick={onNext}
+            size="xl"
+            variant="highlight"
+          >
             {t`Check sound and microphone`}
           </Button>
           <Quiet onClick={onType}>{t`Type instead, without sound`}</Quiet>

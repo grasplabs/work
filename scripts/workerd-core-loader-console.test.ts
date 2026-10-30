@@ -27,6 +27,24 @@ import type { Served } from "./workerd-test-server.ts";
 
 /** How long an isolate's last output may take to come through. */
 const SETTLE_MS = 500;
+/** How often `printed` reads workerd's output again. */
+const PRINTED_POLL_MS = 20;
+
+/**
+ * Whether `on` prints `value` within `SETTLE_MS`: true as soon as it does,
+ * so only output that's expected and never comes waits the whole time.
+ */
+const printed = async (on: Served, value: string): Promise<boolean> => {
+  const deadline = Date.now() + SETTLE_MS;
+  while (!on.logs().includes(value)) {
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- polling: each read waits for the one before
+    await sleep(PRINTED_POLL_MS);
+  }
+  return true;
+};
 
 const ranSchema = z.object({
   answered: z.unknown(),
@@ -249,7 +267,9 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       fetchReplaced: await run("/fetch-errors-replaced"),
       deepReplaced: await run("/deep-errors-replaced"),
     };
-    // The same isolates loaded as they are: each way is read.
+    // The same isolates loaded as they are: each way is read. Each prints a
+    // value of its own, so one's output is never taken for another's, and
+    // one that prints is seen as soon as it does.
     const loud: Record<string, boolean> = {};
     for (const route of [
       "getter",
@@ -263,12 +283,11 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       // oxlint-disable-next-line no-await-in-loop -- one at a time, so each one's output is its own
       await run(`/loud/thrown-${route}`);
       // oxlint-disable-next-line no-await-in-loop -- as above
-      await sleep(SETTLE_MS);
-      loud[route] = served.logs().includes(`loud-${route}-c40b`);
+      loud[route] = await printed(served, `loud-${route}-c40b`);
     }
     await run("/loud/fetch-thrown");
-    await sleep(SETTLE_MS);
-    loud.fetch = served.logs().includes("loud-fetch-thrown-c40b");
+    loud.fetch = await printed(served, "loud-fetch-thrown-c40b");
+    // Before the quiet calls' output is read as never printed.
     await sleep(SETTLE_MS);
 
     expect({
@@ -334,7 +353,7 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       },
       reported: false,
     });
-  });
+  }, 120_000);
 
   // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
   // from 2026-08-04 on, so it is turned off): a timer imported by name from

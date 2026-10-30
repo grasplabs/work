@@ -84,6 +84,18 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 - All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component.
 - UI uses `@grasp-os/ui` components and theme tokens: no raw colours, arbitrary values or inline styles. `@shadcn/lint` names the component, variant or token to use instead.
 
+## Design
+
+Grasp wears its brand book, and it is one design: `apps/web`, `apps/admin` and App screens all draw it from `@grasp-os/ui`, so these rules hold in all three. The theme (`packages/ui/src/styles.css`) keeps it in three layers: the brand book's values word for word (`--brand-*`), a light and a dark theme of semantic tokens, and Tailwind's names for them. Only the themes read `--brand-*`; what the stylesheet can't reach (a canvas before it is styled, a printed page) takes the same values from `@grasp-os/ui/lib/brand`. `packages/ui/test/brand.test.ts` keeps the two equal and fails when anything else reads a brand value.
+
+- **Colour**: tokens only (`@shadcn/lint` holds it). Lime (`highlight`, `Button variant="highlight"`) once a page, for the one action it is for: a step's main button, the dashboard's yes. Amber (`status-attention`, `Badge variant="attention"`) for what needs someone; green (`status-agreed`, `variant="passed"`) for what is done. Red (`destructive`) only for a form's error and an action that can't be undone. A badge is never black.
+- **Type**: Geist for the product. Newsreader only for what Grasp says, page titles and key figures, and only through `type-display`, `type-title`, `type-heading` and `type-figure`, never a `font-*` class. The sidebar stays in Geist.
+- **Marks**: what is highlighted in words gets a line under it (`line-under`), never a highlighter behind it.
+- **Surfaces**: cards rest on the page with the brand's hairline and `shadow-block`; what floats above it (menus, popovers, dialogs) has `shadow-lifted`; a dialog's backdrop is the ink's `veil`. Painted fields (`PaintedField`, always a painting and a pattern) stand only behind the one or two things on a screen that matter most, and two side by side never share a painting or a pattern, in dark mode too.
+- **Controls are closed, containers are open.** A control (Button, Badge, Input, Select, a tab, a menu item) takes layout classes only; a new look is a new variant in its `@grasp-os/ui` file (`@shadcn/lint`'s `no-restyle` holds it). Containers (card parts, table parts, the sidebar's structure, fields, items, a painted field) may also set spacing and typography. Fields are always filled (`bg-card`).
+- **Motion**: on the house curve (`ease-house`, the default), and every answer over within 300 ms: 100 to 150 ms for a hover or a check, 150 to 250 ms for a menu, a tooltip or a fade, 200 to 300 ms for a dialog, a drawer or a panel. Longer only where it isn't a wait (work still going on, a countdown, the brain's dots) or for what is rare (onboarding, the interview, the tour). `apps/web/src/motion-timing.test.ts` holds it for the frontend and the kit; a new exception goes in its list with its reason. Under reduced motion nothing slides, grows or glides.
+- **Plain language** in everything the UI says.
+
 ## Translations
 
 The frontend (`apps/web`) speaks English, German, Dutch, Spanish and French through Lingui. English is written in the code; `vp run -r i18n:extract` collects it into `apps/web/src/locales/<locale>/messages.po`, and CI fails when a catalog isn't up to date. `locales.test.ts` fails when a language lacks a message or a translation drops a placeholder.

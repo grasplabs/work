@@ -734,7 +734,7 @@ const refusals: Refusal[] = [
     spec: {
       platformLimits: { ...testLimits, workflowSteps: 2000 },
       previousRelease: {
-        releaseId: "r000000001-0000000",
+        releaseId: "26.01.1",
         platformLimits: testLimits,
       },
       limitEvidence: (release) => [
