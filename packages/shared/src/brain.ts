@@ -159,8 +159,8 @@ export const teamGroupsInputSchema = z
 
 /**
  * How many interviews the brain learned from in a week, never who gave them
- * or on which day: each week holds at least five, a quieter week counted
- * with the weeks after it.
+ * or on which day: each week holds at least five; a quieter week is left
+ * out.
  */
 export interface InterviewWeek {
   /** The Monday of the week, as an ISO date. */

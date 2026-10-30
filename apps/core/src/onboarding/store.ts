@@ -2642,6 +2642,31 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The interviews of the people who agreed to what was read back and
+   * still take part: someone who withdrew is never counted again
+   * (GRA-329), in a source's people or in a week's interviews.
+   */
+  #agreedInterviews(): { person: string; completedAt: string | null }[] {
+    return this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .leftJoin(
+        participations,
+        eq(participations.person, interviewStates.person)
+      )
+      .where(
+        and(
+          isNotNull(interviewStates.agreedAt),
+          isNull(participations.withdrawnAt)
+        )
+      )
+      .all();
+  }
+
+  /**
    * Each team the brain has interviews of: one source for all of them
    * (brain-intake.ts), with how many of its people agreed and the day the
    * first of them did, never who. A team that left the roster has none.
@@ -2653,14 +2678,7 @@ export class Onboarding extends DurableObject<Env> {
     since: string;
   }[] {
     const roster = this.#roster();
-    const states = this.#db
-      .select({
-        person: interviewStates.person,
-        completedAt: interviewStates.completedAt,
-      })
-      .from(interviewStates)
-      .where(isNotNull(interviewStates.agreedAt))
-      .all();
+    const states = this.#agreedInterviews();
     return this.#db
       .select({ team: brainTeams.team })
       .from(brainTeams)
@@ -2689,11 +2707,12 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * How many interviews the brain learned from, week by week, never who
    * gave them or on which day (GRA-1278): the interviews of the people who
-   * agreed, in teams whose interviews the brain holds, by the Monday of the
-   * week each finished in. A week of fewer than `minTeamShown` is counted
-   * with the weeks after it, on the Monday of the week that brings the
-   * count to it, so no line ever stands for fewer people than a team's
-   * claim needs; what is left at the end waits for more.
+   * agreed and still take part, in teams whose interviews the brain holds,
+   * by the Monday of the week each finished in. A week of fewer than
+   * `minTeamShown` is left out, never added to another week: no line
+   * stands for fewer people than a team's claim needs, and a week a
+   * withdrawal takes below it goes without its rest showing up elsewhere,
+   * where the difference would tell how many were left.
    */
   interviewWeeks(): { week: string; interviews: number }[] {
     const roster = this.#roster();
@@ -2710,31 +2729,17 @@ export class Onboarding extends DurableObject<Env> {
         .filter((person) => sent.has(person.team))
         .map(({ id }) => id)
     );
-    const days = this.#db
-      .select({
-        person: interviewStates.person,
-        completedAt: interviewStates.completedAt,
-      })
-      .from(interviewStates)
-      .where(isNotNull(interviewStates.agreedAt))
-      .all()
-      .flatMap(({ person, completedAt }) =>
-        completedAt === null || !inSent.has(person)
-          ? []
-          : [mondayOf(dayOf(completedAt))]
-      )
-      .toSorted();
-    const weeks: { week: string; interviews: number }[] = [];
-    let waiting = 0;
-    for (const [index, week] of days.entries()) {
-      waiting += 1;
-      const last = days[index + 1] !== week;
-      if (last && waiting >= minTeamShown) {
-        weeks.push({ week, interviews: waiting });
-        waiting = 0;
+    const byWeek = new Map<string, number>();
+    for (const { person, completedAt } of this.#agreedInterviews()) {
+      if (completedAt !== null && inSent.has(person)) {
+        const week = mondayOf(dayOf(completedAt));
+        byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
       }
     }
-    return weeks;
+    return [...byWeek]
+      .filter(([, count]) => count >= minTeamShown)
+      .map(([week, count]) => ({ week, interviews: count }))
+      .toSorted((a, b) => a.week.localeCompare(b.week));
   }
 
   /**
