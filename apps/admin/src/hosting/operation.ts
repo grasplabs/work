@@ -111,6 +111,8 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -1750,67 +1752,79 @@ const assertReleaseFits = async (
   }
 };
 
-/** How many of the newest imported releases a provisioning looks through for one that fits. */
-const fittingReleasesLooked = 20;
+/** How many imported releases are read at a time while looking for one that fits. */
+const fittingReleasesPage = 20;
 
-/** Whether client `clientId` may be provisioned with imported release `releaseId` (`assertReleaseFits`). */
-export const releaseFits = async (
-  db: AdminDatabase,
-  clientId: string,
-  releaseId: string
-): Promise<boolean> => {
-  const manifest = await importedManifest(db, releaseId);
-  if (manifest === null) {
-    return false;
-  }
-  try {
-    await assertReleaseFits(db, clientId, manifest);
-    return true;
-  } catch (error) {
-    if (
-      error instanceof ProvisionOperationError ||
-      error instanceof DeployError
-    ) {
-      return false;
-    }
-    throw error;
-  }
-};
+/** Releases listed after `row`, newest first: built before it, or at once with a lower id. */
+const olderThan = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    lt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), lt(releases.id, row.id))
+  );
+
+/** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
+const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    gt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), gt(releases.id, row.id))
+  );
 
 /**
  * The newest imported release client `clientId` may be provisioned with
- * (`assertReleaseFits`), looking through the newest few; null when none
- * of them fits, or none is imported. What a client is provisioned with
- * when staff don't pick one, and what resuming offers first.
+ * (`assertReleaseFits`), looking through every imported release, newest
+ * first, a page at a time, never only a window of the newest; with
+ * `newerThan`, only releases built after that one (by when built, then
+ * id). Null when none fits. What a client is provisioned with when staff
+ * don't pick one, and what a retry moves a stopped one forward to.
  */
 export const newestFittingRelease = async (
   db: AdminDatabase,
-  clientId: string
+  clientId: string,
+  newerThan?: { id: string; builtAt: Date }
 ): Promise<string | null> => {
-  const newest = await db
-    .select({ id: releases.id, manifest: releases.manifest })
-    .from(releases)
-    .orderBy(desc(releases.builtAt), desc(releases.id))
-    .limit(fittingReleasesLooked);
-  for (const row of newest) {
-    const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
-    if (!parsed.success) {
-      continue;
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
-      await assertReleaseFits(db, clientId, parsed.data);
-      return row.id;
-    } catch (error) {
-      if (
-        !(error instanceof ProvisionOperationError) &&
-        !(error instanceof DeployError)
-      ) {
-        throw error;
+  let after: { id: string; builtAt: Date } | undefined;
+  for (;;) {
+    const page: { id: string; builtAt: Date; manifest: string }[] =
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time, newest first
+      await db
+        .select({
+          id: releases.id,
+          builtAt: releases.builtAt,
+          manifest: releases.manifest,
+        })
+        .from(releases)
+        .where(
+          and(
+            after === undefined ? undefined : olderThan(after),
+            newerThan === undefined ? undefined : newerThanRow(newerThan)
+          )
+        )
+        .orderBy(desc(releases.builtAt), desc(releases.id))
+        .limit(fittingReleasesPage);
+    for (const row of page) {
+      const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
+      if (!parsed.success) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
+        await assertReleaseFits(db, clientId, parsed.data);
+        return row.id;
+      } catch (error) {
+        if (
+          !(error instanceof ProvisionOperationError) &&
+          !(error instanceof DeployError)
+        ) {
+          throw error;
+        }
       }
     }
+    const last = page.at(-1);
+    if (last === undefined || page.length < fittingReleasesPage) {
+      return null;
+    }
+    after = last;
   }
-  return null;
 };
 
 /**

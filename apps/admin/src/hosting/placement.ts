@@ -26,6 +26,7 @@ import {
   clientPlacements,
   clients,
   hostingDestinations,
+  releases,
 } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
@@ -35,7 +36,6 @@ import { InventoryError, placeClient, placementOf } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import {
   newestFittingRelease,
-  releaseFits,
   ProvisionOperationError,
   provisionOf,
 } from "./operation.ts";
@@ -411,23 +411,28 @@ export const placeInputSchema = z.object({
 export type PlaceInput = z.infer<typeof placeInputSchema>;
 
 /**
- * The release a provisioning started or resumed without one picked runs
- * with: its operation's own, while that still fits the client
- * (`releaseFits`), so a stopped one resumes as it was; else the newest
- * that fits (`newestFittingRelease`).
+ * The release a provisioning started or tried again without one picked
+ * runs with: the newest imported release that fits the client
+ * (`newestFittingRelease`, every release looked through). For one with an
+ * operation, the newest that fits among those built after its recorded
+ * release, so a fix released since moves it forward; with none newer
+ * that fits, its recorded release, so it is never left without one.
  */
 const resumeRelease = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<string | null> => {
   const operation = await provisionOf(db, clientId);
-  if (
-    operation !== undefined &&
-    (await releaseFits(db, clientId, operation.releaseId))
-  ) {
-    return operation.releaseId;
+  if (operation === undefined) {
+    return await newestFittingRelease(db, clientId);
   }
-  return await newestFittingRelease(db, clientId);
+  const recorded = await db
+    .select({ id: releases.id, builtAt: releases.builtAt })
+    .from(releases)
+    .where(eq(releases.id, operation.releaseId))
+    .get();
+  const newer = await newestFittingRelease(db, clientId, recorded);
+  return newer ?? operation.releaseId;
 };
 
 /**

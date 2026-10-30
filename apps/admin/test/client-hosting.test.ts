@@ -1,3 +1,4 @@
+import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -51,8 +52,11 @@ const caller = "ops@grasp.test";
  * attempt in a shared destination stops at validation
  * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
-const importedRelease = async (): Promise<string> => {
-  const manifest = await release();
+const importedRelease = async (
+  adjust: (manifest: ReleaseManifest) => ReleaseManifest = (manifest) =>
+    manifest
+): Promise<string> => {
+  const manifest = adjust(await release());
   const now = new Date();
   await db.insert(releases).values({
     id: manifest.releaseId,
@@ -84,6 +88,14 @@ const place = async (
     placeAndProvisionFn,
     { clientId, releaseId, destinationId },
     { email }
+  );
+
+/** Trying it again, as its Setup's button does: no release or destination named. */
+const retry = async (clientId: string) =>
+  await callServerFn(
+    placeAndProvisionFn,
+    { clientId, releaseId: null, destinationId: null },
+    { email: caller }
   );
 
 const placementOf = async (clientId: string) =>
@@ -286,21 +298,48 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("tries a stopped provisioning again on its own release while that still fits, not the newest", async () => {
+  it("tries a stopped provisioning again on the newest release that fits, a fix released since included", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
-    await importedRelease();
+    const fixed = await importedRelease();
 
     // Retry, as its Setup's button asks: no release named.
-    const retried = await callServerFn(
-      placeAndProvisionFn,
-      { clientId, releaseId: null, destinationId: null },
-      { email: caller }
-    );
+    const retried = await retry(clientId);
+    await latestStopped(attempts);
+    const operation = await operationOf(clientId);
+
+    expect({
+      retried: retried.refused,
+      operation: operation?.releaseId,
+      switched: await actorsOf(clientId, "provision.switch_release"),
+    }).toStrictEqual({ retried: null, operation: fixed, switched: [caller] });
+  });
+
+  it("tries a stopped provisioning again on its own release when no newer release fits it", async () => {
+    await destination();
+    const clientId = await client();
+    const own = await importedRelease();
+    using attempts = followAttempts();
+    await place(clientId, own, null);
+    await latestStopped(attempts);
+    // Newer, but its core calls a connect it doesn't ship: it fits no one.
+    await importedRelease((manifest) => ({
+      ...manifest,
+      compatibility: {
+        interfaces: {
+          connect: { serves: 1, calls: {} },
+          core: { calls: { connect: { min: 2, max: 2 } } },
+        },
+        workflowJournal: { min: 8, max: 9 },
+        sdkProtocols: { min: 2, max: 2 },
+      },
+    }));
+
+    const retried = await retry(clientId);
     await latestStopped(attempts);
     const operation = await operationOf(clientId);
 
