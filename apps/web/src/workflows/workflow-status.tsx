@@ -3,6 +3,7 @@ import type {
   WorkflowStage,
 } from "@grasp-os/shared/workflow-lifecycle";
 import { liveStages } from "@grasp-os/shared/workflow-lifecycle";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +20,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import type { MessageDescriptor } from "@lingui/core";
@@ -206,7 +206,7 @@ const StatusMenu = ({
   onAskToGoLive: (version: number) => void;
 }) => {
   const { t } = useLingui();
-  const { askable, canPause, canResume, liveVersion } = view;
+  const { askable, canPause, canResume } = view;
   if (!canPause && !canResume && askable === null) {
     return (
       <span className="flex items-center gap-2 font-medium">
@@ -215,7 +215,6 @@ const StatusMenu = ({
       </span>
     );
   }
-  const since = view.liveSince === null ? null : formatDate(view.liveSince);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -234,11 +233,6 @@ const StatusMenu = ({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuGroup>
-          {since === null ? null : (
-            <DropdownMenuLabel>
-              {t`Version ${liveVersion} went live on ${since}`}
-            </DropdownMenuLabel>
-          )}
           {canPause ? (
             <DropdownMenuItem onClick={onPause}>
               <PauseIcon />
@@ -287,12 +281,38 @@ export const WorkflowStatus = ({
     write: "pause" | "resume" | "requestGoLive",
     input: { revision: number; version?: number }
   ): Promise<void> => {
-    const changed = await run(
-      async (session) =>
-        await session.workflowResources.lifecycle[write](workflow, input)
-    );
+    let conflict = false;
+    const changed = await run(async (session) => {
+      try {
+        return await session.workflowResources.lifecycle[write](
+          workflow,
+          input
+        );
+      } catch (error) {
+        conflict =
+          workflowResourceErrors.codeOf(error) ===
+          "workflow.lifecycle_conflict";
+        throw error;
+      }
+    });
     if (changed !== undefined) {
       onChange(changed);
+      return;
+    }
+    if (conflict) {
+      // Changed by someone else first: how it stands now is read, so the
+      // next change names the revision core has, and why this one failed
+      // still shows.
+      try {
+        onChange(
+          await core.withSession(
+            async (session) =>
+              await session.workflowResources.lifecycle.get(workflow)
+          )
+        );
+      } catch {
+        // The page's own read says how it stands when it is loaded again.
+      }
     }
   };
 
@@ -331,7 +351,7 @@ export const WorkflowStatus = ({
     live: t`Live since ${since}`,
     paused: t({ message: "Paused", context: "a workflow someone paused" }),
   };
-  const { waiting } = view;
+  const { waiting, liveVersion } = view;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -353,6 +373,13 @@ export const WorkflowStatus = ({
           view={view}
           word={words[view.shows]}
         />
+        {/* Which version is live, for everyone: not only in the menu of
+            those who may change it. */}
+        {liveVersion === null || view.liveSince === null ? null : (
+          <span className="text-muted-foreground">
+            {t`Version ${liveVersion} went live on ${since}`}
+          </span>
+        )}
         {waiting === null ? null : (
           <span className="text-muted-foreground">
             <Trans>Version {waiting} waits to go live</Trans>
