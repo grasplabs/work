@@ -672,6 +672,20 @@ const userWorkerOf = (
 };
 
 export const dispatchRoutes: Route[] = [
+  // The namespace's own details: what Readiness reads as the deployer.
+  {
+    method: "GET",
+    path: /^\/workers\/dispatch\/namespaces\/(?<namespace>[^/]+)$/u,
+    answer: ({ account, params }) => {
+      const scripts = namespaceOf(account, params);
+      return scripts instanceof Response
+        ? scripts
+        : envelope({
+            namespace_name: params.namespace,
+            script_count: scripts.size,
+          });
+    },
+  },
   {
     method: "DELETE",
     path: dispatchPath(""),

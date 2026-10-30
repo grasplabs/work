@@ -97,9 +97,9 @@ describe("a Worker's config as it deploys", () => {
       ),
     }).toStrictEqual({
       production:
-        "Secrets Store store-1 doesn't have ROUTER_KEY: put them in, then deploy again",
+        "Secrets Store store-1 doesn't have ROUTER_KEY: add ROUTER_KEY to the stage's 1Password Environment, then run Deploy platform again",
       staging:
-        "Secrets Store store-1 doesn't have ROUTER_KEY_STAGING: put them in, then deploy again",
+        "Secrets Store store-1 doesn't have ROUTER_KEY_STAGING: add ROUTER_KEY to the stage's 1Password Environment, then run Deploy platform again",
     });
   });
 
