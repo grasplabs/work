@@ -6,12 +6,12 @@ import type {
   InterviewLine,
   InterviewProgress,
 } from "@grasp-os/shared/interview-links";
+import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
@@ -83,6 +83,8 @@ import {
 // - T8: a line put right while the team is given to the brain leaving its
 //   old words in what landed.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = "openai/gpt-4o-mini-tts";
 const idp = mockIdp();
 
 /** Words only one person says, to look for where they must not be. */
@@ -763,8 +765,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await toldWith(ids, said);
     const keyOf = (words: string): SpokenKey => ({
       spoken: `[warm] ${stephenSays(words)}`,
-      voice: speakerVoices.stephen,
-      model: voiceModels.said,
+      voice: defaultPlatformAi.speech.voices.stephen,
+      model: speechModel,
       language: "en",
     });
     const answer = JSON.stringify({
@@ -876,8 +878,8 @@ describe(
       await toldWith(ids, said);
       const keyOf = (words: string): SpokenKey => ({
         spoken: `[warm] ${stephenSays(words)}`,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: defaultPlatformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       });
       const answer = JSON.stringify({
@@ -1075,8 +1077,8 @@ describe(
       await toldWith(ids, said);
       const key: SpokenKey = {
         spoken: `[warm] ${stephenSays(said.max)}`,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: defaultPlatformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       };
       const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });

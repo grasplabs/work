@@ -86,6 +86,17 @@ const wholeNumber = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 /** A fee or a value: always in whole euros. */
 export const euros = (amount: number): string => wholeEuros.format(amount);
 
+const euroFractions = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 3,
+});
+
+/** A price per unit in euros: to a tenth of a cent, as a minute of voice costs less than a cent or two. */
+export const euroRate = (amount: number): string =>
+  amount >= 10 ? euros(amount) : euroFractions.format(amount);
+
 /** An amount in euros: to the cent while it is small, in whole euros from ten on. */
 export const euro = (amount: number): string =>
   amount >= 10 ? euros(amount) : euroCents.format(amount);

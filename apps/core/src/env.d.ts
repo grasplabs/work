@@ -51,12 +51,11 @@ interface __BaseEnv_Env {
   /** The model gateway (src/models.ts): JSON. */
   MODEL_GATEWAY?: unknown;
   /**
-   * The deployment's AI Gateway token, a Worker secret: the
-   * `cf-aig-authorization` an authenticated gateway asks for, which voice
-   * requests carry (src/models.ts). Never logged, never sent to the
-   * browser. Without it they carry the AI binding's placeholder.
+   * Each of Grasp's own AI features' provider and model, as shared's
+   * platform-ai.ts describes it (src/platform-ai.ts): JSON, OpenAI's
+   * defaults while unset.
    */
-  AI_GATEWAY_TOKEN?: string;
+  PLATFORM_AI?: unknown;
   /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**

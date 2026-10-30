@@ -1,10 +1,12 @@
 import { voiceTags } from "@grasp-os/shared/interview-links";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
+import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import type { Speaker } from "@grasp-os/shared/voice";
 
-import { gatewaySettings } from "../models.ts";
+import { platformAi } from "../platform-ai.ts";
 import { forgetLines, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
+import { speechModelOf } from "../speech.ts";
 
 // How Stephen's lines are said (speech.ts), and taking them out of the
 // cache of lines said before (speech-cache.ts) once the interview they
@@ -12,42 +14,29 @@ import type { SpokenKey } from "../speech-cache.ts";
 // told, and the cache keeps a line's words with its sound for a month.
 
 /**
- * Each speaker's voice, by its ElevenLabs ID. Stephen's is "Adam", the
- * voice Eleven v4 is shown with: young, confident, conversational.
- * Claire's is "Jessica": playful, bright and warm, checked by ElevenLabs
- * in English, Dutch, German and Spanish, not in French. The sample
- * speakers are ElevenLabs's own voices, each clearly not Stephen.
+ * Each speaker's voice, by the speech provider's name for it: the
+ * platform's settings' (@grasp-os/shared/platform-ai); none while they
+ * don't parse.
  */
-export const speakerVoices: Record<Speaker, string> = {
-  stephen: "s3TPKV1kjDlVtZbl4Ksh",
-  claire: "r1KmysJdVYZjJCm4mL3b",
-  lisa: "EXAVITQu4vr4xnSDxMaL",
-  mark: "cjVigY5qzO86Huf0OWal",
-  tim: "TX3LPaxmHKxFdv7VOQHJ",
-};
+export const speakerVoicesOf = (
+  env: Pick<Env, "PLATFORM_AI">
+): Record<Speaker, string> | undefined => platformAi(env)?.speech.voices;
 
 /**
- * The voice models a line is said in, by the gateway's names: Eleven v4,
- * the most expressive; for a line only known as it is said, v4 Turbo,
- * which is quicker, with the same voices and directions.
+ * How a line is to be said, for the speech model to hear apart from the
+ * line itself: the tone it takes, one of Stephen's (`voiceTags`).
  */
-export const voiceModels = {
-  said: "elevenlabs/eleven_v4",
-  quick: "elevenlabs/eleven_v4_turbo",
-} as const;
-
-/**
- * What the voice is sent: the line led by its tone, in English; the bare
- * line in any other language. A direction is English words in front of
- * the line, and the voice then starts it in English: the first Dutch word
- * came out with an English sound, "nog" as "nok".
- */
-export const spokenOf = (
-  text: string,
-  language: string,
+export const toneInstructions = (
   tone: string | undefined
-): string =>
-  tone !== undefined && language === "en" ? `[${tone}] ${text}` : text;
+): string | undefined =>
+  tone === undefined ? undefined : `Say it in this tone: ${tone}.`;
+
+/**
+ * What a line is kept by in the cache, of what is said: the line led by
+ * its tone, in any language, as the tone changes how it sounds.
+ */
+export const spokenOf = (text: string, tone: string | undefined): string =>
+  tone === undefined ? text : `[${tone}] ${text}`;
 
 /** What was said in an interview, as its lines may have been kept. */
 export interface SaidIn {
@@ -59,26 +48,35 @@ export interface SaidIn {
   languages: readonly string[];
 }
 
-/** Every key a line of `said` may be kept by: each tone, voice model, speaker and language. */
+/**
+ * Every key a line of `said` may be kept by: each tone, speech model,
+ * speaker's voice and language, the platform's settings' now and the
+ * defaults', so a line kept before the settings changed back is found too.
+ */
 const keysOf = (env: Env, said: SaidIn): SpokenKey[] => {
+  const defaults = defaultPlatformAi.speech;
   const models = [
     ...new Set([
-      voiceModels.said,
-      voiceModels.quick,
-      ...gatewaySettings(env).voices,
+      `${defaults.provider}/${defaults.model}`,
+      ...[speechModelOf(env)].filter((model) => model !== undefined),
     ]),
   ];
+  const voices = speakerVoicesOf(env);
   const tones = [undefined, ...voiceTags];
   return said.texts.flatMap((text) =>
     said.languages.flatMap((language) =>
-      (language === "en" ? tones : [undefined]).flatMap((tone) =>
+      tones.flatMap((tone) =>
         said.speakers.flatMap((speaker) =>
-          models.map((model) => ({
-            spoken: spokenOf(text, language, tone),
-            voice: speakerVoices[speaker],
-            model,
-            language,
-          }))
+          [...new Set([defaults.voices[speaker], voices?.[speaker]])]
+            .filter((voice) => voice !== undefined)
+            .flatMap((voice) =>
+              models.map((model) => ({
+                spoken: spokenOf(text, tone),
+                voice,
+                model,
+                language,
+              }))
+            )
         )
       )
     )

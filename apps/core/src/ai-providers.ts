@@ -9,6 +9,7 @@ import {
 } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
+  AiPlatformUse,
   AiProviderAdd,
   AiProviderId,
   AiProviderKey,
@@ -44,7 +45,8 @@ import { orgSettings } from "./db/core/schema.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
-import { models } from "./models.ts";
+import { deploymentStaysInEu, models } from "./models.ts";
+import { platformAi } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -166,6 +168,45 @@ const refusalOf = (error: unknown): Error => {
   return aiProviderErrors.create("ai_provider.failed");
 };
 
+/** `provider` as the listing names it: its name and where it runs. */
+const platformProvider = (
+  provider: AiProviderId
+): NonNullable<AiPlatformUse["provider"]> => ({
+  id: provider,
+  label: aiProviders[provider].label,
+  whereItRuns: aiProviders[provider].whereItRuns,
+});
+
+/**
+ * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
+ * on Grasp's keys whatever the organization connected: its admins can't
+ * switch them off here, but they see where that data goes. Document
+ * conversion stays on the deployment where knowledge/extract.ts keeps it
+ * there (`local`, or a deployment that keeps everything in the EU); none
+ * at all while the settings don't parse, as every feature is then off.
+ */
+const platformUses = (env: Env): AiPlatformUse[] => {
+  const settings = platformAi(env);
+  if (settings === undefined) {
+    return [];
+  }
+  const { conversion, transcription, speech } = settings;
+  return [
+    {
+      feature: "conversion",
+      provider:
+        conversion.provider === "local" || deploymentStaysInEu(env)
+          ? null
+          : platformProvider(conversion.provider),
+    },
+    {
+      feature: "transcription",
+      provider: platformProvider(transcription.provider),
+    },
+    { feature: "speech", provider: platformProvider(speech.provider) },
+  ];
+};
+
 /** The organization's providers, as its admins see them. */
 const listing = async (env: Env): Promise<AiProvidersListing> => {
   const [keys, health, choice] = await Promise.all([
@@ -181,8 +222,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       whereItRuns: aiProviders[provider].whereItRuns,
     })),
     choice,
-    // Grasp's own features don't go through a provider of their own yet.
-    platform: [],
+    platform: platformUses(env),
   };
 };
 

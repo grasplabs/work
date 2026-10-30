@@ -63,8 +63,6 @@ export interface TransportCapabilities {
    * another.
    */
   sharedCacheOff: boolean;
-  /** Whether voice models (speech and listening) are reached through it. */
-  voice: boolean;
   /**
    * Whether pi's provider SDKs retry a refused request themselves (429 or
    * 5xx), each retry admitted by the ledger on its own. Otherwise the
