@@ -80,8 +80,11 @@ type Shown = AppStatus | typeof everyApp;
 
 interface ListedApp {
   app: App;
-  /** Who answers for it, by name; their ID when it isn't known. */
-  responsible: string;
+  /**
+   * Who answers for it, by name; none when core doesn't name them to
+   * the person in time, as an ID says nothing to them.
+   */
+  responsible: string | undefined;
 }
 
 /** The person's Apps, the newest first, each with who answers for it. */
@@ -94,7 +97,7 @@ const listApps = async (session: Session): Promise<ListedApp[]> => {
     .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((app) => ({
       app,
-      responsible: people.get(app.responsible) ?? app.responsible,
+      responsible: people.get(app.responsible),
     }));
 };
 
@@ -224,12 +227,20 @@ const AppTile = ({
           </span>
         )}
         <span className="text-muted-foreground mt-1 flex min-w-0 items-center gap-2 text-xs">
-          <OwnerAvatar name={responsible} />
-          <span className="truncate">
-            <Trans>
-              {responsible} · Made on {made}
-            </Trans>
-          </span>
+          {responsible === undefined ? (
+            <span className="truncate">
+              <Trans>Made on {made}</Trans>
+            </span>
+          ) : (
+            <>
+              <OwnerAvatar name={responsible} />
+              <span className="truncate">
+                <Trans>
+                  {responsible} · Made on {made}
+                </Trans>
+              </span>
+            </>
+          )}
         </span>
       </div>
     </article>

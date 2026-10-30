@@ -8888,6 +8888,10 @@ msgstr "D’aucun de"
 msgid "Made by one of"
 msgstr "De l’un de"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Made on {made}"
+msgstr "Créée le {made}"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Réalisé avec Grasp le {date}"

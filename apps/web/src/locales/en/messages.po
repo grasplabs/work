@@ -8888,6 +8888,10 @@ msgstr "Made by none of"
 msgid "Made by one of"
 msgstr "Made by one of"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Made on {made}"
+msgstr "Made on {made}"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Made with Grasp on {date}"
