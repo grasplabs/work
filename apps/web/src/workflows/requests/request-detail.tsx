@@ -295,11 +295,19 @@ const TeamsPart = ({
   asked: boolean;
 }) => {
   const { t } = useLingui();
+  const countOf = (each: RequestsReport["byTeam"][number]): number =>
+    asked ? each.requests : each.billed;
+  // Most first by the count it shows, and the teams too small to name last.
+  const teams = report.byTeam.toSorted(
+    (a, b) =>
+      Number(a.key === elsewhere) - Number(b.key === elsewhere) ||
+      countOf(b) - countOf(a)
+  );
   return (
     <Section
       title={t({ message: "Teams", context: "Stephen's requests by team" })}
     >
-      {report.byTeam.map((each) => (
+      {teams.map((each) => (
         <OpenRow
           className={row}
           key={each.key}
@@ -308,7 +316,7 @@ const TeamsPart = ({
           <span className={cn("truncate", nameCell)}>
             {names.team(each.key)}
           </span>
-          <Count value={asked ? each.requests : each.billed} />
+          <Count value={countOf(each)} />
         </OpenRow>
       ))}
     </Section>
@@ -543,6 +551,8 @@ const Panel = ({
   const teamOnly =
     subject.kind === "team" && onOnlyTeam !== null ? subject.id : null;
   const makesWorkflow = subject.kind === "topic" || subject.kind === "question";
+  // Only a panel with something to do has a footer: a person's has none.
+  const hasFooter = need !== null || teamOnly !== null || makesWorkflow;
   return (
     <>
       <SheetHeader className="mr-8">
@@ -569,40 +579,42 @@ const Panel = ({
           <Body names={names} opener={opener} page={page} subject={subject} />
         </div>
       )}
-      <div className="bg-popover sticky bottom-0 mt-auto border-t">
-        <SheetFooter>
-          {need === null ? null : (
-            <NeedActions
-              canManage={canManage}
-              need={need}
-              onChanged={onChanged}
-            />
-          )}
-          {teamOnly === null ? null : (
-            <Button
-              onClick={() => {
-                onOnlyTeam?.(teamOnly);
-              }}
-            >
-              {t`Show the page for ${title}`}
-            </Button>
-          )}
-          {makesWorkflow ? (
-            <Button
-              disabled={asking.busy}
-              onClick={() => {
-                void asking.ask(
-                  title,
-                  t`Many people ask Stephen about “${title}”. Which workflow would do it for them?`
-                );
-              }}
-            >
-              {t`Make a workflow of it`}
-            </Button>
-          ) : null}
-          <ErrorText>{asking.failure}</ErrorText>
-        </SheetFooter>
-      </div>
+      {hasFooter ? (
+        <div className="bg-popover sticky bottom-0 mt-auto border-t">
+          <SheetFooter>
+            {need === null ? null : (
+              <NeedActions
+                canManage={canManage}
+                need={need}
+                onChanged={onChanged}
+              />
+            )}
+            {teamOnly === null ? null : (
+              <Button
+                onClick={() => {
+                  onOnlyTeam?.(teamOnly);
+                }}
+              >
+                {t`Show the page for ${title}`}
+              </Button>
+            )}
+            {makesWorkflow ? (
+              <Button
+                disabled={asking.busy}
+                onClick={() => {
+                  void asking.ask(
+                    title,
+                    t`Many people ask Stephen about “${title}”. Which workflow would do it for them?`
+                  );
+                }}
+              >
+                {t`Make a workflow of it`}
+              </Button>
+            ) : null}
+            <ErrorText>{asking.failure}</ErrorText>
+          </SheetFooter>
+        </div>
+      ) : null}
     </>
   );
 };

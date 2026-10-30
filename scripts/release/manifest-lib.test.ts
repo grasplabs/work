@@ -188,7 +188,7 @@ describe("the release manifest", () => {
 
   it("refuses a release id that isn't a plain R2 prefix", () => {
     expect(() =>
-      generateManifest({ ...info, releaseId: "../r000001-0000000" }, fixture)
+      generateManifest({ ...info, releaseId: "../26.01.1" }, fixture)
     ).toThrow(/releaseId/u);
   });
 

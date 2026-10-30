@@ -42,7 +42,7 @@ export const chosenOf = (
 const whoLabels = {
   everyone: msg`Everyone`,
   teams: msg`Chosen teams`,
-  nobody: msg`Nobody`,
+  nobody: msg`Nobody yet`,
 } as const satisfies Record<Exclude<Who, "same">, MessageDescriptor>;
 
 /**

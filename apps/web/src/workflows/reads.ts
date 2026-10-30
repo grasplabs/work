@@ -1,6 +1,7 @@
 import type { App } from "@grasp-os/shared/apps";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type {
+  RunActivity,
   RunFilter,
   RunsPage,
   WorkflowSummary,
@@ -52,6 +53,23 @@ export const listRuns = async (
   } catch (error) {
     if (refused(error)) {
       return { runs: [], more: false };
+    }
+    throw error;
+  }
+};
+
+/**
+ * The runs core counted for the person over its default window
+ * (`workflows.activity`); null where their role lists none.
+ */
+export const readActivity = async (
+  session: Session
+): Promise<RunActivity | null> => {
+  try {
+    return await session.workflows.activity();
+  } catch (error) {
+    if (refused(error)) {
+      return null;
     }
     throw error;
   }

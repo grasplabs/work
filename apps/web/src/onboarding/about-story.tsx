@@ -413,7 +413,7 @@ const Speaking = ({ turn }: { turn: Turn }) => (
         </>
       )}
     </span>
-    <p className="text-2xl font-medium tracking-tight text-balance">
+    <p className="type-title">
       <SpokenText from={0} line={turn.text} text={turn.text} />
     </p>
   </div>
@@ -597,7 +597,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
       className="animate-in fade-in slide-in-from-bottom-2 flex w-full flex-col items-center gap-5 duration-600"
       key={beat}
     >
-      <p className="text-2xl font-medium tracking-tight text-balance">
+      <p className="type-title">
         <SpokenText from={0} line={line} text={line} />
       </p>
     </div>
@@ -605,7 +605,7 @@ export const About = ({ data, parts, percent, go, onStory }: StepProps) => {
   if (told) {
     shownLine = (
       <div className={cn("flex flex-col gap-2", toldEntrance)} key="told">
-        <p className="text-2xl font-medium tracking-tight">{t`Here’s the plan`}</p>
+        <p className="type-title">{t`Here’s the plan`}</p>
         <p className="text-muted-foreground text-balance">
           {t`Your people, documents and tools first. Then two weeks of short conversations with your team. At ${threshold}%, your team can start.`}
         </p>

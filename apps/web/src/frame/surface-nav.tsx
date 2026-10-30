@@ -88,7 +88,7 @@ export const SurfaceNav = ({ core }: { core: CoreConnection }) => {
     <SidebarMenuItem>
       {/* Said in so many words: below are the Apps' own entries, not
           Grasp's, whatever an App calls them. */}
-      <p className="text-muted-foreground px-2 pt-1 text-xs">
+      <p className="text-sidebar-foreground/70 px-2 pt-1 text-xs">
         <Trans>From your domains</Trans>
       </p>
       <SidebarMenuSub aria-label={t`Domain shortcuts`}>
