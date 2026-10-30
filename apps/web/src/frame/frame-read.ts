@@ -5,10 +5,26 @@ import { frameReadMs } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
 
+/** Every frame read shown now, each told to read again. */
+const readers = new Set<() => void>();
+
+/**
+ * Has every frame read read again now: for a page whose own read changed
+ * what the frame shows, with no change for the router to read again after
+ * (the dashboard marks the failures it shows read, and the nav's count
+ * goes with them).
+ */
+export const frameChanged = (): void => {
+  for (const reader of readers) {
+    reader();
+  }
+};
+
 /**
  * What the frame reads for itself beside every page (the sidebar's counts,
  * the chat dock's models): read once it is shown; again after a change on
- * a page (the router reads that page again, its address unchanged); and on
+ * a page (the router reads that page again, its address unchanged), or
+ * when a page's own read changed it ({@link frameChanged}); and on
  * the way to another page once what was read is older than
  * {@link frameReadMs}, for what others changed meanwhile. Not on every
  * click: a page of its own reads what it shows. Nothing is read while
@@ -51,6 +67,10 @@ export const useFrameRead = <T>(
       setValue(undefined);
       void readNow();
     };
+    const told = (): void => {
+      void readNow();
+    };
+    readers.add(told);
     // Not when only the search changes, as a filter typed into does.
     const unsubscribe = router.subscribe(
       "onResolved",
@@ -66,6 +86,7 @@ export const useFrameRead = <T>(
       // Nothing read after this is shown.
       left.abort();
       unsubscribe();
+      readers.delete(told);
       again.current = null;
     };
   }, [router, core, read, shown]);

@@ -14,7 +14,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { frameReadMs } from "../core-connection.ts";
-import { useFrameRead } from "./frame-read.ts";
+import { frameChanged, useFrameRead } from "./frame-read.ts";
 
 // What the frame reads beside every page (the sidebar's counts, the chat
 // dock's models), in a router as the shell's: read once, not on every
@@ -213,5 +213,20 @@ describe("what the frame reads beside every page", () => {
       reads: frame.reads(),
       shown: frame.shown(),
     }).toStrictEqual({ hidden: 0, reads: 1, shown: "1" });
+  });
+
+  it("reads again when a page's own read changed what it shows", async () => {
+    const frame = await opened();
+    await settled();
+
+    act(() => {
+      frameChanged();
+    });
+    await settled();
+
+    expect({ reads: frame.reads(), shown: frame.shown() }).toStrictEqual({
+      reads: 2,
+      shown: "2",
+    });
   });
 });
