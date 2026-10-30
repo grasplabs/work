@@ -470,43 +470,18 @@ const sizeText = (count: TeamCount | undefined): string => {
     : plural(people, { one: "# person", other: "# people" });
 };
 
-/** "8 people, 6 interviewed: the controller and 5 employees.", or "8 people." when nobody was interviewed yet. */
-const sizeAndInterviewed = (
-  people: number,
-  { stakeholder, employees }: { stakeholder?: string; employees: number }
-): string => {
-  const team = plural(people, { one: "# person", other: "# people" });
-  const total = (given(stakeholder) ? 1 : 0) + employees;
-  if (total === 0) {
-    return `${team}.`;
-  }
-  const staff = plural(employees, { one: "# employee", other: "# employees" });
-  if (!given(stakeholder)) {
-    const who = staff;
-    return t`${team}, ${total} interviewed: ${who}.`;
-  }
-  const role = lowerFirst(stakeholder);
-  const who = employees > 0 ? t`the ${role} and ${staff}` : t`the ${role}`;
-  return t`${team}, ${total} interviewed: ${who}.`;
-};
-
-/**
- * "8 people, 6 interviewed: the controller and 5 employees. Heard in 7 conversations."
- * Who was interviewed says how the people and the conversations meet: a team is heard in more
- * conversations than it had interviews when its people spoke to Grasp later, or other teams named it.
- * The statements are left out; the team's page counts them right under it.
- */
+/** "18 people.", with "Not interviewed yet." until anyone in it was heard: never who talked, nor how many. */
 const teamSummary = (
   count: TeamCount | undefined,
-  interviewed: { stakeholder?: string; employees: number },
-  conversations: number
+  interviewed: boolean
 ): string => {
   const people = count?.people;
+  // Its size, and whether it was interviewed: never how many of its people talked, which is theirs.
   const size =
     people === null || people === undefined
       ? t`Team size unknown.`
-      : sizeAndInterviewed(people, interviewed);
-  return `${size} ${plural(conversations, { one: "Heard in # conversation.", other: "Heard in # conversations." })}`;
+      : `${plural(people, { one: "# person", other: "# people" })}.`;
+  return interviewed ? size : `${size} ${t`Not interviewed yet.`}`;
 };
 
 /** "Service desk (14)", or "(unknown)" when the import did not count it. */
@@ -607,16 +582,6 @@ const addedText = (statements: number, breakdown: string): string =>
     one: `# statement: ${breakdown}`,
     other: `# statements: ${breakdown}`,
   });
-
-/** The stakeholder of an interviewed team: "Head of compliance, interviewed 29 Aug 2026 (voice agent)". */
-const interviewedOn = (
-  role: string,
-  date: string,
-  how: string | undefined
-): string =>
-  given(how)
-    ? t`${role}, interviewed ${date} (${how})`
-    : t`${role}, interviewed ${date}`;
 
 /** The stakeholder of a team not interviewed yet, and whether they are invited. */
 const notInterviewed = (role: string, date: string | undefined): string =>
@@ -1124,15 +1089,9 @@ const interviewRef = (
   if (!stakeholder) {
     return { label: t`No stakeholder named yet` };
   }
+  // Whether it was interviewed, never who talked or when: its lead's role alone would say who.
   if (interview) {
-    return {
-      label: interviewedOn(
-        stakeholder.role,
-        formatDay(interview.date),
-        given(interview.how) ? lowerFirst(interview.how) : undefined
-      ),
-      to: interview.id,
-    };
+    return { label: t({ message: "Yes", context: "a team was interviewed" }) };
   }
   return {
     label: notInterviewed(
@@ -1513,30 +1472,10 @@ const teamDraft = (cx: Context, team: Team): Draft => {
       ...(isInvited ? ["invited"] : []),
       interviews.length > 0 ? "interviewed" : "not-interviewed",
     ],
-    summary: teamSummary(
-      latest(team.counts),
-      {
-        stakeholder: interviews.length > 0 ? stakeholder?.role : undefined,
-        employees: cx.employeeSources.filter((source) =>
-          speaksFor(source, team.id)
-        ).length,
-      },
-      heardIn.length
-    ),
+    summary: teamSummary(latest(team.counts), interviews.length > 0),
     points: [],
-    timeline: [
-      ...teamHistory(cx, team),
-      ...interviews
-        .filter((source) => !heardIn.includes(source.id))
-        .map((source) =>
-          event(source.date, source.title, {
-            detail: whoAndHow(source),
-            to: source.id,
-          })
-        ),
-      ...perSource(cx, said, (source) => source.title),
-      ...workflows.flatMap(workflowEvents),
-    ],
+    // Its size, its stakeholder and its workflows over time; never each conversation with its day, which would say who talked and when.
+    timeline: [...teamHistory(cx, team), ...workflows.flatMap(workflowEvents)],
     open:
       interviews.length > 0 || !isInvited ? [] : teamStillToCome(stakeholder),
     links: [

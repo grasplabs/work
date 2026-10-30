@@ -15,7 +15,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { formatDay } from "../../format.ts";
+import { formatDay, isoWeek } from "../../format.ts";
 import { ClaimBasis } from "../aggregate.tsx";
 import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
@@ -103,11 +103,8 @@ export const BannerHeader = ({
   sticker?: ReactNode;
 }) => {
   const group = groupOf[note.kind];
-  const shown =
-    sticker ??
-    (kern.interviewed.length > 0 ? (
-      <Interviewed people={kern.interviewed} />
-    ) : undefined);
+  // Only a conversation's own page shows who it was with; a team or a piece of work never shows its people.
+  const shown = sticker;
   return (
     <header className="flex flex-col gap-4">
       <Panel group={group} short>
@@ -155,7 +152,8 @@ export const StatementLine = ({
   onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
   const { t } = useLingui();
-  const { statement, place } = row;
+  const { statement, place, who } = row;
+  const week = isoWeek(place.source.date);
   return (
     <li
       className={`grid items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0 ${onRemove === undefined ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto_auto]"}`}
@@ -184,9 +182,8 @@ export const StatementLine = ({
         title={place.source.title}
         to="/brain/$noteId"
       >
-        {[place.source.who, place.at ?? formatDay(place.source.date)]
-          .filter(given)
-          .join(" · ")}
+        {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. */}
+        {[who, t`week ${week}`].filter(given).join(" · ")}
       </Link>
       {onRemove === undefined ? null : (
         <Button
