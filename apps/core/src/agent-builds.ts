@@ -1184,7 +1184,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           jobRequestSchema,
           request
         );
-        const { workspaceId, chatId, runId } = this.ctx.props;
+        const { workspaceId, chatId, runId, staff } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
         if (kind === "propose") {
           const draft = await draftOf(this.env, this.ctx.props, id);
@@ -1210,7 +1210,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           await runEngine(this.env).createInternal({
             id: opened.id,
             workflow: "build",
-            input: { workspaceId, chatId, jobId: opened.id },
+            // The run's own staff mark goes with the job, as core set it.
+            input: {
+              workspaceId,
+              chatId,
+              jobId: opened.id,
+              ...(staff === true ? { staff: true } : {}),
+            },
           });
         } catch (error) {
           // No instance runs it: it ends here, failed, with the engine's

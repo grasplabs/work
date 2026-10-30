@@ -184,6 +184,12 @@ catalog:
 catalogs:
   typescript6:
     typescript: 6.0.3
+  # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
+  # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
+  # Core, connect and the web stay on the catalog's v1 until v2 is stable.
+  cf:
+    "@cloudflare/vite-plugin": 2.0.0-beta.v.4
+    cf: 1.0.0-beta.21
 
 # Vite+ replaces Vite and pins Vitest for every package in the workspace.
 overrides:

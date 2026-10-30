@@ -184,7 +184,7 @@ describe("a client's quota policy", () => {
     // Its connect uploaded, core's upload refused: nothing of the new
     // settings live.
     cloudflare.failNext(
-      (call) => call.method === "PUT" && call.path.endsWith("-grasp-os-core"),
+      (call) => call.method === "PUT" && call.path.endsWith("-core"),
       400
     );
     const logged = vi.spyOn(console, "error").mockImplementation(() => {

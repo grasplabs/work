@@ -5,7 +5,8 @@
  *
  * The channel is the webhook in Secrets Store (`STAFF_ALERTS_WEBHOOK`),
  * a Discord webhook as the morning digest's is (src/discord-webhook.ts),
- * which names the channel. Until someone puts it there, an alert is only
+ * which names the channel. Until someone adds it to the stage's 1Password
+ * Environment and runs Deploy platform, which binds it, an alert is only
  * logged, by its client and kind.
  *
  * Threat model, and how each is closed:
@@ -56,7 +57,8 @@ export type AlertKindName =
   | "stephen_uninstalled"
   | "stephen_connections_again"
   | "release_rolled_back"
-  | "release_rollback_failed";
+  | "release_rollback_failed"
+  | "hosting_check_failed";
 
 /**
  * How long one of the watch's alerts holds back the next of its kind: as
@@ -148,6 +150,17 @@ export const alertKinds: Readonly<Record<AlertKindName, AlertKind>> = {
    * A release failed its probe once its code was live, and the client was
    * rolled back to the release before on its own (src/hosting/operation.ts).
    */
+  /**
+   * Provisioning read back a database or bucket outside the jurisdiction
+   * its hosting policy requires: it stopped, and the destination takes no
+   * one until a person looks (src/hosting/provision.ts).
+   */
+  hosting_check_failed: {
+    title: "Hosting check failed",
+    words: () =>
+      "Provisioning found a database or bucket outside the jurisdiction its hosting policy requires, and stopped. Nothing more is placed in that destination until someone checks it.",
+    windowMs: untilClearedMs,
+  },
   release_rolled_back: {
     title: "Release rolled back",
     words: () =>

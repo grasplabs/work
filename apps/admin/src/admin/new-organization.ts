@@ -4,10 +4,12 @@
  * won in Attio, a proposal signed in Rooms, or by hand. A deal won in
  * Attio can be chosen once Attio is read and has one no organization is
  * linked to (src/crm/crm.ts); Rooms has no list of signed proposals to
- * start from yet, so it is shown, with why not, where it will be.
+ * start from yet, so it is shown, with why not, where it will be: whether
+ * the admin isn't connected to Rooms, or is and Rooms can't list them.
  */
 import type { WonDeal } from "../crm/attio.ts";
 import type { WonDeals } from "../crm/crm.ts";
+import { addSecretStep } from "./words.ts";
 
 /** Where a new organization's details can come from. */
 export interface StartingPoint {
@@ -36,7 +38,7 @@ const startingPoints: readonly StartingPoint[] = [
     id: "rooms",
     label: "A proposal signed in Rooms",
     description: "Its company and signatory, filled in below to put right.",
-    unavailable: "Not yet: the admin isn't connected to Rooms.",
+    unavailable: null,
   },
 ];
 
@@ -44,7 +46,7 @@ const startingPoints: readonly StartingPoint[] = [
 const attioUnavailable = (won: WonDeals): string | null => {
   switch (won.state) {
     case "not_connected": {
-      return "Not yet: the admin isn't connected to Attio.";
+      return `Not yet: the admin isn't connected to Attio. ${addSecretStep("ATTIO_READ_KEY")}`;
     }
     case "unread": {
       return "Attio can't be read now: try again in a moment.";
@@ -60,13 +62,33 @@ const attioUnavailable = (won: WonDeals): string | null => {
   }
 };
 
-/** Where a new organization can start from, with the won deals Attio has now. */
-export const startingPointsOf = (won: WonDeals): readonly StartingPoint[] =>
-  startingPoints.map((start) =>
-    start.id === "attio"
-      ? { ...start, unavailable: attioUnavailable(won) }
-      : start
-  );
+/**
+ * Why a proposal signed in Rooms can't be started from: Rooms reads one
+ * room at a time (src/proposal/rooms.ts) and lists none, so never yet;
+ * what to do instead depends on whether the admin reaches Rooms at all.
+ */
+const roomsUnavailable = (roomsConnected: boolean): string =>
+  roomsConnected
+    ? "Not yet: Rooms can't list its signed proposals. Add it by hand, then link its room under its Contract."
+    : "Not yet: the admin isn't connected to Rooms.";
+
+/**
+ * Where a new organization can start from, with the won deals Attio has
+ * now, and whether the admin reaches Rooms (`roomsConnected`).
+ */
+export const startingPointsOf = (
+  won: WonDeals,
+  roomsConnected: boolean
+): readonly StartingPoint[] =>
+  startingPoints.map((start) => {
+    if (start.id === "attio") {
+      return { ...start, unavailable: attioUnavailable(won) };
+    }
+    if (start.id === "rooms") {
+      return { ...start, unavailable: roomsUnavailable(roomsConnected) };
+    }
+    return start;
+  });
 
 const listSeparator = /[\s,]+/u;
 

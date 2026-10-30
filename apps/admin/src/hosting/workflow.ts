@@ -17,6 +17,8 @@ import type { Staff } from "../access.ts";
 import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
+import type { DeployContext } from "../deploy/context.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import {
   claimRun,
@@ -32,6 +34,7 @@ import { InventoryError } from "./inventory.ts";
 import {
   ProvisionOperationError,
   provisionOf,
+  recordUnstarted,
   runClientProvision,
   startClientProvision,
   startClientRelease,
@@ -82,18 +85,33 @@ export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
           attempt,
           attemptKey: idempotencyKey,
         };
+        const db = adminDatabase(env.DB);
+        let context: DeployContext;
         try {
-          const context = await deployContext(env);
-          const operation = await provisionOf(context.db, clientId);
+          const operation = await provisionOf(db, clientId);
           if (operation?.status === "done" && operation.runId === held.runId) {
             return;
           }
-          if (!(await takeAttempt(context.db, held))) {
+          // Taken before anything else is read: from here only this
+          // attempt writes, its failure to read its context included.
+          if (!(await takeAttempt(db, held))) {
             throw new ProvisionOperationError(
               "runner_replaced",
               `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
             );
           }
+        } catch (error) {
+          throw asOperationStepError(error);
+        }
+        try {
+          context = await deployContext(env);
+        } catch (error) {
+          // Recorded on the operation, for staff to read on its Setup, as
+          // this attempt alone: never over a retry that took it over.
+          await recordUnstarted(db, held, errorCode(error));
+          throw asOperationStepError(error);
+        }
+        try {
           await runClientProvision(
             {
               ...context,
