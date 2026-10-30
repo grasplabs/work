@@ -7025,6 +7025,10 @@ msgstr "Grasp no ha encontrado en esta política ningún requisito que una regla
 msgid "Grasp gave its go"
 msgstr "Grasp dio su visto bueno"
 
+#: src/onboarding/no-sender.tsx
+msgid "Grasp has no sender for its mail yet"
+msgstr "Grasp aún no tiene remitente para su correo"
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo siguen."
@@ -16717,6 +16721,10 @@ msgstr "Hasta"
 #: src/workflows/history-view.tsx
 msgid "Until {until}"
 msgstr "Hasta {until}"
+
+#: src/onboarding/no-sender.tsx
+msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
+msgstr "Hasta que el soporte de Grasp configure uno, los enlaces de entrevista no pueden enviarse por correo. Envía a cada uno su enlace a mano desde Entrevistas."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."

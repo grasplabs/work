@@ -11,6 +11,7 @@ import type {
   AuditPage,
   AuditRecord,
 } from "@grasp-os/shared/audit-log";
+import { chatPlatformName } from "@grasp-os/shared/chat";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -42,7 +43,6 @@ import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 
-import { platformName } from "../chat-platforms.ts";
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
 import type { Directory } from "../directory.ts";
@@ -339,7 +339,7 @@ const doerOf = (
   if (actor.type === "person") {
     const name = personName(directory, actor.userId);
     if (actor.via !== undefined) {
-      const app = platformName(actor.via);
+      const app = chatPlatformName(actor.via);
       return { label: i18n._(msg`${name}, in ${app}`), id: actor.userId };
     }
     return { label: name, id: actor.userId };
@@ -352,7 +352,7 @@ const doerOf = (
     const { agentId } = actor;
     const person = personName(directory, actor.onBehalfOf);
     if (actor.via !== undefined) {
-      const app = platformName(actor.via);
+      const app = chatPlatformName(actor.via);
       return {
         label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
         id: actor.agentId,
