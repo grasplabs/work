@@ -155,10 +155,12 @@ describe("today's runs", () => {
     expect({
       from: today.from,
       timeZone: today.timeZone,
+      cutOff: today.cutOff,
       lanes: lanesOf(today),
     }).toStrictEqual({
       from: new Date(midnight).toISOString(),
       timeZone: "UTC",
+      cutOff: 0,
       lanes: [
         {
           lane: app.id,
@@ -229,6 +231,63 @@ describe("today's runs", () => {
       on: { kind: "role", role: "admin" },
       since: new Date(soon(30) + 500).toISOString(),
       asks: "Approve the invoice?",
+    });
+  });
+
+  it("keeps the newest runs of a busy day, and every run waiting on the reader however early, and counts the rest apart", async () => {
+    const owner = await signedInApi(idp, "builder");
+    await env.DB.prepare(
+      "UPDATE organizations SET time_zone = 'UTC' WHERE id = 'organization'"
+    ).run();
+    const midnight = Math.floor(Date.now() / (24 * hour)) * 24 * hour;
+    const now = Date.now();
+    const app = await appOf(owner);
+    // A millisecond apart from today's first moment the day can hold them,
+    // never two at once (just after midnight they run past now, which the
+    // day's read doesn't bound): a run asking the owner first, then more
+    // runs than one read takes, then another asking the owner.
+    const first = Math.max(midnight, now - 120_000);
+    const asksFirst = await seedRun(app.id, {
+      workflow: "approve",
+      status: "running",
+      at: first,
+      asks: { deciders: `person:${owner.userId}`, open: true },
+    });
+    const earlier = 1001;
+    const runs = Array.from({ length: earlier }, (_, index) =>
+      env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, root_run_id) VALUES (?, ?, 'approve', 1, NULL, 'completed', ?, ?, NULL)"
+      ).bind(`run-${unique()}`, app.id, first + 1 + index, first + 2 + index)
+    );
+    await env.DB.batch(runs);
+    const asksLast = await seedRun(app.id, {
+      workflow: "approve",
+      status: "running",
+      at: first + 1 + earlier,
+      asks: { deciders: `person:${owner.userId}`, open: true },
+    });
+
+    const today = await owner.api.workflows.today();
+    const shown = today.lanes.flatMap(({ runs: laneRuns }) => laneRuns);
+    const waitsOf = (id: string) =>
+      shown.find((run) => run.id === id)?.waits?.on;
+    expect({
+      shown: shown.length,
+      cutOff: today.cutOff,
+      oldest: shown.at(0)?.id,
+      newest: shown.at(-1)?.id,
+      waitsFirst: waitsOf(asksFirst.id),
+      waitsLast: waitsOf(asksLast.id),
+    }).toStrictEqual({
+      // The newest 1,000, and the early wait beside them.
+      shown: 1001,
+      // The two earliest of the others, which the owner may see: not
+      // counted as unseen.
+      cutOff: 2,
+      oldest: asksFirst.id,
+      newest: asksLast.id,
+      waitsFirst: { kind: "you" },
+      waitsLast: { kind: "you" },
     });
   });
 });

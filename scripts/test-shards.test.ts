@@ -5,8 +5,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  maxShards,
   projectStartSeconds,
+  shardCountFor,
   shardSeconds,
+  shardTargetSeconds,
   splitIntoShards,
   spreadOver,
   startsFirst,
@@ -161,5 +164,40 @@ describe("splitting the test files between shards", () => {
     );
 
     expect(counts).toStrictEqual([6, 6, 6, 6]);
+  });
+});
+
+describe("choosing how many shards a run takes", () => {
+  it("takes the fewest shards that each end within the target", () => {
+    // Longer than the target in as few shards as it has groups.
+    const long = [
+      ...suite,
+      ...Array.from({ length: 600 }, (_, index) => file(`more ${index}`, 5)),
+    ];
+    const count = shardCountFor(long);
+    const longest = (shards: number): number =>
+      Math.max(...splitIntoShards(long, shards).map(shardSeconds));
+
+    expect(count).toBeGreaterThan(3);
+    expect(longest(count)).toBeLessThanOrEqual(shardTargetSeconds);
+    expect(longest(count - 1)).toBeGreaterThan(shardTargetSeconds);
+  });
+
+  it("gives each group a shard, however short", () => {
+    expect(
+      shardCountFor([file("sdk a", 1), file("screens a", 1, { group: 1 })])
+    ).toBe(2);
+  });
+
+  it("stops at the most shards a run may take", () => {
+    const huge = Array.from({ length: 400 }, (_, index) =>
+      file(`core ${index}`, 300)
+    );
+
+    expect(shardCountFor(huge)).toBe(maxShards);
+  });
+
+  it("takes no shards for no files", () => {
+    expect(shardCountFor([])).toBe(0);
   });
 });
