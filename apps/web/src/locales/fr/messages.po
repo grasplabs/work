@@ -530,6 +530,7 @@ msgid "{daily} a day"
 msgstr "{daily} par jour"
 
 #: src/dashboard/signals.tsx
+#: src/settings/audit-archive.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
 
@@ -2606,6 +2607,10 @@ msgstr "Après"
 msgid "After {most} interviews, it is better split in two"
 msgstr "Après {most} entretiens, mieux vaut le scinder en deux"
 
+#: src/settings/audit-archive.tsx
+msgid "After a run ends. After this, its inputs, outputs and messages are removed."
+msgstr "Après la fin d’une exécution. Ensuite, ses entrées, sorties et messages sont supprimés."
+
 #. Read by screen readers before the new value.
 #: src/landscape/audit-trail.tsx
 msgid "After:"
@@ -3330,6 +3335,11 @@ msgstr "Applications à approuver"
 msgid "Archive"
 msgstr "Archiver"
 
+#: src/settings/audit-archive.tsx
+msgctxt "where retention keeps older audit events"
+msgid "Archive"
+msgstr "Archive"
+
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "Archiver {name} ?"
@@ -3338,6 +3348,10 @@ msgstr "Archiver {name} ?"
 msgctxt "a domain put away"
 msgid "Archived"
 msgstr "Archivé"
+
+#: src/settings/audit-archive.tsx
+msgid "Archived events"
+msgstr "Événements archivés"
 
 #: src/engines/app-status.tsx
 msgid "Archived: nobody opens its apps and nothing runs, until a builder restores it."
@@ -3590,6 +3604,7 @@ msgstr "Tentative {n}"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/audit-archive.tsx
 msgid "Audit trail"
 msgstr "Journal d’audit"
 
@@ -6095,6 +6110,10 @@ msgstr "Événement"
 msgid "Event timeline"
 msgstr "Chronologie des événements"
 
+#: src/settings/audit-archive.tsx
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Les événements plus anciens que ce que conserve le journal d’audit, déplacés vers l’archive. La recherche et l’export utilisent les filtres ci-dessus."
+
 #: src/routes/_shell.landscape.index.tsx
 msgid "Every app your teams use: how Grasp knows about it, what data it touches and who owns it."
 msgstr "Toutes les applications utilisées par vos équipes : comment Grasp en a connaissance, quelles données elles touchent et qui en est responsable."
@@ -6342,10 +6361,12 @@ msgstr "Exporter"
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.index.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "Exporter en CSV"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "Exporter en JSON"
 
@@ -6356,6 +6377,10 @@ msgstr "Exporter le rapport"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exporter le journal d’audit"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Exporter avec l’archive"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -6821,6 +6846,10 @@ msgstr "Issu du lancement avec le sponsor. Ce qui est changé ici s’applique d
 #: src/landscape/data-tab.tsx
 msgid "From the permissions people granted and how the app is classified."
 msgstr "D’après les autorisations accordées et la classification de l’application."
+
+#: src/settings/audit-archive.tsx
+msgid "From when each event was recorded, archive included. After this, archived events are deleted."
+msgstr "À partir de l’enregistrement de chaque événement, archive comprise. Ensuite, les événements archivés sont supprimés."
 
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
@@ -7480,6 +7509,10 @@ msgstr "Combien de temps vous prend chacune, {name} ?"
 #: src/onboarding/about-story.tsx
 msgid "How long does that take you, {name}?"
 msgstr "Combien de temps cela vous prend-il, {name} ?"
+
+#: src/settings/audit-archive.tsx
+msgid "How long Grasp keeps what it records, as your deployment is set up. Grasp sets this with you."
+msgstr "Combien de temps Grasp conserve ce qu’il enregistre, selon la configuration de votre déploiement. Grasp le définit avec vous."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "how long it waits"
@@ -10486,6 +10519,10 @@ msgstr "Pas encore enregistré. Nouvel essai en cours."
 msgid "Not served"
 msgstr "Non servi"
 
+#: src/settings/audit-archive.tsx
+msgid "Not set correctly"
+msgstr "Mal configuré"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
 msgstr "Pas encore validée"
@@ -12780,6 +12817,10 @@ msgstr "Résultats"
 msgid "Resume"
 msgstr "Reprendre"
 
+#: src/settings/audit-archive.tsx
+msgid "Retention"
+msgstr "Conservation"
+
 #: src/landscape/landscape-overview.ts
 msgid "Retention period"
 msgstr "Durée de conservation"
@@ -13430,6 +13471,10 @@ msgstr "Rechercher des personnes et des équipes"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
 
+#: src/settings/audit-archive.tsx
+msgid "Search the archive"
+msgstr "Rechercher dans l’archive"
+
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Chercher dans la transcription"
@@ -13437,6 +13482,10 @@ msgstr "Chercher dans la transcription"
 #: src/chat/chat-switcher.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Recherchez dans vos chats et vos projets, et ouvrez-en un."
+
+#: src/settings/audit-archive.tsx
+msgid "Searched above. After this, events move to the archive."
+msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
 
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
@@ -17857,6 +17906,10 @@ msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Où"
 
+#: src/settings/audit-archive.tsx
+msgid "Where a period isn’t set correctly, nothing is moved or removed on its account until Grasp corrects it."
+msgstr "Lorsqu’une période est mal configurée, rien n’est déplacé ni supprimé à ce titre tant que Grasp ne l’a pas corrigée."
+
 #: src/chat/suggestions.tsx
 msgid "Where does the most time still go?"
 msgstr "Où passe encore le plus de temps ?"
@@ -18305,6 +18358,10 @@ msgstr "Workflow introuvable"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Workflow packages"
 msgstr "Paquets du workflow"
+
+#: src/settings/audit-archive.tsx
+msgid "Workflow run details"
+msgstr "Détails des exécutions de workflow"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

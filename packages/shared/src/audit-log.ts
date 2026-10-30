@@ -348,6 +348,15 @@ export interface AuditPage {
 export const auditExportFormatSchema = z.enum(["json", "csv"]);
 export type AuditExportFormat = z.infer<typeof auditExportFormatSchema>;
 
+/**
+ * How an export reads: `archive` takes in what retention moved to the
+ * archive, as `export` describes. Without it, what the log holds alone.
+ */
+export const auditExportOptionsSchema = z
+  .strictObject({ archive: z.boolean().optional() })
+  .optional();
+export type AuditExportOptions = z.input<typeof auditExportOptionsSchema>;
+
 /** Why the chain breaks at a position: see core's src/audit-chain.ts. */
 export type ChainBreak = "missing" | "unlinked" | "altered";
 
@@ -431,10 +440,22 @@ export interface AuditApi {
    * with `audit.export_too_large` past {@link auditExportMaxRecords}, and
    * with `audit.export_interrupted` if retention archives events it hasn't
    * read yet.
+   *
+   * With `{ archive: true }` (`archive=1` on the download), it takes in
+   * the archive too: every record, archived or held, in one order, by its
+   * position in the chain, oldest first, so archived ones come before the
+   * ones the log holds. Retention archiving under it is no interruption:
+   * what moved is read from the archive. A stretch purged by archive
+   * retention has nothing left: it is passed over, and JSON names it in
+   * `archive.purged` (`[{ from, through }]`, positions). An archived
+   * stretch that can't be read stops it with `audit.archive_unreadable`.
+   * The export is recorded with `archive: true` and `purged`, how many
+   * purged stretches it passes over as it begins.
    */
   export: (
     filter: AuditFilter | undefined,
-    format: AuditExportFormat
+    format: AuditExportFormat,
+    options?: AuditExportOptions
   ) => Promise<ReadableStream<Uint8Array>>;
   /** One step of verifying the whole chain, archived stretches included. */
   verify: (after?: number) => Promise<ChainVerification>;
@@ -444,6 +465,31 @@ export interface AuditApi {
    * in the log: it reads what passes already recorded.
    */
   lastVerification: () => Promise<FullVerification | null>;
+  /**
+   * The archived events that match `filter`, newest first, from before
+   * `before`: what retention moved out of the log, while it is kept (until
+   * archive retention purges it). Each page reads one archived stretch, so
+   * it may hold none and still have a next one. Recorded as a search is,
+   * marked as of the archive. Refused with `audit.archive_unreadable` at a
+   * stretch whose archived copy can't be read.
+   */
+  searchArchive: (filter?: AuditFilter, before?: number) => Promise<AuditPage>;
+  /** How long the deployment keeps events and run details. Not recorded. */
+  retention: () => Promise<AuditRetention>;
+}
+
+/**
+ * How long the deployment keeps what it records, in days, as its config
+ * sets it; `null` where that config is invalid, and nothing is then
+ * archived, purged or swept on its account.
+ */
+export interface AuditRetention {
+  /** Events stay in the log, where a search finds them, then are archived. */
+  auditDays: number | null;
+  /** Events are kept in all, archive included, then purged. */
+  archiveDays: number | null;
+  /** A run keeps its details after it ends, then they are removed. */
+  runDays: number | null;
 }
 
 /**
@@ -464,4 +510,6 @@ export const auditErrors = defineErrorFamily({
     "Too many events for one export. Narrow the time range or the filter.",
   "audit.export_interrupted":
     "Older events were archived while exporting. Export again.",
+  "audit.archive_unreadable":
+    "Part of the audit log's archive can't be read. Verify the chain to see where.",
 });

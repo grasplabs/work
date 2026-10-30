@@ -33,6 +33,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
@@ -261,6 +262,22 @@ export interface SearchRange {
   low: number;
   high: number;
 }
+
+/** A search of the archive: as {@link SearchQuery}, newest first, before `before`. */
+export interface ArchiveQuery {
+  filter: ParsedAuditFilter;
+  /** The position to read before, not included; the newest archived by default. */
+  before?: number;
+  limit: number;
+}
+
+/**
+ * A page of the archive, or the stretch whose object can't be read (gone,
+ * or holding something that isn't an entry), where the search stopped.
+ */
+export type ArchivePage =
+  | AuditPage
+  | { unreadable: { from: number; through: number } };
 
 /** What the daily signals want tallied of a stretch (`tallyStretch`). */
 export interface TallyWanted {
@@ -716,6 +733,183 @@ export class AuditLog extends DurableObject<Env> {
       )
     );
     return { records, next: last === undefined || last === end ? null : last };
+  }
+
+  /**
+   * The archived events that match the filter, newest first, before
+   * position `before`. Reads one archived stretch's object at most (up to
+   * {@link archiveStretch} entries), each record checked against the chain
+   * as a search checks it, so the archive is searched a stretch per call:
+   * `next` says where to carry on, or is `null` once no older stretch is
+   * left. Purged stretches have nothing left to read and are passed over,
+   * and so are stretches the filter's times rule out, by their receipt
+   * times, without reading their objects.
+   */
+  async searchArchive({
+    filter,
+    before,
+    limit,
+  }: ArchiveQuery): Promise<ArchivePage> {
+    // Newest first, each with the one before it: a stretch's events were
+    // received no earlier than the last of the stretch before it.
+    const stretches = this.#db
+      .select()
+      .from(archives)
+      .where(before === undefined ? undefined : lt(archives.firstSeq, before))
+      .orderBy(desc(archives.lastSeq))
+      .all();
+    const readable = (index: number): number =>
+      stretches.findIndex(
+        (stretch, at) => at >= index && stretch.purgedAt === null
+      );
+    for (const [index, stretch] of stretches.entries()) {
+      const older = stretches[index + 1];
+      if (filter.from !== undefined && stretch.lastReceivedAt < filter.from) {
+        break;
+      }
+      const afterTo =
+        filter.to !== undefined &&
+        older !== undefined &&
+        older.lastReceivedAt >= filter.to;
+      if (stretch.purgedAt === null && !afterTo) {
+        // oxlint-disable-next-line no-await-in-loop -- one stretch is read, then the loop ends
+        const read = await this.#searchStretch(
+          stretch,
+          filter,
+          { low: 1, high: before === undefined ? stretch.lastSeq : before - 1 },
+          "newest",
+          limit
+        );
+        if ("unreadable" in read) {
+          return read;
+        }
+        const rest = readable(index + 1);
+        const next = read.cut ?? (rest === -1 ? null : stretch.firstSeq);
+        return { records: read.records, next };
+      }
+    }
+    return { records: [], next: null };
+  }
+
+  /**
+   * How many archived stretches archive retention purged: what an export
+   * that takes the archive in passes over, as it begins.
+   */
+  purgedStretches(): number {
+    return this.#db
+      .select({ firstSeq: archives.firstSeq })
+      .from(archives)
+      .where(isNotNull(archives.purgedAt))
+      .all().length;
+  }
+
+  /**
+   * The archived events that match the filter, oldest first, after
+   * position `after` and up to `through`: an export's reading of the
+   * archive, as `searchArchive` reads it newest first. Reads one archived
+   * stretch's object at most; `next` is the last position it covered, so
+   * the next call carries on after it, or `null` past `through`. A purged
+   * stretch has nothing to read: it is passed as `purged`, read past, and
+   * the chain carries on after it.
+   */
+  async readArchive({
+    filter,
+    after,
+    through,
+    limit,
+  }: {
+    filter: ParsedAuditFilter;
+    after: number;
+    through: number;
+    limit: number;
+  }): Promise<
+    | (AuditPage & { purged?: { from: number; through: number } })
+    | { unreadable: { from: number; through: number } }
+  > {
+    const stretch = this.#db
+      .select()
+      .from(archives)
+      .where(gt(archives.lastSeq, after))
+      .orderBy(asc(archives.firstSeq))
+      .limit(1)
+      .get();
+    if (stretch === undefined || stretch.firstSeq > through) {
+      return { records: [], next: null };
+    }
+    const end = Math.min(stretch.lastSeq, through);
+    const covered = end >= through ? null : end;
+    if (stretch.purgedAt !== null) {
+      return {
+        records: [],
+        next: covered,
+        purged: { from: Math.max(stretch.firstSeq, after + 1), through: end },
+      };
+    }
+    const read = await this.#searchStretch(
+      stretch,
+      filter,
+      { low: after + 1, high: end },
+      "oldest",
+      limit
+    );
+    if ("unreadable" in read) {
+      return read;
+    }
+    return { records: read.records, next: read.cut ?? covered };
+  }
+
+  /**
+   * The entries of one archived stretch that match, in `order`, between
+   * positions `low` and `high`, up to `limit`; `cut` is where it stopped
+   * when more may match.
+   */
+  async #searchStretch(
+    stretch: typeof archives.$inferSelect,
+    filter: ParsedAuditFilter,
+    { low, high }: SearchRange,
+    order: SearchQuery["order"],
+    limit: number
+  ): Promise<
+    | { records: AuditRecord[]; cut?: number }
+    | { unreadable: { from: number; through: number } }
+  > {
+    const unreadable = {
+      unreadable: { from: stretch.firstSeq, through: stretch.lastSeq },
+    };
+    const object = await this.env.AUDIT_ARCHIVE.get(stretch.key);
+    if (object === null) {
+      return unreadable;
+    }
+    const entries: EntryRow[] = [];
+    for await (const line of linesOf(object)) {
+      const parsed = archivedEntrySchema.safeParse(jsonVar(line));
+      if (!parsed.success) {
+        return unreadable;
+      }
+      entries.push(parsed.data);
+    }
+    const hashes = new Map(entries.map(({ seq, hash }) => [seq, hash]));
+    const matched: { entry: EntryRow; event: AuditEvent | null }[] = [];
+    let cut: number | undefined;
+    const ordered = order === "newest" ? entries.toReversed() : entries;
+    for (const entry of ordered) {
+      if (entry.seq >= low && entry.seq <= high) {
+        const event = parseStored(entry.event);
+        if (matches(filter, entry.receivedAt, event)) {
+          if (matched.length === limit) {
+            cut = matched.at(-1)?.entry.seq;
+            break;
+          }
+          matched.push({ entry, event });
+        }
+      }
+    }
+    const records = await Promise.all(
+      matched.map(
+        async ({ entry, event }) => await this.#record(entry, event, hashes)
+      )
+    );
+    return cut === undefined ? { records } : { records, cut };
   }
 
   /**

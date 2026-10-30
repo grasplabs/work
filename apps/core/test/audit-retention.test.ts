@@ -7,6 +7,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import type { AuditLog } from "../src/audit-log.ts";
 import { auditLog, retainAuditLog } from "../src/audit-log.ts";
@@ -150,6 +151,53 @@ const purgesOf = async (seq: number): Promise<AuditEvent[]> => {
   );
 };
 
+/** The rest of an export `reader` sends, read to its end, as its JSON. */
+const exportedJson = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  read = ""
+): Promise<{
+  records: { seq: number; eventJson: string; verified: boolean }[];
+  archive?: { purged: { from: number; through: number }[] };
+}> => {
+  const decoder = new TextDecoder();
+  let text = read;
+  for (;;) {
+    // One chunk after another, as a client pulls them.
+    // oxlint-disable-next-line no-await-in-loop
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return z
+    .object({
+      records: z.array(
+        z.object({
+          seq: z.number(),
+          eventJson: z.string(),
+          verified: z.boolean(),
+        })
+      ),
+      archive: z
+        .object({
+          purged: z.array(z.object({ from: z.number(), through: z.number() })),
+        })
+        .optional(),
+    })
+    .parse(JSON.parse(text));
+};
+
+/** Which of `events` a JSON export holds, in its order, and whether each verified. */
+const exportedOf = (
+  exported: Awaited<ReturnType<typeof exportedJson>>,
+  events: readonly AuditEvent[]
+) =>
+  exported.records.flatMap((record) => {
+    const index = events.findIndex(({ id }) => record.eventJson.includes(id));
+    return index === -1 ? [] : [{ event: index, verified: record.verified }];
+  });
+
 describe("audit log retention", () => {
   it("archives events past retention without breaking verification", async () => {
     const { api } = await signedInApi(idp, "admin");
@@ -212,6 +260,91 @@ describe("audit log retention", () => {
     await expect(outcome(reader.read())).resolves.toBe(
       "audit.export_interrupted"
     );
+  });
+
+  it("exports what it archived with what it holds when asked, in the chain's order, each checked", async () => {
+    const { session } = await signedInWithRole(idp, "admin");
+    const archived = await logged();
+    await alarmAfter(archived, 181);
+    const kept = await logged();
+    const events = [archived, kept];
+
+    const withArchive = await exportedJson(
+      await exportReader(
+        session,
+        { action: "test.retained" },
+        { archive: true }
+      )
+    );
+    const without = await exportedJson(
+      await exportReader(session, { action: "test.retained" })
+    );
+    const seqs = withArchive.records.map(({ seq }) => seq);
+
+    expect({
+      withArchive: exportedOf(withArchive, events),
+      // Earlier stretches of the deployment's log may be purged: named, not exported.
+      purgedNamed: Array.isArray(withArchive.archive?.purged),
+      ordered: seqs.join(",") === seqs.toSorted((a, b) => a - b).join(","),
+      without: exportedOf(without, events),
+      noArchiveKey: without.archive,
+    }).toStrictEqual({
+      withArchive: [
+        { event: 0, verified: true },
+        { event: 1, verified: true },
+      ],
+      purgedNamed: true,
+      ordered: true,
+      without: [{ event: 1, verified: true }],
+      noArchiveKey: undefined,
+    });
+  });
+
+  it("reads from the archive what it archives under an export that takes the archive in", async () => {
+    const { session } = await signedInWithRole(idp, "admin");
+    const event = await logged();
+    const reader = await exportReader(
+      session,
+      { action: "test.retained" },
+      { archive: true }
+    );
+    const decoder = new TextDecoder();
+    // The header fixes the positions the export reads: up to the head.
+    const header = await reader.read();
+
+    await alarmAfter(event, 181);
+    await expect(held(event)).resolves.toBeFalsy();
+    const exported = await exportedJson(reader, decoder.decode(header.value));
+    expect(exportedOf(exported, [event])).toStrictEqual([
+      { event: 0, verified: true },
+    ]);
+  });
+
+  it("names a purged stretch in an export that takes the archive in, and exports nothing of it", async () => {
+    const { session } = await signedInWithRole(idp, "admin");
+    const event = await logged();
+    const receivedAt = await receivedAtOf(event);
+    const seq = await seqOf(event);
+    await alarmAfter(receivedAt, 181);
+    await alarmAfter(receivedAt, 366);
+
+    const exported = await exportedJson(
+      await exportReader(
+        session,
+        { action: "test.retained" },
+        { archive: true }
+      )
+    );
+    const all = await allEvents();
+    const recorded = all.findLast(({ action }) => action === "audit.exported");
+    expect({
+      exported: exportedOf(exported, [event]),
+      named: exported.archive?.purged.some(
+        ({ from, through }) => from <= seq && seq <= through
+      ),
+      // The record says it can't be whole: it passed purged stretches over.
+      recorded: Number(recorded?.detail.purged) >= 1,
+    }).toStrictEqual({ exported: [], named: true, recorded: true });
   });
 
   it("purges archived events once the deployment's archive retention has passed", async () => {
