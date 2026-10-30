@@ -1,4 +1,5 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { appVisitorErrors } from "@grasp-os/shared/app-visitors";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
@@ -1235,6 +1236,130 @@ const callFunction = async (
     return {
       result,
       provenance: sources.snapshot(),
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
+/**
+ * Who a visitor's call runs for (app-visitor-calls.ts): never a person.
+ * The App's version is the one it was granted on.
+ */
+export interface VisitorCaller {
+  readonly app: AppId;
+  readonly version: number;
+  /**
+   * `visitor:<session>`, a name no member's ID has: it owns what the call
+   * inserts, and keys its receipts, so no two visitors share either.
+   */
+  readonly principal: string;
+  /**
+   * Throws unless the visitor may still call `path`: their session live,
+   * the App published at this version, their address listed, and `path`
+   * still granted. Read before the call and before each commit.
+   */
+  readonly stillAllowed: (path: string) => Promise<void>;
+  /** Told the function the call runs, once it is admitted. */
+  readonly admitted: (path: string) => Promise<void>;
+}
+
+/**
+ * The invocation of `release`'s function `path` for a visitor: the App's
+ * store, as no member (no `appMembers` or `appBuilders` table opens to it,
+ * and an `owner` table shows only the visitor's own rows), with nothing
+ * else bound. No resource (no connection, Knowledge, model, store, other
+ * App or template), no workflow started, no notification staged: a
+ * function that asks for any of them is refused (`resource.unavailable`),
+ * whatever the App holds for its members.
+ */
+export const visitorInvocation = async (
+  env: Env,
+  release: Release,
+  caller: VisitorCaller,
+  path: string,
+  requestId: string,
+  deadline: number
+): Promise<Invocation> => {
+  const store =
+    release.store === null
+      ? noStore()
+      : await openStore(env, release.store.storeId);
+  return {
+    principal: caller.principal,
+    consumer: {
+      resourceId: caller.app,
+      resourceVersion: release.manifest.resourceVersion,
+    },
+    store,
+    requestId,
+    deadline,
+    runId: null,
+    authorize: async () => {
+      await requireNotRevoked(env, caller.app, caller.version);
+      await caller.stillAllowed(path);
+      return { appMember: false, appBuilder: false };
+    },
+  };
+};
+
+/**
+ * Calls a function of a published App for a visitor (app-visitor-calls.ts),
+ * as the App itself: only a public query or mutation of the version the
+ * visitor's grant is on, never an action (which reaches resources) and
+ * never core's own workflow or preference queries, which are a member's.
+ * `request` is the call as the screen client wrote it, as text.
+ */
+export const callVisitorFunction = async (
+  env: Env,
+  caller: VisitorCaller,
+  request: unknown,
+  deadline: number
+): Promise<FunctionAnswer> => {
+  const requestId = crypto.randomUUID();
+  const refused = (error: unknown): FunctionAnswer => ({
+    result: { ok: false, error: refusalOf(error, requestId) },
+    provenance: null,
+    fingerprint: null,
+    manifestHash: null,
+  });
+  try {
+    const call = callAllowed(request, { kind: undefined, windowed: false });
+    if (call.reference.kind === "action") {
+      throw appVisitorErrors.create("visitor.not_granted");
+    }
+    const release = await loadRelease(env, caller.app, caller.version);
+    const { path, workflowQuery, preference } = await referenceIn(
+      release,
+      call.reference
+    );
+    if (workflowQuery !== undefined || preference !== undefined) {
+      throw appVisitorErrors.create("visitor.not_granted");
+    }
+    await caller.stillAllowed(path);
+    await caller.admitted(path);
+    const invocation = await visitorInvocation(
+      env,
+      release,
+      caller,
+      path,
+      requestId,
+      deadline
+    );
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      call.idempotencyKey === undefined
+        ? {}
+        : { idempotencyKey: call.idempotencyKey }
+    );
+    return {
+      result,
+      provenance: null,
       fingerprint: call.reference.fingerprint,
       manifestHash: release.manifestHash,
     };

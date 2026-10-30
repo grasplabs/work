@@ -560,8 +560,10 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       await builder.api.apps.unpublish(app);
       unpublished = await open(token);
       await published(app);
+      // Unpublishing ended the session: signed in again, then delisted.
+      const again = await signedInAs();
       await builder.api.apps.setVisitors(app, []);
-      delisted = await open(token);
+      delisted = await open(again);
       await builder.api.apps.setVisitors(app, [
         { kind: "domain", value: domain },
       ]);
@@ -586,7 +588,9 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       actions: [
         "app.visitor_code_sent",
         "app.visitor_signed_in",
-        "app.visitor_refused:not_published",
+        // Unpublishing deleted the session: nothing is left to open.
+        "app.visitor_code_sent",
+        "app.visitor_signed_in",
         // The builder takes the domain off the list, then puts it back.
         "app.visitors_set",
         "app.visitor_refused:not_listed",
