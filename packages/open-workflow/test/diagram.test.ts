@@ -315,6 +315,37 @@ describe("a workflow's diagram", () => {
     }
   });
 
+  it("refuses a part named inside another task, where no drawing could show it", async () => {
+    const nested = documentAround(
+      { name: "nested-parts", input: {}, required: [] },
+      [
+        {
+          outer: {
+            do: [
+              {
+                read: {
+                  set: { status: "read" },
+                  metadata: { grasp: { section: { name: "Read" } } },
+                },
+              },
+            ],
+          },
+        },
+      ]
+    );
+    const result = await validateWorkflow(JSON.stringify(nested), options);
+    expect(
+      result.ok
+        ? []
+        : result.diagnostics.map(({ code, pointer }) => ({ code, pointer }))
+    ).toStrictEqual([
+      {
+        code: "profile.unsupported_feature",
+        pointer: "/do/0/outer/do/0/read/metadata/grasp/section",
+      },
+    ]);
+  });
+
   it("finds each door: a child workflow it waits for, an event that starts another and goes on, or one it ends with", async () => {
     const handing = documentAround(
       {
