@@ -27,7 +27,7 @@ import {
   clientDomain,
   deployerToken,
   deploySecrets,
-  MissingStoreSecretError,
+  ifStored,
 } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -35,12 +35,15 @@ import { answeringVersion, mappedRoute } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import type { NotStarted } from "../hosting/placement.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
+import { notStartedOf } from "../provision/queries.ts";
 import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { currentRun, isReplaceable } from "../runners.ts";
 import { coreAddressOf } from "./core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "./core-address.ts";
 import { onboardingSummaryOf } from "./onboarding.ts";
@@ -90,6 +93,17 @@ export interface GridRow {
     status: "running" | "done" | "failed";
     at: Date;
   } | null;
+  /**
+   * While it's being provisioned, what waits for staff: it hasn't started
+   * (and why, `notStartedOf`; null when nothing keeps it), or it stopped
+   * (its operation failed, or its attempt ended without saying why), for
+   * staff to resume. Null while it's going, and once it's live.
+   */
+  setup:
+    | { state: "not_started"; why: NotStarted | null }
+    | { state: "stopped" }
+    | { state: "unread" }
+    | null;
 }
 
 /** How long a client's health check, or another request to its core, may take. */
@@ -367,20 +381,6 @@ const liveOf = async (
   };
 };
 
-/** What `read` answers, or null when a secret it reads isn't in Secrets Store. */
-export const ifStored = async <T>(
-  read: () => Promise<T>
-): Promise<T | null> => {
-  try {
-    return await read();
-  } catch (error) {
-    if (error instanceof MissingStoreSecretError) {
-      return null;
-    }
-    throw error;
-  }
-};
-
 /**
  * Client `clientId`'s live answer kept within the last minute, if any. A
  * cache that fails to answer is a miss, and so is a kept answer with
@@ -435,14 +435,59 @@ const deployerApiFor = async (
     : (signal) => cloudflareApi({ token, waitBudgetMs, signal });
 };
 
+/** How long the grid waits for one provisioning client's run to be read. */
+const runReadMs = 2000;
+
+/**
+ * What waits for staff in a client's provisioning (`GridRow["setup"]`):
+ * read only for a client being provisioned, its run only while its
+ * operation says running, so a grid of live clients reads nothing more.
+ */
+const setupOf = async (
+  env: Env,
+  db: AdminDatabase,
+  row: Pick<GridRow, "id" | "status" | "lastDeploy">
+): Promise<GridRow["setup"]> => {
+  if (row.status !== "provisioning") {
+    return null;
+  }
+  if (row.lastDeploy === null) {
+    return { state: "not_started", why: await notStartedOf(db, row.id) };
+  }
+  if (row.lastDeploy.status === "failed") {
+    return { state: "stopped" };
+  }
+  if (row.lastDeploy.status === "done") {
+    return null;
+  }
+  // Its run read within a short deadline, a failure this row's alone: a
+  // slow or failing read never stalls or breaks the grid (`unread`).
+  const read = await within(
+    runReadMs,
+    async () => ({ run: await currentRun(env, row.id) }),
+    null
+  );
+  if (read === null) {
+    log.warn("grid.run_unread", { clientId: row.id });
+    return { state: "unread" };
+  }
+  return read.run === null || isReplaceable(read.run.status)
+    ? { state: "stopped" }
+    : null;
+};
+
 /** Every client, as the admin recorded it, for the grid to show at once. */
 export const clientGrid = async (env: Env): Promise<GridRow[]> => {
   const domain = clientDomain(env);
-  const recorded = await recordedClients(adminDatabase(env.DB));
-  return recorded.map((row) => ({
-    ...row,
-    hostname: domain === null ? null : `${row.id}.${domain}`,
-  }));
+  const db = adminDatabase(env.DB);
+  const recorded = await recordedClients(db);
+  return await Promise.all(
+    recorded.map(async (row) => ({
+      ...row,
+      hostname: domain === null ? null : `${row.id}.${domain}`,
+      setup: await setupOf(env, db, row),
+    }))
+  );
 };
 
 /**

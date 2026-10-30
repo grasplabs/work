@@ -96,6 +96,7 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -551,52 +552,6 @@ export const provisionOf = async (db: AdminDatabase, clientId: string) =>
     .get();
 
 /**
- * Records the operation that provisions client `held.clientId` with
- * release `releaseId`, as `actor`, and returns its id: the one it has
- * already when it has one, so starting again resumes it (spec 40.1). An
- * operation of another release is refused (`operation_release_changed`):
- * it isn't replaced. Only while runner `held` holds the client, in the
- * same statement: a start that lost the client writes nothing.
- */
-export const startClientProvision = async (
-  db: AdminDatabase,
-  actor: Actor,
-  held: HeldClient,
-  releaseId: string
-): Promise<string> => {
-  const { clientId } = held;
-  const now = new Date();
-  const id = crypto.randomUUID();
-  await actIfChanged(
-    db,
-    actor,
-    db
-      .insert(clientProvisions)
-      .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
-      )
-      .onConflictDoNothing(),
-    {
-      action: "provision.start",
-      clientId,
-      target: releaseId,
-      detail: { operation: id },
-    }
-  );
-  const operation = await provisionOf(db, clientId);
-  if (operation === undefined) {
-    throw new Error(`${clientId} has no operation after starting one`);
-  }
-  if (operation.releaseId !== releaseId) {
-    throw new ProvisionOperationError(
-      "operation_release_changed",
-      `${clientId} is being provisioned with ${operation.releaseId}`
-    );
-  }
-  return operation.id;
-};
-
-/**
  * The first Worker whose last Durable Object migration (`ran`, by Worker)
  * `to` doesn't have: going to `to` would take its script back past a
  * migration it ran. None when `to` has every one.
@@ -669,6 +624,147 @@ const assertCanGo = async (
       `${behind} ran a Durable Object migration ${target} doesn't have`
     );
   }
+};
+
+/** When release `id` was built; null when it isn't imported. */
+const builtAtOf = async (
+  db: AdminDatabase,
+  id: string
+): Promise<Date | null> => {
+  const row = await db
+    .select({ builtAt: releases.builtAt })
+    .from(releases)
+    .where(eq(releases.id, id))
+    .get();
+  return row?.builtAt ?? null;
+};
+
+/**
+ * Switches client `held.clientId`'s provisioning `operation` to the newer
+ * release `releaseId`, as `actor`, audited (`provision.switch_release`):
+ * only while the client is still being provisioned and its operation
+ * isn't done, so nothing of it is live, and only to a release that has
+ * every Durable Object migration its scripts ran (`assertCanGo`). Its
+ * next run starts again from its first step on the new release: every
+ * step finds what an earlier one did. An older release, or a client
+ * that's live, is refused (`operation_release_changed`).
+ */
+const switchProvisionRelease = async (
+  db: AdminDatabase,
+  actor: Actor,
+  held: HeldClient,
+  operation: Operation,
+  releaseId: string
+): Promise<void> => {
+  const { clientId } = held;
+  const changed = new ProvisionOperationError(
+    "operation_release_changed",
+    `${clientId} is being provisioned with ${operation.releaseId}, and can't take ${releaseId}`
+  );
+  const client = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client?.status !== "provisioning" || operation.status === "done") {
+    throw changed;
+  }
+  const [from, to] = await Promise.all([
+    builtAtOf(db, operation.releaseId),
+    builtAtOf(db, releaseId),
+  ]);
+  if (to === null) {
+    throw new ProvisionOperationError(
+      "release_not_imported",
+      `Release ${releaseId} isn't imported`
+    );
+  }
+  // Newer as the releases list them: by when built, then by id.
+  const newer =
+    from === null ||
+    to > from ||
+    (to.getTime() === from.getTime() && releaseId > operation.releaseId);
+  if (!newer) {
+    throw changed;
+  }
+  await assertCanGo(db, operation, releaseId, false);
+  await actIfChanged(
+    db,
+    actor,
+    db
+      .update(clientProvisions)
+      .set({
+        releaseId,
+        status: "running",
+        error: null,
+        startedBy: actorName(actor),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.releaseId, operation.releaseId),
+          stillHolds(held)
+        )
+      ),
+    {
+      action: "provision.switch_release",
+      clientId,
+      target: releaseId,
+      detail: { operation: operation.id, from: operation.releaseId },
+    }
+  );
+  // A start that lost the client, or another switch first, changed nothing.
+  const after = await provisionOf(db, clientId);
+  if (after?.releaseId !== releaseId) {
+    throw changed;
+  }
+};
+
+/**
+ * Records the operation that provisions client `held.clientId` with
+ * release `releaseId`, as `actor`, and returns its id: the one it has
+ * already when it has one, so starting again resumes it (spec 40.1). One
+ * of an older release is switched to `releaseId` while nothing of the
+ * client is live (`switchProvisionRelease`), so a client started on a
+ * release that can't finish takes a fixed one; anything else is refused
+ * (`operation_release_changed`). Only while runner `held` holds the
+ * client, in the same statement: a start that lost the client writes
+ * nothing.
+ */
+export const startClientProvision = async (
+  db: AdminDatabase,
+  actor: Actor,
+  held: HeldClient,
+  releaseId: string
+): Promise<string> => {
+  const { clientId } = held;
+  const now = new Date();
+  const id = crypto.randomUUID();
+  await actIfChanged(
+    db,
+    actor,
+    db
+      .insert(clientProvisions)
+      .select(
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+      )
+      .onConflictDoNothing(),
+    {
+      action: "provision.start",
+      clientId,
+      target: releaseId,
+      detail: { operation: id },
+    }
+  );
+  const operation = await provisionOf(db, clientId);
+  if (operation === undefined) {
+    throw new Error(`${clientId} has no operation after starting one`);
+  }
+  if (operation.releaseId !== releaseId) {
+    await switchProvisionRelease(db, actor, held, operation, releaseId);
+  }
+  return operation.id;
 };
 
 /** How a release start is audited: a rollback, a run again of what runs, or a release. */
@@ -1596,21 +1692,24 @@ const load = async (
 };
 
 /**
- * Step 1: everything checked before the client's destination is changed,
- * then its resources allocated in its inventory.
+ * Throws unless client `clientId` may run `manifest` as far as the
+ * admin's records tell, before anything of its destination is read:
+ * the release works with what the client runs and with itself
+ * (`incompatibility`), on the schema its databases have, and any
+ * platform limit it raises has evidence for the client's profile. What
+ * the first step checks first (`validate`), and what picks the release a
+ * provisioning offers (`newestFittingRelease`).
  */
-const validate = async (
-  context: ProvisionContext,
-  loaded: Loaded
+const assertReleaseFits = async (
+  db: AdminDatabase,
+  clientId: string,
+  manifest: ReleaseManifest
 ): Promise<void> => {
-  const { db } = context;
-  const { manifest, held } = loaded;
-  const order = appsOf(manifest);
   const refused = incompatibility(
-    await currentReleases(db, held.clientId),
+    await currentReleases(db, clientId),
     manifest,
-    order,
-    await appliedSchema(db, held.clientId)
+    appsOf(manifest),
+    await appliedSchema(db, clientId)
   );
   if (refused !== null) {
     throw new ProvisionOperationError(refused.code, refused.message);
@@ -1621,7 +1720,7 @@ const validate = async (
   try {
     raise = await uncoveredLimitRaise(
       db,
-      held.clientId,
+      clientId,
       manifest.releaseId,
       clientRuntimeProfile
     );
@@ -1644,6 +1743,59 @@ const validate = async (
       `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
     );
   }
+};
+
+/** How many of the newest imported releases a provisioning looks through for one that fits. */
+const fittingReleasesLooked = 20;
+
+/**
+ * The newest imported release client `clientId` may be provisioned with
+ * (`assertReleaseFits`), looking through the newest few; null when none
+ * of them fits, or none is imported. What a client is provisioned with
+ * when staff don't pick one, and what resuming offers first.
+ */
+export const newestFittingRelease = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const newest = await db
+    .select({ id: releases.id, manifest: releases.manifest })
+    .from(releases)
+    .orderBy(desc(releases.builtAt), desc(releases.id))
+    .limit(fittingReleasesLooked);
+  for (const row of newest) {
+    const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
+    if (!parsed.success) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
+      await assertReleaseFits(db, clientId, parsed.data);
+      return row.id;
+    } catch (error) {
+      if (
+        !(error instanceof ProvisionOperationError) &&
+        !(error instanceof DeployError)
+      ) {
+        throw error;
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * Step 1: everything checked before the client's destination is changed,
+ * then its resources allocated in its inventory.
+ */
+const validate = async (
+  context: ProvisionContext,
+  loaded: Loaded
+): Promise<void> => {
+  const { db } = context;
+  const { manifest, held } = loaded;
+  const order = appsOf(manifest);
+  await assertReleaseFits(db, held.clientId, manifest);
   const vars = await coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);

@@ -1,13 +1,14 @@
+import { RINGS, ringName } from "@grasp-os/shared/admin/admin-platform";
+import { cn } from "@grasp-os/ui/lib/utils";
+import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
+
 /**
  * The parts and words of the admin's Platform page, ported from the
  * prototype (grasplabs/prototype `components/admin/platform-parts.tsx`
  * and `platform-words.ts`): how a company stands, the rollout's rings as
  * steps, and the admin's own records in words staff read.
  */
-import { RINGS, ringName } from "@grasp-os/shared/admin/admin-platform";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
-
+import type { NotStarted } from "../hosting/placement.ts";
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
 import type { PlatformNeed, RingState, Standing } from "./platform.ts";
@@ -47,9 +48,25 @@ const driftWords: Record<
   off_pin: "Runs another release than it is pinned to",
 };
 
+/** Why setting a company up hasn't started, in a line with the next step. */
+const notStartedLine: Record<NotStarted | "ready", string> = {
+  no_destination: "Not started: no hosting destination ready.",
+  no_release: "Not started: no release imported yet.",
+  ready: "Not started: provision it from its Setup.",
+};
+
 /** What a company needs, in a line. */
 export const needWords = (need: PlatformNeed): string => {
   switch (need.kind) {
+    case "not_started": {
+      return notStartedLine[need.why ?? "ready"];
+    }
+    case "stopped": {
+      return "Stopped: resume it from its Setup.";
+    }
+    case "setup_unread": {
+      return "Being set up: status unavailable just now. Its Setup reads it again.";
+    }
     case "failed": {
       return `Its last deploy failed (${need.releaseId}).`;
     }

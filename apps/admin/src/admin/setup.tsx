@@ -57,7 +57,7 @@ import { overBars } from "../clients/watch-signals.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import type { ClientHostingView } from "../hosting/placement.ts";
-import { operationErrorWords } from "../hosting/words.ts";
+import { notStartedWords, operationErrorWords } from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
@@ -185,6 +185,7 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 type PlatformNeed =
   | { kind: "provisioning"; view: ProvisioningView }
+  | { kind: "not_started"; why: ProvisioningView["notStarted"] }
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
   | { kind: "secrets" }
   | { kind: "settings" }
@@ -205,6 +206,9 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   const needs: PlatformNeed[] = [];
   if (provisioning.phase === "failed") {
     needs.push({ kind: "provisioning", view: provisioning });
+  }
+  if (provisioning.phase === "placing") {
+    needs.push({ kind: "not_started", why: provisioning.notStarted });
   }
   if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
     needs.push({ kind: "rollout", rollout });
@@ -229,14 +233,17 @@ const needWords = (need: PlatformNeed): ReactNode => {
   if (need.kind === "provisioning") {
     const { view } = need;
     return view.stopped === null ? (
-      "Setting it up stopped, and waits to be started again from Hosting."
+      "Stopped: resume it from Hosting."
     ) : (
       <>
-        {`Setting it up stopped at its ${view.stopped.step} step: `}
+        {`Stopped after its ${view.stopped.step} step, resume it from Hosting: `}
         <ErrorCode code={view.stopped.error} />
         {` ${operationErrorWords(view.stopped.error)}`}
       </>
     );
+  }
+  if (need.kind === "not_started") {
+    return notStartedWords(need.why);
   }
   if (need.kind === "rollout") {
     const { rollout } = need;
@@ -649,7 +656,8 @@ const NeedAction = ({
         </TabLink>
       );
     }
-    case "provisioning": {
+    case "provisioning":
+    case "not_started": {
       // Setting it up is seen to below, on this tab.
       return null;
     }

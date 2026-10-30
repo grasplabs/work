@@ -68,6 +68,20 @@ export class MissingStoreSecretError extends Error {
   }
 }
 
+/** What `read` answers, or null when a secret it reads isn't in Secrets Store. */
+export const ifStored = async <T>(
+  read: () => Promise<T>
+): Promise<T | null> => {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof MissingStoreSecretError) {
+      return null;
+    }
+    throw error;
+  }
+};
+
 /**
  * The value of the Secrets Store secret `name`. One that's missing or
  * empty stops the caller (`MissingStoreSecretError`), naming the secret
