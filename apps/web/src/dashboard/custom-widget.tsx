@@ -109,9 +109,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
     case "number": {
       return (
         <div className="flex flex-col gap-0.5">
-          <span className="text-2xl font-semibold tabular-nums">
-            {formatNumber(part.value)}
-          </span>
+          <span className="type-figure">{formatNumber(part.value)}</span>
           <span className="text-muted-foreground">{part.label}</span>
         </div>
       );

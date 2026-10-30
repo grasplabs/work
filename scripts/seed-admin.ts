@@ -34,22 +34,26 @@ const at = (day: number, time = "08:00"): number =>
 
 const releases = [
   {
-    id: "r000418-3f9c2ab",
+    id: "26.10.4",
+    commit: "3f9c2ab000000000000000000000000000000000",
     day: 14,
     notes: "feat(core): draw workflows left to right",
   },
   {
-    id: "r000412-91d0e47",
+    id: "26.10.3",
+    commit: "91d0e47000000000000000000000000000000000",
     day: 7,
     notes: "feat(core): answer with where the brain read it",
   },
   {
-    id: "r000405-c27b18f",
+    id: "26.09.12",
+    commit: "c27b18f000000000000000000000000000000000",
     day: 0,
     notes: "feat(core): sign in with Google Workspace",
   },
   {
-    id: "r000399-0a6e5d3",
+    id: "26.09.11",
+    commit: "0a6e5d3000000000000000000000000000000000",
     day: -7,
     notes: "feat(connect): run connect as a Worker of its own",
   },
@@ -65,7 +69,7 @@ const companies = [
     name: "Hartog Groothandel",
     ring: 0,
     status: "active",
-    release: "r000418-3f9c2ab",
+    release: "26.10.4",
     // Its last change, its settings and new secrets, failed at its probe.
     lastDeploy: { status: "failed", kind: "settings_and_secrets", day: 15 },
   },
@@ -74,7 +78,7 @@ const companies = [
     name: "Noordkade Finance",
     ring: 1,
     status: "active",
-    release: "r000418-3f9c2ab",
+    release: "26.10.4",
     lastDeploy: { status: "done", kind: "release", day: 14 },
   },
   {
@@ -82,7 +86,7 @@ const companies = [
     name: "Veldkamp Installatietechniek",
     ring: 2,
     status: "active",
-    release: "r000412-91d0e47",
+    release: "26.10.3",
     lastDeploy: { status: "done", kind: "release", day: 9 },
   },
   {
@@ -96,7 +100,7 @@ const companies = [
 ] as const;
 
 /** The release a company still being provisioned is provisioned with. */
-const provisioning = "r000418-3f9c2ab";
+const provisioning = "26.10.4";
 
 /** The made-up dedicated destination every company is placed in. */
 const destinationId = "seed-eu-dedicated";
@@ -128,10 +132,10 @@ const statements = [
   // The companies, releases and workers in place, as anything else a local
   // admin made of them (another rollout's targets, say) may name them.
   `INSERT INTO releases (id, commit_sha, manifest, manifest_sha256, built_at, imported_at) VALUES ${releases
-    .map(({ id, day, notes }) =>
+    .map(({ id, commit, day, notes }) =>
       row([
         id,
-        id.split("-")[1] ?? id,
+        commit,
         JSON.stringify({ notes }),
         "0".repeat(64),
         releaseAt(day),
@@ -229,7 +233,7 @@ const statements = [
     [
       rolloutId,
       "release",
-      "r000418-3f9c2ab",
+      "26.10.4",
       mode,
       mode === "running" ? 2 : 1,
       staff,
