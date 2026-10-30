@@ -450,7 +450,7 @@ const Header = ({
               label="Open its Grasp"
             />
             <OutLink
-              href={`https://${provisioning.hostname}/activity`}
+              href={`https://${provisioning.hostname}/settings/audit`}
               label="Its activity"
             />
           </>
