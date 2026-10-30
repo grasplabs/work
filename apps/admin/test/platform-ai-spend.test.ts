@@ -58,7 +58,7 @@ const transcription = (micros: number): PlatformSpendRow => ({
 });
 const speech = (micros: number): PlatformSpendRow => ({
   feature: "speech",
-  model: "openai/gpt-4o-mini-tts",
+  model: "elevenlabs/eleven_v4",
   micros,
 });
 
@@ -120,7 +120,7 @@ describe("what Grasp's own AI features cost", () => {
     }).toStrictEqual({
       status: 200,
       byFeature: `By feature ${thisMonth} ${lastMonth} Transcription $2.00 $0.00 Document conversion $1.25 $0.00 Speech $0.30 $0.50`,
-      byModel: `By model ${thisMonth} ${lastMonth} OpenAI gpt-4o-transcribe $2.00 $0.00 OpenAI gpt-5.4-mini $1.25 $0.00 OpenAI gpt-4o-mini-tts $0.30 $0.50`,
+      byModel: `By model ${thisMonth} ${lastMonth} OpenAI gpt-4o-transcribe $2.00 $0.00 OpenAI gpt-5.4-mini $1.25 $0.00 ElevenLabs eleven_v4 $0.30 $0.50`,
       dollars: true,
       controls: false,
     });
@@ -173,7 +173,7 @@ describe("what Grasp's own AI features cost", () => {
         byModel: [
           { model: "openai/gpt-4o-transcribe", micros: 7_000_000 },
           { model: "openai/gpt-5.4-mini", micros: 1_250_000 },
-          { model: "openai/gpt-4o-mini-tts", micros: 300_000 },
+          { model: "elevenlabs/eleven_v4", micros: 300_000 },
         ],
       },
       lastMonth: {
@@ -185,7 +185,7 @@ describe("what Grasp's own AI features cost", () => {
         ],
         byModel: [
           { model: "openai/gpt-5.4-mini", micros: 9_000_000 },
-          { model: "openai/gpt-4o-mini-tts", micros: 500_000 },
+          { model: "elevenlabs/eleven_v4", micros: 500_000 },
         ],
       },
       top: [

@@ -19,13 +19,14 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Await, Link } from "@tanstack/react-router";
 
-import { Figure, Panel } from "./parts.tsx";
+import { Figure } from "./parts.tsx";
 import { microsPerDollar, organizationSpendOf } from "./platform-spend-sums.ts";
 import type {
   OrganizationSpend,
   PlatformSpend,
   SpendOverview,
 } from "./platform-spend-sums.ts";
+import { Section } from "./section.tsx";
 import { dollars, formatMonth } from "./words.ts";
 
 const featureWords: Record<PlatformAiFeature, string> = {
@@ -38,7 +39,7 @@ const featureWords: Record<PlatformAiFeature, string> = {
 const featureLabel = (feature: PlatformAiFeature | null): string =>
   feature === null ? "Other" : featureWords[feature];
 
-/** `openai/gpt-4o-mini-tts` as "OpenAI gpt-4o-mini-tts". */
+/** `elevenlabs/eleven_v4` as "ElevenLabs eleven_v4". */
 const modelLabel = (model: string): string => {
   const [provider = "", ...rest] = model.split("/");
   const id = aiProviderIdSchema.safeParse(provider);
@@ -189,7 +190,7 @@ export const OrganizationPlatformSpend = ({
 }: {
   status: Promise<AiStatusReport | null>;
 }) => (
-  <Panel
+  <Section
     description="What document conversion, transcription and speech cost Grasp on its own keys for this organization: the model ledger’s charges in US dollars at list prices, read from its core now. Nothing caps them."
     title="Grasp’s own AI features"
   >
@@ -204,7 +205,7 @@ export const OrganizationPlatformSpend = ({
         )
       }
     </Await>
-  </Panel>
+  </Section>
 );
 
 /** The organizations that cost the most this month, then last, each linked to its AI use. */
@@ -270,7 +271,7 @@ export const PlatformSpendPanel = ({
 }: {
   spend: Promise<PlatformSpend | null>;
 }) => (
-  <Panel
+  <Section
     description="Every active organization’s, summed: the model ledger’s charges in US dollars at list prices, read from each core now. Nothing caps them."
     title="What they cost"
   >
@@ -290,5 +291,5 @@ export const PlatformSpendPanel = ({
         );
       }}
     </Await>
-  </Panel>
+  </Section>
 );
