@@ -44,6 +44,7 @@ import {
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { BlueprintUpdateBanner } from "../engines/blueprint-update.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -558,6 +559,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         <AppStatusControls app={app} identity={identity} />
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
+      <BlueprintUpdateBanner app={app} identity={identity} />
       <Tabs
         // The address's tab, again for each entry of the page's history:
         // a navigation to the App's settings opens that tab, whichever the
