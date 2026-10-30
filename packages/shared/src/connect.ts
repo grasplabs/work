@@ -510,7 +510,7 @@ export const appRequestsListed = 200;
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
  * core's callback, which returns it to `returnTo` (a path on this origin)
- * with `connection=<id>` once it finished, or to the Connections page with
+ * with `connection=<id>` once it finished, or to the Integrations page with
  * `connectionError=<code>` when it didn't. Reconnecting a connection that
  * needs it (`needs_reauth`) is starting one for its provider and scope:
  * finished with the account it holds, it is that connection again.
