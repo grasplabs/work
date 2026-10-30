@@ -2226,7 +2226,11 @@ export class ResourceRunHost
     // for the next activation, its call not spent (`#onceAtMost`).
     const runs = funded || (configOf(step).once && !this.#isolateStopped);
     // Only an attempt that runs is admitted: one cut off holds nothing of
-    // its lineage.
+    // its lineage, and records no receipt, so a lineage's receipts can skip
+    // its number (attempt 3 after 1, GRA-1096). It is still one of the
+    // engine's attempts at the step (`stepConfig.retries`), as an isolate
+    // the Loader stopped is on Cloudflare: the engine, not core, counts
+    // them, and its count is the attempts' fence.
     let admission: AttemptAdmission | undefined;
     if (runs) {
       const admitted = await this.#admitFunded(run, told, lease, funded);
