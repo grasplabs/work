@@ -35,6 +35,7 @@ export const staffActions = [
   "rollout.cancel",
   "rollout.rollback",
   "client.create",
+  "client.discard",
   "client.ring",
   "client.model_spend_ceiling",
   "client.pin",
