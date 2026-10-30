@@ -898,16 +898,24 @@
   }
 }
 
-/* A line of dots, down a page in the colour of the text it is set in (`text-*`): the spine the
-   brain's log hangs its days on (brain/brain-log.tsx). */
+/* A line of dots, down a page in the colour of the text it is set in (`text-*`). One rule draws
+   every size of it: `dots-down` is the fine line, `dots-down-wide` beside it the larger, softer
+   dots of the spine the brain's log hangs its days on (brain/brain-log.tsx), as the prototype
+   draws it. */
 @utility dots-down {
   background-image: radial-gradient(
     circle,
-    currentColor 0.8px,
-    transparent 1px
+    currentColor var(--dots-dot, 0.8px),
+    transparent var(--dots-fade, 1px)
   );
-  background-size: 2px 6.5px;
+  background-size: var(--dots-tile, 2px 6.5px);
   background-repeat: repeat-y;
+}
+
+@utility dots-down-wide {
+  --dots-dot: 0.8px;
+  --dots-fade: 1.3px;
+  --dots-tile: 4px 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {
