@@ -127,6 +127,31 @@ export default defineConfig({
         rules: { "grasp/no-scrollbars": "error" },
       },
       {
+        // Every answer of the interface is over within 300 ms (AGENTS.md,
+        // Design), in the frontend, the admin and the kit alike.
+        files: ["apps/web/src/**", "apps/admin/src/**", "packages/ui/src/**"],
+        excludeFiles: ["**/*.test.ts", "**/*.test.tsx"],
+        rules: { "grasp/no-slow-motion": "error" },
+      },
+      {
+        // Seen once per person, so they may take longer to delight: the
+        // onboarding, the interview, setup and Stephen's tour. And rare: an
+        // app connected, a few times per company, whose drawn mark is the
+        // delight of it (success-mark.tsx).
+        files: [
+          "apps/web/src/onboarding/**",
+          "apps/web/src/interview/**",
+          "apps/web/src/tour/**",
+          "apps/web/src/voice/**",
+          "apps/web/src/routes/_shell.onboarding*",
+          "apps/web/src/routes/interview*",
+          "apps/web/src/routes/setup*",
+          "apps/web/src/frame/onboarding-frame.tsx",
+          "packages/ui/src/components/success-mark.tsx",
+        ],
+        rules: { "grasp/no-slow-motion": "off" },
+      },
+      {
         // What clients and buyers read names the product Grasp Work
         // (GRA-143): the apps' and packages' source, not their tests.
         files: ["apps/*/src/**", "packages/*/src/**"],

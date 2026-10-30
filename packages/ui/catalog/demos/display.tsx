@@ -357,7 +357,7 @@ const SuccessMarkDemo = () => (
 
 const GraspMarkDemo = () => (
   <div className="flex items-center gap-2">
-    <GraspMark className="size-6" variant="logo" />
+    <GraspMark className="size-6" />
     <span className="font-medium">Grasp</span>
   </div>
 );

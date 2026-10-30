@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
@@ -7,9 +8,9 @@ import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`): Geist for the text, the
-// title in Newsreader (`type-title`), and the light theme, which is what
-// paper takes (the theme's dark is for the screen only). No PDF is drawn
-// in the app itself.
+// title in Newsreader (the kit's PageHeaderTitle), and the light theme,
+// which is what paper takes (the theme's dark is for the screen only). No
+// PDF is drawn in the app itself.
 //
 // The page to print is a frame of this origin, so it keeps this page's
 // Content Security Policy: no inline script or style. Its look comes from
@@ -72,7 +73,7 @@ const PrintPage = ({
   markdown: string;
 }) => (
   <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
-    <h1 className="type-title">{title}</h1>
+    <PageHeaderTitle>{title}</PageHeaderTitle>
     <PlainMarkdown
       text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
     />
@@ -185,7 +186,7 @@ export const printAsPdf = async (
   await withinTime(
     Promise.all([
       page.fonts.load('1em "Geist Variable"'),
-      page.fonts.load('300 1.75rem "Newsreader Variable"'),
+      page.fonts.load('300 1em "Newsreader Variable"'),
     ])
   );
   await withinTime(page.fonts.ready);

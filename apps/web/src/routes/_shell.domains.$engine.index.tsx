@@ -6,6 +6,7 @@ import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { buttonVariants } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -537,7 +538,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
       <div className="flex flex-wrap items-start gap-4">
         <EngineIcon />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h1 className="type-title">{app.name}</h1>
+          <PageHeaderTitle>{app.name}</PageHeaderTitle>
           {app.description === "" ? null : (
             <p className="text-muted-foreground">{app.description}</p>
           )}
@@ -693,7 +694,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
       />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-0.5">
-          <h1 className="type-title">{listed.subject.name}</h1>
+          <PageHeaderTitle>{listed.subject.name}</PageHeaderTitle>
           <p className="text-muted-foreground">
             <Trans>
               The packages approved for this domain. You see them because you

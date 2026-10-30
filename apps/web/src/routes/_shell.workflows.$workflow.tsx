@@ -9,6 +9,7 @@ import type {
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -217,7 +218,7 @@ const WorkflowResourceView = ({
     >
       <div className="flex flex-col gap-3 border-b px-6 pt-5">
         <div className="flex min-w-0 flex-col gap-2">
-          <h1 className="type-title">{resource.name}</h1>
+          <PageHeaderTitle>{resource.name}</PageHeaderTitle>
           <div className="text-muted-foreground flex flex-wrap items-center gap-2">
             <Badge variant="outline">
               {currentVersion === null ? (

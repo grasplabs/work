@@ -93,11 +93,7 @@ export const IntegrationsBanner = ({
     attention: stateOf(integration) === "needs_reauth",
   }));
   return (
-    <PaintedField
-      className="h-44 rounded-2xl"
-      painting="mist"
-      pattern="horizon"
-    >
+    <PaintedField className="h-44 rounded-lg" painting="mist" pattern="horizon">
       <IntegrationsNerves
         lines={lines}
         onHold={(id, at) => {

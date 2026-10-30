@@ -4,6 +4,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tooltip,
   TooltipContent,
@@ -117,11 +118,11 @@ export const BannerHeader = ({
         )}
       </Panel>
       <span className="flex flex-col gap-0.5">
-        <h1 className="type-title wrap-break-word">
+        <PageHeaderTitle className="wrap-break-word">
           {note.kind === "statement"
             ? statementWords(note.id, note.title)
             : note.title}
-        </h1>
+        </PageHeaderTitle>
         {note.kind === "statement" && isTeamClaim(note.id) ? (
           <ClaimBasis />
         ) : null}

@@ -8,6 +8,7 @@ import type {
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -966,7 +967,7 @@ const Header = ({
   return (
     <section className="bg-card overflow-hidden rounded-xl border text-sm">
       <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="type-title">{work.name}</h2>
+        <PageHeaderTitle render={<h2>{work.name}</h2>} />
         <p className="text-muted-foreground">{team}</p>
         <p aria-live="polite">
           <StandsLine record={record} />

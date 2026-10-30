@@ -1,5 +1,3 @@
-import { BRAND } from "@grasp-os/ui/lib/brand";
-
 /**
  * The ink the dot brain prints with, shared with the buddy on Home: how its dots look and move,
  * and every colour a dot can have, by warmth and ink, from the brain tokens in the kit's styles.css. Ported
@@ -134,7 +132,7 @@ export const rgba = (color: string): [number, number, number, number] => {
       .getContext("2d", { willReadFrequently: true });
   }
   if (!probe) {
-    // The brand's ink (BRAND.ink), where there is no canvas to paint with.
+    // The ink, near enough, where there is no canvas to paint with.
     return [6, 45, 34, 1];
   }
   probe.clearRect(0, 0, 1, 1);
@@ -182,13 +180,19 @@ const mix = (
   Math.round(a[2] + (b[2] - a[2]) * t),
 ];
 
+/**
+ * A theme token's value where `element` stands, as the kit's stylesheet
+ * resolves it for light or dark: a canvas paints with what the theme says,
+ * never with a copy of its colours.
+ */
+export const token = (element: Element, name: string): string =>
+  getComputedStyle(element).getPropertyValue(name).trim();
+
 /** Every colour a dot can have, in bucket order: warmth × ALPHAS + ink. */
 export const palette = (element: HTMLElement): string[] => {
-  const read = (name: string, fallback: string) =>
-    rgb(getComputedStyle(element).getPropertyValue(name).trim() || fallback);
-  const ink = read("--brain-ink", BRAND.ink);
-  const heat = read("--brain-heat", BRAND.voice);
-  const glow = read("--brain-glow", BRAND.glow);
+  const ink = rgb(token(element, "--brain-ink"));
+  const heat = rgb(token(element, "--brain-heat"));
+  const glow = rgb(token(element, "--brain-glow"));
   const styles: string[] = [];
   for (let h = 0; h < HEATS; h += 1) {
     const w = h / (HEATS - 1);

@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   createRootRoute,
   HeadContent,
@@ -6,11 +7,6 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-// Light or dark as the platform has it: the web's own script, the one
-// file for both, run in <head> before first paint so the admin never
-// flashes light. The admin has no choice of its own, so it follows the
-// system's colour scheme.
-import themeScript from "../../../web/public/theme.js?url";
 import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
@@ -47,7 +43,7 @@ const Frame = () => {
 /** A page there isn't, in the admin's frame. */
 const NotFound = () => (
   <main className="flex flex-col gap-4 p-6">
-    <h1 className="type-title">Not found</h1>
+    <PageHeaderTitle>Not found</PageHeaderTitle>
     <p className="text-sm">There&apos;s no such page.</p>
     <Link className="text-sm underline underline-offset-4" to="/">
       Back to the admin
@@ -80,7 +76,9 @@ export const Route = createRootRoute({
       { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }],
-    scripts: [{ src: themeScript }],
+    // Light or dark as the system has it, set before first paint
+    // (public/theme.js, the admin's own), so the admin never flashes light.
+    scripts: [{ src: "/theme.js" }],
   }),
   shellComponent: RootDocument,
   component: Frame,

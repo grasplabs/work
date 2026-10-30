@@ -21,9 +21,17 @@
  * alone. Outside packages it also refuses a TypeScript-private or
  * -protected method, which Cap'n Web calls like any other but types hide.
  * With `reexportsOnly` (packages), only the exports are checked.
+ *
+ * no-slow-motion: Grasp answers within 300 ms (AGENTS.md, Design). It
+ * reads the durations a class list (`duration-*`) or a Motion option
+ * (`duration`) sets, and refuses one over that, unless it loops (work
+ * still going on). What is rare or seen once is turned off for its files
+ * in vite.config.ts, each with its reason; a stylesheet's own animations
+ * are for review.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
+import { findSlowClass, LIMIT_MS, motionMs } from "./slow-motion.ts";
 
 interface Node {
   type: string;
@@ -42,6 +50,7 @@ interface Node {
   expressions?: Node[];
   object?: Node;
   properties?: Node[];
+  key?: Node;
   argument?: Node;
   elements?: (Node | null)[];
   consequent?: Node;
@@ -475,11 +484,78 @@ const noUnboundedRpcTarget = {
   },
 };
 
+/** Whether an options object repeats for ever, as work still going on does. */
+const repeatsForever = (object: Node): boolean =>
+  (object.properties ?? []).some(
+    (each) =>
+      nameOf(each.key) === "repeat" &&
+      isNode(each.value) &&
+      nameOf(each.value) === "Infinity"
+  );
+
+const noSlowMotion = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Every answer of the interface is over within 300 ms.",
+    },
+    messages: {
+      slow: "{{ms}} ms is longer than an answer may take ({{limit}} ms). Shorten it, or, if it is rare or seen once, turn the rule off for its file in vite.config.ts with the reason.",
+    },
+    schema: [],
+  },
+  create: (context: Context) => {
+    const report = (node: Node, ms: number): void => {
+      context.report({
+        node,
+        messageId: "slow",
+        data: { ms: String(ms), limit: String(LIMIT_MS) },
+      });
+    };
+    const check = (node: Node, text: string): void => {
+      const ms = findSlowClass(text);
+      if (ms !== undefined) {
+        report(node, ms);
+      }
+    };
+    return {
+      Literal: (node: Node): void => {
+        if (typeof node.value === "string") {
+          check(node, node.value);
+        }
+      },
+      TemplateLiteral: (node: Node): void => {
+        for (const quasi of node.quasis ?? []) {
+          check(node, quasi.value.raw);
+        }
+      },
+      ObjectExpression: (node: Node): void => {
+        if (repeatsForever(node)) {
+          return;
+        }
+        for (const each of node.properties ?? []) {
+          const { value } = each;
+          if (
+            nameOf(each.key) === "duration" &&
+            isNode(value) &&
+            value.type === "Literal" &&
+            typeof value.value === "number" &&
+            motionMs(value.value) > LIMIT_MS
+          ) {
+            report(each, motionMs(value.value));
+          }
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
   rules: {
     "no-unbounded-rpc-target": noUnboundedRpcTarget,
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,
+    "no-slow-motion": noSlowMotion,
   },
 };
