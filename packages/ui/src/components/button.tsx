@@ -18,6 +18,9 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
+        // A quiet word under a figure that opens what it stands on: muted,
+        // with a dotted line under it (size `inline`).
+        hint: "text-muted-foreground hover:text-foreground focus-visible:text-foreground underline decoration-dotted underline-offset-4",
         // Asking Grasp: the one dark button in the header, so it reads as the way in to the chat.
         ask: "bg-primary text-primary-foreground hover:bg-primary/85 shadow-sm",
         // The one action a page is for, in lime with a soft light under it,
@@ -40,6 +43,8 @@ const buttonVariants = cva(
         "icon-sm":
           "size-8 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-md",
         "icon-lg": "size-10",
+        // In a line of text: no box of its own, in the small type.
+        inline: "h-auto self-start rounded-sm p-0 text-xs font-normal",
       },
     },
     defaultVariants: {
