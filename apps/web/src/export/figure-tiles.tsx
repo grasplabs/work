@@ -1,6 +1,7 @@
+import { Stat } from "@grasp-os/ui/components/stat";
 // An export's key figures as tiles, as the prototype's board report sets
 // them (`lib/report.ts`, `.tiles`): each figure in Newsreader
-// (`type-figure`) over what it counts, side by side in one bordered row.
+// (the kit's Stat) over what it counts, side by side in one bordered row.
 // The report dialog shows them as the page it prints from does.
 
 /** One key figure: its value, already written in the reader's locale, and what it counts. */
@@ -26,7 +27,7 @@ export const FigureTiles = ({
           key={key}
         >
           <dt className="text-muted-foreground text-xs">{label}</dt>
-          <dd className="type-figure">{value}</dd>
+          <Stat render={<dd />}>{value}</Stat>
         </div>
       ))}
     </dl>

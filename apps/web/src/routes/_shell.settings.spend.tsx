@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import type { I18n } from "@lingui/core";
 import { msg, ph, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -64,7 +65,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="type-figure">{value}</span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground text-xs">{sub}</span>
   </div>
 );

@@ -3,6 +3,7 @@ import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tabs,
   TabsContent,
@@ -551,7 +552,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           <AppLogo logo={integration.logo} name={integration.name} />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="type-title">{integration.name}</h1>
+              <PageHeaderTitle>{integration.name}</PageHeaderTitle>
               {integration.listed && !integration.offered ? (
                 <Badge variant="outline">
                   <Trans>Not offered</Trans>
