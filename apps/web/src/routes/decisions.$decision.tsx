@@ -6,6 +6,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { Label } from "@grasp-os/ui/components/label";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -291,7 +292,7 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
 /** A page of its own, for someone not signed in or when core is away. */
 const OnItsOwn = ({ children }: { children: ReactNode }) => (
   <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center text-sm">
-    <GraspMark className="size-6" variant="logo" />
+    <GraspMark className="size-6" />
     {children}
   </main>
 );
@@ -325,9 +326,9 @@ const Decision = () => {
   if (page.state === "offline") {
     return (
       <OnItsOwn>
-        <h1 className="type-title">
+        <PageHeaderTitle>
           <Trans>Decision</Trans>
-        </h1>
+        </PageHeaderTitle>
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
         </ErrorText>
@@ -337,9 +338,9 @@ const Decision = () => {
   if (page.state === "signed-out") {
     return (
       <OnItsOwn>
-        <h1 className="type-title">
+        <PageHeaderTitle>
           <Trans>Sign in to answer</Trans>
-        </h1>
+        </PageHeaderTitle>
         <p className="text-muted-foreground">
           <Trans>Only the people this decision is from can answer it.</Trans>
         </p>
@@ -369,9 +370,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <h1 className="type-title">
+        <PageHeaderTitle>
           <Trans>Decision</Trans>
-        </h1>
+        </PageHeaderTitle>
         <p className="text-muted-foreground">
           <Trans>This decision is for someone else to answer.</Trans>
         </p>
@@ -387,9 +388,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <h1 className="type-title">
+        <PageHeaderTitle>
           <Trans>Decision</Trans>
-        </h1>
+        </PageHeaderTitle>
         <ErrorText>{page.message}</ErrorText>
         <Link className="underline-offset-4 hover:underline" to="/">
           <Trans>Go to Grasp</Trans>

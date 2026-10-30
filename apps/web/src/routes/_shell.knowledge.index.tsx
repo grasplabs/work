@@ -12,6 +12,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
@@ -284,9 +285,9 @@ const Knowledge = () => {
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 md:px-12">
           <header className="flex flex-col gap-2.5">
-            <h1 className="type-title">
+            <PageHeaderTitle>
               <Trans>Knowledge</Trans>
-            </h1>
+            </PageHeaderTitle>
             <p className="text-muted-foreground text-sm leading-relaxed">
               <Trans>
                 Everything Grasp and its agents may read, in collections: your
