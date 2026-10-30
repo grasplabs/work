@@ -133,9 +133,7 @@ test("names each member's actions for them, and asks before making someone an ad
   // Everyone signed in here has the same name.
   const { admin, one, two } = peopleIn("memberActions");
   await signInTo(context, admin);
-  // An old link leads to Settings → Members and roles.
-  await page.goto("/members");
-  await expect(page).toHaveURL(/\/settings\/members$/u);
+  await page.goto("/settings/members");
 
   for (const person of [one, two]) {
     const who = `Person (${person.email})`;

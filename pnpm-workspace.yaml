@@ -151,6 +151,9 @@ catalog:
   happy-dom: 21.0.3
   # The kit's one-time-code input.
   input-otp: 1.5.0
+  # The CSS parser the motion lint (scripts/lint) works a duration out with,
+  # as Vite and Tailwind already resolve it.
+  lightningcss: 1.33.0
   lucide-react: 1.47.0
   # The kit's motion, as the prototype animates (components/shimmer).
   motion: 14.3.0
