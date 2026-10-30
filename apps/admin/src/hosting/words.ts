@@ -4,6 +4,7 @@
  * admin's own words (it's English only). Codes stay on screen beside
  * them, as staff search the audit log and the code by them.
  */
+import type { DiscardErrorCode } from "./discard.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import type { OffboardingErrorCode } from "./offboarding.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
@@ -204,6 +205,19 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
     "The client isn't being provisioned: it's live or offboarded.",
+};
+
+/** What staff read when discarding a client is refused, by its code. */
+export const discardRefusals: Readonly<Record<DiscardErrorCode, string>> = {
+  client_unknown: "There's no such client.",
+  not_provisioning:
+    "It's live or offboarded: offboard it instead, which keeps its data for 30 days.",
+  placed:
+    "It's placed in a hosting destination: offboard it instead, then delete its resources.",
+  has_resources:
+    "Something of it is recorded (its provisioning, a resource or a Worker), so it may exist somewhere: offboard it instead.",
+  client_busy:
+    "Something is working on it right now: wait for that to end, then try again.",
 };
 
 /** What staff read when offboarding or deleting is refused, by its code. */
