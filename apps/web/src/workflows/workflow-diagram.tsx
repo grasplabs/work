@@ -59,7 +59,7 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
     failed: t`Failed`,
   }[state];
   return (
-    <Badge variant={state === "failed" ? "destructive" : "secondary"}>
+    <Badge variant={state === "failed" ? "attention" : "secondary"}>
       {label}
     </Badge>
   );

@@ -1,7 +1,5 @@
-import type {
-  WorkflowResourceRun,
-  WorkflowRunStatus,
-} from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Table,
   TableBody,
@@ -10,47 +8,57 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useId } from "react";
+import { useId, useState } from "react";
 
 import { formatDateTime } from "../format.ts";
+import type { Names } from "./activity-bar.tsx";
+import { RunSheet } from "./run-detail.tsx";
+import { runDotOf, runStatusLabels } from "./run-status.ts";
 
 // An independent workflow's runs (GRA-674), newest first, the latest page,
 // as core lists them for the reader: every run for its builders, their own
-// for its users (`workflowResources.runs`). What a run returned or why it
-// failed stays on the run itself, under its own rule for who sees it.
+// for its users (`workflowResources.runs`). Each opens beside the page
+// (run-detail.tsx) with what it returned or why it failed, read on the
+// run itself under its own rule for who sees it; its steps stay for the
+// workflow's builders, who read its definitions (Traces).
 
-// Each in a context of its own: a run's status, not a workflow's.
-export const runStatusLabels: Readonly<
-  Record<WorkflowRunStatus, MessageDescriptor>
-> = {
-  starting: msg({ message: "Starting", context: "status of a workflow run" }),
-  running: msg({ message: "Running", context: "status of a workflow run" }),
-  paused: msg({ message: "Paused", context: "status of a workflow run" }),
-  completed: msg({ message: "Completed", context: "status of a workflow run" }),
-  failed: msg({ message: "Failed", context: "status of a workflow run" }),
-  cancelled: msg({ message: "Cancelled", context: "status of a workflow run" }),
-};
-
-/** The colour of a run's dot, as the runs log has it (`runs.tsx`). */
-export const runDotOf = (status: WorkflowRunStatus): string => {
-  if (status === "completed") {
-    return "bg-status-agreed";
-  }
-  return status === "failed" ? "bg-status-attention" : "bg-foreground";
+/** The button on a run's row that opens it beside the page. */
+export const OpenRun = ({
+  started,
+  onOpen,
+}: {
+  started: string;
+  onOpen: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Button
+      aria-label={t`Open the run started ${started}`}
+      onClick={onOpen}
+      size="sm"
+      variant="ghost"
+    >
+      {t({ message: "Open", context: "open one run of a workflow" })}
+    </Button>
+  );
 };
 
 export const ResourceRuns = ({
+  workflow,
   runs,
-  me,
+  names,
+  admin,
 }: {
+  workflow: string;
   runs: WorkflowResourceRun[];
-  me: string;
+  names: Names;
+  /** Whether the reader is one of the organization's admins. */
+  admin: boolean;
 }) => {
   const { t } = useLingui();
   const captionId = useId();
+  const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
   if (runs.length === 0) {
     return (
       <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
@@ -69,38 +77,66 @@ export const ResourceRuns = ({
               <TableHead variant="card">{t`Version`}</TableHead>
               <TableHead variant="card">{t`Started by`}</TableHead>
               <TableHead variant="card">{t`Ended`}</TableHead>
+              <TableHead variant="card">
+                <span className="sr-only">
+                  {t({
+                    message: "Open",
+                    context: "column: a button that opens a run",
+                  })}
+                </span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {runs.map((run) => (
-              <TableRow key={run.id}>
-                <TableCell variant="roomy">
-                  {formatDateTime(run.createdAt)}
-                </TableCell>
-                <TableCell variant="roomy">
-                  <span className="inline-flex items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
+            {runs.map((run) => {
+              const started = formatDateTime(run.createdAt);
+              return (
+                <TableRow key={run.id}>
+                  <TableCell variant="roomy">{started}</TableCell>
+                  <TableCell variant="roomy">
+                    <span className="inline-flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
+                      />
+                      {t(runStatusLabels[run.status])}
+                    </span>
+                  </TableCell>
+                  <TableCell variant="roomy">{run.version}</TableCell>
+                  <TableCell variant="roomy">
+                    {run.principal === names.me
+                      ? t`You`
+                      : (names.people.get(run.principal) ?? t`Someone else`)}
+                  </TableCell>
+                  <TableCell variant="roomy">
+                    {run.endedAt === null ? "" : formatDateTime(run.endedAt)}
+                  </TableCell>
+                  <TableCell variant="roomy">
+                    <OpenRun
+                      onOpen={() => {
+                        setOpened(run);
+                      }}
+                      started={started}
                     />
-                    {t(runStatusLabels[run.status])}
-                  </span>
-                </TableCell>
-                <TableCell variant="roomy">{run.version}</TableCell>
-                <TableCell variant="roomy">
-                  {run.principal === me ? t`You` : t`Someone else`}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {run.endedAt === null ? "" : formatDateTime(run.endedAt)}
-                </TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
       <p className="text-muted-foreground" id={captionId}>
         <Trans>The latest runs, newest first.</Trans>
       </p>
+      <RunSheet
+        admin={admin}
+        names={names}
+        onClose={() => {
+          setOpened(null);
+        }}
+        opened={opened}
+        workflow={workflow}
+      />
     </div>
   );
 };

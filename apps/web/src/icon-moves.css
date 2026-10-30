@@ -2742,6 +2742,15 @@
   --icon-wait: 0.2s;
 }
 
+/* The thumb nods down, once. */
+.lucide-thumbs-down {
+  --icon-move: icon-there;
+  --icon-y: 6.25%;
+  --icon-turn: 8deg;
+  --icon-origin: 30% 30%;
+  --icon-time: 0.4s;
+}
+
 /* The button is pressed and the hand goes round. */
 .lucide-timer > :nth-child(1) {
   --icon-move: icon-there;
@@ -3023,9 +3032,9 @@
   --icon-wait: 0.26s;
 }
 
-/* The business processes (the prototype's components/process-icon.tsx; no
-   page here draws one yet). Each `data-moves` is the process's id, and
-   parts are counted in the order that file draws them. */
+/* The business processes (workflows/business-process.tsx, from the
+   prototype's components/process-icon.tsx). Each `data-moves` is the
+   process's id, and parts are counted in the order that file draws them. */
 
 /* Cash lands in the till: the coin drops in. */
 [data-moves="o2c"] > :nth-child(1) {

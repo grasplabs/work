@@ -22,7 +22,7 @@ import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
-import { runDotOf, runStatusLabels } from "./resource-runs.tsx";
+import { runDotOf, runStatusLabels } from "./run-status.ts";
 
 // "Test on recent items" (GRA-513, prototype `builder-runs.tsx`): the
 // draft's checkpoint runs once on the input of each of the builder's most
