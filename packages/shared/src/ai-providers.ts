@@ -264,12 +264,24 @@ export interface AiProviderStatus {
   lastStatus: number | null;
 }
 
+/** A model an admin can choose, by `<provider>/<model>`, with its name. */
+export interface AiProviderModel {
+  model: string;
+  /** Its name for people, as the provider's catalog has it. */
+  name: string;
+}
+
 /** One of the organization's providers, as its admins see it. */
 export interface AiProviderListed extends AiProviderKey {
   label: string;
   whereItRuns: string;
   /** None until a call went through it. */
   status: AiProviderStatus | null;
+  /**
+   * The models it offers to choose from; none for an OpenAI-compatible
+   * endpoint, whose models the organization names itself.
+   */
+  models: AiProviderModel[];
 }
 
 /** Grasp's own AI features, which Grasp pays for, on its own keys. */

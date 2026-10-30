@@ -25,6 +25,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { buildsApp } from "../engines/app-role.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -107,20 +108,68 @@ const useModels = (): {
   };
 };
 
-/** Why nothing can be asked yet, if that is so: the models are what a question names. */
+/**
+ * Why nothing can be asked yet, if that is so: the models are what a
+ * question names. None offered means no AI provider to call yet, or none
+ * of its models chosen: `provider`, said as a state with the way out.
+ */
 const useNoModels = (
   models: Loaded<Offered> | undefined
-): string | undefined => {
+): { why: "provider" } | { why: "read"; text: string } | undefined => {
   const { t } = useLingui();
   if (models === undefined || models.state === "ready") {
     return models?.state === "ready" && models.data.models.length === 0
-      ? t`No model is set up for this deployment yet.`
+      ? { why: "provider" }
       : undefined;
   }
   if (models.state === "offline") {
-    return t`Grasp can't be reached right now. Try again in a moment.`;
+    return {
+      why: "read",
+      text: t`Grasp can't be reached right now. Try again in a moment.`,
+    };
   }
-  return models.state === "refused" ? models.message : undefined;
+  return models.state === "refused"
+    ? { why: "read", text: models.message }
+    : undefined;
+};
+
+/**
+ * Why nothing can be asked yet, under the box: the way to connect an AI
+ * provider, or why the models couldn't be read, with the way to read them
+ * again.
+ */
+const NoModels = ({
+  noModels,
+  open,
+  onRetry,
+}: {
+  noModels: NonNullable<ReturnType<typeof useNoModels>>;
+  open: boolean;
+  onRetry: (() => void) | undefined;
+}) => {
+  if (noModels.why === "provider") {
+    return (
+      <div className={open ? undefined : "px-3 pb-3"}>
+        <ConnectAiProvider size="xs" />
+      </div>
+    );
+  }
+  return (
+    <p
+      className={
+        open
+          ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
+          : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
+      }
+    >
+      {noModels.text}
+      {onRetry === undefined ? null : (
+        <Button onClick={onRetry} size="xs" variant="link">
+          <Trans>Try again</Trans>
+        </Button>
+      )}
+    </p>
+  );
 };
 
 /** A button in the dock's header, named by its label. */
@@ -502,20 +551,11 @@ const Dock = ({
           {box}
           <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (
-            <p
-              className={
-                open
-                  ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
-                  : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
-              }
-            >
-              {noModels}
-              {canRetry ? (
-                <Button onClick={retry} size="xs" variant="link">
-                  <Trans>Try again</Trans>
-                </Button>
-              ) : null}
-            </p>
+            <NoModels
+              noModels={noModels}
+              onRetry={canRetry ? retry : undefined}
+              open={open}
+            />
           )}
         </div>
       </section>

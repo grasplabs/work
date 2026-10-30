@@ -569,6 +569,37 @@ describe("AI providers", { timeout: 60_000 }, () => {
       expect(JSON.stringify(events)).not.toContain(key);
     });
 
+    it("offers each connected provider's models to choose from, and takes any of them as the default", async () => {
+      const { admin: by } = await admin();
+      await added(openaiCase, newKey());
+      await added(compatibleCase, newKey());
+
+      const { providers } = await by.api.aiProviders.list();
+      const offered = Object.fromEntries(
+        providers.map(({ provider, models: each }) => [provider, each])
+      );
+      const openai = offered.openai ?? [];
+      const last = openai.at(-1)?.model ?? "";
+      await by.api.aiProviders.setModels({
+        defaultModel: last,
+        fallbacks: [openaiCase.model],
+      });
+      const { choice } = await by.api.aiProviders.list();
+
+      expect(openai.map(({ model }) => model)).toContain(openaiCase.model);
+      expect(
+        openai.filter(
+          ({ model, name }) => !model.startsWith("openai/") || name === ""
+        )
+      ).toStrictEqual([]);
+      // A custom endpoint's models are named by the organization.
+      expect(offered["openai-compatible"]).toStrictEqual([]);
+      expect(choice).toStrictEqual({
+        defaultModel: last,
+        fallbacks: last === openaiCase.model ? [] : [openaiCase.model],
+      });
+    });
+
     it("lets only the organization's admins read its providers, and its own admins change them", async () => {
       const member = await signedInApi(idp, "user");
 

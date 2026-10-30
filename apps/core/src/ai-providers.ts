@@ -41,7 +41,7 @@ import {
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import { orgSettings } from "./db/core/schema.ts";
-import { parseModelRef } from "./model-catalog.ts";
+import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
 import { models } from "./models.ts";
@@ -143,6 +143,7 @@ const listed = (
       ? aiProviders[key.provider].whereItRuns
       : `${aiProviders[key.provider].whereItRuns}: ${new URL(key.baseUrl).hostname}`,
   status: statusOf(health, key.provider),
+  models: catalogModelsOf(key.provider),
 });
 
 /** Connect's refusal of a key, in the words of this API. */

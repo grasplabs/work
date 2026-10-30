@@ -28,6 +28,7 @@ import { ChevronDownIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { isEffort } from "./model-choice.ts";
 
 // Where a question is written, in the prototype's look
@@ -390,7 +391,6 @@ export const Composer = ({
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
 }) => {
-  const { t } = useLingui();
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
   const canSend = !running && !busy && !disabled && !empty && model !== "";
@@ -459,10 +459,9 @@ export const Composer = ({
           </PromptInputFooter>
         </InputGroup>
       )}
+      {/* No model to name: the organization has no AI provider to call yet, or none of its models is chosen. */}
       {compact || model === undefined || models.length > 0 ? null : (
-        <p className="text-muted-foreground px-1 text-xs">
-          {t`No model is set up for this deployment yet.`}
-        </p>
+        <ConnectAiProvider size="xs" />
       )}
       <ErrorText>{failure}</ErrorText>
     </form>
