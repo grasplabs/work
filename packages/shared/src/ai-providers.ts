@@ -272,6 +272,25 @@ export interface AiProviderListed extends AiProviderKey {
   status: AiProviderStatus | null;
 }
 
+/** Grasp's own AI features, which Grasp pays for, on its own keys. */
+export const aiPlatformFeatures = [
+  "conversion",
+  "transcription",
+  "speech",
+] as const;
+export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
+
+/**
+ * Who handles one of Grasp's own AI features for this deployment, whatever
+ * provider the organization connected: always on Grasp's key, never its
+ * own, so its admins see where that data goes.
+ */
+export interface AiPlatformUse {
+  feature: AiPlatformFeature;
+  /** The provider, and where it runs; none when the deployment does it itself. */
+  provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
+}
+
 /** The organization's AI providers and its choice of models. */
 export interface AiProvidersListing {
   providers: AiProviderListed[];
@@ -279,6 +298,12 @@ export interface AiProvidersListing {
   offered: { provider: AiProviderId; label: string; whereItRuns: string }[];
   /** The models its calls use; none until an admin chose. */
   choice: AiModelChoice | null;
+  /**
+   * Who handles Grasp's own AI features (document conversion,
+   * transcription, speech), on Grasp's keys; none of a feature this
+   * deployment doesn't have, or whose settings don't parse.
+   */
+  platform: AiPlatformUse[];
 }
 
 /** How a test of a provider went: one tiny call through the gateway. */

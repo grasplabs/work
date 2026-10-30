@@ -181,6 +181,8 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       whereItRuns: aiProviders[provider].whereItRuns,
     })),
     choice,
+    // Grasp's own features don't go through a provider of their own yet.
+    platform: [],
   };
 };
 
