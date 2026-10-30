@@ -13,6 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -481,9 +486,15 @@ export const StephenSettings = ({
           title={t`Workflows`}
         >
           {workflows.length === 0 ? (
-            <p className="text-muted-foreground border-t px-5 py-4">
-              <Trans>No workflow is open to asking yet.</Trans>
-            </p>
+            <div className="border-t">
+              <Empty size="xs">
+                <EmptyHeader>
+                  <EmptyDescription>
+                    <Trans>No workflow is open to asking yet.</Trans>
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </div>
           ) : (
             <ul>
               {workflows.map((workflow) => (

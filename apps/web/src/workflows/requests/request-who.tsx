@@ -2,6 +2,11 @@ import { elsewhere } from "@grasp-os/shared/stephen-requests";
 import type { RequestsPage } from "@grasp-os/shared/stephen-requests";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -214,8 +219,12 @@ export const RequestPeople = ({
           </OpenRow>
         ))}
         {rows.length === 0 ? (
-          <li className="text-muted-foreground border-t px-6 py-6 text-center">
-            {t`Nobody by that name`}
+          <li className="border-t">
+            <Empty size="xs">
+              <EmptyHeader>
+                <EmptyDescription>{t`Nobody by that name`}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           </li>
         ) : null}
       </ul>

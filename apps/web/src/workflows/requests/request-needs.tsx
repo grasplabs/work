@@ -6,6 +6,12 @@ import type {
 } from "@grasp-os/shared/stephen-requests";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@grasp-os/ui/components/card";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -219,10 +225,16 @@ export const NeedPart = ({ need }: { need: Need }) => {
         {state === null ? null : <span>{state}</span>}
       </p>
       {need.proposal !== null || need.proposing ? (
-        <section className="bg-muted flex flex-col gap-2 rounded-lg border p-4">
-          <h3 className="text-muted-foreground text-xs">{t`Grasp proposes`}</h3>
-          <p>{need.proposal ?? t`Grasp is still working out a proposal.`}</p>
-        </section>
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>
+              <h3>{t`Grasp proposes`}</h3>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p>{need.proposal ?? t`Grasp is still working out a proposal.`}</p>
+          </CardContent>
+        </Card>
       ) : null}
     </div>
   );
