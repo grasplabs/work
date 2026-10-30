@@ -1,40 +1,59 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { domainsOrAdmins, prefillOf } from "../src/admin/new-organization.ts";
+import { domainOfEmail, slugOf } from "../src/admin/new-organization.ts";
 import { stageKind } from "../src/crm/attio.ts";
+import { signInProvidersOf } from "../src/hosting/progress.ts";
 
-describe("a new organization's email domains", () => {
-  it("are the ones given, when given", () => {
-    expect(domainsOrAdmins("acme.test", "ada@acme.example")).toBe("acme.test");
+describe("a new organization's web address", () => {
+  it("is made from its name: accents dropped, lowercase, dashes between words, none at the ends", () => {
+    expect(
+      [
+        "Bakkerij Dé Graaf & Müller B.V.",
+        "  Acme  ",
+        "ACME—Holdings (EU)",
+        "x".repeat(80),
+      ].map(slugOf)
+    ).toStrictEqual([
+      "bakkerij-de-graaf-muller-b-v",
+      "acme",
+      "acme-holdings-eu",
+      "x".repeat(50),
+    ]);
   });
 
-  it("are the admins' own, each once and in order, when left empty", () => {
+  it("takes its first admin's domain from their email", () => {
     expect(
-      domainsOrAdmins(
-        " ",
-        "ada@acme.test, Bob@Acme.TEST tom@birch.test not-an-email"
-      )
-    ).toBe("acme.test, birch.test");
+      ["ada@Acme.COM", "nobody", "@acme.de"].map(domainOfEmail)
+    ).toStrictEqual(["acme.com", "", "acme.de"]);
   });
 });
 
-describe("a new organization started from a deal won in Attio", () => {
-  it("takes the company's name, an address made from it, and its domains", () => {
+/** A sign-in config naming `providers`, as its record keeps it. */
+const signIn = (providers: object): string =>
+  JSON.stringify({
+    domains: ["acme.test"],
+    admins: ["ada@acme.test"],
+    ...providers,
+  });
+
+describe("the sign-in step of an organization's progress", () => {
+  it("names the providers its sign-in names, or none", () => {
     expect(
-      prefillOf({
-        dealId: "deal",
-        title: "Bakkerij De Graaf: Team",
-        stage: "Won 🎉",
-        on: "2026-10-13",
-        companyId: "company",
-        name: "Bakkerij Dé Graaf & Müller B.V.",
-        domains: ["bakkerijdegraaf.test", "degraaf.test"],
-      })
-    ).toStrictEqual({
-      name: "Bakkerij Dé Graaf & Müller B.V.",
-      clientId: "bakkerij-de-graaf-muller-b-v",
-      domains: "bakkerijdegraaf.test, degraaf.test",
-    });
+      [
+        signIn({ googleHostedDomain: "acme.test" }),
+        signIn({ entraTenantId: "4a1b2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d" }),
+        signIn({
+          googleHostedDomain: "acme.test",
+          entraTenantId: "4a1b2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        }),
+        null,
+      ].map(signInProvidersOf)
+    ).toStrictEqual([
+      "Google Workspace",
+      "Microsoft 365",
+      "Google Workspace and Microsoft 365",
+      null,
+    ]);
   });
 });
 
