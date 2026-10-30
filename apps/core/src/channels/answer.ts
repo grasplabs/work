@@ -22,7 +22,7 @@ import { checkOf, turnHeldWrites } from "./held.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
-import { settleRequest, takeRequest } from "./stephen-requests.ts";
+import { keepCardsOf, settleRequest, takeRequest } from "./stephen-requests.ts";
 import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
@@ -130,8 +130,22 @@ const takenIn = async (
   };
   const rate =
     requestId !== null && platform === "teams" ? requestId : undefined;
-  return { settle, rate };
+  return { settle, rate, requestId };
 };
+
+/**
+ * `post`, which posts something after an answer, never throwing: what
+ * couldn't be posted is logged, and what comes after it still goes, the
+ * answer's own record among it.
+ */
+const quietly =
+  (what: string, post: () => Promise<void>) => async (): Promise<void> => {
+    try {
+      await post();
+    } catch (error) {
+      log.warn("channel.after_answer_failed", { what, ...errorFields(error) });
+    }
+  };
 
 /** How a request whose turn ended without an answer ended. */
 const endOfTurn = (outcome: string): "stopped" | "failed" =>
@@ -271,6 +285,23 @@ const streamInto = (thread: Thread, onFirst: () => void) => {
   };
 };
 
+/**
+ * What goes under a streamed answer's last words, which Teams gets once
+ * the turn returns: its sources and the thumbs for it, or the thumbs
+ * alone for an answer without sources, as the stream carries none of its
+ * own; nothing when there is neither.
+ */
+const underStream =
+  (thread: Conversation, card: Parameters<typeof sourcesCard>[0]) =>
+  async (): Promise<void> => {
+    if (card.sources.length === 0 && card.rate === undefined) {
+      return;
+    }
+    await quietly("sources", async () => {
+      await thread.post(sourcesCard(card));
+    })();
+  };
+
 /** The answer as a chat app shows it: no links to Grasp's own notes. */
 const shownText = (text: string): string =>
   citedIn(text, () => false).text.trim();
@@ -302,7 +333,7 @@ const answerOne = async (
   locale: ChannelLocale
 ): Promise<void> => {
   const startedAt = Date.now();
-  const { settle, rate } = await takenIn(env, {
+  const { settle, rate, requestId } = await takenIn(env, {
     platform,
     userId,
     messageId,
@@ -373,14 +404,16 @@ const answerOne = async (
     return;
   }
   // Sorted and settled once the person has the answer, as it takes a
-  // model call of its own.
+  // model call of its own; never kept from it by a card after the answer
+  // that couldn't be posted (`quietly`).
   const recorded = async () => {
     await settle({ chatId, ended: "answered", calls, cited }, final);
   };
-  // The starts the turn offered, each on its card, under the answer.
-  const offers = async () => {
-    await postOffers(env, thread, { chatId, userId }, locale);
-  };
+  // The starts the turn offered, each on its card, under the answer, each
+  // kept with this request so a press on it is this request's.
+  const offers = quietly("offers", async () => {
+    await postOffers(env, thread, { chatId, userId, requestId }, locale);
+  });
   // Timed to the answer the person has, as they wait for it: its stream's
   // last words, or the post of it whole.
   const timed = async () => {
@@ -409,21 +442,27 @@ const answerOne = async (
   const chatUrl = `${origin}/?chat=${encodeURIComponent(chatId)}`;
   // Without their own Microsoft 365 he answered from what the company
   // shared alone: once a day, he offers to connect it.
-  const offer = async () => {
+  const offer = quietly("connect_own", async () => {
     await offerConnectOwn(env, thread, {
       userId,
       platform,
       question: text,
       locale,
     });
-  };
+  });
   // The turn's held writes, on one card after the answer: nothing changes
-  // until the person presses Confirm on it (held.ts).
-  const held = async () => {
+  // until the person presses Confirm on it (held.ts). Each is kept with
+  // this request, so a press on it is this request's.
+  const held = quietly("held", async () => {
     const writes = await turnHeldWrites(env, userId, chatId, since);
     if (writes.length === 0) {
       return;
     }
+    await keepCardsOf(
+      env,
+      requestId,
+      writes.map(({ id }) => `write:${id}`)
+    );
     const check = checkOf(answer.provenance.sources);
     await thread.post(
       heldWritesCard({
@@ -433,7 +472,7 @@ const answerOne = async (
         openUrl: chatUrl,
       })
     );
-  };
+  });
   if (!streamed) {
     await postIn(
       env,
@@ -454,21 +493,7 @@ const answerOne = async (
     await recorded();
     return;
   }
-  // Under the answer's last words, which Teams gets once this returns,
-  // with the thumbs for it.
-  if (sources.length > 0) {
-    afterward(
-      async () =>
-        await thread.post(
-          sourcesCard({
-            locale,
-            sources,
-            chatUrl,
-            rate,
-          })
-        )
-    );
-  }
+  afterward(underStream(thread, { locale, sources, chatUrl, rate }));
   afterward(held);
   afterward(offers);
   afterward(offer);
