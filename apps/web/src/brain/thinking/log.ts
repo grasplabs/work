@@ -81,6 +81,18 @@ export const noteArrivals = (
   }
 };
 
+/** The calls whose findings were taught to the brain already. */
+const taught = new Set<string>();
+
+/** Whether call `call`'s finding is still to teach the brain; it is taught from now. */
+export const teachOnce = (call: string): boolean => {
+  if (taught.has(call)) {
+    return false;
+  }
+  taught.add(call);
+  return true;
+};
+
 /** What the thinking taught the brain, added to what it taught before. */
 export const learn = (lessons: readonly Learned[]): void => {
   if (lessons.length > 0) {
@@ -108,6 +120,12 @@ export const putThinkingAway = (
         : lesson
     ),
   });
+};
+
+/** Forgets what the tab saw: it was the thinking of whoever signed out. */
+export const forgetThinking = (): void => {
+  taught.clear();
+  change(empty);
 };
 
 /** What the tab saw of Grasp's thinking, renewed as it changes. */

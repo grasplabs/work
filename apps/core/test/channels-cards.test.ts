@@ -498,6 +498,15 @@ const values = {
   where: "Sales register.xlsx",
   workflow: "Weekly report",
   link: "https://acme.grasp.test/decisions/d-1",
+  from: "19 October",
+  to: "25 October",
+  change: "12%",
+  hours: 31,
+  label: "How do I report sick?",
+  requests: 4,
+  pace: 380,
+  included: 400,
+  url: "https://acme.grasp.test/workflows/requests",
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */

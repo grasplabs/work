@@ -5006,10 +5006,50 @@ export const brainRecords = sqliteTable(
      * the brain. Kept, never deleted, and left out of `brain.read`.
      */
     retiredAt: timestamp("retired_at"),
+    /**
+     * When an admin took the record out of the brain (brain-forget.ts):
+     * its body is then a tombstone holding no words, only what a removed
+     * source still shows (its kind and day). Kept, never deleted, so its
+     * id stays taken and the same record sent again is left as removed.
+     */
+    forgottenAt: timestamp("forgotten_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
 );
+
+/**
+ * The company's groups of teams (brain-team-groups.ts): the brain's
+ * regions. One row per group, in the company's order. A group Grasp
+ * proposed has no `confirmedAt` until an admin confirms it, or changes it.
+ */
+export const brainTeamGroups = sqliteTable("brain_team_groups", {
+  id: text().primaryKey(),
+  /** The company's own name for it. */
+  name: text().notNull(),
+  /** The brain's team ids in it, as JSON: each team in one group at most. */
+  teamIds: text("team_ids").notNull(),
+  /** Its place in the company's order. */
+  position: integer().notNull(),
+  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  confirmedAt: timestamp("confirmed_at"),
+  savedAt: timestamp("saved_at").notNull(),
+});
+
+/**
+ * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
+ * the groups whole, as they were before and as confirmed, so an earlier
+ * set can be put back. Never changed or deleted; the audit event of the
+ * save names its id, and who saved it.
+ */
+export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
+  id: text().primaryKey(),
+  savedAt: timestamp("saved_at").notNull(),
+  /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
+  before: text().notNull(),
+  /** The groups as confirmed, as JSON, the same way. */
+  after: text().notNull(),
+});
 
 /**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
@@ -5292,4 +5332,115 @@ export const policyExceptions = sqliteTable(
     grantedAt: timestamp("granted_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.ruleId, table.appId] })]
+);
+
+/**
+ * One request Stephen took on outside Grasp (channels/stephen-requests.ts):
+ * labels and a day, never the words of the message or of his answer, and
+ * never the time of day. Kept by the place's own id for the message, so a
+ * resend counts once. Only `done` is billed. Kept 13 months, and gone with
+ * the person when they are erased (person-erasure.ts).
+ */
+export const stephenRequests = sqliteTable(
+  "stephen_requests",
+  {
+    /** `<platform>:<the platform's id for the message>`. */
+    id: text().primaryKey(),
+    /** `YYYY-MM-DD`, in the organization's time zone. */
+    day: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    teamId: text("team_id"),
+    /**
+     * The person's chat it was answered in, only to find the request a
+     * later press on one of its cards belongs to; never shown.
+     */
+    chatId: text("chat_id"),
+    kind: text({
+      enum: ["answered", "lookedUp", "changed", "workflow"],
+    }).notNull(),
+    outcome: text({
+      enum: ["done", "unanswered", "notPossible", "stopped", "failed"],
+    }).notNull(),
+    topicId: text("topic_id"),
+    questionId: text("question_id"),
+    /** `[{ id, ok }]`: the tools he called, in order. */
+    tools: text().notNull(),
+    /** `[{ id, why }]`: the tools it would have taken that are off or missing. */
+    missing: text().notNull(),
+    rating: text({ enum: ["up", "down"] }),
+  },
+  (table) => [
+    index("stephen_requests_day_idx").on(table.day),
+    index("stephen_requests_person_idx").on(table.personId, table.chatId),
+    index("stephen_requests_question_idx").on(table.questionId),
+  ]
+);
+
+/** The company's topics Stephen's requests are sorted into (channels/request-sorting.ts). */
+export const stephenRequestTopics = sqliteTable("stephen_request_topics", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * A question people ask Stephen, in Grasp's own wording, without names or
+ * details, with the role best placed to answer it. A page names it only
+ * once five or more people asked it.
+ */
+export const stephenRequestQuestions = sqliteTable(
+  "stephen_request_questions",
+  {
+    id: text().primaryKey(),
+    topicId: text("topic_id").notNull(),
+    wording: text().notNull(),
+    role: text(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("stephen_request_questions_topic_idx").on(table.topicId)]
+);
+
+/** What an owner or admin is doing about one thing Needs you lists (stephen-requests.ts). */
+export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
+  key: text().primaryKey(),
+  status: text({ enum: ["working", "fixed", "leftAsIs"] }).notNull(),
+  statusBy: text("status_by").notNull(),
+  statusAt: timestamp("status_at").notNull(),
+});
+
+/** Grasp's proposal for one thing Needs you lists, in one language, made once. */
+export const stephenRequestProposals = sqliteTable(
+  "stephen_request_proposals",
+  {
+    key: text().notNull(),
+    locale: text().notNull(),
+    text: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.key, table.locale] })]
+);
+
+/** Where an owner or admin has the weekly summary of Stephen's requests go. */
+export const stephenSummaryReaders = sqliteTable("stephen_summary_readers", {
+  personId: text("person_id").primaryKey(),
+  via: text({ enum: ["teams", "email"] }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** One weekly summary, queued for one reader and sent from there once (stephen-summary.ts). */
+export const stephenSummaries = sqliteTable(
+  "stephen_summaries",
+  {
+    /** The Monday of the week it sums up. */
+    week: text().notNull(),
+    personId: text("person_id").notNull(),
+    via: text({ enum: ["teams", "email"] }).notNull(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    reason: text(),
+    queuedAt: timestamp("queued_at").notNull(),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.week, table.personId] })]
 );

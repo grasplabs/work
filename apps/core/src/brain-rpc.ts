@@ -2,6 +2,7 @@ import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
   BrainChangePage,
+  BrainForgetPreview,
   BrainNotePage,
   Company,
   Connection,
@@ -10,6 +11,8 @@ import type {
   Source,
   Stakeholder,
   Team,
+  TeamGroup,
+  ThinkingGround,
   Tool,
   Transcript,
   Vision,
@@ -23,16 +26,20 @@ import type {
 import type { CatalogSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
 import { purgedMarker } from "@grasp-os/shared/knowledge";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { hoursPerWeek } from "@grasp-os/shared/thinking";
+import type { WorkKnowledge } from "@grasp-os/shared/work-knowledge";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
 import { brainChanges } from "./brain-changes.ts";
 import type { SourceChange } from "./brain-changes.ts";
+import { forget, forgetPreview } from "./brain-forget.ts";
 import {
   answerGap,
   askAboutGap,
@@ -48,9 +55,15 @@ import {
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
 import {
+  proposeTeamGroups,
+  saveTeamGroups,
+  teamGroupsOf,
+} from "./brain-team-groups.ts";
+import {
   brainTranscript,
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
+import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -102,6 +115,11 @@ import { visibleApps } from "./workflows/overview.ts";
 // Grasp's staff are admins, and read what admins read (Nick,
 // 2026-10-25): that each of their reads is audited and visible to the
 // client is GRA-1087's.
+// | teamGroups         | the company's groups of teams (brain-team-groups.ts),    |
+// |                    | for everyone signed in, naming only the reader's teams   |
+// | interviewWeeks     | the interviews the brain learned from, five or more a    |
+// |                    | week, never who or which day (the onboarding's store),   |
+// |                    | for everyone signed in                                   |
 // | goals              | the brain's records, for everyone signed in; each goal's |
 // |                    | linked workflows only as far as the person may see their |
 // |                    | App, while it still has them                             |
@@ -913,17 +931,38 @@ export const goalsFor = async (
 };
 
 /**
+ * `source` as the company may read who gave it: their role only where
+ * five or more in its team hold that role now, else no one, so it never
+ * points at one person. Every reader gets the same, so the floor holds
+ * here, not only where the web labels it (witness.ts).
+ */
+const witnessed = (teams: readonly Team[], source: Source): Source => {
+  const { who, ...rest } = source;
+  if (who === undefined) {
+    return source;
+  }
+  const team = teams.find(({ id }) => id === source.teamIds?.[0]);
+  const counts = team?.counts
+    .toSorted((a, b) => a.date.localeCompare(b.date))
+    .at(-1);
+  const holders = counts?.roles?.find(({ name }) => name === who)?.people ?? 0;
+  return holders >= minTeamShown ? source : rest;
+};
+
+/**
  * What every read of the brain starts from, as `person` may read it: the
  * onboarding (an admin's alone), the brain's records, and its teams.
  */
-const readBrainCore = async (
-  env: Env,
-  person: Pick<Identity, "role">
-): Promise<{
+interface BrainCore {
   facts: OnboardingFacts | null;
   records: ReturnType<typeof withSuccessors>;
   teams: Workspace["teams"];
-}> => {
+}
+
+const readBrainCore = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<BrainCore> => {
   const [facts, held] = await Promise.all([
     onboardingFacts(env, person),
     readBrainRecords(env),
@@ -951,27 +990,15 @@ export const readThinkingBrain = async (
   };
 };
 
-/** The brain's workspace, as `person` may read it. */
-export const readBrain = async (
+/**
+ * The sources the brain's records came from, but Knowledge's transcripts:
+ * an admin reads the onboarding's; a member only those the records they
+ * read name, so a fact shows where it came from.
+ */
+const recordSources = async (
   env: Env,
-  person: Identity
-): Promise<Workspace> => {
-  const [{ facts, records, teams }, name, connections, transcribed] =
-    await Promise.all([
-      readBrainCore(env, person),
-      organizationName(env),
-      connectionsOf(env, person),
-      knowledgeTranscriptSources(env, person),
-    ]);
-
-  const company: Company = {
-    name,
-    sector: facts === null ? "" : kickoffSaid(facts.kickoff, "business"),
-    people: facts?.view.roster?.people.length ?? 0,
-  };
-
-  // A member reads the onboarding's sources only as the records it reads
-  // name them: when each came in, so a fact shows where it came from.
+  { facts, records, teams }: BrainCore
+): Promise<Source[]> => {
   const named = new Set(
     [
       ...[...records.tools, ...records.statements, ...records.gaps].map(
@@ -994,14 +1021,50 @@ export const readBrain = async (
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
+  return [...sources, ...records.sources];
+};
+
+/** The brain's workspace, as `person` may read it. */
+export const readBrain = async (
+  env: Env,
+  person: Identity
+): Promise<Workspace> => {
+  const [core, name, connections, transcribed, groups, weeks] =
+    await Promise.all([
+      readBrainCore(env, person),
+      organizationName(env),
+      connectionsOf(env, person),
+      knowledgeTranscriptSources(env, person),
+      teamGroupsOf(env),
+      onboardingStore(env).interviewWeeks(),
+    ]);
+  const { facts, records, teams } = core;
+  const sources = await recordSources(env, core);
+
+  const company: Company = {
+    name,
+    sector: facts === null ? "" : kickoffSaid(facts.kickoff, "business"),
+    people: facts?.view.roster?.people.length ?? 0,
+  };
 
   return {
     company,
     vision: visionOf(records, facts),
     goals: await goalsFor(env, person, records.goals),
     teams,
+    // A group names only the teams this reader has; one left with none is
+    // not theirs to see.
+    teamGroups: groups.flatMap((group) => {
+      const teamIds = group.teamIds.filter((id) =>
+        teams.some((team) => team.id === id)
+      );
+      return teamIds.length === 0 ? [] : [{ ...group, teamIds }];
+    }),
+    interviewWeeks: weeks,
     tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
-    sources: [...sources, ...records.sources, ...transcribed],
+    sources: [...sources, ...transcribed].map((source) =>
+      witnessed(teams, source)
+    ),
     statements: records.statements,
     candidates: records.candidates,
     gaps: await brainGaps(env, person, records),
@@ -1013,12 +1076,50 @@ export const readBrain = async (
 };
 
 /**
+ * What a picture of a chat's thinking is drawn from, as `person` may read
+ * it (`brain.thinking`): the teams, what each said with the team whose
+ * source said it, and the workflows with their hours a week. Narrower than
+ * `readBrain`: no Knowledge, nothing else of the brain.
+ */
+export const readThinkingGround = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<ThinkingGround> => {
+  const core = await readBrainCore(env, person);
+  const { records, teams } = core;
+  const read = await recordSources(env, core);
+  const sources = new Map(
+    read.map((source) => [source.id, witnessed(teams, source)])
+  );
+  return {
+    teams: teams.map(({ id, name }) => ({ id, name })),
+    statements: records.statements.map((statement) => {
+      const source = sources.get(statement.sourceId);
+      return {
+        id: statement.id,
+        text: statement.text,
+        kind: statement.kind,
+        sourceId: statement.sourceId,
+        teamId: source?.teamIds?.[0] ?? statement.teamIds[0] ?? "",
+        ...(source?.who === undefined ? {} : { who: source.who }),
+      };
+    }),
+    workflows: records.workflows.map((workflow) => ({
+      id: workflow.id,
+      name: workflow.name,
+      hours: hoursPerWeek(workflow),
+    })),
+  };
+};
+
+/**
  * The company brain over `/rpc`: for anyone signed in. Of its workspace,
  * only the Knowledge documents it lists as transcript sources are audited,
  * as the Knowledge read that listing is; the rest reads nothing from
  * Knowledge. Opening a source's transcript is audited as that one read
  * (brain-transcripts.ts). Its changes are, as the Knowledge read they are
- * (brain-changes.ts). Adding records is, with the records it added.
+ * (brain-changes.ts). Adding records is, with the records it added;
+ * taking them out is, by each record's key (brain-forget.ts).
  */
 export class BrainRpc extends CoreRpcTarget implements BrainApi {
   readonly #env: Env;
@@ -1030,10 +1131,43 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     this.#check = check;
   }
 
+  async work(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await workKnowledge(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
+  }
+
+  async askMorePeople(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await askMorePeople(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
+  }
+
   async read(): Promise<Workspace> {
     return await withPerson(
       this.#check,
       async (person) => await readBrain(this.#env, person)
+    );
+  }
+
+  async thinking(): Promise<ThinkingGround> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readThinkingGround(this.#env, person)
     );
   }
 
@@ -1080,6 +1214,51 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           person,
           records,
           async () => await onboardingHeld(this.#env)
+        )
+    );
+  }
+
+  async forgetPreview(target: unknown): Promise<BrainForgetPreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await forgetPreview(this.#env, person, target)
+    );
+  }
+
+  async forget(target: unknown): Promise<BrainForgetPreview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await forget(this.#env, person, target)
+    );
+  }
+
+  /** The brain's teams as `person` reads them. */
+  async #teams(person: Identity): Promise<Team[]> {
+    const { teams } = await readBrain(this.#env, person);
+    return teams;
+  }
+
+  async proposeTeamGroups(): Promise<TeamGroup[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await proposeTeamGroups(
+          this.#env,
+          person,
+          async () => await this.#teams(person)
+        )
+    );
+  }
+
+  async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await saveTeamGroups(
+          this.#env,
+          person,
+          groups,
+          async () => await this.#teams(person)
         )
     );
   }

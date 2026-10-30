@@ -14,6 +14,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BookOpenIcon, FileTextIcon, FolderIcon } from "lucide-react";
@@ -308,9 +309,9 @@ const CollectionView = () => {
             <>
               <header className="flex flex-col gap-2.5">
                 <div className="flex items-start justify-between gap-3">
-                  <h1 className="type-title">
+                  <PageHeaderTitle>
                     {collection.data.collection.name}
-                  </h1>
+                  </PageHeaderTitle>
                   {isMemberAdmin(identity) ? (
                     <CollectionAdminMenu
                       collection={collection.data.collection.name}

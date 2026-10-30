@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -77,7 +78,7 @@ const Notice = ({ title, children }: { title: string; children: string }) => {
     <InterviewFrame bottom={bottom} top={top}>
       <Said label={t`Stephen, drawn in dots.`} room={room}>
         <div className="flex flex-col items-center gap-2">
-          <h1 className="type-title">{title}</h1>
+          <PageHeaderTitle>{title}</PageHeaderTitle>
           <ErrorText>{children}</ErrorText>
         </div>
       </Said>

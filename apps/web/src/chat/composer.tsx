@@ -275,6 +275,7 @@ const QuestionField = ({
   onText,
   compact,
   label,
+  describedBy,
   placeholder,
   maxLength,
 }: {
@@ -282,6 +283,7 @@ const QuestionField = ({
   onText: (text: string) => void;
   compact: boolean;
   label: string | undefined;
+  describedBy: string | undefined;
   placeholder: string | undefined;
   maxLength: number | undefined;
 }) => {
@@ -294,6 +296,7 @@ const QuestionField = ({
     // field, spaced for the box, doesn't fit.
     return (
       <InputGroupTextarea
+        aria-describedby={describedBy}
         aria-label={name}
         className="field-sizing-content max-h-40 min-h-0"
         maxLength={longest}
@@ -356,6 +359,7 @@ export const Composer = ({
   onStop,
   compact = false,
   label,
+  describedBy,
   placeholder,
   children,
   maxLength,
@@ -397,6 +401,8 @@ export const Composer = ({
   compact?: boolean;
   /** What the box is called; "Your question" without it. */
   label?: string;
+  /** The id of what says more about the box, in a compact box. */
+  describedBy?: string;
   placeholder?: string;
   /** Beside the button, in a compact box only: such as the way to open the dock. */
   children?: ReactNode;
@@ -434,6 +440,7 @@ export const Composer = ({
         <InputGroup size="chat">
           <QuestionField
             compact={compact}
+            describedBy={describedBy}
             label={label}
             maxLength={maxLength}
             onText={onText}
@@ -464,6 +471,7 @@ export const Composer = ({
             <PromptInputBody>
               <QuestionField
                 compact={compact}
+                describedBy={undefined}
                 label={label}
                 maxLength={maxLength}
                 onText={onText}

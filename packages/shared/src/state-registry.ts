@@ -262,6 +262,22 @@ const coreDb: D1State = {
       `${core}channels/signals.ts`,
       "Hourly counts of how Stephen fared in the chat apps, kept a week for the admin's watch."
     ),
+    stephen_requests: exported(
+      `${core}channels/stephen-requests.ts`,
+      "One record per request Stephen took on outside Grasp, labels only: what he is billed by."
+    ),
+    stephen_request_topics: exported(`${core}channels/request-sorting.ts`),
+    stephen_request_questions: exported(`${core}channels/request-sorting.ts`),
+    stephen_request_needs: exported(`${core}stephen-requests.ts`),
+    stephen_request_proposals: cache(
+      `${core}stephen-requests.ts`,
+      "Grasp's proposals for what Needs you lists, made again when asked."
+    ),
+    stephen_summary_readers: exported(`${core}stephen-requests.ts`),
+    stephen_summaries: transient(
+      `${core}stephen-summary.ts`,
+      "The weekly summaries queued and sent: a week's goes once, from where it is sent."
+    ),
     chat_audiences: exported(`${core}knowledge/access.ts`),
     invitations: exported(auth),
     teams: exported(auth),
@@ -430,6 +446,8 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
+    brain_team_groups: exported(`${core}brain-team-groups.ts`),
+    brain_team_group_saves: exported(`${core}brain-team-groups.ts`),
     // Knowledge's host tables (src/db/core/schema.ts).
     collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),
@@ -620,6 +638,10 @@ const workspaces: DurableObjectState = {
     chat_projects: exported(`${core}workspace.ts`),
     chat_project_documents: exported(`${core}workspace.ts`),
     chat_messages: exported(`${core}workspace.ts`),
+    chat_search_text: exported(
+      `${core}workspace.ts`,
+      "Each message's words as a search reads them, kept as it is stored (or by the first search after, for one stored before); it moves with them, as nothing writes it again for messages already read."
+    ),
     chat_sources: exported(`${core}workspace.ts`),
     chat_run_sources: exported(`${core}workspace.ts`),
     chat_documents: exported(`${core}workspace.ts`),
@@ -763,6 +785,10 @@ const onboarding: DurableObjectState = {
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
     settled_works: exported(`${core}onboarding/store.ts`),
+    more_voices: exported(
+      `${core}onboarding/store.ts`,
+      "The pieces of work the company asked to hear more people about: who is asked next is asked about these first."
+    ),
     checked_differences: exported(
       `${core}onboarding/store.ts`,
       "The differences whose two ways the brain's intake checked five or more people behind, by the drawing it checked."

@@ -1,4 +1,5 @@
 import { isAdmin } from "@grasp-os/shared/roles";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import {
 import {
   ActivityIcon,
   BellIcon,
+  BrainIcon,
   BuildingIcon,
   CircleHelpIcon,
   CoinsIcon,
@@ -55,6 +57,7 @@ type SettingsPath =
   | "/settings/stephen"
   | "/settings/pulse"
   | "/settings/onboarding"
+  | "/settings/brain"
   | "/settings/audit"
   | "/settings/outcomes"
   | "/settings/billing"
@@ -115,6 +118,8 @@ const groupsFor = ({
           to: "/settings/onboarding",
           icon: MessagesSquareIcon,
         },
+        // Its groups of teams, the brain's regions.
+        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
         ...(staff
           ? []
@@ -186,9 +191,9 @@ const SettingsLayout = () => {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 pb-24">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <h1 className="type-title">
+            <PageHeaderTitle>
               <Trans>Settings</Trans>
-            </h1>
+            </PageHeaderTitle>
             <p className="text-muted-foreground text-sm">
               <Trans>
                 Your workspace, who may do what in it, and your own account.
