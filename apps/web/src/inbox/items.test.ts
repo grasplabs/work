@@ -206,8 +206,21 @@ const waiting = (ranOut = true) =>
               at: "2026-10-12T09:00:00.000Z",
               read: false,
             },
+            {
+              id: "revoked-1",
+              type: "package_revoked",
+              subject: {
+                type: "app",
+                app: "app-invoices",
+                appName: "Invoices",
+              },
+              package: { name: "left-pad", version: "1.3.0" },
+              advisory: "MAL-2026-1",
+              at: "2026-10-12T10:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 3,
+          unread: 4,
           more: false,
         },
       },
@@ -272,12 +285,35 @@ describe(inboxItems, () => {
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
         "packages:packages-1",
         "request:request-1",
+        "revoked:revoked-1",
         "screens:app-invoices",
         "signIn:connection-1",
         "stopped:stopped-1",
         "workflowGoLive:workflow-quotes:2",
       ].toSorted()
     );
+  });
+
+  it("tells of packages revoked as malware as urgent, with the package, its advisory and where to replace it", () => {
+    const revoked = inboxItems(waiting(), member, readAt).find(
+      ({ id }) => id === "revoked:revoked-1"
+    );
+    expect({
+      kind: revoked?.kind,
+      title: revoked?.title,
+      facts: revoked?.facts.slice(0, 2),
+      about: revoked?.about,
+      urgent: revoked?.urgent,
+    }).toStrictEqual({
+      kind: "revokedPackage",
+      title: "Packages of Invoices were revoked as malware",
+      facts: [
+        { label: "Package", value: "left-pad@1.3.0" },
+        { label: "Advisory", value: "MAL-2026-1" },
+      ],
+      about: { kind: "engine", engine: "app-invoices" },
+      urgent: true,
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {
@@ -367,6 +403,7 @@ describe(inInbox, () => {
       "asked:asked-1",
       "decision:decision-1",
       "goLive:app-invoices:4",
+      "revoked:revoked-1",
       "stopped:stopped-1",
       "workflowGoLive:workflow-quotes:2",
     ]);
