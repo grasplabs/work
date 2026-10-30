@@ -426,7 +426,9 @@ const Dock = ({
   // (OpenChat), which the box's description names.
   const open = mode !== "bar";
   const unfolds = !open && ways.opens(chatId);
-  useUnfoldOnPointer(dock, unfolds);
+  useUnfoldOnPointer(dock, unfolds, () => {
+    moveTo("frame");
+  });
   const showWidth = useDockWidth(dock, mode === "drawer");
   const dockId = useId();
   const hintId = useId();
