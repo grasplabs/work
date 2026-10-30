@@ -1389,6 +1389,10 @@ msgstr "{role}, invitación del {date}, aún sin entrevista"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, aún sin invitación ni entrevista"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Superada en # registro real} other {Superada en # registros reales}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run}: completada"
@@ -7928,9 +7932,17 @@ msgstr "No ocurrió: {who}"
 msgid "it didn't pass"
 msgstr "no los superó"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Ha fallado en su conjunto: falló su código, no un registro. Esta versión no puede pasar a ser la actual hasta que una muestra más reciente la supere."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Falló en sus registros de prueba cuando se selló la versión: no se ejecuta sobre ningún registro y la versión no puede hacerse actual"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Ha fallado en el registro {record}. Esta versión no puede pasar a ser la actual hasta que una muestra más reciente la supere."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9895,6 +9907,10 @@ msgstr "sin motivo indicado"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Ningún registro tiene la culpa, así que un administrador solo puede abandonar el cambio, en la página del dominio."
+
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "No quedan registros que transformar."
 
 #: src/brain/memory-page.tsx
 msgid "No records yet"
@@ -16520,6 +16536,14 @@ msgstr "Reintentar"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Prueba otra búsqueda o borra los filtros para ver todo el registro."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Probar de nuevo"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "Probar con registros reales"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx

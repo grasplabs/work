@@ -1389,6 +1389,10 @@ msgstr "{role}, eingeladen am {date}, noch nicht interviewt"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, noch nicht eingeladen, noch nicht interviewt"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Bei # echten Datensatz bestanden} other {Bei # echten Datensätzen bestanden}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run}: abgeschlossen"
@@ -7928,9 +7932,17 @@ msgstr "Es ist nicht geschehen: {who}"
 msgid "it didn't pass"
 msgstr "sie hat nicht bestanden"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Sie ist als Ganzes fehlgeschlagen: Ihr Code ist fehlgeschlagen, nicht ein Datensatz. Diese Version kann erst aktuell gemacht werden, wenn eine neuere Stichprobe besteht."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegelt wurde: Sie läuft auf keinem Datensatz, und die Version kann nicht aktuell gemacht werden"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Sie ist beim Datensatz {record} fehlgeschlagen. Diese Version kann erst aktuell gemacht werden, wenn eine neuere Stichprobe besteht."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9895,6 +9907,10 @@ msgstr "ohne Angabe eines Grunds"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Kein Datensatz ist schuld, daher kann ein Admin die Änderung auf der Seite der Domäne nur verwerfen."
+
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "Es sind keine Datensätze mehr zu transformieren."
 
 #: src/brain/memory-page.tsx
 msgid "No records yet"
@@ -16520,6 +16536,14 @@ msgstr "Erneut versuchen"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Versuchen Sie eine andere Suche, oder setzen Sie die Filter zurück, um das ganze Protokoll zu sehen."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Erneut versuchen"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "An echten Datensätzen ausprobieren"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx

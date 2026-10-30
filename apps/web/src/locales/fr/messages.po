@@ -1389,6 +1389,10 @@ msgstr "{role}, invitation du {date}, pas encore d’entretien"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, ni invitation ni entretien pour l’instant"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Réussie sur # enregistrement réel} other {Réussie sur # enregistrements réels}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run} : terminée"
@@ -7928,9 +7932,17 @@ msgstr "Ce n'est pas arrivé : {who}"
 msgid "it didn't pass"
 msgstr "elle n'a pas réussi"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Elle a échoué dans son ensemble : c'est son code qui a échoué, pas un enregistrement. Cette version ne peut pas devenir la version actuelle tant qu'un échantillon plus récent ne réussit pas."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Elle a échoué sur ses enregistrements de test quand la version a été scellée : elle ne s'exécute sur aucun enregistrement, et la version ne peut pas être rendue actuelle"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Elle a échoué sur l'enregistrement {record}. Cette version ne peut pas devenir la version actuelle tant qu'un échantillon plus récent ne réussit pas."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9895,6 +9907,10 @@ msgstr "sans motif indiqué"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du domaine."
+
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "Il ne reste aucun enregistrement à transformer."
 
 #: src/brain/memory-page.tsx
 msgid "No records yet"
@@ -16520,6 +16536,14 @@ msgstr "Réessayer"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Essayez une autre recherche, ou effacez les filtres pour voir tout le journal."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Réessayer"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "Essayer sur des enregistrements réels"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx

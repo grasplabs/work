@@ -1389,6 +1389,10 @@ msgstr "{role}, invited {date}, not interviewed yet"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, not invited yet, not interviewed yet"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run}: completed"
@@ -7928,9 +7932,17 @@ msgstr "It didn't happen: {who}"
 msgid "it didn't pass"
 msgstr "it didn't pass"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "It failed on the record {record}. This version can't be made current until a newer sample passes."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9895,6 +9907,10 @@ msgstr "no reason given"
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "No record is to blame, so an admin can only abandon the change, on the domain's page."
+
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "No records are left for it to transform."
 
 #: src/brain/memory-page.tsx
 msgid "No records yet"
@@ -16520,6 +16536,14 @@ msgstr "Try again"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Try another search, or clear the filters to see the whole trail."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Try it again"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "Try it on real records"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
