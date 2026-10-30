@@ -22,11 +22,11 @@ import {
   limitEvidenceFile,
   limitEvidenceKey,
   manifestKey,
-  releaseIdSchema,
   releaseManifestSchema,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
 import type { Bytes } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { AwsClient } from "aws4fetch";
 
 import { assertReleaseDir, clearReleaseDir } from "./manifest-lib.ts";

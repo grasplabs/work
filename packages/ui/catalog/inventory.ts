@@ -906,6 +906,21 @@ export const graspComponents = {
       "Text with a light sweeping across it, for what is still being worked out.",
     exports: ["Shimmer"],
   },
+  trace: {
+    status: "supported",
+    summary:
+      "The steps something took, one quiet line each, a running one turning and one with more to show folding open.",
+    exports: [
+      "Trace",
+      "TraceCollapsible",
+      "TraceCollapsibleContent",
+      "TraceCollapsibleTrigger",
+      "TraceDescription",
+      "TraceIcon",
+      "TraceLine",
+      "TraceTitle",
+    ],
+  },
   "success-mark": {
     status: "supported",
     summary:

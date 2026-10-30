@@ -9,6 +9,7 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
@@ -134,30 +135,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("asks who an organization is, its sign-in and its ring on adding it, and no account to adopt or release", async () => {
-    const { status, html } = await page("/new-organization");
-
-    expect({
-      status,
-      form: html.includes('name="clientId"') && html.includes('name="ring"'),
-      account: html.includes('name="accountId"'),
-      release: html.includes('name="releaseId"'),
-      signIn: [
-        'name="entraTenantId"',
-        'name="googleHostedDomain"',
-        'name="domains"',
-        'name="admins"',
-      ].every((field) => html.includes(field)),
-    }).toStrictEqual({
-      status: 200,
-      form: true,
-      account: false,
-      release: false,
-      signIn: true,
-    });
-  });
-
-  it("shows a company just added its Hosting, to place and provision on an imported release", async () => {
+  it("shows a company just added its setting up step by step, and its Hosting folded away with nothing to choose", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
@@ -166,20 +144,28 @@ describe("the company pages, in the admin", () => {
 
     expect({
       status,
+      steps: [
+        `Reserving ${client.id}.grasp.test`,
+        "Installing Grasp",
+        "Inviting admins",
+      ].every((line) => html.includes(line)),
+      folded: hosting.includes("Show hosting details"),
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
+      where: hosting.includes("Grasp Cloud, data kept in the EU"),
       account: html.includes("Account id"),
-      hostname: html.includes(`${client.id}.grasp.test`),
     }).toStrictEqual({
       status: 200,
-      place: true,
-      release: true,
+      steps: true,
+      folded: true,
+      place: false,
+      release: false,
+      where: true,
       account: false,
-      hostname: true,
     });
   });
 
-  it("says where a company's provisioning stopped and why, for staff to start it again from Hosting", async () => {
+  it("says a stopped provisioning is being tried again, and that it needs a look once Grasp gives up, with why and Retry now", async () => {
     const releaseId = await importedRelease("feat(core): stops");
     const client = await recordClient();
     const now = new Date();
@@ -195,13 +181,28 @@ describe("the company pages, in the admin", () => {
       updatedAt: now,
     });
 
+    const retrying = await setupOf(client.id);
+    // Grasp's automatic retries give up: a person is asked to look.
+    await markNeedsAttention(db, client.id, await episodeOf(db, client.id), {
+      reason: "needs_person",
+      code: "probe_unanswered",
+    });
     const { html } = await setupOf(client.id);
 
     expect({
-      stopped: html.includes("Setting it up stopped at its resources step"),
+      retrying: [
+        retrying.html.includes("Trying again"),
+        retrying.html.includes("Setting it up needs a look"),
+      ],
+      stopped: html.includes("Setting it up needs a look"),
       code: html.includes("probe_unanswered"),
-      resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
-    }).toStrictEqual({ stopped: true, code: true, resume: true });
+      resume: sectionOf(html, "Hosting").includes("Retry now"),
+    }).toStrictEqual({
+      retrying: [true, false],
+      stopped: true,
+      code: true,
+      resume: true,
+    });
   });
 
   it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {

@@ -14,8 +14,8 @@ import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
+import type { Actor } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
 import type { DeployContext } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
@@ -112,15 +112,7 @@ export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
           throw asOperationStepError(error);
         }
         try {
-          await runClientProvision(
-            {
-              ...context,
-              alert: async (alert) => {
-                await sendStaffAlert(env, alert);
-              },
-            },
-            held
-          );
+          await runClientProvision(context, held);
         } catch (error) {
           throw asOperationStepError(error);
         }
@@ -145,7 +137,7 @@ const newAttemptId = (clientId: string): string =>
  */
 const startAttempt = async (
   env: Env,
-  staff: Staff,
+  staff: Actor,
   clientId: string,
   event: { action: string; target: string },
   start: (held: HeldClient) => Promise<void>
@@ -196,7 +188,7 @@ const startAttempt = async (
  */
 export const provisionPlacedClient = async (
   env: Env,
-  staff: Staff,
+  staff: Actor,
   clientId: string,
   releaseId: string
 ): Promise<string> =>

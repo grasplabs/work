@@ -37,13 +37,11 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import type { AlertOutcome } from "../alerts.ts";
 import {
   applySettingsFn,
   fetchClientLive,
   fetchTeamsPackageFn,
   rotateSecretsFn,
-  sendTestAlertFn,
   setModelSpendCeilingFn,
   setRingFn,
   setSealedSecretFn,
@@ -66,7 +64,6 @@ import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
-import { addSecretStep } from "./words.ts";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -496,62 +493,6 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </Body>
-  );
-};
-
-/** What became of a test alert, in words. */
-const alertOutcomeWords: Readonly<Record<AlertOutcome, string>> = {
-  sent: "Sent: it should be in the alerts' channel now.",
-  held: "Held back: one went out less than a minute ago.",
-  no_channel: `Not sent: there's no staff alerts channel, or STAFF_ALERTS_WEBHOOK isn't a Discord webhook. ${addSecretStep("STAFF_ALERTS_WEBHOOK")}`,
-  failed: "Not sent: the channel refused it. Try again in a moment.",
-};
-
-/** Sends a test alert about client `clientId`; what became of it. */
-const testAlertOutcome = async (
-  clientId: string
-): Promise<AlertOutcome | "error"> => {
-  try {
-    return await sendTestAlertFn({ data: { clientId } });
-  } catch {
-    return "error";
-  }
-};
-
-/** Sending a test alert about it, to see staff alerts reach their channel. */
-export const TestAlert = ({ clientId }: { clientId: string }) => {
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<AlertOutcome | "error" | null>(null);
-  return (
-    <Body>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            void (async () => {
-              setOutcome(await testAlertOutcome(clientId));
-              setBusy(false);
-            })();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Send a test alert
-        </Button>
-        {outcome === null ? null : (
-          <output
-            className={
-              outcome === "sent" ? "text-muted-foreground" : "text-destructive"
-            }
-          >
-            {outcome === "error"
-              ? "The admin couldn't send it: read the page again and retry."
-              : alertOutcomeWords[outcome]}
-          </output>
-        )}
-      </div>
     </Body>
   );
 };
