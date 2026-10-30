@@ -6,6 +6,7 @@ import {
   organizationProviderIdSchema,
   organizationProviderIds,
   aiProviders,
+  providerTroubles,
 } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoiceNow,
@@ -26,7 +27,7 @@ import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { z } from "zod";
+import { z } from "zod";
 
 import {
   aiModelsKind,
@@ -53,6 +54,7 @@ import { platformAi, platformRouteFor } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { wakeAiWaits } from "./workflows/ai-waits.ts";
 
 // The organization's own AI providers, for its admins (@grasp-os/shared/
 // ai-providers, `AiProvidersApi`): its keys, which live only in connect,
@@ -133,6 +135,9 @@ const statusOf = (
         lastFailedAt: found.lastFailedAt,
         lastFailure: found.lastFailure,
         lastStatus: found.lastStatus,
+        failingClass:
+          z.enum(providerTroubles).safeParse(found.failingClass).data ?? null,
+        failingSince: found.failingSince,
       };
 };
 
@@ -259,7 +264,10 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
 
 /**
  * Adds or replaces the provider's key in connect, which audits it in the
- * same write, in the admin's name.
+ * same write, in the admin's name. A new key ends what the old one's
+ * refusals said: the provider no longer reads as failing
+ * (`ModelLedger.keyReplaced`), and every workflow run held for a working
+ * key tries again at once (`wakeAiWaits`).
  */
 const addProvider = async (
   env: Env,
@@ -279,7 +287,10 @@ const addProvider = async (
     throw refusalOf(error);
   }
   drainConnectOutboxSoon(env);
-  return listed(saved, await modelLedger(env).providerHealth());
+  const ledger = modelLedger(env);
+  await ledger.keyReplaced(add.provider);
+  await wakeAiWaits(env);
+  return listed(saved, await ledger.providerHealth());
 };
 
 /** The model a test of `provider` asks: the one named, or its own. */

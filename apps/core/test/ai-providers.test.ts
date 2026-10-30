@@ -35,7 +35,7 @@ import {
 import { z } from "zod";
 
 import { modelLedger } from "../src/model-ledger.ts";
-import { models } from "../src/models.ts";
+import { modelFailureOf, models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
@@ -320,6 +320,10 @@ const coreDatabaseText = async (): Promise<string> => {
   );
   return JSON.stringify(rows.map(({ results }) => results));
 };
+
+/** Whether `later` is after `earlier`, both times read. */
+const after = (later: number | null, earlier: number | null): boolean =>
+  later !== null && earlier !== null && later > earlier;
 
 /** Sets up an organization that defaults to OpenAI and falls back to Claude. */
 const fallingBack = async (): Promise<{ openai: string; claude: string }> => {
@@ -824,14 +828,14 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
       await store.drawNext();
 
-      const after = await store.teamWorks(ids.team);
+      const drawn = await store.teamWorks(ids.team);
       const sent = await carrying(key);
       expect({
         models: sent.map(
           ({ body }) =>
             z.object({ model: z.string() }).parse(JSON.parse(body)).model
         ),
-        ticketsByPim: after
+        ticketsByPim: drawn
           .find(({ id }) => id === tickets.id)
           ?.doers.includes(ids.pim),
       }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
@@ -935,7 +939,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         models(env).call(await callOf(openaiCase.model))
       );
 
-      expect(failed).toBe("model.failed");
+      expect(failed).toBe("model.provider_unavailable");
       await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
     });
 
@@ -957,7 +961,8 @@ describe("AI providers", { timeout: 60_000 }, () => {
         })
       );
 
-      expect(failed).toBe("model.failed");
+      // The key stopped working, said so: never another model's answer.
+      expect(failed).toBe("model.provider_key_failed");
       await expect(carrying(keys.openai)).resolves.toHaveLength(2);
       await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
       const events = await auditedFor(trigger.userId, 2);
@@ -1016,6 +1021,39 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
     });
 
+    it("falls back when the default's account has no credit left, as OpenAI refuses it with a 429, asking it once", async () => {
+      const keys = await fallingBack();
+      // Out of credit, not a rate limit: waiting its retry-after gets
+      // nothing but the same refusal.
+      await plan(keys.openai, [
+        {
+          status: 429,
+          headers: { "retry-after": "1" },
+          body: {
+            error: {
+              message: "You exceeded your current quota.",
+              type: "insufficient_quota",
+              code: "insufficient_quota",
+            },
+          },
+        },
+        { status: 429, headers: { "retry-after": "1" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const trigger = newPerson();
+
+      const answer = await models(env).call(
+        await callOf(openaiCase.model, { trigger })
+      );
+
+      expect(answer.text).toBe("From Claude.");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(1);
+      const events = await auditedFor(trigger.userId, 3);
+      expect(
+        events.find(({ action }) => action === "model.fallback")?.detail
+      ).toMatchObject({ why: "quota", status: 429 });
+    });
+
     it("falls back in an agent's loop too, before anything streamed", async () => {
       const keys = await fallingBack();
       await plan(keys.openai, [{ status: 403 }]);
@@ -1040,6 +1078,142 @@ describe("AI providers", { timeout: 60_000 }, () => {
       }).toMatchObject({
         stopReason: "stop",
         content: [{ type: "text", text: "From Claude." }],
+      });
+    });
+  });
+
+  describe("a key that stopped working", () => {
+    it("says what the provider showed, by HTTP class, when there is no backup model, in a call and in an agent's loop", async () => {
+      const key = await connected(anthropicCase);
+      await plan(key, [
+        // Anthropic's refusal for an account with no credit left.
+        {
+          status: 400,
+          body: {
+            type: "error",
+            error: {
+              type: "invalid_request_error",
+              message:
+                "Your credit balance is too low to access the Anthropic API.",
+            },
+          },
+        },
+        {
+          status: 402,
+          body: { type: "error", error: { type: "billing_error" } },
+        },
+        { status: 503 },
+        { status: 403 },
+      ]);
+
+      const outOfCredit = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const billing = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const down = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const { input: _input, ...session } = await callOf(anthropicCase.model);
+      const agent = await models(env).agent(session);
+      const looped = await agent
+        .stream(
+          agent.model,
+          normalizeContext({
+            messages: [
+              { role: "user", content: "Hello.", timestamp: Date.now() },
+            ],
+          })
+        )
+        .result();
+      const asked = await carrying(key);
+
+      expect({
+        outOfCredit,
+        billing,
+        down,
+        looped: modelFailureOf(looped.errorMessage),
+        // Each sent once, never waited out and asked again.
+        asked: asked.length,
+      }).toStrictEqual({
+        outOfCredit: "model.rate_limited",
+        billing: "model.rate_limited",
+        down: "model.provider_unavailable",
+        looped: "model.provider_key_failed",
+        asked: 4,
+      });
+    });
+
+    it("reads as failing since its first failure after the last call that worked, until the key is replaced or a call works", async () => {
+      const key = await connected(anthropicCase);
+      await plan(key, [
+        answered("anthropic-messages", "Fine."),
+        { status: 401 },
+        { status: 401 },
+      ]);
+      const { admin: by } = await admin();
+      const unread = {
+        failingSince: null,
+        failingClass: null,
+        lastFailedAt: null,
+        lastFailure: null,
+      };
+      const statusNow = async () => {
+        const { providers } = await by.api.aiProviders.list();
+        return providers[0]?.status ?? unread;
+      };
+
+      await models(env).call(await callOf(anthropicCase.model));
+      const working = await statusNow();
+      const beforeFailing = Date.now();
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const firstFailure = await statusNow();
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const stillFailing = await statusNow();
+      // The admin replaces the key: what the old one's refusals said ends.
+      await added(anthropicCase, key);
+      const replaced = await statusNow();
+      await plan(key, [{ status: 401 }]);
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const failingAgain = await statusNow();
+      // The provider stops answering: a run of failures of another kind,
+      // since its own first one.
+      await plan(key, [{ status: 503 }]);
+      await outcome(models(env).call(await callOf(anthropicCase.model)));
+      const down = await statusNow();
+      await plan(key, [answered("anthropic-messages", "Fine again.")]);
+      await models(env).call(await callOf(anthropicCase.model));
+      const workingAgain = await statusNow();
+
+      expect({
+        working: working.failingSince,
+        since: after(firstFailure.failingSince, beforeFailing - 1),
+        kept: stillFailing.failingSince === firstFailure.failingSince,
+        later: after(stillFailing.lastFailedAt, stillFailing.failingSince),
+        how: stillFailing.lastFailure,
+        shows: stillFailing.failingClass,
+        replaced: replaced.failingSince,
+        failingAgain: after(
+          failingAgain.failingSince,
+          stillFailing.lastFailedAt
+        ),
+        down: {
+          shows: down.failingClass,
+          since: after(down.failingSince, failingAgain.failingSince),
+        },
+        workingAgain: workingAgain.failingSince,
+      }).toStrictEqual({
+        working: null,
+        since: true,
+        kept: true,
+        later: true,
+        how: "auth",
+        shows: "refused",
+        replaced: null,
+        failingAgain: true,
+        down: { shows: "not_answering", since: true },
+        workingAgain: null,
       });
     });
   });
@@ -1248,7 +1422,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
     });
 
-    it("fails a request that takes longer than its timeout", async () => {
+    it("fails a request that takes longer than its timeout, saying the provider isn't answering", async () => {
       const key = await connected(each);
       await plan(key, [{ hang: true }]);
       const trigger = newPerson();
@@ -1257,7 +1431,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         models(env).call(await callOf(each.model, { trigger, timeoutMs: 500 }))
       );
 
-      expect(late).toBe("model.failed");
+      expect(late).toBe("model.provider_unavailable");
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({
         outcome: "failed",
@@ -1298,7 +1472,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const { admin: by } = await admin();
       const { providers } = await by.api.aiProviders.list();
 
-      expect([refused, asked.length]).toStrictEqual(["model.failed", 1]);
+      expect([refused, asked.length]).toStrictEqual([
+        "model.provider_key_failed",
+        1,
+      ]);
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({ outcome: "failed", status: 401 });
       expect(providers[0]?.status).toMatchObject({

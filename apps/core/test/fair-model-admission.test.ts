@@ -477,7 +477,14 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       },
       rateLimited: {
         code: "model.rate_limited",
-        details: { model: mistral, retryAfterSeconds: 60 },
+        details: {
+          model: mistral,
+          provider: "mistral",
+          trouble: "limiting",
+          retryAfterSeconds: 60,
+          // Refused each time, retries and all: nothing was taken on.
+          unbilled: true,
+        },
       },
       usedUp: {
         code: "model.over_budget",
@@ -1106,8 +1113,9 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     const db = drizzle(env.DB);
     const runId = `run-${crypto.randomUUID()}`;
     const shown = async () => {
-      const queued = await queuedRuns(db, [runId], Date.now());
-      return queued.get(runId);
+      const waits = await queuedRuns(db, [runId], Date.now());
+      const wait = waits.get(runId);
+      return wait !== undefined && "queued" in wait ? wait.queued : undefined;
     };
     const now = Date.now();
     // The newer call of the step waits, asking again in five seconds.

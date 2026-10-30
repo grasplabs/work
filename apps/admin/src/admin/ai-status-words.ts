@@ -4,6 +4,7 @@
  * organization connected, and whether its real calls work.
  */
 import { aiProviders } from "@grasp-os/shared/ai-providers";
+import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 
 const minuteMs = 60 * 1000;
@@ -45,13 +46,21 @@ const sinceWords = (at: number, now: number): string => {
   return `${day}, ${time} UTC`;
 };
 
+/** What a provider's failing calls show, by the HTTP class seen, in a few words. */
+const troubleWords: Readonly<Record<ProviderTrouble, string>> = {
+  refused: "refusing the key",
+  not_answering: "not answering",
+  limiting: "limiting requests",
+};
+
 /**
  * The client's AI in one plain line, from what its core reported (`null`:
  * it couldn't be asked), by its organization's default provider:
  * "AI: OpenAI connected · working · last used 5 min ago", "AI: OpenAI
- * connected · not answering since 14:02 UTC" when its last call failed
- * after the last that worked, "AI: OpenAI connected · not used yet", or
- * "AI: not connected yet".
+ * connected · refusing the key since 14:02 UTC" (or "not answering",
+ * "limiting requests": what was seen, never a guess at why) from the
+ * first such failure after the last call that worked, "AI: OpenAI
+ * connected · not used yet", or "AI: not connected yet".
  */
 export const aiStatusLine = (
   report: AiStatusReport | null,
@@ -69,9 +78,9 @@ export const aiStatusLine = (
   const more =
     others.length === 0 ? "" : ` (and ${String(others.length)} more)`;
   const connected = `AI: ${aiProviders[first.provider].label}${more} connected`;
-  const { lastOkAt, lastFailedAt } = first;
-  if (lastFailedAt !== null && (lastOkAt === null || lastFailedAt > lastOkAt)) {
-    return `${connected} · not answering since ${sinceWords(lastFailedAt, now)}`;
+  const { lastOkAt, failingSince, failingClass } = first;
+  if (failingSince !== null && failingClass !== null) {
+    return `${connected} · ${troubleWords[failingClass]} since ${sinceWords(failingSince, now)}`;
   }
   if (lastOkAt === null) {
     return `${connected} · not used yet`;

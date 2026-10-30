@@ -301,7 +301,7 @@ const latestRuns = async (
         {
           id: runIdSchema.parse(row.id),
           ...(status === "running" && queue !== undefined
-            ? { status: "queued", queued: queue }
+            ? { status: "queued" as const, ...queue }
             : { status }),
           createdAt: new Date(row.createdAt).toISOString(),
         },

@@ -51,7 +51,11 @@ const RunPage = () => {
         <PageHeading
           meta={
             <>
-              <RunResult queued={summary.queued} status={summary.status} />
+              <RunResult
+                aiProvider={summary.aiProvider}
+                queued={summary.queued}
+                status={summary.status}
+              />
               <span className="text-muted-foreground tabular-nums">
                 {formatDateTime(summary.createdAt)}
               </span>
