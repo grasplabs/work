@@ -214,6 +214,11 @@ export const forgetDatabases = (): void => {
   slots.clear();
 };
 
+/** Frees the slot of the fake database `uuid`, once it is deleted. */
+export const forgetDatabase = (uuid: string): void => {
+  slots.delete(uuid);
+};
+
 /**
  * The real D1 database the fake database `uuid` keeps its data in: its
  * own, emptied when it's first used, so no two databases the fake holds,
