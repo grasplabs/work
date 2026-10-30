@@ -335,6 +335,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Pulse",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
+        // What the brain holds and how it learns, for admins.
+        "Brain",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
