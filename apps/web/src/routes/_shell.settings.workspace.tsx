@@ -1,3 +1,4 @@
+import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -21,19 +22,21 @@ import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import {
   SettingsError,
   SettingsLoading,
   SettingsRow,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
+import { StaffAccessSection } from "../settings/staff-access.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Workspace, as in the prototype (`routes/settings/workspace.tsx`):
 // the organization's name and the time zone it works in, which its admins
 // change, and where its data lives, which the deployment decides. Everyone
 // sees them; core refuses a change from anyone but the organization's own
-// admins.
+// admins. Then, for admins, Grasp's staff access (settings/staff-access.tsx).
 
 /** The time zones to pick from, each by a city in the reader's language. */
 const zones: { value: string; label: MessageDescriptor }[] = [
@@ -277,24 +280,45 @@ const WorkspaceSettings = ({
   );
 };
 
-const Workspace = () => {
+/** Grasp's staff access, as core answered an admin. */
+const StaffAccess = ({
+  read,
+  editable,
+}: {
+  read: Loaded<GateView["staff"]>;
+  editable: boolean;
+}) => {
   const { t } = useLingui();
-  const page = Route.useLoaderData();
-  const { identity } = Route.useRouteContext();
-  if (page.state !== "ready") {
-    return (
-      <SettingsSection
-        title={t({ message: "Workspace", context: "settings section" })}
-      >
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
-    );
+  if (read.state === "ready") {
+    return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <WorkspaceSettings
-      canChange={isAdmin(identity.role) && !identity.staff}
-      organization={page.data}
-    />
+    <SettingsSection title={t`Grasp staff access`}>
+      <NotLoadedState heading="h3" page={read} />
+    </SettingsSection>
+  );
+};
+
+const Workspace = () => {
+  const { t } = useLingui();
+  const { page, staff } = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  const editable = isAdmin(identity.role) && !identity.staff;
+  return (
+    <>
+      {page.state === "ready" ? (
+        <WorkspaceSettings canChange={editable} organization={page.data} />
+      ) : (
+        <SettingsSection
+          title={t({ message: "Workspace", context: "settings section" })}
+        >
+          <NotLoadedState heading="h3" page={page} />
+        </SettingsSection>
+      )}
+      {staff === undefined ? null : (
+        <StaffAccess editable={editable} read={staff} />
+      )}
+    </>
   );
 };
 
@@ -302,9 +326,17 @@ export const Route = createFileRoute("/_shell/settings/workspace")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: Workspace,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.organization.get()
-    ),
+  loader: async ({ context: { core, identity } }) => {
+    // Staff access is for admins only: nobody else is asked.
+    const [page, staff] = await Promise.all([
+      loadFromCore(core, async (session) => await session.organization.get()),
+      isAdmin(identity.role)
+        ? loadFromCore(core, async (session) => {
+            const gate = await session.onboardingGate.view();
+            return gate.staff;
+          })
+        : undefined,
+    ]);
+    return { page, staff };
+  },
 });
