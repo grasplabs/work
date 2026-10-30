@@ -42,20 +42,38 @@ const keysMaxAgeMs = 10 * 60 * 1000;
 const keysTimeoutMs = 5000;
 
 /**
+ * How long after a refetch for a key id the kept keys didn't have the next
+ * such refetch waits: a forged JWT naming a made-up key id, sent past
+ * Access, is refused at once rather than fetching the keys each time.
+ */
+const missCooldownMs = 30 * 1000;
+
+/**
  * Each team's keys as last fetched, per isolate: plain data only. Never a
  * fetch in flight, a response or a remote key set holding one: those
  * belong to the request that made them, and another request awaiting them
  * fails ("Cannot perform I/O on behalf of a different request") or hangs.
  * Each request that finds no fresh keys fetches them itself.
+ * `lastMissFetchAt` is when a JWT's unknown key id last made a request
+ * fetch them again (`missCooldownMs`); null before any.
  */
-const keyCache = new Map<string, { keys: JSONWebKeySet; fetchedAt: number }>();
+const keyCache = new Map<
+  string,
+  { keys: JSONWebKeySet; fetchedAt: number; lastMissFetchAt: number | null }
+>();
 
 const keySetSchema = z.object({
   keys: z.array(z.object({ kty: z.string() }).loose()),
 });
 
-/** The team's keys, fetched now, in the asking request, and kept. */
-const fetchKeys = async (issuer: string): Promise<JSONWebKeySet> => {
+/**
+ * The team's keys, fetched now, in the asking request, and kept; `miss`
+ * when a JWT named a key id the kept keys didn't have.
+ */
+const fetchKeys = async (
+  issuer: string,
+  miss: boolean
+): Promise<JSONWebKeySet> => {
   const response = await fetch(`${issuer}/cdn-cgi/access/certs`, {
     signal: AbortSignal.timeout(keysTimeoutMs),
   });
@@ -64,14 +82,22 @@ const fetchKeys = async (issuer: string): Promise<JSONWebKeySet> => {
     throw new Error(`Access keys answered ${String(response.status)}`);
   }
   const keys: JSONWebKeySet = keySetSchema.parse(await response.json());
-  keyCache.set(issuer, { keys, fetchedAt: Date.now() });
+  const now = Date.now();
+  keyCache.set(issuer, {
+    keys,
+    fetchedAt: now,
+    lastMissFetchAt: miss
+      ? now
+      : (keyCache.get(issuer)?.lastMissFetchAt ?? null),
+  });
   return keys;
 };
 
 /**
  * Verifies `token` with the team's keys: those kept while fresh, else
  * fetched; kept keys that have no key for it are fetched again once, as
- * Access rotates its keys.
+ * Access rotates its keys, at most once every `missCooldownMs`: within
+ * it, a JWT naming an unknown key id is refused without a fetch.
  */
 const verifyAccessToken = async (
   token: string,
@@ -88,19 +114,22 @@ const verifyAccessToken = async (
   if (kept === undefined || Date.now() - kept.fetchedAt >= keysMaxAgeMs) {
     return await jwtVerify(
       token,
-      createLocalJWKSet(await fetchKeys(issuer)),
+      createLocalJWKSet(await fetchKeys(issuer, false)),
       options
     );
   }
   try {
     return await jwtVerify(token, createLocalJWKSet(kept.keys), options);
   } catch (error) {
-    if (!(error instanceof errors.JWKSNoMatchingKey)) {
+    const coolingDown =
+      kept.lastMissFetchAt !== null &&
+      Date.now() - kept.lastMissFetchAt < missCooldownMs;
+    if (!(error instanceof errors.JWKSNoMatchingKey) || coolingDown) {
       throw error;
     }
     return await jwtVerify(
       token,
-      createLocalJWKSet(await fetchKeys(issuer)),
+      createLocalJWKSet(await fetchKeys(issuer, true)),
       options
     );
   }

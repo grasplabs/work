@@ -298,21 +298,26 @@ describe("the Access signing keys", () => {
     });
   });
 
-  it("refuses a JWT under a key Access doesn't publish, after fetching the keys again only once", async () => {
+  it("refuses JWTs under a key Access doesn't publish, fetching the keys again at most once in its cooldown", async () => {
     const published = await signingKey("published");
     const unknown = await signingKey("unknown");
     const { issuer, fetches } = freshTeam({ current: [published] });
     const on = { CF_ACCESS_ISS: issuer };
     await statusOf(asStaff("/", await signedBy(issuer, published)), on);
 
-    const refused = await statusOf(
-      asStaff("/", await signedBy(issuer, unknown)),
-      on
-    );
+    const forged = await signedBy(issuer, unknown);
 
-    expect({ refused, fetches: fetches.count }).toStrictEqual({
-      refused: 403,
-      fetches: 2,
+    const refused = await statusOf(asStaff("/", forged), on);
+    const fetchedFirst = fetches.count;
+    // Another forged JWT within the cooldown: refused, fetching nothing.
+    const refusedAgain = await statusOf(asStaff("/", forged), on);
+
+    expect({
+      refused: [refused, refusedAgain],
+      fetches: [fetchedFirst, fetches.count],
+    }).toStrictEqual({
+      refused: [403, 403],
+      fetches: [2, 2],
     });
   });
 });
