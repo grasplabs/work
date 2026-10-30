@@ -451,6 +451,10 @@ msgstr "{count} von {of} Schritten haben zu wenige Personen beschrieben"
 msgid "{count} or more files"
 msgstr "{count} oder mehr Dateien"
 
+#: src/workflows/today-lanes.tsx
+msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
+msgstr "{cutOff, plural, one {# früherer Lauf heute wird nicht gezeigt: nur die neuesten passen hinein} other {# frühere Läufe heute werden nicht gezeigt: nur die neuesten passen hinein}}"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{daily} a day"
 msgstr "{daily} pro Tag"

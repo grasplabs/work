@@ -155,10 +155,12 @@ describe("today's runs", () => {
     expect({
       from: today.from,
       timeZone: today.timeZone,
+      cutOff: today.cutOff,
       lanes: lanesOf(today),
     }).toStrictEqual({
       from: new Date(midnight).toISOString(),
       timeZone: "UTC",
+      cutOff: 0,
       lanes: [
         {
           lane: app.id,
@@ -229,6 +231,50 @@ describe("today's runs", () => {
       on: { kind: "role", role: "admin" },
       since: new Date(soon(30) + 500).toISOString(),
       asks: "Approve the invoice?",
+    });
+  });
+
+  it("keeps the newest runs of a busy day, the one waiting on the reader among them, and counts the earlier ones apart", async () => {
+    const owner = await signedInApi(idp, "builder");
+    await env.DB.prepare(
+      "UPDATE organizations SET time_zone = 'UTC' WHERE id = 'organization'"
+    ).run();
+    const midnight = Math.floor(Date.now() / (24 * hour)) * 24 * hour;
+    const now = Date.now();
+    const app = await appOf(owner);
+    // More runs than one read takes, all before the one asking the owner.
+    const earlier = 1001;
+    const runs = Array.from({ length: earlier }, (_, index) =>
+      env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, root_run_id) VALUES (?, ?, 'approve', 1, NULL, 'completed', ?, ?, NULL)"
+      ).bind(
+        `run-${unique()}`,
+        app.id,
+        Math.max(midnight, now - 120_000 + index),
+        Math.max(midnight, now - 120_000 + index) + 1
+      )
+    );
+    await env.DB.batch(runs);
+    const asksOwner = await seedRun(app.id, {
+      workflow: "approve",
+      status: "running",
+      at: Math.max(midnight, now - 1000),
+      asks: { deciders: `person:${owner.userId}`, open: true },
+    });
+
+    const today = await owner.api.workflows.today();
+    const shown = today.lanes.flatMap(({ runs: laneRuns }) => laneRuns);
+    expect({
+      shown: shown.length,
+      cutOff: today.cutOff,
+      newest: shown.at(-1)?.id,
+      waitsOnOwner: shown.find(({ id }) => id === asksOwner.id)?.waits?.on,
+    }).toStrictEqual({
+      shown: 1000,
+      // The two earliest, which the owner may see: not counted as unseen.
+      cutOff: 2,
+      newest: asksOwner.id,
+      waitsOnOwner: { kind: "you" },
     });
   });
 });
