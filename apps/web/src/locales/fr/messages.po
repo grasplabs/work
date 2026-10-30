@@ -2044,6 +2044,7 @@ msgstr "Action"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/settings/package-approvers.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -2137,6 +2138,10 @@ msgstr "Ajouter un mot"
 msgid "Add an exception"
 msgstr "Ajouter une exception"
 
+#: src/settings/package-approvers.tsx
+msgid "Add approver"
+msgstr "Ajouter un approbateur"
+
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
 msgstr "Ajouter des documents"
@@ -2174,6 +2179,7 @@ msgid "Add the team"
 msgstr "Ajouter l’équipe"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Ajouté"
 
@@ -7476,6 +7482,7 @@ msgstr "Lancement"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Type"
 
@@ -8289,6 +8296,7 @@ msgstr "Micro coupé"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/package-approvers.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Nom"
@@ -9008,9 +9016,17 @@ msgstr "Personne"
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Personne n’a répondu à temps : cette décision est donc close."
 
+#: src/settings/package-approvers.tsx
+msgid "Nobody approves packages yet, so every package request waits."
+msgstr "Personne n'approuve encore de paquets : chaque demande de paquets attend."
+
 #: src/onboarding/work-record.tsx
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Personne ne sait pourquoi. Cela attend que quelqu’un l’explique."
+
+#: src/settings/package-approvers.tsx
+msgid "Nobody else to add."
+msgstr "Personne d'autre à ajouter."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -10356,6 +10372,7 @@ msgid "Pending"
 msgstr "En attente"
 
 #: src/onboarding/interview-people.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "People"
 msgstr "Personnes"
@@ -10508,6 +10525,7 @@ msgid "Permissions asked for"
 msgstr "Autorisations demandées"
 
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 msgid "Person"
 msgstr "Personne"
@@ -10985,6 +11003,10 @@ msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Relecture"
 
+#: src/settings/package-approvers.tsx
+msgid "Reading people and teams…"
+msgstr "Lecture des personnes et des équipes…"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
 msgstr "La lecture des politiques nécessite un modèle que ce déploiement autorise pour les données sensibles. Demandez à Grasp d’en configurer un, puis relancez la lecture. En attendant, créez ses règles manuellement."
@@ -11147,6 +11169,7 @@ msgstr "Relancé le {date}"
 
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Remove"
 msgstr "Retirer"
@@ -11168,6 +11191,10 @@ msgstr "Retirer {file}"
 msgid "Remove {name}?"
 msgstr "Retirer {name} ?"
 
+#: src/settings/package-approvers.tsx
+msgid "Remove {named} as an approver"
+msgstr "Retirer {named} des approbateurs"
+
 #: src/policies/policy-editing.tsx
 msgid "Remove {title}?"
 msgstr "Retirer {title} ?"
@@ -11185,6 +11212,7 @@ msgid "Remove: {item}"
 msgstr "Retirer : {item}"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Supprimé"
 
@@ -11877,6 +11905,10 @@ msgstr "Rechercher des personnes"
 #: src/settings/pulse-people.tsx
 msgid "Search people and devices"
 msgstr "Rechercher des personnes et des appareils"
+
+#: src/settings/package-approvers.tsx
+msgid "Search people and teams"
+msgstr "Rechercher des personnes et des équipes"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
@@ -12979,6 +13011,7 @@ msgstr "ID de la cible"
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 #: src/workflows/team-picker.tsx
 msgid "Team"
@@ -13059,6 +13092,7 @@ msgstr "Équipe : {name}"
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
 msgstr "Équipes"
@@ -13776,6 +13810,10 @@ msgstr "La partie de l'adresse avant le @, sur le domaine de messagerie configur
 #: src/policies/policy-editing.tsx
 msgid "The passage it says"
 msgstr "Le passage qu’elle reprend"
+
+#: src/settings/package-approvers.tsx
+msgid "The people and teams who approve or deny the npm packages domains and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
+msgstr "Les personnes et les équipes qui approuvent ou refusent les paquets npm demandés par les domaines et les workflows. Aucun rôle ne l'inclut, pas même administrateur : ajoutez-vous pour approuver des paquets."
 
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
@@ -15970,6 +16008,11 @@ msgstr "qui répond"
 #: src/brain/brain.ts
 msgid "Who approves a new tool"
 msgstr "Qui valide un nouvel outil"
+
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
+msgid "Who approves packages"
+msgstr "Qui approuve les paquets"
 
 #: src/brain/brain.ts
 msgid "Who can answer"
