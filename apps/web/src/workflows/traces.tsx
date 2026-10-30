@@ -22,7 +22,7 @@ import {
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -32,6 +32,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ActivityLine, activityKey } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
+import { followedTrace } from "./followed-trace.ts";
 import { ItemTest } from "./item-test.tsx";
 import { OpenRun } from "./resource-runs.tsx";
 import { RunSheet } from "./run-detail.tsx";
@@ -116,29 +117,40 @@ const StepLine = ({ step }: { step: TraceStep }) => {
 const RunTraceDetail = ({
   workflow,
   runId,
+  onStatus,
 }: {
   workflow: string;
   runId: string;
+  /** The run's status, as each read of its trace says it. */
+  onStatus: (status: string) => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const [trace, setTrace] = useState<WorkflowRunTrace>();
   const [failure, setFailure] = useState<string>();
+  const told = useEffectEvent(onStatus);
 
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Its doors are read once: the run's version, so its diagram, stays.
+    let drawn: WorkflowRunTrace["diagram"] | undefined;
     const follow = async (): Promise<void> => {
       try {
         const read = await core.withSession(
           async (session) =>
-            await session.workflowResources.runTrace(workflow, runId)
+            await session.workflowResources.runTrace(workflow, runId, {
+              doors: drawn === undefined,
+            })
         );
         if (stopped) {
           return;
         }
-        setTrace(read);
+        const followed = followedTrace(read, drawn);
+        drawn = followed.diagram;
+        setTrace(followed);
         setFailure(undefined);
+        told(read.status);
         if (!settled(read)) {
           timer = setTimeout(() => {
             void follow();
@@ -352,6 +364,8 @@ export const Traces = ({
 }) => {
   const { t } = useLingui();
   const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
+  // The opened run's status, as its followed trace last said it.
+  const [traced, setTraced] = useState<{ runId: string; status: string }>();
   return (
     <div className="flex flex-col gap-6">
       <ToggleGroup
@@ -372,18 +386,18 @@ export const Traces = ({
           {t({ message: "Activity", context: "what a workflow did lately" })}
         </ToggleGroupItem>
       </ToggleGroup>
-      {part === "runs" ? (
-        <>
-          {checkpoint === null ? null : (
-            <ItemTest revision={checkpoint} workflow={workflow} />
-          )}
-          {runs.state === "ready" ? (
-            <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
-          ) : (
-            <NotLoadedState page={runs} />
-          )}
-        </>
-      ) : null}
+      {/* Kept while Activity shows: a test going on stays followed, and
+          the answers typed for it stay. */}
+      <div className="flex flex-col gap-6" hidden={part !== "runs"}>
+        {checkpoint === null ? null : (
+          <ItemTest revision={checkpoint} workflow={workflow} />
+        )}
+        {runs.state === "ready" ? (
+          <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
+        ) : (
+          <NotLoadedState page={runs} />
+        )}
+      </div>
       {part === "activity" ? (
         <ActivityList activity={activity} names={names} />
       ) : null}
@@ -394,13 +408,24 @@ export const Traces = ({
           setOpened(null);
         }}
         opened={opened}
+        status={
+          traced !== undefined && traced.runId === opened?.id
+            ? traced.status
+            : null
+        }
         steps={
           opened === null ? null : (
             <section className="flex flex-col gap-3">
               <h3 className="text-muted-foreground">
                 <Trans>What it did</Trans>
               </h3>
-              <RunTraceDetail runId={opened.id} workflow={workflow} />
+              <RunTraceDetail
+                onStatus={(status) => {
+                  setTraced({ runId: opened.id, status });
+                }}
+                runId={opened.id}
+                workflow={workflow}
+              />
             </section>
           )
         }
