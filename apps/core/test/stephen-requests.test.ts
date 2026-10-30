@@ -1,4 +1,4 @@
-import { dayFrom, weekOf } from "@grasp-os/shared/stephen-requests";
+import { dayFrom, spanBefore, weekOf } from "@grasp-os/shared/stephen-requests";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -274,9 +274,14 @@ describe("the requests report", setUpTime, () => {
     const admin = await signedInApi(idp, "admin");
     const today = await companyDay(env);
     const rare = await named("Who signs the lease?");
+    const grown = await named("Where is the payslip?");
+    const lastMonth = spanBefore("month", today);
     await seed(today, [
       ...people(6, { team: "team-big" }),
       ...people(2, { team: "team-small", ...rare }),
+      // Five or more ask it now; one or two did the month before.
+      ...people(5, grown),
+      ...people(2, { ...grown, day: lastMonth?.from }),
     ]);
 
     const small = await admin.api.stephenRequests.report({
@@ -287,12 +292,18 @@ describe("the requests report", setUpTime, () => {
       range: "month",
       question: rare.question,
     });
+    const now = await admin.api.stephenRequests.report({
+      range: "month",
+      question: grown.question,
+    });
 
     expect({
-      tooFew: [small.tooFew, question.tooFew],
+      tooFew: [small.tooFew, question.tooFew, now.tooFew],
       total: small.report.total,
       questionTotal: question.report.total.requests,
       named: question.questions,
+      nowTotal: now.report.total.people,
+      before: now.before,
       person: await outcome(
         admin.api.stephenRequests.report({
           range: "month",
@@ -300,10 +311,12 @@ describe("the requests report", setUpTime, () => {
         })
       ),
     }).toStrictEqual({
-      tooFew: [true, true],
+      tooFew: [true, true, false],
       total: { requests: 0, billed: 0, people: 0 },
       questionTotal: 0,
       named: [],
+      nowTotal: 5,
+      before: null,
       person: "role.forbidden",
     });
   });
