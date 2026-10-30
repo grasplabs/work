@@ -9301,6 +9301,10 @@ msgstr "Not now"
 msgid "Not offered"
 msgstr "Not offered"
 
+#: src/settings/sign-in-settings.tsx
+msgid "Not offered: its secret isn’t set"
+msgstr "Not offered: its secret isn’t set"
+
 #: src/landscape/overview-tab.tsx
 msgid "Not on file yet."
 msgstr "Not on file yet."
@@ -9702,6 +9706,10 @@ msgstr "on the event {event}, filtered"
 msgid "On the schedule set by {param} ({timeZone})"
 msgstr "On the schedule set by {param} ({timeZone})"
 
+#: src/settings/sign-in-settings.tsx
+msgid "On the sign-in page"
+msgstr "On the sign-in page"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "On the way"
@@ -9764,6 +9772,14 @@ msgstr "One real case"
 msgctxt "Pulse status"
 msgid "Online"
 msgstr "Online"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the Google Workspace {hostedDomain}."
+msgstr "Only accounts of the Google Workspace {hostedDomain}."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the tenant {tenantId}."
+msgstr "Only accounts of the tenant {tenantId}."
 
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
@@ -12221,6 +12237,7 @@ msgstr "Sign out everywhere"
 
 #: src/brain/brain-atlas.ts
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Sign-in"
 
@@ -12231,6 +12248,10 @@ msgstr "Sign-in didn't work. Try again, or ask an admin."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Sign-in domains"
 msgstr "Sign-in domains"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
+msgstr "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 
 #: src/brain/brain-atlas.ts
 msgid "Sign-in shows the applications people log in to."
@@ -13225,6 +13246,10 @@ msgstr "The {top} who spent most; more spent less."
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
 msgstr "The account you signed in with."
+
+#: src/settings/sign-in-settings.tsx
+msgid "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
+msgstr "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
