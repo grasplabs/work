@@ -2232,7 +2232,17 @@ const finished = (
   };
 };
 
-export const buildBrain = (ws: Workspace): Brain => {
+export const buildBrain = (read: Workspace): Brain => {
+  // A source taken out of the brain keeps only its id, kind and day: what
+  // still names it, such as a workflow's numbers, says it was removed.
+  const ws: Workspace = {
+    ...read,
+    sources: read.sources.map((source) =>
+      source.removedAt === undefined
+        ? source
+        : { ...source, title: t`Removed from the brain` }
+    ),
+  };
   const brainSources = ws.sources.filter(inBrain);
   // How the board steers the sprint: the budget for AI and who approves a new tool, each with its history.
   const boardQuestions: BoardQuestion[] = [
