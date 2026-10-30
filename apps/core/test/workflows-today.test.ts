@@ -242,23 +242,22 @@ describe("today's runs", () => {
     const midnight = Math.floor(Date.now() / (24 * hour)) * 24 * hour;
     const now = Date.now();
     const app = await appOf(owner);
-    // More runs than one read takes, all before the one asking the owner.
+    // More runs than one read takes, all before the one asking the owner:
+    // a millisecond apart from today's first moment the day can hold
+    // them, never two at once (just after midnight they run past now,
+    // which the day's read doesn't bound).
     const earlier = 1001;
+    const first = Math.max(midnight, now - 120_000);
     const runs = Array.from({ length: earlier }, (_, index) =>
       env.DB.prepare(
         "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at, root_run_id) VALUES (?, ?, 'approve', 1, NULL, 'completed', ?, ?, NULL)"
-      ).bind(
-        `run-${unique()}`,
-        app.id,
-        Math.max(midnight, now - 120_000 + index),
-        Math.max(midnight, now - 120_000 + index) + 1
-      )
+      ).bind(`run-${unique()}`, app.id, first + index, first + index + 1)
     );
     await env.DB.batch(runs);
     const asksOwner = await seedRun(app.id, {
       workflow: "approve",
       status: "running",
-      at: Math.max(midnight, now - 1000),
+      at: first + earlier,
       asks: { deciders: `person:${owner.userId}`, open: true },
     });
 
