@@ -449,7 +449,8 @@ export interface AuditApi {
    * retention has nothing left: it is passed over, and JSON names it in
    * `archive.purged` (`[{ from, through }]`, positions). An archived
    * stretch that can't be read stops it with `audit.archive_unreadable`.
-   * The export is recorded with `archive: true`.
+   * The export is recorded with `archive: true` and `purged`, how many
+   * purged stretches it passes over as it begins.
    */
   export: (
     filter: AuditFilter | undefined,
