@@ -29,6 +29,16 @@ export const chatPlatformSchema = z
 
 export type ChatPlatform = z.infer<typeof chatPlatformSchema>;
 
+/** The chat platforms Grasp answers in, as people know them, by adapter name. */
+export const chatPlatformNames: Readonly<Record<string, string>> = {
+  teams: "Microsoft Teams",
+  slack: "Slack",
+};
+
+/** A chat platform as people know it, or its adapter's name for one not listed. */
+export const chatPlatformName = (platform: string): string =>
+  chatPlatformNames[platform] ?? platform;
+
 /**
  * Which channel a chat came through: Grasp's own app (`web`), or a chat
  * platform.
@@ -59,6 +69,11 @@ export interface ChatSummary {
   projectId: string | null;
   /** The App it is for (`ChatsApi.forApp`), or null for none. */
   appId: string | null;
+  /**
+   * Which channel it came through: Grasp's own app (`web`), or a chat
+   * platform by its adapter's name (`teams`, `slack`), for good.
+   */
+  via: ChatChannel;
 }
 
 /**
