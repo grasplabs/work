@@ -154,16 +154,14 @@ const landing = [
 const spaces = /(?<space>\s+)/u;
 
 /**
- * Puts each word under `node` in a span of its own that fades in, so only
- * a word new to an answer being written does: the words already there keep
- * their spans, and their place. Code, in a block or inline, stays as it
- * is, a whole.
+ * Puts each word under `node` in a span of its own that fades in. Code, in
+ * a block or inline, stays as it is, a whole.
  */
-export const landWords = (node: { children: Element["children"] }): void => {
+const wrapWords = (node: { children: Element["children"] }): void => {
   node.children = node.children.flatMap((child): Element["children"] => {
     if (child.type === "element") {
       if (child.tagName !== "pre" && child.tagName !== "code") {
-        landWords(child);
+        wrapWords(child);
       }
       return [child];
     }
@@ -184,4 +182,18 @@ export const landWords = (node: { children: Element["children"] }): void => {
             }
       );
   });
+};
+
+/**
+ * Lets the words of the answer being written under `root` fade in where
+ * they land: those of its last block, where new words come, each in a
+ * span of its own (keyed by its place, so a word already there keeps its
+ * span as more come). The blocks before it are done, their words long
+ * landed, and stay plain text: each chunk wraps one block, not the answer.
+ */
+export const landWords = (root: { children: Element["children"] }): void => {
+  const last = root.children.findLast((child) => child.type === "element");
+  if (last?.type === "element") {
+    wrapWords({ children: [last] });
+  }
 };

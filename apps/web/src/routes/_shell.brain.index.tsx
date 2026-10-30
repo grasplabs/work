@@ -47,9 +47,6 @@ import type { DockMode } from "../chat/dock-mode.ts";
 // over the atlas (brain/thinking/*), the legend stepping aside; "See it in
 // the brain" plays an answer's thinking again (`?think=`).
 
-/** How wide the chat's frame is (`w-110.5` in chat/chat-dock.tsx): the dive keeps clear of it while the answer is written beside it. */
-const FRAME = 442;
-
 /** What the brain keeps clear, in pixels: a little along the top and the sides; and the chat's bar along the bottom. The legend's corner, top left, depends on the region's groups. */
 const CLEAR = { top: 12, bottom: 64 };
 
@@ -161,13 +158,17 @@ const withLearned = (
     ? brain
     : { ...brain, edges: [...brain.edges, ...learned] };
 
-/** While Grasp thinks, its shape keeps clear of the chat: its drawer, or its frame, where the answer is written beside it. */
-const diveClearOf = (dock: DockMode): number => {
-  if (dock === "drawer") {
-    return dockDrawerWidth;
-  }
-  return dock === "frame" ? FRAME : 0;
-};
+/** The atlas of `brain`: `readAtlas`, laid out already, while it is still the brain as `read`. */
+const atlasWith = (
+  ws: Workspace,
+  brain: Brain,
+  read: Brain,
+  readAtlas: Atlas
+): Atlas => (brain === read ? readAtlas : atlasOf(ws, brain));
+
+/** While Grasp thinks, its shape keeps clear of the chat: its drawer, or its frame (as wide), where the answer is written beside it. */
+const diveClearOf = (dock: DockMode): number =>
+  dock === "bar" ? 0 : dockDrawerWidth;
 
 /** The part of the brain a thinking is about, as the way back names it. */
 const aboutOf = (
@@ -253,16 +254,20 @@ const AtlasPage = () => {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/brain/" });
   const reduce = useLessMotion();
-  // Grasp's thinking, played over the atlas; what it found stays as new nerves.
+  // Grasp's thinking, played over the atlas; what it found stays as new
+  // nerves. The atlas is laid out once for the brain as read, and again
+  // only once the thinking taught it a link (`learned` is the same array
+  // until then), so the compiler keeps both from render to render.
+  const readAtlas = atlasOf(ws, read);
   const thinking = useBrainThinking({
     ws,
     brain: read,
-    atlas: atlasOf(ws, read),
+    atlas: readAtlas,
     think: search.think,
     still: reduce,
   });
   const brain = withLearned(read, thinking.learned);
-  const atlas = atlasOf(ws, brain);
+  const atlas = atlasWith(ws, brain, read, readAtlas);
   const { view, groups } = viewOf(search, atlas, brain);
   const { region, group } = view;
   // The region's neurons, for the keys: as the atlas lays them out in the room it has, where a folder may be folded into one; until it has, as a roomy screen would show them.

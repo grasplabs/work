@@ -8,7 +8,7 @@ import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
-import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { activeChat, appOfChat, setActiveChat } from "../chat/active-chat.ts";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { ChatMore } from "../chat/chat-more.tsx";
@@ -298,12 +298,24 @@ const Chat = () => {
   const [panel, setPanel] = useState(Route.useSearch().panel === true);
   // Whether the open chat's agent has an App to show beside it.
   const [building, setBuilding] = useState(false);
+  // One past the list's newest opens too, as core finds it (or says why
+  // not); whose it is the tab knows if it is an App's it opened.
+  const chat =
+    page.state !== "ready" || open === undefined
+      ? undefined
+      : (page.data.chats.find(({ id }) => id === open) ?? {
+          id: open,
+          title: t`Chat`,
+          createdAt: "",
+          lastAt: "",
+          running: false,
+          projectId: null,
+          appId: appOfChat(open) ?? null,
+        });
   // The open chat: the chat dock carries it on on every other page. An
   // App's own chat stays the App's, in the dock on its page, and leaves
   // the person's open chat as it was.
-  const forApp =
-    page.state === "ready" &&
-    page.data.chats.some(({ id, appId }) => id === open && appId !== null);
+  const forApp = chat !== undefined && chat.appId !== null;
   useEffect(() => {
     if (open !== undefined && !forApp) {
       setActiveChat(open);
@@ -314,20 +326,6 @@ const Chat = () => {
   }
   const { chats, projects, models, efforts, sourceNames, organizationName } =
     page.data;
-  // One past the list's newest opens too, as core finds it (or says why not).
-  const chat =
-    chats.find(({ id }) => id === open) ??
-    (open === undefined
-      ? undefined
-      : {
-          id: open,
-          title: t`Chat`,
-          createdAt: "",
-          lastAt: "",
-          running: false,
-          projectId: null,
-          appId: null,
-        });
   return (
     <>
       <SiteHeader

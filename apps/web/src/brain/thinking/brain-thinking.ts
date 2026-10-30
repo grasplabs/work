@@ -7,15 +7,11 @@ import { useActiveChat } from "../../chat/active-chat.ts";
 import { useFollowedChat } from "../../chat/chat-watch.ts";
 import type { Atlas, RegionId } from "../brain-atlas.ts";
 import type { Brain } from "../brain.ts";
-import { liveThinking, thinkingIn } from "./play.ts";
+import { putThinkingAway, useThinkingLog } from "./log.ts";
+import { liveThinking, parseThink, thinkingIn } from "./play.ts";
 import { aboutRegion, thinkingTitle } from "./shapes.ts";
 import type { Thought } from "./shapes.ts";
-import {
-  noteThinking,
-  putThinkingAway,
-  usePlayedThinking,
-  useThinkingLog,
-} from "./use-thinking.ts";
+import { noteThinking, usePlayedThinking } from "./use-thinking.ts";
 import type { PlayedThinking } from "./use-thinking.ts";
 
 // Grasp's thinking in the brain page: played as Grasp answers in the
@@ -25,23 +21,6 @@ import type { PlayedThinking } from "./use-thinking.ts";
 
 /** How long after the finding begins its nerve sets off growing. */
 const NERVE_AFTER_MS = 900;
-
-/** An answer's thinking as the address names it: its chat and its question. */
-export const thinkAddress = (chatId: string, questionId: number): string =>
-  `${chatId}:${questionId}`;
-
-const parseThink = (
-  think: string | undefined
-): { chatId: string; questionId: number } | undefined => {
-  if (think === undefined) {
-    return undefined;
-  }
-  const at = think.lastIndexOf(":");
-  const questionId = Number(think.slice(at + 1));
-  return at <= 0 || !Number.isInteger(questionId)
-    ? undefined
-    : { chatId: think.slice(0, at), questionId };
-};
 
 /** The thinking as the dive draws it, from where it plays now; none before its first step. */
 const thoughtOf = (

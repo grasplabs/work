@@ -6,7 +6,6 @@ import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useLessMotion } from "../brain/less-motion.ts";
-import { thinkAddress } from "../brain/thinking/brain-thinking.ts";
 import { useThinkingBrain } from "../brain/thinking/card-brain.ts";
 import type { ThinkingBrain } from "../brain/thinking/card-brain.ts";
 import {
@@ -22,6 +21,7 @@ import { WorkHours } from "../brain/thinking/dive.tsx";
 import { roundHours } from "../brain/thinking/hours.ts";
 import { SAG } from "../brain/thinking/layout.ts";
 import type { ThinkingNeuron } from "../brain/thinking/layout.ts";
+import { thinkAddress } from "../brain/thinking/play.ts";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { thinkingMap } from "../brain/thinking/shapes.ts";
 import { usePlayedThinking } from "../brain/thinking/use-thinking.ts";
