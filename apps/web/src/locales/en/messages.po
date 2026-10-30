@@ -2340,6 +2340,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Action"
 
+#: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -2363,6 +2364,10 @@ msgstr "Actions for {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
 msgstr "Actions for {who}"
+
+#: src/engines/app-versions.tsx
+msgid "Actions for version {version}"
+msgstr "Actions for version {version}"
 
 #: src/policies/policy.ts
 msgctxt "status of a policy rule"
@@ -3994,6 +3999,10 @@ msgstr "By workflow"
 msgid "By workflow run"
 msgstr "By workflow run"
 
+#: src/engines/app-versions.tsx
+msgid "by you"
+msgstr "by you"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Called a model"
@@ -4035,7 +4044,9 @@ msgstr "Can’t be read"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-remove.tsx
 #: src/engines/app-status.tsx
+#: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5162,6 +5173,10 @@ msgctxt "kind of app"
 msgid "CRM"
 msgstr "CRM"
 
+#: src/engines/app-versions.tsx
+msgid "Current"
+msgstr "Current"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Current plan"
@@ -5335,6 +5350,7 @@ msgstr "Definition version"
 #: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/engines/app-remove.tsx
 #: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete"
@@ -5353,6 +5369,7 @@ msgstr "Delete “{title}”?"
 msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Delete {first}'s interview for good, with all they said?"
 
+#: src/engines/app-remove.tsx
 #: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete {name}?"
@@ -5361,6 +5378,10 @@ msgstr "Delete {name}?"
 #: src/onboarding/interview-actions.tsx
 msgid "Delete and start over"
 msgstr "Delete and start over"
+
+#: src/engines/app-remove.tsx
+msgid "Delete for good"
+msgstr "Delete for good"
 
 #: src/interview/closed.tsx
 msgid "Delete it"
@@ -7970,6 +7991,10 @@ msgstr "It has recorded no step yet."
 msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 msgstr "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
 
+#: src/engines/app-remove.tsx
+msgid "It is gone for good: its apps, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
+msgstr "It is gone for good: its apps, versions and members, and what it was allowed. Its stores and their records stay, and so do the workflows it doesn’t own."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It is no longer held."
 msgstr "It is no longer held."
@@ -8138,6 +8163,10 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 
+#: src/engines/app-versions.tsx
+msgid "Its apps and workflows run on it from now on. Grasp checks and builds it first, and refuses if the version that runs changed since you looked."
+msgstr "Its apps and workflows run on it from now on. Grasp checks and builds it first, and refuses if the version that runs changed since you looked."
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
@@ -8237,6 +8266,10 @@ msgstr "Its people are each asked what they do"
 #: src/onboarding/organization-words.ts
 msgid "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
 msgstr "Its people get their links without waiting, and Stephen asks each what work they do. With a lead, he asks the lead first which work there is."
+
+#: src/engines/app-versions.tsx
+msgid "Its permissions on connections, to start workflows and to call other domains wait for an admin to grant them again."
+msgstr "Its permissions on connections, to start workflows and to call other domains wait for an admin to grant them again."
 
 #: src/workflows/chosen-at-run-time.tsx
 msgid "its retries"
@@ -8856,6 +8889,10 @@ msgstr "Low"
 msgid "Low confidence"
 msgstr "Low confidence"
 
+#: src/engines/app-versions.tsx
+msgid "Made"
+msgstr "Made"
+
 #: src/policies/policy.ts
 msgid "Made by {vendors}"
 msgstr "Made by {vendors}"
@@ -8918,6 +8955,10 @@ msgstr "Make a workflow of it"
 msgid "Make admin"
 msgstr "Make admin"
 
+#: src/engines/app-versions.tsx
+msgid "Make current"
+msgstr "Make current"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Make version {version} current"
@@ -8925,6 +8966,10 @@ msgstr "Make version {version} current"
 #: src/chat/builds.tsx
 msgid "Make version {version} current and publish"
 msgstr "Make version {version} current and publish"
+
+#: src/engines/app-versions.tsx
+msgid "Make version {version} current?"
+msgstr "Make version {version} current?"
 
 #: src/inbox/items.ts
 msgid "Make version {version} of {name} live?"
@@ -9993,6 +10038,10 @@ msgstr "No usage seen"
 #: src/workflows/files-and-apps.tsx
 msgid "No version uses it yet"
 msgstr "No version uses it yet"
+
+#: src/engines/app-versions.tsx
+msgid "No version yet: its builders make the first in a chat."
+msgstr "No version yet: its builders make the first in a chat."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "No watching rule catches an app."
@@ -12983,6 +13032,18 @@ msgstr "Role of {who}"
 msgid "Roles"
 msgstr "Roles"
 
+#: src/engines/app-versions.tsx
+msgid "Roll back"
+msgstr "Roll back"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to this version"
+msgstr "Roll back to this version"
+
+#: src/engines/app-versions.tsx
+msgid "Roll back to version {version}?"
+msgstr "Roll back to version {version}?"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Rome"
@@ -13776,6 +13837,10 @@ msgstr "Show older"
 #: src/landscape/audit-trail.tsx
 msgid "Show older events to read further back."
 msgstr "Show older events to read further back."
+
+#: src/engines/app-versions.tsx
+msgid "Show older versions"
+msgstr "Show older versions"
 
 #: src/dashboard/widget-ask.tsx
 msgid "Show only the failed runs."
@@ -16730,6 +16795,10 @@ msgstr "Until this is resolved, no release that changes this store's tables can 
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 
+#: src/engines/app-versions.tsx
+msgid "Up for review"
+msgstr "Up for review"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
 msgstr "Up to {upTo} minutes"
@@ -16918,6 +16987,7 @@ msgstr "Verify now"
 msgid "Verify the chain"
 msgstr "Verify the chain"
 
+#: src/engines/app-versions.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -16985,6 +17055,10 @@ msgstr "Version {waiting} waits to go live"
 #: src/dashboard/pile-cards.tsx
 msgid "Version to review: {version}"
 msgstr "Version to review: {version}"
+
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Versions"
+msgstr "Versions"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -17329,6 +17403,7 @@ msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "What came in"
 
+#: src/engines/app-versions.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -18497,6 +18572,10 @@ msgstr "Written by a model: {0}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Written down"
+
+#: src/engines/app-versions.tsx
+msgid "Written in a chat"
+msgstr "Written in a chat"
 
 #: src/brain/work-knowledge.tsx
 msgid "Written in a document"

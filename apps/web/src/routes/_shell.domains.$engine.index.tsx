@@ -39,11 +39,13 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { RemoveApp } from "../engines/app-remove.tsx";
 import {
   AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { AppVersions } from "../engines/app-versions.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -556,6 +558,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </div>
         {/* On its bar, as the prototype's Publish: for who builds. */}
         <AppStatusControls app={app} identity={identity} />
+        <RemoveApp app={app} identity={identity} />
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
@@ -599,6 +602,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <SettingsTab surfaces={surfaces} />
           <TabsTrigger value="members">
             <Trans>Members</Trans>
+          </TabsTrigger>
+          <TabsTrigger value="versions">
+            <Trans>Versions</Trans>
           </TabsTrigger>
         </TabsList>
         <TabsContent value="workflows">
@@ -664,6 +670,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                 );
               }}
             </Await>
+          </div>
+        </TabsContent>
+        <TabsContent value="versions">
+          <div className="pt-4">
+            <AppVersions app={app} identity={identity} />
           </div>
         </TabsContent>
         <TabsContent value="members">
@@ -767,8 +778,11 @@ export const Route = createFileRoute("/_shell/domains/$engine/")({
   // pass through unchecked.
   validateSearch: (
     search: Record<string, unknown>
-  ): { tab?: "settings" | undefined } => ({
-    tab: search.tab === "settings" ? "settings" : undefined,
+  ): { tab?: "settings" | "versions" | undefined } => ({
+    tab:
+      search.tab === "settings" || search.tab === "versions"
+        ? search.tab
+        : undefined,
   }),
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them. Core lists every
