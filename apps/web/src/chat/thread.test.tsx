@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ThinkingGround } from "@grasp-os/shared/brain";
 import type {
   ChatMessage,
   ChatPartial,
@@ -15,7 +16,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatThread } from "./thread.tsx";
 
@@ -45,8 +46,28 @@ const asked: ChatMessage = {
 const thread = async (
   messages: readonly ChatMessage[],
   partial: ChatPartial | null = null,
-  tools: readonly ChatToolEvent[] = []
+  tools: readonly ChatToolEvent[] = [],
+  /** What core says a picture of thinking is drawn from; it can't be read without. */
+  ground?: ThinkingGround
 ): Promise<void> => {
+  const core = {
+    withSession: async <T,>(
+      action: (session: {
+        brain: { thinking: () => Promise<ThinkingGround> };
+      }) => Promise<T>
+    ): Promise<T> =>
+      await action({
+        brain: {
+          thinking: async () => {
+            await Promise.resolve();
+            if (ground === undefined) {
+              throw new Error("Core can't be reached.");
+            }
+            return ground;
+          },
+        },
+      }),
+  };
   const page = createRootRoute({
     component: () => (
       <ChatThread
@@ -66,6 +87,7 @@ const thread = async (
   const router = createRouter({
     routeTree: page,
     history: createMemoryHistory(),
+    context: { core },
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -91,6 +113,26 @@ const firstStep = () => {
       shows === null || shows === undefined
         ? undefined
         : document.querySelector(`#${shows}`)?.textContent,
+  };
+};
+
+/** The way to the brain under an answer, if there is one. */
+const findWay = () =>
+  document.querySelector<HTMLAnchorElement>('a[href^="/brain"]');
+
+/** The way to the brain under an answer, once whatever comes has come. */
+const wayToBrain = async () => {
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(findWay()).not.toBeNull();
+  });
+  const way = findWay();
+  return {
+    href: way?.getAttribute("href"),
+    text: way?.textContent,
+    picture: way?.querySelector("svg") !== null,
   };
 };
 
@@ -223,6 +265,72 @@ describe(ChatThread, () => {
     }).toStrictEqual({
       landing: ["Four,", "as", "two", "and", "two."],
       kept: 0,
+    });
+  });
+
+  it("carries an answer's thinking as a picture that opens the brain, and the way there where it can't be drawn", async () => {
+    const at = "2026-10-27T09:00:05.000Z";
+    const thought: ChatMessage[] = [
+      asked,
+      {
+        id: 2,
+        role: "result",
+        callId: "step",
+        text: "Shown in the brain.",
+        failed: false,
+        at,
+        thinking: {
+          text: "Reading the work",
+          notes: ["wf-report"],
+          shape: "hours",
+          move: "work",
+        },
+      },
+      {
+        id: 3,
+        role: "assistant",
+        text: "The weekly report takes most.",
+        citations: [],
+        code: [],
+        end: "done",
+        at,
+      },
+    ];
+    await thread(thought);
+    const unread = await wayToBrain();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread(thought, null, [], {
+      teams: [],
+      statements: [],
+      workflows: [{ id: "wf-report", name: "Weekly report", hours: 6 }],
+    });
+    // The drawing is a lazy import: its first load outlasts waitFor's default
+    // second on a busy runner.
+    await vi.waitFor(
+      async () => {
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(document.querySelector('a[href^="/brain"] svg')).not.toBeNull();
+      },
+      { timeout: 10_000 }
+    );
+
+    expect({ unread, drawn: await wayToBrain() }).toStrictEqual({
+      unread: {
+        href: "/brain?think=chat%3A1",
+        text: "See it in the brain",
+        picture: false,
+      },
+      drawn: {
+        href: "/brain?think=chat%3A1",
+        // The step, the workflow's name as its title and under it, the way.
+        text: "Reading the workWeekly reportWeekly reportSee it in the brain",
+        picture: true,
+      },
     });
   });
 });

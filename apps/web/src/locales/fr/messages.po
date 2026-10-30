@@ -467,6 +467,10 @@ msgstr "{count, plural, one {# workflow le sert} other {# workflows le servent}}
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {Ajouter # document} other {Ajouter # documents}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
+msgstr "{count, plural, one {Addition des heures de # workflow} other {Addition des heures de # workflows}}"
+
 #: src/chat/sources.tsx
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Les réponses s’appuient sur # source} other {Les réponses s’appuient sur # sources}}"
@@ -475,6 +479,10 @@ msgstr "{count, plural, one {Les réponses s’appuient sur # source} other {Les
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {une fois} other {# fois}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
+msgstr "{count, plural, one {Lecture de # workflow} other {Lecture de # workflows}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
 msgstr "{count, plural, one {La direction a fixé # objectif pour le sprint.} other {La direction a fixé # objectifs pour le sprint.}}"
@@ -482,6 +490,10 @@ msgstr "{count, plural, one {La direction a fixé # objectif pour le sprint.} ot
 #: src/connections/workflows-using.tsx
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Utilisée par # workflow} other {Utilisée par # workflows}}"
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, other {# not counted yet}}"
+msgstr "{count, plural, other {# pas encore comptés}}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{count} of {finished} said how it was, at the end of their interview."
@@ -594,6 +606,10 @@ msgstr "{done} réussies · {failed} échouées · 30 jours"
 #: src/brain/brain-atlas.ts
 msgid "{drawn} drawn in the builder"
 msgstr "{drawn} dessinées dans l’éditeur"
+
+#: src/brain/thinking/work-hours.tsx
+msgid "{each, plural, one {# hour a week} other {# hours a week}}"
+msgstr "{each, plural, one {# heure par semaine} other {# heures par semaine}}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "{each} a run"
@@ -724,6 +740,10 @@ msgstr "{holder} : {actions} sur {resource}"
 msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
 msgstr "{hostCopies, plural, one {# copie hors de Connaissances nettoyée} other {# copies hors de Connaissances nettoyées}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
+msgstr "{hours, plural, one {# heure par semaine dans tout ce que Grasp peut compter} other {# heures par semaine dans tout ce que Grasp peut compter}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# heure} other {# heures}}"
@@ -732,6 +752,10 @@ msgstr "{hours, plural, one {# heure} other {# heures}}"
 msgctxt "hours, short"
 msgid "{hours} h"
 msgstr "{hours} h"
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{hours} of the {all} hours a week"
+msgstr "{hours} des {all} heures par semaine"
 
 #: src/settings/week-hours.tsx
 msgid "{hoursOn, plural, one {On # hour a week: {summary}.} other {On # hours a week: {summary}.}}"
@@ -1087,6 +1111,10 @@ msgstr "{name}, où part le temps dans votre semaine ?"
 msgid "{name}: {count}"
 msgstr "{name} : {count}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
+msgstr "{name} : {hours, plural, one {# heure par semaine} other {# heures par semaine}}"
+
 #: src/onboarding/work-record.tsx
 msgid "{name}: {outOfTen} in 10"
 msgstr "{name} : {outOfTen} sur 10"
@@ -1343,6 +1371,18 @@ msgstr "{request} par requête"
 #: src/chat/thread.tsx
 msgid "{rest}s"
 msgstr "{rest} s"
+
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · {role}, {team} · week {week}"
+msgstr "{rests} · {role}, {team} · semaine {week}"
+
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · {team} · week {week}"
+msgstr "{rests} · {team} · semaine {week}"
+
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · week {week}"
+msgstr "{rests} · semaine {week}"
 
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
@@ -3423,6 +3463,10 @@ msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le domain
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Ask it in"
 msgstr "L’inviter"
+
+#: src/brain/work-knowledge.tsx
+msgid "Ask more people"
+msgstr "Interroger plus de personnes"
 
 #: src/brain/brain.ts
 #: src/settings/stephen-card.tsx
@@ -5693,6 +5737,11 @@ msgctxt "tour"
 msgid "Done"
 msgstr "Terminé"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: it happened in a run"
+msgid "Done"
+msgstr "Fait"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Done by {doers}"
 msgstr "Faite par {doers}"
@@ -5701,6 +5750,10 @@ msgstr "Faite par {doers}"
 msgctxt "a run that ran alone"
 msgid "done by itself"
 msgstr "fait tout seul"
+
+#: src/brain/work-knowledge.tsx
+msgid "Done in a run"
+msgstr "Fait lors d’une exécution"
 
 #: src/interview/words.ts
 msgid "Done right"
@@ -7006,6 +7059,10 @@ msgctxt "who did it, in the log"
 msgid "Grasp itself"
 msgstr "Grasp lui-même"
 
+#: src/brain/work-knowledge.tsx
+msgid "Grasp knows nothing about this work in its own words yet."
+msgstr "Grasp ne sait encore rien de ce travail dans ses propres mots."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
@@ -7217,6 +7274,10 @@ msgstr "Réécouter les deux"
 msgid "Heard from"
 msgstr "Entendu de"
 
+#: src/brain/work-knowledge.tsx
+msgid "Heard from enough people"
+msgstr "Entendu de suffisamment de personnes"
+
 #: src/onboarding/interview-people.tsx
 msgid "Held by"
 msgstr "Mené par"
@@ -7340,6 +7401,10 @@ msgstr "Hébergement hors {regions}"
 msgid "Hosted outside all of"
 msgstr "Hébergée hors de toutes"
 
+#: src/brain/thinking/work-hours.tsx
+msgid "Hours not known yet"
+msgstr "Heures pas encore connues"
+
 #: src/policies/policy-editing.tsx
 msgid "How condition {position} reads"
 msgstr "Formulation de la condition {position}"
@@ -7425,9 +7490,17 @@ msgstr "À quelle fréquence il arrive erroné"
 msgid "How Stephen is set up here"
 msgstr "Comment Stephen est réglé ici"
 
+#: src/brain/work-knowledge.tsx
+msgid "How sure"
+msgstr "Quelle certitude"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "How the parts stand"
 msgstr "Disposition des parties"
+
+#: src/brain/work-knowledge.tsx
+msgid "How the work goes today"
+msgstr "Comment le travail se passe aujourd’hui"
 
 #: src/brain/brain.ts
 msgid "How they would notice: {notice}."
@@ -8289,6 +8362,11 @@ msgstr "Type de propos"
 msgid "Knowledge"
 msgstr "Connaissances"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: what Grasp knows about a piece of work"
+msgid "Knowledge"
+msgstr "Connaissances"
+
 #: src/workflows/files-and-apps.tsx
 msgid "Knowledge it reads"
 msgstr "Connaissances qu’il lit"
@@ -9059,6 +9137,10 @@ msgstr "La suite de ce que vous m’avez dit sur l’IA."
 #: src/interview/words.ts
 msgid "More of when it goes differently."
 msgstr "La suite, si ça se passe autrement."
+
+#: src/brain/work-knowledge.tsx
+msgid "More people are asked about it in the next interviews."
+msgstr "Davantage de personnes seront interrogées à ce sujet lors des prochains entretiens."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
@@ -10378,6 +10460,11 @@ msgstr "Pas encore"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
+msgid "Note"
+msgstr "Note"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: a piece of work's note in the brain"
 msgid "Note"
 msgstr "Note"
 
@@ -12545,6 +12632,11 @@ msgstr "Version {restoredFrom} restaurée"
 msgid "Restricted"
 msgstr "Restreint"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what a piece of work's knowledge rests on: said, written, seen or done"
+msgid "Rests on"
+msgstr "Repose sur"
+
 #: src/chat/thread.tsx
 msgid "Result"
 msgstr "Résultat"
@@ -13019,12 +13111,21 @@ msgstr "Exécutions cette semaine"
 msgid "Runs: {total}"
 msgstr "Exécutions : {total}"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: people said it"
+msgid "Said"
+msgstr "Dit"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
 #: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Dit par cinq personnes ou plus"
+
+#: src/brain/work-knowledge.tsx
+msgid "Said in an interview"
+msgstr "Dit lors d’un entretien"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -13237,6 +13338,7 @@ msgid "See an example"
 msgstr "Voir un exemple"
 
 #: src/chat/answer-thinking.tsx
+#: src/chat/thinking-card.tsx
 msgid "See it in the brain"
 msgstr "Le voir dans le cerveau"
 
@@ -13261,6 +13363,15 @@ msgstr "Voir l’utilisation"
 #: src/onboarding/setup-steps.tsx
 msgid "See what needs you"
 msgstr "Voir ce qui a besoin de vous"
+
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: Grasp saw it in use"
+msgid "Seen"
+msgstr "Vu"
+
+#: src/brain/work-knowledge.tsx
+msgid "Seen in use"
+msgstr "Vu en usage"
 
 #: src/brain/brain.ts
 msgid "Seen in use: not observed through sign-in or Pulse yet"
@@ -16844,6 +16955,10 @@ msgstr "En attente d’une part des exécutions de cette personne ; réessaie au
 msgid "Waiting for an event"
 msgstr "Attend un événement"
 
+#: src/brain/work-knowledge.tsx
+msgid "Waiting for more voices"
+msgstr "En attente de plus de voix"
+
 #: src/policies/policy.ts
 msgctxt "state of a data processing agreement"
 msgid "Waiting for signature"
@@ -17084,6 +17199,10 @@ msgstr "Ce qu’ont coûté ce mois-ci les appels au modèle de chaque workflow,
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "Ce que chaque agent a en permanence dans son contexte."
+
+#: src/brain/work-knowledge.tsx
+msgid "What gets in the way"
+msgstr "Ce qui gêne"
 
 #: src/onboarding/interview-words.ts
 msgctxt "part of an interview"
@@ -17380,6 +17499,10 @@ msgstr "Ce qu’ils ont dit jusqu’ici est supprimé, et leur lien s’ouvre su
 msgid "What they told us"
 msgstr "Ce qu’ils nous ont dit"
 
+#: src/brain/work-knowledge.tsx
+msgid "What they want instead"
+msgstr "Ce qu’ils veulent à la place"
+
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Ce qu'il faut corriger"
@@ -17588,6 +17711,10 @@ msgctxt "what Grasp knows, by source"
 msgid "Where the documents live"
 msgstr "Où se trouvent les documents"
 
+#: src/brain/thinking/shapes.ts
+msgid "Where the hours go"
+msgstr "Où passent les heures"
+
 #: src/onboarding/interview-people.tsx
 msgid "Where the link stands"
 msgstr "État du lien"
@@ -17599,6 +17726,10 @@ msgstr "Où en est l’onboarding, étape par étape."
 #: src/workflows/requests/request-summary.tsx
 msgid "Where the summary goes"
 msgstr "Où va le résumé"
+
+#: src/brain/work-knowledge.tsx
+msgid "Where the time goes"
+msgstr "Où va le temps"
 
 #: src/landscape/data-tab.tsx
 msgid "Where the vendor says data is stored and processed, and any transfers to other countries."
@@ -18158,6 +18289,11 @@ msgstr "Rédaction du widget…"
 msgid "Written"
 msgstr "Écrit"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: a document says it"
+msgid "Written"
+msgstr "Écrit"
+
 #. placeholder {0}: version.wording
 #: src/brain/lessons-view.tsx
 msgid "Written by a model: {0}"
@@ -18166,6 +18302,10 @@ msgstr "Écrit par un modèle : {0}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Noté"
+
+#: src/brain/work-knowledge.tsx
+msgid "Written in a document"
+msgstr "Écrit dans un document"
 
 #: src/onboarding/work-record.tsx
 msgid "Wrong"
