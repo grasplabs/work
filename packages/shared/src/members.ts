@@ -33,8 +33,12 @@ export interface Invitation {
 export interface ErasureArea {
   /** The area, as the erasure names it: `identity` and so on. */
   area: string;
-  /** `pending` until done, retried until then; `complete` once done. */
-  state: "pending" | "complete";
+  /**
+   * `pending` until done, retried until then; `complete` once done;
+   * `skipped` when it couldn't be done and won't be tried again (an
+   * interview whose address was released, say): left as it is.
+   */
+  state: "pending" | "complete" | "skipped";
 }
 
 /** A person's erasure, as admins see it. */

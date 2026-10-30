@@ -4422,6 +4422,62 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Closes `person`'s link for good, as core asks once it erased them and
+   * deleted their interview (person-erasure.ts): its code goes, so it
+   * answers `interview.link_invalid`, and the device it opened on is
+   * forgotten. Unlike a delete on their own request, no new interview can
+   * be saved under it. Their entry on the list stays, an admin's to remove.
+   */
+  closeLinkOf(person: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
+      // Mail still to go about them (a reminder, say) goes nowhere now.
+      // Sent mail stays: the company's record, as the roster is.
+      dropMailAbout(this.ctx.storage.sql, person);
+      this.#db
+        .update(links)
+        .set({ keyMark: null })
+        .where(eq(links.person, person))
+        .run();
+    });
+  }
+
+  /**
+   * Deletes `person`'s interview and closes their link for good, as core
+   * asks once it erased whoever had their address (person-erasure.ts), but
+   * only a link that went out by `sentBy`, when the erasure was asked for:
+   * one sent after it went to someone the address was released to, whose
+   * interview stays. Whether it deleted one.
+   */
+  async eraseInterviewOf(person: string, sentBy: string): Promise<boolean> {
+    const [link] = this.#db
+      .select({ sentAt: links.sentAt })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    if (link === undefined || link.sentAt > sentBy) {
+      return false;
+    }
+    await this.deleteOnRequest(person, { type: "system" });
+    // Their link answers nothing any more: no new interview is saved
+    // under the entry that stays.
+    this.closeLinkOf(person);
+    return true;
+  }
+
+  /**
+   * Who is on the list, by their ID and email, for core to find someone it
+   * erases by the address that was theirs (person-erasure.ts): only core
+   * asks, and nothing of it leaves core.
+   */
+  rosterEmails(): { id: string; email: string }[] {
+    return this.#db
+      .select({ id: people.id, email: people.email })
+      .from(people)
+      .all();
+  }
+
+  /**
    * Deletes someone's interview because they asked Grasp to: what they
    * said is gone at once, a copy left open can't save it back, and their
    * link opens a new one on the device it is on. False when no link of

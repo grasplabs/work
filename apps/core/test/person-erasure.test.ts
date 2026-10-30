@@ -1,4 +1,6 @@
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -6,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { setCurrentVersion } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -92,6 +95,83 @@ const storedOf = async (claims: Record<string, unknown>) => {
     .bind(String(claims.sub))
     .first<{ count: number }>();
   return { users: users?.count ?? 0, accounts: held?.count ?? 0 };
+};
+
+/** Runs `sql` in the deployment's onboarding store: its rows. */
+const onList = async (sql: string, ...values: unknown[]) =>
+  await runInDurableObject(onboardingStore(env), (_instance, state) =>
+    state.storage.sql.exec(sql, ...values).toArray()
+  );
+
+/** What a link's page gets opening it with `secret`: open, or the refusal. */
+const sessionWith = async (secret: string): Promise<string> => {
+  const response = await routed(interviewApiPath, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "session", secret }),
+  });
+  if (response.ok) {
+    return "open";
+  }
+  const payload = errorPayloadSchema.safeParse(await response.json());
+  return payload.success ? payload.data.code : String(response.status);
+};
+
+/**
+ * Someone with `email` and someone else on the onboarding's list, both
+ * sent their links: their IDs and their links' secrets.
+ */
+const onTheList = async (email: string) => {
+  const ids = { team: `ops-${crypto.randomUUID().slice(0, 8)}` };
+  const theirs = `person-${crypto.randomUUID().slice(0, 8)}`;
+  const others = `person-${crypto.randomUUID().slice(0, 8)}`;
+  const store = onboardingStore(env);
+  const by = { type: "system" } as const;
+  await store.setPaused(false, by);
+  await store.saveRoster(
+    {
+      teams: [{ id: ids.team, name: "Ops", lead: null, does: "", off: false }],
+      people: [
+        {
+          id: theirs,
+          name: "Them",
+          team: ids.team,
+          // Their list address, in other letters.
+          email: email.toUpperCase(),
+          title: "",
+          away: false,
+        },
+        {
+          id: others,
+          name: "Someone else",
+          team: ids.team,
+          email: `other-${crypto.randomUUID().slice(0, 8)}@acme.test`,
+          title: "",
+          away: false,
+        },
+      ],
+    },
+    by
+  );
+  await store.savePlan(
+    {
+      start: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+      days: 14,
+    },
+    by
+  );
+  await store.setAgreements(
+    { processing: true, assessment: true, council: "none" },
+    by
+  );
+  await store.releaseDue();
+  const secretOf = async (id: string) => {
+    const link = await store.linkOf(id);
+    return link?.split("#")[1] ?? "";
+  };
+  const theirSecret = await secretOf(theirs);
+  const otherSecret = await secretOf(others);
+  return { theirs, others, theirSecret, otherSecret };
 };
 
 /** How many invitations went to `address`, in any case. */
@@ -282,6 +362,7 @@ describe("erasing a person", () => {
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
+          { area: "interview", state: "complete" },
         ],
       },
       name,
@@ -495,6 +576,7 @@ describe("erasing a person", () => {
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
+          { area: "interview", state: "complete" },
         ],
       },
       // Nothing of the area went: one statement, or none of it.
@@ -508,6 +590,7 @@ describe("erasing a person", () => {
           { area: "connect", state: "complete" },
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
+          { area: "interview", state: "complete" },
         ],
       },
       accounts: 0,
@@ -600,6 +683,138 @@ describe("erasing a person", () => {
       ],
       text: false,
     });
+  });
+
+  it("deletes their interview, found on the list by the address that was theirs, closes their link, and leaves their entry and everyone else's", async () => {
+    const { admin, person } = await removedPerson();
+    const { theirs, others, theirSecret, otherSecret } = await onTheList(
+      String(person.person.email)
+    );
+    const before = await sessionWith(theirSecret);
+    await onList(
+      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'what they said', ?)",
+      theirs,
+      new Date().toISOString()
+    );
+    // A reminder to them, still to go, as the onboarding queues one.
+    const queue = async (id: string): Promise<void> => {
+      await onList(
+        "INSERT INTO mail_outbox (key, about, to_address, mail, state, next_at, queued_at) VALUES (?, ?, 'them@acme.test', '{}', 'queued', ?, ?)",
+        `reminder:${id}`,
+        id,
+        Date.now() + 86_400_000,
+        new Date().toISOString()
+      );
+    };
+    await queue(theirs);
+    await queue(others);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const textsOf = async (id: string) => {
+      const rows = await onList(
+        "SELECT person FROM interview_texts WHERE person = ?",
+        id
+      );
+      return rows.length;
+    };
+    const listed = async (id: string) => {
+      const rows = await onList("SELECT id FROM people WHERE id = ?", id);
+      return rows.length;
+    };
+    const queuedFor = async (id: string) => {
+      const rows = await onList(
+        "SELECT key FROM mail_outbox WHERE about = ? AND state = 'queued'",
+        id
+      );
+      return rows.length;
+    };
+    expect({
+      before,
+      // Their old link opens nothing any more, so nothing new is saved.
+      after: await sessionWith(theirSecret),
+      other: await sessionWith(otherSecret),
+      theirTexts: await textsOf(theirs),
+      theirEntry: await listed(theirs),
+      otherEntry: await listed(others),
+      theirMail: await queuedFor(theirs),
+      otherMail: await queuedFor(others),
+    }).toStrictEqual({
+      before: "open",
+      after: "interview.link_invalid",
+      other: "open",
+      theirTexts: 0,
+      // Their entry is the company's: it stays, for an admin to remove.
+      theirEntry: 1,
+      otherEntry: 1,
+      theirMail: 0,
+      otherMail: 1,
+    });
+  });
+
+  it("records the interview as skipped, never done, when the address that was theirs can't find them any more", async () => {
+    const { admin, person } = await removedPerson();
+    const now = Date.now();
+    // An erasure made under an older key: its hash finds nobody now.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, ?, ?, 0, ?, ?)"
+      ).bind(
+        person.userId,
+        String(person.person.name),
+        `old-${person.userId}`,
+        admin.userId,
+        now
+      ),
+      env.DB.prepare(
+        "INSERT INTO person_erasure_areas (user_id, area, state, attempts, updated_at) VALUES (?, 'interview', 'pending', 0, ?)"
+      ).bind(person.userId, now),
+    ]);
+
+    await runMinuteTasks();
+
+    const erasure = await admin.api.members.erasure(person.userId);
+    expect({
+      areas: erasure.erasure?.areas,
+      completed: typeof erasure.erasure?.completedAt,
+    }).toStrictEqual({
+      areas: [{ area: "interview", state: "skipped" }],
+      completed: "string",
+    });
+  });
+
+  it("keeps the interview from a link sent to their entry after their erasure was asked for, as one sent to whoever the address went to", async () => {
+    const { admin, person } = await removedPerson();
+    const { theirs, theirSecret } = await onTheList(
+      String(person.person.email)
+    );
+    await onList(
+      "INSERT INTO interview_texts (person, mark, at) VALUES (?, 'the new owner said', ?)",
+      theirs,
+      new Date().toISOString()
+    );
+    // The address released and a link sent to the entry again while the
+    // erasure ran: sent after the erasure was asked for.
+    await onList(
+      "UPDATE links SET sent_at = ? WHERE person = ?",
+      new Date(Date.now() + 60_000).toISOString(),
+      theirs
+    );
+
+    const erased = await admin.api.members.erase(
+      person.userId,
+      String(person.person.name)
+    );
+
+    const texts = await onList(
+      "SELECT person FROM interview_texts WHERE person = ?",
+      theirs
+    );
+    expect({
+      interview: erased.areas.find(({ area }) => area === "interview")?.state,
+      texts: texts.length,
+      link: await sessionWith(theirSecret),
+    }).toStrictEqual({ interview: "complete", texts: 1, link: "open" });
   });
 
   it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications and teams", async () => {

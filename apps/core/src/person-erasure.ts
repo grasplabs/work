@@ -42,6 +42,7 @@ import {
   subjectKeyVersion,
   subjectsOf,
 } from "./erased-people.ts";
+import { onboardingStore } from "./onboarding/store.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
 //
@@ -88,6 +89,28 @@ interface ErasureStep {
 }
 
 /**
+ * Marks area `area` of `userId`'s erasure `state`, done one way or
+ * another, if `done` holds as the batch reaches it.
+ */
+const marked = (
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  area: string,
+  state: "complete" | "skipped",
+  done: SQL = sql`1`
+) =>
+  db
+    .update(personErasureAreas)
+    .set({ state, updatedAt: new Date() })
+    .where(
+      and(
+        eq(personErasureAreas.userId, userId),
+        eq(personErasureAreas.area, area),
+        done
+      )
+    );
+
+/**
  * Marks area `area` of `userId`'s erasure complete, if `done` holds as the
  * batch reaches it.
  */
@@ -96,17 +119,7 @@ const completed = (
   userId: string,
   area: string,
   done: SQL = sql`1`
-) =>
-  db
-    .update(personErasureAreas)
-    .set({ state: "complete", updatedAt: new Date() })
-    .where(
-      and(
-        eq(personErasureAreas.userId, userId),
-        eq(personErasureAreas.area, area),
-        done
-      )
-    );
+) => marked(db, userId, area, "complete", done);
 
 /** Where an erased person's email was: an address nothing can deliver to. */
 const erasedEmail = (userId: string): string =>
@@ -176,6 +189,60 @@ const identity: ErasureStep = {
         )`
       ),
     ]);
+  },
+};
+
+/**
+ * Their interview (GRA-1187), deleted as the onboarding deletes one on
+ * its person's own request (`deleteOnRequest`): what they said and agreed
+ * to, every drawing it was in, the Brain's records resting on it, and
+ * Stephen's lines kept from it. Found on the list by the address that was
+ * theirs, through its keyed hash, so whichever area ran first; once an
+ * admin released the address, or under an older key, it is found no more.
+ * Their entry on the list is the company's (Nick's D5): it stays, removed
+ * only by an admin.
+ */
+const interview: ErasureStep = {
+  area: "interview",
+  erase: async (env, userId) => {
+    const db = drizzle(env.DB);
+    const [erasure] = await db
+      .select({
+        emailHash: personErasures.emailHash,
+        keyVersion: personErasures.emailKeyVersion,
+        requestedAt: personErasures.requestedAt,
+      })
+      .from(personErasures)
+      .where(eq(personErasures.userId, userId));
+    if (erasure === undefined) {
+      return;
+    }
+    // Their address released, or hashed under an older key: they can't be
+    // found on the list by it, and whatever interview they have is left.
+    // Recorded as skipped, never as done.
+    if (erasure.emailHash === null || erasure.keyVersion !== emailKeyVersion) {
+      await marked(db, userId, "interview", "skipped");
+      return;
+    }
+    const store = onboardingStore(env);
+    let found = 0;
+    for (const { id, email } of await store.rosterEmails()) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      if ((await emailHashOf(env, email)) === erasure.emailHash) {
+        // Only an interview from a link sent before the erasure was asked
+        // for: the address may have been released, and a link sent to
+        // the entry since, as this ran (`eraseInterviewOf`).
+        // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+        await store.eraseInterviewOf(id, erasure.requestedAt.toISOString());
+        found += 1;
+      }
+    }
+    if (found === 0) {
+      // Not on the list by the address they signed in with: an interview
+      // under another address is left. IDs only.
+      log.warn("member.erasure_interview_unmatched", { userId });
+    }
+    await completed(db, userId, "interview");
   },
 };
 
@@ -347,6 +414,7 @@ const steps: readonly ErasureStep[] = [
   connect,
   workspaceArea,
   apps,
+  interview,
 ];
 
 /** Refuses anyone but one of the client's admins, as members.ts does. */
