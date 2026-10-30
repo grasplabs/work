@@ -13,6 +13,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -372,7 +373,7 @@ const List = ({
 const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
   <div className="flex min-w-0 flex-col-reverse gap-0.5">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="type-figure">{value ?? "–"}</dd>
+    <Stat render={<dd />}>{value ?? "–"}</Stat>
   </div>
 );
 

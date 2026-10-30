@@ -114,6 +114,7 @@ import {
 } from "@grasp-os/ui/components/sidebar";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Switch } from "@grasp-os/ui/components/switch";
 import {
   Table,
@@ -249,7 +250,7 @@ const Theme = () => (
         <div className="flex flex-col gap-1">
           <p className="type-display">What Grasp says, in Newsreader.</p>
           <PageHeaderTitle render={<p />}>A page&apos;s title</PageHeaderTitle>
-          <p className="type-figure">1,284</p>
+          <Stat render={<p />}>1,284</Stat>
           <p className="text-sm">
             The body text, in Geist, with a{" "}
             <span className="line-under">line under</span> what was heard.

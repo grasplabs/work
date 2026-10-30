@@ -840,7 +840,7 @@ export const AiUse = () => {
             />
           ))}
         </ul>
-        <div className="bg-row-group grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 border-t px-5 py-2.5">
+        <div className="bg-row-group text-row-group-foreground grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 border-t px-5 py-2.5">
           <span>In all</span>
           <span className="tabular-nums">{euro(now.total.spend)}</span>
         </div>

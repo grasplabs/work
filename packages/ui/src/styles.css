@@ -18,30 +18,33 @@
 }
 
 /*
- * Grasp's theme is shadcn's: every value stands once, in :root (light) and
- * .dark, under shadcn's own names, and @theme inline maps each to its
- * Tailwind utility. Components only ever use those utilities.
+ * Grasp's theme is shadcn's: every colour stands once in :root (light) and
+ * once in .dark, under shadcn's own names, and @theme inline maps each to
+ * its Tailwind utility. Components only ever use those utilities.
  *
  * The values are the brand book's: deep green ink on a cool white page,
  * Newsreader (`font-serif`) for what Grasp says and Geist (`font-sans`)
  * for the product. Dark is not in the brand book; it is built on the base
  * of its Ink painting.
  *
- * Beside shadcn's names, only what a component or a page needs and
- * shadcn has no name for:
- *   - `highlight` / `highlight-foreground`: lime, the one action a page is
- *     for (Button variant="highlight"). Rare, so it keeps its meaning.
+ * Beside shadcn's names, only what a component or a page needs and shadcn
+ * has no name for. A surface comes as a pair, `x` and `x-foreground` for
+ * the text on it, as shadcn's own do:
+ *   - `highlight`: lime, the one action a page is for (Button
+ *     variant="highlight"). Rare, so it keeps its meaning.
+ *   - `tile`: the light ground of a brand's logo. `tinted`: a light tint
+ *     of the primary (Bubble variant="tinted"). `row-group`: the band
+ *     over a group of rows.
+ * Signals, which are never a ground for text:
  *   - `status-agreed` (green) for what is done, `status-attention` (amber)
  *     for what needs someone; as a badge, on a tint of themselves
  *     (Badge variant="passed" and "attention"), as shadcn's destructive is.
  *   - `destructive` (red) is for errors, a form's error or something that
  *     failed, and for actions that can't be undone. Nothing else is red.
  *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
- *     a dialog; `tile`, the light ground of a brand's logo; the hovers of
- *     secondary and muted; `tinted`, a light tint of the primary.
- *   - The dashboard's, the brain's and the charts' own colours, and three
- *     shadows: a block resting on the page, what floats above it, and the
- *     highlight's soft light.
+ *     a dialog; the dashboard's, the brain's and the charts' own colours.
+ * And three shadows: a block resting on the page, what floats above it,
+ * and the highlight's soft light.
  */
 :root {
   --radius: 0.625rem;
@@ -83,6 +86,12 @@
   --scrim: #062d2229;
   --highlight: #d9f9ad;
   --highlight-foreground: #062d22;
+  --tile: #ffffff;
+  --tile-foreground: #062d22;
+  --tinted: #dfe9e3;
+  --tinted-foreground: #062d22;
+  --row-group: #f9faf9;
+  --row-group-foreground: #062d22;
   /* Charts rank in the greens of the ink: the biggest part is the darkest. */
   --chart-1: #062d22;
   --chart-2: #b0beb5;
@@ -102,21 +111,12 @@
   --sidebar-accent-foreground: #fbfdff;
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: #6fb48a;
-  /* Brand logos are drawn for light backgrounds, so their tile stays light in dark mode too. */
-  --tile: #ffffff;
-  --tile-foreground: #062d22;
   --status-agreed: #1c7148;
   --status-attention: #82560f;
   /* Time bars: what is still by hand. */
   --bar-manual: #e0e7e2;
   /* The dashboard's return: measured is the agreed green; expected a light tint of it, still to come. */
   --return-expected: #d1e5d9;
-  --row-group: #f9faf9;
-  --shadow-block: 0 1px 2px -1px #062d2212, 0 30px 70px -50px #062d2240;
-  --shadow-lifted:
-    0 0 0 1px #0f3a2a14, 0 30px 70px -30px #0b2c2059,
-    0 10px 24px -14px #0b2c2030;
-  --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 24px -14px #6fae2ecc;
   /*
    * The brain's notes are the one place with colour: one soft hue per
    * group, as a dot per note in its file tree, note pages and the atlas's
@@ -131,39 +131,17 @@
   --graph-sources: oklch(0.82 0.01 286);
   --graph-gaps: oklch(0.7 0.1 195);
   /*
-   * The dots of Grasp's figures (the brain, the buddy, Stephen's head),
-   * which a canvas draws with the values it reads from here: the ink at
-   * rest, the voice's warmth where there is activity, its glow on the
-   * hottest dots.
+   * The warmth of Grasp's dots (the brain, the buddy, Stephen's head),
+   * where there is activity, and its glow on the hottest dots. A dot at
+   * rest is the text's own colour.
    */
-  --brain-ink: var(--foreground);
   --brain-heat: #e0542c;
   --brain-glow: #f6c35a;
-  /*
-   * A chart someone asked to have in colour: six hues of one weight,
-   * beside the agreed green and the attention amber. A chart nobody asked
-   * to colour stays in the ranked greens above.
-   */
-  --hue-blue: oklch(0.6 0.15 255);
-  --hue-purple: oklch(0.58 0.16 300);
-  --hue-pink: oklch(0.68 0.15 355);
-  --hue-red: oklch(0.6 0.19 25);
-  --hue-amber: oklch(0.78 0.14 78);
-  --hue-teal: oklch(0.66 0.1 195);
-  /*
-   * Hovered secondary and muted surfaces, a step towards the text, and a
-   * light tint of the primary (a chat bubble's `tinted` variant), with
-   * its hover. Derived from the colours above, so each theme declares
-   * them again: a value is worked out where it is declared.
-   */
-  --secondary-hover: color-mix(
-    in oklch,
-    var(--secondary),
-    var(--foreground) 5%
-  );
-  --muted-hover: color-mix(in oklch, var(--muted), var(--foreground) 5%);
-  --tinted: oklch(from var(--primary) 0.93 calc(c * 0.4) h);
-  --tinted-hover: oklch(from var(--primary) 0.88 calc(c * 0.5) h);
+  --shadow-block: 0 1px 2px -1px #062d2212, 0 30px 70px -50px #062d2240;
+  --shadow-lifted:
+    0 0 0 1px #0f3a2a14, 0 30px 70px -30px #0b2c2059,
+    0 10px 24px -14px #0b2c2030;
+  --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 24px -14px #6fae2ecc;
 }
 
 /* On screen only: paper keeps the light theme. */
@@ -189,6 +167,16 @@
     --input: oklch(1 0 0 / 15%);
     --ring: #6fb48a;
     --scrim: #0000008c;
+    /* Lime leads in dark too. */
+    --highlight: #d9f9ad;
+    --highlight-foreground: #062d22;
+    /* Brand logos are drawn for light backgrounds, so their tile stays light. */
+    --tile: #f3f6f4;
+    --tile-foreground: #062d22;
+    --tinted: #1f3a2f;
+    --tinted-foreground: #eef4f0;
+    --row-group: #111d18;
+    --row-group-foreground: #eef4f0;
     --chart-1: #eef4f0;
     --chart-2: #2f423a;
     --chart-3: #94a89c;
@@ -197,19 +185,15 @@
     --sidebar: #0a1311;
     --sidebar-foreground: #eef4f0;
     --sidebar-primary: #eef4f0;
+    --sidebar-primary-foreground: #062d22;
     --sidebar-accent: #1b2b25;
     --sidebar-accent-foreground: #eef4f0;
-    --tile: #f3f6f4;
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: #6fb48a;
     --status-agreed: #3fae6a;
     --status-attention: #e2b360;
     --bar-manual: #24342d;
     --return-expected: #1f4434;
-    --row-group: #111d18;
-    --shadow-block: 0 0 0 1px oklch(1 0 0 / 9%), 0 24px 60px -40px #000000b3;
-    --shadow-lifted:
-      0 0 0 1px oklch(1 0 0 / 9%), 0 36px 80px -28px #000000a6,
-      0 12px 28px -14px #00000059;
-    --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 28px -14px #6fae2e73;
     --graph-vision: oklch(0.72 0.13 70);
     --graph-teams: oklch(0.68 0.12 150);
     --graph-tools: oklch(0.68 0.12 250);
@@ -217,28 +201,14 @@
     --graph-candidates: oklch(0.66 0.15 300);
     --graph-sources: oklch(0.5 0.01 286);
     --graph-gaps: oklch(0.68 0.1 195);
-    --brain-ink: var(--foreground);
     --brain-heat: oklch(0.68 0.19 38);
-    --hue-blue: oklch(0.68 0.14 255);
-    --hue-purple: oklch(0.68 0.15 300);
-    --hue-pink: oklch(0.74 0.13 355);
-    --hue-red: oklch(0.68 0.17 25);
-    --hue-amber: oklch(0.8 0.13 78);
-    --hue-teal: oklch(0.72 0.1 195);
-    --secondary-hover: color-mix(
-      in oklch,
-      var(--secondary),
-      var(--foreground) 5%
-    );
-    --muted-hover: color-mix(in oklch, var(--muted), var(--foreground) 5%);
-    --tinted: oklch(from var(--primary) 0.3 calc(c * 0.4) h);
-    --tinted-hover: oklch(from var(--primary) 0.35 calc(c * 0.5) h);
+    --brain-glow: #f6c35a;
+    --shadow-block: 0 0 0 1px oklch(1 0 0 / 9%), 0 24px 60px -40px #000000b3;
+    --shadow-lifted:
+      0 0 0 1px oklch(1 0 0 / 9%), 0 36px 80px -28px #000000a6,
+      0 12px 28px -14px #00000059;
+    --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 28px -14px #6fae2e73;
   }
-}
-
-/* On the sidebar, which is the brand's ink, Grasp's dots print in the sidebar's own light ink. */
-[data-slot="sidebar"] {
-  --brain-ink: var(--sidebar-foreground);
 }
 
 /* Motion is the same in light and dark. */
@@ -295,10 +265,8 @@
   --color-scrim: var(--scrim);
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
-  --color-secondary-hover: var(--secondary-hover);
-  --color-muted-hover: var(--muted-hover);
   --color-tinted: var(--tinted);
-  --color-tinted-hover: var(--tinted-hover);
+  --color-tinted-foreground: var(--tinted-foreground);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -319,6 +287,7 @@
   --color-bar-manual: var(--bar-manual);
   --color-return-expected: var(--return-expected);
   --color-row-group: var(--row-group);
+  --color-row-group-foreground: var(--row-group-foreground);
   --color-brain-heat: var(--brain-heat);
   --color-graph-vision: var(--graph-vision);
   --color-graph-teams: var(--graph-teams);
@@ -327,38 +296,21 @@
   --color-graph-candidates: var(--graph-candidates);
   --color-graph-sources: var(--graph-sources);
   --color-graph-gaps: var(--graph-gaps);
-  --color-hue-blue: var(--hue-blue);
-  --color-hue-purple: var(--hue-purple);
-  --color-hue-pink: var(--hue-pink);
-  --color-hue-red: var(--hue-red);
-  --color-hue-amber: var(--hue-amber);
-  --color-hue-teal: var(--hue-teal);
 }
 
 /*
- * The serif's two looks that no kit component owns. Titles are the kit's
- * (PageHeaderTitle, and the titles of dialogs, sheets and drawers); these
- * two stand on plain elements across pages, in the middle of a sentence or
- * a list, so they are utilities.
+ * The serif's one look that no kit component owns: what Grasp asks or says
+ * out loud, the brand book's h2, on plain elements of the interview and
+ * the onboarding's spoken story, line by line. Titles and figures are the
+ * kit's (PageHeaderTitle, the dialogs' titles, Stat).
  */
 @utility type-display {
-  /* What Grasp asks or says out loud, as in the interview: the brand book's h2. */
   font-family: var(--font-serif);
   font-size: clamp(1.75rem, 2.6vw, 2.5rem);
   font-weight: 300;
   line-height: 1.1;
   letter-spacing: -0.022em;
   text-wrap: balance;
-}
-
-@utility type-figure {
-  /* A key figure: one number that says the result. Figures line up. */
-  font-family: var(--font-serif);
-  font-size: 1.75rem;
-  font-weight: 300;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  font-variant-numeric: lining-nums tabular-nums;
 }
 
 /*
