@@ -7,8 +7,20 @@ import { useSyncExternalStore } from "react";
 /** How the dock sits. */
 export type DockMode = "bar" | "frame" | "drawer";
 
-/** How wide the dock is as a drawer, in pixels: its `w-110`. */
-export const dockDrawerWidth = 440;
+/**
+ * How wide the dock is as a drawer (and as a frame), in pixels: the
+ * prototype's 442, `dockDrawerClass`.
+ */
+export const dockDrawerWidth = 442;
+
+/** The dock's width as a drawer or frame, as a class: `dockDrawerWidth`. */
+export const dockDrawerClass = "w-110.5";
+
+/**
+ * The room a page leaves the drawer on a wide window: `dockDrawerWidth`
+ * and the 8 pixels (`right-2`) the drawer keeps off the window's edge.
+ */
+export const dockDrawerRoom = "lg:pr-112.5";
 
 const listeners = new Set<() => void>();
 

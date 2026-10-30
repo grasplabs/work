@@ -37,7 +37,7 @@ const ScheduleTrigger = ({
         </span>
       </span>
       {trigger.stopped ? (
-        <Badge variant="destructive">
+        <Badge variant="attention">
           <Trans context="a schedule that stopped">Stopped</Trans>
         </Badge>
       ) : null}

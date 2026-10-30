@@ -5,6 +5,7 @@
  * dedicated destination of its own on the fake Cloudflare API, provisioned
  * on a release, with a newer release imported to roll out.
  */
+import { clientsNamespace, platformAccountId } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 
@@ -12,6 +13,7 @@ import { adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import type { fakeCloudflareApi } from "./cloudflare-api.ts";
+import { namespaceRelease } from "./namespace-release.ts";
 import { deployPlaced, placedClientRecord, placedRelease } from "./placed.ts";
 import { adminOf, adminSecrets } from "./secrets-store-admin.ts";
 
@@ -178,4 +180,21 @@ export const seedOrganizations = async (
     answered: { clientId: answered.clientId, account: answered.account },
     unset: { clientId: unset.clientId },
   };
+};
+
+/**
+ * Seeds the admin for the create journey: Grasp's own account in the
+ * fake, with its stage's clients' namespace, where a new organization
+ * goes, and a release that can run there.
+ */
+export const seedCreate = async (
+  cloudflare: ReturnType<typeof fakeCloudflareApi>,
+  tokens: { deployer: string }
+): Promise<{ releaseId: string }> => {
+  await migrate(env.DB);
+  await fillStore(tokens);
+  const account = cloudflare.addAccount("Grasp", undefined, platformAccountId);
+  account.namespaces.set(clientsNamespace("production"), new Map());
+  const manifest = await namespaceRelease();
+  return { releaseId: manifest.releaseId };
 };

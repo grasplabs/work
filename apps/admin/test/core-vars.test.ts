@@ -34,7 +34,7 @@ const signIn = {
 const change = {
   by: staff.email,
   what: "release",
-  release: "r100000001-0000000",
+  release: "26.01.100000001",
   at: new Date(0).toISOString(),
 } as const;
 

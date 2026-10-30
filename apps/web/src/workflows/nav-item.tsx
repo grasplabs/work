@@ -3,6 +3,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@grasp-os/ui/components/sidebar";
 import { Plural, Trans } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
@@ -44,8 +47,11 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
-/** The sidebar's Workflows entry, with how many workflows need the person. */
-export const WorkflowsItem = () => {
+/**
+ * The sidebar's Workflows entry, with how many workflows need the person;
+ * for owners and admins (`requests`), Stephen's requests under it.
+ */
+export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
   const router = useRouter();
   const matchRoute = useMatchRoute();
   const core = useCore();
@@ -104,6 +110,20 @@ export const WorkflowsItem = () => {
           </SidebarMenuBadge>
         ) : null}
       </SidebarMenuButton>
+      {requests ? (
+        <SidebarMenuSub>
+          <SidebarMenuSubItem>
+            <SidebarMenuSubButton
+              isActive={matchRoute({ to: "/workflows/requests" }) !== false}
+              render={<Link to="/workflows/requests" />}
+            >
+              <span>
+                <Trans context="Stephen's requests: the page">Requests</Trans>
+              </span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        </SidebarMenuSub>
+      ) : null}
     </SidebarMenuItem>
   );
 };
