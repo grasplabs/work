@@ -891,6 +891,12 @@ interface Route extends Admitted {
    * call that may not fall back.
    */
   fallbacks: readonly string[];
+  /**
+   * Whether a provider request of this call may already have been billed
+   * (an answer came, or a request's fate is unknown): from then on the
+   * call never falls back (`fallbackOf`). Set as its requests end.
+   */
+  billed?: boolean;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
   /**
@@ -2959,6 +2965,20 @@ const admit = async (
 };
 
 /**
+ * Whether any provider request `response` covers may have been billed: one
+ * whose answer streams, or one settled at a charge or of unknown fate.
+ * Refusals and requests never sent can't have been.
+ */
+const mayHaveBilled = ({ pending, settled }: GatewayResponse): boolean =>
+  pending !== undefined ||
+  settled.some(
+    ({ settled: state }) =>
+      state?.state === "unknown" ||
+      state?.state === "quarantined" ||
+      (state?.state === "settled" && state.chargedMicros > 0)
+  );
+
+/**
  * The route of the organization's next model for a call the provider
  * refused (`Route.fallbacks`), admitted afresh by the rules, or none:
  * only once the provider refused it before anything could be billed (its
@@ -2977,6 +2997,8 @@ const fallbackOf = async (
   const [next] = route.fallbacks;
   if (
     next === undefined ||
+    route.billed === true ||
+    mayHaveBilled(response) ||
     failure === undefined ||
     stopped !== undefined ||
     response.held !== undefined ||
@@ -2997,7 +3019,9 @@ const fallbackOf = async (
     }
     return undefined;
   }
-  return { ...route, ...admitted };
+  // The same call, on another model: it keeps what its requests already
+  // hold under its binding's cap per request, never a fresh count.
+  return { ...route, ...admitted, perRequest: route.perRequest };
 };
 
 /** Records that `from` fell back to `to`'s model, and why. Metadata only. */
@@ -3052,6 +3076,9 @@ const sendFallingBack = async (
     // oxlint-disable-next-line no-await-in-loop -- one model after another
     const sent = await send(request);
     if (!hasFailed(sent.answer) || sent.held !== undefined) {
+      // Answered: whatever the call asks next (a second try at its
+      // schema) comes after a request that was billed.
+      request.billed = request.billed === true || mayHaveBilled(sent);
       return sent;
     }
     const stopped = limit.stopped();
