@@ -6,6 +6,14 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  RailButton,
+  RailDivider,
+  RailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -18,15 +26,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";

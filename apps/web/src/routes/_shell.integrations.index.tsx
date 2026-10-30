@@ -8,6 +8,14 @@ import {
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
 import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  RailButton,
+  RailDivider,
+  RailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -46,15 +54,7 @@ import { RequestedApps } from "../connections/requested-apps.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";

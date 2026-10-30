@@ -4,7 +4,7 @@ import { defineConfig } from "vite-plus";
 import { adminPlugins, localEnv } from "./vite.config.ts";
 
 /** How many client databases the fake Cloudflare API holds at once. */
-const clientDatabases = 24;
+const clientDatabases = 32;
 
 /**
  * The admin the browser journeys run (e2e/admin-rollout.e2e.ts): the
