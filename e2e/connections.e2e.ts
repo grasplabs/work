@@ -192,20 +192,20 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   );
   await page.keyboard.press("Escape");
 
-  // A flow that failed comes back through the old address, refused, and
-  // says what to do; a code nobody knows says only the page's own words.
-  await page.goto("/connections?connectionError=connection.already_connected");
-  await expect(page).toHaveURL(/\/integrations\?connectionError=/u);
+  // A flow that failed comes back refused, and says what to do; a code
+  // nobody knows says only the page's own words.
+  await page.goto("/integrations?connectionError=connection.already_connected");
   await expect(page.getByRole("alert")).toHaveText(
     "That account is already connected here. Disconnect it first to connect it again."
   );
-  await page.goto("/connections?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E");
+  await page.goto(
+    "/integrations?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E"
+  );
   await expect(page.getByRole("alert")).toHaveText(
     "Connecting didn't work. Try again, or ask an admin."
   );
-  // A flow that finished, sent back through the old address, still says so.
-  await page.goto(`/connections?connection=${mine.id}`);
-  await expect(page).toHaveURL(/\/integrations\?connection=/u);
+  // A flow that finished, sent back without a page of its own, says so.
+  await page.goto(`/integrations?connection=${mine.id}`);
   await expect(
     page.getByRole("dialog", { name: "Microsoft 365 is connected" })
   ).toBeVisible();

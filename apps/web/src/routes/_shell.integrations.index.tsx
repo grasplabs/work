@@ -60,8 +60,8 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 // drawn as they come near. One control filters them all, to what is
 // connected or to one kind of app, and the search narrows them; both are
 // in the address. Each app opens its own page, where it is connected and
-// managed. Core's callback sends a flow that failed back here (through
-// `/connections`), with `connectionError=<code>`.
+// managed. Core's callback sends a flow that failed back here, with
+// `connectionError=<code>`.
 
 /** What the address holds: the search, the filter, and a failed flow's code. */
 interface IntegrationsSearch {
