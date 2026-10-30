@@ -96,7 +96,7 @@ export const Marked = ({
         <span key={piece.at}>{piece.text}</span>
       ) : (
         <mark
-          className="bg-brain-heat/15 -mx-0.5 rounded-sm box-decoration-clone px-0.5 text-inherit"
+          className="line-under text-inherit"
           key={piece.at}
           title={names[piece.tag]}
         >

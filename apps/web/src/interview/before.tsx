@@ -22,6 +22,7 @@ import {
   voiceLevel,
 } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
+import { usePromise } from "./words.ts";
 
 // Before the interview (prototype `interview-intro.tsx`): first which
 // language, then who they talk with, Stephen or Claire, then what this is,
@@ -295,11 +296,12 @@ const About = ({
   const other = interviewers.find((each) => each !== interviewer) ?? "stephen";
   const otherName = interviewerNames[other];
   const { body, size } = useHead(room, headSizes.talking);
+  const promise = usePromise();
   const rows = [
     { about: t`What we do`, text: useWhatWeDo(kind) },
     {
       about: t`Your words`,
-      text: t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together.`,
+      text: `${t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept.`} ${promise}`,
     },
     {
       about: t`Your choice`,

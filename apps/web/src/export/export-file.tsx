@@ -1,14 +1,21 @@
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
 import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
+import { FigureTiles } from "./figure-tiles.tsx";
+import type { ExportFigure } from "./figure-tiles.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
-// (Save as PDF), from the Markdown set as an A4 page in Geist, its title in
-// Newsreader (the kit's PageHeaderTitle), as in the
-// prototype (`lib/export-file.ts`); no PDF is drawn in the app itself.
+// (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
+// as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
+// mark at its head, Geist for the text, the title (PageHeaderTitle), the
+// Markdown's first two levels of heading (`page-export` in styles.css) and
+// any key figures (Stat) in Newsreader, and the light theme, which is what
+// paper takes (the theme's dark is for the screen only). No PDF is drawn
+// in the app itself.
 //
 // The page to print is a frame of this origin, so it keeps this page's
 // Content Security Policy: no inline script or style. Its look comes from
@@ -25,7 +32,15 @@ export interface ExportFile {
   title: string;
   /** The Markdown, made when the person asks for it. */
   markdown: () => string;
+  /**
+   * Its key figures, which the PDF shows as tiles under its title (the
+   * Markdown file says them in its text).
+   */
+  figures?: readonly ExportFigure[];
 }
+
+/** No key figures. */
+const noFigures: readonly ExportFigure[] = [];
 
 /** How long a download's address is kept: some browsers read the file only after the click returns. */
 const downloadKeptMs = 60_000;
@@ -62,16 +77,27 @@ const withoutTitleLine = (body: string, title: string): string => {
     : body;
 };
 
-/** The page an export prints: its title, then its Markdown, on A4. */
+/**
+ * The page an export prints, on A4: the Grasp mark and name at its head,
+ * as the prototype's report opens, then its title, its key figures and
+ * its Markdown. The name is the product's, never translated.
+ */
 const PrintPage = ({
   title,
   markdown,
+  figures,
 }: {
   title: string;
   markdown: string;
+  figures: readonly ExportFigure[];
 }) => (
   <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
+    <header className="flex items-center gap-2 font-medium">
+      <GraspMark className="h-4 w-auto" />
+      Grasp
+    </header>
     <PageHeaderTitle>{title}</PageHeaderTitle>
+    <FigureTiles figures={figures} />
     <PlainMarkdown
       text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
     />
@@ -171,7 +197,13 @@ export const printAsPdf = async (
   };
   printing = { remove };
   flushSync(() => {
-    root.render(<PrintPage markdown={file.markdown()} title={file.title} />);
+    root.render(
+      <PrintPage
+        figures={file.figures ?? noFigures}
+        markdown={file.markdown()}
+        title={file.title}
+      />
+    );
   });
   await Promise.all(
     links.map(async (link) => {

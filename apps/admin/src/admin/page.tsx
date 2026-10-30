@@ -1,9 +1,3 @@
-/**
- * An admin page in its frame, as the prototype lays one out
- * (`components/site-header.tsx` and `components/page.tsx`): the bar above
- * it, with the sidebar's trigger and where the page is, then its title.
- * The pages after the overview have only their title until they are ported.
- */
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,6 +6,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@grasp-os/ui/components/breadcrumb";
+/**
+ * An admin page in its frame, as the prototype lays one out
+ * (`components/site-header.tsx` and `components/page.tsx`): the bar above
+ * it, with the sidebar's trigger and where the page is, then its title.
+ * The pages after the overview have only their title until they are ported.
+ */
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { SidebarTrigger } from "@grasp-os/ui/components/sidebar";
 import { cn } from "@grasp-os/ui/lib/utils";
@@ -93,7 +94,7 @@ export const PageHeading = ({
   children?: ReactNode;
 }) => (
   <div className="flex flex-col gap-1">
-    <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+    <PageHeaderTitle>{title}</PageHeaderTitle>
     {description === undefined || description === "" ? null : (
       <p className="text-muted-foreground text-sm">{description}</p>
     )}

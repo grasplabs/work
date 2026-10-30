@@ -27,6 +27,7 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
+import { withDoors } from "./workflow-doors.ts";
 import {
   compileModules,
   contractsFromManifest,
@@ -287,7 +288,7 @@ export const draftCheckpoint = async (
  * The draft of `workflow` as `workflowDraft` answers it; given `saved`,
  * as that edit left it, whatever was saved after it.
  */
-const draftOf = async (
+const draftReadOf = async (
   env: Env,
   by: Acting,
   workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
@@ -339,6 +340,46 @@ const draftOf = async (
     editedAt: latest.editedAt.toISOString(),
   };
 };
+
+/**
+ * `draft`, its checkpoint's diagram with the doors its tasks lead
+ * through, as `by` may see them (workflow-doors.ts).
+ */
+const withCheckpointDoors = async (
+  env: Env,
+  by: Acting,
+  draft: WorkflowDraft
+): Promise<WorkflowDraft> => {
+  const { checkpoint } = draft;
+  if (checkpoint === null) {
+    return draft;
+  }
+  return {
+    ...draft,
+    checkpoint: {
+      ...checkpoint,
+      diagram: await withDoors(
+        env,
+        by,
+        checkpoint.diagram,
+        JSON.parse(checkpoint.source)
+      ),
+    },
+  };
+};
+
+/** The draft of `workflow` as `workflowDraft` answers it, its doors resolved for `by`. */
+const draftOf = async (
+  env: Env,
+  by: Acting,
+  workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
+  saved?: Parameters<typeof draftReadOf>[3]
+): Promise<WorkflowDraft> =>
+  await withCheckpointDoors(
+    env,
+    by,
+    await draftReadOf(env, by, workflow, saved)
+  );
 
 /**
  * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`).

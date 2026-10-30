@@ -51,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -427,9 +428,7 @@ const Middle = ({
   }
   return (
     <text dominantBaseline="middle" textAnchor="middle" x={cx} y={cy}>
-      <tspan className="fill-foreground text-2xl font-medium" x={cx} y={cy - 6}>
-        {amount}
-      </tspan>
+      <Stat render={<tspan x={cx} y={cy - 6} />}>{amount}</Stat>
       <tspan className="fill-muted-foreground text-xs" x={cx} y={cy + 14}>
         in all
       </tspan>
