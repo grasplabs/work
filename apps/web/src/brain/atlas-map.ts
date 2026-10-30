@@ -1,6 +1,6 @@
 import { t } from "@lingui/core/macro";
 
-import { REGION_IDS } from "./brain-atlas.ts";
+import { REGION_IDS, TEAM_FOLDER } from "./brain-atlas.ts";
 import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { folderName } from "./brain.ts";
 import type { Brain, Note, NoteKind } from "./brain.ts";
@@ -53,12 +53,30 @@ export interface RegionGroup {
   count: number;
 }
 
-/** The notes a region shows as neurons: a folder's own note names its group instead, and a gap sits beside what it is about, except among the gaps. */
+/** A folder's own note: a channel names the folder of its sources, a team the folder of its work. It names its group rather than being a neuron in it. */
+const ownsFolder = (note: Note): boolean =>
+  note.kind === "channel" ||
+  (note.kind === "team" && note.path[0] === TEAM_FOLDER);
+
+/** What a folder of a region is called: a team's by the team, any other by the vault's name for it. */
+const folderLabel = (
+  region: AtlasRegion | undefined,
+  path: string[]
+): string => {
+  if (path[0] === TEAM_FOLDER) {
+    return (
+      region?.notes.find((note) => note.kind === "team" && note.id === path[1])
+        ?.title ?? folderName(path[1] ?? "")
+    );
+  }
+  return folderName(path.at(-1) ?? "");
+};
+
+/** The notes a region shows as neurons: a folder's own note names its group instead, and a gap sits beside what it is about. */
 const shownNotes = (regionId: RegionId, atlas: Atlas): Note[] => {
   const region = atlas.regions.find((each) => each.id === regionId);
   return (region?.notes ?? []).filter(
-    (note) =>
-      note.kind !== "channel" && (note.kind !== "gap" || regionId === "gaps")
+    (note) => !ownsFolder(note) && note.kind !== "gap"
   );
 };
 
@@ -67,12 +85,13 @@ export const regionGroups = (
   regionId: RegionId,
   atlas: Atlas
 ): RegionGroup[] => {
+  const region = atlas.regions.find((each) => each.id === regionId);
   const groups = new Map<string, RegionGroup>();
   for (const note of shownNotes(regionId, atlas)) {
     const key = note.path.join("/");
     const group = groups.get(key) ?? {
       key,
-      label: folderName(note.path.at(-1) ?? key),
+      label: folderLabel(region, note.path),
       count: 0,
     };
     group.count += 1;
@@ -241,6 +260,8 @@ export interface Group {
   noteId?: string;
   /** The folder above it, when that has a note of its own. */
   parent?: { label: string; noteId: string };
+  /** It is a team, its work under it: named however little work it has, since in a group of teams the team is what a reader looks for. */
+  team?: boolean;
   /** Where its name sits, in the map's pixels: over its neurons, from their left, standing on `y`; and how wide the group is, which its name keeps within. */
   x: number;
   y: number;
@@ -257,6 +278,10 @@ export interface Exit {
   /** Links between the two regions in the brain. */
   count: number;
   from: number[];
+  /** It carries what came in, or links only proposed, rather than nerves. */
+  quiet?: boolean;
+  /** Its links are only proposed: its fibres are dashed. */
+  dashed?: boolean;
 }
 
 /** The room one neuron has with its name under it, in pixels. */
@@ -275,7 +300,10 @@ export interface NeuronMap {
   region: RegionId;
   neurons: Neuron[];
   groups: Group[];
+  /** The nerves between its neurons: confirmed links, and an open question against what it is about. */
   synapses: [number, number][];
+  /** Links Grasp proposed and nobody confirmed yet: drawn dashed. */
+  proposed?: [number, number][];
   exits: Exit[];
   /** The room it is laid out in. */
   room: MapRoom;
@@ -600,7 +628,8 @@ const blocksOf = (neurons: Neuron[], groups: Group[]): Block[] => {
     }
     const named =
       groups.length > 1 &&
-      own.filter((index) => neurons[index]?.kind !== "gap").length >= 2;
+      (each.team === true ||
+        own.filter((index) => neurons[index]?.kind !== "gap").length >= 2);
     const last = blocks.at(-1);
     if (!named && last && last.name === 0) {
       last.groups.push(group);
@@ -862,10 +891,11 @@ const addFolder = (
     .findLast(Boolean);
   const group = groups.length;
   groups.push({
-    label: folderName(path.at(-1) ?? folder),
+    label: folderLabel(region, path),
     noteId: own?.id,
     parent:
       !own && above ? { label: above.title, noteId: above.id } : undefined,
+    ...(path[0] === TEAM_FOLDER ? { team: true } : {}),
     x: 0,
     y: 0,
     width: 0,
@@ -884,7 +914,7 @@ const addFolder = (
       id: `${CLUSTER}${folder}`,
       noteIds: members.map((member) => member.id),
       kind: "cluster",
-      label: `${folderName(path.at(-1) ?? folder)} · ${many}`,
+      label: `${folderLabel(region, path)} · ${many}`,
       state: waiting ? "waiting" : "known",
       group,
       r: 0,
@@ -911,24 +941,38 @@ const addFolder = (
   }
 };
 
+/** The neuron a note is, or, for a note that names a group (a team, for one), the first neuron of it. */
+const neuronOrGroupIn =
+  ({ neurons, groups, neuronOf }: Parts) =>
+  (id: string): number | undefined => {
+    const found = neuronOf.get(id);
+    if (found !== undefined) {
+      return found;
+    }
+    const group = groups.findIndex((each) => each.noteId === id);
+    const first =
+      group === -1 ? -1 : neurons.findIndex((neuron) => neuron.group === group);
+    return first >= 0 ? first : undefined;
+  };
+
 /** An open question as a small neuron of its own, against the first note here it is about, or the one it was noticed in. */
 const addOpen = (
   parts: Parts,
   byId: Map<string, Note>,
-  regionId: RegionId,
   link: (a: number, b: number) => void,
   only: string | undefined
 ): void => {
   const { region, neurons, groups, neuronOf } = parts;
+  const neuronOrGroup = neuronOrGroupIn(parts);
   let loose = -1;
   for (const item of region.open) {
     const note = byId.get(item.noteId);
-    if (note?.kind !== "gap" || regionId === "gaps") {
+    if (note?.kind !== "gap") {
       continue;
     }
     const index = neurons.length;
     const beside = [...item.subjects, ...note.links]
-      .map((id) => neuronOf.get(id))
+      .map(neuronOrGroup)
       .find((found) => found !== undefined);
     // Narrowed to one folder, only what is about the notes in it.
     if (beside === undefined && only !== undefined) {
@@ -952,7 +996,7 @@ const addOpen = (
     });
     neuronOf.set(item.noteId, index);
     for (const subject of item.subjects) {
-      const found = neuronOf.get(subject);
+      const found = neuronOrGroup(subject);
       if (found !== undefined) {
         link(index, found);
       }
@@ -974,19 +1018,13 @@ const partsOf = (
       .filter((item) => byId.get(item.noteId)?.kind !== "gap")
       .flatMap((item) => item.subjects)
   );
-  // Among the gaps, the open questions are the gaps' own notes.
-  if (regionId === "gaps") {
-    for (const item of region.open) {
-      openNotes.add(item.noteId);
-    }
-  }
   const shown = new Set(shownNotes(regionId, atlas));
   // The notes of one folder sit together. A folder's own note names its group rather than being a neuron in it.
   const folders = new Map<string, Note[]>();
   const folderNotes = new Map<string, Note>();
   for (const note of region.notes) {
     const folder = note.path.join("/");
-    if (note.kind === "channel") {
+    if (ownsFolder(note)) {
       folderNotes.set(folder, note);
     } else if (shown.has(note) && (only === undefined || folder === only)) {
       folders.set(folder, [...(folders.get(folder) ?? []), note]);
@@ -997,6 +1035,110 @@ const partsOf = (
     addFolder(parts, folder, members, folderNotes, fold, openNotes);
   }
   return { parts, folderNotes };
+};
+
+/** Adds a way out of a region to `other`, from neuron `inside`. */
+const addWay = (
+  ends: Map<RegionId, Set<number>>,
+  counts: Map<RegionId, number>,
+  other: RegionId,
+  inside: number
+): void => {
+  ends.set(other, (ends.get(other) ?? new Set()).add(inside));
+  counts.set(other, (counts.get(other) ?? 0) + 1);
+};
+
+/**
+ * The brain's links from a region's neurons: confirmed ones between them (through `link`) and out
+ * to the region the other end lives in; ones only proposed, drawn dashed, never as a nerve.
+ */
+const nervesOf = (
+  neuronOrGroup: (id: string) => number | undefined,
+  atlas: Atlas,
+  regionId: RegionId,
+  link: (a: number, b: number) => void
+) => {
+  const proposed = new Map<string, [number, number]>();
+  const nerveOut = new Map<RegionId, Set<number>>();
+  const nerveCount = new Map<RegionId, number>();
+  const maybeOut = new Map<RegionId, Set<number>>();
+  const maybeCount = new Map<RegionId, number>();
+  for (const nerve of atlas.nerves) {
+    const a = neuronOrGroup(nerve.a);
+    const b = neuronOrGroup(nerve.b);
+    const inside = a ?? b;
+    const other = atlas.home.get(a === undefined ? nerve.a : nerve.b);
+    if (a !== undefined && b !== undefined && a !== b) {
+      if (nerve.link.confirmed) {
+        link(a, b);
+      } else {
+        const pair: [number, number] = a < b ? [a, b] : [b, a];
+        proposed.set(`${pair[0]}:${pair[1]}`, pair);
+      }
+    } else if (
+      (a === undefined || b === undefined) &&
+      inside !== undefined &&
+      other !== undefined &&
+      other !== regionId
+    ) {
+      if (nerve.link.confirmed) {
+        addWay(nerveOut, nerveCount, other, inside);
+      } else {
+        addWay(maybeOut, maybeCount, other, inside);
+      }
+    }
+  }
+  return { proposed, nerveOut, nerveCount, maybeOut, maybeCount };
+};
+
+/** What came in, between the stem and where it landed in a region: a way out to follow, never a nerve. */
+const heardOf = (
+  parts: Parts,
+  neuronOrGroup: (id: string) => number | undefined,
+  atlas: Atlas,
+  brain: Brain,
+  byId: Map<string, Note>,
+  regionId: RegionId
+) => {
+  const evidence = (id: string) =>
+    byId.get(id)?.kind === "source" || byId.get(id)?.kind === "channel";
+  const heardOut = new Map<RegionId, Set<number>>();
+  const heardCount = new Map<RegionId, number>();
+  for (const [from, to] of brain.edges) {
+    const a = neuronOrGroup(from);
+    const b = neuronOrGroup(to);
+    const inside = a ?? b;
+    const other = atlas.home.get(a === undefined ? from : to);
+    if (
+      inside === undefined ||
+      (a !== undefined && b !== undefined) ||
+      !(evidence(from) || evidence(to)) ||
+      // A question was noticed in what came in, but it is tied to what it asks about, not wired to the stem.
+      parts.neurons[inside]?.kind === "gap" ||
+      !other ||
+      other === regionId
+    ) {
+      continue;
+    }
+    addWay(heardOut, heardCount, other, inside);
+  }
+  return { heardOut, heardCount };
+};
+
+/** What runs from a region's neurons: its nerves, the links only proposed, and what came in. */
+const waysOf = (
+  parts: Parts,
+  atlas: Atlas,
+  brain: Brain,
+  byId: Map<string, Note>,
+  regionId: RegionId,
+  link: (a: number, b: number) => void
+) => {
+  const neuronOrGroup = neuronOrGroupIn(parts);
+  return {
+    ...nervesOf(neuronOrGroup, atlas, regionId, link),
+    ...heardOf(parts, neuronOrGroup, atlas, brain, byId, regionId),
+  };
 };
 
 /** The map with every folder of more than `fold` notes as one neuron; narrowed to one folder, `only`, when there is one. */
@@ -1052,7 +1194,7 @@ const foldedMap = (
       y: 0,
     });
     groups.push({
-      label: folderName(note.path.at(-1) ?? note.title),
+      label: folderLabel(region, note.path),
       x: 0,
       y: 0,
       width: 0,
@@ -1067,30 +1209,13 @@ const foldedMap = (
       synapses.set(`${pair[0]}:${pair[1]}`, pair);
     }
   };
-  addOpen(parts, byId, regionId, link, only);
+  addOpen(parts, byId, link, only);
 
-  const outside = new Map<RegionId, Set<number>>();
-  // How many links run to each other region from what is shown, for a region narrowed to one folder.
-  const crossing = new Map<RegionId, number>();
-  for (const [from, to] of brain.edges) {
-    const a = neuronOf.get(from);
-    const b = neuronOf.get(to);
-    if (a !== undefined && b !== undefined) {
-      link(a, b);
-      continue;
-    }
-    const inside = a ?? b;
-    if (inside === undefined) {
-      continue;
-    }
-    const other = atlas.home.get(a === undefined ? from : to);
-    if (!other || other === regionId) {
-      continue;
-    }
-    outside.set(other, (outside.get(other) ?? new Set()).add(inside));
-    crossing.set(other, (crossing.get(other) ?? 0) + 1);
-  }
+  const ways = waysOf(parts, atlas, brain, byId, regionId, link);
+  const { proposed, nerveOut, maybeOut, heardOut } = ways;
   const pairs = [...synapses.values()];
+  // A way out shows the strongest it carries: confirmed nerves, else proposed links, else what came in.
+  const outside = new Map([...heardOut, ...maybeOut, ...nerveOut]);
   const links = neurons.map(
     (_, index) =>
       pairs.filter(([a, b]) => a === index || b === index).length +
@@ -1098,24 +1223,34 @@ const foldedMap = (
   );
   const { cell, fits } = layOut(neurons, groups, links, room);
 
-  // The ways out: each other region this one links to, by name, in the atlas's own order. They sit in a row over the room until the atlas, which knows how wide each name is, puts them where they fit.
-  const out = REGION_IDS.filter(
-    (other) => outside.has(other) && (region.links[other] ?? 0) > 0
-  );
+  // The ways out: each other region a nerve reaches, and the regions what came in runs to or from, by name, in the atlas's own order. They sit in a row over the room until the atlas, which knows how wide each name is, puts them where they fit.
+  const out = REGION_IDS.filter((other) => outside.has(other));
   const step = room.width / Math.max(out.length, 1);
-  const exits = out.map((other, index): Exit => ({
-    region: other,
-    x: (index - (out.length - 1) / 2) * step,
-    y: room.height / 2 + EXITS,
-    count:
-      (only === undefined ? region.links[other] : crossing.get(other)) ?? 0,
-    from: [...(outside.get(other) ?? [])].toSorted((a, b) => a - b),
-  }));
+  const exits = out.map((other, index): Exit => {
+    const nerves = nerveOut.has(other);
+    const maybe = !nerves && maybeOut.has(other);
+    let counts = ways.heardCount;
+    if (nerves) {
+      counts = ways.nerveCount;
+    } else if (maybe) {
+      counts = ways.maybeCount;
+    }
+    return {
+      region: other,
+      x: (index - (out.length - 1) / 2) * step,
+      y: room.height / 2 + EXITS,
+      count: counts.get(other) ?? 0,
+      from: [...(outside.get(other) ?? [])].toSorted((a, b) => a - b),
+      ...(nerves ? {} : { quiet: true }),
+      ...(maybe ? { dashed: true } : {}),
+    };
+  });
   return {
     region: regionId,
     neurons,
     groups,
     synapses: pairs,
+    proposed: [...proposed.values()],
     exits,
     room,
     cell,
@@ -1325,6 +1460,8 @@ interface Strand {
   to: number;
   /** A nerve fibre: two strands side by side, beaded, ending in a small terminal. */
   fibre: boolean;
+  /** Printed in dashes, as a link that is only proposed. */
+  dashed?: boolean;
 }
 
 /** The point a line between two points bows through: off its middle, sideways, by a share of its length. */
@@ -1479,6 +1616,38 @@ const strandsOf = (map: NeuronMap, step: number): Strand[] => {
       fibre: true,
     });
   }
+  // A link Grasp only proposed: a dashed fibre, bowed the other way.
+  for (const [a, b] of map.proposed ?? []) {
+    const one = map.neurons[a];
+    const two = map.neurons[b];
+    if (!one || !two) {
+      continue;
+    }
+    const [x1, y1] = edgeOf(one, two.x, two.y);
+    const [x2, y2] = edgeOf(two, one.x, one.y);
+    const [cx, cy] = bowed(
+      x1,
+      y1,
+      x2,
+      y2,
+      (hash(`${one.id}${two.id}`) % 2 === 0 ? -1 : 1) * 0.14
+    );
+    strands.push({
+      x1,
+      y1,
+      cx,
+      cy,
+      x2,
+      y2,
+      owner: a,
+      other: b,
+      role: SYNAPSE,
+      from: 0.5,
+      to: 0.5,
+      fibre: true,
+      dashed: true,
+    });
+  }
   for (const [exit, out] of map.exits.entries()) {
     for (const from of out.from) {
       const neuron = map.neurons[from];
@@ -1506,6 +1675,7 @@ const strandsOf = (map: NeuronMap, step: number): Strand[] => {
         from: 0.55,
         to: 0.3,
         fibre: true,
+        ...(out.dashed === true ? { dashed: true } : {}),
       });
     }
   }
@@ -1572,8 +1742,13 @@ const printStrand = (
   const dy = strand.y2 - strand.y1;
   const across = Math.hypot(dx, dy) || 1e-6;
   const { owner, other, role } = strand;
+  // A dash and a gap, each about five dots long.
+  const dashes = Math.max(4, Math.round(length / (step * 5)));
   for (let dot = 1; dot <= many; dot += 1) {
     const along = dot / many;
+    if (strand.dashed === true && Math.floor(along * dashes) % 2 === 1) {
+      continue;
+    }
     const x =
       (1 - along) * (1 - along) * strand.x1 +
       2 * along * (1 - along) * strand.cx +
@@ -1601,7 +1776,7 @@ const printStrand = (
       along
     );
   }
-  if (strand.fibre) {
+  if (strand.fibre && strand.dashed !== true) {
     // The terminal: a small bud where the fibre arrives.
     put(strand.x2, strand.y2, 0.9, 0.6, owner, other, role, 1);
     for (let bud = 0; bud < 6; bud += 1) {
