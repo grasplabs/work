@@ -1,4 +1,3 @@
-import type { GridRow, LiveStatus } from "../clients/grid.ts";
 /**
  * The admin's Platform page as a model, ported from the prototype
  * (grasplabs/prototype `lib/admin-platform.ts`): the rollout going out
@@ -14,6 +13,7 @@ import type { GridRow, LiveStatus } from "../clients/grid.ts";
  */
 import { compareReleaseIds } from "@grasp-os/shared/release-id";
 
+import type { GridRow, LiveStatus } from "../clients/grid.ts";
 import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";

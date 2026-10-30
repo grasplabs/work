@@ -95,6 +95,8 @@ interface Bucket {
   writtenAfterHead: Map<string, Buffer>;
   /** Objects another writer stores right after the next listing is answered. */
   writtenAfterList: Map<string, Buffer>;
+  /** Keys whose next PUT is refused, as R2 failing a write for good (a 5xx is retried). */
+  failingPuts: Set<string>;
 }
 
 const emptyBucket = (): Bucket => ({
@@ -103,6 +105,7 @@ const emptyBucket = (): Bucket => ({
   puts: [],
   writtenAfterHead: new Map(),
   writtenAfterList: new Map(),
+  failingPuts: new Set(),
 });
 
 /** A ListObjectsV2 by `/` of the keys under `prefix`, in one page. */
@@ -180,6 +183,10 @@ const handle = async (
     return;
   }
   const body = await buffer(request);
+  if (bucket.failingPuts.delete(key)) {
+    response.writeHead(HTTP_BAD_REQUEST).end();
+    return;
+  }
   if (request.headers["if-none-match"] === "*" && stored !== undefined) {
     response.writeHead(HTTP_PRECONDITION_FAILED).end();
     return;
@@ -493,6 +500,26 @@ describe("publishing a release", () => {
 
     expect(publishedReleases()).toHaveLength(1);
     expect(stdout).not.toContain("Published");
+  });
+
+  it("marks, rather than publishes again, a commit whose publish stopped between its manifest and its marker", async () => {
+    const month = releaseMonthPrefix(new Date());
+    const commit = "7".repeat(40);
+    bucket.failingPuts.add(commitKey(commit));
+    const stopped = await outcomeOf(publish(buildOf(commit)));
+    const rerun = await publish(buildOf(commit));
+
+    expect({
+      stopped: stopped.includes(`PUT ${commitKey(commit)}: 400`),
+      releases: publishedReleases().map(({ id }) => id),
+      marker: bucket.objects.get(commitKey(commit))?.toString(),
+      published: rerun.includes("Published"),
+    }).toStrictEqual({
+      stopped: true,
+      releases: [`${month}1`],
+      marker: `${month}1\n`,
+      published: false,
+    });
   });
 
   it("uploads nothing on a dry run", async () => {

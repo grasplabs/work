@@ -22,6 +22,9 @@
  * another publish claimed that id first, it takes the next one, so two
  * publishes never share an id. Once published, `commits/<sha>` records the
  * id, and a re-run of the same commit's publish publishes nothing again.
+ * One that stopped between its manifest and that marker is found by its
+ * commit among the month's releases (and the month before's) and marked
+ * then, rather than published under a second id.
  * Without it (Promote release) the release keeps the id it has.
  *
  * With --dry-run it verifies the release and says what it would upload,
@@ -41,12 +44,16 @@ import {
   manifestKey,
 } from "@grasp-os/shared/release";
 import { nextReleaseId, releaseMonthPrefix } from "@grasp-os/shared/release-id";
+import { z } from "zod";
 
 import { stampReleaseId } from "./assign-lib.ts";
 import { releasesBucketFromEnv } from "./bucket-lib.ts";
 import type { ReleasesBucket } from "./bucket-lib.ts";
 import { readLimitEvidence } from "./evidence-lib.ts";
 import { verifyRelease } from "./manifest-lib.ts";
+
+/** What a published manifest is read for when looking for a commit's release. */
+const publishedCommitSchema = z.object({ commit: z.string() });
 
 const UPLOAD_CONCURRENCY = 8;
 const HTTP_NOT_FOUND = 404;
@@ -231,6 +238,52 @@ const publishedAs = async (
   return id.trim();
 };
 
+/** The UTC month before `at`'s. */
+const monthBefore = (at: Date): Date =>
+  new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - 1, 1));
+
+/**
+ * The release `manifest.commit` was published as by an attempt that
+ * stopped before writing its marker (`commits/<sha>`): the release of this
+ * month or the month before whose manifest names the commit. Its marker
+ * is written then, so the next run finds it at once.
+ */
+const publishedUnmarked = async (
+  bucket: ReleasesBucket
+): Promise<string | undefined> => {
+  const now = new Date();
+  const months = [
+    releaseMonthPrefix(now),
+    releaseMonthPrefix(monthBefore(now)),
+  ];
+  for (const month of months) {
+    // oxlint-disable-next-line no-await-in-loop -- this month first
+    for (const id of await bucket.listIds(month)) {
+      // oxlint-disable-next-line no-await-in-loop -- a few releases a month
+      const response = await bucket.fetch(bucket.url(manifestKey(id)));
+      if (response.status === HTTP_NOT_FOUND) {
+        continue;
+      }
+      if (!response.ok) {
+        throw new Error(`GET ${manifestKey(id)}: ${response.status}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a few releases a month
+      const { commit } = publishedCommitSchema.parse(await response.json());
+      if (commit === manifest.commit) {
+        // oxlint-disable-next-line no-await-in-loop -- once, when found
+        await putFile(
+          bucket,
+          commitKey(manifest.commit),
+          Buffer.from(`${id}\n`),
+          { onlyIfAbsent: true, contentType: "text/plain" }
+        );
+        return id;
+      }
+    }
+  }
+  return undefined;
+};
+
 /**
  * Publishes the release under the next id of the month (CI's publish):
  * each attempt claims an id with the first key it writes under it, only
@@ -282,7 +335,9 @@ if (args["dry-run"]) {
   );
 } else {
   const bucket = releasesBucketFromEnv();
-  const earlier = args["assign-id"] ? await publishedAs(bucket) : undefined;
+  const earlier = args["assign-id"]
+    ? ((await publishedAs(bucket)) ?? (await publishedUnmarked(bucket)))
+    : undefined;
   if (earlier === undefined) {
     await uploadBlobs(bucket);
     await (args["assign-id"]
