@@ -3,8 +3,9 @@
  * the one the admin sets, drift flagged (`clientQuotaPolicy`).
  */
 import { Badge } from "@grasp-os/ui/components/badge";
+import { PanelBody } from "@grasp-os/ui/components/panel";
 
-import { Body, SetupSection } from "../admin/setup-parts.tsx";
+import { Section } from "../admin/section.tsx";
 import { formatTime } from "../releases/format.ts";
 import type {
   ClientQuotaPolicy,
@@ -69,7 +70,7 @@ export const summaryOf = ({
 };
 
 export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
-  <SetupSection
+  <Section
     action={
       <Badge variant={policy.state === "drifted" ? "attention" : "secondary"}>
         {stateLabels[policy.state]}
@@ -78,7 +79,7 @@ export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
     description={summaryOf(policy)}
     title="Quota policy"
   >
-    <Body>
+    <PanelBody>
       {policy.inForce === null ? null : (
         <div className="flex flex-col gap-1">
           <span className="font-medium">{`Core applies ${generationText(policy.inForce.generation)}`}</span>
@@ -95,6 +96,6 @@ export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
         <span className="font-medium">{`The admin sets ${policy.set.generation === 0 ? "no policy" : generationText(policy.set.generation)}`}</span>
         <LoweredLimits lowered={policy.set.lowered} />
       </div>
-    </Body>
-  </SetupSection>
+    </PanelBody>
+  </Section>
 );

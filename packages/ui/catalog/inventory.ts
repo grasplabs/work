@@ -950,6 +950,28 @@ export const graspComponents = {
     summary: "Children in a column with an even gap.",
     exports: ["Stack", "stackVariants"],
   },
+  "site-header": {
+    status: "supported",
+    summary:
+      "The bar above a page in a frame with a sidebar: the sidebar's trigger, where the page is as a breadcrumb that keeps to one line, and the page's actions.",
+    exports: ["SiteHeader"],
+  },
+  panel: {
+    status: "supported",
+    summary:
+      "A part of a page on a card of its own: a header with its title, a line on what it holds and its action, then its rows or body, each under a line.",
+    exports: [
+      "Panel",
+      "PanelBody",
+      "PanelDescription",
+      "PanelHeader",
+      "PanelHeading",
+      "PanelRow",
+      "PanelRowControl",
+      "PanelRowLabel",
+      "PanelTitle",
+    ],
+  },
 } as const satisfies Record<string, SupportedEntry>;
 
 export type GraspComponent = keyof typeof graspComponents;

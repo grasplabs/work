@@ -67,6 +67,17 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Kbd, KbdGroup } from "@grasp-os/ui/components/kbd";
 import {
+  Panel,
+  PanelBody,
+  PanelDescription,
+  PanelHeader,
+  PanelHeading,
+  PanelRow,
+  PanelRowControl,
+  PanelRowLabel,
+  PanelTitle,
+} from "@grasp-os/ui/components/panel";
+import {
   Progress,
   ProgressLabel,
   ProgressValue,
@@ -371,6 +382,30 @@ const StatDemo = () => (
   </dl>
 );
 
+const PanelDemo = () => (
+  <Panel aria-labelledby="panel-demo-title">
+    <PanelHeader>
+      <PanelHeading>
+        <PanelTitle id="panel-demo-title">Sign-in</PanelTitle>
+        <PanelDescription>How people at Acme sign in.</PanelDescription>
+      </PanelHeading>
+      <Button size="sm" variant="outline">
+        Save
+      </Button>
+    </PanelHeader>
+    <PanelRow>
+      <PanelRowLabel>
+        <span>Provider</span>
+        <p className="text-muted-foreground">Where accounts live.</p>
+      </PanelRowLabel>
+      <PanelRowControl>Microsoft 365</PanelRowControl>
+    </PanelRow>
+    <PanelBody>
+      <p>Everyone signs in with their work account.</p>
+    </PanelBody>
+  </Panel>
+);
+
 const GraspMarkDemo = () => (
   <div className="flex items-center gap-2">
     <GraspMark className="size-6" />
@@ -391,6 +426,7 @@ export const displayDemos = {
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
   "grasp-mark": GraspMarkDemo,
+  panel: PanelDemo,
   stat: StatDemo,
   item: ItemDemo,
   kbd: KbdDemo,

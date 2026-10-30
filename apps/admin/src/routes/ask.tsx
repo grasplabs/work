@@ -35,9 +35,8 @@ const AskPage = () => {
       : admins.find(({ client }) => client.id === about)?.client.name;
   return (
     <>
-      <AdminHeader page="Ask Grasp" />
-      <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col text-sm">
-        <div className="flex justify-end px-4 pt-3 md:px-6">
+      <AdminHeader
+        actions={
           <Button
             onClick={() => {
               setChat((each) => each + 1);
@@ -48,7 +47,10 @@ const AskPage = () => {
             <PlusIcon data-icon="inline-start" />
             New chat
           </Button>
-        </div>
+        }
+        page="Ask Grasp"
+      />
+      <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col text-sm">
         <h1 className="sr-only">Ask Grasp</h1>
         <AskChat
           about={name}

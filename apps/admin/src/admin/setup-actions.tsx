@@ -12,6 +12,7 @@
  * and everything its audit log keeps of it.
  */
 import { fromBase64Url } from "@grasp-os/shared/encoding";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -24,6 +25,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
+import { PanelBody } from "@grasp-os/ui/components/panel";
 import {
   Table,
   TableBody,
@@ -33,6 +35,7 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Link, useRouter } from "@tanstack/react-router";
+import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
@@ -63,7 +66,7 @@ import { pinClientFn, rollbackClientFn } from "../rollout/functions.ts";
 import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
-import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
+import { Facts, Failure, Quiet } from "./setup-parts.tsx";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
@@ -330,40 +333,40 @@ export const RollBack = ({
     );
   };
   return (
-    <Body>
+    <PanelBody>
       <p className="text-muted-foreground">
         {`Rolling it back from ${rollout.releaseId ?? "the secrets rollout"} puts back what it ran before, and waits for it.`}
       </p>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Rolling it back puts the shared secrets it ran before back. If you
-            revoked them at their providers, its people can&apos;t sign in or
-            reach their connections until the next secrets rollout.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={busy}
-              onClick={rollBack}
-              size="sm"
-              variant="destructive"
-            >
-              Roll back anyway
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              Keep the new secrets
-            </Button>
-          </div>
-        </div>
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Rolling it back puts the shared secrets it ran before back. If you
+              revoked them at their providers, its people can&apos;t sign in or
+              reach their connections until the next secrets rollout.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy}
+                onClick={rollBack}
+                size="sm"
+                variant="destructive"
+              >
+                Roll back anyway
+              </Button>
+              <Button
+                onClick={() => {
+                  setConfirming(false);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                Keep the new secrets
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -383,7 +386,7 @@ export const RollBack = ({
           <Failure failure={failure} />
         </div>
       )}
-    </Body>
+    </PanelBody>
   );
 };
 
@@ -467,7 +470,7 @@ export const ApplySettings = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   return (
-    <Body>
+    <PanelBody>
       <p>{pendingWords(configPending, pinned)}</p>
       {active ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -493,7 +496,7 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </Body>
+    </PanelBody>
   );
 };
 
@@ -778,36 +781,36 @@ export const RotateSecrets = ({
     });
   };
   return (
-    <Body>
+    <PanelBody>
       {confirming ? (
-        <div
-          className="border-destructive flex flex-col gap-2 rounded-md border p-4"
-          role="alert"
-        >
-          <p>
-            Its people all sign in again once the next deploy makes the new
-            secrets live.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={busy}
-              onClick={rotate}
-              size="sm"
-              variant="destructive"
-            >
-              Rotate them
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirming(false);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              Keep them
-            </Button>
-          </div>
-        </div>
+        <Alert variant="destructive">
+          <TriangleAlertIcon aria-hidden />
+          <AlertDescription>
+            <p>
+              Its people all sign in again once the next deploy makes the new
+              secrets live.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy}
+                onClick={rotate}
+                size="sm"
+                variant="destructive"
+              >
+                Rotate them
+              </Button>
+              <Button
+                onClick={() => {
+                  setConfirming(false);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                Keep them
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -830,7 +833,7 @@ export const RotateSecrets = ({
           ) : null}
         </div>
       )}
-    </Body>
+    </PanelBody>
   );
 };
 
