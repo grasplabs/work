@@ -91,7 +91,7 @@ function TabsList({
       {variant === "line" ? (
         <TabsPrimitive.Indicator
           data-slot="tabs-indicator"
-          className="bg-foreground ease-sidebar absolute bottom-0.75 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-300 group-data-vertical/tabs:hidden motion-reduce:transition-none"
+          className="bg-foreground ease-sidebar absolute bottom-0.75 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full transition-[translate,width] duration-200 group-data-vertical/tabs:hidden motion-reduce:transition-none"
         />
       ) : (
         <TabsPrimitive.Indicator

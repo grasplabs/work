@@ -17,7 +17,10 @@ function Trace({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="trace"
-      className={cn("flex w-full min-w-0 flex-col gap-2", className)}
+      className={cn(
+        "*:has-[>[data-slot=trace-line]]:focus-visible:ring-ring/30 flex w-full min-w-0 flex-col gap-2 *:has-[>[data-slot=trace-line]]:flex *:has-[>[data-slot=trace-line]]:w-fit *:has-[>[data-slot=trace-line]]:max-w-full *:has-[>[data-slot=trace-line]]:min-w-0 *:has-[>[data-slot=trace-line]]:rounded-lg *:has-[>[data-slot=trace-line]]:text-left *:has-[>[data-slot=trace-line]]:outline-none *:has-[>[data-slot=trace-line]]:focus-visible:ring-3",
+        className
+      )}
       {...props}
     />
   );
@@ -44,7 +47,7 @@ function TraceLine({
       data-status={status}
       data-wrap={wrap || undefined}
       className={cn(
-        "text-muted-foreground data-[status=error]:text-destructive data-[status=attention]:text-status-attention flex w-fit max-w-full min-w-0 items-center gap-2 text-sm transition-colors data-wrap:items-start data-wrap:*:data-[slot=trace-title]:whitespace-normal data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:animate-pulse",
+        "text-muted-foreground data-[status=error]:text-destructive data-[status=attention]:text-status-attention in-[a:hover,button:hover]:text-foreground data-[status=error]:in-[a:hover,button:hover]:text-destructive flex w-fit max-w-full min-w-0 items-center gap-2 text-sm transition-colors in-[a,button]:cursor-pointer data-wrap:items-start data-wrap:*:data-[slot=trace-icon]:h-5 data-wrap:*:data-[slot=trace-title]:whitespace-normal data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:animate-pulse",
         className
       )}
       {...props}
@@ -59,7 +62,7 @@ function TraceIcon({ className, ...props }: React.ComponentProps<"span">) {
       data-slot="trace-icon"
       aria-hidden="true"
       className={cn(
-        "flex size-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
+        "flex size-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [[data-slot=trace-title]~&]:-ml-1",
         className
       )}
       {...props}
@@ -119,7 +122,7 @@ function TraceCollapsibleTrigger({
     <CollapsibleTrigger
       data-slot="trace-collapsible-trigger"
       className={cn(
-        "group/trace-trigger text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-lg text-left transition-colors outline-none focus-visible:ring-3",
+        "group/trace-trigger text-muted-foreground hover:text-foreground focus-visible:ring-ring/30 has-[[data-status=error]]:text-destructive flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-lg text-left transition-colors outline-none focus-visible:ring-3",
         className
       )}
       {...props}
