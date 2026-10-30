@@ -12,6 +12,7 @@ import type { GridRow, LiveStatus } from "../clients/grid.ts";
  * are in, and the ring after the one it waits after is the next of
  * those, as approving it moves on to (src/rollout/control.ts).
  */
+import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { ReleaseSummary } from "../releases/queries.ts";
 import type { RolloutSummary, TargetView } from "../rollout/queries.ts";
@@ -199,6 +200,7 @@ export const behindOf = (
 
 /** What about a company needs someone at Grasp, the most pressing first. */
 export type PlatformNeed =
+  | { kind: "needs_attention"; reason: AttentionReason }
   | { kind: "not_started"; why: NotStarted | null }
   | { kind: "stopped" }
   | { kind: "setup_unread" }
@@ -216,7 +218,9 @@ export const needsOf = (
   }
   const needs: PlatformNeed[] = [];
   // Being set up: what waits for staff there, in place of a deploy's.
-  if (row.setup?.state === "not_started") {
+  if (row.setup?.state === "needs_attention") {
+    needs.push({ kind: "needs_attention", reason: row.setup.reason });
+  } else if (row.setup?.state === "not_started") {
     needs.push({ kind: "not_started", why: row.setup.why });
   } else if (row.setup?.state === "stopped") {
     needs.push({ kind: "stopped" });

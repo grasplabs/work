@@ -289,6 +289,8 @@ describe("a company being set up, on the grid", () => {
       needWords({ kind: "not_started", why: "no_release" }),
       needWords({ kind: "not_started", why: null }),
       needWords({ kind: "stopped" }),
+      needWords({ kind: "needs_attention", reason: "stuck" }),
+      needWords({ kind: "needs_attention", reason: "needs_person" }),
     ];
 
     expect({ setup, words }).toStrictEqual({
@@ -297,7 +299,9 @@ describe("a company being set up, on the grid", () => {
         "Not started: no hosting destination ready.",
         "Not started: no release imported yet.",
         "Not started: provision it from its Setup.",
-        "Stopped: resume it from its Setup.",
+        "Stopped: Grasp is retrying it by itself.",
+        "Needs attention: Grasp's automatic retries haven't finished setting it up. Retry now from its Setup once it's fixed.",
+        "Needs attention: setting it up stopped for something Grasp can't fix by itself. Retry now from its Setup once it's fixed.",
       ],
     });
   });
