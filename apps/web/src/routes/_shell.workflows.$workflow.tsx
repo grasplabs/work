@@ -3,8 +3,6 @@ import type {
   SteeredWrite,
   WorkflowActivity,
   WorkflowDraft,
-  WorkflowFile,
-  WorkflowKnowledge,
   WorkflowParams,
   WorkflowResource,
   WorkflowActionReview,
@@ -29,10 +27,8 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
-import { integrationsOf } from "../connections/integrations.ts";
-import type { Session } from "../core.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import {
@@ -53,8 +49,6 @@ import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
-import { workflowAppsOf } from "../workflows/workflow-apps.ts";
-import type { WorkflowApps } from "../workflows/workflow-apps.ts";
 import { WorkflowStatus } from "../workflows/workflow-status.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
@@ -283,9 +277,6 @@ const WorkflowResourceView = ({
   askable,
   lifecycle,
   activity,
-  knowledge,
-  files,
-  apps,
   names,
 }: {
   resource: WorkflowResource;
@@ -296,9 +287,6 @@ const WorkflowResourceView = ({
   askable: Loaded<boolean>;
   lifecycle: Loaded<WorkflowLifecycle>;
   activity: Loaded<WorkflowActivity[]>;
-  knowledge: Loaded<WorkflowKnowledge[]>;
-  files: Loaded<WorkflowFile[]>;
-  apps: Loaded<WorkflowApps>;
   names: Names;
 }) => {
   const router = useRouter();
@@ -308,6 +296,9 @@ const WorkflowResourceView = ({
     draft === undefined ? "versions" : "definition"
   );
   const [part, setPart] = useState<TracesPart>("runs");
+  // Files and apps reads what no other tab needs: only once it is opened,
+  // then kept while another tab shows.
+  const [filesOpened, setFilesOpened] = useState(false);
   // A test on recent items runs a saved checkpoint: none before the
   // draft's first edit (revision 0 is the current version's definition).
   const saved =
@@ -318,6 +309,9 @@ const WorkflowResourceView = ({
       <Tabs
         onValueChange={(value: WorkflowTab) => {
           setTab(value);
+          if (value === "files") {
+            setFilesOpened(true);
+          }
         }}
         spacing="none"
         value={tab}
@@ -408,9 +402,15 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
-        <TabsContent value="files">
+        <TabsContent keepMounted value="files">
           <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
-            <FilesAndApps apps={apps} files={files} knowledge={knowledge} />
+            {filesOpened ? (
+              <FilesAndApps
+                currentVersion={currentVersion}
+                versions={versions}
+                workflow={resource.id}
+              />
+            ) : null}
           </div>
         </TabsContent>
         {/* Kept while another tab shows: what was typed stays. */}
@@ -456,33 +456,29 @@ const WorkflowResourceView = ({
 };
 
 /**
- * The apps workflow `workflow` works in: the catalog and the connections
- * Integrations reads, which of them serve it, and the connector bindings
- * of its current version that nothing serves yet.
+ * People's names by ID, for the names on activity lines: read beside the
+ * page rather than before it, with IDs standing in until they come.
  */
-const readApps = async (
-  session: Session,
-  workflow: string
-): Promise<WorkflowApps> => {
-  const [resource, catalog, connections, uses, versions, approvals] =
-    await Promise.all([
-      session.workflowResources.get(workflow),
-      session.connections.catalog(),
-      session.connections.list(),
-      session.workflows.byConnection(),
-      session.workflowResources.versions(workflow),
-      session.workflowResources.bindings(workflow),
-    ]);
-  const { currentVersion } = resource;
-  const current = versions.find(({ version }) => version === currentVersion);
-  return workflowAppsOf({
-    workflow,
-    integrations: integrationsOf(catalog.entries, connections),
-    uses,
-    currentVersion,
-    bindings: current?.bindings ?? [],
-    approvals,
-  });
+const usePeople = (
+  read: Promise<Loaded<ReadonlyMap<string, string>>>
+): ReadonlyMap<string, string> => {
+  const [people, setPeople] = useState<ReadonlyMap<string, string>>(
+    () => new Map()
+  );
+  useEffect(() => {
+    let left = false;
+    const settle = async (): Promise<void> => {
+      const loaded = await read;
+      if (!left && loaded.state === "ready") {
+        setPeople(loaded.data);
+      }
+    };
+    void settle();
+    return () => {
+      left = true;
+    };
+  }, [read]);
+  return people;
 };
 
 const WorkflowResourcePage = () => {
@@ -495,11 +491,9 @@ const WorkflowResourcePage = () => {
     askable,
     lifecycle,
     activity,
-    knowledge,
-    files,
-    apps,
-    people,
+    people: peopleRead,
   } = Route.useLoaderData();
+  const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
@@ -526,11 +520,8 @@ const WorkflowResourcePage = () => {
           // one keeps what is typed in its editor.
           key={resource.data.id}
           activity={activity}
-          apps={apps}
           askable={askable}
           draft={draft}
-          files={files}
-          knowledge={knowledge}
           lifecycle={lifecycle}
           names={{ people, me: identity.userId }}
           params={params}
@@ -546,23 +537,35 @@ const WorkflowResourcePage = () => {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
+    // Names only, and not waited for: IDs stand in until they come.
+    const people = loadFromCore(core, readPeople);
+    const resourceRead = loadFromCore(
+      core,
+      async (session) => await session.workflowResources.get(workflow)
+    );
+    // Only its builders read its draft, as soon as core says who reads:
+    // beside the page's other reads, not after them.
+    const draftRead = async (): Promise<Loaded<WorkflowDraft> | undefined> => {
+      const read = await resourceRead;
+      return read.state === "ready" && read.data.role === "builder"
+        ? await loadFromCore(
+            core,
+            async (session) => await session.workflowResources.draft(workflow)
+          )
+        : undefined;
+    };
     const [
       resource,
+      draft,
       versions,
       params,
       runs,
       askable,
       lifecycle,
       activity,
-      knowledge,
-      files,
-      apps,
-      people,
     ] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.get(workflow)
-      ),
+      resourceRead,
+      draftRead(),
       loadFromCore(
         core,
         async (session) => await session.workflowResources.versions(workflow)
@@ -588,26 +591,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await session.workflowResources.activity(workflow)
       ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.knowledge(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.files(workflow)
-      ),
-      loadFromCore(core, async (session) => await readApps(session, workflow)),
-      // Names only: IDs stand in for anyone not listed in time.
-      loadFromCore(core, readPeople),
     ]);
-    // Only its builders read its draft.
-    const draft =
-      resource.state === "ready" && resource.data.role === "builder"
-        ? await loadFromCore(
-            core,
-            async (session) => await session.workflowResources.draft(workflow)
-          )
-        : undefined;
     return {
       resource,
       draft,
@@ -617,11 +601,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       askable,
       lifecycle,
       activity,
-      knowledge,
-      files,
-      apps,
-      people:
-        people.state === "ready" ? people.data : new Map<string, string>(),
+      people,
     };
   },
   component: WorkflowResourcePage,
