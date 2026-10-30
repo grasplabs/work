@@ -16,7 +16,6 @@ import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
-import { Route as PlatformDestinationsRouteImport } from './routes/platform/destinations'
 import { Route as PlatformOffboardedRouteImport } from './routes/platform/offboarded'
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
 import { Route as OrganizationsClientIdAiUseRouteImport } from './routes/organizations/$clientId/ai-use'
@@ -72,11 +71,6 @@ const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
 const PlatformIndexRoute = PlatformIndexRouteImport.update({
   id: '/platform/',
   path: '/platform/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PlatformDestinationsRoute = PlatformDestinationsRouteImport.update({
-  id: '/platform/destinations',
-  path: '/platform/destinations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlatformOffboardedRoute = PlatformOffboardedRouteImport.update({
@@ -209,7 +203,6 @@ export interface FileRoutesByFullPath {
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
-  '/platform/destinations': typeof PlatformDestinationsRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -239,7 +232,6 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
-  '/platform/destinations': typeof PlatformDestinationsRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -271,7 +263,6 @@ export interface FileRoutesById {
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
-  '/platform/destinations': typeof PlatformDestinationsRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
@@ -304,7 +295,6 @@ export interface FileRouteTypes {
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
-    | '/platform/destinations'
     | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -334,7 +324,6 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/lab'
     | '/new-organization'
-    | '/platform/destinations'
     | '/platform/offboarded'
     | '/platform'
     | '/organizations/$clientId/ai-use'
@@ -365,7 +354,6 @@ export interface FileRouteTypes {
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
-    | '/platform/destinations'
     | '/platform/offboarded'
     | '/platform/'
     | '/organizations/$clientId/ai-use'
@@ -397,7 +385,6 @@ export interface RootRouteChildren {
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
-  PlatformDestinationsRoute: typeof PlatformDestinationsRoute
   PlatformOffboardedRoute: typeof PlatformOffboardedRoute
   PlatformIndexRoute: typeof PlatformIndexRoute
   PlatformReleasesReleaseIdRoute: typeof PlatformReleasesReleaseIdRoute
@@ -456,13 +443,6 @@ declare module '@tanstack/react-router' {
       path: '/platform'
       fullPath: '/platform/'
       preLoaderRoute: typeof PlatformIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/platform/destinations': {
-      id: '/platform/destinations'
-      path: '/platform/destinations'
-      fullPath: '/platform/destinations'
-      preLoaderRoute: typeof PlatformDestinationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/platform/offboarded': {
@@ -665,7 +645,6 @@ const rootRouteChildren: RootRouteChildren = {
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,
-  PlatformDestinationsRoute: PlatformDestinationsRoute,
   PlatformOffboardedRoute: PlatformOffboardedRoute,
   PlatformIndexRoute: PlatformIndexRoute,
   PlatformReleasesReleaseIdRoute: PlatformReleasesReleaseIdRoute,

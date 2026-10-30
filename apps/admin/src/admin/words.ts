@@ -453,3 +453,14 @@ export const knowledgeSourceWords: Record<KnowledgeSource, string> = {
   everyoneHeard: "Everyone else interviewed",
   review: "Workflows known",
 };
+
+/**
+ * What staff do to give the admin secret `secret` it runs without until
+ * then (scripts/optional-secrets.ts): every secret lives in the stage's
+ * 1Password Environment, and Deploy platform copies it into Secrets
+ * Store and binds it. Putting it in the store alone does nothing: the
+ * admin was deployed without its binding, as Cloudflare refuses a deploy
+ * that binds a secret the store doesn't have.
+ */
+export const addSecretStep = (secret: string): string =>
+  `Add ${secret} to the stage’s 1Password Environment, then run Deploy platform.`;
