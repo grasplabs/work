@@ -240,6 +240,19 @@ const answerSchema = z.strictObject({
 const notFound = () => decisionErrors.create("decision.not_found");
 
 /** The audit entry of something that happened to a decision. */
+/**
+ * Where a person answered when not on the decision's own page: on one of
+ * App `app`'s screens. The audit log names that App, an independent run's
+ * decision having none of its own.
+ */
+export interface ScreenVia {
+  readonly app: string;
+}
+
+/** What an audit entry's detail says of `via`. */
+const viaDetail = (via: ScreenVia | undefined): Record<string, string> =>
+  via === undefined ? {} : { via: "screen", app: via.app };
+
 const decisionEntry = (
   actor: AuditActor,
   action: `workflow.decision.${string}`,
@@ -1321,7 +1334,7 @@ const auditRefusal = async (
   by: Identity,
   found: DecisionWithRun,
   code: RefusalCode,
-  where: { via?: "screen"; stage?: "confirm" }
+  where: { via?: ScreenVia; stage?: "confirm" }
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const { run } = found;
@@ -1335,7 +1348,7 @@ const auditRefusal = async (
         found.decision,
         {
           errorCode: code,
-          ...(where.via === undefined ? {} : { via: where.via }),
+          ...viaDetail(where.via),
           ...(where.stage === undefined ? {} : { stage: where.stage }),
         }
       )
@@ -1451,7 +1464,7 @@ export const confirmDecision = async (
   decision: unknown,
   revision: unknown,
   answer: unknown,
-  via?: "screen"
+  via?: ScreenVia
 ): Promise<DecisionConfirmation> => {
   const found = await decisionWithRun(env, decision);
   const where = via === undefined ? {} : { via };
@@ -1505,9 +1518,7 @@ export const confirmDecision = async (
         "workflow.decision.confirmed",
         run,
         found.decision,
-        via === undefined
-          ? { expiresAt: expiresAt.toISOString() }
-          : { via, expiresAt: expiresAt.toISOString() }
+        { ...viaDetail(via), expiresAt: expiresAt.toISOString() }
       )
     ),
   ]);
@@ -1560,7 +1571,7 @@ export const answerDecision = async (
   decision: unknown,
   answer: unknown,
   confirmation: unknown,
-  via?: "screen"
+  via?: ScreenVia
 ): Promise<DecisionView> => {
   const found = await decisionWithRun(env, decision);
   const refuse = async (code: RefusalCode) => {
@@ -1680,7 +1691,7 @@ export const answerDecision = async (
         `workflow.decision.${status}`,
         run,
         row,
-        via === undefined ? {} : { via }
+        viaDetail(via)
       )
     ),
     summaryChanged(db, run),

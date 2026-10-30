@@ -1,8 +1,11 @@
 import { clientDomain, stages } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
+import { and, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
-import { clients, settings } from "../src/db/schema.ts";
+import { setModelSpendCeiling } from "../src/clients/settings.ts";
+import { auditEvents, clients, settings } from "../src/db/schema.ts";
 import { oauthRelayOf, signInApps } from "../src/deploy/context.ts";
 import {
   derivedCoreConfig,
@@ -31,7 +34,7 @@ const signIn = {
 const change = {
   by: staff.email,
   what: "release",
-  release: "r100000001-0000000",
+  release: "26.01.100000001",
   at: new Date(0).toISOString(),
 } as const;
 
@@ -233,4 +236,139 @@ describe("a hosted client's sign-in, in relay mode", () => {
       ),
     ]).toStrictEqual(["sign_in_incomplete", "sign_in_incomplete"]);
   });
+});
+
+describe("a client's model spend ceiling, as its gateway's budget", () => {
+  it("holds every client's core to €250 a month unless staff set another, audited, and no setting raises it", async () => {
+    const fresh = await clientWith({});
+    const raised = await clientWith({
+      MODEL_GATEWAY: JSON.stringify({
+        gateway: "grasp-os",
+        models: ["anthropic/claude-sonnet-4-5"],
+        budgets: {
+          deployment: { limit: 5000, alertAt: 90 },
+          user: { limit: 20 },
+        },
+      }),
+    });
+    const lowered = await clientWith({
+      MODEL_GATEWAY: JSON.stringify({
+        gateway: "grasp-os",
+        models: ["anthropic/claude-sonnet-4-5"],
+        budgets: { deployment: { limit: 100 } },
+      }),
+    });
+    const before = await varsOf(fresh);
+    const raisedVars = await varsOf(raised);
+    const loweredVars = await varsOf(lowered);
+
+    const changed = await setModelSpendCeiling(env, staff, {
+      clientId: fresh,
+      euros: 1200,
+    });
+    const again = await setModelSpendCeiling(env, staff, {
+      clientId: fresh,
+      euros: 1200,
+    });
+    const audited = await db
+      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, fresh),
+          eq(auditEvents.action, "client.model_spend_ceiling")
+        )
+      );
+    const [record] = await db
+      .select({ configChangedAt: clients.configChangedAt })
+      .from(clients)
+      .where(eq(clients.id, fresh));
+    const after = await varsOf(fresh);
+
+    expect({
+      before: before.MODEL_GATEWAY,
+      after: after.MODEL_GATEWAY,
+      raised: raisedVars.MODEL_GATEWAY,
+      lowered: loweredVars.MODEL_GATEWAY,
+      changed,
+      again,
+      audited: audited.map(({ detail }): unknown =>
+        JSON.parse(detail ?? "null")
+      ),
+      marked: record?.configChangedAt instanceof Date,
+    }).toMatchObject({
+      before: { budgets: { deployment: { limit: 250, alertAt: 80 } } },
+      after: { budgets: { deployment: { limit: 1200, alertAt: 80 } } },
+      // The setting's own budgets stay, its deployment one held to the ceiling.
+      raised: {
+        budgets: {
+          deployment: { limit: 250, alertAt: 90 },
+          user: { limit: 20 },
+        },
+      },
+      lowered: { budgets: { deployment: { limit: 100, alertAt: 80 } } },
+      changed: true,
+      again: false,
+      audited: [{ from: 250, to: 1200 }],
+      marked: true,
+    });
+  });
+
+  it("audits two saves that overlap each as what it replaced, the second from the first's ceiling", async () => {
+    const clientId = await clientWith({});
+
+    const saved = await Promise.all([
+      setModelSpendCeiling(env, staff, { clientId, euros: 300 }),
+      setModelSpendCeiling(env, staff, { clientId, euros: 400 }),
+    ]);
+    const audited = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "client.model_spend_ceiling")
+        )
+      )
+      .orderBy(auditEvents.at, sql`rowid`);
+    const changes = audited.map(({ detail }) =>
+      z
+        .object({ from: z.number(), to: z.number() })
+        .parse(JSON.parse(detail ?? "null"))
+    );
+    const [first, second] = changes;
+    const [record] = await db
+      .select({ ceiling: clients.modelSpendCeiling })
+      .from(clients)
+      .where(eq(clients.id, clientId));
+
+    expect({
+      saved,
+      count: changes.length,
+      chained: [first?.from, second?.from === first?.to],
+      ends: record?.ceiling === second?.to,
+      both: [first?.to ?? 0, second?.to ?? 0].toSorted((a, b) => a - b),
+    }).toStrictEqual({
+      saved: [true, true],
+      count: 2,
+      chained: [250, true],
+      ends: true,
+      both: [300, 400],
+    });
+  });
+
+  it.each([0, 1.5, 100_001])(
+    "refuses a ceiling of %s euros, changing nothing",
+    async (euros) => {
+      const clientId = await clientWith({});
+
+      await expect(
+        setModelSpendCeiling(env, staff, { clientId, euros })
+      ).rejects.toThrow(/euros/u);
+      const vars = await varsOf(clientId);
+      expect(vars.MODEL_GATEWAY).toMatchObject({
+        budgets: { deployment: { limit: 250 } },
+      });
+    }
+  );
 });

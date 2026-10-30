@@ -31,6 +31,12 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import {
+  confirmScreenDecision,
+  decideScreenRun,
+  reviewScreenDecision,
+} from "../src/workflows/screen-runs.ts";
+import { allEvents } from "./audit-events.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -283,6 +289,18 @@ const screenErrors = async (
         .map(({ file, line, message }) => `${file}:${line}: ${message}`);
 };
 
+/** "answered" when `call` succeeds, else the code it was refused with. */
+const codeOf = async (call: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await call();
+    return "answered";
+  } catch (error) {
+    return error instanceof Error && "code" in error
+      ? error.code
+      : String(error);
+  }
+};
+
 /** What a call answered, or its refusal's code. */
 const answerOf = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
@@ -294,7 +312,7 @@ const answerOf = (result: OperationResult): unknown =>
  * of its decision queries, as whoever calls.
  */
 const decisionInbox = async () => {
-  const { fixture, workflowId } = await boundApp();
+  const { fixture, workflowId, binding } = await boundApp();
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
@@ -309,12 +327,12 @@ const decisionInbox = async () => {
       ).bind(fixture.app, member.userId, fixture.owner.userId, Date.now())
     )
   );
-  const version = await env.DB.prepare(
+  const pinnedRow = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
   )
     .bind(workflowId)
     .first<{ hash: string }>();
-  const manifestHash = version?.hash ?? "";
+  const manifestHash = pinnedRow?.hash ?? "";
   const opened = Date.now() - 60_000;
   /** A run of the pinned version `app` started for `starter`, asking `ask`. */
   const runAsking = async (
@@ -323,28 +341,36 @@ const decisionInbox = async () => {
     {
       step = "task:ask",
       restricted = false,
+      version = 1,
       input = { amount: 5 },
-    }: { step?: string; restricted?: boolean; input?: unknown } = {}
+    }: {
+      step?: string;
+      restricted?: boolean;
+      version?: number;
+      input?: unknown;
+    } = {}
   ): Promise<{ runId: string; decisionId: string }> => {
     const runId = crypto.randomUUID();
     const decisionId = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'app', ?, ?, ?, ?, ?, ?, 1, 'h', ?)"
       ).bind(
         runId,
         app,
         `key-${runId}`,
         workflowId,
+        version,
         manifestHash,
         starter.userId,
         at
       ),
       env.DB.prepare(
-        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, restricted, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?, ?)"
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, restricted, created_at) VALUES (?, ?, ?, ?, 'b', ?, 'running', ?, ?)"
       ).bind(
         runId,
         workflowId,
+        version,
         manifestHash,
         starter.userId,
         restricted ? 1 : 0,
@@ -391,6 +417,7 @@ const decisionInbox = async () => {
   };
   return {
     fixture,
+    binding,
     workflowId,
     manifestHash,
     opened,
@@ -659,6 +686,205 @@ describe(
         removedListed: [],
         removedDetail: "workflow.decision_unavailable",
       });
+    });
+
+    it("answer an independent run's decision from the App's screen once, after the page's confirmation, and refuse every decision the App may not answer alike", async () => {
+      const { fixture, binding, opened, reviewer, outsider, runAsking, ask } =
+        await decisionInbox();
+      const { app } = fixture;
+      // The screen's App, at the release its frame runs.
+      const screen = { app, version: 1 };
+      const asked = await runAsking(app, opened);
+      const restricted = await runAsking(app, opened + 1000, {
+        restricted: true,
+      });
+      const elsewhere = await runAsking(`other-${unique()}`, opened + 2000);
+      const answer = { approved: true, payload: { comment: "Looks right" } };
+      const review = async (
+        who: typeof reviewer,
+        of: typeof asked
+      ): Promise<unknown> =>
+        await codeOf(
+          async () =>
+            await reviewScreenDecision(
+              env,
+              who,
+              screen,
+              of.runId,
+              of.decisionId,
+              answer
+            )
+        );
+      const refusals = {
+        restricted: await review(reviewer, restricted),
+        elsewhere: await review(reviewer, elsewhere),
+        // Its ID with another run of the App's: never the decision's.
+        mismatched: await review(reviewer, {
+          runId: restricted.runId,
+          decisionId: asked.decisionId,
+        }),
+        outsider: await review(outsider, asked),
+      };
+      const reviewed = await reviewScreenDecision(
+        env,
+        reviewer,
+        screen,
+        asked.runId,
+        asked.decisionId,
+        answer
+      );
+      if (reviewed.state !== "review") {
+        throw new Error("Nothing to review");
+      }
+      // The screen alone can't answer: only with the page's confirmation.
+      const unconfirmed = await codeOf(
+        async () =>
+          await decideScreenRun(
+            env,
+            reviewer,
+            screen,
+            asked.runId,
+            asked.decisionId,
+            reviewed.response,
+            null
+          )
+      );
+      const { confirmation } = await confirmScreenDecision(
+        env,
+        reviewer,
+        screen,
+        asked.runId,
+        asked.decisionId,
+        reviewed.decision.revision,
+        reviewed.response
+      );
+      const decided = await decideScreenRun(
+        env,
+        reviewer,
+        screen,
+        asked.runId,
+        asked.decisionId,
+        reviewed.response,
+        confirmation
+      );
+      // Exactly that answer again is the recorded decision; another isn't.
+      const again = await decideScreenRun(
+        env,
+        reviewer,
+        screen,
+        asked.runId,
+        asked.decisionId,
+        reviewed.response,
+        confirmation
+      );
+      const changed = await codeOf(
+        async () =>
+          await decideScreenRun(
+            env,
+            reviewer,
+            screen,
+            asked.runId,
+            asked.decisionId,
+            { approved: false },
+            confirmation
+          )
+      );
+      const events = await allEvents();
+      const answeredEvent = events.find(
+        ({ action, target }) =>
+          action === "workflow.decision.approved" &&
+          target?.id === asked.decisionId
+      );
+      const stored = await env.DB.prepare(
+        "SELECT status, decided_by AS decidedBy, payload FROM workflow_decisions WHERE id = ?"
+      )
+        .bind(asked.decisionId)
+        .first();
+      // The App no longer binds the workflow: its runs' decisions aren't
+      // its screens' to answer.
+      const later = await runAsking(app, opened + 3000);
+      // Once the App reads restricted data, a run it started before stays
+      // unrestricted: an answer its screen composes may carry what it read.
+      await appHost(env, appIdSchema.parse(app)).restrict();
+      const afterRestricting = {
+        answer: await review(reviewer, later),
+        listed: await ask(reviewer, "decisions", {
+          runId: later.runId,
+          pagination: {},
+        }),
+      };
+      // A run as restricted as the App is now: its screen may answer it,
+      // until the App no longer binds the workflow.
+      const matching = await runAsking(app, opened + 4000, {
+        restricted: true,
+      });
+      const beforeUnbinding = await review(reviewer, matching);
+      await unbindWorkflowFromApp(env, fixture.owner, binding);
+
+      expect({
+        ...refusals,
+        unconfirmed,
+        decided: decided.status,
+        again: again.status,
+        changed,
+        stored,
+        answeredBy: answeredEvent?.detail,
+        afterRestricting,
+        beforeUnbinding,
+        unbound: await review(reviewer, matching),
+      }).toMatchObject({
+        restricted: "decision.not_found",
+        elsewhere: "decision.not_found",
+        mismatched: "decision.not_found",
+        outsider: "decision.forbidden",
+        unconfirmed: "decision.unconfirmed",
+        decided: "approved",
+        again: "approved",
+        changed: "decision.closed",
+        stored: {
+          status: "approved",
+          decidedBy: reviewer.userId,
+          payload: JSON.stringify({ comment: "Looks right" }),
+        },
+        // Which App's screen answered: an independent run names none.
+        answeredBy: { via: "screen", app },
+        afterRestricting: {
+          answer: "decision.not_found",
+          // Still shown to the reviewer, as one their screen can't answer.
+          listed: {
+            items: [{ wait: { id: later.decisionId, canRespond: false } }],
+          },
+        },
+        beforeUnbinding: "answered",
+        unbound: "decision.not_found",
+      });
+    });
+
+    it("answer from a screen only a decision of the version the release pins, as its inbox lists them", async () => {
+      const { fixture, opened, reviewer, runAsking } = await decisionInbox();
+      const { app } = fixture;
+      // The App's binding of `review` moved to version 2 without a new
+      // release: the release still pins version 1.
+      await env.DB.prepare(
+        "UPDATE app_workflow_bindings SET workflow_resource_version = 2 WHERE app_id = ? AND alias = 'review' AND status = 'active'"
+      )
+        .bind(app)
+        .run();
+      const unsealed = await runAsking(app, opened, { version: 2 });
+
+      await expect(
+        codeOf(
+          async () =>
+            await reviewScreenDecision(
+              env,
+              reviewer,
+              { app, version: 1 },
+              unsealed.runId,
+              unsealed.decisionId,
+              { approved: true, payload: { comment: "Fine" } }
+            )
+        )
+      ).resolves.toBe("decision.not_found");
     });
 
     it("follow the App's bindings in a draft, and fail a screen's type check on a decision the workflow doesn't have", async () => {

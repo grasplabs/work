@@ -1611,8 +1611,8 @@ msgid "{workflow} in {appName} failed"
 msgstr "{workflow} in {appName} is mislukt"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {domain}"
-msgstr "{workflowId} in {domain}"
+msgid "{workflow} in {domain}"
+msgstr "{workflow} in {domain}"
 
 #: src/dashboard/widget-board.tsx
 msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
@@ -11424,12 +11424,20 @@ msgid "Run {runId}"
 msgstr "Run {runId}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
-msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}"
+msgstr "Run {shortId} van {workflow} in {domain}, gestart {started}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the run chain started by run {rootId}"
-msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}, in de keten van runs die run {rootId} startte"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}, in the run chain started by run {rootId}"
+msgstr "Run {shortId} van {workflow} in {domain}, gestart {started}, in de keten van runs die run {rootId} startte"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}"
+msgstr "Run {shortId} van {workflow}, gestart {started}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}, in the run chain started by run {rootId}"
+msgstr "Run {shortId} van {workflow}, gestart {started}, in de keten van runs die run {rootId} startte"
 
 #: src/workflows/history-view.tsx
 msgid "Run history"
@@ -11553,7 +11561,9 @@ msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
 #. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
+#: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Gezegd door vijf of meer mensen"
 
