@@ -22,7 +22,15 @@ import { formatTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
-import { handovers, hoursOf, journeyOf, laneDay, placeOf } from "./lanes.ts";
+import {
+  handovers,
+  hoursOf,
+  journeyOf,
+  laneDay,
+  laterDay,
+  listedRuns,
+  placeOf,
+} from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 
 // Runs › Today (prototype `components/workflows/today-lanes.tsx`): a lane
@@ -69,12 +77,35 @@ const WorkingDots = () => {
   );
 };
 
-/** The mark of a run: filled, hollow, or orange. */
+/**
+ * How a run that ended without its result is marked: filled when it went
+ * by itself, hollow when it went to people, as any run; red when it
+ * failed, grey when it was cancelled.
+ */
+const unfinishedMarks: Readonly<
+  Record<"failed" | "cancelled", Record<"alone" | "people", string>>
+> = {
+  failed: {
+    alone: "bg-destructive",
+    people: "border-destructive bg-background border",
+  },
+  cancelled: {
+    alone: "bg-muted-foreground",
+    people: "border-muted-foreground bg-background border",
+  },
+};
+
+/** The mark of a run: filled, hollow, orange, or red or grey when unfinished. */
 const Mark = ({ run, large }: { run: LaneRun; large: boolean }) => {
   const size = cn(
     "size-2 rounded-full transition-transform duration-200",
     large && "scale-125"
   );
+  if (run.state === "failed" || run.state === "cancelled") {
+    return (
+      <span className={cn(size, unfinishedMarks[run.state][run.run.went])} />
+    );
+  }
   if (run.state === "waits") {
     return <span className={cn(size, "bg-status-attention")} />;
   }
@@ -124,6 +155,11 @@ const useRunText = (run: LaneRun): string => {
     running: t({ message: "running", context: "a run going on now" }),
     toPerson: t`went to people`,
     done: t({ message: "done by itself", context: "a run that ran alone" }),
+    failed: t({ message: "failed", context: "a run that ended in failure" }),
+    cancelled: t({
+      message: "cancelled",
+      context: "a run someone stopped before its end",
+    }),
   };
   return words[run.state];
 };
@@ -304,7 +340,7 @@ const Lanes = ({
                     dimmed && !lit.has(run.id) && "opacity-25"
                   )}
                   key={`${run.id} trail`}
-                  ref={placedAt(placeOf(run.at, day))}
+                  ref={placedAt(placeOf(run.waitsSince ?? run.at, day))}
                 />
               ) : null
             )}
@@ -394,7 +430,7 @@ const ListLane = ({
       {lane.running ? <WorkingDots /> : null}
     </span>
     <span className="flex flex-wrap items-center gap-1">
-      {lane.runs.slice(-12).map((run) => (
+      {listedRuns(lane, 12).map((run) => (
         <ListDot
           chosen={chosen === run.id}
           key={run.id}
@@ -492,7 +528,16 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       <span className="font-medium">{waits.asks}</span>
       <span className="text-muted-foreground text-xs">{waitsSince}</span>
       <ErrorText>{failure}</ErrorText>
-      <span className="flex justify-end gap-2">
+      <span className="flex flex-wrap items-center justify-end gap-2">
+        {/* An answer with a comment, which a decision may require: on the
+            decision's own page, which has the field. */}
+        <Link
+          className="text-muted-foreground mr-auto text-xs hover:underline"
+          params={{ decision: waits.decision }}
+          to="/decisions/$decision"
+        >
+          <Trans>Answer with a comment</Trans>
+        </Link>
         <Button
           disabled={busy}
           onClick={() => {
@@ -579,7 +624,52 @@ const WhereItIs = ({
   );
 };
 
-export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
+/** How often Today is read again while it shows, in milliseconds. */
+const refreshMs = 30_000;
+
+/**
+ * The day as core serves it now: `loaded`, the page's read, then read
+ * again every `refreshMs` while the page is in view, so new waits come
+ * in, ended runs end and now moves on. Whichever read is the later wins.
+ */
+const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
+  const core = useCore();
+  const [read, setRead] = useState<WorkflowsToday>();
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const readAgain = async (): Promise<void> => {
+      if (document.visibilityState === "visible") {
+        try {
+          const next = await core.withSession(
+            async (session) => await session.workflows.today()
+          );
+          if (!stopped) {
+            setRead(next);
+          }
+        } catch {
+          // Shown as last read; the next read may reach core again.
+        }
+      }
+      if (!stopped) {
+        timer = setTimeout(() => {
+          void readAgain();
+        }, refreshMs);
+      }
+    };
+    timer = setTimeout(() => {
+      void readAgain();
+    }, refreshMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [core]);
+  return laterDay(loaded, read);
+};
+
+export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
+  const today = useLatestToday(loaded);
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
   const day = laneDay(today);
