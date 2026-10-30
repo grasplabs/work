@@ -10,6 +10,7 @@ import { audiencesOf, noteProvenance, readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 import { authorize } from "./app-entries.ts";
 import { extractEntities } from "./entities.ts";
+import { gradeForCalibration } from "./eval-judge.ts";
 import { wordLesson } from "./lesson-wording.ts";
 import {
   keepRecalledMemories,
@@ -55,6 +56,12 @@ export const portsOf = (env: Env): BrainPorts<Reader> => ({
     await mayRetire(reader, record);
   },
   wordLesson: async (facts) => await wordLesson(env, facts),
+  // Learning suites (GRA-311): no one holds a capability on one yet; the
+  // judge spends only under the deployment's calibration budget.
+  evaluation: {
+    capabilities: async () => await Promise.resolve([]),
+    grade: async (request) => await gradeForCalibration(env, request),
+  },
   memories: {
     audienceOf: async (reader) => await recallMemoryAudience(env, reader),
     readableBy: async (_reader, people) =>

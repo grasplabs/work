@@ -394,6 +394,10 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
+    brain_calibration_spend: exported(
+      `${core}knowledge/eval-judge.ts`,
+      "What calibrating learning suites' graders reserved and spent each month, against its budget."
+    ),
     // Knowledge's host tables (src/db/core/schema.ts).
     collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),
@@ -482,6 +486,14 @@ const knowledgeDb: D1State = {
     brain_eval_suite_versions: exported(
       `${brain}eval-suites.ts`,
       "Each learning suite version, frozen by its digests, and who accepted it."
+    ),
+    brain_eval_labels: exported(
+      `${brain}eval-calibration.ts`,
+      "The outputs a learning suite's owner labelled, with their verdicts: what its grader is calibrated against."
+    ),
+    brain_eval_calibrations: exported(
+      `${brain}eval-calibration.ts`,
+      "Each calibration of a learning suite's grader: agreement, stability, errors and cost; never an output."
     ),
     brain_eval_cases: exported(
       `${brain}eval-suites.ts`,

@@ -81,6 +81,11 @@ interface __BaseEnv_Env {
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**
+   * US dollars a month calibrating learning suites' graders may spend
+   * (src/knowledge/eval-judge.ts): nothing unless set above zero.
+   */
+  BRAIN_CALIBRATION_BUDGET_USD?: unknown;
+  /**
    * The limits the operator lowered, with the policy's generation
    * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
    * src/workflows/quotas.ts).
