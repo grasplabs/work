@@ -41,6 +41,9 @@ const liveClient = async (snapshot: AdminSnapshot) => {
   return { clientId, name, account, release };
 };
 
+/** A link into the company's own Grasp, to its audit trail. */
+const toItsAuditTrail = /href="https:\/\/[^"/]+\/settings\/audit"/u;
+
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
   const at = html.indexOf(`aria-label="${title}"`);
@@ -88,6 +91,8 @@ describe("an organization's Setup", () => {
         "Open its Grasp",
         "Its activity",
       ].map((text) => header.includes(text)),
+      // Its activity is the audit trail in its own Grasp.
+      activity: toItsAuditTrail.test(sectionOf(status.html, "How it stands")),
       // Nothing of it is left to the old client pages.
       toOldPages: status.html.includes('href="/clients/'),
       // Nothing needs a look on a company that runs the newest release.
@@ -153,6 +158,7 @@ describe("an organization's Setup", () => {
     }).toStrictEqual({
       statuses: [200, 200, 200, 200, 200],
       header: [true, true, true, true, true, true],
+      activity: true,
       toOldPages: false,
       needs: false,
       numbers: [true, true],
