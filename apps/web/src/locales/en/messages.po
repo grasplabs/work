@@ -868,6 +868,10 @@ msgstr "{match} of {matches}"
 msgid "{measured} a month measured return"
 msgstr "{measured} a month measured return"
 
+#: src/workflows/share-workflow.tsx
+msgid "{memberName} (team)"
+msgstr "{memberName} (team)"
+
 #: src/knowledge/purge.tsx
 msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
 msgstr "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
@@ -4100,6 +4104,10 @@ msgstr "Choose your language"
 msgid "Choose your staff list"
 msgstr "Choose your staff list"
 
+#: src/workflows/share-workflow.tsx
+msgid "Choose…"
+msgstr "Choose…"
+
 #: src/workflows/chosen-at-run-time.tsx
 msgid "Chosen at run time: {options}"
 msgstr "Chosen at run time: {options}"
@@ -4153,6 +4161,7 @@ msgstr "Clear filters"
 #: src/settings/stephen-settings.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Close"
 msgstr "Close"
 
@@ -7317,6 +7326,11 @@ msgstr "It isn't offered to your organization."
 msgid "It isn't shared with anyone."
 msgstr "It isn't shared with anyone."
 
+#: src/workflows/share-workflow.tsx
+msgctxt "a workflow"
+msgid "It isn't shared with anyone."
+msgstr "It isn't shared with anyone."
+
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "It knows who leads which team, so I can talk to the leads first. We connect it with you."
@@ -7517,6 +7531,10 @@ msgstr "its output is larger than a record may be"
 #: src/engines/store-change-errors.ts
 msgid "its output isn't what the fixture expects"
 msgstr "its output isn't what the fixture expects"
+
+#: src/workflows/share-workflow.tsx
+msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
+msgstr "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -10643,6 +10661,7 @@ msgstr "Pending"
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
+#: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "People"
 
@@ -11841,9 +11860,17 @@ msgstr "Risk-to-Compliance"
 msgid "Role"
 msgstr "Role"
 
+#: src/workflows/share-workflow.tsx
+msgid "Role of {shown}"
+msgstr "Role of {shown}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Role of {who}"
+
+#: src/workflows/share-workflow.tsx
+msgid "Role to share with"
+msgstr "Role to share with"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12484,6 +12511,19 @@ msgstr "Settled: {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Several workflows run with AI, across most of its work by hand."
 
+#: src/workflows/share-workflow.tsx
+msgid "Share"
+msgstr "Share"
+
+#: src/workflows/share-workflow.tsx
+msgctxt "share a workflow with someone"
+msgid "Share"
+msgstr "Share"
+
+#: src/workflows/share-workflow.tsx
+msgid "Share {name}"
+msgstr "Share {name}"
+
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Share it"
@@ -12497,6 +12537,7 @@ msgid "Share this record"
 msgstr "Share this record"
 
 #: src/brain/share-record.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Share with"
 msgstr "Share with"
 
@@ -12517,6 +12558,7 @@ msgid "Shared mailboxes, registers and the company's records, after they press a
 msgstr "Shared mailboxes, registers and the company's records, after they press a card."
 
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Shared with"
 msgstr "Shared with"
 
@@ -13239,6 +13281,10 @@ msgstr "Stop and ask"
 msgid "Stop for now"
 msgstr "Stop for now"
 
+#: src/workflows/share-workflow.tsx
+msgid "Stop sharing with {shown}"
+msgstr "Stop sharing with {shown}"
+
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
 msgid "Stopped"
@@ -13569,6 +13615,7 @@ msgstr "Team: {name}"
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 #: src/settings/teams.tsx
+#: src/workflows/share-workflow.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -15426,6 +15473,10 @@ msgstr "Unreadable event"
 #: src/workflows/definition-editor.tsx
 msgid "Unsaved changes"
 msgstr "Unsaved changes"
+
+#: src/workflows/share-workflow.tsx
+msgid "Unshare"
+msgstr "Unshare"
 
 #: src/settings/staff-access.tsx
 msgid "Until"

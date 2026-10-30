@@ -854,6 +854,12 @@ export interface WorkflowVersionSource {
   files: Record<string, string>;
 }
 
+/** The organization's people and teams, by name, to share a workflow with. */
+export interface WorkflowShareCandidates {
+  people: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
+}
+
 /** Someone a workflow is shared with. */
 export interface WorkflowMember {
   type: "person" | "team";
@@ -1201,6 +1207,12 @@ export interface WorkflowResourcesApi {
   share: (id: string, input: unknown) => Promise<void>;
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
+  /**
+   * Whom its builders may share it with: the organization's people and
+   * teams, by name and ID alone (no address, no role, no team's members).
+   * For whoever may share it (`share`), never Grasp staff.
+   */
+  shareCandidates: (id: string) => Promise<WorkflowShareCandidates>;
   /**
    * Whether its owner lets people ask Stephen to start it in a chat app;
    * for anyone with a role in it.
