@@ -14,7 +14,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
@@ -33,8 +33,8 @@ import type { WorkflowApps } from "./workflow-apps.ts";
 // `inside-connectors.tsx`): the apps it works in, each with whether it is
 // connected; the Knowledge it reads, with the names its bindings give it;
 // and the files its runs wrote, what they are and never what they hold.
-// Each part is read on its own, once the tab is first opened, and says on
-// its own why it failed: the apps read the catalog and connections from
+// Each part is read on its own, each time the tab opens, and says on its
+// own why it failed: the apps read the catalog and connections from
 // connect (a cold catalog can take seconds), which no other tab needs, so
 // the page never waits for them.
 
@@ -241,7 +241,7 @@ const readApps = async (
 };
 
 /**
- * Files and apps of workflow `workflow`, read when it is first shown;
+ * Files and apps of workflow `workflow`, read each time it is shown;
  * `versions` and `currentVersion` as the page read them.
  */
 export const FilesAndApps = ({
@@ -266,55 +266,44 @@ export const FilesAndApps = ({
     ? apps
     : versions;
 
-  useEffect(() => {
-    const left = new AbortController();
-    const readKnowledge = async (): Promise<void> => {
-      const read = await loadFromCore(
-        core,
-        async (session) => await session.workflowResources.knowledge(workflow),
-        left.signal
-      );
-      if (!left.signal.aborted) {
-        setKnowledge(read);
-      }
-    };
-    const readFiles = async (): Promise<void> => {
-      const read = await loadFromCore(
-        core,
-        async (session) => await session.workflowResources.files(workflow),
-        left.signal
-      );
-      if (!left.signal.aborted) {
-        setFiles(read);
-      }
-    };
-    void readKnowledge();
-    void readFiles();
-    return () => {
-      left.abort();
-    };
-  }, [core, workflow]);
+  // The apps of the version as the page has it now, without reading again
+  // for a page refresh that left the version where it was.
+  const appsOfVersion = useEffectEvent(
+    async (session: Session, version: number | null): Promise<WorkflowApps> =>
+      await readApps(session, workflow, version, current)
+  );
 
+  // One rule for every part: read each time the tab opens, and again when
+  // the current version moves (its bindings, so its apps, move with it).
   useEffect(() => {
     const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await loadFromCore(
-        core,
-        async (session) =>
-          await readApps(session, workflow, currentVersion, current),
-        left.signal
-      );
+    const read = async <T,>(
+      part: (session: Session) => Promise<T>,
+      set: (loaded: Loaded<T>) => void
+    ): Promise<void> => {
+      const loaded = await loadFromCore(core, part, left.signal);
       if (!left.signal.aborted) {
-        setApps(loaded);
+        set(loaded);
       }
     };
+    void read(
+      async (session) => await session.workflowResources.knowledge(workflow),
+      setKnowledge
+    );
+    void read(
+      async (session) => await session.workflowResources.files(workflow),
+      setFiles
+    );
     if (versionsRead) {
-      void read();
+      void read(
+        async (session) => await appsOfVersion(session, currentVersion),
+        setApps
+      );
     }
     return () => {
       left.abort();
     };
-  }, [core, workflow, currentVersion, current, versionsRead]);
+  }, [core, workflow, currentVersion, versionsRead]);
 
   return (
     <div className="flex flex-col gap-8">
