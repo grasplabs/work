@@ -1710,6 +1710,10 @@ msgstr "Eine Änderung wartet auf die Freigabe der Person, für die der Lauf han
 msgid "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
 msgstr "Eine Änderung wurde gesendet, aber ihre Antwort ging verloren: Sie wartet darauf, dass die Person, für die der Lauf handelt, sagt, ob sie geschehen ist"
 
+#: src/knowledge/new-collection.tsx
+msgid "A collection holds documents Grasp and its agents may read."
+msgstr "Eine Sammlung enthält Dokumente, die Grasp und seine Agenten lesen dürfen."
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "Eine Verbindung braucht eine neue Anmeldung"
@@ -1787,6 +1791,10 @@ msgctxt "under an amount on a dashboard chart"
 msgid "a month"
 msgstr "pro Monat"
 
+#: src/knowledge/new-document.tsx
+msgid "A name has no [, ], # or |, and no empty folders."
+msgstr "Ein Name enthält kein [, ], # oder | und keine leeren Ordner."
+
 #: src/engines/resource-bindings.tsx
 msgid "A new template"
 msgstr "Eine neue Vorlage"
@@ -1822,6 +1830,10 @@ msgstr "Eine ausgewählte Datei konnte nicht gelesen werden. Wählen Sie sie ern
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
 msgstr "Eine Vorschau behält keine Dateien."
+
+#: src/knowledge/new-collection.tsx
+msgid "A private collection: nobody else reads it, nor their agents."
+msgstr "Eine private Sammlung: Niemand sonst liest sie, auch keine anderen Agenten."
 
 #: src/chat/project-dialog.tsx
 msgid "A project takes Markdown, text, CSV and JSON files."
@@ -2227,6 +2239,10 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} für {person}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Agenten lesen dies, bevor sie hineinschauen."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -3499,6 +3515,8 @@ msgstr "Nicht lesbar"
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
+#: src/knowledge/new-collection.tsx
+#: src/knowledge/new-document.tsx
 #: src/link-confirmation.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3902,6 +3920,7 @@ msgstr "Mitarbeiterliste auswählen"
 msgid "Chosen at run time: {options}"
 msgstr "Während des Laufs gewählt: {options}"
 
+#: src/knowledge/new-collection.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Chosen teams"
 msgstr "Ausgewählte Teams"
@@ -3945,6 +3964,8 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
+#: src/knowledge/new-collection.tsx
+#: src/knowledge/new-document.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -4499,6 +4520,14 @@ msgstr "Von Grasp als bekannt gezählt, bevor die Regeln es taten."
 #: src/workflows/independent-workflows.tsx
 msgid "Create"
 msgstr "Erstellen"
+
+#: src/knowledge/new-collection.tsx
+msgid "Create collection"
+msgstr "Sammlung erstellen"
+
+#: src/knowledge/new-document.tsx
+msgid "Create document"
+msgstr "Dokument erstellen"
 
 #: src/chat/project-dialog.tsx
 msgid "Create project"
@@ -5464,6 +5493,7 @@ msgid "Every tool it has: domains and agents use only what they are granted."
 msgstr "Jedes seiner Tools: Domänen und Agenten nutzen nur, was ihnen erlaubt ist."
 
 #: src/knowledge/collection-markers.tsx
+#: src/knowledge/new-collection.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Everyone"
 msgstr "Alle"
@@ -5487,6 +5517,10 @@ msgstr "Jede Person hat einen eigenen Link: Wer ihn hat, gilt als diese Person, 
 #: src/onboarding/interview-words.ts
 msgid "Everyone has talked"
 msgstr "Alle haben gesprochen"
+
+#: src/knowledge/new-collection.tsx
+msgid "Everyone in the organization, and their agents."
+msgstr "Alle in der Organisation und ihre Agenten."
 
 #: src/onboarding/organization-words.ts
 msgid "Everyone taking part has their link."
@@ -6363,6 +6397,10 @@ msgstr "Gäste"
 msgid "Half my Monday goes on invoices. Most miss an order number, so I’m emailing around to ask."
 msgstr "Mein halber Montag geht für Rechnungen drauf. Meist fehlt die Bestellnummer, also frage ich per Mail nach."
 
+#: src/knowledge/new-document.tsx
+msgid "handbook/leave"
+msgstr "handbuch/urlaub"
+
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Handoff"
@@ -7078,6 +7116,10 @@ msgstr "Die Angabe erscheint, sobald der Desktop-Agent oder Single Sign-on eine 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
 msgstr "Die Nutzung beginnt, wenn Stephen das Kickoff liest, und wächst mit jedem Interview."
+
+#: src/knowledge/new-document.tsx
+msgid "It starts with its name as a heading; write the rest in the editor."
+msgstr "Es beginnt mit seinem Namen als Überschrift; den Rest schreiben Sie im Editor."
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
@@ -8163,6 +8205,8 @@ msgid "Muted"
 msgstr "Stumm"
 
 #: src/chat/project-dialog.tsx
+#: src/knowledge/new-collection.tsx
+#: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -8328,6 +8372,14 @@ msgstr "Neuer Chat im Projekt {projectName}"
 #: src/chat/chat-list.tsx
 msgid "New chat in this project"
 msgstr "Neuer Chat in diesem Projekt"
+
+#: src/knowledge/new-collection.tsx
+msgid "New collection"
+msgstr "Neue Sammlung"
+
+#: src/knowledge/new-document.tsx
+msgid "New document"
+msgstr "Neues Dokument"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -9659,6 +9711,10 @@ msgstr "Online"
 msgid "Only admins can read the audit trail"
 msgstr "Nur Admins können den Audit-Trail lesen"
 
+#: src/knowledge/new-collection.tsx
+msgid "Only an admin makes a collection for everyone or for teams."
+msgstr "Nur Admins erstellen eine Sammlung für alle oder für Teams."
+
 #: src/engines/app-page.tsx
 msgid "Only described"
 msgstr "Nur beschrieben"
@@ -9674,6 +9730,10 @@ msgstr "Nur wenn die Bedingung zutrifft"
 #: src/dashboard/standard-widgets.tsx
 msgid "Only mapped"
 msgstr "Nur erfasst"
+
+#: src/knowledge/new-collection.tsx
+msgid "Only me"
+msgstr "Nur ich"
 
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "Only people who may approve packages see what is approved across the workspace."
@@ -10618,6 +10678,10 @@ msgstr "Zweck und Modell"
 msgid "Put back"
 msgstr "Zurücklegen"
 
+#: src/knowledge/new-document.tsx
+msgid "Put it in folders with a slash, as in handbook/leave."
+msgstr "Mit einem Schrägstrich legen Sie es in Ordner, wie in handbuch/urlaub."
+
 #: src/dashboard/widget-board.tsx
 msgid "Put one back"
 msgstr "Eines zurücklegen"
@@ -10806,6 +10870,10 @@ msgstr "Vorlesen"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
 msgstr "Zum Lesen von Richtlinien braucht es ein Modell, das diese Bereitstellung für sensible Daten zulässt. Bitten Sie Grasp, eines einzurichten, und lassen Sie sie dann erneut lesen. Erstellen Sie ihre Regeln bis dahin manuell."
+
+#: src/knowledge/new-collection.tsx
+msgid "Reading the teams"
+msgstr "Teams werden gelesen"
 
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
@@ -11796,6 +11864,7 @@ msgid "Send version {version} of {who} back"
 msgstr "Version {version} von {who} zurücksenden"
 
 #: src/knowledge/collection-markers.tsx
+#: src/knowledge/new-collection.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/resource-params.tsx
 msgid "Sensitive"
@@ -12851,6 +12920,7 @@ msgstr "Team: {name}"
 
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
+#: src/knowledge/new-collection.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
@@ -13434,6 +13504,10 @@ msgstr "Die Liste, wie die Admin des Unternehmens sie geteilt hat, Team für Tea
 msgid "The list is full: remove a line to add another."
 msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
 
+#: src/knowledge/new-collection.tsx
+msgid "The members of the teams you choose, and their agents."
+msgstr "Die Mitglieder der Teams, die Sie auswählen, und ihre Agenten."
+
 #: src/brain/brain-home.tsx
 msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
 msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agenten lesen, finden Sie unter <0>Wissen</0>."
@@ -13473,6 +13547,10 @@ msgstr "Das Modellbudget ist aufgebraucht. Bitten Sie Ihren Admin, es von Grasp 
 #: src/chat/failure.ts
 msgid "The model couldn't answer. Try again."
 msgstr "Das Modell konnte nicht antworten. Versuchen Sie es erneut."
+
+#: src/knowledge/new-collection.tsx
+msgid "The model gateway treats what agents read from it as sensitive."
+msgstr "Das Modell-Gateway behandelt, was Agenten daraus lesen, als sensibel."
 
 #: src/chat/failure.ts
 msgid "The model is busy. Try again in a minute."
@@ -13533,6 +13611,10 @@ msgstr "Die vorherige"
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "The organization"
 msgstr "Die Organisation"
+
+#: src/knowledge/new-collection.tsx
+msgid "The organization has no teams yet."
+msgstr "Die Organisation hat noch keine Teams."
 
 #: src/landscape/app-cells.tsx
 msgid "The other kinds of data this app touches"
@@ -13986,6 +14068,10 @@ msgstr "Dieser Chat hat eingeschränkte Daten gelesen: Dies kann sie nach außen
 #: src/chat/failure.ts
 msgid "This chat stays in the EU, and this model isn't hosted there. Pick another one."
 msgstr "Dieser Chat bleibt in der EU, und dieses Modell wird dort nicht betrieben. Wählen Sie ein anderes."
+
+#: src/knowledge/new-document.tsx
+msgid "This collection has a document at {path} already."
+msgstr "Diese Sammlung hat bereits ein Dokument unter {path}."
 
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "This collection has no files yet."
@@ -15579,6 +15665,10 @@ msgctxt "kind of fact"
 msgid "When to stop"
 msgstr "Wann man aufhört"
 
+#: src/knowledge/new-collection.tsx
+msgid "When to use it"
+msgstr "Wann sie zu verwenden ist"
+
 #: src/interview/words.ts
 #: src/onboarding/work-record.tsx
 msgid "Where"
@@ -15754,6 +15844,10 @@ msgstr "Wer leitet es?"
 msgctxt "what Grasp knows, by source"
 msgid "Who leads which team"
 msgstr "Wer welches Team leitet"
+
+#: src/knowledge/new-collection.tsx
+msgid "Who may read it"
+msgstr "Wer sie lesen darf"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Who people chose"
