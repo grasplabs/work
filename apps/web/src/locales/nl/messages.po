@@ -5594,8 +5594,8 @@ msgid "European Union"
 msgstr "Europese Unie"
 
 #: src/settings/audit-archive.tsx
-msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
-msgstr "Gebeurtenissen die ouder zijn dan de audittrail bewaart, verplaatst naar het archief. De zoekopdracht gebruikt de filters hierboven."
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Gebeurtenissen die ouder zijn dan de audittrail bewaart, verplaatst naar het archief. De zoekopdracht en de export gebruiken de filters hierboven."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
@@ -5809,10 +5809,12 @@ msgstr "Exporteren"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "CSV exporteren"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "JSON exporteren"
 
@@ -5823,6 +5825,10 @@ msgstr "Rapport exporteren"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Audittrail exporteren"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Exporteren met archief"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"

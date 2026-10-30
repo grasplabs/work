@@ -1,9 +1,20 @@
 import type { AuditPage, AuditRetention } from "@grasp-os/shared/audit-log";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { auditFilterOf, LogRecords } from "../activity/audit-log.tsx";
+import {
+  auditFilterOf,
+  exportHref,
+  LogRecords,
+} from "../activity/audit-log.tsx";
 import type { LogSearch } from "../activity/log-search.ts";
 import type { Directory } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -83,6 +94,39 @@ export const RetentionView = ({
   );
 };
 
+/**
+ * The audit trail with its archive, as one download in the chain's order,
+ * filtered as shown: core records the export, checks the session as it
+ * reads, and names in JSON what archive retention already purged.
+ */
+const ArchiveExport = ({ search }: { search: LogSearch }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
+      <DownloadIcon data-icon="inline-start" />
+      <Trans>Export with archive</Trans>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuItem
+        onClick={() => {
+          // Core sends it as a file to save: the page stays.
+          window.location.assign(exportHref(search, "csv", true));
+        }}
+      >
+        <SheetIcon />
+        <Trans>Export CSV</Trans>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => {
+          window.location.assign(exportHref(search, "json", true));
+        }}
+      >
+        <BracesIcon />
+        <Trans>Export JSON</Trans>
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
 /** Archived events that match the page's filters, once asked for. */
 const ArchivedEvents = ({
   search,
@@ -105,20 +149,23 @@ const ArchivedEvents = ({
   return (
     <SettingsSection
       action={
-        first === undefined ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void open();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Search the archive</Trans>
-          </Button>
-        ) : undefined
+        <div className="flex flex-wrap gap-2">
+          {first === undefined ? (
+            <Button
+              disabled={busy}
+              onClick={() => {
+                void open();
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <Trans>Search the archive</Trans>
+            </Button>
+          ) : null}
+          <ArchiveExport search={search} />
+        </div>
       }
-      description={t`Events older than the audit trail keeps, moved to the archive. The search uses the filters above.`}
+      description={t`Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above.`}
       title={t`Archived events`}
     >
       {failure === undefined ? null : (
