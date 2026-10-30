@@ -2802,6 +2802,19 @@ const gatewayRouting = async (
   };
 };
 
+/**
+ * Whether `call` may fall back to the organization's other models: only a
+ * call that names no model of its own approval, the organization's own
+ * chats, agents and core's features, which use whichever of its chosen
+ * models answers. A call through an App's model binding, or an App's or a
+ * workflow's own, goes to the model it was approved for, and to no other:
+ * its prompt never reaches a provider its approval didn't name.
+ */
+const mayFallBack = ({ binding, trigger }: Session): boolean =>
+  binding === undefined &&
+  trigger.type !== "app" &&
+  trigger.type !== "workflow";
+
 /** The organization's providers and Grasp's, from connect; failed when unread. */
 const routesOrFailed = async (env: ModelsEnv): Promise<AiProviderRoutes> => {
   try {
@@ -2870,7 +2883,13 @@ const routingOf = async (
   const target = { credential: "organization" as const, ...connected };
   return {
     ref,
-    routing: await connectRouting(env, call, ref, target, chosen.slice(at + 1)),
+    routing: await connectRouting(
+      env,
+      call,
+      ref,
+      target,
+      mayFallBack(call) ? chosen.slice(at + 1) : []
+    ),
   };
 };
 
@@ -2984,7 +3003,10 @@ const mayHaveBilled = ({ pending, settled }: GatewayResponse): boolean =>
  * only once the provider refused it before anything could be billed (its
  * credentials, or a rate limit its retries didn't outlast), never after a
  * server error, no answer or an answer begun, never past its deadline or
- * once its caller cancelled it. A fallback model the rules refuse is
+ * once its caller cancelled it, never once a request of the call may have
+ * been billed, never for a call that allows one provider request only
+ * (`providerRetries: false`), and never for a call bound to the model it
+ * was approved for (`mayFallBack`). A fallback model the rules refuse is
  * audited as refused, and the call fails as the first did.
  */
 const fallbackOf = async (
@@ -2997,6 +3019,10 @@ const fallbackOf = async (
   const [next] = route.fallbacks;
   if (
     next === undefined ||
+    // A caller that allows no request beyond its first (a workflow step:
+    // one step, one provider request) gets no other model either.
+    route.providerRetries === false ||
+    !mayFallBack(route.call) ||
     route.billed === true ||
     mayHaveBilled(response) ||
     failure === undefined ||
