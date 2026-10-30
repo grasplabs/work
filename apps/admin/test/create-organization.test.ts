@@ -25,7 +25,7 @@ import { db, staff } from "./hosting.ts";
 import { namespaceRelease } from "./namespace-release.ts";
 import { graspAccount, ownId } from "./own-destination.ts";
 import { callServerFn } from "./pages.ts";
-import { startsOf } from "./runs.ts";
+import { ended, startsOf } from "./runs.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 // Creating an organization from its three fields (src/routes/new-organization.tsx):
@@ -96,6 +96,16 @@ describe("creating an organization", () => {
   });
 
   it("finds how a company signs in from its domain, and finds nothing rather than guess", async () => {
+    // Loaded once before the calls at once: in the test pool a server
+    // function's module loads lazily through Vite's module runner, a round
+    // trip of the first request's own, which requests at once can't share
+    // (workerd refuses another request's I/O). A built Worker has every
+    // module bundled, so production loads nothing this way.
+    await callServerFn(
+      detectSignInFn,
+      { domain: "plain.test" },
+      { email: staff.email }
+    );
     const found = await Promise.all(
       [
         "acme.test",
@@ -212,6 +222,8 @@ describe("creating an organization", () => {
       adminWorkflows.provisionPlacedClient
     ).get(attemptId);
     await attempt.terminate();
+    // Ended before the step runs on: nothing of it is left going after.
+    await ended(adminWorkflows.provisionPlacedClient, attemptId);
     const runId = await claimRun(
       db,
       "system",
