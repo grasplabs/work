@@ -39,6 +39,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { ExportDefinition } from "../engines/app-definition.tsx";
 import {
   AppStatusControls,
   StatusBadge,
@@ -578,6 +579,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
+        <ExportDefinition app={app} identity={identity} />
         {/* On its bar, as the prototype's Publish: for who builds. */}
         <AppStatusControls app={app} identity={identity} />
       </div>
