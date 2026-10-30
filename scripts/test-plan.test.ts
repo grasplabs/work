@@ -2,9 +2,11 @@
  * Which test projects a pull request runs (test-plan.ts): those with a file
  * in a package its changes reach, by pnpm's graph, and none other.
  */
+import path from "node:path";
+
 import { describe, expect, it } from "vite-plus/test";
 
-import { affectedProjects, packageOf } from "./test-plan.ts";
+import { affectedProjects, packageOf, packagesSelected } from "./test-plan.ts";
 
 const root = "/repo";
 const packages = [
@@ -54,5 +56,16 @@ describe("planning which test projects run", () => {
 
   it("runs no project when no package is affected", () => {
     expect(affectedProjects(files, packages, new Set())).toStrictEqual([]);
+  });
+
+  it("asks pnpm for the packages a change in one reaches: itself and those that depend on it", () => {
+    const workspace = path.join(import.meta.dirname, "..");
+    const reached = packagesSelected("...@grasp-os/web").map((dir) =>
+      path.relative(workspace, dir)
+    );
+
+    expect(reached).toContain(path.join("apps", "web"));
+    expect(reached).toContain(path.join("apps", "core"));
+    expect(reached).not.toContain(path.join("apps", "admin"));
   });
 });

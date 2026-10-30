@@ -298,9 +298,6 @@ jobs:
       # in a home it doesn't own. A host IPC namespace, so Chromium's shared
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
-    # On GitHub's runners for now: the container runs as uid 1001, the
-    # GitHub runner's user, and boat's runner user differs, so the job
-    # can't write the runner's files there.
     runs-on: ubuntu-latest
     # About 1 minute of setup and 2 for the stack to build and start, then
     # each part's tests.
@@ -578,8 +575,8 @@ jobs:
     name: publish-release
     needs: release
     if: github.event_name == 'push'
-    # On GitHub's own runners, unlike the jobs above (boat.dev): it holds the
-    # staging 1Password token, and no secret leaves GitHub-hosted machines.
+    # It holds the staging 1Password token: GitHub-hosted runners only, so
+    # no secret leaves GitHub's machines.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging

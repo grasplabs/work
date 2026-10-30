@@ -63,14 +63,14 @@ export const affectedProjects = (
 const listed = z.array(z.object({ path: z.string() }));
 
 /** The workspace packages' directories, of those `filter` selects, by pnpm. */
-const packagesSelected = (filter?: string): string[] => {
+export const packagesSelected = (filter?: string): string[] => {
   const output = execFileSync(
     "vp",
     [
       "pm",
       "ls",
       "--recursive",
-      "--depth=-1",
+      "--depth=0",
       "--json",
       ...(filter === undefined ? [] : [`--filter=${filter}`]),
     ],
