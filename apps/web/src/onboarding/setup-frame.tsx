@@ -198,7 +198,7 @@ export const SetupFrame = ({
       </main>
       <footer className="bg-background setup-footer grid h-18 flex-none items-center px-4 sm:px-10">
         {/* The mark bottom left, across from the language. */}
-        <GraspMark className="size-5" variant="logo" />
+        <GraspMark className="size-5" />
         <nav aria-label={t`Onboarding steps`} className="flex items-center">
           {word === undefined ? (
             <StepDots index={index} onGo={onGo} open={open} />

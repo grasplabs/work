@@ -133,7 +133,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
   // own stylesheets: the title and the text's headings in Newsreader
-  // (`type-title`, `type-heading`), the text in Geist.
+  // (Markdown's serif headings), the text in Geist.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect

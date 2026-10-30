@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -114,15 +115,9 @@ const Big = ({
 }) => (
   <div className="flex min-w-0 flex-col-reverse justify-end gap-0.5">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd
-      className={cn(
-        "type-figure",
-        tone === "done" && "text-status-agreed",
-        tone === "attention" && "text-status-attention"
-      )}
-    >
+    <Stat render={<dd />} variant={tone ?? "default"}>
       {value}
-    </dd>
+    </Stat>
   </div>
 );
 
