@@ -12,13 +12,13 @@ import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
-import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
 import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
+import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
@@ -65,7 +65,9 @@ import { repairWakes } from "./workflows/wakes.ts";
  * with the rest of its slot; its own failure is its own.
  */
 export const clockTasks: readonly ClockTask<Env>[] = [
-  { name: "audit.drain", period: "minute", run: drainAuditOutboxes },
+  // Connect's events also tell people of the mailboxes and drives it
+  // stopped hearing (src/connector-source-notices.ts).
+  { name: "audit.drain", period: "minute", run: drainAuditOutboxesNoticing },
   // Settled runs' outcomes the Brain doesn't have yet (src/brain-capture.ts).
   { name: "brain.capture", period: "minute", run: reconcileRunCaptures },
   // Scopes whose few new episodes waited long enough to be consolidated

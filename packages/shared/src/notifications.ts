@@ -7,9 +7,10 @@ export const notificationErrors = defineErrorFamily({
 
 // What core tells a signed-in person in the product (core's
 // notifications.ts): that a workflow failed while acting for them, that
-// an admin asked them one of the brain's open questions, or that a
-// schedule trigger of theirs stopped. Only they
-// see their own; nobody else is told.
+// an admin asked them one of the brain's open questions, that a
+// schedule trigger of theirs stopped, or that connect stopped hearing a
+// mailbox or drive their triggers listen to. Only they see their own;
+// nobody else is told.
 
 /**
  * A workflow of an App failed while acting for the person: one per App
@@ -66,10 +67,33 @@ export interface TriggerStoppedNotification {
   read: boolean;
 }
 
+/**
+ * Connect stopped hearing events where the person's triggers listen (a
+ * mailbox, a drive): the provider refused access (`refused`: connect then
+ * asks only daily, until the connection is signed in to again or its
+ * access is given back), or its reads kept failing (`failed`: connect
+ * goes on trying). Their triggers there start nothing new meanwhile.
+ */
+export interface EventsStoppedNotification {
+  id: string;
+  type: "events_stopped";
+  /** The connection's ID. */
+  connection: string;
+  /** The event type it stopped hearing, such as `m365.mail.received`. */
+  event: string;
+  /** The part of the connection (a mailbox, a drive); null for the account's own. */
+  resource: string | null;
+  reason: "refused" | "failed";
+  /** When connect stopped hearing it (ISO 8601). */
+  at: string;
+  read: boolean;
+}
+
 export type Notification =
   | RunFailedNotification
   | GapAskedNotification
-  | TriggerStoppedNotification;
+  | TriggerStoppedNotification
+  | EventsStoppedNotification;
 
 /** Most notifications `list` returns: the latest. */
 export const listedNotifications = 50;

@@ -5183,6 +5183,10 @@ msgstr "Als Workflow skizziert"
 msgid "Drawn as a workflow: {workflow}"
 msgstr "Als Workflow skizziert: {workflow}"
 
+#: src/inbox/items.ts
+msgid "Drive"
+msgstr "Laufwerk"
+
 #: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
@@ -5722,6 +5726,7 @@ msgid "File"
 msgstr "Datei"
 
 #: src/chat/builds.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Dateien"
@@ -7838,6 +7843,10 @@ msgstr "Erstellt mit Grasp am {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/inbox/items.ts
+msgid "Mail"
+msgstr "E-Mail"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mails und Nachrichten an andere, nachdem die Person eine Karte mit allen Empfängern bestätigt."
@@ -7845,6 +7854,10 @@ msgstr "Mails und Nachrichten an andere, nachdem die Person eine Karte mit allen
 #: src/onboarding/review-parts.tsx
 msgid "Mail isn’t available on this hosting yet"
 msgstr "Mail ist auf diesem Hosting noch nicht verfügbar"
+
+#: src/inbox/items.ts
+msgid "Mailbox"
+msgstr "Postfach"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -9157,6 +9170,11 @@ msgctxt "lowest end of a rating of the interview"
 msgid "Not good"
 msgstr "Nicht gut"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
+msgid "Not hearing"
+msgstr "Kein Empfang"
+
 #: src/landscape/landscape.ts
 msgid "Not in a domain yet"
 msgstr "Noch in keiner Domäne"
@@ -9852,6 +9870,10 @@ msgstr "Offen seit dem Go von Grasp am {since}."
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
+
+#: src/inbox/item-detail.tsx
+msgid "Open the connection"
+msgstr "Verbindung öffnen"
 
 #: src/chat/thread.tsx
 msgid "Open the dashboard"
@@ -10802,6 +10824,10 @@ msgstr "Vorlesen"
 msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Vorlesen"
+
+#: src/inbox/items.ts
+msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
+msgstr "Das Lesen ist wiederholt fehlgeschlagen, deshalb starten deine Auslöser dort vorerst nichts Neues. Grasp versucht es weiter; wenn es nicht wiederkommt, prüfe die Verbindung."
 
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
@@ -13573,6 +13599,10 @@ msgstr "Die Plattform ist für alle im Unternehmen offen: Sie wurde für das Onb
 #: src/policies/policy-editing.tsx
 msgid "The policy's text"
 msgstr "Text der Richtlinie"
+
+#: src/inbox/items.ts
+msgid "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
+msgstr "Der Anbieter hat den Zugriff verweigert, deshalb starten deine Auslöser dort nichts Neues. Melde dich erneut bei der Verbindung an oder bitte die Person, die sie verwaltet, den Zugriff wiederherzustellen. Grasp fragt einmal täglich erneut nach."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
@@ -16405,6 +16435,22 @@ msgstr "Ihre Geschichte"
 #: src/onboarding/knowledge-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Ihr Team kann bei {threshold} % starten"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files"
+msgstr "Deine Auslöser empfangen keine neuen Dateien mehr"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files at {name}"
+msgstr "Deine Auslöser empfangen keine neuen Dateien von {name} mehr"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail"
+msgstr "Deine Auslöser empfangen keine neuen E-Mails mehr"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail at {name}"
+msgstr "Deine Auslöser empfangen keine neuen E-Mails von {name} mehr"
 
 #: src/interview/before.tsx
 msgid "Your words"

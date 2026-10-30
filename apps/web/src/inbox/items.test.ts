@@ -205,10 +205,26 @@ const waiting = (ranOut = true) =>
               at: "2026-10-12T09:00:00.000Z",
               read: false,
             },
+            {
+              id: "deaf-1",
+              type: "events_stopped",
+              connection: "connection-1",
+              event: "m365.mail.received",
+              resource: "invoices@acme.test",
+              reason: "refused",
+              at: "2026-10-12T10:00:00.000Z",
+              read: false,
+            },
           ],
-          unread: 3,
+          unread: 4,
           more: false,
         },
+        accounts: new Map([
+          [
+            "connection-1",
+            { name: "Acme mail", source: "native", provider: "microsoft" },
+          ],
+        ]),
       },
     },
     reconnect: { state: "ready", data: ranOut ? [signInAgain] : [] },
@@ -274,9 +290,27 @@ describe(inboxItems, () => {
         "screens:app-invoices",
         "signIn:connection-1",
         "stopped:stopped-1",
+        "stoppedEvents:deaf-1",
         "workflowGoLive:workflow-quotes:2",
       ].toSorted()
     );
+  });
+
+  it("tells of a mailbox connect stopped hearing as urgent, by its account, with a way to the connection", () => {
+    const deaf = inboxItems(waiting(), member, readAt).find(
+      ({ id }) => id === "stoppedEvents:deaf-1"
+    );
+    expect({
+      title: deaf?.title,
+      facts: deaf?.facts.slice(0, 1),
+      about: deaf?.about,
+      urgent: deaf?.urgent,
+    }).toStrictEqual({
+      title: "Your triggers stopped hearing new mail at Acme mail",
+      facts: [{ label: "Mailbox", value: "invoices@acme.test" }],
+      about: { kind: "integration", integration: "native:microsoft" },
+      urgent: true,
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {
@@ -358,6 +392,7 @@ describe(listed, () => {
       listed(items, "workflows", "urgent").map(({ kind }) => kind)
     ).toStrictEqual([
       "decision",
+      "stoppedEvents",
       "goLive",
       "failedRun",
       "goLive",
@@ -390,6 +425,6 @@ describe(listed, () => {
     expect(items.find(({ kind }) => kind === "stoppedSchedule")?.title).toBe(
       "The schedule of Nightly report stopped"
     );
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 6);
+    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
   });
 });
