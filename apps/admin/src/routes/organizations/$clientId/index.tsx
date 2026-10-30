@@ -5,6 +5,7 @@ import { ArrowRightIcon } from "lucide-react";
 import { OrgBrief } from "../../../admin/org-brief.tsx";
 import { OrgHealth } from "../../../admin/org-health.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
+import { Section } from "../../../admin/section.tsx";
 import {
   needSection,
   sectionTo,
@@ -23,11 +24,7 @@ const NeedsHere = () => {
     return null;
   }
   return (
-    <section className="bg-card overflow-hidden rounded-xl border">
-      <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">Needs Grasp</h2>
-        <p className="text-muted-foreground">The most pressing first.</p>
-      </div>
+    <Section title="Needs Grasp" description="The most pressing first.">
       <ul className="flex flex-col">
         {view.needs.map((need, index) => {
           const text = needLine(need, view);
@@ -64,7 +61,7 @@ const NeedsHere = () => {
           );
         })}
       </ul>
-    </section>
+    </Section>
   );
 };
 
