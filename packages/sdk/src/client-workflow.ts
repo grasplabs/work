@@ -4,6 +4,7 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { appErrorDetailsOf } from "./app-error.ts";
 import { clientInternals } from "./client-core.ts";
 import type {
+  DecisionTransport,
   GraspClient,
   SubmissionTarget,
   WorkflowLink,
@@ -15,6 +16,7 @@ import {
   issueDetails,
   readAnswer,
   readRejection,
+  withReceiptLink,
 } from "./client-error.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import type {
@@ -376,7 +378,10 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
 /** The most waits one snapshot lists. */
 export const maxWaits = 256;
 
-const idText = v.string().min(1).max(256);
+/** The longest ID the host gives a run or a wait. */
+const maxWaitIdLength = 256;
+
+const idText = v.string().min(1).max(maxWaitIdLength);
 const plainText = v.string().max(2000);
 
 const runHandleSchema = v.object({
@@ -1082,6 +1087,90 @@ export class WorkflowChannel {
         read: (value) => checked(descriptors.sent, value),
       }
     );
+  }
+
+  /**
+   * Answers the decision `wait` holds run `runId` at, with `response`:
+   * through the trusted host (`WorkflowLink.decisions`), which has the
+   * person confirm the answer in its own UI before it records it. `wait`
+   * must be a decision wait of this very workflow's (its key one of the
+   * reference's decisions), and `response.value` what that decision's
+   * value schema takes. Never sent again on its own: an answer whose
+   * outcome is lost is `decision.outcome_unknown`, and the same answer
+   * given again is the recorded one, never a second.
+   */
+  async respond(
+    read: ReadWorkflow,
+    runId: string,
+    wait: unknown,
+    response: unknown
+  ): Promise<void> {
+    const decision =
+      isPlainObject(wait) &&
+      wait.kind === "decision" &&
+      typeof wait.key === "string"
+        ? read.decisions.get(wait.key)
+        : undefined;
+    if (
+      decision === undefined ||
+      !isPlainObject(wait) ||
+      typeof wait.id !== "string" ||
+      wait.id.length === 0 ||
+      wait.id.length > maxWaitIdLength
+    ) {
+      throw clientError("contract.invalid_request");
+    }
+    if (!isPlainObject(response) || typeof response.approved !== "boolean") {
+      throw clientError("contract.invalid_args");
+    }
+    const accepted = validateValue(
+      decision.valueSchema.descriptor,
+      response.value
+    );
+    if (accepted.issues !== undefined) {
+      throw clientError("contract.invalid_args", {
+        issues: issueDetails(accepted.issues),
+      });
+    }
+    const { decisions } = this.#link;
+    if (decisions === undefined) {
+      throw clientError("decision.unavailable");
+    }
+    await this.#answer(decisions, runId, wait.id, {
+      approved: response.approved,
+      payload: accepted.value,
+    });
+  }
+
+  /**
+   * Sends `answer` to decision `decision` of run `runId` through the
+   * trusted host: an outcome lost on the way is `decision.outcome_unknown`,
+   * carrying a link that sends this very answer again (`withReceiptLink`),
+   * so a form asked again never makes a fresh one.
+   */
+  async #answer(
+    decisions: DecisionTransport,
+    runId: string,
+    decision: string,
+    answer: { readonly approved: boolean; readonly payload: unknown }
+  ): Promise<void> {
+    try {
+      await decisions.respond(runId, decision, answer);
+    } catch (error) {
+      const settled = readRejection(error);
+      if (settled.kind !== "failed") {
+        throw withReceiptLink(
+          clientError("decision.outcome_unknown"),
+          async () => {
+            await this.#answer(decisions, runId, decision, answer);
+          }
+        );
+      }
+      if (fences(settled.error.code)) {
+        this.#link.fence(settled.error);
+      }
+      throw settled.error;
+    }
   }
 
   #follow(

@@ -10,6 +10,7 @@ import type {
 } from "./client-workflow.ts";
 import type {
   AppErrorPayload,
+  DecisionValueOf,
   EventDataOf,
   RunHandle,
   WorkflowWait,
@@ -83,6 +84,24 @@ export interface WorkflowCommands<Input, Wait, Event = never> {
   readonly send: <Sent extends Event>(
     event: Sent,
     data: NoInfer<EventDataOf<Sent>>
+  ) => Promise<void>;
+  /**
+   * Answers a decision the selected run is held at (spec 10.4.5, 10.7.2):
+   * `wait` exactly as a wait of this run's (`waits`) or the decision inbox
+   * (`queries.decisions`) gave it, and `value` as that decision's value
+   * schema declares it. The page asks the person to confirm the answer in
+   * its own dialog first; it resolves once the answer is the recorded
+   * decision, and rejects with `decision.cancelled` when they cancel it,
+   * the draft kept. Never sent on render, mount or a lost connection; an
+   * answer whose outcome is lost rejects with `decision.outcome_unknown`,
+   * and giving the same answer again records nothing twice.
+   */
+  readonly respond: <Answered extends Extract<Wait, { kind: "decision" }>>(
+    wait: Answered,
+    response: {
+      readonly approved: boolean;
+      readonly value: NoInfer<DecisionValueOf<Answered>>;
+    }
   ) => Promise<void>;
   /** Whether a new run may be started now (not a promise it will be). */
   readonly canRun: boolean;
@@ -426,6 +445,14 @@ export class WorkflowStore {
     await this.#control("cancel");
   };
 
+  readonly respond = async (
+    wait: unknown,
+    response: unknown
+  ): Promise<void> => {
+    const runId = this.#attachedRunId();
+    await this.#channel.respond(this.#read, runId, wait, response);
+  };
+
   readonly send = async (event: unknown, data: unknown): Promise<void> => {
     const runId = this.#attachedRunId();
     await this.#channel.send(this.#read, runId, event, data);
@@ -605,6 +632,7 @@ export class WorkflowStore {
       resume: this.resume,
       cancel: this.cancel,
       send: this.send,
+      respond: this.respond,
       canRun:
         binding.fresh &&
         binding.error === undefined &&

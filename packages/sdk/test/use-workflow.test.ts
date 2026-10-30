@@ -94,12 +94,19 @@ const unheard = (): void => {
   // Nothing to hear.
 };
 
+/** The page's answer to a decision, once its dialog and core took it. */
+const recorded = async (): Promise<unknown> =>
+  await Promise.resolve({ status: "approved" });
+
 /** The page and host a client reaches, scripted by each test. */
 const host = () => {
   const commands: Command[] = [];
   /** What the client acknowledged to the host's recovery index. */
   const received: string[] = [];
   const subscriptions: Subscription[] = [];
+  /** What the client asked the page to answer, through its own dialog. */
+  const responses: { run: string; decision: string; answer: unknown }[] = [];
+  let decide: () => Promise<unknown> = recorded;
   let watchRefusal: Error | undefined;
   let reply: (command: Command) => Reply | Promise<Reply> = (command) =>
     command.command === "start"
@@ -126,6 +133,12 @@ const host = () => {
     },
     received: (text) => {
       received.push(text);
+    },
+    decisions: {
+      respond: async (run, decision, answer) => {
+        responses.push({ run, decision, answer });
+        return await decide();
+      },
     },
     watch: async (text, onSnapshot, onLost) => {
       const refused = watchRefusal;
@@ -178,6 +191,11 @@ const host = () => {
     client: new GraspClient(transport),
     commands,
     received,
+    responses,
+    /** How the page answers the next decisions: its dialog and core. */
+    decideWith: (next: typeof decide) => {
+      decide = next;
+    },
     open,
     one,
     answer: (next: typeof reply) => {
@@ -1650,5 +1668,165 @@ describe("sending the selected run an event", () => {
     answered.resolve({ value: { eventId: "evt_1" } });
     await sending;
     expect(page.commands.map(({ runId }) => runId)).toStrictEqual(["run-1"]);
+  });
+});
+
+/** A decision wait of `summarizeNote` as the host names it. */
+const reviewing = {
+  kind: "decision",
+  id: "decision-1",
+  taskId: "review",
+  key: "approveSummary",
+  title: "review",
+  openedAt: 1000,
+  deadline: null,
+  canRespond: true,
+} as const;
+
+describe("answering a decision the selected run is held at", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses to answer for a run that isn't shown yet", async () => {
+    const page = host();
+    const idle = mount(page, null);
+    await expect(
+      codeOf(
+        idle.store.respond(reviewing, {
+          approved: true,
+          value: { comment: "Fine" },
+        })
+      )
+    ).resolves.toBe("workflow.not_attached");
+    expect(page.responses).toStrictEqual([]);
+  });
+
+  it("asks the page to answer the exact wait of the run shown, once, with the value as its decision declares it", async () => {
+    const page = host();
+    const hook = await showing(
+      page,
+      snapshotOf({ status: "waiting", waits: [reviewing] })
+    );
+    await hook.store.respond(reviewing, {
+      approved: false,
+      value: { comment: "Too long", rating: 2 },
+    });
+    expect({
+      responses: page.responses,
+      commands: page.commands,
+    }).toStrictEqual({
+      responses: [
+        {
+          run: "run-1",
+          decision: "decision-1",
+          answer: {
+            approved: false,
+            payload: { comment: "Too long", rating: 2 },
+          },
+        },
+      ],
+      // Nothing over the command path: only the page records an answer.
+      commands: [],
+    });
+  });
+
+  it("sends nothing for a value its decision doesn't take, another kind of wait, or another workflow's decision", async () => {
+    const page = host();
+    const hook = await showing(page);
+    const answered = async (wait: unknown, response: unknown) =>
+      // Untyped, as the store takes what any code may pass.
+      await codeOf(hook.store.respond(wait, response));
+    const codes = {
+      wrongValue: await answered(reviewing, {
+        approved: true,
+        value: "short",
+      }),
+      extraField: await answered(reviewing, {
+        approved: true,
+        value: { comment: "", by: "ada" },
+      }),
+      noApproval: await answered(reviewing, { value: { comment: "" } }),
+      eventWait: await answered(listening(), {
+        approved: true,
+        value: null,
+      }),
+      unknownKey: await answered(
+        { ...reviewing, key: "confirmArchive" },
+        { approved: true, value: null }
+      ),
+      noId: await answered(
+        { ...reviewing, id: "" },
+        { approved: true, value: { comment: "" } }
+      ),
+    };
+    expect({ codes, responses: page.responses }).toStrictEqual({
+      codes: {
+        wrongValue: "contract.invalid_args",
+        extraField: "contract.invalid_args",
+        noApproval: "contract.invalid_args",
+        eventWait: "contract.invalid_request",
+        unknownKey: "contract.invalid_request",
+        noId: "contract.invalid_request",
+      },
+      responses: [],
+    });
+  });
+
+  it("rejects with the page's refusal, a cancelled confirmation included, and leaves a lost answer uncertain, never sent again", async () => {
+    const page = host();
+    const hook = await showing(page);
+    const answer = { approved: true, value: { comment: "Fine" } };
+    page.decideWith(async () => {
+      await Promise.resolve();
+      throw Object.assign(new Error("Cancelled."), {
+        code: "decision.cancelled",
+      });
+    });
+    const cancelled = await codeOf(hook.store.respond(reviewing, answer));
+    page.decideWith(async () => {
+      await Promise.resolve();
+      throw new Error("The connection was reset.");
+    });
+    const lost = await codeOf(hook.store.respond(reviewing, answer));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect({ cancelled, lost, asked: page.responses.length }).toStrictEqual({
+      cancelled: "decision.cancelled",
+      lost: "decision.outcome_unknown",
+      asked: 2,
+    });
+  });
+
+  it("answers nothing where no trusted host can confirm it", async () => {
+    const page = host();
+    const bare = new GraspClient({
+      call: async () => await Promise.reject(new Error("Unused")),
+      watch: async (text, onSnapshot) => {
+        await Promise.resolve();
+        if (fieldOf(text, "runId") !== undefined) {
+          onSnapshot({
+            revision: 1,
+            result: { ok: true, value: snapshotOf() },
+          });
+        }
+        return { release: unheard };
+      },
+    });
+    const store = new WorkflowStore(
+      workflowChannel(bare),
+      readWorkflowReference(workflows.summarizeNote)
+    );
+    const stop = store.subscribe("run-1", unheard);
+    await flush();
+    await expect(
+      codeOf(
+        store.respond(reviewing, { approved: true, value: { comment: "" } })
+      )
+    ).resolves.toBe("decision.unavailable");
+    stop();
+    expect(page.responses).toStrictEqual([]);
   });
 });
