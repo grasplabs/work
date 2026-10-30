@@ -38,7 +38,8 @@ import {
 // At each stop the page is open behind him and the sidebar's way to it is
 // marked (`data-tour-target`, styles.css), so the person sees where to
 // find it again; at the last, where he can be asked, it is himself. On Chat, for someone who wasn't offered it before, he
-// first offers it. A page he didn't go to, Escape or the cross ends it.
+// first offers it, on the new chat in the greeting's place (`TourOffer`).
+// A page he didn't go to, Escape or the cross ends it.
 
 /** The sidebar's link to `address`, where the sidebar is on the page; on a phone it is a sheet that comes and goes, not that one. */
 const sidebarLink = (address: string | null): HTMLElement | null =>
@@ -116,13 +117,10 @@ const TourCard = ({
   line,
   children,
   progress,
-  closable = true,
 }: {
   line: string;
   children: ReactNode;
   progress?: string;
-  /** Whether it has a cross to end the tour; the offer has its own answers. */
-  closable?: boolean;
 }) => {
   const { t } = useLingui();
   return (
@@ -136,19 +134,65 @@ const TourCard = ({
         {progress === undefined ? null : (
           <span className="text-muted-foreground text-xs">{progress}</span>
         )}
-        {closable ? (
-          <Button
-            aria-label={t`End the tour`}
-            onClick={endTour}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <XIcon />
-          </Button>
-        ) : null}
+        <Button
+          aria-label={t`End the tour`}
+          onClick={endTour}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <XIcon />
+        </Button>
       </div>
       <p aria-live="polite">{line}</p>
       <div className="flex justify-end gap-2">{children}</div>
+    </section>
+  );
+};
+
+/**
+ * His offer, on the new chat, as the prototype makes it (grasplabs/
+ * prototype `routes/index.tsx`): his question in the greeting's place,
+ * in the greeting's serif, and its two answers under it, taking the tour
+ * the page's one highlight. The page shows it while the tour is
+ * `invited`, which the layer decides.
+ */
+export const TourOffer = ({
+  userId,
+  headingId,
+}: {
+  userId: string;
+  /** The new chat's heading's ID, which labels it: his question is it while he asks. */
+  headingId: string;
+}) => {
+  const { i18n, t } = useLingui();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  return (
+    <section
+      aria-label={t`Tour of Grasp`}
+      className="flex flex-col items-center gap-6"
+    >
+      <h1 aria-live="polite" className="type-display" id={headingId}>
+        {i18n._(tourOffer.say)}
+      </h1>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button
+          onClick={() => {
+            startTour(userId, pathname);
+          }}
+          variant="highlight"
+        >
+          {i18n._(tourOffer.start)}
+        </Button>
+        <Button
+          onClick={() => {
+            tourOffered(userId);
+            endTour();
+          }}
+          variant="ghost"
+        >
+          {i18n._(tourOffer.later)}
+        </Button>
+      </div>
     </section>
   );
 };
@@ -233,27 +277,9 @@ export const TourLayer = ({ identity }: { identity: Identity }) => {
     }
   };
 
+  // The offer stands on the new chat itself (`TourOffer`), not in a card.
   if (tour.phase === "invited") {
-    return (
-      <TourCard closable={false} line={i18n._(tourOffer.say)}>
-        <Button
-          onClick={() => {
-            tourOffered(userId);
-            endTour();
-          }}
-          variant="ghost"
-        >
-          {i18n._(tourOffer.later)}
-        </Button>
-        <Button
-          onClick={() => {
-            startTour(userId, pathname);
-          }}
-        >
-          {i18n._(tourOffer.start)}
-        </Button>
-      </TourCard>
-    );
+    return null;
   }
   if (tour.phase === "opening") {
     return (

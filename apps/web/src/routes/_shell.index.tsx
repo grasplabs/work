@@ -32,6 +32,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { useWide } from "../frame/wide.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { usePageSidePanel } from "../screens/app-panel-context.tsx";
+import { TourOffer } from "../tour/tour-layer.tsx";
+import { useTour } from "../tour/tour-state.ts";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the open chat has the page's
@@ -43,7 +45,9 @@ import { usePageSidePanel } from "../screens/app-panel-context.tsx";
 // hold what can be done with this one. A new chat starts on Grasp's buddy
 // and the question "What should we look at today?", centred in the middle
 // of the page, with questions to start from and the person's projects as
-// quiet rows under the box; once its agent writes a draft of an App, the
+// quiet rows under the box (the first time, Stephen's offer of his tour
+// stands in the question's place, tour/tour-layer.tsx); once its agent
+// writes a draft of an App, the
 // chat moves left and the App's preview stands on the right
 // (chat/studio.tsx).
 
@@ -127,6 +131,10 @@ const NewChat = ({
     project?.id
   );
   const projectName = project?.name;
+  const { identity } = Route.useRouteContext();
+  // Offered the tour, his question stands in the greeting's place, and
+  // nothing to start from under the box until it is answered.
+  const offered = useTour().phase === "invited";
   return (
     <section
       aria-labelledby="new-chat"
@@ -136,12 +144,13 @@ const NewChat = ({
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
-            <h1
-              className="text-2xl font-medium tracking-tight text-balance"
-              id="new-chat"
-            >
-              <Trans>What should we look at today?</Trans>
-            </h1>
+            {offered ? (
+              <TourOffer headingId="new-chat" userId={identity.userId} />
+            ) : (
+              <h1 className="type-display" id="new-chat">
+                <Trans>What should we look at today?</Trans>
+              </h1>
+            )}
           </div>
           {projectName === undefined ? null : (
             <p className="text-muted-foreground text-center">
@@ -149,7 +158,7 @@ const NewChat = ({
             </p>
           )}
           <Composer running={false} {...composer} />
-          {project === undefined ? (
+          {project === undefined && !offered ? (
             <div className="flex flex-col gap-6">
               <Suggestions
                 disabled={composer.busy || models.length === 0}
