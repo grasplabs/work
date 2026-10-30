@@ -567,6 +567,18 @@ export interface AppMembersApi {
    * once, or within a few seconds, as every push checks their role again.
    */
   remove: (app: string, member: AppMemberRef) => Promise<void>;
+  /**
+   * Whom its builders may share the App with: the organization's people
+   * and teams, by name and ID alone (no address, no role, no team's
+   * members). For whoever may share it (`add`), never Grasp staff.
+   */
+  candidates: (app: string) => Promise<ShareCandidates>;
+}
+
+/** The organization's people and teams, by name, to share an App with. */
+export interface ShareCandidates {
+  people: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
 }
 
 /**
