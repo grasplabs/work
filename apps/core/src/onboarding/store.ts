@@ -194,6 +194,7 @@ import {
   dueLinks,
   leads,
   leadsTalked,
+  mondayOf,
   progressOf,
   sendsFrom,
   takingPart,
@@ -2672,6 +2673,31 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The interviews of the people who agreed to what was read back and
+   * still take part: someone who withdrew is never counted again
+   * (GRA-329), in a source's people or in a week's interviews.
+   */
+  #agreedInterviews(): { person: string; completedAt: string | null }[] {
+    return this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .leftJoin(
+        participations,
+        eq(participations.person, interviewStates.person)
+      )
+      .where(
+        and(
+          isNotNull(interviewStates.agreedAt),
+          isNull(participations.withdrawnAt)
+        )
+      )
+      .all();
+  }
+
+  /**
    * Each team the brain has interviews of: one source for all of them
    * (brain-intake.ts), with how many of its people agreed and the day the
    * first of them did, never who. A team that left the roster has none.
@@ -2683,14 +2709,7 @@ export class Onboarding extends DurableObject<Env> {
     since: string;
   }[] {
     const roster = this.#roster();
-    const states = this.#db
-      .select({
-        person: interviewStates.person,
-        completedAt: interviewStates.completedAt,
-      })
-      .from(interviewStates)
-      .where(isNotNull(interviewStates.agreedAt))
-      .all();
+    const states = this.#agreedInterviews();
     return this.#db
       .select({ team: brainTeams.team })
       .from(brainTeams)
@@ -2714,6 +2733,44 @@ export class Onboarding extends DurableObject<Env> {
           ? []
           : [{ team: id, name: team.name, people: agreed.length, since }];
       });
+  }
+
+  /**
+   * How many interviews the brain learned from, week by week, never who
+   * gave them or on which day (GRA-1278): the interviews of the people who
+   * agreed and still take part, in teams whose interviews the brain holds,
+   * by the Monday of the week each finished in. A week of fewer than
+   * `minTeamShown` is left out, never added to another week: no line
+   * stands for fewer people than a team's claim needs, and a week a
+   * withdrawal takes below it goes without its rest showing up elsewhere,
+   * where the difference would tell how many were left.
+   */
+  interviewWeeks(): { week: string; interviews: number }[] {
+    const roster = this.#roster();
+    const sent = new Set(
+      this.#db
+        .select({ team: brainTeams.team })
+        .from(brainTeams)
+        .where(isNotNull(brainTeams.sentAt))
+        .all()
+        .map(({ team }) => team)
+    );
+    const inSent = new Set(
+      (roster?.people ?? [])
+        .filter((person) => sent.has(person.team))
+        .map(({ id }) => id)
+    );
+    const byWeek = new Map<string, number>();
+    for (const { person, completedAt } of this.#agreedInterviews()) {
+      if (completedAt !== null && inSent.has(person)) {
+        const week = mondayOf(dayOf(completedAt));
+        byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
+      }
+    }
+    return [...byWeek]
+      .filter(([, count]) => count >= minTeamShown)
+      .map(([week, count]) => ({ week, interviews: count }))
+      .toSorted((a, b) => a.week.localeCompare(b.week));
   }
 
   /**

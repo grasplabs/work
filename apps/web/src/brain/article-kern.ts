@@ -10,6 +10,11 @@ import type { Place } from "./transcript.ts";
 export interface StatementRow {
   statement: Statement;
   place: Place;
+  /**
+   * Who said it as the company may read it (witness.ts `labelOf`): a role
+   * five or more in the team have, else the team; none for a document.
+   */
+  who?: string | undefined;
 }
 
 /** Someone the team was heard through in an interview, as the source names them. */
