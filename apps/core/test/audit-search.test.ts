@@ -652,6 +652,45 @@ describe("audit log access", () => {
     ).resolves.toStrictEqual([]);
   });
 
+  it("records an export that takes the archive in as such, over RPC and as a download, and refuses an unknown option", async () => {
+    const { api, session, userId } = await signedInApi(idp, "admin");
+    const targetId = `archive-export-${unique()}`;
+
+    const events = await auditedDuring(async () => {
+      await new Response(
+        await api.audit.export({ targetId }, "json", { archive: true })
+      ).text();
+      const response = await download(
+        session,
+        `format=csv&archive=1&targetId=${targetId}`,
+        { "sec-fetch-site": "same-origin" }
+      );
+      await response.text();
+    });
+    expect(
+      events
+        .filter(({ action }) => action === "audit.exported")
+        .map(({ actor, detail }) => [actor, detail])
+    ).toStrictEqual([
+      [
+        { type: "person", userId },
+        { "filter.targetId": targetId, format: "json", archive: true },
+      ],
+      [
+        { type: "person", userId },
+        { "filter.targetId": targetId, format: "csv", archive: true },
+      ],
+    ]);
+    await expect(
+      outcome(
+        api.audit.export({ targetId }, "json", {
+          // @ts-expect-error -- an option core doesn't know
+          everything: true,
+        })
+      )
+    ).resolves.toBe("audit.invalid");
+  });
+
   it("records a search of the archive as a search, marked as of the archive", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
     const targetId = `archived-${unique()}`;
