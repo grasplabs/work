@@ -91,6 +91,26 @@ export const audit = async (
 };
 
 /**
+ * `event` by `actor` as a statement that records it only if the statement
+ * right before it in a batch changed a row (`changes()`), answering the
+ * event's id when it did: for a batch `actIfChanged` doesn't shape, such
+ * as one whose change needs other rows gone first.
+ */
+export const auditIfChanged = (
+  db: AdminDatabase,
+  actor: Actor,
+  event: AdminEvent
+) => {
+  const row = rowOf(actor, event);
+  return db
+    .insert(auditEvents)
+    .select(
+      sql`SELECT ${row.id}, ${row.at.getTime()}, ${row.actor}, ${row.action}, ${row.clientId}, ${row.target}, ${row.detail} WHERE changes() > 0`
+    )
+    .returning({ id: auditEvents.id });
+};
+
+/**
  * Runs `statement`, a conditional change (an update or delete with a
  * `WHERE` that may match nothing, or an insert that ignores a conflict,
  * as the release import's), and records `event` by `actor` only if
@@ -112,13 +132,7 @@ export const actIfChanged = async (
   event: AdminEvent,
   following: readonly BatchItem<"sqlite">[] = []
 ): Promise<boolean> => {
-  const row = rowOf(actor, event);
-  const record = db
-    .insert(auditEvents)
-    .select(
-      sql`SELECT ${row.id}, ${row.at.getTime()}, ${row.actor}, ${row.action}, ${row.clientId}, ${row.target}, ${row.detail} WHERE changes() > 0`
-    )
-    .returning({ id: auditEvents.id });
+  const record = auditIfChanged(db, actor, event);
   const [, recorded] = await db.batch([statement, record, ...following]);
   return recorded.length > 0;
 };

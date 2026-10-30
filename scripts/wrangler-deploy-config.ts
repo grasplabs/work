@@ -80,10 +80,13 @@ const boundSecrets = (
  * placeholder (a Worker that binds neither the store nor the router's map,
  * such as the connect gateway) comes back as it is.
  *
- * Cloudflare refuses a deploy that binds a secret the store doesn't have,
- * and Secrets Store keeps no empty values. So a binding to an optional
- * secret the store doesn't have yet is left out of the deploy: the Worker
- * reads it as not set up. Any other secret the store lacks stops the
+ * Cloudflare refuses a deploy that binds a secret the store doesn't have
+ * (code 10182), and Secrets Store keeps no empty values. So a binding to
+ * an optional secret the store doesn't have yet is left out of the
+ * deploy: the Worker reads it as not set up. Adding one later takes
+ * effect only at the next deploy, which binds it: staff add it to the
+ * stage's 1Password Environment, then run Deploy platform, which copies
+ * it in and deploys (`addSecretStep`, apps/admin/src/admin/words.ts). Any other secret the store lacks stops the
  * deploy before it starts, naming all of them. Only the deployed stage's
  * bindings count: the router's staging key needn't be in the store to
  * deploy production, nor production's to deploy staging.
@@ -118,16 +121,19 @@ export const filledConfig = async (
   const stored = await lookups.storedSecrets(store);
   const missing = bound.filter(({ name }) => !stored.has(name));
   const needed = missing.filter(({ binding }) => !target.optional.has(binding));
+  // Secrets Store names a staging secret `<binding>_STAGING`; the stage's
+  // 1Password Environment names it as its binding, which Deploy platform
+  // copies in under the store's name (scripts/store-secrets-lib.ts).
   if (needed.length > 0) {
     throw new Error(
-      `Secrets Store ${store} doesn't have ${needed.map(({ name }) => name).join(", ")}: put them in, then deploy again`
+      `Secrets Store ${store} doesn't have ${needed.map(({ name }) => name).join(", ")}: add ${needed.map(({ binding }) => binding).join(", ")} to the stage's 1Password Environment, then run Deploy platform again`
     );
   }
   if (missing.length === 0 || view === undefined) {
     return filled;
   }
   console.warn(
-    `Not in Secrets Store yet, so left unbound: ${missing.map(({ name }) => name).join(", ")}`
+    `Not in Secrets Store yet, so left unbound until a Deploy platform after ${missing.map(({ binding }) => binding).join(", ")} ${missing.length === 1 ? "is" : "are"} added to the stage's 1Password Environment: ${missing.map(({ name }) => name).join(", ")}`
   );
   const bindings = field(view, "secrets_store_secrets");
   view.secrets_store_secrets = Array.isArray(bindings)

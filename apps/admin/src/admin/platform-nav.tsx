@@ -67,13 +67,6 @@ export const PlatformNav = () => (
     >
       Offboarded
     </Link>
-    <Link
-      activeProps={{ className: activeTab }}
-      inactiveProps={{ className: tab }}
-      to="/platform/destinations"
-    >
-      Destinations
-    </Link>
   </nav>
 );
 

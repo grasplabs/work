@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5d5063a5-7ddf-4a8d-8f87-86ae0d3680d5",
+  "id": "d3265adf-b19e-4624-a133-84ca8f60da44",
   "prevId": "d7239fbb-85fd-4ce8-9dcd-5104d3d97ec7",
   "tables": {
     "access_revocations": {
@@ -2400,13 +2400,6 @@
         },
         "retired_at": {
           "name": "retired_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "forgotten_at": {
-          "name": "forgotten_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -6993,6 +6986,66 @@
             "permission_id"
           ],
           "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "run_chat_sources": {
+      "name": "run_chat_sources",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "run_chat_sources_run_id_source_id_pk": {
+          "columns": [
+            "run_id",
+            "source_id"
+          ],
+          "name": "run_chat_sources_run_id_source_id_pk"
         }
       },
       "uniqueConstraints": {},
