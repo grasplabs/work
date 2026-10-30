@@ -2468,6 +2468,27 @@ export const runEvidenceHolds = sqliteTable(
 );
 
 /**
+ * What the chat whose agent had a run started had read (GRA-1093;
+ * workflow-starts.ts): each of its sources still unwithheld then, with the
+ * chat's scope, copied once as the start is admitted. Before anything
+ * leaves the run, the host checks the chat's agent may still read them all
+ * for its person (history-access.ts, `readableSources`): a run is held to
+ * what its input may carry. Goes with the run's details.
+ */
+export const runChatSources = sqliteTable(
+  "run_chat_sources",
+  {
+    runId: text("run_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sourceId] })]
+);
+
+/**
  * Each pause, resume or cancel of a run that the host admitted
  * (src/workflows/controls.ts): its durable receipt. `admitted` until the
  * engine confirms it (`applied`), or a cancel supersedes a pause or resume
