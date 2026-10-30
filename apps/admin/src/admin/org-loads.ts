@@ -15,10 +15,13 @@
  *
  * Neither ever rejects: a read that fails is a client not answering.
  */
+import { whenAborted } from "@grasp-os/shared/deadline";
+
 import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchClientAdmin, fetchClientAdmins } from "../clients/functions.ts";
 import type { GridRow } from "../clients/grid.ts";
-import type { OrgRead, OrgReads } from "./org-reads.ts";
+import { freshMs } from "./org-reads.ts";
+import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
 import type { Deferred } from "./settled.tsx";
 
 const openOrganization = /^\/organizations\/(?<clientId>[^/]+)/u;
@@ -94,6 +97,39 @@ const peek = async <T>(value: Promise<T>): Promise<T | typeof notYet> =>
   // A promise settled already wins the race: its callbacks run first.
   await Promise.race([value, Promise.resolve(notYet)]);
 
+/**
+ * How long an organization's page waits on the frame's read for its
+ * client before asking it alone: a little past the page's own deadline
+ * (3 s, `pageReadOptions`), as the frame's waits on every client.
+ */
+const frameWaitMs = 4000;
+
+/**
+ * What the frame's read (`admins`) answered for `clientId`, once it is in,
+ * or undefined: when it holds up the page past `frameWaitMs`, failed, or
+ * has no fresh answer from its core (asked alone then, as staff opened
+ * it).
+ */
+const framedAnswer = async (
+  admins: Promise<ClientAdmin[] | null>,
+  clientId: string
+): Promise<AnsweredAdmin | undefined> => {
+  try {
+    const framed = await Promise.race([
+      admins,
+      whenAborted(AbortSignal.timeout(frameWaitMs)),
+    ]);
+    const found = framed?.find((admin) => admin.client.id === clientId);
+    // Only an answer that is still fresh: an older one is read again.
+    return found?.state === "answered" &&
+      Date.now() - Date.parse(found.at) < freshMs
+      ? found
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /** A client whose read failed without an answer, as one that didn't answer. */
 const unanswered = (client: GridRow): ClientAdmin => ({
   client,
@@ -104,7 +140,7 @@ const unanswered = (client: GridRow): ClientAdmin => ({
 
 /**
  * Organization `client`'s page as read: an answer the page has while it
- * is fresh, at once (unless asked anew, `again`); otherwise its core
+ * is fresh, at once (unless staff asked anew over it); otherwise its core
  * asked now, unless only preloaded (undefined: asked once opened). The
  * frame's read (`admins`) counts once it is in.
  */
@@ -122,7 +158,11 @@ export const readOrganization = async ({
   /** Only pointed at, not opened: what the page has, its core never asked. */
   preload: boolean;
 }): Promise<{ read: Deferred<OrgRead> | undefined }> => {
-  if (!again) {
+  // Run again where a fresh answer shows: staff asked anew (Read again,
+  // Try again), so the answer isn't reused. Run again without one (it
+  // went stale, or the page opens from a preload): read as on opening.
+  const anew = again && reads.fresh(client.id, Date.now()) !== undefined;
+  if (!anew) {
     const framed = await peek(admins);
     const found =
       framed === notYet || framed === null
@@ -142,6 +182,14 @@ export const readOrganization = async ({
     return { read: undefined };
   }
   const read = (async () => {
+    // The frame's read of every client, still under way, has this one in
+    // it: waited on, rather than asking its core, Stripe, Rooms and Attio
+    // a second time, unless it holds up the page past `frameWaitMs`.
+    const framed = anew ? undefined : await framedAnswer(admins, client.id);
+    if (framed !== undefined) {
+      reads.remember(framed);
+      return reads.settle(framed, Date.now());
+    }
     let admin: ClientAdmin | null = null;
     try {
       admin = await readOne(reads, client.id);

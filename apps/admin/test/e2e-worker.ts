@@ -94,7 +94,8 @@ const steerSchema = z.object({
 
 /**
  * A seeded core, held for `holdMs` before each snapshot it answers (0
- * answers at once), and how many it answered so far.
+ * answers at once), how many it answered so far, and every path it was
+ * asked for.
  */
 const steerCore = async (request: Request): Promise<Response> => {
   const { clientId, holdMs } = steerSchema.parse(await request.json());
@@ -110,7 +111,10 @@ const steerCore = async (request: Request): Promise<Response> => {
             await scheduler.wait(holdMs);
           };
   }
-  return Response.json({ reads: account.adminReaders.length });
+  return Response.json({
+    reads: account.adminReaders.length,
+    asked: account.coreAsked,
+  });
 };
 
 /** What makes a server function fail: its name, and whether it fails or answers garbage. */
