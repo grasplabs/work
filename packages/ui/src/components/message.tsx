@@ -1,4 +1,12 @@
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 function MessageGroup({ className, ...props }: React.ComponentProps<"div">) {
@@ -42,14 +50,37 @@ function MessageAvatar({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-function MessageContent({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * `reading` sets an answer as the prototype sets Grasp's answers in the
+ * chat (shadcn/typeset's reading text): 15px with room between the lines,
+ * an eighth larger on a phone, where it is read from further off. A
+ * step's own line (`TraceLine`) keeps its size.
+ */
+const messageContentVariants = cva(
+  "flex w-full min-w-0 flex-col gap-2.5 wrap-break-word group-data-[align=end]/message:*:data-slot:self-end",
+  {
+    variants: {
+      size: {
+        default: "",
+        reading: "text-[1.0546875rem]/[1.7] md:text-[0.9375rem]",
+      },
+    },
+    defaultVariants: {
+      size: "default",
+    },
+  }
+);
+
+function MessageContent({
+  className,
+  size = "default",
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof messageContentVariants>) {
   return (
     <div
       data-slot="message-content"
-      className={cn(
-        "flex w-full min-w-0 flex-col gap-2.5 wrap-break-word group-data-[align=end]/message:*:data-slot:self-end",
-        className
-      )}
+      data-size={size}
+      className={cn(messageContentVariants({ size }), className)}
       {...props}
     />
   );
@@ -81,7 +112,52 @@ function MessageFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/** A quiet row of actions under a message's content. */
+function MessageActions({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="message-actions"
+      className={cn("-ml-1.5 flex items-center gap-1", className)}
+      {...props}
+    />
+  );
+}
+
+/**
+ * One small action in that row: an icon, named by `label` (already in the
+ * reader's language) for a screen reader and in its tooltip.
+ */
+function MessageAction({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={label}
+            onClick={onClick}
+            size="icon-sm"
+            variant="ghost"
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export {
+  MessageAction,
+  MessageActions,
   MessageGroup,
   Message,
   MessageAvatar,

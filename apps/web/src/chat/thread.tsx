@@ -7,7 +7,14 @@ import type {
   ChatReasoning,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+} from "@grasp-os/ui/components/message";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
   Trace,
@@ -45,6 +52,7 @@ import {
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
+import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
   SeeInBrain,
   ThinkingLine,
@@ -57,13 +65,6 @@ import {
 } from "./conversation.tsx";
 import { failureMessage } from "./failure.ts";
 import { GraspSign } from "./grasp-sign.tsx";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageResponse,
-} from "./message.tsx";
 import { signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
@@ -90,8 +91,8 @@ const ThinkingCard = lazy(async () => {
 // stands under its newest answer and each new word fades in where it
 // lands; once it is done, the answer has its actions in a quiet row under
 // it. It follows the answer as it streams, unless the person scrolls
-// up to read (`Conversation`); each message is the prototype's AI Elements
-// message (`Message`).
+// up to read (`Conversation`); each message is the kit's (`Message`), a
+// question in its `Bubble`, an answer's words set for reading.
 
 type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
@@ -412,18 +413,14 @@ const ReplyText = ({
   text,
   citations,
   written,
-  compact,
 }: {
   text: string;
   citations?: ChatCitation[];
   /** Still being written: each new word fades in. */
   written: boolean;
-  /** In the chat dock: the size of the rest of the dock. */
-  compact: boolean;
 }) => (
-  <MessageResponse
+  <AnswerMarkdown
     cited={citations?.map(({ documentId }) => documentId)}
-    compact={compact}
     sources={useCitedDocuments()}
     text={text}
     written={written}
@@ -565,52 +562,50 @@ const Reply = ({
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   const shown = (
-    <div className="flex w-full min-w-0 flex-col gap-3">
-      <Message from="assistant">
-        <MessageContent>
-          <ReplySteps
-            output={output}
-            reply={reply}
-            results={results}
-            running={running}
-            thinking={writing && answer === "" && reply.code.length === 0}
-            top={top}
-            writing={writing}
+    <Message>
+      {/* Its words set for reading; in the dock, at the dock's size. */}
+      <MessageContent size={compact ? "default" : "reading"}>
+        <ReplySteps
+          output={output}
+          reply={reply}
+          results={results}
+          running={running}
+          thinking={writing && answer === "" && reply.code.length === 0}
+          top={top}
+          writing={writing}
+        />
+        {card}
+        {answer === "" ? null : (
+          <ReplyText
+            citations={reply.citations}
+            text={reply.text}
+            written={writing}
           />
-          {card}
-          {answer === "" ? null : (
-            <ReplyText
-              citations={reply.citations}
-              compact={compact}
-              text={reply.text}
-              written={writing}
-            />
-          )}
-          {reply.end === "cancelled" ? (
-            <p className="text-muted-foreground">
-              <Trans>Stopped.</Trans>
+        )}
+        {reply.end === "cancelled" ? (
+          <p className="text-muted-foreground">
+            <Trans>Stopped.</Trans>
+          </p>
+        ) : null}
+        {reply.end === "cut_off" ? (
+          <p className="text-muted-foreground">
+            <Trans>The answer was cut off at the model&apos;s limit.</Trans>
+          </p>
+        ) : null}
+        {reply.end === "failed" ? (
+          <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
+            <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
+            <p className="flex-1" role="alert">
+              {failureMessage(reply.failure, i18n)}
             </p>
-          ) : null}
-          {reply.end === "cut_off" ? (
-            <p className="text-muted-foreground">
-              <Trans>The answer was cut off at the model&apos;s limit.</Trans>
-            </p>
-          ) : null}
-          {reply.end === "failed" ? (
-            <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
-              <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
-              <p className="flex-1" role="alert">
-                {failureMessage(reply.failure, i18n)}
-              </p>
-              {onRetry === undefined ? null : (
-                <Button onClick={onRetry} size="sm" variant="outline">
-                  <RefreshCcwIcon data-icon="inline-start" />
-                  <Trans>Try again</Trans>
-                </Button>
-              )}
-            </div>
-          ) : null}
-        </MessageContent>
+            {onRetry === undefined ? null : (
+              <Button onClick={onRetry} size="sm" variant="outline">
+                <RefreshCcwIcon data-icon="inline-start" />
+                <Trans>Try again</Trans>
+              </Button>
+            )}
+          </div>
+        ) : null}
         {sign === undefined ? null : (
           <GraspSign said={reply.text.length} state={sign} />
         )}
@@ -624,8 +619,8 @@ const Reply = ({
             )}
           </ReplyActions>
         )}
-      </Message>
-    </div>
+      </MessageContent>
+    </Message>
   );
   // Only an answer that cites documents asks core what it cites.
   return cited === undefined ? (
@@ -804,8 +799,10 @@ export const ChatThread = ({
               if (message.role === "user") {
                 return (
                   <li key={message.id}>
-                    <Message from="user">
-                      <MessageContent>{message.text}</MessageContent>
+                    <Message align="end">
+                      <Bubble size="lg" variant="secondary">
+                        <BubbleContent>{message.text}</BubbleContent>
+                      </Bubble>
                     </Message>
                   </li>
                 );
