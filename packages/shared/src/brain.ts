@@ -17,6 +17,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
+import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
@@ -114,6 +115,58 @@ export interface Team {
   counts: TeamCount[];
   /** Who is interviewed for this team, oldest first; the newest counts. */
   stakeholders: Stakeholder[];
+}
+
+/**
+ * One of the company's groups of teams, as its admin confirmed it or Grasp
+ * proposed it: a region of the brain.
+ */
+export interface TeamGroup {
+  id: string;
+  /** The company's own name for it. */
+  name: string;
+  /** Its teams, by the brain's team ids, in the company's order. */
+  teamIds: string[];
+  /** An admin confirmed it; until then it is only Grasp's proposal. */
+  confirmed: boolean;
+}
+
+/** Most groups of teams a company keeps. */
+export const teamGroupsMax = 50;
+
+/** A group of teams as an admin confirms it (`brain.saveTeamGroups`). */
+export const teamGroupInputSchema = z.strictObject({
+  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+  name: z.string().trim().min(1).max(80),
+  teamIds: z
+    .array(z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/u))
+    .min(1)
+    .max(200),
+});
+export type TeamGroupInput = z.input<typeof teamGroupInputSchema>;
+
+/** The company's groups of teams, in its order: each id once, each team in one group at most. */
+export const teamGroupsInputSchema = z
+  .array(teamGroupInputSchema)
+  .max(teamGroupsMax)
+  .refine(
+    (groups) => new Set(groups.map(({ id }) => id)).size === groups.length,
+    "Each group once."
+  )
+  .refine((groups) => {
+    const teams = groups.flatMap(({ teamIds }) => teamIds);
+    return new Set(teams).size === teams.length;
+  }, "Each team in one group at most.");
+
+/**
+ * How many interviews the brain learned from in a week, never who gave them
+ * or on which day: each week holds at least five; a quieter week is left
+ * out.
+ */
+export interface InterviewWeek {
+  /** The Monday of the week, as an ISO date. */
+  week: string;
+  interviews: number;
 }
 
 /** Whether a tool is an AI tool or has AI built in. */
@@ -360,6 +413,14 @@ export interface Workspace {
   vision: Vision;
   goals: Goal[];
   teams: Team[];
+  /**
+   * The company's groups of teams, in its order: the brain's regions. A
+   * team in none has no group yet; Grasp proposes one when an admin asks
+   * (`brain.proposeTeamGroups`).
+   */
+  teamGroups: TeamGroup[];
+  /** The interviews the brain learned from, week by week, oldest first. */
+  interviewWeeks: InterviewWeek[];
   tools: Tool[];
   sources: Source[];
   statements: Statement[];
@@ -433,6 +494,19 @@ export interface BrainApi {
    * staff.
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /**
+   * Has Grasp propose, through the model gateway, a group for every team
+   * in none that an admin confirmed: kept as proposals until an admin
+   * confirms them (`saveTeamGroups`), replacing earlier proposals. For the
+   * company's admins. Returns the groups as they are now.
+   */
+  proposeTeamGroups: () => Promise<TeamGroup[]>;
+  /**
+   * Confirms the company's groups of teams as given, in its order, all of
+   * them: what isn't given is no longer a group. For the company's
+   * admins, audited. Returns them as kept.
+   */
+  saveTeamGroups: (groups: TeamGroupInput[]) => Promise<TeamGroup[]>;
   /** Closes an open gap without an answer: for the company's admins. */
   closeGap: (gapId: string) => Promise<Gap>;
   /**
@@ -440,11 +514,24 @@ export interface BrainApi {
    * for the company's admins.
    */
   redactGapAnswer: (gapId: string) => Promise<Gap>;
+  /**
+   * What Grasp knows about a piece of work, in its own sentences, for
+   * everyone signed in (`WorkKnowledge`): never a quote, a name or a day.
+   */
+  work: (id: string) => Promise<WorkKnowledge>;
+  /**
+   * Asks to hear more people about a piece of work in Stephen's next
+   * interviews: for the company's admins.
+   */
+  askMorePeople: (id: string) => Promise<WorkKnowledge>;
 }
 
 /** Why a brain call was refused. */
 export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
+  "brain.team_groups_invalid":
+    "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
+  "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
 
 /**
