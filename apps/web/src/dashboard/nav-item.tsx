@@ -14,8 +14,8 @@ import { useCore } from "../use-core.ts";
 
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): everything core's feed of
-// what waits lists (`session.waiting`), the failed workflows, questions and
-// stopped schedules among it only while unread. Read again on every other
+// what waits lists (`session.waiting`), the failed workflows, questions,
+// stopped schedules and revoked packages among it only while unread. Read again on every other
 // page the person opens and after every change on one; nothing is marked
 // read by counting.
 
@@ -28,6 +28,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
         "failedRun",
         "openQuestion",
         "stoppedSchedule",
+        "revokedPackage",
       ]);
       return (
         items.filter(({ kind }) => !notified.has(kind)).length +

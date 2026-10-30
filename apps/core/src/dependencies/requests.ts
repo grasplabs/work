@@ -87,6 +87,7 @@ import {
   workflowResources,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
+import { revocationNoticed } from "../notifications.ts";
 import {
   failUnless,
   lockGuardFailed,
@@ -95,6 +96,7 @@ import {
 } from "../packages/locks.ts";
 import { knownMalwareIn } from "../packages/malware.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
+import { concernedWith } from "./concerned.ts";
 import { peerIssues } from "./peers.ts";
 import { dropPending } from "./pending.ts";
 import {
@@ -1967,6 +1969,7 @@ const revokeReportedMalware = async (
   const [first] = found;
   const generation = generationNow + 1;
   const reason = `Reported as malware: ${packageKey(first.package)} (${first.advisory})`;
+  const concerned = await concernedWith(env, subject, ids);
   const event = createAuditEvent(
     {
       actor: coreActor,
@@ -2039,6 +2042,14 @@ const revokeReportedMalware = async (
       reason
     ),
     ...unusedLockStatements(db, subject),
+    // Its builders and approvers are told, as no person decided it.
+    ...revocationNoticed(db, {
+      subject,
+      package: first.package,
+      advisory: first.advisory,
+      personIds: concerned,
+      recorded: storedEvent(event.id),
+    }),
   ]);
   return ended.length === ids.length;
 };

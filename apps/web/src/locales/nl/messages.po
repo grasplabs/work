@@ -1176,6 +1176,10 @@ msgstr "{request} per verzoek"
 msgid "{rest}s"
 msgstr "{rest} s"
 
+#: src/inbox/items.ts
+msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+msgstr "{revoked} is als malware gemeld, dus Grasp heeft de pakketten ingetrokken die ermee zijn goedgekeurd: niets van {name} dat ze gebruikt wordt gebouwd, geleverd of gestart. Verwijder het pakket en vraag daarna om goedkeuring van nieuwe pakketten."
+
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
 msgstr "{role} (onbekend)"
@@ -2200,6 +2204,10 @@ msgstr "Beheerders kunnen ieders rol wijzigen, sessies beëindigen en mensen ver
 #: src/landscape/overview-tab.tsx
 msgid "Adoption"
 msgstr "Adoptie"
+
+#: src/inbox/items.ts
+msgid "Advisory"
+msgstr "Beveiligingsadvies"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "column of the audit trail export: the value after the change"
@@ -7874,6 +7882,11 @@ msgstr "Versie {version} actueel maken en publiceren"
 msgid "Make version {version} of {name} live?"
 msgstr "Versie {version} van {name} live zetten?"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: packages revoked as malware"
+msgid "Malware"
+msgstr "Malware"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Beheren"
@@ -10058,6 +10071,7 @@ msgid "Ownership"
 msgstr "Eigenaarschap"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Package"
 msgstr "Pakket"
 
@@ -10087,6 +10101,10 @@ msgstr "Pakketten voor {domain}"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Packages for {workflow}"
 msgstr "Pakketten voor {workflow}"
+
+#: src/inbox/items.ts
+msgid "Packages of {name} were revoked as malware"
+msgstr "Pakketten van {name} zijn ingetrokken als malware"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -10998,6 +11016,10 @@ msgstr "Voorwaarde {position} verwijderen"
 msgid "Remove the exception for {name}"
 msgstr "Uitzondering voor {name} verwijderen"
 
+#: src/inbox/item-detail.tsx
+msgid "Remove the package"
+msgstr "Pakket verwijderen"
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
 msgstr "Verwijderen: {item}"
@@ -11267,6 +11289,10 @@ msgstr "Pakketten voor {domain} intrekken"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakketten voor {domain} intrekken?"
+
+#: src/inbox/items.ts
+msgid "Revoked"
+msgstr "Ingetrokken"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"
