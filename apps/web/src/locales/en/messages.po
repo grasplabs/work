@@ -15078,10 +15078,6 @@ msgstr "The app is marked in the landscape, so its owner can act on it."
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 
-#: src/routes/_shell.apps.index.tsx
-msgid "The apps of some domains couldn't be read."
-msgstr "The apps of some domains couldn't be read."
-
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "The apps teams named, and the ones seen in use that nobody mentioned."

@@ -15078,10 +15078,6 @@ msgstr "Die App wird in der App-Landschaft gekennzeichnet, damit die verantwortl
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite der Domäne erneut genehmigen."
 
-#: src/routes/_shell.apps.index.tsx
-msgid "The apps of some domains couldn't be read."
-msgstr "Die Apps einiger Domänen konnten nicht gelesen werden."
-
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "Die Apps, die Teams genannt haben, und die, die im Einsatz sind, aber niemand erwähnt hat."

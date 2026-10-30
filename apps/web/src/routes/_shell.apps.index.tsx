@@ -1,4 +1,4 @@
-import type { App, AppStatus } from "@grasp-os/shared/apps";
+import type { AppStatus, ListedScreen } from "@grasp-os/shared/apps";
 import { canBuild } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
@@ -37,8 +37,6 @@ import {
 import { useState } from "react";
 
 import { statusLabel } from "../engines/app-status.tsx";
-import { listDomains } from "../engines/listed-domains.ts";
-import type { ListedDomain } from "../engines/listed-domains.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -55,8 +53,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // nobody works in them until it is restored. New app starts one in the
 // chat, for who builds.
 //
-// Core has no one read of every domain's screens: the page reads each
-// domain's contents (`listDomains`), as the Domains page does.
+// One read lists them all (`apps.screens`): core finds the domains as it
+// lists them and reads each one's screens from its current version's row.
 //
 // Not as the prototype: a tile shows the app's bar, not a picture of its
 // screen (screens are built and run sandboxed when opened), and has no
@@ -86,32 +84,22 @@ type Listed = (typeof statuses)[number];
 const everyApp = "all";
 type Shown = Listed | typeof everyApp;
 
-/** One app: a screen of a domain. */
+/** One app: a screen of a domain that isn't archived. */
 interface DomainApp {
-  domain: App & { status: Listed };
+  domain: ListedScreen["app"] & { status: Listed };
   screen: string;
 }
 
-const isListed = (domain: App): domain is App & { status: Listed } =>
+const isListed = (
+  domain: ListedScreen["app"]
+): domain is ListedScreen["app"] & { status: Listed } =>
   domain.status !== "archived";
 
-/** The apps of the domains, the newest domain's first, and whether any domain's couldn't be read. */
-const appsOf = (
-  domains: readonly ListedDomain[]
-): { apps: DomainApp[]; unread: boolean } => {
-  const newest = domains.toSorted((a, b) =>
-    b.app.createdAt.localeCompare(a.app.createdAt)
+/** The screens core lists, in its order (the newest domain's first), but an archived domain's. */
+const appsOf = (screens: readonly ListedScreen[]): DomainApp[] =>
+  screens.flatMap(({ app, screen }) =>
+    isListed(app) ? [{ domain: app, screen }] : []
   );
-  const apps = newest.flatMap(({ app, contents }) =>
-    isListed(app) && contents !== undefined
-      ? contents.screens.map((screen) => ({ domain: app, screen }))
-      : []
-  );
-  const unread = domains.some(
-    ({ app, contents }) => isListed(app) && contents === undefined
-  );
-  return { apps, unread };
-};
 
 /** New app, in lime: the page's one action. */
 const NewAppLink = ({ size }: { size?: "lg" }) => (
@@ -192,7 +180,7 @@ const AppsOverview = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Apps` }]} page={page} />;
   }
-  const { apps, unread } = appsOf(page.data);
+  const apps = appsOf(page.data);
   const builds = canBuild(identity.role);
   const holding = statuses.filter((status) =>
     apps.some(({ domain }) => domain.status === status)
@@ -277,11 +265,6 @@ const AppsOverview = () => {
             ) : null}
           </div>
         ) : null}
-        {unread ? (
-          <p className="text-muted-foreground">
-            <Trans>The apps of some domains couldn&apos;t be read.</Trans>
-          </p>
-        ) : null}
         {apps.length === 0 ? <FirstApp builds={builds} /> : null}
         {shownApps.length > 0 ? (
           <ul
@@ -321,5 +304,5 @@ export const Route = createFileRoute("/_shell/apps/")({
   pendingComponent: PageLoading,
   component: AppsOverview,
   loader: async ({ context: { core } }) =>
-    await loadFromCore(core, listDomains),
+    await loadFromCore(core, async (session) => await session.apps.screens()),
 });
