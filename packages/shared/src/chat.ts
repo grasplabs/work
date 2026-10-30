@@ -743,6 +743,12 @@ export interface ChatsApi {
     version: number
   ) => Promise<ChatDraftVersion>;
   /**
+   * Discards the chat's draft of `app`: its changes go, and the agent's
+   * next write starts over from the App's latest version; its versions
+   * stay, to restore one. For the person while they build the App.
+   */
+  discardDraft: (chatId: string, app: string) => Promise<void>;
+  /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
    * the App. With `version`, of that version of the draft, read-only:
