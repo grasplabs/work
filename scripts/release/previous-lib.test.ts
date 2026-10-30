@@ -1,31 +1,36 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { earlierReleaseIds, parseReleaseListing } from "./previous-lib.ts";
+import { parseReleaseListing } from "./bucket-lib.ts";
+import { newestReleaseIds } from "./previous-lib.ts";
 
-describe("the release before a CI run's", () => {
-  it("is the newest CI release from an earlier run, never this run's or a later one's, then the ones before it", () => {
+describe("the release before the one CI publishes", () => {
+  it("is the newest published release by year, month and N, never a local build", () => {
     const ids = [
-      "r000099-aaaaaaa",
-      "r000120-bbbbbbb",
-      "r000121-ccccccc",
-      "r000130-ddddddd",
+      "26.09.31",
+      "26.10.9",
       "dev-abc123",
+      "26.10.10",
+      "25.12.200",
+      "26.10.2",
     ];
-    expect(earlierReleaseIds(ids, 121)).toStrictEqual([
-      "r000120-bbbbbbb",
-      "r000099-aaaaaaa",
+    expect(newestReleaseIds(ids)).toStrictEqual([
+      "26.10.10",
+      "26.10.9",
+      "26.10.2",
+      "26.09.31",
+      "25.12.200",
     ]);
-    expect(earlierReleaseIds(ids, 99)).toStrictEqual([]);
+    expect(newestReleaseIds(["dev-abc123"])).toStrictEqual([]);
   });
 
   it("is read from every page of the bucket's listing", () => {
     const page = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult><IsTruncated>true</IsTruncated>
-<CommonPrefixes><Prefix>releases/r000120-bbbbbbb/</Prefix></CommonPrefixes>
-<CommonPrefixes><Prefix>releases/r000121-ccccccc/</Prefix></CommonPrefixes>
+<CommonPrefixes><Prefix>releases/26.10.1/</Prefix></CommonPrefixes>
+<CommonPrefixes><Prefix>releases/26.10.2/</Prefix></CommonPrefixes>
 <NextContinuationToken>next-page</NextContinuationToken></ListBucketResult>`;
     expect(parseReleaseListing(page)).toStrictEqual({
-      ids: ["r000120-bbbbbbb", "r000121-ccccccc"],
+      ids: ["26.10.1", "26.10.2"],
       next: "next-page",
     });
     expect(

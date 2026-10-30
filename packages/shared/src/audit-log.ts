@@ -444,6 +444,12 @@ export interface AuditApi {
   ) => Promise<ReadableStream<Uint8Array>>;
   /** One step of verifying the whole chain, archived stretches included. */
   verify: (after?: number) => Promise<ChainVerification>;
+  /**
+   * The last pass of `verify` that ran from the chain's first position and
+   * ended, as JSON exports report it; `null` before one has. Not recorded
+   * in the log: it reads what passes already recorded.
+   */
+  lastVerification: () => Promise<FullVerification | null>;
 }
 
 /**

@@ -28,6 +28,7 @@
 import { z } from "zod";
 
 import { toHex } from "./encoding.ts";
+import { releaseIdSchema } from "./release-id.ts";
 
 /** The manifest shape the admin must understand (see the header comment). */
 export const MANIFEST_VERSION = 1;
@@ -64,13 +65,6 @@ export const workerNameSchema = z
 
 /** The placeholder a D1 binding's id is in the manifest, filled in per account. */
 export const d1IdPlaceholder = (binding: string): string => `$D1_${binding}_ID`;
-
-// `r<run>-<sha7>` from CI, `dev-<time>` locally. It becomes an R2 prefix, so
-// nothing else is allowed in it.
-const RELEASE_ID = /^(?:r\d{6,}-[0-9a-f]{7}|dev-[0-9a-z]+)$/u;
-
-/** A release's id: `r<run6>-<sha7>` from CI, `dev-<time>` locally. */
-export const releaseIdSchema = z.string().regex(RELEASE_ID);
 
 // Platform limits and the evidence for raising one.
 //
@@ -520,6 +514,12 @@ export const limitEvidenceFile = "limit-evidence.json";
 /** Where a release's manifest is stored; written last. */
 export const manifestKey = (releaseId: string): string =>
   `releases/${releaseId}/manifest.json`;
+/**
+ * Where CI's publish records the release a commit was published as (its
+ * id, as text), written once that release's manifest is: a re-run of the
+ * commit's publish finds it there and publishes nothing again.
+ */
+export const commitKey = (commit: string): string => `commits/${commit}`;
 
 /** Bytes whose buffer is a plain `ArrayBuffer`, as Web Crypto takes them. */
 export type Bytes = Uint8Array<ArrayBuffer>;

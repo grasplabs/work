@@ -30,7 +30,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { decidesRequests } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/waiting.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 

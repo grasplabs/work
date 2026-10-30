@@ -94,9 +94,7 @@ const Company = () => {
   return (
     <section className="bg-card flex flex-wrap items-start justify-between gap-x-8 gap-y-3 rounded-xl border px-5 py-4">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="text-2xl leading-tight font-medium tracking-tight">
-          {org.name}
-        </h2>
+        <h2 className="type-title">{org.name}</h2>
         <p className="text-muted-foreground">
           {about === "" ? "What it does is not known yet" : about}
         </p>
