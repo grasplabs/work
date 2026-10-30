@@ -2507,6 +2507,18 @@ msgstr "An app runs only once an admin approved its code. That happens on the do
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 
+#: src/settings/audit-chain.tsx
+msgid "An entry doesn't link to the one before it."
+msgstr "An entry doesn't link to the one before it."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry is missing."
+msgstr "An entry is missing."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry was changed after it was written."
+msgstr "An entry was changed after it was written."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "An old format: save it as PDF or a newer file"
@@ -3578,6 +3590,10 @@ msgstr "Category"
 msgid "Certifications"
 msgstr "Certifications"
 
+#: src/settings/audit-chain.tsx
+msgid "Chain check"
+msgstr "Chain check"
+
 #: src/policies/policy.ts
 msgctxt "what a permission lets an app do with company data"
 msgid "change"
@@ -3841,9 +3857,17 @@ msgstr "Check and save"
 msgid "Check sound and microphone"
 msgstr "Check sound and microphone"
 
+#: src/settings/audit-chain.tsx
+msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+msgstr "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Checked the audit trail's chain"
+
+#: src/settings/audit-chain.tsx
+msgid "Checked through entry {through}…"
+msgstr "Checked through entry {through}…"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Checking it against your numbers…"
@@ -9271,6 +9295,10 @@ msgstr "Not started yet."
 msgid "Not verified"
 msgstr "Not verified"
 
+#: src/settings/audit-chain.tsx
+msgid "Not verified since this page opened."
+msgstr "Not verified since this page opened."
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Note"
@@ -13122,6 +13150,10 @@ msgstr "The apps your workflows can work in. Grasp only does what you allow per 
 msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
 msgstr "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
 
+#: src/settings/audit-chain.tsx
+msgid "The audit trail has no entries yet: there is nothing to verify."
+msgstr "The audit trail has no entries yet: there is nothing to verify."
+
 #: src/brain/brain-atlas.ts
 msgid "The board"
 msgstr "The board"
@@ -13154,6 +13186,10 @@ msgstr "The catalog doesn't list {app}, so its tools can't be shown."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
+
+#: src/settings/audit-chain.tsx
+msgid "The chain breaks at entry {entry}: nothing from there on is verified."
+msgstr "The chain breaks at entry {entry}: nothing from there on is verified."
 
 #: src/engines/store-changes.tsx
 msgid "The change to the store {name} was abandoned"
@@ -13733,6 +13769,10 @@ msgstr "The way most told it"
 #: src/onboarding/review-parts.tsx
 msgid "The way some told it"
 msgstr "The way some told it"
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, at {time}."
+msgstr "The whole chain verified, through entry {entries}, at {time}."
 
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
@@ -14825,6 +14865,14 @@ msgstr "Vendors, separated by commas"
 #: src/activity/audit-log.tsx
 msgid "Verified"
 msgstr "Verified"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify now"
+msgstr "Verify now"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify the chain"
+msgstr "Verify the chain"
 
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
