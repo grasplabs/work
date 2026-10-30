@@ -3,6 +3,7 @@ import { env, exports } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { orgSections, sectionTo, sectionWords } from "../src/admin/sections.ts";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
@@ -201,6 +202,21 @@ const integrationsOf = ({
   toCome: html.includes("This section isn’t in the admin yet."),
 });
 
+/** Each section as an organization not read shows it. */
+const unread = (state: string[]) =>
+  orgSections
+    .filter((each) => each !== "setup")
+    .map((section) => ({
+      section,
+      status: 200,
+      title: true,
+      column: true,
+      failed: false,
+      fromCore: false,
+      toSetup: true,
+      state,
+    }));
+
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token });
   // Only each test's own clients are listed: an earlier test's accounts
@@ -224,7 +240,7 @@ describe("the admin's frame", () => {
 
     const places = [
       "Overview",
-      "Integrations to build",
+      "Apps asked for",
       "Platform",
       "Ask Grasp",
       "Stephen Lab",
@@ -277,45 +293,27 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("says there is nothing to build yet where the integrations' table goes, and how a build goes, with no build to move on", async () => {
+  it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
     const { status, html } = await page("/integrations");
-    const text = html.replaceAll(tags, " ").replaceAll(spaces, " ");
-    const steps = [
-      "A company’s workflow needs an app Composio does not have.",
-      "Build it starts Grasp’s agent on a branch of its own.",
-      "A person registers Grasp with the app and puts the keys in the admin.",
-      "The agent writes the connection and its tests",
-      "The merge goes into the next release",
-    ].map((step) => text.indexOf(step));
 
     expect({
       status,
-      title: html.includes(">Integrations to build</h1>"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      howItIsBuilt: html.includes(">How it is built</h2>"),
-      stepsInOrder:
-        steps.every((at) => at >= 0) &&
-        steps.toSorted((a, b) => a - b).every((at, i) => at === steps[i]),
-      // No sample builds, and nothing that would move one on.
+      title: html.includes(">Apps asked for</h1>"),
+      nothingAsked: html.includes("Nothing asked for yet"),
       table: html.includes("<table"),
       buttons: html
-        .slice(html.indexOf(">Integrations to build</h1>"))
+        .slice(html.indexOf(">Apps asked for</h1>"))
         .includes("<button"),
-      // Connect signs in with OAuth2 and API keys now (GRA-688).
-      firstByHand: text.includes("First, by hand"),
     }).toStrictEqual({
       status: 200,
       title: true,
-      nothingToBuild: true,
-      howItIsBuilt: true,
-      stepsInOrder: true,
+      nothingAsked: true,
       table: false,
       buttons: false,
-      firstByHand: false,
     });
   });
 
-  it("lists every app the companies asked Grasp for once, most asked first, each opening its build, and every company's request leading to it", async () => {
+  it("lists every app the companies asked Grasp for once, most asked first, and every company's request leading to it", async () => {
     const acme = await liveClient();
     const globex = await liveClient();
     const asked = (name: string, ago: number) => ({
@@ -356,17 +354,13 @@ describe("the admin's frame", () => {
       // Once each, the one two companies asked for first.
       rows: (html.match(/<tr/gu) ?? []).length - 1,
       order: exact !== -1 && twinfield > exact,
-      exact: [
-        rowText("exact-online").includes(
-          `Acme ${acme.clientId} and Acme ${globex.clientId}`
-        ),
-        rowText("exact-online").includes("Waiting for Grasp to start it"),
-      ],
+      exact: rowText("exact-online").includes(
+        `Acme ${acme.clientId} and Acme ${globex.clientId}`
+      ),
       twinfield: rowText("twinfield").includes(`Acme ${acme.clientId}`),
-      badge: text.includes("2 wait on Grasp"),
-      sidebar: sidebarOf(html).includes("2 apps wait on Grasp"),
-      nothingToBuild: html.includes("Nothing to build yet"),
-      // Its own request, on the company's Integrations, leads to the build.
+      sidebar: sidebarOf(html).includes("2 apps asked for"),
+      nothingAsked: html.includes("Nothing asked for yet"),
+      // Its own request, on the company's Integrations, leads to the app.
       companyAsked: company.html.includes(
         `href="/integrations?app=exact-online"`
       ),
@@ -375,11 +369,10 @@ describe("the admin's frame", () => {
       status: [200, 200],
       rows: 2,
       order: true,
-      exact: [true, true],
+      exact: true,
       twinfield: true,
-      badge: true,
       sidebar: true,
-      nothingToBuild: false,
+      nothingAsked: false,
       companyAsked: true,
       companyWords: true,
     });
@@ -1198,70 +1191,66 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("opens an organization whose core didn't answer with its column of sections, each saying why nothing of it is read, and its Setup", async () => {
+  it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
     const down = await liveClient();
     down.account.unhealthy = 1000;
     const waiting = await recordClient("provisioning");
-
+    /** What a section of `client` says, on every section but its Setup. */
+    const sectionsOf = async (client: { clientId: string; name: string }) => {
+      const said = [];
+      for (const section of orgSections.filter((each) => each !== "setup")) {
+        const path = sectionTo[section].replace("$clientId", client.clientId);
+        // oxlint-disable-next-line no-await-in-loop -- pages render one at a time
+        const { status, html } = await page(path);
+        said.push({
+          section,
+          status,
+          title: html.includes(
+            `${section === "overview" ? client.name : sectionWords[section].title}</h1>`
+          ),
+          column:
+            columnOf(html, client.name).includes("Members") &&
+            columnOf(html, client.name).includes("Not read now"),
+          failed: html.includes("This couldn’t be shown"),
+          fromCore: ["Needs Grasp", "% known", "From the company"].some(
+            (text) => html.includes(text)
+          ),
+          toSetup: html.includes(
+            `href="/organizations/${client.clientId}/setup"`
+          ),
+          state: [
+            "isn’t set up yet",
+            "See its Setup progress",
+            "’s Grasp didn’t answer",
+            "Try again",
+          ].filter((text) => html.includes(text)),
+        });
+      }
+      return said;
+    };
+    const downSections = await sectionsOf(down);
+    const waitingSections = await sectionsOf(waiting);
     const downPage = await page(`/organizations/${down.clientId}`);
     const downMembers = await page(`/organizations/${down.clientId}/members`);
     const downSetup = await page(`/organizations/${down.clientId}/setup`);
     const waitingPage = await page(`/organizations/${waiting.clientId}`);
-    /** What the page says of `name`: its title, its column, and whether anything of its core is there. */
-    const pageOf = (
-      { status, html }: { status: number; html: string },
-      name: string,
-      title = name
-    ) => ({
-      status,
-      title: html.includes(`${title}</h1>`),
-      column:
-        columnOf(html, name).includes("Members") &&
-        columnOf(html, name).includes("Not read now"),
-      fromCore: ["Needs Grasp", "% known", "From the company"].some((text) =>
-        html.includes(text)
-      ),
-      toSetup: html.includes(
-        `href="/organizations/${name === down.name ? down.clientId : waiting.clientId}/setup"`
-      ),
-    });
 
     expect({
-      down: pageOf(downPage, down.name),
+      downSections,
+      waitingSections,
       downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
-      downMembers: pageOf(downMembers, down.name, "Members"),
       membersWhy: downMembers.html.includes("Its Grasp can’t be read now:"),
       // Its Setup is the admin's own record, read whatever its core does.
       setup: downSetup.html.includes("How it stands"),
-      waiting: pageOf(waitingPage, waiting.name),
       waitingWhy: waitingPage.html.includes(
         "Its Grasp isn’t deployed yet, so there is nothing of it to read."
       ),
     }).toStrictEqual({
-      down: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
+      downSections: unread(["’s Grasp didn’t answer", "Try again"]),
+      waitingSections: unread(["isn’t set up yet", "See its Setup progress"]),
       downWhy: true,
-      downMembers: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       membersWhy: true,
       setup: true,
-      waiting: {
-        status: 200,
-        title: true,
-        column: true,
-        fromCore: false,
-        toSetup: true,
-      },
       waitingWhy: true,
     });
   });

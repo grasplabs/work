@@ -762,11 +762,11 @@ export default class extends WorkerEntrypoint {
 }
 `;
     const load = env.LOADER.load.bind(env.LOADER);
-    const loading = vi
-      .spyOn(env.LOADER, "load")
-      .mockImplementation((code) =>
-        load({ ...code, modules: { "extractor.js": takenOver } })
-      );
+    const loading = vi.spyOn(env.LOADER, "load").mockImplementation((code) =>
+      // The extractor's own module taken over; the quiet Loader's wrapper
+      // around it kept, as core loads it.
+      load({ ...code, modules: { ...code.modules, "extractor.js": takenOver } })
+    );
     let markdown: string;
     try {
       ({ markdown } = await localExtractor(env)({

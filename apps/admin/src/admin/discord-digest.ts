@@ -20,8 +20,7 @@ import { digestOf } from "@grasp-os/shared/admin/admin-tools";
 import { log } from "@grasp-os/shared/log";
 
 import { clientAdmins } from "../clients/admin.ts";
-import { ifStored } from "../clients/grid.ts";
-import { storeSecret } from "../deploy/context.ts";
+import { ifStored, storeSecret } from "../deploy/context.ts";
 import { discordWebhookOf, postToDiscord } from "../discord-webhook.ts";
 import { organizationsOf } from "./views.ts";
 

@@ -17,6 +17,7 @@ import type { CloudflareApi, CloudflareApiOptions } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import type { ReleaseStore } from "../releases/import.ts";
+import { ClientDomainUnsetError } from "./client-domain.ts";
 import type { SignInApps } from "./core-config.ts";
 import type { RouterHosts, SmokeOptions } from "./router.ts";
 import type { DeploySecrets } from "./secrets.ts";
@@ -66,6 +67,20 @@ export class MissingStoreSecretError extends Error {
     this.secret = name;
   }
 }
+
+/** What `read` answers, or null when a secret it reads isn't in Secrets Store. */
+export const ifStored = async <T>(
+  read: () => Promise<T>
+): Promise<T | null> => {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof MissingStoreSecretError) {
+      return null;
+    }
+    throw error;
+  }
+};
 
 /**
  * The value of the Secrets Store secret `name`. One that's missing or
@@ -283,7 +298,7 @@ export const oauthRelayOf = (env: {
 export const deployContext = async (env: Env): Promise<DeployContext> => {
   const domain = clientDomain(env);
   if (domain === null) {
-    throw new Error("CLIENT_DOMAIN isn't set: no client can be deployed");
+    throw new ClientDomainUnsetError();
   }
   // Exactly staging or production: never production by default, so an
   // admin whose STAGE is missing or misspelt runs no operation anywhere.

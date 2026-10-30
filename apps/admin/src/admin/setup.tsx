@@ -35,7 +35,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   ArrowDownIcon,
   ArrowRightIcon,
@@ -56,14 +56,20 @@ import { slackAppManifest, slackRequestUrl } from "../clients/slack-app.ts";
 import { overBars } from "../clients/watch-signals.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
+import { retryProvisioningFn } from "../hosting/functions.ts";
 import type { ClientHostingView } from "../hosting/placement.ts";
-import { operationErrorWords } from "../hosting/words.ts";
+import {
+  notStartedWords,
+  operationErrorWords,
+  placeRefusals,
+} from "../hosting/words.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { formatTime } from "../releases/format.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
 import { fetchDrift } from "../rollout/functions.ts";
 import type { DriftCheck } from "../rollout/functions.ts";
-import { ringWords } from "./platform-parts.tsx";
+import { thenRefresh, useAction } from "../use-action.ts";
+import { attentionWords, ringWords } from "./platform-parts.tsx";
 import { sectionTo } from "./sections.ts";
 import type { OrgSection } from "./sections.ts";
 import {
@@ -79,7 +85,6 @@ import {
   SealedSecretChange,
   TeamsBotChange,
   TeamsPackageDownload,
-  TestAlert,
   useRefreshSetup,
 } from "./setup-actions.tsx";
 import type { Refresh } from "./setup-actions.tsx";
@@ -184,11 +189,50 @@ const OutLink = ({ href, label }: { href: string; label: string }) => (
 
 /** What about a company's platform needs someone at Grasp, the most pressing first. */
 type PlatformNeed =
+  | {
+      kind: "attention";
+      attention: NonNullable<ProvisioningView["needsAttention"]>;
+      view: ProvisioningView;
+    }
   | { kind: "provisioning"; view: ProvisioningView }
+  | { kind: "not_started"; why: ProvisioningView["notStarted"] }
   | { kind: "rollout"; rollout: NonNullable<ClientSetup["rollout"]> }
   | { kind: "secrets" }
   | { kind: "settings" }
-  | { kind: "behind"; releases: number };
+  | { kind: "behind"; releases: number }
+  | { kind: "teams_bot_secret"; days: number }
+  | { kind: "stephen"; over: number };
+
+/** How many days before its Teams bot's secret expires its Setup says it needs a new one. */
+const botSecretWarnDays = 30;
+
+/** How long until its Teams bot's secret expires, `days` from now, as a sentence. */
+const botSecretWords = (days: number): string => {
+  if (days > 1) {
+    return `Its Teams bot's secret expires in ${days} days.`;
+  }
+  if (days === 1) {
+    return "Its Teams bot's secret expires tomorrow.";
+  }
+  return days === 0
+    ? "Its Teams bot's secret expires today: Stephen stops answering in Teams once it has."
+    : "Its Teams bot's secret has expired: Stephen can't answer in Teams.";
+};
+
+/** What a live company's chat apps need: a new bot secret soon, a look at Stephen. */
+const chatNeedsOf = (setup: ClientSetup): PlatformNeed[] => {
+  const needs: PlatformNeed[] = [];
+  const days = setup.teamsBotSecretDays;
+  if (days !== null && days <= botSecretWarnDays) {
+    needs.push({ kind: "teams_bot_secret", days });
+  }
+  const over =
+    setup.watched === null ? 0 : overBars(setup.watched.signals).size;
+  if (over > 0) {
+    needs.push({ kind: "stephen", over });
+  }
+  return needs;
+};
 
 /** A company this many releases behind the newest, not pinned, needs a look. */
 const behindAt = 2;
@@ -204,7 +248,18 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   const { provisioning, rollout, behind } = setup;
   const needs: PlatformNeed[] = [];
   if (provisioning.phase === "failed") {
-    needs.push({ kind: "provisioning", view: provisioning });
+    needs.push(
+      provisioning.needsAttention === null
+        ? { kind: "provisioning", view: provisioning }
+        : {
+            kind: "attention",
+            attention: provisioning.needsAttention,
+            view: provisioning,
+          }
+    );
+  }
+  if (provisioning.phase === "placing") {
+    needs.push({ kind: "not_started", why: provisioning.notStarted });
   }
   if (rollout?.target === "failed" || rollout?.target === "rolled_back") {
     needs.push({ kind: "rollout", rollout });
@@ -221,22 +276,41 @@ const needsOf = (setup: ClientSetup): PlatformNeed[] => {
   if (pinned === null && behind !== null && behind >= behindAt) {
     needs.push({ kind: "behind", releases: behind });
   }
-  return needs;
+  return active ? [...needs, ...chatNeedsOf(setup)] : needs;
 };
 
 /** A need in a sentence. */
 const needWords = (need: PlatformNeed): ReactNode => {
+  if (need.kind === "attention") {
+    const { attention, view } = need;
+    const code = attention.code ?? view.stopped?.error ?? null;
+    return (
+      <>
+        {attentionWords[attention.reason]}
+        {code === null ? null : (
+          <>
+            {" "}
+            <ErrorCode code={code} />
+            {` ${operationErrorWords(code)}`}
+          </>
+        )}
+      </>
+    );
+  }
   if (need.kind === "provisioning") {
     const { view } = need;
     return view.stopped === null ? (
-      "Setting it up stopped, and waits to be started again from Hosting."
+      "Stopped: Grasp is retrying it by itself."
     ) : (
       <>
-        {`Setting it up stopped at its ${view.stopped.step} step: `}
+        {`Stopped after its ${view.stopped.step} step; Grasp is retrying it by itself: `}
         <ErrorCode code={view.stopped.error} />
         {` ${operationErrorWords(view.stopped.error)}`}
       </>
     );
+  }
+  if (need.kind === "not_started") {
+    return notStartedWords(need.why);
   }
   if (need.kind === "rollout") {
     const { rollout } = need;
@@ -260,6 +334,12 @@ const needWords = (need: PlatformNeed): ReactNode => {
   }
   if (need.kind === "settings") {
     return "Changed settings wait to reach it: the next deploy carries them.";
+  }
+  if (need.kind === "teams_bot_secret") {
+    return `${botSecretWords(need.days)} Mint a new client secret for its bot in its own Entra and set it under Its Teams bot, with the day it expires.`;
+  }
+  if (need.kind === "stephen") {
+    return `${need.over === 1 ? "One of Stephen's signals is" : `${need.over} of Stephen's signals are`} over its bar: see Stephen below.`;
   }
   return `${need.releases} releases behind the newest.`;
 };
@@ -608,6 +688,39 @@ const Checklist = ({
   );
 };
 
+/**
+ * Retry now: resumes its provisioning as the staff member
+ * (`retryProvisioningFn`), which starts a new episode of automatic
+ * retries and clears what needed attention.
+ */
+const RetryNow = ({ clientId }: { clientId: string }) => {
+  const router = useRouter();
+  const { busy, failure, run } = useAction(placeRefusals);
+  const retry = () => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () => await retryProvisioningFn({ data: { clientId } }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button disabled={busy} onClick={retry} size="sm" variant="outline">
+        Retry now
+      </Button>
+      {failure === null ? null : (
+        <span className="text-destructive text-sm" role="alert">
+          {failure}
+        </span>
+      )}
+    </span>
+  );
+};
+
 /** Where what a need says is seen to: the rollout's page, or the tab it is done on. */
 const NeedAction = ({
   clientId,
@@ -635,7 +748,8 @@ const NeedAction = ({
       );
     }
     case "secrets":
-    case "settings": {
+    case "settings":
+    case "teams_bot_secret": {
       return (
         <TabLink clientId={clientId} tab="settings">
           Its settings
@@ -649,8 +763,13 @@ const NeedAction = ({
         </TabLink>
       );
     }
-    case "provisioning": {
-      // Setting it up is seen to below, on this tab.
+    case "attention": {
+      return <RetryNow clientId={clientId} />;
+    }
+    case "provisioning":
+    case "not_started":
+    case "stephen": {
+      // Setting it up, and Stephen's signals, are seen to below, on this tab.
       return null;
     }
     default: {
@@ -709,7 +828,7 @@ const StephenWatched = ({ setup }: { setup: ClientSetup }) => {
   const over = overBars(signals);
   return (
     <SetupSection
-      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. Each signal over its bar was posted to the staff alerts' channel.`}
+      description={`Over the last ${signals.hours} hours, as the admin's hourly watch read it at ${formatTime(readAt)}. Counts only. A signal over its bar is marked, and the Setup says it needs a look.`}
       title="Stephen"
     >
       <Facts
@@ -1756,12 +1875,6 @@ const Settings = ({
           />
         </>
       )}
-      <SetupSection
-        description="What needs someone at Grasp about it, such as its Teams bot's secret running out, is posted to the staff alerts' channel with a link here."
-        title="Staff alerts"
-      >
-        <TestAlert clientId={clientId} />
-      </SetupSection>
     </>
   );
 };
