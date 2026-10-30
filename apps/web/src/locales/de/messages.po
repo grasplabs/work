@@ -5013,6 +5013,10 @@ msgstr "Code kopieren"
 msgid "Copy fingerprint"
 msgstr "Fingerabdruck kopieren"
 
+#: src/knowledge/copy-skill.tsx
+msgid "Copy into Our skills"
+msgstr "In „Our skills“ kopieren"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Tabelle kopieren"
@@ -11390,6 +11394,10 @@ msgstr "Unsere E-Mail hat {names} nicht erreicht. Senden Sie den Link selbst üb
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
 msgstr "Unser erstes Gespräch hat mir das große Bild gegeben. Jetzt brauche ich die Details."
+
+#: src/knowledge/copy-skill.tsx
+msgid "Our skills has a skill at {path} already: adapt that one."
+msgstr "„Our skills“ hat unter {path} bereits einen Skill: Passen Sie diesen an."
 
 #: src/chat/thread.tsx
 #: src/engines/resource-bindings.tsx
