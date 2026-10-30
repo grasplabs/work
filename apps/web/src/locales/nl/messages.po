@@ -466,9 +466,21 @@ msgstr "{documentKinds}, en alles wat uitlegt hoe jullie werken. Deel wat je heb
 msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 msgstr "{documentKinds}. Koppel waar ze staan, en ik lees alleen wat je met me deelt."
 
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {# document purged} other {# documents purged}}"
+msgstr "{documents, plural, one {# document opgeschoond} other {# documenten opgeschoond}}"
+
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
+msgstr "{documents, plural, one {# document wordt herschreven} other {# documenten worden herschreven}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# document} other {# documenten}}"
+
+#: src/knowledge/purge.tsx
+msgid "{documents, plural, one {From every version of this collection's # file.} other {From every version of this collection's # files.}}"
+msgstr "{documents, plural, one {Uit elke versie van het # bestand van deze collectie.} other {Uit elke versie van de # bestanden van deze collectie.}}"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{domain} doesn't get these packages."
@@ -607,6 +619,10 @@ msgstr "{hidden, plural, one {Nog # tonen} other {Nog # tonen}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} op {resource}"
 
+#: src/knowledge/purge.tsx
+msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
+msgstr "{hostCopies, plural, one {# kopie buiten Kennis opgeschoond} other {# kopieën buiten Kennis opgeschoond}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# uur} other {# uur}}"
@@ -744,6 +760,10 @@ msgstr "{live} van {count}"
 msgid "{live} of {count} live"
 msgstr "{live} van {count} live"
 
+#: src/knowledge/purge.tsx
+msgid "{longer, plural, one {A term is still in # longer word or address.} other {A term is still in # longer words or addresses.}}"
+msgstr "{longer, plural, one {Een term zit nog in # langer woord of adres.} other {Een term zit nog in # langere woorden of adressen.}}"
+
 #: src/onboarding/work-record.tsx
 msgid "{low} to {high}"
 msgstr "{low} tot {high}"
@@ -767,6 +787,10 @@ msgstr "{matching, plural, one {Einde van de audittrail · # gebeurtenis} other 
 #: src/dashboard/standard-widgets.tsx
 msgid "{measured} a month measured return"
 msgstr "{measured} per maand gemeten opbrengst"
+
+#: src/knowledge/purge.tsx
+msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
+msgstr "{memories, plural, one {# herinnering geredigeerd of verwijderd} other {# herinneringen geredigeerd of verwijderd}}"
 
 #. A length of time, said short: 4 minutes and 21 seconds.
 #: src/chat/thread.tsx
@@ -922,6 +946,10 @@ msgstr "{name} is voor het eerst gezien op {firstSeen}, minder dan een maand gel
 msgid "{name} was first seen on {firstSeen}, more than a month ago."
 msgstr "{name} is voor het eerst gezien op {firstSeen}, meer dan een maand geleden."
 
+#: src/activity/audit-log.tsx
+msgid "{name}, in {app}"
+msgstr "{name}, in {app}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
@@ -982,6 +1010,10 @@ msgstr "{normal} minuten, {quickest} tot {longest}"
 msgid "{notTalked, plural, one {# person who does it has not talked} other {# people who do it have not talked}}"
 msgstr "{notTalked, plural, one {# persoon die het doet heeft nog niet gepraat} other {# mensen die het doen hebben nog niet gepraat}}"
 
+#: src/knowledge/purge.tsx
+msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
+msgstr "{occurrences, plural, one {# vermelding verwijderd} other {# vermeldingen verwijderd}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} en {other} noemen allebei dezelfde overdracht, elk vanaf hun eigen kant."
@@ -1001,6 +1033,10 @@ msgstr "{open, plural, one {# open vraag} other {# open vragen}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Niets wacht op jou} =1 {Nog maar één ding voor jou} other {# dingen voor jou}}"
+
+#: src/knowledge/purge.tsx
+msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
+msgstr "{originals, plural, one {# geüpload origineel verwijderd} other {# geüploade originelen verwijderd}}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "{out, plural, one {All in place: # link is out, the rest go by the plan.} other {All in place: # links are out, the rest go by the plan.}}"
@@ -1262,6 +1298,10 @@ msgstr "{status, select, drawn {{workflow} (uitgetekend)} designed {{workflow} (
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Uitgetekend als workflow} designed {Ontworpen als workflow} testing {In test als workflow} other {Live als workflow}}"
 
+#: src/knowledge/purge.tsx
+msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
+msgstr "{still, plural, one {Zoeken vindt een term nog op # plek.} other {Zoeken vindt een term nog op # plekken.}}"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{stopped, plural, one {# interview stopped halfway and was not picked up again.} other {# interviews stopped halfway and were not picked up again.}}"
 msgstr "{stopped, plural, one {# interview is halverwege gestopt en niet meer opgepakt.} other {# interviews zijn halverwege gestopt en niet meer opgepakt.}}"
@@ -1318,6 +1358,10 @@ msgstr "{team} · nieuw"
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · nog niet beschikbaar"
+
+#: src/onboarding/interviews-progress.tsx
+msgid "{team} · our email didn’t reach them"
+msgstr "{team} · onze e-mail kwam niet aan"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
@@ -1487,6 +1531,14 @@ msgstr "{value} van {of}"
 msgid "{vendor} · usage unknown"
 msgstr "{vendor} · gebruik onbekend"
 
+#: src/knowledge/purge.tsx
+msgid "{versions, plural, one {# version purged} other {# versions purged}}"
+msgstr "{versions, plural, one {# versie opgeschoond} other {# versies opgeschoond}}"
+
+#: src/knowledge/purge.tsx
+msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
+msgstr "{versions, plural, one {# versie wordt herschreven} other {# versies worden herschreven}}"
+
 #: src/landscape/columns-menu.tsx
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# getoond. Sleep om de volgorde te wijzigen.} other {# getoond. Sleep om de volgorde te wijzigen.}}"
@@ -1528,6 +1580,14 @@ msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} praat"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs, and named {named} for it."
+msgstr "{who} zei dat het werk waarnaar gevraagd werd niet van hen is, en noemde {named} ervoor."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs. Whom they named isn't on the list."
+msgstr "{who} zei dat het werk waarnaar gevraagd werd niet van hen is. Wie ze noemden, staat niet op de lijst."
 
 #: src/interview/talk.tsx
 msgid "{who}, asking."
@@ -1711,6 +1771,10 @@ msgstr "Een concept: alleen de bouwers openen het, en de triggers gaan niet af, 
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Een bestand wordt alleen gedownload als je erom vraagt, met een klik."
 
+#: src/knowledge/purge.tsx
+msgid "A form spelled otherwise, or part of a longer word or address. Purge again with those forms as terms."
+msgstr "Een anders gespelde vorm, of een deel van een langer woord of adres. Schoon opnieuw op met die vormen als termen."
+
 #: src/connections/request-app-dialog.tsx
 msgid "A former member"
 msgstr "Een voormalig lid"
@@ -1820,6 +1884,10 @@ msgstr "Een run van een workflow vroeg om dit antwoord."
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Een run van een workflow wacht op dit antwoord."
+
+#: src/knowledge/purge.tsx
+msgid "A search for part of a word still finds those. Go back and add each such form as a term of its own."
+msgstr "Zoeken op een deel van een woord vindt die nog. Ga terug en voeg elke zulke vorm toe als eigen term."
 
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
@@ -1957,6 +2025,7 @@ msgstr "Actie"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/settings/package-approvers.tsx
 msgid "Actions"
 msgstr "Acties"
 
@@ -2057,6 +2126,10 @@ msgstr "Een woord toevoegen"
 msgid "Add an exception"
 msgstr "Uitzondering toevoegen"
 
+#: src/settings/package-approvers.tsx
+msgid "Add approver"
+msgstr "Goedkeurder toevoegen"
+
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
 msgstr "Documenten toevoegen"
@@ -2094,6 +2167,7 @@ msgid "Add the team"
 msgstr "Team toevoegen"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Toegevoegd"
 
@@ -2203,6 +2277,10 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} voor {person}"
+
+#: src/activity/audit-log.tsx
+msgid "Agent {agentId} for {person}, in {app}"
+msgstr "Agent {agentId} voor {person}, in {app}"
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -2480,6 +2558,18 @@ msgstr "Een app draait pas als een beheerder de code heeft goedgekeurd. Dat gebe
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Een gearchiveerd domein blijft zoals het is en gaat offline: niemand opent de apps, de triggers stoppen en onafgemaakte runs worden geannuleerd. Een bouwer kan het later herstellen, als concept."
 
+#: src/settings/audit-chain.tsx
+msgid "An entry doesn't link to the one before it."
+msgstr "Een item is niet gekoppeld aan het item ervoor."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry is missing."
+msgstr "Er ontbreekt een item."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry was changed after it was written."
+msgstr "Een item is gewijzigd nadat het was geschreven."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Een oud formaat: sla het op als pdf of nieuwer bestand"
@@ -2515,6 +2605,10 @@ msgstr "Er wacht al een link op antwoord, of er is er net een geweigerd. Probeer
 #: src/onboarding/connect-steps.tsx
 msgid "Another platform"
 msgstr "Ander platform"
+
+#: src/knowledge/purge.tsx
+msgid "Another reason"
+msgstr "Een andere reden"
 
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
@@ -3485,6 +3579,7 @@ msgstr "Niet leesbaar"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/interview-actions.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
@@ -3563,6 +3658,10 @@ msgstr "Categorie"
 msgid "Certifications"
 msgstr "Certificeringen"
 
+#: src/settings/audit-chain.tsx
+msgid "Chain check"
+msgstr "Ketencontrole"
+
 #: src/policies/policy.ts
 msgctxt "what a permission lets an app do with company data"
 msgid "change"
@@ -3625,6 +3724,10 @@ msgstr "Standaardlimiet wijzigen"
 #: src/settings/person-limits.tsx
 msgid "Change the limit for {name}"
 msgstr "Limiet voor {name} wijzigen"
+
+#: src/knowledge/purge.tsx
+msgid "Change the terms"
+msgstr "Termen wijzigen"
 
 #: src/settings/stephen-settings.tsx
 msgid "Change their own"
@@ -3826,9 +3929,17 @@ msgstr "Controleren en opslaan"
 msgid "Check sound and microphone"
 msgstr "Geluid en microfoon testen"
 
+#: src/settings/audit-chain.tsx
+msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+msgstr "Controleer dat geen enkel item van de audittrail is verwijderd of gewijzigd sinds het werd geschreven, van het eerste tot het nieuwste."
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "De keten van het auditlogboek gecontroleerd"
+
+#: src/settings/audit-chain.tsx
+msgid "Checked through entry {through}…"
+msgstr "Gecontroleerd tot en met item {through}…"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Checking it against your numbers…"
@@ -3930,6 +4041,7 @@ msgstr "Klik om Gebruik te openen"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
+#: src/knowledge/purge.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
@@ -3996,6 +4108,10 @@ msgstr "Collectie"
 #: src/activity/pending.tsx
 msgid "Collection {collectionId}"
 msgstr "Collectie {collectionId}"
+
+#: src/knowledge/purge.tsx
+msgid "Collection actions"
+msgstr "Acties voor de collectie"
 
 #: src/engines/resource-bindings.tsx
 msgid "Collection for {collection}"
@@ -4714,6 +4830,10 @@ msgstr "Het interview van {first} voorgoed verwijderen, met alles wat is gezegd?
 msgid "Delete {name}?"
 msgstr "{name} verwijderen?"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Delete and start over"
+msgstr "Verwijderen en opnieuw beginnen"
+
 #: src/interview/closed.tsx
 msgid "Delete it"
 msgstr "Verwijderen"
@@ -5347,6 +5467,10 @@ msgstr "Voer een bedrag in, bijvoorbeeld 12.50."
 msgid "Entries"
 msgstr "Vermeldingen"
 
+#: src/settings/audit-chain.tsx
+msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
+msgstr "De items tot en met {purged} zijn verwijderd toen hun bewaartermijn afliep: ze sluiten nog op elkaar aan, maar konden niet worden gecontroleerd."
+
 #: src/workflows/history-view.tsx
 msgid "Entry {sequence} can't be read."
 msgstr "Item {sequence} kan niet worden gelezen."
@@ -5952,6 +6076,10 @@ msgstr "Voor de mensen met wie hij gedeeld is"
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
 msgstr "Alleen voor deze organisatie. Elke organisatie begint met dezelfde waarden, en Grasp stemt ze af naarmate de interviews binnenkomen."
 
+#: src/onboarding/interview-actions.tsx
+msgid "For when their link doesn't reach them, or no longer opens for them."
+msgstr "Voor als hun link hen niet bereikt, of niet meer voor hen opent."
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"
@@ -5986,6 +6114,10 @@ msgstr "Uit al die gesprekken haal ik waar AI je team de meeste tijd bespaart."
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From before marks were kept"
 msgstr "Van voordat kenmerken werden bewaard"
+
+#: src/knowledge/purge.tsx
+msgid "From every version of the first {first} files of this collection; purge again for the rest."
+msgstr "Uit elke versie van de eerste {first} bestanden van deze collectie; schoon de rest daarna opnieuw op."
 
 #: src/onboarding/place-picker.tsx
 msgid "From Google Drive. I read only the files you add."
@@ -6043,6 +6175,10 @@ msgstr "Krijgt de links zodra het team is ingelicht"
 msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In voorbereiding"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Give {name} a new start?"
+msgstr "{name} opnieuw laten beginnen?"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Give the go"
@@ -6427,6 +6563,10 @@ msgctxt "part of an interview"
 msgid "Hello"
 msgstr "Hallo"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Help them in"
+msgstr "Helpen met toegang"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Helsinki"
@@ -6726,8 +6866,8 @@ msgid "I talk to each team lead first, so they hear about me before their team d
 msgstr "Ik praat eerst met elke teamleider, zodat die over mij hoort voordat het team dat doet. Controleer wie welk team leidt, en welke teams meedoen."
 
 #: src/interview/before.tsx
-msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
-msgstr "Ik schrijf op wat je vertelt. Aan het eind lees ik het voor, en jij zegt wat niet klopt. Je stem wordt niet bewaard. Je bedrijf ziet nooit wat één persoon zei, alleen wat vijf of meer mensen zeiden, samengenomen."
+msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
+msgstr "Ik schrijf op wat je vertelt. Aan het eind lees ik het voor, en jij zegt wat niet klopt. Je stem wordt niet bewaard."
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -6806,6 +6946,10 @@ msgstr "In Workflows"
 #: src/onboarding/setup-steps.tsx
 msgid "In your documents I saw {tools}."
 msgstr "In je documenten zag ik {tools}."
+
+#: src/dashboard/in-inbox.tsx
+msgid "In your inbox"
+msgstr "In je inbox"
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -7359,6 +7503,7 @@ msgstr "Kick-off"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Soort"
 
@@ -7839,6 +7984,10 @@ msgstr "Gemaakt met Grasp op {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Mail"
+msgstr "E-mail"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
@@ -8172,6 +8321,7 @@ msgstr "Gedempt"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/package-approvers.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Naam"
@@ -8358,6 +8508,10 @@ msgstr "Nieuwe regel"
 #: src/dashboard/dependency-requests.tsx
 msgid "New since the last approval: {added}"
 msgstr "Nieuw sinds de laatste goedkeuring: {added}"
+
+#: src/onboarding/interview-actions.tsx
+msgid "New start"
+msgstr "Opnieuw beginnen"
 
 #: src/workflows/independent-workflows.tsx
 msgid "New workflow"
@@ -8643,6 +8797,10 @@ msgstr "Niet meer gebruikt: {removed}"
 msgid "No longer where it was"
 msgstr "Staat niet meer waar het stond"
 
+#: src/onboarding/interview-actions.tsx
+msgid "No mail to them failed."
+msgstr "Geen e-mail aan hen is mislukt."
+
 #: src/onboarding/organization-words.ts
 msgid "No map of its work came of the lead's interview"
 msgstr "Uit het interview van de teamleider kwam geen kaart van het werk"
@@ -8726,6 +8884,10 @@ msgstr "Nog geen beleidsdocumenten. Upload er een om Grasp de regels te laten vo
 msgctxt "Pulse status"
 msgid "No Pulse"
 msgstr "Geen Pulse"
+
+#: src/onboarding/interview-actions.tsx
+msgid "no reason given"
+msgstr "geen reden opgegeven"
 
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
@@ -8879,9 +9041,17 @@ msgstr "Niemand"
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand heeft op tijd geantwoord, dus deze beslissing is gesloten."
 
+#: src/settings/package-approvers.tsx
+msgid "Nobody approves packages yet, so every package request waits."
+msgstr "Nog niemand keurt pakketten goed, dus elk pakketverzoek wacht."
+
 #: src/onboarding/work-record.tsx
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kan zeggen waarom. Het wacht tot iemand het uitlegt."
+
+#: src/settings/package-approvers.tsx
+msgid "Nobody else to add."
+msgstr "Er is niemand anders om toe te voegen."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -9203,6 +9373,10 @@ msgstr "Nu niet"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
 msgstr "Niet aangeboden"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Not offered: its secret isn’t set"
+msgstr "Niet aangeboden: het secret ervan is niet ingesteld"
 
 #: src/landscape/overview-tab.tsx
 msgid "Not on file yet."
@@ -9568,6 +9742,10 @@ msgstr "Oudste eerst"
 msgid "on {date} at {hour}"
 msgstr "op {date} om {hour}"
 
+#: src/settings/audit-chain.tsx
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
+msgstr "Op {time} brak de keten bij item {entry}: vanaf daar is niets gecontroleerd."
+
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
 msgid "On {where}"
@@ -9609,6 +9787,10 @@ msgstr "bij de gebeurtenis {event}, gefilterd"
 msgid "On the schedule set by {param} ({timeZone})"
 msgstr "Volgens het schema uit {param} ({timeZone})"
 
+#: src/settings/sign-in-settings.tsx
+msgid "On the sign-in page"
+msgstr "Op de inlogpagina"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "Onderweg"
@@ -9641,6 +9823,10 @@ msgstr "Onboardingstappen"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
+#: src/knowledge/purge.tsx
+msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
+msgstr "Eén per regel, tot {most}: een naam, elke andere vorm ervan, een e-mailadres. Een term wordt als heel woord verwijderd, ongeacht hoofdletters, dus zet samengestelde vormen als eigen termen."
+
 #: src/onboarding/interview-list.tsx
 msgid "One by one"
 msgstr "Een voor een"
@@ -9667,6 +9853,14 @@ msgstr "Eén echt geval"
 msgctxt "Pulse status"
 msgid "Online"
 msgstr "Online"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the Google Workspace {hostedDomain}."
+msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the tenant {tenantId}."
+msgstr "Alleen accounts van de tenant {tenantId}."
 
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
@@ -9734,6 +9928,7 @@ msgid "Only your organization's admins can abandon a change to a store."
 msgstr "Alleen de beheerders van je organisatie kunnen een wijziging in een opslag opgeven."
 
 #: src/connections/request-app-dialog.tsx
+#: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
 msgid "Open"
 msgstr "Openen"
@@ -9823,6 +10018,10 @@ msgstr "Openen in Chat"
 msgid "Open in full"
 msgstr "Volledig openen"
 
+#: src/dashboard/in-inbox.tsx
+msgid "Open in the inbox: {title}"
+msgstr "Openen in de inbox: {title}"
+
 #: src/policies/findings-table.tsx
 msgid "Open in the landscape"
 msgstr "Openen in het applicatielandschap"
@@ -9873,6 +10072,10 @@ msgstr "Dashboard openen"
 #: src/workflows/workflows-table.tsx
 msgid "Open the domain {name}"
 msgstr "Domein {name} openen"
+
+#: src/dashboard/to-do.tsx
+msgid "Open the inbox"
+msgstr "Inbox openen"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -9996,6 +10199,10 @@ msgstr "Anders:"
 #: src/workflows/workflow-diagram.tsx
 msgid "Otherwise: {name}"
 msgstr "Anders: {name}"
+
+#: src/onboarding/failed-mail.tsx
+msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
+msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om te versturen, of vraag Grasp hun adres te controleren."
 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
@@ -10207,6 +10414,7 @@ msgid "Pending"
 msgstr "In afwachting"
 
 #: src/onboarding/interview-people.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "People"
 msgstr "Mensen"
@@ -10359,6 +10567,7 @@ msgid "Permissions asked for"
 msgstr "Gevraagde toestemmingen"
 
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 msgid "Person"
 msgstr "Persoon"
@@ -10480,6 +10689,10 @@ msgstr "Voorbeeld van de app {screen}"
 #: src/screens/screen-frame.tsx
 msgid "Preview of the draft's first app"
 msgstr "Voorbeeld van de eerste app van het concept"
+
+#: src/knowledge/purge.tsx
+msgid "Preview the purge"
+msgstr "Opschoning eerst bekijken"
 
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -10632,6 +10845,22 @@ msgstr "Pulse op apparaten van het bedrijf. Voegt toe welke applicaties, MCP-ser
 #: src/brain/brain-atlas.ts
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse laat zien wat er op de laptops draait, AI-tools inbegrepen."
+
+#: src/knowledge/purge.tsx
+msgid "Purge for good"
+msgstr "Definitief opschonen"
+
+#: src/knowledge/purge.tsx
+msgid "Purge more"
+msgstr "Meer opschonen"
+
+#: src/knowledge/purge.tsx
+msgid "Purge personal data"
+msgstr "Persoonsgegevens opschonen"
+
+#: src/knowledge/purge.tsx
+msgid "Purge personal data from {collection}"
+msgstr "Persoonsgegevens uit {collection} opschonen"
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Purpose and model"
@@ -10826,6 +11055,10 @@ msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Teruglezen"
 
+#: src/settings/package-approvers.tsx
+msgid "Reading people and teams…"
+msgstr "Mensen en teams worden gelezen…"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
 msgstr "Voor het lezen van beleid is een model nodig dat deze omgeving toestaat voor gevoelige gegevens. Vraag Grasp er een in te stellen en laat het dan opnieuw lezen. Maak de regels tot die tijd handmatig."
@@ -10988,6 +11221,7 @@ msgstr "Herinnerd op {date}"
 
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Remove"
 msgstr "Verwijderen"
@@ -11009,6 +11243,10 @@ msgstr "{file} verwijderen"
 msgid "Remove {name}?"
 msgstr "{name} verwijderen?"
 
+#: src/settings/package-approvers.tsx
+msgid "Remove {named} as an approver"
+msgstr "{named} als goedkeurder verwijderen"
+
 #: src/policies/policy-editing.tsx
 msgid "Remove {title}?"
 msgstr "{title} verwijderen?"
@@ -11026,6 +11264,7 @@ msgid "Remove: {item}"
 msgstr "Verwijderen: {item}"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Verwijderd"
 
@@ -11719,6 +11958,10 @@ msgstr "Personen zoeken"
 msgid "Search people and devices"
 msgstr "Mensen en apparaten zoeken"
 
+#: src/settings/package-approvers.tsx
+msgid "Search people and teams"
+msgstr "Mensen en teams zoeken"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of minder."
@@ -11797,6 +12040,10 @@ msgstr "Versturen"
 msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Send again"
+msgstr "Opnieuw versturen"
 
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
@@ -12114,6 +12361,7 @@ msgstr "Overal afmelden"
 
 #: src/brain/brain-atlas.ts
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Inloggen"
 
@@ -12124,6 +12372,10 @@ msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Sign-in domains"
 msgstr "Inlogdomeinen"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
+msgstr "Inloggen is nog niet ingesteld voor deze werkruimte, dus niemand kan inloggen. Grasp stelt het in."
 
 #: src/brain/brain-atlas.ts
 msgid "Sign-in shows the applications people log in to."
@@ -12206,6 +12458,10 @@ msgstr "SOC 2"
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 msgstr "Niet alles is toegevoegd. Ik kan PDF, Word, Excel, PowerPoint en tekst lezen."
 
+#: src/knowledge/purge.tsx
+msgid "Someone asked for their data to be erased"
+msgstr "Iemand heeft gevraagd zijn gegevens te wissen"
+
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
 msgid "Someone at the company"
@@ -12227,6 +12483,10 @@ msgstr "Iemand anders"
 #: src/screens/screen-frame.tsx
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
+
+#: src/knowledge/purge.tsx
+msgid "Someone left the organization"
+msgstr "Iemand heeft de organisatie verlaten"
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -12321,6 +12581,10 @@ msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Typend beginnen"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Start over on a new device"
+msgstr "Opnieuw beginnen op een nieuw apparaat"
 
 #: src/tour/tour-script.ts
 msgid "Start the tour"
@@ -12738,6 +13002,10 @@ msgstr "Doet mee aan de interviews"
 msgid "Takes sensitive data"
 msgstr "Neemt gevoelige gegevens aan"
 
+#: src/knowledge/purge.tsx
+msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."
+msgstr "Haalt termen definitief uit elke versie van de documenten van de collectie. Je ziet eerst wat er zou verdwijnen."
+
 #: src/connections/connect-dialog.tsx
 msgid "Taking long? <0>Try again</0>"
 msgstr "Duurt het lang? <0>Probeer opnieuw</0>"
@@ -12803,6 +13071,7 @@ msgstr "Doel-ID"
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 #: src/workflows/team-picker.tsx
 msgid "Team"
@@ -12883,6 +13152,7 @@ msgstr "Team: {name}"
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
 msgstr "Teams"
@@ -13095,6 +13365,10 @@ msgstr "De {top} die het meest uitgaven; anderen gaven minder uit."
 msgid "The account you signed in with."
 msgstr "Het account waarmee je bent ingelogd."
 
+#: src/settings/sign-in-settings.tsx
+msgid "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
+msgstr "De accounts waarmee mensen inloggen in Grasp. Grasp stelt dit in voor je werkruimte: vraag Grasp om het te wijzigen."
+
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Misschien klopt het adres niet, of is de pagina verplaatst of verwijderd."
@@ -13144,6 +13418,10 @@ msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per 
 #: src/settings/stephen-settings.tsx
 msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
 msgstr "De assistent met wie mensen chatten in Microsoft Teams en de andere chatapps. Wat hier staat is alles wat hij mag: een plek of een app beperkt het alleen."
+
+#: src/settings/audit-chain.tsx
+msgid "The audit trail has no entries yet: there is nothing to verify."
+msgstr "De audittrail heeft nog geen items: er is niets te controleren."
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
@@ -13581,6 +13859,10 @@ msgstr "Het deel van het adres vóór de @, op het maildomein dat voor Grasp is 
 msgid "The passage it says"
 msgstr "De passage die hij weergeeft"
 
+#: src/settings/package-approvers.tsx
+msgid "The people and teams who approve or deny the npm packages domains and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
+msgstr "De mensen en teams die de npm-pakketten goedkeuren of weigeren waar domeinen en workflows om vragen. Geen rol omvat dit, ook admin niet: voeg jezelf toe om pakketten goed te keuren."
+
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
 msgstr "De persoon voor wie de run handelt zegt op haar dashboard wat er gebeurde"
@@ -13757,6 +14039,14 @@ msgstr "Zoals de meesten het vertelden"
 msgid "The way some told it"
 msgstr "Zoals sommigen het vertelden"
 
+#: src/settings/audit-chain.tsx
+msgid "The whole chain has not been verified yet."
+msgstr "De hele keten is nog niet gecontroleerd."
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, on {time}."
+msgstr "De hele keten is gecontroleerd, tot en met item {entries}, op {time}."
+
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "de hele koppeling"
@@ -13786,6 +14076,10 @@ msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is geslo
 msgid "The works council hasn't been heard"
 msgstr "De ondernemingsraad is niet gehoord"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Hun link is op {on} mislukt: {reason}. Los op wat hem tegenhield en verstuur hem dan opnieuw."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Their link stops working, and what they said goes with them."
 msgstr "Hun link werkt niet meer, en wat ze zeiden, gaat mee."
@@ -13809,6 +14103,10 @@ msgstr "Eigen opgave: {minutes}"
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
 msgstr "Hun beoordeling"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Their reminder failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Hun herinnering is op {on} mislukt: {reason}. Los op wat haar tegenhield en verstuur haar dan opnieuw."
 
 #: src/settings/person-limits.tsx
 msgid "Their team's limit"
@@ -13964,6 +14262,10 @@ msgstr "De opgeslagen code van deze app komt niet meer overeen met de goedgekeur
 #: src/interview/sound-check.tsx
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Deze browser kan niet luisteren. Je kunt je antwoorden typen."
+
+#: src/knowledge/purge.tsx
+msgid "This can't be undone. Confirm by {until}, or prepare it again."
+msgstr "Dit kan niet ongedaan worden gemaakt. Bevestig vóór {until}, of bereid het opnieuw voor."
 
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
@@ -14853,6 +15155,14 @@ msgstr "Leveranciers, gescheiden door komma’s"
 msgid "Verified"
 msgstr "Geverifieerd"
 
+#: src/settings/audit-chain.tsx
+msgid "Verify now"
+msgstr "Nu controleren"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify the chain"
+msgstr "Keten controleren"
+
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -15474,6 +15784,10 @@ msgstr "Wat de leverancier over zijn certificaten publiceert."
 msgid "What the workspace pays for Grasp."
 msgstr "Wat de werkruimte voor Grasp betaalt."
 
+#: src/onboarding/interview-actions.tsx
+msgid "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked."
+msgstr "Wat ze tot nu toe zeiden wordt verwijderd, en hun link opent op het volgende apparaat dat hem opent. Doe dit alleen als zij erom vroegen."
+
 #: src/brain/brain-article/statements-by-kind.tsx
 msgid "What they told us"
 msgstr "Wat ze ons vertelden"
@@ -15481,6 +15795,10 @@ msgstr "Wat ze ons vertelden"
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Wat er te verbeteren is"
+
+#: src/knowledge/purge.tsx
+msgid "What to remove"
+msgstr "Wat te verwijderen"
 
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
@@ -15609,6 +15927,10 @@ msgstr "Als iets op jou wacht"
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
 msgstr "Wanneer de gebeurtenis {event} plaatsvindt"
+
+#: src/onboarding/interview-actions.tsx
+msgid "When they lost the device their interview was on. Only on their request."
+msgstr "Als ze het apparaat kwijt zijn waarop hun interview stond. Alleen op hun verzoek."
 
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
@@ -15756,6 +16078,11 @@ msgstr "wie antwoordt"
 msgid "Who approves a new tool"
 msgstr "Wie keurt een nieuwe tool goed"
 
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
+msgid "Who approves packages"
+msgstr "Wie pakketten goedkeurt"
+
 #: src/brain/brain.ts
 msgid "Who can answer"
 msgstr "Wie kan antwoorden"
@@ -15781,6 +16108,15 @@ msgstr "Wie beslist, wie kan blokkeren"
 #: src/onboarding/work-record.tsx
 msgid "who do it have talked"
 msgstr "die het doen hebben gepraat"
+
+#: src/interview/words.ts
+msgid "Who does it"
+msgstr "Wie het doet"
+
+#: src/onboarding/interview-words.ts
+msgctxt "kind of fact"
+msgid "Who does it"
+msgstr "Wie het doet"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Who leads it?"
@@ -15853,6 +16189,7 @@ msgid "Whose numbers to show"
 msgstr "Wiens cijfers te tonen"
 
 #: src/engines/package-approvals.tsx
+#: src/knowledge/purge.tsx
 #: src/policies/policy-editing.tsx
 msgid "Why"
 msgstr "Waarom"
@@ -16346,6 +16683,10 @@ msgstr "Jouw keuze"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inloggen; een beheerder kan een sessie eerder beëindigen bij Leden en rollen."
+
+#: src/interview/words.ts
+msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
+msgstr "Je bedrijf ziet nooit wat één persoon zei, of diens naam: alleen wat vijf of meer mensen over hetzelfde werk vertelden, samengenomen per team."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."
