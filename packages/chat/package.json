@@ -1,15 +1,12 @@
 {
   "name": "@grasp-os/chat",
   "private": true,
-  "description": "Vercel's Chat SDK on workerd: its state in Durable Objects, and what its adapters need to send from a Worker",
+  "description": "Vercel's Chat SDK on workerd: its state in Durable Objects",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "sideEffects": [
-    "./src/workerd.ts"
-  ],
+  "sideEffects": false,
   "exports": {
-    "./state": "./src/state.ts",
-    "./workerd": "./src/workerd.ts"
+    "./state": "./src/state.ts"
   },
   "dependencies": {
     "chat": "catalog:"
