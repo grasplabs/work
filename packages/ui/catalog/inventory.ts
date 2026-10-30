@@ -886,7 +886,7 @@ export const graspComponents = {
     status: "supported",
     summary:
       "One of the brand book's paintings with a grain and a pattern over it, behind the one or two things on a screen that matter most.",
-    exports: ["PaintedField"],
+    exports: ["PaintedField", "paintedFieldVariants"],
   },
   "prompt-input": {
     status: "supported",
@@ -912,6 +912,21 @@ export const graspComponents = {
     summary:
       "Text with a light sweeping across it, for what is still being worked out.",
     exports: ["Shimmer"],
+  },
+  trace: {
+    status: "supported",
+    summary:
+      "The steps something took, one quiet line each, a running one turning and one with more to show folding open.",
+    exports: [
+      "Trace",
+      "TraceCollapsible",
+      "TraceCollapsibleContent",
+      "TraceCollapsibleTrigger",
+      "TraceDescription",
+      "TraceIcon",
+      "TraceLine",
+      "TraceTitle",
+    ],
   },
   "success-mark": {
     status: "supported",

@@ -348,9 +348,19 @@
   margin: 16mm 16mm 18mm;
 }
 
+/*
+ * In every Markdown export, its first two levels of heading are in
+ * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts),
+ * so a printed page reads as Grasp's. A Markdown h1 is in the serif
+ * already (knowledge/markdown.tsx); on paper its h2 is too.
+ */
 @utility page-export {
   page: export;
   print-color-adjust: exact;
+
+  & h2 {
+    @apply font-serif font-normal tracking-tight;
+  }
 }
 
 /*
