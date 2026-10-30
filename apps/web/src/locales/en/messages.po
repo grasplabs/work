@@ -1453,6 +1453,10 @@ msgstr "{subject}: {actions} on {object}"
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 
+#: src/engines/app-errors.tsx
+msgid "{suppressed, plural, one {At least # more report was dropped: the app reported more than it may in a minute.} other {At least # more reports were dropped: the app reported more than it may in a minute.}}"
+msgstr "{suppressed, plural, one {At least # more report was dropped: the app reported more than it may in a minute.} other {At least # more reports were dropped: the app reported more than it may in a minute.}}"
+
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "{takingPart, plural, one {# takes part} other {# take part}}"
 msgstr "{takingPart, plural, one {# takes part} other {# take part}}"
@@ -5570,6 +5574,10 @@ msgstr "Erased a removed member"
 msgid "Error"
 msgstr "Error"
 
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Errors"
+msgstr "Errors"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "EU routing"
 msgstr "EU routing"
@@ -7725,6 +7733,7 @@ msgstr "Languages"
 msgid "Languages he interviews in"
 msgstr "Languages he interviews in"
 
+#: src/engines/app-errors.tsx
 #: src/inbox/items.ts
 msgid "Last"
 msgstr "Last"
@@ -8061,6 +8070,10 @@ msgstr "Log"
 msgctxt "onboarding area section"
 msgid "Log"
 msgstr "Log"
+
+#: src/engines/app-errors.tsx
+msgid "Logged error"
+msgstr "Logged error"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -9761,6 +9774,10 @@ msgstr "Nothing waits on you"
 msgid "Nothing waits on you."
 msgstr "Nothing waits on you."
 
+#: src/engines/app-errors.tsx
+msgid "Nothing went wrong in its apps or its server code so far."
+msgstr "Nothing went wrong in its apps or its server code so far."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nothing yet"
@@ -10903,6 +10920,10 @@ msgstr "Previous match"
 msgid "Probably two workflows in one, or teams that work differently."
 msgstr "Probably two workflows in one, or teams that work differently."
 
+#: src/engines/app-errors.tsx
+msgid "Problem"
+msgstr "Problem"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
 msgstr "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
@@ -11336,6 +11357,10 @@ msgstr "Redesigned or testing"
 msgctxt "how far a team is with AI"
 msgid "Redesigning"
 msgstr "Redesigning"
+
+#: src/engines/app-errors.tsx
+msgid "Refresh"
+msgstr "Refresh"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Region"
@@ -12418,6 +12443,10 @@ msgstr "Sent to the {who}"
 msgid "Served by"
 msgstr "Served by"
 
+#: src/engines/app-errors.tsx
+msgid "Server"
+msgstr "Server"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
 msgid "Server"
@@ -12426,6 +12455,18 @@ msgstr "Server"
 #: src/chat/builds.tsx
 msgid "Server code"
 msgstr "Server code"
+
+#: src/engines/app-errors.tsx
+msgid "Server error"
+msgstr "Server error"
+
+#: src/engines/app-errors.tsx
+msgid "Server log"
+msgstr "Server log"
+
+#: src/engines/app-errors.tsx
+msgid "Server warning"
+msgstr "Server warning"
 
 #: src/onboarding/hr-leads.tsx
 msgid "Service user ID"
@@ -15070,6 +15111,10 @@ msgstr "Timed out: {timedOut}"
 msgid "Timeline"
 msgstr "Timeline"
 
+#: src/engines/app-errors.tsx
+msgid "Times"
+msgstr "Times"
+
 #: src/settings/week-hours.tsx
 msgctxt "between two hours"
 msgid "to"
@@ -15332,6 +15377,10 @@ msgstr "Typed, started on {started}, not agreed to yet."
 msgid "Unanswered question"
 msgstr "Unanswered question"
 
+#: src/engines/app-errors.tsx
+msgid "Uncaught error"
+msgstr "Uncaught error"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Under 5"
@@ -15371,6 +15420,10 @@ msgstr "Undoing its changes after a failure"
 #: src/workflows/history-view.tsx
 msgid "Undoing its changes after it was cancelled"
 msgstr "Undoing its changes after it was cancelled"
+
+#: src/engines/app-errors.tsx
+msgid "Unhandled rejection"
+msgstr "Unhandled rejection"
 
 #: src/activity/pending.tsx
 msgid "Unknown"
@@ -15541,6 +15594,7 @@ msgstr "Verify now"
 msgid "Verify the chain"
 msgstr "Verify the chain"
 
+#: src/engines/app-errors.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -15817,6 +15871,10 @@ msgstr "waits on your team, {team}"
 #: src/inbox/items.ts
 msgid "Waits until"
 msgstr "Waits until"
+
+#: src/engines/app-errors.tsx
+msgid "Warning"
+msgstr "Warning"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -16447,6 +16505,7 @@ msgstr "When to stop"
 msgid "When to use it"
 msgstr "When to use it"
 
+#: src/engines/app-errors.tsx
 #: src/interview/words.ts
 #: src/onboarding/work-record.tsx
 msgid "Where"
