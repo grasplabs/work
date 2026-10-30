@@ -38,8 +38,9 @@ export interface ProvisioningView {
   };
   /**
    * Why its operation stopped: the last step it finished and the error's
-   * code. Null while it hasn't, and for an attempt that's gone without
-   * one.
+   * code; for an attempt that ended without recording why, `run_<how it
+   * ended>` (`run_errored`, `run_terminated`, `run_gone`). Null while it
+   * hasn't stopped.
    */
   stopped: { step: string; error: string } | null;
   phase: ProvisioningPhase;
@@ -90,9 +91,16 @@ export const getProvisioning = async (
   }
   const run = await currentRun(env, clientId);
   const gone = run === null || isReplaceable(run.status);
+  if (!gone || operation.status === "done") {
+    return { ...view, stopped: null, phase: "provisioning" };
+  }
   return {
     ...view,
-    stopped: null,
-    phase: gone && operation.status !== "done" ? "failed" : "provisioning",
+    // Its attempt ended without the operation saying why: how it ended.
+    stopped: {
+      step: operation.step ?? "validated",
+      error: `run_${run?.status ?? "gone"}`,
+    },
+    phase: "failed",
   };
 };

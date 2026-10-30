@@ -40,6 +40,8 @@ const Setup = () => {
  * (`/clients/$clientId`) was.
  */
 export const Route = createFileRoute("/organizations/$clientId/setup")({
+  // Being set up, or not answering, its core has nothing for it: it shows from what the admin recorded.
+  staticData: { withoutCore: true },
   // A tab it doesn't have is left out: the router keeps what this doesn't name.
   validateSearch: (search: Record<string, unknown>): { tab?: SetupTab } => {
     const tab = setupTabs.find((each) => each === search.tab);
