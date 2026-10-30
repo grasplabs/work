@@ -182,15 +182,17 @@ const useFrameLines = () => {
   const drawing = useRef<HTMLDivElement>(null);
   const [wires, setWires] = useState<Drawn[]>([]);
   useEffect(() => {
-    // Measured whenever the drawing changes size: parts stacked or side
-    // by side, a part more or less, a task opened.
+    // Measured whenever the drawing or any frame in it changes size:
+    // parts stacked or side by side, a task opened in one frame (which
+    // moves the frames after it without resizing the drawing); and each
+    // frame watched as it comes, a part more or less.
     const observer = new ResizeObserver(() => {
       const element = drawing.current;
       if (element === null) {
         return;
       }
       const origin = element.getBoundingClientRect();
-      const frames = [...element.querySelectorAll("[data-part]")].map(
+      const boxes = [...element.querySelectorAll("[data-part]")].map(
         (frame, index) => {
           const rect = frame.getBoundingClientRect();
           const box: Box = {
@@ -208,12 +210,26 @@ const useFrameLines = () => {
           };
         }
       );
-      setWires(flowWires(frames));
+      setWires(flowWires(boxes));
     });
+    const watch = (): void => {
+      const element = drawing.current;
+      if (element === null) {
+        return;
+      }
+      observer.disconnect();
+      observer.observe(element);
+      for (const frame of element.querySelectorAll("[data-part]")) {
+        observer.observe(frame);
+      }
+    };
+    const parts = new MutationObserver(watch);
     if (drawing.current !== null) {
-      observer.observe(drawing.current);
+      parts.observe(drawing.current, { childList: true });
     }
+    watch();
     return () => {
+      parts.disconnect();
       observer.disconnect();
     };
   }, []);
