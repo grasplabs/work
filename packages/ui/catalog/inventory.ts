@@ -446,7 +446,7 @@ export const shadcnComponents = {
       "InputGroupTextarea",
     ],
     changes:
-      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is its edge in the keyboard's ink and a hair of ring, not a field's wide ring.",
+      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is the same ring as Input's.",
   },
   "input-otp": {
     status: "supported",
