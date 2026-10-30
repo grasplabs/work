@@ -11,6 +11,7 @@ import { CogIcon, Maximize2Icon } from "lucide-react";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { CopyDeepLink } from "../screens/copy-deep-link.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
 import {
   useScreenNavigate,
@@ -47,15 +48,18 @@ const AppPage = () => {
     <>
       <SiteHeader
         actions={
-          <Link
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-            params={{ engine, screen }}
-            state={(previous) => ({ ...previous, screenOpening: opening })}
-            to="/domains/$engine/apps/$screen/full"
-          >
-            <Maximize2Icon data-icon="inline-start" />
-            <Trans>Open full page</Trans>
-          </Link>
+          <>
+            <CopyDeepLink app={engine} screen={screen} />
+            <Link
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+              params={{ engine, screen }}
+              state={(previous) => ({ ...previous, screenOpening: opening })}
+              to="/domains/$engine/apps/$screen/full"
+            >
+              <Maximize2Icon data-icon="inline-start" />
+              <Trans>Open full page</Trans>
+            </Link>
+          </>
         }
         crumbs={[
           { label: t`Domains`, to: "/domains" },
