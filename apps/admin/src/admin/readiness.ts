@@ -207,6 +207,12 @@ const releaseCheck = (
         link: "releases",
       };
 
+/** `items` in a sentence: "a", "a and b", "a, b and c". */
+const listed = (items: readonly string[]): string =>
+  items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+
 /** Each platform AI feature, as a sentence names it. */
 const platformFeatureWords = {
   conversion: "document conversion",
@@ -256,7 +262,7 @@ const platformAiCheck = async (envOf: Env): Promise<ReadinessCheck> => {
   return {
     ...check,
     status: "not_configured",
-    words: `Secrets Store has no ${missing.join(", ")}, so ${features.join(", ")} ${features.length === 1 ? "isn't" : "aren't"} configured yet in any organization; everything else works. ${secretStep(missing)} Or choose another provider on Platform → AI.`,
+    words: `Secrets Store has no ${missing.join(", ")}, so ${listed(features)} ${features.length === 1 ? "isn't" : "aren't"} configured yet in any organization; everything else works. ${secretStep(missing)} Or choose another provider on Platform → AI.`,
   };
 };
 

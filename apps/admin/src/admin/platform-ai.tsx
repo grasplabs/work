@@ -168,7 +168,7 @@ const FeatureFields = ({
 /** What the page says of the providers Grasp has a key for. */
 const keyedWords = (keyed: readonly AiProviderId[]): string =>
   keyed.length === 0
-    ? "Grasp has no AI provider key in Secrets Store yet, so no provider can be chosen: add OPENAI_API_KEY (or another provider's) to the stage’s 1Password Environment, then run Deploy platform."
+    ? "Grasp has no AI provider key in Secrets Store yet, so its AI features aren't configured yet in any organization and no provider can be chosen: add OPENAI_API_KEY (or another provider's) to the stage’s 1Password Environment, then run Deploy platform."
     : `Grasp has its own key for ${keyed.map((each) => aiProviders[each].label).join(", ")}. Another provider is offered once its key is in the stage’s 1Password Environment and Deploy platform ran.`;
 
 /** The model a conversion setting names; none for reading locally. */

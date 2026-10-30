@@ -5,18 +5,13 @@
  * replaced by the client's setting of the same name, its other settings,
  * and the change core records, checked as core would take them.
  */
-import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import { deploymentConfigVars } from "@grasp-os/shared/deployment-config";
-import { log } from "@grasp-os/shared/log";
-import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import type { PlatformChange } from "@grasp-os/shared/platform-change";
 import { eq } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { settings } from "../db/schema.ts";
-import { platformAiOf, platformAiProviders } from "../platform-ai.ts";
-import { MissingStoreSecretError } from "./context.ts";
+import { platformAiOf } from "../platform-ai.ts";
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 
@@ -30,46 +25,6 @@ export const mailSenderOf = (
   context: { router: { domain: string } },
   clientId: string
 ): string => onboardingSender(clientId, context.router.domain).address;
-
-/**
- * The providers Grasp's own key reaches a client's connect for: those
- * among `connect`, the shared secrets a deploy gives connect
- * (src/deploy/context.ts), whose platform secret is there.
- */
-export const keyedProviders = (
-  connect: Readonly<Record<string, string>> | undefined
-): ReadonlySet<AiProviderId> =>
-  new Set(
-    aiProviderIds.filter((provider) => {
-      const name = aiProviders[provider].platformSecret;
-      return name !== undefined && connect?.[name] !== undefined;
-    })
-  );
-
-/**
- * Throws `MissingStoreSecretError` naming the key, recorded as
- * `store_secret_missing: <name>`, unless every platform feature in
- * `PLATFORM_AI` (checked already) sends to a provider in `keyed`: core
- * would fail that feature on every call (`upload.conversion_unavailable`
- * and the like), so it never goes out that way.
- */
-const checkPlatformKeys = (
-  clientId: string,
-  value: unknown,
-  keyed: ReadonlySet<AiProviderId>
-): void => {
-  const parsed = platformAiSchema.safeParse(value);
-  if (!parsed.success) {
-    return;
-  }
-  for (const { feature, provider } of platformAiProviders(parsed.data)) {
-    const name = aiProviders[provider].platformSecret;
-    if (name !== undefined && !keyed.has(provider)) {
-      log.warn("deploy.platform_key_missing", { clientId, feature, provider });
-      throw new MissingStoreSecretError(name);
-    }
-  }
-};
 
 /** Setting `key`'s value, stored as JSON; `setting_invalid` when it isn't. */
 const settingValue = (key: string, value: string): unknown => {
@@ -86,17 +41,20 @@ const settingValue = (key: string, value: string): unknown => {
  * platform's AI settings as `PLATFORM_AI`: each replaced by the client's
  * setting of the same name, its other settings, and `change` as
  * `PLATFORM_CHANGE`, checked as `checkDeployedConfig` says, its
- * `MAIL_FROM` against `mailSender`, the address its mail is locked to, and
- * its `PLATFORM_AI` against `keyed`, the providers Grasp's key reaches its
- * connect for (`keyedProviders`).
+ * `MAIL_FROM` against `mailSender`, the address its mail is locked to.
+ *
+ * `PLATFORM_AI` goes out whether or not Grasp has a key for the providers
+ * it names: a deploy never waits on one. Without it connect has no route
+ * for that provider, and core answers that feature as not configured yet
+ * (`upload.conversion_unavailable` and the like) until a later deploy
+ * brings the key; Platform's Readiness names the key meanwhile.
  */
 export const configuredCoreVars = async (
   db: AdminDatabase,
   clientId: string,
   derived: Readonly<Record<string, unknown>>,
   change: PlatformChange,
-  mailSender: string,
-  keyed: ReadonlySet<AiProviderId>
+  mailSender: string
 ): Promise<Record<string, unknown>> => {
   const rows = await db
     .select({ key: settings.key, value: settings.value })
@@ -124,7 +82,5 @@ export const configuredCoreVars = async (
   // can sign in with, nor a var core can't parse, nor a MAIL_FROM its EMAIL
   // binding won't send from.
   checkDeployedConfig(clientId, vars, mailSender);
-  // Nor a platform feature on a provider Grasp has no key for.
-  checkPlatformKeys(clientId, vars.PLATFORM_AI, keyed);
   return vars;
 };

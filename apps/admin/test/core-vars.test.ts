@@ -25,8 +25,8 @@ import { db, staff } from "./hosting.ts";
 // a value that isn't JSON, one core wouldn't take, and a MAIL_FROM at an
 // address its EMAIL binding won't send from. And the platform's AI
 // settings, which staff choose once for every client: audited, given to
-// each core as `PLATFORM_AI`, and never deployed on a provider Grasp has
-// no key for. No spend ceiling of the platform's: a client controls its
+// each core as `PLATFORM_AI`, and deployed whether or not Grasp has the
+// key yet. No spend ceiling of the platform's: a client controls its
 // spend at its own provider, and its own budgets are its settings.
 
 const domain = "grasp.test";
@@ -69,14 +69,8 @@ const clientWith = async (stored: Record<string, string>): Promise<string> => {
   return clientId;
 };
 
-/** The providers Grasp's key reaches connect for, as the test store has them: OpenAI's. */
-const openAiOnly: ReadonlySet<AiProviderId> = new Set(["openai"]);
-
-/** Client `clientId`'s core vars, as its operation reads them, with Grasp's keys for `keyed`. */
-const varsOf = async (
-  clientId: string,
-  keyed: ReadonlySet<AiProviderId> = openAiOnly
-) =>
+/** Client `clientId`'s core vars, as its operation reads them. */
+const varsOf = async (clientId: string) =>
   await configuredCoreVars(
     db,
     clientId,
@@ -87,17 +81,13 @@ const varsOf = async (
       apps: signInApps(env),
     }),
     change,
-    onboardingSender(clientId, domain).address,
-    keyed
+    onboardingSender(clientId, domain).address
   );
 
 /** Why reading `clientId`'s core vars was refused: its code, as a deploy records it. */
-const refusalOf = async (
-  clientId: string,
-  keyed: ReadonlySet<AiProviderId> = openAiOnly
-): Promise<unknown> => {
+const refusalOf = async (clientId: string): Promise<unknown> => {
   try {
-    await varsOf(clientId, keyed);
+    await varsOf(clientId);
   } catch (error) {
     return errorCode(error);
   }
@@ -314,7 +304,7 @@ describe("the platform's AI settings, as every core's PLATFORM_AI", () => {
 
     const changed = await setPlatformAi(db, staff, chosen, keyed);
     const again = await setPlatformAi(db, staff, chosen, keyed);
-    const after = await varsOf(clientId, keyed);
+    const after = await varsOf(clientId);
     const events = await platformAiEvents();
     const audited = events.slice(earlier);
     const [record] = await db
@@ -378,27 +368,24 @@ describe("the platform's AI settings, as every core's PLATFORM_AI", () => {
     });
   });
 
-  it("stops a deploy whose platform AI names a provider Grasp has no key for, naming the key", async () => {
+  it("deploys whatever provider platform AI names, Grasp's key or not, so a missing key never stops a deploy", async () => {
     const clientId = await clientWith({});
     const onAnthropic = await clientWith({
       PLATFORM_AI: JSON.stringify(converting("anthropic", "claude-haiku-4-5")),
     });
-    const local = await clientWith({
-      PLATFORM_AI: JSON.stringify({ conversion: { provider: "local" } }),
-    });
 
+    // Whether Grasp has the key is connect's business: without it the
+    // feature answers "not configured" in core, and everything else works.
+    const defaults = await varsOf(clientId);
+    const anthropic = await varsOf(onAnthropic);
     expect({
-      // The defaults are OpenAI's: without its key, nothing deploys.
-      noKeys: await refusalOf(clientId, new Set()),
-      onAnthropic: await refusalOf(onAnthropic),
-      // Reading every file locally needs no key; the rest stay OpenAI's.
-      local: await refusalOf(local),
-      keyed: await refusalOf(onAnthropic, new Set(["openai", "anthropic"])),
+      defaults: defaults.PLATFORM_AI,
+      onAnthropic: anthropic.PLATFORM_AI,
     }).toStrictEqual({
-      noKeys: "store_secret_missing: OPENAI_API_KEY",
-      onAnthropic: "store_secret_missing: ANTHROPIC_API_KEY",
-      local: "taken",
-      keyed: "taken",
+      defaults: platformAiSchema.parse({}),
+      onAnthropic: platformAiSchema.parse(
+        converting("anthropic", "claude-haiku-4-5")
+      ),
     });
   });
 });
