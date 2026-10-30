@@ -217,6 +217,38 @@ const Facts = ({
   </dl>
 );
 
+/** Run statuses of an attempt that ended without finishing. */
+const endedRuns: ReadonlySet<string> = new Set([
+  "errored",
+  "terminated",
+  "gone",
+]);
+
+/**
+ * Why it stopped: the code its operation recorded, or, for one left
+ * running by an attempt that ended without saying why, how that ended.
+ */
+const stopCodeOf = (
+  operation: NonNullable<ClientHostingView["operation"]>,
+  run: ClientHostingView["run"]
+): string | null => {
+  if (operation.error !== null) {
+    return operation.error;
+  }
+  return operation.status === "running" && run !== null && endedRuns.has(run)
+    ? `run_${run}`
+    : null;
+};
+
+/** A stop's code, and what it means. */
+const StopReason = ({ code }: { code: string | null }) =>
+  code === null ? null : (
+    <p className="text-destructive text-sm" role="alert">
+      <span className="font-mono">{code}</span>
+      {`: ${operationErrorWords(code)}`}
+    </p>
+  );
+
 /** Where the client's provisioning operation is. */
 const Operation = ({
   operation,
@@ -236,12 +268,7 @@ const Operation = ({
         ["Updated (UTC)", formatTime(operation.updatedAt)],
       ]}
     />
-    {operation.error === null ? null : (
-      <p className="text-destructive text-sm" role="alert">
-        <span className="font-mono">{operation.error}</span>
-        {`: ${operationErrorWords(operation.error)}`}
-      </p>
-    )}
+    <StopReason code={stopCodeOf(operation, run)} />
   </div>
 );
 

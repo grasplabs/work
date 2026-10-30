@@ -110,8 +110,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
-  model_spend_undecided:
-    "Model spend isn't decided yet (GRA-141): provisioning stops here. Core binds Workers AI, and a placed client gets no model spend until a spend ceiling and the shared AI Gateway are set. Resume once they are.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",
   wfp_schedule_unqualified:
@@ -147,10 +145,28 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
 };
 
+/**
+ * Why it stopped, where nothing in the operation said: what it works
+ * with couldn't be read, or its attempt ended without recording why.
+ */
+const startWords: Readonly<Record<string, string>> = {
+  client_domain_unset:
+    "This admin has no CLIENT_DOMAIN set, so it deploys no client: set it in its deploy, then resume.",
+  run_errored:
+    "Its attempt failed without recording why (it may have crashed or run out of retries): resume it, and look at the attempt's run if it fails again.",
+  run_terminated: "Its attempt was stopped before it finished: resume it.",
+  run_gone:
+    "Its attempt is gone, or never started: resume it to start a new one.",
+};
+
 const knownWords: Readonly<Record<string, string>> = {
   ...inventoryWords,
   ...operationWords,
+  ...startWords,
 };
+
+/** What a secret missing from Secrets Store is recorded as, before its name. */
+const storeSecretMissing = /^store_secret_missing: (?<name>\w+)$/u;
 
 /**
  * Why an operation stopped, by the code it recorded: its own, the
@@ -160,6 +176,10 @@ export const operationErrorWords = (code: string): string => {
   const known = knownWords[code];
   if (known !== undefined) {
     return known;
+  }
+  const secret = storeSecretMissing.exec(code)?.groups?.name;
+  if (secret !== undefined) {
+    return `Secrets Store has no ${secret}, so nothing was started: add it (Deploy platform copies the store's secrets from 1Password), then resume.`;
   }
   return code.startsWith("cloudflare_")
     ? "Cloudflare refused a call: its status and error codes are in the code."

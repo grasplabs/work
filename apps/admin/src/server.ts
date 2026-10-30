@@ -24,7 +24,7 @@
  * watch's reads how Stephen fares at every client every hour
  * (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
- * builds of integrations, applying a client's settings now
+ * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
  * hosting destination (src/hosting/workflow.ts), rollouts and the runs
  * that deploy their fleet clients (src/rollout/workflow.ts,

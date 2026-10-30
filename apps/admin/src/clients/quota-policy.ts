@@ -32,6 +32,7 @@ import {
 import type { QuotaPolicyReport } from "@grasp-os/shared/quota-policy-report";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import { and, eq } from "drizzle-orm";
+import type { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import { clients, settings } from "../db/schema.ts";
@@ -84,22 +85,21 @@ export interface QuotaPolicyRequest {
 }
 
 /**
- * Client core's policy in force, signed for; null when its core didn't
- * give one (refused it, a release from before the report, or an answer
- * that isn't one). Throws when the request fails without an answer.
+ * What client core answers at `report.path`, signed for with a key derived
+ * for `report.purpose` alone; null when its core didn't give it (refused
+ * it, a release from before the report, or an answer that isn't one).
+ * Throws when the request fails without an answer.
  */
-export const quotaPolicyReportOf = async ({
-  core,
-  routerSecret,
-  authSecret,
-  signal,
-}: QuotaPolicyRequest): Promise<QuotaPolicyReport | null> => {
+export const signedCoreReport = async <T>(
+  { core, routerSecret, authSecret, signal }: QuotaPolicyRequest,
+  report: { path: string; purpose: string; schema: z.ZodType<T> }
+): Promise<T | null> => {
   const body = JSON.stringify({ sentAt: new Date().toISOString() });
-  const key = await hkdfHmacKey(authSecret, quotaPolicyReportPurpose, ["sign"]);
+  const key = await hkdfHmacKey(authSecret, report.purpose, ["sign"]);
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
-  const response = await core.fetch(`${core.origin}${quotaPolicyReportPath}`, {
+  const response = await core.fetch(`${core.origin}${report.path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -117,11 +117,74 @@ export const quotaPolicyReportOf = async ({
     return null;
   }
   try {
-    const parsed = quotaPolicyReportSchema.safeParse(await response.json());
+    const parsed = report.schema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
+};
+
+/** Client core's policy in force, signed for (`signedCoreReport`). */
+export const quotaPolicyReportOf = async (
+  request: QuotaPolicyRequest
+): Promise<QuotaPolicyReport | null> =>
+  await signedCoreReport(request, {
+    path: quotaPolicyReportPath,
+    purpose: quotaPolicyReportPurpose,
+    schema: quotaPolicyReportSchema,
+  });
+
+/**
+ * Asks active client `clientId`'s core through the router's route, as
+ * `ask` does, within the grid's deadline; null when it can't be asked
+ * (no domain, a secret missing, no route) or doesn't answer, logged as
+ * `<what>.unread`. Never throws for its core.
+ */
+export const askClientCore = async <T>(
+  env: Env,
+  clientId: string,
+  what: string,
+  ask: (request: QuotaPolicyRequest) => Promise<T | null>
+): Promise<T | null> => {
+  const domain = clientDomain(env);
+  if (domain === null) {
+    return null;
+  }
+  return await within(
+    healthTimeoutMs,
+    async (signal) => {
+      const secrets = await ifStored(async () => await deploySecrets(env));
+      if (secrets === null) {
+        return null;
+      }
+      const route = await routeOf(
+        env.ROUTER_HOSTS,
+        secrets.routerKey,
+        clientId,
+        `${clientId}.${domain}`,
+        env.DISPATCHER
+      );
+      if (typeof route === "string") {
+        return null;
+      }
+      try {
+        return await ask({
+          core: route.core,
+          routerSecret: route.secret,
+          authSecret: await clientAuthSecret(
+            secrets,
+            clientId,
+            route.generation
+          ),
+          signal,
+        });
+      } catch (error) {
+        log.warn(`${what}.unread`, { clientId, error: errorCode(error) });
+        return null;
+      }
+    },
+    null
+  );
 };
 
 /**
@@ -212,49 +275,9 @@ export const clientQuotaPolicy = async (
     clientId,
     setting?.updatedAt ?? null
   );
-  const domain = clientDomain(env);
   const inForce =
-    client.status !== "active" || domain === null
-      ? null
-      : await within(
-          healthTimeoutMs,
-          async (signal) => {
-            const secrets = await ifStored(
-              async () => await deploySecrets(env)
-            );
-            if (secrets === null) {
-              return null;
-            }
-            const route = await routeOf(
-              env.ROUTER_HOSTS,
-              secrets.routerKey,
-              clientId,
-              `${clientId}.${domain}`,
-              env.DISPATCHER
-            );
-            if (typeof route === "string") {
-              return null;
-            }
-            try {
-              return await quotaPolicyReportOf({
-                core: route.core,
-                routerSecret: route.secret,
-                authSecret: await clientAuthSecret(
-                  secrets,
-                  clientId,
-                  route.generation
-                ),
-                signal,
-              });
-            } catch (error) {
-              log.warn("quota_policy.unread", {
-                clientId,
-                error: errorCode(error),
-              });
-              return null;
-            }
-          },
-          null
-        );
+    client.status === "active"
+      ? await askClientCore(env, clientId, "quota_policy", quotaPolicyReportOf)
+      : null;
   return { set, inForce, state: stateOf(set, inForce, pending) };
 };

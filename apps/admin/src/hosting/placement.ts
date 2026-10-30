@@ -159,7 +159,12 @@ export interface ClientHostingView {
     startedBy: string;
     updatedAt: Date;
   } | null;
-  /** Its current attempt's status, when its runner is a provisioning attempt. */
+  /**
+   * Its current attempt's status, when its runner is a provisioning
+   * attempt; `gone` when its operation runs with no runner at all, as
+   * Setup reads it (src/provision/queries.ts). Null under another kind of
+   * runner, or with nothing running.
+   */
   run: RunStatus | null;
   /** Whether that attempt is still going, so the page follows it. */
   going: boolean;
@@ -363,6 +368,21 @@ export const automaticChoice = (
   return { destinationId: only.id, reason: null };
 };
 
+/**
+ * Its attempt's status as the page shows it (`ClientHostingView["run"]`):
+ * a provisioning attempt's own, `gone` for an operation running with no
+ * runner, else null.
+ */
+const attemptOf = (
+  current: Awaited<ReturnType<typeof currentRun>>,
+  operation: string | undefined
+): RunStatus | null => {
+  if (current === null) {
+    return operation === "running" ? "gone" : null;
+  }
+  return current.kind === "provision_placed" ? current.status : null;
+};
+
 /** Client `clientId`'s hosting under `policyId`, or null when there's no such client. */
 export const getClientHosting = async (
   env: Env,
@@ -392,7 +412,7 @@ export const getClientHosting = async (
   const destinations = await destinationChoices(db, policy.id);
   const operation = await provisionOf(db, clientId);
   const current = await currentRun(env, clientId);
-  const attempt = current?.kind === "provision_placed" ? current.status : null;
+  const attempt = attemptOf(current, operation?.status);
   return {
     clientId,
     policy: { id: policy.id, description: policy.description },
