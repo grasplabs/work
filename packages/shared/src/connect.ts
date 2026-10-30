@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { WebhookOutcome, WebhookPost } from "./app-webhooks.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
@@ -1680,12 +1681,22 @@ export interface ChannelApi {
   ) => Promise<Response>;
 }
 
+/** Sending an App's events to a company's webhooks (connect's webhooks.ts). */
+export interface WebhookApi {
+  /**
+   * POSTs one delivery core signed (`WebhookPost`) to its URL, checked
+   * again (`webhookTargetOf`), following no redirect, within
+   * `appWebhookLimits.timeoutMs`; audited, by its origin and status only.
+   */
+  webhookPost: (post: WebhookPost) => Promise<WebhookOutcome>;
+}
+
 /**
  * What core reaches in connect, over the `CONNECT` service binding: the
- * npm registry among the rest (`PackageRegistryApi`), and the chat
- * platforms (`ChannelApi`).
+ * npm registry among the rest (`PackageRegistryApi`), the chat platforms
+ * (`ChannelApi`) and company webhooks (`WebhookApi`).
  */
-export interface ConnectApi extends PackageRegistryApi, ChannelApi {
+export interface ConnectApi extends PackageRegistryApi, ChannelApi, WebhookApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;

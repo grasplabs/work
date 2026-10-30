@@ -2015,6 +2015,11 @@ msgstr "Un hecho"
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Un archivo solo se descarga cuando lo pides, con un clic."
 
+#: src/engines/app-webhooks.tsx
+msgctxt "a webhook event: someone sent a form of the domain's apps"
+msgid "A form is sent"
+msgstr "Se envía un formulario"
+
 #: src/knowledge/purge.tsx
 msgid "A form spelled otherwise, or part of a longer word or address. Purge again with those forms as terms."
 msgstr "Una forma escrita de otro modo, o parte de una palabra o dirección más larga. Vuelve a depurar con esas formas como términos."
@@ -2080,6 +2085,11 @@ msgstr "Un nombre no lleva [, ], # ni |, ni carpetas vacías."
 #: src/engines/resource-bindings.tsx
 msgid "A new template"
 msgstr "Una plantilla nueva"
+
+#: src/engines/app-webhooks.tsx
+msgctxt "a webhook event: a version of the domain was made current"
+msgid "A new version goes live"
+msgstr "Una nueva versión entra en funcionamiento"
 
 #: src/inbox/items.ts
 msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, on the domain's page."
@@ -2512,6 +2522,10 @@ msgstr "Añadir la persona"
 msgid "Add the team"
 msgstr "Añadir el equipo"
 
+#: src/engines/app-webhooks.tsx
+msgid "Add webhook"
+msgstr "Añadir webhook"
+
 #: src/chat/builds.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
@@ -2526,6 +2540,10 @@ msgstr "Aporta"
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "Añadió un miembro a un dominio"
+
+#: src/activity/audit-words.ts
+msgid "Added a webhook to a domain"
+msgstr "Añadió un webhook a un dominio"
 
 #: src/brain/brain.ts
 msgid "Added as an open question"
@@ -2555,6 +2573,7 @@ msgstr "Añadido: actúa en nombre de quien use el dominio, con todo lo que el d
 msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Añadida: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
 
+#: src/engines/app-webhooks.tsx
 #: src/routes/_shell.settings.billing.tsx
 msgid "Address"
 msgstr "Dirección"
@@ -2956,6 +2975,10 @@ msgctxt "memory record kind"
 msgid "An experience"
 msgstr "Una experiencia"
 
+#: src/engines/app-webhooks.tsx
+msgid "An https address on the public internet, with no user name, password or IP address in it."
+msgstr "Una dirección https en internet pública, sin nombre de usuario, contraseña ni dirección IP."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un formato antiguo: guárdalo como PDF o en un archivo más reciente"
@@ -3199,6 +3222,7 @@ msgstr "Aprobaciones"
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-webhooks.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
@@ -3240,6 +3264,7 @@ msgid "Approve the packages for {domain}?"
 msgstr "¿Aprobar los paquetes para {domain}?"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/app-webhooks.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.onboarding.interviews.$person.tsx
@@ -4982,12 +5007,14 @@ msgstr "Copenhague"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-webhooks.tsx
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copied"
 msgstr "Copiado"
 
+#: src/engines/app-webhooks.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 msgid "Copy"
@@ -5724,6 +5751,7 @@ msgid "done"
 msgstr "hecho"
 
 #: src/chat/thread.tsx
+#: src/engines/app-webhooks.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -6122,6 +6150,10 @@ msgstr "Cada pregunta o queja de un cliente, desde el primer mensaje hasta que s
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "Every day with any use, the newest first."
 msgstr "Cada día con uso, el más reciente primero."
+
+#: src/engines/app-webhooks.tsx
+msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp. Copy it now: Grasp won't show it again."
+msgstr "Cada envío se firma con él, para que el receptor sepa que viene de Grasp. Cópialo ahora: Grasp no volverá a mostrarlo."
 
 #: src/onboarding/staff-words.ts
 msgid "Every interview Stephen and Claire held, by voice or typed."
@@ -6854,6 +6886,10 @@ msgstr "Dio su consentimiento para una conexión"
 msgid "Gave up revoking a disconnected account's access at its provider"
 msgstr "Desistió de revocar el acceso de una cuenta desconectada en su proveedor"
 
+#: src/activity/audit-words.ts
+msgid "Gave up sending a domain's event to a webhook"
+msgstr "Dejó de intentar enviar un evento de un dominio a un webhook"
+
 #: src/onboarding/interview-words.ts
 msgid "Gets its links once the team is told"
 msgstr "Recibe sus enlaces cuando se informe al equipo"
@@ -7119,6 +7155,10 @@ msgstr "Grasp registra tu palabra de que surtió efecto y no lo vuelve a enviar 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp resolvió estos paquetes desde el registro de npm y comprobó los archivos de cada uno con el hash del registro. Una licencia es la que indica el propio paquete."
+
+#: src/engines/app-webhooks.tsx
+msgid "Grasp sends this domain's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form."
+msgstr "Grasp envía los eventos de este dominio a cada dirección, firmados con su secreto. Hasta que un administrador apruebe una dirección, solo recibe los ID y el evento, nunca lo que alguien envió en un formulario."
 
 #: src/settings/chat-accounts.tsx
 msgid "Grasp sent this link to that account in {app}. Link it only if it is yours: Grasp then answers it as you, with what you can see."
@@ -7978,6 +8018,11 @@ msgstr "Ya no está retenido."
 msgid "It is not one of these"
 msgstr "No es ninguna de estas"
 
+#: src/engines/app-webhooks.tsx
+msgctxt "a webhook event: the domain was published"
+msgid "It is published"
+msgstr "Se publica"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
 msgstr "No se ofrece a tu organización: ofrécelo en su Resumen antes de conectarlo."
@@ -8620,6 +8665,10 @@ msgstr "Datos jurídicos"
 msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
 msgstr "Lecciones"
+
+#: src/activity/audit-words.ts
+msgid "Let a domain's data go to a webhook"
+msgstr "Permitió que los datos de un dominio vayan a un webhook"
 
 #: src/routes/_shell.settings.security.tsx
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
@@ -12540,6 +12589,7 @@ msgstr "Recordar algo"
 msgid "Reminded on {date}"
 msgstr "Recordado el {date}"
 
+#: src/engines/app-webhooks.tsx
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/package-approvers.tsx
@@ -12616,6 +12666,10 @@ msgstr "Eliminado"
 #: src/activity/audit-words.ts
 msgid "Removed a member"
 msgstr "Eliminó a un miembro"
+
+#: src/activity/audit-words.ts
+msgid "Removed a webhook from a domain"
+msgstr "Quitó un webhook de un dominio"
 
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
@@ -13446,6 +13500,10 @@ msgstr "Buscó en el conocimiento"
 msgid "Searched the audit trail"
 msgstr "Buscó en el registro de auditoría"
 
+#: src/engines/app-webhooks.tsx
+msgid "Secret"
+msgstr "Secreto"
+
 #: src/routes/_shell.settings.tsx
 msgid "Security"
 msgstr "Seguridad"
@@ -13545,6 +13603,10 @@ msgstr "Enviar respuesta"
 msgid "Send back"
 msgstr "Devolver"
 
+#: src/engines/app-webhooks.tsx
+msgid "Send it when"
+msgstr "Enviarlo cuando"
+
 #: src/connections/request-app-dialog.tsx
 msgid "Send request"
 msgstr "Enviar solicitud"
@@ -13576,6 +13638,10 @@ msgstr "Enviado"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Enviado <0>{sent}</0>"
+
+#: src/activity/audit-words.ts
+msgid "Sent a domain's event to a webhook"
+msgstr "Envió un evento de un dominio a un webhook"
 
 #: src/inbox/item-detail.tsx
 msgid "Sent back: {who}, version {version}."
@@ -15701,6 +15767,10 @@ msgstr "Como lo contó la mayoría"
 msgid "The way some told it"
 msgstr "Como lo contaron algunos"
 
+#: src/engines/app-webhooks.tsx
+msgid "The webhook's secret"
+msgstr "El secreto del webhook"
+
 #: src/settings/audit-chain.tsx
 msgid "The whole chain has not been verified yet."
 msgstr "Toda la cadena aún no se ha comprobado."
@@ -17113,6 +17183,10 @@ msgstr "Esperando una parte de las ejecuciones de este dominio; lo vuelve a inte
 msgid "Waiting for a share of this person's runs; tries again by {time}"
 msgstr "Esperando una parte de las ejecuciones de esta persona; lo vuelve a intentar antes de {time}"
 
+#: src/engines/app-webhooks.tsx
+msgid "Waiting for an admin"
+msgstr "Esperando a un administrador"
+
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"
 msgstr "Esperando un evento"
@@ -17260,6 +17334,10 @@ msgstr "Abrimos tu plataforma en cuanto lo hayamos revisado todo contigo. Tendr�
 #: src/onboarding/setup-steps.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "Queremos dedicar menos tiempo al trabajo repetitivo, para tener más tiempo para nuestros clientes. Se trata de cómo fluye el trabajo, no de puestos."
+
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Webhooks"
+msgstr "Webhooks"
 
 #: src/brain/brain-article/kern.tsx
 msgid "week {week}"

@@ -43,6 +43,7 @@ import {
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import { queueFormSent } from "./app-webhook-queue.ts";
 import { appFor } from "./apps.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
@@ -443,13 +444,13 @@ const noteKeyedAction = async (
   person: Identity,
   { id, build }: KeyedTarget,
   call: FunctionRequest
-): Promise<void> => {
+): Promise<string | undefined> => {
   let release: Release;
   let path: string;
   try {
     const found = await appFor(env, person, id, "user");
     if (found.currentVersion === null) {
-      return;
+      return undefined;
     }
     release = await loadRelease(env, found.id, found.currentVersion);
     path = publicOperationOf(
@@ -457,10 +458,18 @@ const noteKeyedAction = async (
       await pinnedReference(env, release, call.reference, build?.version)
     );
   } catch {
-    return;
+    return undefined;
   }
   await noteScreenSubmission(env, person, release, call, path);
+  return path;
 };
+
+/** Whether `result`, a call's as core answers it, says it ran and succeeded. */
+const answeredOk = (result: unknown): boolean =>
+  typeof result === "object" &&
+  result !== null &&
+  "ok" in result &&
+  result.ok === true;
 
 /** What a keyed action answers: what it ran, as far as its invocation keeps. */
 interface KeyedAnswer {
@@ -497,9 +506,10 @@ const keyedAnswer = async (
     operation,
     stage: "admission",
   });
-  if (caller.portableSession === undefined) {
-    await noteKeyedAction(env, person, target, call);
-  }
+  const path =
+    caller.portableSession === undefined
+      ? await noteKeyedAction(env, person, target, call)
+      : undefined;
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
@@ -549,6 +559,15 @@ const keyedAnswer = async (
       throw error;
     }
     return { ...answer, result: { ok: false, error: withheld(error, key) } };
+  }
+  // A form sent, as its screen's keyed action: told to the App's webhooks.
+  if (path !== undefined && answeredOk(answer.result)) {
+    await queueFormSent(env, {
+      app: id,
+      key,
+      operation: path,
+      values: call.input,
+    });
   }
   if (jsonBytes(answer, screenLimits.answerBytes) <= screenLimits.answerBytes) {
     return answer;
@@ -648,7 +667,11 @@ const boundedCall = async (
       async () => {
         // Which attempt under its key this call is, once noted, and the
         // fence of the receipt its mutation claimed.
-        const noted: { attempt?: number; fence?: number } = {};
+        const noted: {
+          attempt?: number;
+          fence?: number;
+          sent?: { call: FunctionRequest; path: string };
+        } = {};
         const called = await callScreenFunction(
           env,
           person,
@@ -664,6 +687,7 @@ const boundedCall = async (
                   ? {}
                   : { pinnedVersion: build.version }),
                 onAdmitted: async (release, call, path) => {
+                  noted.sent = { call, path };
                   noted.attempt = await noteScreenSubmission(
                     env,
                     person,
@@ -682,6 +706,22 @@ const boundedCall = async (
           await noteScreenAnswer(env, person, id, text, called.result, {
             attempt: noted.attempt,
             fence: noted.fence ?? null,
+          });
+        }
+        // A form sent, as its screen's keyed mutation: told to the App's
+        // webhooks.
+        const key = noted.sent?.call.idempotencyKey;
+        if (
+          noted.attempt !== undefined &&
+          noted.sent !== undefined &&
+          key !== undefined &&
+          answeredOk(called.result)
+        ) {
+          await queueFormSent(env, {
+            app: id,
+            key,
+            operation: noted.sent.path,
+            values: noted.sent.call.input,
           });
         }
         return withinFrame(called);

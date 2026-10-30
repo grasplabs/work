@@ -142,6 +142,24 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "app.output.classified",
     text: msg`Changed whether a domain's data needs approved apps`,
   },
+  { action: "app.webhook.added", text: msg`Added a webhook to a domain` },
+  {
+    action: "app.webhook.approved",
+    text: msg`Let a domain's data go to a webhook`,
+  },
+  {
+    action: "app.webhook.removed",
+    text: msg`Removed a webhook from a domain`,
+  },
+  {
+    action: "app.webhook.undeliverable",
+    text: msg`Gave up sending a domain's event to a webhook`,
+  },
+  {
+    action: "webhook.call",
+    // Recorded for refusals and failures too, as a channel call is.
+    text: msg`Sent a domain's event to a webhook`,
+  },
   { action: "app", text: msg`Changed a domain` },
   { action: "member.removed", text: msg`Removed a member` },
   {
