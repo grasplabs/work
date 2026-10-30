@@ -47,11 +47,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 
-import { formatDayMonth, formatMonth, formatNumber } from "../../format.ts";
-
-/** A calendar day kept as an ISO date, as its day and month: "3 Oct". */
-const dayOf = (iso: string): string =>
-  iso === "" ? iso : formatDayMonth(`${iso.slice(0, 10)}T12:00:00Z`);
+import { formatIsoDayMonth, formatMonth, formatNumber } from "../../format.ts";
 
 // The plan in one picture, as the prototype's `request-plan.tsx`: the
 // billed requests of the month climbing day by day toward the line of what
@@ -127,7 +123,9 @@ const Saved = ({
   const { t, i18n } = useLingui();
   return (
     <Popover>
-      <PopoverTrigger render={<Button size="inline" variant="hint" />}>
+      <PopoverTrigger
+        render={<Button className="self-start" size="inline" variant="hint" />}
+      >
         {t`Time saved`}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72">
@@ -202,7 +200,7 @@ export const RequestPlan = ({
   const ahead = pace === null ? "" : formatNumber(pace);
   // Days of this month or last, so without their year, as the prototype
   // writes them: "31 Oct".
-  const end = dayOf(report.to);
+  const end = formatIsoDayMonth(report.to);
   const over =
     range === "month" && included !== null && pace !== null && pace > included;
   const config: ChartConfig = {
@@ -211,7 +209,8 @@ export const RequestPlan = ({
     billed: { label: t`Billed`, color: "chart-1" },
   };
   const daily = report.by === "day";
-  const format = (at: string) => (daily ? dayOf(at) : formatMonth(at));
+  const format = (at: string) =>
+    daily ? formatIsoDayMonth(at) : formatMonth(at);
   const data: {
     at: string;
     total?: number | null;

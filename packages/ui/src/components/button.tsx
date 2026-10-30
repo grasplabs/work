@@ -44,7 +44,7 @@ const buttonVariants = cva(
           "size-8 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-md",
         "icon-lg": "size-10",
         // In a line of text: no box of its own, in the small type.
-        inline: "h-auto self-start rounded-sm p-0 text-xs font-normal",
+        inline: "h-auto rounded-sm p-0 text-xs font-normal",
       },
     },
     defaultVariants: {
