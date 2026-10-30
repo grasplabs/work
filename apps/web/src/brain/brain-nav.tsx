@@ -1,10 +1,14 @@
-import { useLingui } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
+  ActivityIcon,
   BrainIcon,
   Building2Icon,
   ChevronDownIcon,
+  InboxIcon,
   NotebookPenIcon,
+  TargetIcon,
+  UsersIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,13 +23,16 @@ import {
   RailExpand,
   usePageSidebarFold,
 } from "../frame/page-sidebar.tsx";
+import { LOBES, TEAM_FOLDER } from "./brain-atlas.ts";
+import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { dotClass } from "./brain-colors.ts";
-import { tone } from "./brain-home.tsx";
-import { brainSections, findFolder, shownCount } from "./brain-sections.ts";
-import { countNotes, folderTree, groupLabel } from "./brain.ts";
+import { findFolder } from "./brain-sections.ts";
+import { countNotes, folderTree } from "./brain.ts";
 import type { Brain, Folder, Note } from "./brain.ts";
 
-// The brain's navigation, as the prototype has it (`components/brain-nav.tsx`).
+// The brain's navigation, as the prototype has it (`components/brain-nav.tsx`):
+// the brain's regions, not the Playbook's six parts, which keep their own
+// pages (/brain/sections) for whoever links to them.
 
 /** Where the parts and folders the reader opened are kept, so a reload shows them as they were. */
 const opened = "grasp.brain.open";
@@ -222,23 +229,102 @@ const TopLink = ({
     </Link>
   );
 
+/** The key a region is opened by in the navigation. */
+const regionKey = (id: RegionId): string => `region:${id}`;
+
+/** Each region's icon: the board's goals, the teams in a lobe, and what came in. */
+const regionIcon = (id: RegionId): LucideIcon => {
+  if (id === "frontal") {
+    return TargetIcon;
+  }
+  return id === "stem" ? InboxIcon : UsersIcon;
+};
+
 /**
- * The brain's navigation: the home and the brain itself, then one entry per part of the brain with
- * its icon, which opens in place to its notes along a thin guide line. It folds to a rail of icons
- * to give the page more room: by itself on a window too narrow to hold it open beside the brain,
- * and whenever you fold it. It stays folded or open as the reader left it, and so do the parts and
- * folders opened in it.
+ * What a region holds, as the navigation lists it. In front, the vision and the goals; in a lobe,
+ * each team as a group that opens its page from its name, its work under it; at the stem, the
+ * folders of what came in.
+ */
+const regionFolder = (region: AtlasRegion, tree: Folder): Folder => {
+  const key = regionKey(region.id);
+  if (region.id === "stem") {
+    return {
+      key,
+      name: region.name,
+      folders: findFolder(tree, "Sources")?.folders ?? [],
+      notes: [],
+    };
+  }
+  if (region.id === "frontal") {
+    return { key, name: region.name, folders: [], notes: region.notes };
+  }
+  const teams = region.notes.filter((each) => each.kind === "team");
+  const workOf = (team: Note) =>
+    region.notes.filter(
+      (each) =>
+        each.kind !== "team" &&
+        each.path[0] === TEAM_FOLDER &&
+        each.path[1] === team.id
+    );
+  const [only] = teams;
+  // A group of one team named after it: the team's page first, then its work, said once.
+  if (teams.length === 1 && only?.title === region.name) {
+    return {
+      key,
+      name: region.name,
+      folders: [],
+      notes: [only, ...workOf(only)],
+    };
+  }
+  return {
+    key,
+    name: region.name,
+    notes: [],
+    folders: teams.map((team) => ({
+      key: `team:${team.id}`,
+      name: team.title,
+      note: team,
+      folders: [],
+      notes: workOf(team),
+    })),
+  };
+};
+
+/** The keys on the way to a note in the navigation: its region, the team whose work it is, and the folders of what came in. */
+const wayTo = (note: Note, atlas: Atlas): string[] => {
+  const home = atlas.home.get(note.id);
+  if (home === undefined) {
+    return [];
+  }
+  const shown = atlas.regions
+    .find((each) => each.id === home)
+    ?.notes.find((each) => each.id === note.id);
+  const team =
+    shown?.path[0] === TEAM_FOLDER ? [`team:${shown.path[1] ?? ""}`] : [];
+  const folders = home === "stem" ? pathKeys(note) : [];
+  return [regionKey(home), ...team, ...folders];
+};
+
+/**
+ * The brain's navigation, as the prototype has it: the home and the brain itself, its log, then
+ * the brain's regions: the board, each of the company's groups of teams, and what came in. A
+ * region opens in place along a thin guide line: a group's teams, each opening to its work. It
+ * folds to a rail of icons to give the page more room: by itself on a window too narrow to hold
+ * it open beside the brain, and whenever you fold it. It stays folded or open as the reader left
+ * it, and so do the regions and teams opened in it.
  */
 export const BrainNav = ({
   brain,
+  atlas,
   note,
-  sectionSlug,
+  region: shownRegion,
 }: {
   brain: Brain;
-  note?: Note;
-  sectionSlug?: string;
+  atlas: Atlas;
+  note?: Note | undefined;
+  region?: RegionId | undefined;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const [collapsed, setCollapsed] = usePageSidebarFold("brain");
   const [open, setOpen] = useState(readOpened);
   // What is open is kept for the next visit, as the folding is.
@@ -247,21 +333,22 @@ export const BrainNav = ({
   }, [open]);
   const [revealed, setRevealed] = useState<string | undefined>();
   const company = brain.notes.find((candidate) => candidate.kind === "company");
-  const here = new Set(note ? pathKeys(note) : []);
+  const activityLabel = t({ message: "Activity", context: "the brain's log" });
+  let here = new Set<string>();
+  if (note) {
+    here = new Set(wayTo(note, atlas));
+  } else if (shownRegion) {
+    here = new Set([regionKey(shownRegion)]);
+  }
 
   // Opening a note opens the way to it once, so you can see where you are. After that it closes
-  // like anything else.
-  if (note && revealed !== note.id) {
-    setRevealed(note.id);
-    setOpen((previous) => new Set([...previous, ...pathKeys(note)]));
-  }
-  // A part's own page opens that part here too, once.
-  const shownSection = brainSections.find(
-    (section) => section.slug === sectionSlug
-  );
-  if (shownSection && revealed !== shownSection.slug) {
-    setRevealed(shownSection.slug);
-    setOpen((previous) => new Set([...previous, shownSection.key]));
+  // like anything else. A region open in the brain opens here too, once.
+  const reveal =
+    note?.id ??
+    (shownRegion === undefined ? undefined : regionKey(shownRegion));
+  if (reveal !== undefined && revealed !== reveal) {
+    setRevealed(reveal);
+    setOpen((previous) => new Set([...previous, ...here]));
   }
 
   const tree = folderTree(brain.notes);
@@ -271,12 +358,19 @@ export const BrainNav = ({
       setOpen((previous) => flip(previous, key));
     },
   };
-  const sections = brainSections.flatMap((section) => {
-    const folder = findFolder(tree, section.key);
-    return folder
-      ? [{ ...section, folder, label: i18n._(groupLabel[section.group]) }]
-      : [];
-  });
+  // The board first, then the company's groups in its own order, then what came in.
+  const order: RegionId[] = ["frontal", ...LOBES, "stem"];
+  const regions = order.flatMap((id) =>
+    atlas.regions
+      .filter(
+        (each) => each.id === id && each.name !== "" && each.notes.length > 0
+      )
+      .map((each) => ({
+        region: each,
+        folder: regionFolder(each, tree),
+        Icon: regionIcon(each.id),
+      }))
+  );
 
   if (collapsed) {
     return (
@@ -300,33 +394,31 @@ export const BrainNav = ({
           </RailButton>
         ) : null}
         <RailButton
-          active={!note && sectionSlug === undefined}
+          active={!note && shownRegion === undefined}
           label={t`Brain`}
-          render={<Link to="/brain" />}
+          render={<Link activeOptions={{ exact: true }} to="/brain" />}
         >
           <BrainIcon />
+        </RailButton>
+        <RailButton
+          label={activityLabel}
+          render={<Link to="/brain/activity" />}
+        >
+          <ActivityIcon />
         </RailButton>
         <RailButton label={t`Memory`} render={<Link to="/brain/memory" />}>
           <NotebookPenIcon />
         </RailButton>
-        {sections.map((section) => {
-          const Icon = section.icon;
-          return (
-            <RailButton
-              active={here.has(section.key) || section.slug === sectionSlug}
-              key={section.key}
-              label={section.label}
-              render={
-                <Link
-                  params={{ sectionId: section.slug }}
-                  to="/brain/sections/$sectionId"
-                />
-              }
-            >
-              <Icon className={tone[section.group].ink} />
-            </RailButton>
-          );
-        })}
+        {regions.map(({ region, Icon }) => (
+          <RailButton
+            active={here.has(regionKey(region.id))}
+            key={region.id}
+            label={region.name}
+            render={<Link search={{ region: region.id }} to="/brain" />}
+          >
+            <Icon />
+          </RailButton>
+        ))}
       </PageSidebar>
     );
   }
@@ -351,42 +443,49 @@ export const BrainNav = ({
       </PageSidebarTop>
       <PageSidebarBody joined>
         {company ? <TopLink icon={BrainIcon} label={t`Brain`} /> : null}
+        <Link className={topLinkClass} to="/brain/activity">
+          <TopLinkContent icon={ActivityIcon} label={activityLabel} />
+        </Link>
         <Link className={topLinkClass} to="/brain/memory">
           <TopLinkContent icon={NotebookPenIcon} label={t`Memory`} />
         </Link>
         <span aria-hidden="true" className="bg-border my-2 h-px" />
 
-        {sections.map((section) => {
-          const Icon = section.icon;
-          const expanded = opening.isOpen(section.key);
-          const current = here.has(section.key);
-          const name = section.label;
+        {regions.map(({ region, folder, Icon }) => {
+          const key = regionKey(region.id);
+          const expanded = opening.isOpen(key);
+          const current = here.has(key);
+          const { name } = region;
           return (
-            <div className="flex flex-col" key={section.key}>
+            <div className="flex flex-col" key={key}>
               <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center rounded-md">
+                {/* The region's name goes to it in the brain; the arrow opens what it holds here. */}
                 <Link
+                  activeOptions={{ includeSearch: true }}
                   className={
                     current
                       ? "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
                       : "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm data-[status=active]:font-medium"
                   }
-                  params={{ sectionId: section.slug }}
-                  to="/brain/sections/$sectionId"
+                  search={{ region: region.id }}
+                  to="/brain"
                 >
-                  <Icon
-                    className={`size-4 flex-none ${tone[section.group].ink}`}
-                  />
+                  <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
                   <span className="min-w-0 flex-1 truncate">{name}</span>
-                  <span className="text-muted-foreground text-xs font-normal tabular-nums">
-                    {shownCount(section.folder)}
-                  </span>
+                  {region.group?.confirmed === false ? (
+                    <span className="text-muted-foreground text-xs font-normal">
+                      <Trans context="a group of teams Grasp proposed that no admin confirmed yet">
+                        Proposed
+                      </Trans>
+                    </span>
+                  ) : null}
                 </Link>
                 <button
                   aria-expanded={expanded}
                   aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
                   className="flex size-7 flex-none items-center justify-center rounded-md"
                   onClick={() => {
-                    opening.toggle(section.key);
+                    opening.toggle(key);
                   }}
                   type="button"
                 >
@@ -395,10 +494,7 @@ export const BrainNav = ({
               </div>
               {expanded ? (
                 <div className="my-1 ml-4 flex flex-col gap-0.5 border-l pl-2">
-                  {section.folder.note ? (
-                    <NoteItem note={section.folder.note} />
-                  ) : null}
-                  <Entries folder={section.folder} opening={opening} />
+                  <Entries folder={folder} opening={opening} />
                 </div>
               ) : null}
             </div>
