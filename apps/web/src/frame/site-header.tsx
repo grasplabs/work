@@ -113,21 +113,32 @@ const CrumbLink = ({ crumb }: { crumb: Crumb }) => {
 };
 
 /**
+ * Which crumbs a phone keeps: by default the step before the page and the
+ * page (`last-two`, below md); or the first alone (`first`, below sm), for
+ * a page whose header is full of its own actions, as an open chat's is in
+ * the prototype, with the whole trail from sm up.
+ */
+type PhoneCrumbs = "last-two" | "first";
+
+/**
  * The bar above every signed-in page: the sidebar's trigger, then where the
  * page is, and on the right any page action. It stays in view while the
  * page scrolls. On one line whatever the window: on a narrow one only the
- * step before the page is kept. With no crumbs yet (the page is loading), a
- * skeleton where they will be.
+ * step before the page is kept, or the first alone (`phoneCrumbs`). With
+ * no crumbs yet (the page is loading), a skeleton where they will be.
  */
 export const SiteHeader = ({
   crumbs,
   actions,
+  phoneCrumbs: phone = "last-two",
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  phoneCrumbs?: PhoneCrumbs;
 }) => {
   const { t } = useLingui();
   const last = crumbs.length - 1;
+  const firstOnly = phone === "first";
   return (
     <header className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b">
       {/* A square of its own, as wide as a page sidebar's rail, so the
@@ -149,14 +160,14 @@ export const SiteHeader = ({
                 <Fragment key={`${index}:${crumb.label}`}>
                   {index > 0 ? (
                     <BreadcrumbSeparator
-                      className={index < last ? "max-md:hidden" : undefined}
+                      className={`${firstOnly ? "max-sm:hidden" : ""} ${!firstOnly && index < last ? "max-md:hidden" : ""}`}
                     />
                   ) : null}
                   <BreadcrumbItem
                     className={
                       index === last
-                        ? "min-w-8"
-                        : `flex-none ${index < last - 1 ? "max-md:hidden" : ""}`
+                        ? `min-w-8 ${firstOnly && index > 0 ? "max-sm:hidden" : ""}`
+                        : `flex-none ${firstOnly && index > 0 ? "max-sm:hidden" : ""} ${!firstOnly && index < last - 1 ? "max-md:hidden" : ""}`
                     }
                   >
                     <CrumbLink crumb={crumb} />
