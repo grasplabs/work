@@ -956,6 +956,25 @@ export const graspComponents = {
       "The bar above a page in a frame with a sidebar: the sidebar's trigger, where the page is as a breadcrumb that keeps to one line, and the page's actions.",
     exports: ["SiteHeader"],
   },
+  "page-sidebar": {
+    status: "supported",
+    summary:
+      "The column beside a page's content: open with its top row and the fold beside it, or folded to a rail of icons, its width easing between the two. `landmark` makes it the page's navigation.",
+    exports: [
+      "PageSidebar",
+      "PageSidebarBody",
+      "PageSidebarTop",
+      "RailButton",
+      "RailDivider",
+      "RailExpand",
+    ],
+  },
+  suggestions: {
+    status: "supported",
+    summary:
+      'Questions to start a conversation from, each a button that asks it: `quiet` rows of muted text under a chat\'s box, or `variant="card"` rows on a card with a chevron.',
+    exports: ["Suggestion", "Suggestions", "suggestionsVariants"],
+  },
   panel: {
     status: "supported",
     summary:

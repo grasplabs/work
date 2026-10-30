@@ -126,7 +126,7 @@ export default defineProject({
         // each database it holds at once (test/cloudflare-api-workers.ts).
         d1Databases: {
           ...Object.fromEntries(
-            Array.from({ length: 24 }, (_, slot) => [
+            Array.from({ length: 32 }, (_, slot) => [
               `CLIENT_D1_${slot}`,
               `client-d1-${slot}`,
             ])

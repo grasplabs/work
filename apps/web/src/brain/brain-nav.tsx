@@ -1,3 +1,11 @@
+import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  RailButton,
+  RailDivider,
+  RailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
@@ -14,15 +22,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  RailButton,
-  RailDivider,
-  RailExpand,
-  usePageSidebarFold,
-} from "../frame/page-sidebar.tsx";
+import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { LOBES, TEAM_FOLDER } from "./brain-atlas.ts";
 import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { dotClass } from "./brain-colors.ts";

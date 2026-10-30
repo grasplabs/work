@@ -27,6 +27,14 @@ import {
   NavigationMenuTrigger,
 } from "@grasp-os/ui/components/navigation-menu";
 import {
+  PageSidebar,
+  PageSidebarBody,
+  PageSidebarTop,
+  RailButton,
+  RailDivider,
+  RailExpand,
+} from "@grasp-os/ui/components/page-sidebar";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -53,6 +61,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { BookOpenIcon, MessagesSquareIcon } from "lucide-react";
+import { useState } from "react";
 
 const BreadcrumbDemo = () => (
   <Breadcrumb>
@@ -182,6 +191,47 @@ const SiteHeaderDemo = () => (
   </SidebarProvider>
 );
 
+const PageSidebarDemo = () => {
+  const [folded, setFolded] = useState(false);
+  return (
+    <div className="flex h-64 overflow-hidden rounded-lg border">
+      <PageSidebar folded={folded} label="Knowledge">
+        {folded ? (
+          <>
+            <RailExpand
+              label="Expand the sidebar"
+              onExpand={() => {
+                setFolded(false);
+              }}
+            />
+            <RailDivider />
+            <RailButton active label="Policies">
+              <BookOpenIcon />
+            </RailButton>
+          </>
+        ) : (
+          <>
+            <PageSidebarTop
+              fold={{
+                label: "Fold the sidebar",
+                onFold: () => {
+                  setFolded(true);
+                },
+              }}
+            >
+              <span className="font-medium">Knowledge</span>
+            </PageSidebarTop>
+            <PageSidebarBody>
+              <span>Policies</span>
+              <span>Handbook</span>
+            </PageSidebarBody>
+          </>
+        )}
+      </PageSidebar>
+    </div>
+  );
+};
+
 const TabsDemo = () => (
   <Tabs defaultValue="account">
     <TabsList>
@@ -202,6 +252,7 @@ export const navigationDemos = {
   breadcrumb: BreadcrumbDemo,
   command: CommandDemo,
   "navigation-menu": NavigationMenuDemo,
+  "page-sidebar": PageSidebarDemo,
   pagination: PaginationDemo,
   sidebar: SidebarDemo,
   "site-header": SiteHeaderDemo,
