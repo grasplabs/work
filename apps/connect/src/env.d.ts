@@ -106,7 +106,8 @@ interface __BaseEnv_Env {
    * Grasp's own keys at the AI providers, for platform features
    * (src/ai-providers.ts): each optional, and a provider whose key is unset
    * isn't offered for them. Never the organization's own keys, which are
-   * sealed in the database.
+   * sealed in the database. Given by Grasp's admin to its hosted
+   * deployments alone; on-prem leaves them unset.
    */
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;

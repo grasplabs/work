@@ -116,10 +116,6 @@ const wranglerConfigSchema = z.strictObject({
     )
     .default([]),
   triggers: z.strictObject({ crons: z.array(z.string()) }).optional(),
-  // `remote` only changes local dev.
-  ai: z
-    .strictObject({ binding: bindingName, remote: z.boolean().optional() })
-    .optional(),
   send_email: z.array(z.strictObject({ name: bindingName })).default([]),
   version_metadata: z.strictObject({ binding: bindingName }).optional(),
   services: z
@@ -200,7 +196,6 @@ const bindingsOf = (
     bucket_name: bucket.bucket_name,
     jurisdiction: bucket.jurisdiction,
   })),
-  ...(config.ai ? [{ type: "ai", name: config.ai.binding }] : []),
   ...config.send_email.map((email) => ({
     type: "send_email",
     name: email.name,

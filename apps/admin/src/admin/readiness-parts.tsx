@@ -63,6 +63,13 @@ const CheckLinkTo = ({ link }: { link: CheckLink }) => {
         </Link>
       );
     }
+    case "platform_ai": {
+      return (
+        <Link className={className} to="/platform/ai">
+          Open Platform → AI
+        </Link>
+      );
+    }
     default: {
       return link satisfies never;
     }

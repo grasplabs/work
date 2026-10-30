@@ -16,7 +16,7 @@ export const PROVISION_STEPS = [
 ] as const;
 export type ProvisionStep = (typeof PROVISION_STEPS)[number];
 
-/** A deploy, in order: the EU resources and AI Gateway, the database migrations, the Workers with their secrets, a smoke check through the router, and the hostname in the router's map. */
+/** A deploy, in order: the EU resources, the database migrations, the Workers with their secrets, a smoke check through the router, and the hostname in the router's map. */
 export const DEPLOY_STEPS = [
   "resources",
   "migrations",

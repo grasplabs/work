@@ -12,8 +12,8 @@ import { adapterFor } from "./model-catalog.ts";
 import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 
 // How the model gateway (models.ts) reaches a model: a transport. The
-// gateway stays the one choke point whatever the transport: the allowlist
-// and the rules (model-rules.ts), the budgets and the spend ceiling
+// gateway stays the one choke point whatever the transport: the
+// organization's chosen models and the rules (model-rules.ts), the budgets
 // (model-budgets.ts), the model ledger's admission of every provider
 // request before it is sent, and the audit log all run before and around
 // it, never inside it. A transport only says where a request goes and how

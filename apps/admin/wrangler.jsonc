@@ -140,9 +140,8 @@
   ],
   // What provisioning and releases need from the account's Secrets Store
   // (src/deploy/context.ts): the deployer's token, with deploy permissions
-  // only, on every hosting destination's account (AI Gateway edit among
-  // them: provisioning makes each client's gateway; and Zone and Email
-  // Sending edit: provisioning makes the client's sending domain,
+  // only, on every hosting destination's account (Zone and Email Sending
+  // edit among them: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
   // are derived from; and the secrets every client shares. Deploy platform
   // copies every one of them in from the stage's 1Password Environment
@@ -189,6 +188,34 @@
       "binding": "APP_OAUTH_CLIENTS",
       "store_id": "account-secrets-store",
       "secret_name": "APP_OAUTH_CLIENTS",
+    },
+    // Grasp's own AI provider keys, which pay for its platform features
+    // (converting PDFs for the Brain, transcription, speech), as staff
+    // choose each feature's provider on Platform → AI (src/platform-ai.ts).
+    // Every client's connect gets them as shared secrets, never its core
+    // (src/deploy/context.ts). Optional: added to the stage's 1Password
+    // Environment, each is bound at the next Deploy platform; until then,
+    // Platform → AI doesn't offer its provider, and a deploy whose features
+    // name it stops, saying which key is missing.
+    {
+      "binding": "OPENAI_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "OPENAI_API_KEY",
+    },
+    {
+      "binding": "ANTHROPIC_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "ANTHROPIC_API_KEY",
+    },
+    {
+      "binding": "MISTRAL_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "MISTRAL_API_KEY",
+    },
+    {
+      "binding": "OPENROUTER_API_KEY",
+      "store_id": "account-secrets-store",
+      "secret_name": "OPENROUTER_API_KEY",
     },
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
@@ -360,6 +387,26 @@
           "binding": "APP_OAUTH_CLIENTS",
           "store_id": "account-secrets-store",
           "secret_name": "APP_OAUTH_CLIENTS_STAGING",
+        },
+        {
+          "binding": "OPENAI_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "OPENAI_API_KEY_STAGING",
+        },
+        {
+          "binding": "ANTHROPIC_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "ANTHROPIC_API_KEY_STAGING",
+        },
+        {
+          "binding": "MISTRAL_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "MISTRAL_API_KEY_STAGING",
+        },
+        {
+          "binding": "OPENROUTER_API_KEY",
+          "store_id": "account-secrets-store",
+          "secret_name": "OPENROUTER_API_KEY_STAGING",
         },
         {
           "binding": "STRIPE_RESTRICTED_KEY",

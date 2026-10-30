@@ -1,7 +1,7 @@
 /**
  * Platform's own places, as its pages link them: its overview (the
- * Platform page), every release the admin imported, every rollout, the
- * offboarded clients and the hosting destinations,
+ * Platform page), every release the admin imported, every rollout, Grasp's
+ * own AI features, the offboarded clients and the hosting destinations,
  * each a page of its own under Platform, as the admin's Releases and
  * Rollouts pages were before the admin took them in.
  */
@@ -59,6 +59,13 @@ export const PlatformNav = () => (
       to="/platform/rollouts"
     >
       Rollouts
+    </Link>
+    <Link
+      activeProps={{ className: activeTab }}
+      inactiveProps={{ className: tab }}
+      to="/platform/ai"
+    >
+      AI
     </Link>
     <Link
       activeProps={{ className: activeTab }}

@@ -3,7 +3,7 @@
  * entry, written from how onboarding fails when nobody looked first: a
  * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
- * namespace, model spend undecided; and an optional feature left
+ * namespace, Grasp's AI on a provider it has no key for; and an optional feature left
  * unconfigured without saying so.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
@@ -96,7 +96,7 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        model_spend: "ready",
+        platform_ai: "ready",
         rooms: "not_configured",
         discord_bot: "ready",
         grasp_organization: "not_configured",
@@ -160,7 +160,7 @@ describe("Platform's Readiness", () => {
         release: "ready",
         secrets: "ready",
         deployer: "ready",
-        model_spend: "ready",
+        platform_ai: "ready",
       },
       blocking: 0,
       destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
@@ -186,16 +186,20 @@ describe("Platform's Readiness", () => {
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
   });
 
-  it("says every organization is held to the default model spend ceiling unless staff set another", async () => {
-    const read = await withVars(production, readiness);
+  it("blocks onboarding while Grasp's AI is on a provider whose key Secrets Store doesn't have, naming it", async () => {
+    const keyed = await withVars(production, readiness);
+    await emptyStoreSecret(env.OPENAI_API_KEY, "OPENAI_API_KEY");
+    const unkeyed = await withVars(production, readiness);
 
     expect({
-      status: statuses(read).model_spend,
-      words: wordsOf(read, "model_spend"),
+      keyed: statuses(keyed).platform_ai,
+      unkeyed: statuses(unkeyed).platform_ai,
+      words: wordsOf(unkeyed, "platform_ai"),
     }).toStrictEqual({
-      status: "ready",
+      keyed: "ready",
+      unkeyed: "blocked",
       words:
-        "Every organization is held to a model spend ceiling of €250 a month, its gateway's budget, unless staff set another on its Setup.",
+        "Platform → AI chose a provider whose key Secrets Store doesn't have (OPENAI_API_KEY), so every deploy stops. Add OPENAI_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
     });
   });
 

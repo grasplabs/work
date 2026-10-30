@@ -54,14 +54,6 @@
  * fencing: a call already in flight can still land, and the runner that
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
- * Model spend (GRA-141): core reaches models through an AI Gateway in the
- * destination's account (`modelGatewayOf`): the client's own in a
- * dedicated account, the destination's shared one in a Workers for
- * Platforms namespace (spec 37.5), ensured with the client's resources.
- * Its core's model gateway holds every client to its monthly ceiling, the
- * deployment budget its vars carry (src/deploy/core-vars.ts
- * `withSpendCeiling`), so no client has unbounded spend on the account.
- *
  * Not here, on purpose:
  * - A probe of an owned workflow's run: core's probe asks its identity,
  *   every private binding of core and connect (databases, buckets,
@@ -89,7 +81,6 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
-  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -121,7 +112,7 @@ import { z } from "zod";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
-import { ensureAiGateway, findD1Database } from "../cloudflare/accounts.ts";
+import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -150,14 +141,16 @@ import {
   incompatibility,
 } from "../deploy/compatibility.ts";
 import {
-  clientGatewayId,
   clientMailDomain,
   clientRuntimeProfile,
-  defaultGatewayModels,
   derivedCoreConfig,
 } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
-import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
+import {
+  configuredCoreVars,
+  keyedProviders,
+  mailSenderOf,
+} from "../deploy/core-vars.ts";
 import { DeployError, errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -457,8 +450,7 @@ const appSchema = z.enum(apps);
 
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
- * Workers: D1, R2, Durable Objects and Workers AI
- * (configuration/bindings), and static assets
+ * Workers: D1, R2 and Durable Objects (configuration/bindings), and static assets
  * (configuration/static-assets), and what the GRA-430 run
  * on a real namespace (28 Oct) qualified: the Worker Loader, version
  * metadata and a service binding, which renders to the connect gateway (a
@@ -468,7 +460,6 @@ const appSchema = z.enum(apps);
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
-  "ai",
   "d1",
   "r2_bucket",
   "durable_object_namespace",
@@ -1518,34 +1509,9 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 };
 
 /**
- * The AI Gateway `loaded`'s core reaches models through, in its
- * destination's account: the destination's shared one in a Workers for
- * Platforms namespace (spec 37.5), the client's own in a dedicated one.
- */
-const modelGatewayOf = (loaded: Loaded): string => {
-  if (loaded.destination.kind !== "workers_for_platforms") {
-    return clientGatewayId;
-  }
-  const stage = stageOfNamespace(loaded.ownNamespace);
-  if (stage === undefined) {
-    throw new ProvisionOperationError(
-      "stage_unset",
-      "This admin's STAGE is neither staging nor production: it runs no operation"
-    );
-  }
-  return placedModelGateway(stage);
-};
-
-/** Whether any of the release's Workers binds Workers AI. */
-const bindsModels = (manifest: ReleaseManifest): boolean =>
-  Object.values(manifest.workers).some((worker) =>
-    worker.bindings.some(({ type }) => type === "ai")
-  );
-
-/**
- * Core's vars: its derived sign-in, runtime profile and model gateway
- * (`modelGatewayOf`), the client's settings, its monthly model spend
- * ceiling as the gateway's budget, and the change core records.
+ * Core's vars: its derived sign-in and runtime profile, the platform's AI
+ * settings, checked against the AI provider keys connect gets, the
+ * client's settings, and the change core records.
  */
 const coreVarsOf = async (
   context: ProvisionContext,
@@ -1563,13 +1529,7 @@ const coreVarsOf = async (
   return await configuredCoreVars(
     context.db,
     loaded.held.clientId,
-    {
-      ...derived,
-      MODEL_GATEWAY: {
-        gateway: modelGatewayOf(loaded),
-        models: defaultGatewayModels,
-      },
-    },
+    derived,
     {
       by: loaded.operation.startedBy,
       // What started it: a release, or new settings or secrets on the
@@ -1579,7 +1539,8 @@ const coreVarsOf = async (
       // When the operation started: the same however often it's resumed.
       at: loaded.operation.createdAt.toISOString(),
     },
-    mailSenderOf(context, loaded.held.clientId)
+    mailSenderOf(context, loaded.held.clientId),
+    keyedProviders(context.secrets.shared.connect)
   );
 };
 
@@ -2932,11 +2893,6 @@ const runOperation = async (
 
     step = "resources";
     const inventory = await ensureClientResources(api, db, "system", held);
-    // Before core goes live naming it: the gateway its model calls take.
-    if (bindsModels(loaded.manifest)) {
-      await assertHolds(db, held);
-      await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
-    }
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
