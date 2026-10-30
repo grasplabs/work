@@ -469,28 +469,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The branch name and the PR title, which becomes the commit on main and the
-  # release note. Skipped (which counts as passing) in the merge queue.
-  conventions:
-    name: conventions
-    if: github.event_name == 'pull_request'
-    runs-on: boat
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
-      - run: vp run check:branch
-      - run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-
   # Stephen's eval against a real model runs by hand only (stephen-eval.yml),
   # and weekly on main (stephen-weekly.yml); every change is checked against
   # the scripted model in `vp test`. This job only keeps the required

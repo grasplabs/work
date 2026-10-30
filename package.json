@@ -20,6 +20,7 @@
     "check:state-registry": "node scripts/check-state-registry.ts",
     "check:playwright-image": "node scripts/check-playwright-image.ts",
     "github:setup": "node scripts/github-setup.ts",
+    "check:attribution": "node scripts/check-attribution.ts",
     "check:branch": "node scripts/check-branch-name.ts",
     "stephen:report": "node scripts/stephen-eval.ts report",
     "build:jq-wasm": "node scripts/jq-wasm/build.ts",
