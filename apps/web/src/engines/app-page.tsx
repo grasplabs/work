@@ -21,7 +21,7 @@ import {
 import type { ReactNode } from "react";
 
 import { appSlot, setActiveChat } from "../chat/active-chat.ts";
-import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
+import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
@@ -253,7 +253,7 @@ export const AppPage = ({
     <div
       className={
         drawer
-          ? "flex min-h-0 flex-1 flex-col text-sm lg:pr-112.5"
+          ? `flex min-h-0 flex-1 flex-col text-sm ${dockDrawerRoom}`
           : "flex min-h-0 flex-1 flex-col text-sm"
       }
     >

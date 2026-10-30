@@ -24,8 +24,8 @@ import { ChatThread } from "./thread.tsx";
 // answer is kept, a quiet line says how long it thought, folded, and opens
 // to what it thought. How long Grasp worked is the trace's first line. And
 // what an answer's code did to the dashboard, under the step that did it.
-// While an answer is written, its words fade in where they land; a kept
-// one stands still.
+// While an answer is written, the words of the block being written fade
+// in where they land, the blocks before it done; a kept one stands still.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -191,9 +191,9 @@ describe(ChatThread, () => {
     });
   });
 
-  it("fades each word of an answer in as it is written, and a kept answer stands still", async () => {
+  it("fades each word of an answer in as it is written, where words come, and a kept answer stands still", async () => {
     await thread([asked], {
-      text: "Four, as **two** and two.",
+      text: "It adds up.\n\nFour, as **two** and two.",
       code: [],
       reasoning: "",
     });
