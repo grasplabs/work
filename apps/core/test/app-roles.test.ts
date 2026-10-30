@@ -575,6 +575,62 @@ describe("App roles", { timeout: 60_000 }, () => {
     );
   });
 
+  it("offer a builder of an App the organization's people and teams to share with, by name alone, and nobody else", async () => {
+    const admin = await personApi("admin");
+    const owner = await personApi("builder");
+    const [colleague, user, stranger] = await Promise.all([
+      personApi("user"),
+      personApi("user"),
+      personApi("builder"),
+    ]);
+    const team = await newTeam(admin, [colleague]);
+    const app = await newApp(owner);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const { core } = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = core.authenticate();
+
+    const offered = await owner.api.apps.members.candidates(app);
+    const person = offered.people.find(({ id }) => id === colleague.userId);
+    const offeredTeam = offered.teams.find(({ id }) => id === team);
+
+    expect({
+      // Its name and ID, and nothing more: no address, no role, no members.
+      person: person === undefined ? null : Object.keys(person).toSorted(),
+      team:
+        offeredTeam === undefined ? null : Object.keys(offeredTeam).toSorted(),
+      owner: offered.people.some(({ id }) => id === owner.userId),
+    }).toStrictEqual({
+      person: ["id", "name"],
+      team: ["id", "name"],
+      owner: true,
+    });
+    await expect(
+      Promise.all([
+        // Someone it is shared with as a user, who may not share it on.
+        outcome(user.api.apps.members.candidates(app)),
+        // Someone without a role in it, who doesn't learn it exists.
+        outcome(stranger.api.apps.members.candidates(app)),
+        outcome(staff.apps.members.candidates(app)),
+      ])
+    ).resolves.toStrictEqual([
+      await outcome(
+        user.api.apps.members.add(app, {
+          type: "person",
+          id: colleague.userId,
+          role: "user",
+        })
+      ),
+      "app.not_found",
+      "role.forbidden",
+    ]);
+  });
+
   it("leave whom a client's App reaches to the client, not Grasp staff", async () => {
     const owner = await personApi("builder");
     const person = await signedInWithRole(idp, "user");
