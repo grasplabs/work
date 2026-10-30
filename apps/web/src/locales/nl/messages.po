@@ -2044,6 +2044,7 @@ msgstr "Actie"
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/settings/package-approvers.tsx
 msgid "Actions"
 msgstr "Acties"
 
@@ -2137,6 +2138,10 @@ msgstr "Een woord toevoegen"
 msgid "Add an exception"
 msgstr "Uitzondering toevoegen"
 
+#: src/settings/package-approvers.tsx
+msgid "Add approver"
+msgstr "Goedkeurder toevoegen"
+
 #: src/chat/project-dialog.tsx
 msgid "Add documents"
 msgstr "Documenten toevoegen"
@@ -2174,6 +2179,7 @@ msgid "Add the team"
 msgstr "Team toevoegen"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Toegevoegd"
 
@@ -7476,6 +7482,7 @@ msgstr "Kick-off"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Soort"
 
@@ -8289,6 +8296,7 @@ msgstr "Gedempt"
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/package-approvers.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Naam"
@@ -9008,9 +9016,17 @@ msgstr "Niemand"
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand heeft op tijd geantwoord, dus deze beslissing is gesloten."
 
+#: src/settings/package-approvers.tsx
+msgid "Nobody approves packages yet, so every package request waits."
+msgstr "Nog niemand keurt pakketten goed, dus elk pakketverzoek wacht."
+
 #: src/onboarding/work-record.tsx
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kan zeggen waarom. Het wacht tot iemand het uitlegt."
+
+#: src/settings/package-approvers.tsx
+msgid "Nobody else to add."
+msgstr "Er is niemand anders om toe te voegen."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -10356,6 +10372,7 @@ msgid "Pending"
 msgstr "In afwachting"
 
 #: src/onboarding/interview-people.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "People"
 msgstr "Mensen"
@@ -10508,6 +10525,7 @@ msgid "Permissions asked for"
 msgstr "Gevraagde toestemmingen"
 
 #: src/routes/_shell.settings.outcomes.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 msgid "Person"
 msgstr "Persoon"
@@ -10985,6 +11003,10 @@ msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Teruglezen"
 
+#: src/settings/package-approvers.tsx
+msgid "Reading people and teams…"
+msgstr "Mensen en teams worden gelezen…"
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
 msgstr "Voor het lezen van beleid is een model nodig dat deze omgeving toestaat voor gevoelige gegevens. Vraag Grasp er een in te stellen en laat het dan opnieuw lezen. Maak de regels tot die tijd handmatig."
@@ -11147,6 +11169,7 @@ msgstr "Herinnerd op {date}"
 
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Remove"
 msgstr "Verwijderen"
@@ -11168,6 +11191,10 @@ msgstr "{file} verwijderen"
 msgid "Remove {name}?"
 msgstr "{name} verwijderen?"
 
+#: src/settings/package-approvers.tsx
+msgid "Remove {named} as an approver"
+msgstr "{named} als goedkeurder verwijderen"
+
 #: src/policies/policy-editing.tsx
 msgid "Remove {title}?"
 msgstr "{title} verwijderen?"
@@ -11185,6 +11212,7 @@ msgid "Remove: {item}"
 msgstr "Verwijderen: {item}"
 
 #: src/chat/builds.tsx
+#: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Verwijderd"
 
@@ -11877,6 +11905,10 @@ msgstr "Personen zoeken"
 #: src/settings/pulse-people.tsx
 msgid "Search people and devices"
 msgstr "Mensen en apparaten zoeken"
+
+#: src/settings/package-approvers.tsx
+msgid "Search people and teams"
+msgstr "Mensen en teams zoeken"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
@@ -12979,6 +13011,7 @@ msgstr "Doel-ID"
 #: src/brain/brain.ts
 #: src/dashboard/standard-widgets.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/pulse-people.tsx
 #: src/workflows/team-picker.tsx
 msgid "Team"
@@ -13059,6 +13092,7 @@ msgstr "Team: {name}"
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
 msgstr "Teams"
@@ -13776,6 +13810,10 @@ msgstr "Het deel van het adres vóór de @, op het maildomein dat voor Grasp is 
 #: src/policies/policy-editing.tsx
 msgid "The passage it says"
 msgstr "De passage die hij weergeeft"
+
+#: src/settings/package-approvers.tsx
+msgid "The people and teams who approve or deny the npm packages domains and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
+msgstr "De mensen en teams die de npm-pakketten goedkeuren of weigeren waar domeinen en workflows om vragen. Geen rol omvat dit, ook admin niet: voeg jezelf toe om pakketten goed te keuren."
 
 #: src/workflows/history-view.tsx
 msgid "The person the run acts for says what happened on their dashboard"
@@ -15970,6 +16008,11 @@ msgstr "wie antwoordt"
 #: src/brain/brain.ts
 msgid "Who approves a new tool"
 msgstr "Wie keurt een nieuwe tool goed"
+
+#: src/routes/_shell.settings.packages.index.tsx
+#: src/settings/package-approvers.tsx
+msgid "Who approves packages"
+msgstr "Wie pakketten goedkeurt"
 
 #: src/brain/brain.ts
 msgid "Who can answer"
