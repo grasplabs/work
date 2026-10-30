@@ -27,6 +27,7 @@ import {
   personErasureAreas,
   personErasures,
   sessions,
+  stephenRequestCards,
   stephenRequests,
   stephenSummaries,
   stephenSummaryReaders,
@@ -256,6 +257,18 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // The cards still to be pressed of their requests, then the requests.
+      db
+        .delete(stephenRequestCards)
+        .where(
+          inArray(
+            stephenRequestCards.requestId,
+            db
+              .select({ id: stephenRequests.id })
+              .from(stephenRequests)
+              .where(eq(stephenRequests.personId, userId))
+          )
+        ),
       db.delete(stephenRequests).where(eq(stephenRequests.personId, userId)),
       db
         .delete(stephenSummaryReaders)

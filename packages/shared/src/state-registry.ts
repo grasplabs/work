@@ -266,6 +266,10 @@ const coreDb: D1State = {
       `${core}channels/stephen-requests.ts`,
       "One record per request Stephen took on outside Grasp, labels only: what he is billed by."
     ),
+    stephen_request_cards: transient(
+      `${core}channels/stephen-requests.ts`,
+      "Which request a card still to be pressed was posted for (a Start, a held change), good for a day: a press after a move counts for no request."
+    ),
     stephen_request_topics: exported(`${core}channels/request-sorting.ts`),
     stephen_request_questions: exported(`${core}channels/request-sorting.ts`),
     stephen_request_needs: exported(`${core}stephen-requests.ts`),
