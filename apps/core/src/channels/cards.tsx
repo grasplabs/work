@@ -144,6 +144,11 @@ export interface AnswerCard {
   sources: readonly AnswerSource[];
   /** The chat in Grasp, where the whole answer is. */
   chatUrl: string;
+  /**
+   * The request the answer is for (stephen-requests.ts), where the person
+   * can rate it with a thumb: Helpful or Not helpful.
+   */
+  rate?: string | undefined;
 }
 
 /** `sources` as numbered links, within half a card's room for outside text. */
@@ -184,6 +189,29 @@ const SourcesSection = ({
     </Section>
   );
 
+/** A thumb on an answer, by the request it is for (stephen-requests.ts). */
+export const helpfulAction = "answer.helpful";
+export const notHelpfulAction = "answer.not_helpful";
+
+/** Helpful and Not helpful, under an answer that is a request's. */
+const RateButtons = ({
+  locale,
+  rate,
+}: {
+  locale: ChannelLocale;
+  rate: string | undefined;
+}) =>
+  rate === undefined
+    ? null
+    : [
+        <Button id={helpfulAction} key="up" value={rate}>
+          {`👍 ${say("helpful", locale)}`}
+        </Button>,
+        <Button id={notHelpfulAction} key="down" value={rate}>
+          {`👎 ${say("notHelpful", locale)}`}
+        </Button>,
+      ];
+
 /**
  * An answer with its numbered sources, labelled as made by AI where the
  * platform has a label for it (Teams). Text past what the platform takes
@@ -194,6 +222,7 @@ export const answerCard = ({
   text,
   sources,
   chatUrl,
+  rate,
 }: AnswerCard): PostableCard => {
   // The sources take at most half the room, so a long answer keeps the
   // rest; a source whose address no longer fits is named without a link.
@@ -213,11 +242,14 @@ export const answerCard = ({
         <CardText style="muted">{say("answerTooLong", locale)}</CardText>
       )}
       {SourcesSection({ locale, listed })}
-      {whole ? null : (
+      {whole && rate === undefined ? null : (
         <Actions>
-          <LinkButton url={ownLink(chatUrl)}>
-            {say("openInGrasp", locale)}
-          </LinkButton>
+          {RateButtons({ locale, rate })}
+          {whole ? null : (
+            <LinkButton url={ownLink(chatUrl)}>
+              {say("openInGrasp", locale)}
+            </LinkButton>
+          )}
         </Actions>
       )}
     </Card>
@@ -234,16 +266,21 @@ export const sourcesCard = ({
   locale,
   sources,
   chatUrl,
+  rate,
 }: Omit<AnswerCard, "text">): PostableCard => {
   const listed = listedSources(sources, { left: outsideBytes });
+  const more = sources.length > maxSources;
   const card = (
     <Card>
       {SourcesSection({ locale, listed })}
-      {sources.length <= maxSources ? null : (
+      {!more && rate === undefined ? null : (
         <Actions>
-          <LinkButton url={ownLink(chatUrl)}>
-            {say("openInGrasp", locale)}
-          </LinkButton>
+          {RateButtons({ locale, rate })}
+          {more ? (
+            <LinkButton url={ownLink(chatUrl)}>
+              {say("openInGrasp", locale)}
+            </LinkButton>
+          ) : null}
         </Actions>
       )}
     </Card>
