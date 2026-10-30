@@ -283,6 +283,7 @@ const cast = {
   memberRemoval: { admin: "admin", leaving: "user" },
   workspaceSettings: { admin: "admin", member: "user" },
   memberInvites: { admin: "admin" },
+  teams: { admin: "admin", member: "user" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
