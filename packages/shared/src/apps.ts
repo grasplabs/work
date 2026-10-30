@@ -452,6 +452,48 @@ export interface AppFilesApi {
   ) => Promise<CommittedVersion>;
 }
 
+/** Why an admin revokes a release or holds it: kept in the audit log. */
+const releaseReasonSchema = z.string().trim().min(1).max(500);
+
+/** Revoking an App's release (`AppVersionsApi.revoke`): why. */
+export const releaseRevocationSchema = z.strictObject({
+  reason: releaseReasonSchema,
+});
+export type ReleaseRevocation = z.input<typeof releaseRevocationSchema>;
+
+/**
+ * A legal hold on an App's release (`AppVersionsApi.placeHold`): its name,
+ * such as a case reference, which lifting it names again, and why.
+ */
+export const releaseHoldSchema = z.strictObject({
+  hold: identifierSchema,
+  reason: releaseReasonSchema,
+});
+export type ReleaseHold = z.input<typeof releaseHoldSchema>;
+
+/** A legal hold that keeps a release, until an admin lifts it. */
+export interface AppReleaseHold {
+  hold: string;
+  placedAt: string;
+}
+
+/**
+ * A sealed release of one of an App's versions (spec 16.3), as its admins
+ * keep it: whether it was revoked, so it runs no more, and the legal
+ * holds that keep it.
+ */
+export interface AppRelease {
+  app: AppId;
+  version: number;
+  /** SHA-256 of its manifest, which names its code exactly. */
+  manifestHash: string;
+  sealedAt: string;
+  /** When an admin revoked it; null while it may run. */
+  revokedAt: string | null;
+  /** Its legal holds, oldest first. */
+  holds: AppReleaseHold[];
+}
+
 /** An App's versions and which of them runs. */
 export interface AppVersionsApi {
   /** The App's versions, newest first, at most 100 from before `before`. */
@@ -491,6 +533,34 @@ export interface AppVersionsApi {
      */
     expected?: number | null
   ) => Promise<App>;
+  /**
+   * The App's sealed releases, newest first, at most 100 from before
+   * `before`, with whether each was revoked and its legal holds. For the
+   * organization's own admins, never Grasp staff, as is each call below.
+   */
+  releases: (app: string, before?: number) => Promise<AppRelease[]>;
+  /**
+   * Revokes a sealed release (`releaseRevocationSchema`): it runs no more,
+   * calls already running included, and is kept for good. Audited, with
+   * why; revoking it again changes nothing.
+   */
+  revoke: (app: string, version: number, input: unknown) => Promise<AppRelease>;
+  /**
+   * Places a legal hold on a sealed release (`releaseHoldSchema`): it is
+   * kept until the hold is lifted, however old. Audited, with why; placing
+   * the same hold again changes nothing.
+   */
+  placeHold: (
+    app: string,
+    version: number,
+    input: unknown
+  ) => Promise<AppRelease>;
+  /** Lifts legal hold `hold` from a release. Audited. */
+  releaseHold: (
+    app: string,
+    version: number,
+    hold: string
+  ) => Promise<AppRelease>;
 }
 
 /**
