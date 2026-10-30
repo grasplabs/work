@@ -3691,6 +3691,7 @@ msgstr "Illisible"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5043,6 +5044,18 @@ msgstr "Est-ce arrivé ? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Annuaire"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Supprimer"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Supprimer le brouillon"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Supprimer ce brouillon ?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -11621,6 +11634,10 @@ msgstr "Ressources"
 msgid "Restore"
 msgstr "Restaurer"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Restaurer cette version"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restaurer la version {number}"
@@ -14037,6 +14054,10 @@ msgstr "Les domaines et workflows qui peuvent utiliser des paquets npm approuvé
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "Les domaines que ce chat crée n’ont pas été chargés."
+
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "Les modifications du brouillon disparaissent, et la prochaine modification de l'agent repart de l'app telle qu'elle est. Ses versions sont conservées, vous pouvez donc en restaurer une."
 
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
