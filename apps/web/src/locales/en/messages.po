@@ -1405,9 +1405,17 @@ msgstr "{team} has been quiet so far. A short message from {lead}, their lead, u
 msgid "{team} interviewed"
 msgstr "{team} interviewed"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{team} says the same"
+msgstr "{team} says the same"
+
 #: src/brain/brain.ts
 msgid "{team}, {total} interviewed: {who}."
 msgstr "{team}, {total} interviewed: {who}."
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{team}: “{words}”"
+msgstr "{team}: “{words}”"
 
 #: src/onboarding/review-parts.tsx
 msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
@@ -5374,7 +5382,6 @@ msgstr "Earlier version"
 msgid "Earlier versions"
 msgstr "Earlier versions"
 
-#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/policies/policy-editing.tsx
@@ -9441,6 +9448,10 @@ msgstr "Not started"
 msgid "Not started yet."
 msgstr "Not started yet."
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Not the same in {team}"
+msgstr "Not the same in {team}"
+
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Not verified"
@@ -11023,6 +11034,10 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Reading"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Reading {name}"
+msgstr "Reading {name}"
+
 #: src/interview/words.ts
 msgid "Reading it back"
 msgstr "Reading it back"
@@ -11869,6 +11884,14 @@ msgstr "Say it didn't happen?"
 msgid "Say it happened?"
 msgstr "Say it happened?"
 
+#: src/chat/chat-dock.tsx
+msgid "Say what should change"
+msgstr "Say what should change"
+
+#: src/chat/chat-dock.tsx
+msgid "Say what should change in {name}. Every change is a new version of it."
+msgstr "Say what should change in {name}. Every change is a new version of it."
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how far a team is with AI"
 msgid "Scaling"
@@ -11973,6 +11996,10 @@ msgstr "See"
 #: src/onboarding/setup-steps.tsx
 msgid "See an example"
 msgstr "See an example"
+
+#: src/chat/answer-thinking.tsx
+msgid "See it in the brain"
+msgstr "See it in the brain"
 
 #: src/onboarding/interview-people.tsx
 msgid "See the interview"
@@ -13935,6 +13962,10 @@ msgstr "The run is starting."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "The run was stopped."
+
+#: src/brain/thinking/shapes.ts
+msgid "The same pain in more than one team"
+msgstr "The same pain in more than one team"
 
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"

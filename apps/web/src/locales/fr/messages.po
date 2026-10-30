@@ -1405,9 +1405,17 @@ msgstr "{team} est resté silencieux jusqu’ici. Un petit message de {lead}, le
 msgid "{team} interviewed"
 msgstr "Entretien avec {team}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{team} says the same"
+msgstr "{team} dit la même chose"
+
 #: src/brain/brain.ts
 msgid "{team}, {total} interviewed: {who}."
 msgstr "{team}, {total} interviewés : {who}."
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{team}: “{words}”"
+msgstr "{team} : « {words} »"
 
 #: src/onboarding/review-parts.tsx
 msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
@@ -5374,7 +5382,6 @@ msgstr "Version précédente"
 msgid "Earlier versions"
 msgstr "Versions précédentes"
 
-#: src/engines/app-page.tsx
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/policies/policy-editing.tsx
@@ -9441,6 +9448,10 @@ msgstr "Pas commencé"
 msgid "Not started yet."
 msgstr "Pas encore commencé."
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Not the same in {team}"
+msgstr "Pas la même chose chez {team}"
+
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Non vérifié"
@@ -11023,6 +11034,10 @@ msgctxt "what AI was used for"
 msgid "Reading"
 msgstr "Lecture"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "Reading {name}"
+msgstr "Lecture de {name}"
+
 #: src/interview/words.ts
 msgid "Reading it back"
 msgstr "Relecture"
@@ -11869,6 +11884,14 @@ msgstr "Dire que ce n'est pas arrivé ?"
 msgid "Say it happened?"
 msgstr "Dire que c'est arrivé ?"
 
+#: src/chat/chat-dock.tsx
+msgid "Say what should change"
+msgstr "Dites ce qui doit changer"
+
+#: src/chat/chat-dock.tsx
+msgid "Say what should change in {name}. Every change is a new version of it."
+msgstr "Dites ce qui doit changer dans {name}. Chaque modification en est une nouvelle version."
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how far a team is with AI"
 msgid "Scaling"
@@ -11973,6 +11996,10 @@ msgstr "Voir"
 #: src/onboarding/setup-steps.tsx
 msgid "See an example"
 msgstr "Voir un exemple"
+
+#: src/chat/answer-thinking.tsx
+msgid "See it in the brain"
+msgstr "Le voir dans le cerveau"
 
 #: src/onboarding/interview-people.tsx
 msgid "See the interview"
@@ -13935,6 +13962,10 @@ msgstr "L'exécution démarre."
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "L'exécution a été arrêtée."
+
+#: src/brain/thinking/shapes.ts
+msgid "The same pain in more than one team"
+msgstr "La même difficulté dans plusieurs équipes"
 
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"
