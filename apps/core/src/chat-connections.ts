@@ -29,7 +29,7 @@ import {
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { memberOf } from "./auth/identity.ts";
+import { actingPerson } from "./auth/identity.ts";
 import {
   offeredConnections,
   personOf,
@@ -186,7 +186,7 @@ const scopePerson = async (
   scope: AgentScope
 ): Promise<ConnectionPerson> => {
   const [member, user] = await Promise.all([
-    memberOf(env.DB, scope.personId),
+    actingPerson(env, scope.personId, scope.staff),
     drizzle(env.DB)
       .select({ email: users.email })
       .from(users)

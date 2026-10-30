@@ -37,13 +37,12 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 
-import type { AlertOutcome } from "../alerts.ts";
 import {
   applySettingsFn,
   fetchClientLive,
   fetchTeamsPackageFn,
   rotateSecretsFn,
-  sendTestAlertFn,
+  setModelSpendCeilingFn,
   setRingFn,
   setSealedSecretFn,
   setSignInFn,
@@ -164,6 +163,72 @@ export const PinRelease = ({
             Unpin
           </Button>
         )}
+        <Failure failure={failure} />
+      </div>
+    </form>
+  );
+};
+
+/**
+ * Its monthly model spend ceiling, in whole euros (GRA-141): what its
+ * core's model gateway lets its model calls cost in a calendar month,
+ * from its next deploy.
+ */
+export const ModelSpendCeilingChange = ({
+  clientId,
+  ceiling,
+  refresh,
+}: {
+  clientId: string;
+  ceiling: number;
+  refresh: Refresh;
+}) => {
+  const { busy, failure, run } = useSettingsAction();
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const euros = Number(
+          textOf(new FormData(event.currentTarget), "ceiling")
+        );
+        void run(
+          async () =>
+            await thenRefresh(
+              async () =>
+                await setModelSpendCeilingFn({ data: { clientId, euros } }),
+              refresh
+            )
+        );
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="setup-model-ceiling">
+          Model spend ceiling, euros a month
+        </FieldLabel>
+        <Input
+          className="max-w-48"
+          defaultValue={String(ceiling)}
+          id="setup-model-ceiling"
+          inputMode="numeric"
+          // Keyed by the ceiling: it starts again from the one read after each change.
+          key={ceiling}
+          max={100_000}
+          min={1}
+          name="ceiling"
+          required
+          step={1}
+          type="number"
+        />
+        <FieldDescription>
+          Past it, its model calls are refused until the next month. It reaches
+          its core with its next deploy: apply its settings for it to hold now.
+        </FieldDescription>
+      </Field>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
+          Save ceiling
+        </Button>
         <Failure failure={failure} />
       </div>
     </form>
@@ -428,63 +493,6 @@ export const ApplySettings = ({
           <Failure failure={failure} />
         </div>
       ) : null}
-    </Body>
-  );
-};
-
-/** What became of a test alert, in words. */
-const alertOutcomeWords: Readonly<Record<AlertOutcome, string>> = {
-  sent: "Sent: it should be in the alerts' channel now.",
-  held: "Held back: one went out less than a minute ago.",
-  no_channel:
-    "Not sent: Secrets Store has no STAFF_ALERTS_WEBHOOK, or it isn't a Discord webhook.",
-  failed: "Not sent: the channel refused it. Try again in a moment.",
-};
-
-/** Sends a test alert about client `clientId`; what became of it. */
-const testAlertOutcome = async (
-  clientId: string
-): Promise<AlertOutcome | "error"> => {
-  try {
-    return await sendTestAlertFn({ data: { clientId } });
-  } catch {
-    return "error";
-  }
-};
-
-/** Sending a test alert about it, to see staff alerts reach their channel. */
-export const TestAlert = ({ clientId }: { clientId: string }) => {
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<AlertOutcome | "error" | null>(null);
-  return (
-    <Body>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            void (async () => {
-              setOutcome(await testAlertOutcome(clientId));
-              setBusy(false);
-            })();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Send a test alert
-        </Button>
-        {outcome === null ? null : (
-          <output
-            className={
-              outcome === "sent" ? "text-muted-foreground" : "text-destructive"
-            }
-          >
-            {outcome === "error"
-              ? "The admin couldn't send it: read the page again and retry."
-              : alertOutcomeWords[outcome]}
-          </output>
-        )}
-      </div>
     </Body>
   );
 };

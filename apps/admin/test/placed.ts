@@ -139,7 +139,6 @@ export const placedClientRecord = async (
   await placeClient(db, staff, {
     clientId,
     destinationId,
-    policyId: "eu-storage",
   });
   return { clientId, account, destinationId };
 };

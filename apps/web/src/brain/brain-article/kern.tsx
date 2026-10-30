@@ -15,10 +15,10 @@ import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { formatDay } from "../../format.ts";
-import { ClaimBasis, isTeamClaim } from "../aggregate.tsx";
+import { ClaimBasis } from "../aggregate.tsx";
 import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
-import { given, groupOf, quoted } from "../brain.ts";
+import { given, groupOf, isTeamClaim, statementWords } from "../brain.ts";
 import type { Note } from "../brain.ts";
 import { KindLabel } from "../statement-kind.tsx";
 
@@ -118,8 +118,13 @@ export const BannerHeader = ({
       </Panel>
       <span className="flex flex-col gap-0.5">
         <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
-          {note.kind === "statement" ? quoted(note.title) : note.title}
+          {note.kind === "statement"
+            ? statementWords(note.id, note.title)
+            : note.title}
         </h1>
+        {note.kind === "statement" && isTeamClaim(note.id) ? (
+          <ClaimBasis />
+        ) : null}
         {/* Last heard follows the summary's last word, so a summary that wraps keeps it beside its words. A source's summary already carries its date. */}
         <p className="text-muted-foreground text-sm">
           {note.summary}

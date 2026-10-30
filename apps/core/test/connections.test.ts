@@ -1,4 +1,9 @@
 import { composioConsentText } from "@grasp-os/shared/connect";
+import {
+  readRelayRequest,
+  relayStateValid,
+  relayTarget,
+} from "@grasp-os/shared/oauth-relay";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -17,6 +22,7 @@ import {
   signedInApi,
   signedInWithRole,
   staffPerson,
+  withSignIn,
 } from "./sign-in.ts";
 
 // Connecting an account, through core: the person starts over `/rpc`, the
@@ -306,6 +312,69 @@ describe("connecting an account", () => {
       anna.connections.disconnect(connection?.id ?? "")
     ).resolves.toStrictEqual({ revoked: false });
     await expect(anna.connections.list()).resolves.toStrictEqual([]);
+  });
+});
+
+describe("connecting an account in relay mode", () => {
+  const hostedOrigin = "https://acme.ongrasp.app";
+  const relayOrigin = "https://auth.ongrasp.app";
+  const relayEnv = withSignIn({
+    origin: hostedOrigin,
+    callbackOrigin: relayOrigin,
+  });
+
+  it("goes from the person's browser through the provider, the relay and back to this client, and the connection is active", async () => {
+    const { session, person: claims } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session, {
+      origin: hostedOrigin,
+      coreEnv: relayEnv,
+    });
+    const { url } = await core.authenticate().connections.start({
+      provider: "microsoft",
+      scope: "personal",
+      returnTo: "/connections",
+    });
+    const authorization = new URL(url);
+    // The provider sends the browser to the relay, with the code for the
+    // flow's state; the router checks this client signed it, with the
+    // secret it derives for it (core's ROUTER_SECRET), and sends it on.
+    const returned = new URL(`${relayOrigin}/callback/connections`);
+    returned.searchParams.set(
+      "code",
+      consentCode(authorization, acmeTenant, String(claims.oid))
+    );
+    returned.searchParams.set(
+      "state",
+      authorization.searchParams.get("state") ?? ""
+    );
+    const relayed = readRelayRequest(returned, "production");
+    const signed =
+      relayed !== null && (await relayStateValid(env.ROUTER_SECRET, relayed));
+    const onward = new URL(
+      relayed === null ? hostedOrigin : relayTarget(returned, relayed)
+    );
+    const response = await backFromProvider(
+      session,
+      Object.fromEntries(onward.searchParams),
+      relayEnv
+    );
+    const listed = await core.authenticate().connections.list();
+
+    expect({
+      redirect: authorization.searchParams.get("redirect_uri"),
+      signed,
+      onward: `${onward.origin}${onward.pathname}`,
+      status: response.status,
+      location: response.headers.get("location"),
+      connection: listed[0]?.status,
+    }).toStrictEqual({
+      redirect: `${relayOrigin}/callback/connections`,
+      signed: true,
+      onward: `${hostedOrigin}/api/connections/callback`,
+      status: 303,
+      location: `${hostedOrigin}/connections?connection=${listed[0]?.id}`,
+      connection: "active",
+    });
   });
 });
 
