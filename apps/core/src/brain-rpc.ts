@@ -29,6 +29,7 @@ import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { hoursPerWeek } from "@grasp-os/shared/thinking";
+import type { WorkKnowledge } from "@grasp-os/shared/work-knowledge";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -53,6 +54,7 @@ import {
   brainTranscript,
   knowledgeTranscriptSources,
 } from "./brain-transcripts.ts";
+import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import { brainOf } from "./knowledge/ports.ts";
@@ -1077,6 +1079,32 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     super();
     this.#env = env;
     this.#check = check;
+  }
+
+  async work(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await workKnowledge(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
+  }
+
+  async askMorePeople(id: string): Promise<WorkKnowledge> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await askMorePeople(
+          this.#env,
+          person,
+          id,
+          async () => await readBrain(this.#env, person)
+        )
+    );
   }
 
   async read(): Promise<Workspace> {
