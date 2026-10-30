@@ -8,13 +8,14 @@ import type {
   RequestRating,
   RequestToolCall,
 } from "@grasp-os/shared/stephen-requests";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { activeMember } from "../auth/auth.ts";
 import type { ToolCall } from "../chat-tool-events.ts";
 import {
+  stephenRequestCards,
   stephenRequestQuestions,
   stephenRequests,
   stephenSummaries,
@@ -56,6 +57,9 @@ import type { Sorted } from "./request-sorting.ts";
 //   the record it belongs to, never makes one.
 // - Someone else's request touched: a press or a thumb finds a record by
 //   the person the door verified, never by a value on the card alone.
+// - Another request of theirs touched: a card that can be pressed later
+//   is kept with the request whose answer posted it (`keepCardsOf`), and
+//   a press updates that one, however much they asked in the chat since.
 // - A record of someone no longer a member: written only while they are
 //   one, in the statement that writes it.
 // - Counting failing a turn: every write here is best effort, logged and
@@ -128,7 +132,12 @@ const heardCall = (
     return { id: brainTool, work: {} };
   }
   if (call.method === "connections.call") {
-    const connection = textOf(call.summary, "connection") ?? "app";
+    // By the app it is of (`microsoft`), as the page counts an app's
+    // calls; by the connection's name only where the call didn't say.
+    const connection =
+      textOf(call.summary, "app") ??
+      textOf(call.summary, "connection") ??
+      "app";
     const action = textOf(call.summary, "action");
     return {
       id: action === null ? connection : `${connection}.${action}`,
@@ -207,7 +216,9 @@ export const heardFrom = (
  * How a request ended, from how its turn ended and what it did: a turn
  * that answered is `done`, unless all it came to was what he could not do
  * (`notPossible`), or he said he didn't know or asked something back
- * (`unanswered`, as its sorting read it).
+ * (`unanswered`, as its sorting read it). An answer and nothing else that
+ * couldn't be sorted (no model may, or the call failed) is `unanswered`
+ * too: billed only once it is known he answered.
  */
 export const outcomeOf = (
   ended: "answered" | "stopped" | "failed",
@@ -220,7 +231,7 @@ export const outcomeOf = (
   if (heard.missing.length > 0 && !heard.worked) {
     return "notPossible";
   }
-  if (!heard.worked && sorted?.answered === false) {
+  if (!heard.worked && sorted?.answered !== true) {
     return "unanswered";
   }
   return "done";
@@ -274,6 +285,17 @@ export const takeRequest = async (
   }
 };
 
+const toolsSchema = z.array(z.object({ id: z.string(), ok: z.boolean() }));
+
+/** The tools a record keeps, as JSON; none if it doesn't parse. */
+export const toolsIn = (stored: string): RequestToolCall[] => {
+  try {
+    return toolsSchema.parse(JSON.parse(stored));
+  } catch {
+    return [];
+  }
+};
+
 /** How a taken request ended, to settle it. */
 export interface Settled {
   chatId: string | null;
@@ -291,13 +313,30 @@ export const settleRequest = async (
 ): Promise<void> => {
   const heard = heardFrom(calls, cited);
   try {
-    await drizzle(env.DB)
+    const db = drizzle(env.DB);
+    // A press on one of its cards may have come first: what it said of a
+    // tool, and that a workflow started, stand.
+    const [pressed] = await db
+      .select({ kind: stephenRequests.kind, tools: stephenRequests.tools })
+      .from(stephenRequests)
+      .where(eq(stephenRequests.id, id));
+    const before = toolsIn(pressed?.tools ?? "[]");
+    const tools = [
+      ...heard.tools.map(
+        (tool) => before.find((each) => each.id === tool.id) ?? tool
+      ),
+      ...before.filter(
+        (each) => !heard.tools.some((tool) => tool.id === each.id)
+      ),
+    ];
+    const kind = pressed?.kind === "workflow" ? "workflow" : heard.kind;
+    await db
       .update(stephenRequests)
       .set({
         chatId,
-        kind: heard.kind,
-        outcome: outcomeOf(ended, heard, sorted),
-        tools: JSON.stringify(heard.tools),
+        kind,
+        outcome: outcomeOf(ended, { ...heard, kind }, sorted),
+        tools: JSON.stringify(tools),
         missing: JSON.stringify(heard.missing),
         topicId: sorted?.topicId ?? null,
         questionId: sorted?.questionId ?? null,
@@ -308,68 +347,77 @@ export const settleRequest = async (
   }
 };
 
-const toolsSchema = z.array(z.object({ id: z.string(), ok: z.boolean() }));
-
-/** The tools a record keeps, as JSON; none if it doesn't parse. */
-export const toolsIn = (stored: string): RequestToolCall[] => {
+/**
+ * Keeps the cards `keys` names (`write:<id>`, `offer:<id>`) as request
+ * `requestId`'s, as its answer posts them; nothing without a request.
+ */
+export const keepCardsOf = async (
+  env: Env,
+  requestId: string | null,
+  keys: readonly string[]
+): Promise<void> => {
+  if (requestId === null || keys.length === 0) {
+    return;
+  }
   try {
-    return toolsSchema.parse(JSON.parse(stored));
-  } catch {
-    return [];
+    const db = drizzle(env.DB);
+    const now = new Date();
+    await db
+      .insert(stephenRequestCards)
+      .values(keys.map((key) => ({ key, requestId, createdAt: now })))
+      .onConflictDoNothing();
+  } catch (error) {
+    log.warn("stephen_requests.cards_unkept", errorFields(error));
   }
 };
 
 /**
- * The latest request `userId` made in chat `chatId`: the one a press on a
- * card of its answer belongs to.
+ * The request of `userId` card `key` was posted for: the one a press on
+ * it belongs to, whatever they asked in the chat since.
  */
-const latestIn = async (env: Env, userId: string, chatId: string) => {
+const requestOfCard = async (env: Env, userId: string, key: string) => {
   const [found] = await drizzle(env.DB)
-    .select({
-      id: stephenRequests.id,
-      tools: stephenRequests.tools,
-      kind: stephenRequests.kind,
-    })
-    .from(stephenRequests)
+    .select({ id: stephenRequests.id, tools: stephenRequests.tools })
+    .from(stephenRequestCards)
+    .innerJoin(
+      stephenRequests,
+      eq(stephenRequests.id, stephenRequestCards.requestId)
+    )
     .where(
       and(
-        eq(stephenRequests.personId, userId),
-        eq(stephenRequests.chatId, chatId)
+        eq(stephenRequestCards.key, key),
+        eq(stephenRequests.personId, userId)
       )
     )
-    .orderBy(desc(sql`rowid`))
     .limit(1);
   return found;
 };
 
 /**
- * A press on a card of held changes ran them: the request they belong to
- * notes each that failed (by its action) as a tool that didn't work. A
- * change shown to confirm was billed as shown, pressed or not.
+ * A press on a card of held changes ran them: the request the card was
+ * posted for notes the one that failed (`writeId`, by its `action`) as a
+ * tool that didn't work. A change shown to confirm was billed as shown,
+ * pressed or not.
  */
 export const pressedChanges = async (
   env: Env,
   {
     userId,
-    chatId,
-    failed,
-  }: { userId: string; chatId: string; failed: readonly string[] }
+    writeId,
+    action,
+  }: { userId: string; writeId: string; action: string }
 ): Promise<void> => {
-  if (failed.length === 0) {
-    return;
-  }
   try {
-    const request = await latestIn(env, userId, chatId);
+    const request = await requestOfCard(env, userId, `write:${writeId}`);
     if (request === undefined) {
       return;
     }
-    const left = [...failed];
+    let left = true;
     const tools = toolsIn(request.tools).map((tool) => {
-      const at = left.findIndex((action) => tool.id.endsWith(`.${action}`));
-      if (at === -1 || !tool.ok) {
+      if (!(left && tool.ok && tool.id.endsWith(`.${action}`))) {
         return tool;
       }
-      left.splice(at, 1);
+      left = false;
       return { ...tool, ok: false };
     });
     await drizzle(env.DB)
@@ -382,20 +430,21 @@ export const pressedChanges = async (
 };
 
 /**
- * A press on Start, on a card offering workflow `workflowId`: the request
- * that offered it is a workflow's, and its tool says whether it started.
+ * A press on Start, on the card of offer `offerId` of workflow
+ * `workflowId`: the request that offered it is a workflow's, and its tool
+ * says whether it started.
  */
 export const pressedStart = async (
   env: Env,
   {
     userId,
-    chatId,
+    offerId,
     workflowId,
     started,
-  }: { userId: string; chatId: string; workflowId: string; started: boolean }
+  }: { userId: string; offerId: string; workflowId: string; started: boolean }
 ): Promise<void> => {
   try {
-    const request = await latestIn(env, userId, chatId);
+    const request = await requestOfCard(env, userId, `offer:${offerId}`);
     if (request === undefined) {
       return;
     }
@@ -461,6 +510,12 @@ export const sweepStephenRequests = async (
     sql`${stephenRequestQuestions.createdAt} < ${now.getTime() - 86_400_000}
         AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
           WHERE ${stephenRequests.questionId} = ${stephenRequestQuestions.id})`
+  );
+  // Cards whose request is gone (swept or erased), a day on.
+  await db.delete(stephenRequestCards).where(
+    sql`${stephenRequestCards.createdAt} < ${now.getTime() - 86_400_000}
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequests}
+          WHERE ${stephenRequests.id} = ${stephenRequestCards.requestId})`
   );
   // Weekly summaries sent or failed a quarter ago.
   await db
