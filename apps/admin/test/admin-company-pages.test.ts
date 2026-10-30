@@ -9,6 +9,7 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
@@ -164,7 +165,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("says where a company's provisioning stopped and why, for staff to start it again from Hosting", async () => {
+  it("says a stopped provisioning is being tried again, and that it needs a look once Grasp gives up, with why and Retry now", async () => {
     const releaseId = await importedRelease("feat(core): stops");
     const client = await recordClient();
     const now = new Date();
@@ -180,13 +181,28 @@ describe("the company pages, in the admin", () => {
       updatedAt: now,
     });
 
+    const retrying = await setupOf(client.id);
+    // Grasp's automatic retries give up: a person is asked to look.
+    await markNeedsAttention(db, client.id, await episodeOf(db, client.id), {
+      reason: "needs_person",
+      code: "probe_unanswered",
+    });
     const { html } = await setupOf(client.id);
 
     expect({
+      retrying: [
+        retrying.html.includes("Trying again"),
+        retrying.html.includes("Setting it up needs a look"),
+      ],
       stopped: html.includes("Setting it up needs a look"),
       code: html.includes("probe_unanswered"),
       resume: sectionOf(html, "Hosting").includes("Retry now"),
-    }).toStrictEqual({ stopped: true, code: true, resume: true });
+    }).toStrictEqual({
+      retrying: [true, false],
+      stopped: true,
+      code: true,
+      resume: true,
+    });
   });
 
   it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {

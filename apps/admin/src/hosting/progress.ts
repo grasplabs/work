@@ -18,6 +18,7 @@ import { clientRuns, clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { clientSignInSchema } from "../deploy/core-config.ts";
 import { currentRun, hasEnded } from "../runners.ts";
+import { needsAttentionOf } from "./attention.ts";
 import { provisionOf, provisionSteps } from "./operation.ts";
 import type { ProvisionStep } from "./operation.ts";
 import { clientHostingOf } from "./organization.ts";
@@ -219,12 +220,15 @@ const stepIndex = (step: string | null): number =>
 /**
  * Where each of the operation's lines stands: done up to the last step
  * it finished; the next being done while a run goes (tried again once
- * its run is on a later attempt), or needing a look once it stopped.
+ * its run is on a later attempt). Once it stopped, being tried again, as
+ * the admin resumes it by itself (src/hosting/reconcile.ts), unless the
+ * admin gave up and asked a person to look (`needsAttention`).
  */
 const cloudLineStates = (
   operation: { status: "running" | "failed" | "done"; step: string | null },
   going: boolean,
-  retrying: boolean
+  retrying: boolean,
+  needsAttention: boolean
 ): LineState[] => {
   // Running or stopped, it records the last step it finished.
   const lastDone =
@@ -242,7 +246,7 @@ const cloudLineStates = (
     }
     current = true;
     if (operation.status === "failed" && !going) {
-      return "needs_attention";
+      return needsAttention ? "needs_attention" : "retrying";
     }
     if (!going) {
       return "waiting";
@@ -314,6 +318,7 @@ export const provisioningProgress = async (
     return onPremProgress(hostname, client.createdAt, admins);
   }
   const { going, retrying } = await runOf(env, clientId);
+  const attention = await needsAttentionOf(db, clientId);
   const context: LineContext = {
     hostname: hostname ?? clientId,
     releaseId: operation?.releaseId ?? null,
@@ -323,7 +328,7 @@ export const provisioningProgress = async (
   const states =
     operation === undefined
       ? cloudLines.map((): LineState => "waiting")
-      : cloudLineStates(operation, going, retrying);
+      : cloudLineStates(operation, going, retrying, attention !== null);
   const lines: ProgressLine[] = cloudLines.map((line, at) => ({
     id: line.id,
     label: line.label(context),
