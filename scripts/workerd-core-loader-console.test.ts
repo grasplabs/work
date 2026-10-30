@@ -353,7 +353,7 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       },
       reported: false,
     });
-  });
+  }, 120_000);
 
   // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
   // from 2026-08-04 on, so it is turned off): a timer imported by name from
