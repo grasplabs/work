@@ -1,15 +1,10 @@
-import type {
-  Statement,
-  StatementKind,
-  Workspace,
-} from "@grasp-os/shared/brain";
+import type { StatementKind } from "@grasp-os/shared/brain";
 import type { ThinkingMove, ThinkingStep } from "@grasp-os/shared/thinking";
 
 import type { MapRoom, NeuronState } from "../atlas-map.ts";
-import type { Atlas } from "../brain-atlas.ts";
-import type { Brain } from "../brain.ts";
 import { BEAT, cut, inTurn, readFor, sayLength } from "./beats.ts";
 import type { BeatSay, ThinkingBeat } from "./beats.ts";
+import type { ShapeGround } from "./ground.ts";
 import {
   CAPTION,
   NAME,
@@ -207,14 +202,6 @@ export const markShared = (
   return pieces;
 };
 
-/** Who said a statement: the team its source speaks for. */
-const speakerOf =
-  (ws: Workspace) =>
-  (statement: Statement): string =>
-    ws.sources.find(({ id }) => id === statement.sourceId)?.teamIds?.[0] ??
-    statement.teamIds[0] ??
-    "";
-
 /** The first step of this step's run in its shape: what those steps looked at stays in view. */
 const firstOfShape = (steps: readonly ThinkingStep[], at: number): number => {
   let first = at;
@@ -232,9 +219,7 @@ const firstOfShape = (steps: readonly ThinkingStep[], at: number): number => {
 export const samePainAt = (
   steps: readonly ThinkingStep[],
   at: number,
-  ws: Workspace,
-  brain: Brain,
-  atlas: Atlas
+  ground: ShapeGround
 ): SamePainFigure | undefined => {
   const step = steps[at];
   if (step?.shape !== "same-pain") {
@@ -243,36 +228,14 @@ export const samePainAt = (
   const looked = new Set(
     steps.slice(firstOfShape(steps, at), at + 1).flatMap(({ notes }) => notes)
   );
-  const notes = new Map(brain.notes.map((note) => [note.id, note]));
-  const speaker = speakerOf(ws);
-  const inBrain = ws.statements.filter(
-    (statement) => notes.get(speaker(statement))?.kind === "team"
-  );
+  const inBrain = ground.statements;
   const found =
     step.move === "teams" ? [] : inBrain.filter(({ id }) => looked.has(id));
-  const involved = new Set(found.map(speaker));
-  const asked = new Set(
-    atlas.open
-      .filter((item) => notes.get(item.noteId)?.kind !== "gap")
-      .flatMap((item) => item.subjects)
-  );
-  const waiting = new Set(atlas.regions.flatMap((each) => each.waiting));
-  const stateOf = (id: string): NeuronState => {
-    if (asked.has(id)) {
-      return "open";
-    }
-    return waiting.has(id) ? "waiting" : "known";
-  };
-  const teams = ws.teams
-    .filter(
-      (team) =>
-        notes.get(team.id)?.kind === "team" &&
-        (looked.has(team.id) || involved.has(team.id))
-    )
+  const involved = new Set(found.map(({ teamId }) => teamId));
+  const teams = ground.teams
+    .filter((team) => looked.has(team.id) || involved.has(team.id))
     .map((team): FigureTeam => ({
-      id: team.id,
-      name: team.name,
-      state: stateOf(team.id),
+      ...team,
       involved: involved.has(team.id),
     }));
   if (teams.length === 0) {
@@ -285,21 +248,20 @@ export const samePainAt = (
     ? inBrain
         .filter(
           (statement) =>
-            read.has(speaker(statement)) &&
+            read.has(statement.teamId) &&
             (PAIN.has(statement.kind) || foundIds.has(statement.id))
         )
         .map((statement): FigureSaid => ({
           id: statement.id,
-          teamId: speaker(statement),
+          teamId: statement.teamId,
           sourceId: statement.sourceId,
           text: statement.text,
           found: foundIds.has(statement.id),
         }))
     : [];
   const words = found.map((statement): FigureWord => {
-    const teamId = speaker(statement);
-    const team = ws.teams.find(({ id }) => id === teamId)?.name ?? "";
-    const role = ws.sources.find(({ id }) => id === statement.sourceId)?.who;
+    const { teamId, who: role } = statement;
+    const team = ground.teams.find(({ id }) => id === teamId)?.name ?? "";
     return {
       id: statement.id,
       text: statement.text,

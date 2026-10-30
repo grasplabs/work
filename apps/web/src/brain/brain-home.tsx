@@ -488,9 +488,7 @@ export const HomePage = ({
         <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 pb-24 md:px-12">
           <header className="flex flex-col gap-2.5">
             {toolbar}
-            <h1 className="text-2xl font-medium tracking-tight wrap-break-word">
-              {company?.title}
-            </h1>
+            <h1 className="type-title wrap-break-word">{company?.title}</h1>
             {/* In plain words: in the company’s own name a team such as Finance would read as a link. */}
             {(company?.article ?? []).map((paragraph) => (
               <p
