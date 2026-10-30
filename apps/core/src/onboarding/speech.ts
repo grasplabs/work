@@ -16,14 +16,13 @@ import { z } from "zod";
 
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings } from "../models.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
-import { gatewaySpeech } from "../speech.ts";
+import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
-import { speakerVoices, spokenOf, voiceModels } from "./spoken-lines.ts";
+import { speakerVoicesOf, spokenOf, toneInstructions } from "./spoken-lines.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -32,10 +31,10 @@ import type { Took } from "./store.ts";
 // the words up as they are said. Ported from the prototype (grasplabs/
 // prototype, packages/grasp: worker/speech.ts).
 //
-// Said through speech synthesis behind its interface (speech.ts: the
-// provider now, on-prem later), which goes through the model gateway: the
-// deployment's allowlist and rules judge every line, its budgets are
-// charged, and the audit log records it, never the line.
+// Said through speech synthesis behind its interface (speech.ts): the
+// provider and voices the platform's settings name, OpenAI's by default,
+// through the model gateway: the deployment's rules judge every line, its
+// budgets are charged, and the audit log records it, never the line.
 //
 // What it must not do, and what stops it:
 //
@@ -52,8 +51,9 @@ import type { Took } from "./store.ts";
 //   router limits the endpoint per address, the store counts calls per
 //   link, and the gateway's budgets hold too.
 // - Say a line in a tone Stephen may not use: the only direction a line
-//   takes is one of `voiceTags`, none of them sad, and a line with a
-//   bracket of its own is refused, so no direction is slipped in.
+//   takes is one of `voiceTags`, none of them sad, sent apart from the
+//   line (`toneInstructions`), and a line with a bracket of its own is
+//   refused, so no direction is slipped in.
 
 /** What the gateway is told every line is for. */
 const purpose = "onboarding.speech";
@@ -124,32 +124,6 @@ const failed = (error: unknown, requestId: string): Response => {
     code: "speech.failed",
   };
   return refused(refusal.status, speechErrors.create(refusal.code), requestId);
-};
-
-/**
- * The voice model a line is said in: v4 Turbo for a quick line where the
- * deployment allows it, else v4, else the first voice model it allows;
- * `undefined` where it allows none.
- */
-const voiceModelFor = (env: Env, quick: boolean): string | undefined => {
-  const { voices } = gatewaySettings(env);
-  const wanted = quick
-    ? [voiceModels.quick, voiceModels.said]
-    : [voiceModels.said];
-  return wanted.find((model) => voices.includes(model)) ?? voices[0];
-};
-
-/**
- * The words of a line as written, from the words said: the direction's
- * words, up to the one that closes it, taken out. The line itself has no
- * bracket, so the first word that ends one ends the direction.
- */
-const wordsAsWritten = (
-  words: readonly SpokenWord[],
-  directed: boolean
-): SpokenWord[] => {
-  const closes = words.findIndex(({ text }) => text.endsWith("]"));
-  return directed && closes !== -1 ? words.slice(closes + 1) : [...words];
 };
 
 /** The page's request, read no further than it may be; `undefined` when it isn't one. */
@@ -315,14 +289,15 @@ const say = async (
   listener: Listener,
   requestId: string
 ): Promise<Response> => {
-  const model = voiceModelFor(env, asked.quick);
-  if (model === undefined) {
+  // One speech model says every line, a quick one too.
+  const model = speechModelOf(env);
+  const voice = speakerVoicesOf(env)?.[asked.speaker];
+  if (model === undefined || voice === undefined) {
     return refused(503, speechErrors.create("speech.unavailable"), requestId);
   }
-  const spoken = spokenOf(asked.text, asked.language, asked.tone);
   const key: SpokenKey = {
-    spoken,
-    voice: speakerVoices[asked.speaker],
+    spoken: spokenOf(asked.text, asked.tone),
+    voice,
     model,
     language: asked.language,
   };
@@ -339,21 +314,29 @@ const say = async (
   // taken it out of the cache already: taken before the request, the
   // mark says whether one did (`keepUnlessPurged`).
   const purges = await onboardingStore(env).purgeMark();
-  let speech: Awaited<ReturnType<ReturnType<typeof gatewaySpeech>["speak"]>>;
+  let speech: Awaited<ReturnType<ReturnType<typeof platformSpeech>["speak"]>>;
+  const instructions = toneInstructions(asked.tone);
   try {
-    speech = await gatewaySpeech(env, {
+    speech = await platformSpeech(env, {
       purpose,
       trigger: listener.trigger,
       work: { onboarding: true },
       requestId,
-    }).speak({ text: spoken, voice: key.voice, language: key.language, model });
+    }).speak({
+      text: asked.text,
+      voice,
+      language: asked.language,
+      model,
+      ...(instructions === undefined ? {} : { instructions }),
+    });
   } catch (error) {
     return failed(error, requestId);
   }
+  // The words of the line as written: its tone is said apart from it.
   const answer: SpeechAnswer = {
     audio: toBase64(speech.audio),
     mime: speech.mime,
-    words: wordsAsWritten(speech.words, spoken !== asked.text),
+    words: speech.words,
   };
   const body = JSON.stringify(answer);
   await Promise.all([

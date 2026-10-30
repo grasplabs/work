@@ -45,9 +45,10 @@ const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
  * A company whose core counted, today: Stephen reading the first
  * conversation with the careful model (2 million tokens read, 200
  * thousand written: €15) and interviewing with the quick one (1 million
- * read, 200 thousand written: €6), his voice (20 minutes: €3), and
+ * read, 200 thousand written: €6), his voice (20 minutes at €0.015:
+ * €0.30), and
  * core's own default model, which has no price (500 thousand read, 100
- * thousand written: its tokens count, not its cost). €24 in all, with
+ * thousand written: its tokens count, not its cost). €21.30 in all, with
  * its contract not known.
  */
 const usedSnapshot = (): AdminSnapshot => {
@@ -99,7 +100,7 @@ describe("an organization's AI use and hours", () => {
       counted: has("Counted as it happened, every time a model was asked."),
       month: has(`${monthName(snapshot.now)}</span>`),
       inAll: has("In all, so far"),
-      spend: html.split(">€24<").length - 1,
+      spend: html.split(">€21<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
       contract: [
         has("the contract isn’t known yet"),
@@ -113,15 +114,16 @@ describe("an organization's AI use and hours", () => {
       // The numbers, by use: reading and interviews cost, the rest nothing.
       byUse: [
         has(">€15<"),
-        has(">€9.00<"),
+        has(">€6.30<"),
         has("Every interview Stephen held"),
         // The unpriced model's tokens are among the interviews'.
         has("1.5 million read, 300 thousand written"),
       ],
-      shares: [has(">63%<"), has(">25%<"), has(">13%<")],
+      shares: [has(">70%<"), has(">28%<"), has(">1%<")],
       prices: [
         has("€5 a million tokens read, €25 written"),
-        has("€0.15 a minute"),
+        has("€0.015 a minute"),
+        has("€0.006 a minute"),
         has("Other models (not priced)"),
         has("No price: its tokens count, its cost doesn’t"),
       ],
@@ -138,7 +140,7 @@ describe("an organization's AI use and hours", () => {
       voice: [true, true],
       byUse: [true, true, true, true],
       shares: [true, true, true],
-      prices: [true, true, true, true],
+      prices: [true, true, true, true, true],
       toCome: false,
     });
   });
@@ -162,7 +164,7 @@ describe("an organization's AI use and hours", () => {
       thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
-      inAll: html.includes(">€24<"),
+      inAll: html.includes(">€21<"),
       since: html.includes(`since ${monthName(earlier)}`),
     }).toStrictEqual({
       status: 200,

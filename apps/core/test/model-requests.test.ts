@@ -68,7 +68,7 @@ describe("model requests", () => {
           tools: [{ name: "t", input_schema: { type: "file" } }],
         }),
         "not JSON",
-      ].map(unboundedBy)
+      ].map((one) => unboundedBy(one))
     ).toStrictEqual([
       undefined,
       "image",
@@ -110,7 +110,7 @@ describe("model requests", () => {
           mcp_servers: [{ url: "https://x" }],
           speed: "fast",
         }).map(([field, value]) => body({ messages: [text], [field]: value })),
-      ].map(unboundedBy)
+      ].map((one) => unboundedBy(one))
     ).toStrictEqual([
       "input_audio",
       "item_reference",
@@ -155,7 +155,7 @@ describe("model requests", () => {
           cache_control: { type: "ephemeral", ttl: "1h" },
         }),
         body({ messages: [text], tools: "not a list" }),
-      ].map(unboundedBy)
+      ].map((one) => unboundedBy(one))
     ).toStrictEqual([
       undefined,
       undefined,

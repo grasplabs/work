@@ -88,8 +88,8 @@ const agreementWords: Record<keyof Agreed, string> = {
 const others = [
   { name: "Anthropic", what: "The model that reads, talks and writes." },
   {
-    name: "ElevenLabs",
-    what: "Stephen’s voice, and writing out what people say.",
+    name: "OpenAI",
+    what: "Stephen’s voice, writing out what people say, and reading PDFs.",
   },
   { name: "Cloudflare", what: "Where Grasp runs." },
   { name: "Stripe", what: "Invoices and payments." },

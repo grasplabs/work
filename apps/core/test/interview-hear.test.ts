@@ -1,87 +1,84 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { interviewHearPath } from "@grasp-os/shared/interview-hear";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import { hearingModel } from "../src/onboarding/hear.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { heardBudgets } from "../src/onboarding/transcription.ts";
+import { writtenText } from "./ai-providers-fake.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { codeOf, openedFor } from "./interview-link.ts";
-import { routed } from "./sign-in.ts";
+import { carrying, keyPlaces, plan, sentCount } from "./platform-providers.ts";
+import { routed, unique } from "./sign-in.ts";
 
 // A stretch of what someone said, written down from its recording when the
-// live line can't be used (src/onboarding/hear.ts). ElevenLabs's Scribe,
-// behind AI Gateway, is the outside system: a fake behind the AI binding
-// that writes every recording down as the same words. The store, the link
-// checks and the counting are real. The ways it can fail, tried here:
+// live line can't be used (src/onboarding/hear.ts). OpenAI's transcription,
+// Grasp's own by default (@grasp-os/shared/platform-ai), is the outside
+// system: a fake behind connect's fetch that writes every recording down
+// as the same words. Connect, the store, the link checks and the counting
+// are real. The ways it can fail, tried here:
 //
 // - Writing down for a link that isn't one, on another device, or for a
-//   link that heard all it may today; with no voice set up.
+//   link that heard all it may today; with no transcription set up.
 // - A request that isn't a recording, or is too large.
 // - The recording kept anywhere: the store, the database, the audit log.
 // - Listening out for words the page chose, or for more than 30.
-// - Writing down past the deployment's own budgets, or with a model its
-//   allowlist doesn't list (GRA-1064).
+// - Writing down past the deployment's own budgets (GRA-1064).
 
-const voiceModel = "elevenlabs/eleven_v4";
+/** The transcription model recordings are written down by, the default. */
+const hearingModel = "openai/gpt-4o-transcribe";
 
-/** The deployment's gateway, allowing the recordings' model: they may be written down. */
+/** The deployment's gateway: no voice model needs allowing. */
 const gatewayConfig = {
   gateway: "grasp-os-test",
-  models: [voiceModel, hearingModel],
+  models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
 };
-
-/** A text model, which no recording is written down by. */
-const textModel = "anthropic/claude-sonnet-4-5";
-
-/** What the fake Scribe writes every recording down as. */
-const words = "I check the invoice in Exact.";
 
 /** Something no recording would hold by chance: if it shows anywhere, the recording was kept. */
 const marker = "RECORDING-MARKER-7f3a";
 
-/** A request core made of Scribe, as far as these tests read it. */
+/** A request core made of OpenAI, as far as these tests read it. */
 interface Asked {
-  url: URL;
+  path: string;
   fields: Record<string, string[]>;
   file: number;
-  apiKey: string | null;
 }
 
-/** Scribe behind the gateway: every recording written down as `words`, or refused with `status`. */
-const fakeScribe = (status = 200) => {
-  const asked: Asked[] = [];
-  const fetch = async (
-    input: Request | string | URL,
-    init?: RequestInit
-  ): Promise<Response> => {
-    const request = new Request(input, init);
-    const form = await request.formData();
-    const fields: Record<string, string[]> = {};
-    let file = 0;
-    for (const [name, value] of form.entries()) {
-      if (typeof value === "string") {
-        fields[name] = [...(fields[name] ?? []), value];
-      } else {
-        file = value.size;
+/** What reached OpenAI with `audio` in it: each request's fields and file. */
+const askedWith = async (audio: string): Promise<Asked[]> => {
+  const carried = await carrying(audio);
+  return await Promise.all(
+    carried.map(async ({ path, headers, body }) => {
+      const form = await new Response(body, {
+        headers: { "content-type": headers["content-type"] ?? "" },
+      }).formData();
+      const fields: Record<string, string[]> = {};
+      let file = 0;
+      for (const [name, value] of form.entries()) {
+        if (typeof value === "string") {
+          fields[name] = [...(fields[name] ?? []), value];
+        } else {
+          file = value.size;
+        }
       }
-    }
-    asked.push({
-      url: new URL(request.url),
-      fields,
-      file,
-      apiKey: request.headers.get("xi-api-key"),
-    });
-    return status === 200
-      ? Response.json({ language_code: "en", text: ` ${words} `, words: [] })
-      : new Response("{}", { status });
-  };
-  return { fetch, asked };
+      return { path, fields, file };
+    })
+  );
 };
+
+/** The words a request listened out for, from its prompt. */
+const termsOf = (asked: Asked | undefined): string[] =>
+  (asked?.fields.prompt?.[0] ?? "")
+    .replace(/^Names and terms: /u, "")
+    .replace(/\.$/u, "")
+    .split(", ")
+    .filter((term) => term !== "");
+
+/** A recording's audio no other test sends, so what reached OpenAI with it is this test's. */
+const newAudio = (): string => `${marker}-${unique()}${"x".repeat(2000)}`;
 
 let monthsUsed = 0;
 
@@ -92,42 +89,41 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns while the fake Scribe stands behind the gateway,
- * under `config`, budgets counted in `month`.
+ * What `run` returns under the gateway config `config` and the platform's
+ * AI settings `platform`, budgets counted in `month`.
  */
 const hearing = async <T>(
   run: () => Promise<T>,
   {
-    status = 200,
     config = gatewayConfig,
+    platform,
     month,
-  }: { status?: number; config?: unknown; month?: string } = {}
-) => {
+  }: { config?: unknown; platform?: unknown; month?: string } = {}
+): Promise<T> => {
   const before = {
     gateway: env.MODEL_GATEWAY,
+    platform: env.PLATFORM_AI,
     month: env.MODEL_BUDGET_MONTH,
   };
-  const scribe = fakeScribe(status);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(scribe.fetch);
   Reflect.set(env, "MODEL_GATEWAY", config);
+  Reflect.set(env, "PLATFORM_AI", platform);
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
   try {
-    return { asked: scribe.asked, result: await run() };
+    return await run();
   } finally {
     env.MODEL_GATEWAY = before.gateway;
+    env.PLATFORM_AI = before.platform;
     env.MODEL_BUDGET_MONTH = before.month;
-    spy.mockRestore();
   }
 };
 
 /**
- * Scribe's price, with keyterms, as the ledger pins it: micros per
- * million seconds, rounded up ($0.27 an hour).
+ * GPT-4o Transcribe's price as the ledger pins it: micros per million
+ * seconds, rounded up ($0.60 an hour).
  */
-const microsPerMillionSeconds = Math.ceil((0.27 / 3600) * 1e12);
+const microsPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
 
 /** What `seconds` heard cost, in micros, as the ledger charges them. */
 const heardMicros = (seconds: number): number =>
@@ -159,7 +155,7 @@ const gatewayEvents = async (head: number) => {
 /** A recording as the page sends it, with the link and what it measured. */
 const recording = (
   link: { secret: string; key: string },
-  { seconds = "2.4", audio = `${marker}${"x".repeat(2000)}` } = {}
+  { seconds = "2.4", audio = newAudio() } = {}
 ): FormData => {
   const form = new FormData();
   form.set("secret", link.secret);
@@ -244,32 +240,36 @@ describe(
     it("writes a link's recording down through the gateway, keeps nothing of it, and counts its seconds", async () => {
       const { link } = await openedFor();
       const before = await heardCounted();
-      const { asked, result } = await hearing(async () => {
-        const response = await hear(recording(link));
+      const audio = newAudio();
+      const result = await hearing(async () => {
+        const response = await hear(recording(link, { audio }));
         return { status: response.status, body: await response.json() };
       });
-      const [request] = asked;
+      const [request] = await askedWith(audio);
       const stored = await everythingStored();
       expect({
         result,
-        path: request?.url.pathname.endsWith("/v1/speech-to-text"),
-        logging: request?.url.searchParams.get("enable_logging"),
-        model: request?.fields.model_id,
-        language: request?.fields.language_code,
+        path: request?.path,
+        model: request?.fields.model,
+        language: request?.fields.language,
         file: request?.file,
-        apiKey: request?.apiKey,
         counted: (await heardCounted()) - before,
         kept: stored.includes(marker),
       }).toStrictEqual({
-        result: { status: 200, body: { heard: words } },
-        path: true,
-        logging: "false",
-        model: ["scribe_v2"],
+        result: { status: 200, body: { heard: writtenText } },
+        path: "/v1/audio/transcriptions",
+        model: ["gpt-4o-transcribe"],
         language: ["en"],
-        file: 2000 + marker.length,
-        apiKey: null,
+        file: audio.length,
         counted: 2.4,
         kept: false,
+      });
+      // Grasp's key from connect alone, once, to OpenAI.
+      await expect(keyPlaces(audio, platformOpenAiKey)).resolves.toStrictEqual({
+        hosts: ["api.openai.com"],
+        headers: ["authorization"],
+        inBody: false,
+        placeholder: false,
       });
     });
 
@@ -285,13 +285,15 @@ describe(
         { type: "system" }
       );
       const { link } = await openedFor();
-      const form = recording(link);
+      const audio = newAudio();
+      const form = recording(link, { audio });
       form.append("keyterms", "Injected");
-      const { asked, result } = await hearing(async () => {
+      const result = await hearing(async () => {
         const response = await hear(form);
         return response.status;
       });
-      const terms = asked[0]?.fields.keyterms ?? [];
+      const [asked] = await askedWith(audio);
+      const terms = termsOf(asked);
       expect({
         result,
         // The roster's own: Oli Olsen, in Ops.
@@ -322,8 +324,10 @@ describe(
         { type: "system" }
       );
       const { link } = await openedFor();
-      const { asked } = await hearing(async () => await hear(recording(link)));
-      expect(asked[0]?.fields.keyterms).toHaveLength(30);
+      const audio = newAudio();
+      await hearing(async () => await hear(recording(link, { audio })));
+      const [asked] = await askedWith(audio);
+      expect(termsOf(asked)).toHaveLength(30);
     });
 
     it.each([
@@ -336,23 +340,28 @@ describe(
       "refuses %s, with nothing sent to the gateway",
       async (_name, kind, refusal) => {
         const { link } = await openedFor();
+        const audio = newAudio();
         const bodies = {
-          unknown: () => recording({ secret: "a".repeat(43), key: link.key }),
+          unknown: () =>
+            recording({ secret: "a".repeat(43), key: link.key }, { audio }),
           otherKey: () =>
-            recording({ secret: link.secret, key: "b".repeat(43) }),
+            recording({ secret: link.secret, key: "b".repeat(43) }, { audio }),
           noAudio: () => {
-            const form = recording(link);
+            const form = recording(link, { audio });
             form.delete("audio");
             return form;
           },
           tooLarge: () =>
-            recording(link, { audio: "x".repeat(1024 * 1024 + 1) }),
-          notForm: () => JSON.stringify(link),
+            recording(link, { audio: `${audio}${"x".repeat(1024 * 1024)}` }),
+          notForm: () => JSON.stringify({ ...link, audio }),
         };
-        const { asked, result } = await hearing(
+        const result = await hearing(
           async () => await codeOf(await hear(bodies[kind]()))
         );
-        expect({ result, sent: asked.length }).toStrictEqual({
+        expect({
+          result,
+          sent: await sentCount(audio),
+        }).toStrictEqual({
           result: refusal,
           sent: 0,
         });
@@ -366,10 +375,14 @@ describe(
         "interviews",
         heardBudgets.link
       );
-      const { asked, result } = await hearing(
-        async () => await codeOf(await hear(recording(link)))
+      const audio = newAudio();
+      const result = await hearing(
+        async () => await codeOf(await hear(recording(link, { audio })))
       );
-      expect({ result, sent: asked.length }).toStrictEqual({
+      expect({
+        result,
+        sent: await sentCount(audio),
+      }).toStrictEqual({
         result: [429, "hear.limited"],
         sent: 0,
       });
@@ -377,27 +390,36 @@ describe(
 
     it("says when listening isn't set up, and when the upstream failed", async () => {
       const { link } = await openedFor();
+      const unparsed = newAudio();
+      const unoffered = newAudio();
+      const failed = newAudio();
       const unset = await hearing(
-        async () => await codeOf(await hear(recording(link))),
-        // A deployment whose client agreed to no voice model.
-        { config: { gateway: "grasp-os-test", models: [textModel] } }
+        async () =>
+          await codeOf(await hear(recording(link, { audio: unparsed }))),
+        // Settings that don't parse: no transcription at all.
+        { platform: { transcription: { provider: "elevenlabs" } } }
       );
-      const voiceOnly = await hearing(
-        async () => await codeOf(await hear(recording(link))),
-        // A voice, but not the model recordings are written down by.
-        { config: { gateway: "grasp-os-test", models: [voiceModel] } }
+      const notOffered = await hearing(
+        async () =>
+          await codeOf(await hear(recording(link, { audio: unoffered }))),
+        // A model the gateway doesn't offer.
+        {
+          platform: {
+            transcription: { provider: "openai", model: "gpt-9-transcribe" },
+          },
+        }
       );
+      await plan(platformOpenAiKey, [{ status: 500 }]);
       const failing = await hearing(
-        async () => await codeOf(await hear(recording(link))),
-        { status: 500 }
+        async () => await codeOf(await hear(recording(link, { audio: failed })))
       );
       expect({
-        unset: unset.result,
-        voiceOnly: [...voiceOnly.result, voiceOnly.asked.length],
-        failing: failing.result,
+        unset: [...unset, await sentCount(unparsed)],
+        notOffered: [...notOffered, await sentCount(unoffered)],
+        failing,
       }).toStrictEqual({
-        unset: [503, "hear.unavailable"],
-        voiceOnly: [503, "hear.unavailable", 0],
+        unset: [503, "hear.unavailable", 0],
+        notOffered: [503, "hear.unavailable", 0],
         failing: [502, "hear.failed"],
       });
     });
@@ -406,7 +428,8 @@ describe(
       const { link } = await openedFor();
       const month = newMonth();
       const head = await logHead();
-      const { asked, result } = await hearing(
+      const audio = { busy: newAudio(), first: newAudio(), spent: newAudio() };
+      const result = await hearing(
         async () => {
           // Two minutes held elsewhere: no room for half a minute beside them.
           const elsewhere = await models(env).listen({
@@ -418,30 +441,35 @@ describe(
             work: { onboarding: true },
           });
           const busy = await codeOf(
-            await hear(recording(link, { seconds: "30" }))
+            await hear(recording(link, { seconds: "30", audio: audio.busy }))
           );
           await elsewhere.heard(100, "answered");
-          const first = await hear(recording(link, { seconds: "29.2" }));
+          const first = await hear(
+            recording(link, { seconds: "29.2", audio: audio.first })
+          );
           const charged = await deploymentSpend(month);
           // Spent: what is left is less than another half minute.
           const spent = await codeOf(
-            await hear(recording(link, { seconds: "30" }))
+            await hear(recording(link, { seconds: "30", audio: audio.spent }))
           );
           return { busy, first: first.status, charged, spent };
         },
         {
-          // A cent: 100 seconds of Scribe (0.75¢) and half a minute
-          // (0.225¢) fit, another half minute doesn't.
+          // 2.4 cents: 100 seconds (1.67¢) and half a minute (0.5¢) fit,
+          // two minutes and half a minute don't, nor another half minute.
           config: {
             ...gatewayConfig,
-            budgets: { deployment: { limit: 0.01 } },
+            budgets: { deployment: { limit: 0.024 } },
           },
           month,
         }
       );
+      const sent = await Promise.all(
+        Object.values(audio).map(async (one) => await sentCount(one))
+      );
       expect({
         ...result,
-        sent: asked.length,
+        sent,
         events: await gatewayEvents(head),
       }).toStrictEqual({
         busy: [503, "hear.busy"],
@@ -449,8 +477,8 @@ describe(
         // Whole seconds, rounded up.
         charged: { spent: heardMicros(100) + heardMicros(30), held: 0 },
         spent: [429, "hear.over_budget"],
-        // Only the recording admitted reached Scribe.
-        sent: 1,
+        // Only the recording admitted reached OpenAI.
+        sent: [0, 1, 0],
         events: [
           {
             action: "model.refused",
@@ -464,7 +492,7 @@ describe(
           {
             action: "model.call",
             actor: { type: "system" },
-            model: "scribe_v2",
+            model: "gpt-4o-transcribe",
             cost: (100 * microsPerMillionSeconds) / 1e12,
             seconds: 100,
             outcome: "answered",
@@ -473,7 +501,7 @@ describe(
           {
             action: "model.call",
             actor: { type: "system" },
-            model: "scribe_v2",
+            model: "gpt-4o-transcribe",
             // Before the ledger rounds it up to a micro.
             cost: (30 * microsPerMillionSeconds) / 1e12,
             seconds: 30,

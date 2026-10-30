@@ -28,7 +28,7 @@ import type {
 // as a custom provider of the deployment's gateway, `custom-bedrock-eu`,
 // whose base URL is Frankfurt's endpoint
 // (`https://bedrock-mantle.eu-central-1.api.aws/anthropic`) and which holds
-// the Bedrock key, as `custom-elevenlabs-eu` does for ElevenLabs's EU host.
+// the Bedrock key.
 // Each model is asked for by its EU inference profile
 // (`eu.anthropic.<model>`), which routes only within the EU's regions.
 
@@ -154,7 +154,6 @@ export const cloudflareAiGateway = (
       ),
       payloadLoggingOff: true,
       sharedCacheOff: true,
-      voice: true,
       sdkRetries: true,
     },
     route: (ref, metadata): TransportRoute | undefined => {

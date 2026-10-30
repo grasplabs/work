@@ -24,7 +24,8 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 //
 // They apply whenever they are configured. The rule that keeps the whole
 // deployment in the EU also keeps uploads' text extraction in the Worker,
-// off Workers AI (knowledge/extract.ts): it is what the client agreed to.
+// never sent out to be converted (knowledge/extract.ts): it is what the
+// client agreed to.
 //
 // "Hosted in the EU" is the config's word for a model: the client's
 // provider serves it in the EU (its EU data residency, with the keys AI
@@ -71,7 +72,8 @@ export interface RulesInput {
           | "brain_recall"
           | "policy_reading"
           | "stephen_requests"
-          | "provider_test";
+          | "provider_test"
+          | "document_conversion";
       };
 }
 

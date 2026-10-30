@@ -431,6 +431,7 @@ export const finalFailures: ReadonlySet<string> = new Set([
   "upload.no_text",
   "upload.original_missing",
   "upload.superseded",
+  "upload.conversion_unavailable",
   "knowledge.too_large",
   "knowledge.too_many_sections",
   "knowledge.too_many_links",
@@ -512,7 +513,8 @@ const extractionError = (uploadId: string, error: unknown): unknown => {
 /**
  * The extraction run's one step: extracts the upload's text with the
  * extractor its collection gets (extract.ts), after recording that the
- * file is sent out when the extractor is Workers AI, and saves it as the
+ * file is sent out when it is converted by Grasp's own conversion, and
+ * saves it as the
  * next version of its document, marking the upload ready and recording
  * which extractor read it in the same batch. Safe to run again:
  * an upload that is ready or failed, or forgotten (its collection deleted,
@@ -551,8 +553,10 @@ export const extractUpload = async (
     throw uploadErrors.create("upload.original_missing");
   }
   const bytes = new Uint8Array(await original.arrayBuffer());
-  const extractor = extractorFor(env, collection, mediaTypeOf(row));
-  if (extractor.name === "workers-ai") {
+  const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
+  // Converted for whoever uploaded it, on their budget.
+  const extractor = extractorFor(env, collection, mediaTypeOf(row), actor);
+  if (extractor.name === "platform") {
     // Recorded before the file leaves the Worker, so a failure after it
     // left is on record too; one that can't be recorded fails the step,
     // which is retried, and nothing is sent.
@@ -587,7 +591,6 @@ export const extractUpload = async (
     throw uploadErrors.create("upload.superseded");
   }
   await requireStillWritable(env, knowledge, row, collection);
-  const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
   // Claimed for the save, unless it was forgotten meanwhile (a purge of
   // its document, whose text this would save again) or ended: then it is
   // left. A purge's forgetting refuses a claimed upload, so none forgets

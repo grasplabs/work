@@ -24,12 +24,13 @@ import type { z } from "zod";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
-import type { Listening, ListeningOutcome } from "../models.ts";
+import type { Listening, ListeningOutcome, ModelsEnv } from "../models.ts";
+import { platformAi } from "../platform-ai.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
 import { sessionRecheckMs } from "../session-check.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { gatewayTranscription } from "../transcription.ts";
+import { platformTranscription } from "../transcription.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -38,8 +39,9 @@ import type { Took } from "./store.ts";
 // its microphone to its own origin over a WebSocket, as `connect-src
 // 'self'` allows and nothing else; core relays it to live transcription
 // behind its interface (src/transcription.ts), which reaches the provider
-// through the deployment's AI Gateway. No provider token or host ever
-// reaches the browser (GRA-361, A2).
+// the platform's settings name (@grasp-os/shared/platform-ai), OpenAI's
+// realtime transcription by default, through connect with Grasp's own key.
+// No provider token or host ever reaches the browser (GRA-361, A2).
 //
 // The socket's protocol, one session per socket:
 //
@@ -89,7 +91,7 @@ import type { Took } from "./store.ts";
 //   And the deployment's own budgets bound it all together (GRA-1064): the
 //   model gateway admits each socket as it opens, for the seconds it
 //   holds, before the upstream is opened (models.ts, `listen`), judged by
-//   the allowlist and the rules as any model call, and refused as one
+//   the rules as any model call, and refused as one
 //   when a budget has no room (`transcription.over_budget`); once it
 //   closed, it is charged the seconds it heard, and audited as a model
 //   call, never with anything heard. The relay's own limits stay a
@@ -119,10 +121,16 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
 export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
 
 /**
- * The transcription model a socket listens with, as the gateway's
- * allowlist names it: the deployment must list it, as it lists a voice.
+ * The transcription model sockets and recordings are written down with,
+ * as the gateway names it: the one the platform's settings name;
+ * `undefined` while they don't parse.
  */
-export const transcriptionModel = "elevenlabs/scribe_v2_realtime";
+export const transcriptionModelOf = (env: ModelsEnv): string | undefined => {
+  const transcription = platformAi(env)?.transcription;
+  return transcription === undefined
+    ? undefined
+    : `${transcription.provider}/${transcription.model}`;
+};
 
 /** What the gateway is told every socket is for. */
 const purpose = "onboarding.transcription";
@@ -439,7 +447,7 @@ class Relay {
       const keyterms = await onboardingStore(this.#env).listeningTerms(
         hearer.person
       );
-      session = await gatewayTranscription(listening).open({
+      session = await platformTranscription(listening).open({
         language: start.language,
         keyterms,
         sampleRate: start.sampleRate,
@@ -476,8 +484,8 @@ class Relay {
   }
 
   /**
-   * The model gateway's admission for the seconds held: the allowlist,
-   * the rules and the deployment's budgets, before anything is sent
+   * The model gateway's admission for the seconds held: the platform's
+   * key, the rules and the deployment's budgets, before anything is sent
    * upstream. `undefined` once the session ended, refused, failed, or
    * left by the page meanwhile; what was admitted then is given back.
    */
@@ -487,8 +495,12 @@ class Relay {
   ): Promise<Listening | undefined> {
     let listening: Listening;
     try {
+      const model = transcriptionModelOf(this.#env);
+      if (model === undefined) {
+        throw modelErrors.create("model.unconfigured");
+      }
       listening = await models(this.#env).listen({
-        model: transcriptionModel,
+        model,
         seconds,
         // Open at most `maxOpenMs`, ended by the check after it.
         openMs: maxOpenMs + sessionRecheckMs,

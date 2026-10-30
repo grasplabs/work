@@ -9,10 +9,13 @@
  * to another host, another path, in two headers, or after a redirect; a
  * credential of core's own; a custom endpoint aimed at a private,
  * internal or metadata address; a key read back, logged, or opened after
- * its row was tampered with. Then what it is for.
+ * its row was tampered with; a realtime socket (Grasp's live listening)
+ * opened without a platform grant, to another path, or on an
+ * organization's key, or left open at one end. Then what it is for.
  */
 import {
   aiCredentialPlaceholder,
+  aiGrantHeader,
   aiKeyErrors,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
@@ -522,6 +525,244 @@ describe("AI providers in connect", () => {
         ])
       );
       expect(stores).toStrictEqual({ platform: false, organization: true });
+    });
+  });
+
+  describe("Grasp's own speech and transcription", () => {
+    it("sends a line to say and a recording to write down, and nothing else of OpenAI's audio", async () => {
+      const grant = async () =>
+        await grantFor({
+          provider: "openai",
+          host: "api.openai.com",
+          credential: "platform",
+        });
+      const outcomes = {
+        speech: refusalOf(
+          await connect().modelFetch(
+            modelRequest("https://api.openai.com/v1/audio/speech"),
+            await grant()
+          )
+        ),
+        transcription: refusalOf(
+          await connect().modelFetch(
+            modelRequest("https://api.openai.com/v1/audio/transcriptions"),
+            await grant()
+          )
+        ),
+        translation: refusalOf(
+          await connect().modelFetch(
+            modelRequest("https://api.openai.com/v1/audio/translations"),
+            await grant()
+          )
+        ),
+        voices: refusalOf(
+          await connect().modelFetch(
+            modelRequest("https://api.openai.com/v1/audio/voice_consents"),
+            await grant()
+          )
+        ),
+      };
+
+      expect({
+        outcomes,
+        paths: sent.map(({ path }) => path),
+      }).toStrictEqual({
+        outcomes: {
+          speech: "sent",
+          transcription: "sent",
+          translation: "path",
+          voices: "path",
+        },
+        paths: ["/v1/audio/speech", "/v1/audio/transcriptions"],
+      });
+    });
+  });
+
+  describe("a realtime socket, for Grasp's live listening", () => {
+    const realtimeUrl =
+      "https://api.openai.com/v1/realtime?intent=transcription";
+
+    /** OpenAI's end of each socket connect opens: what it got, and how it closed. */
+    const upstreams: {
+      socket: WebSocket;
+      got: string[];
+      closed: Promise<number>;
+    }[] = [];
+
+    beforeEach(() => {
+      upstreams.length = 0;
+      nextAnswer = () => {
+        const { 0: client, 1: server } = new WebSocketPair();
+        server.accept();
+        const got: string[] = [];
+        const closed = Promise.withResolvers<number>();
+        server.addEventListener("message", (event) => {
+          got.push(String(event.data));
+        });
+        server.addEventListener("close", (event) => {
+          closed.resolve(event.code);
+        });
+        upstreams.push({ socket: server, got, closed: closed.promise });
+        return new Response(null, { status: 101, webSocket: client });
+      };
+    });
+
+    /** The upgrade core sends connect: its grant, and the placeholder. */
+    const upgrade = async (
+      url = realtimeUrl,
+      {
+        grant,
+        headers = { authorization: `Bearer ${aiCredentialPlaceholder}` },
+      }: { grant?: string | null; headers?: Record<string, string> } = {}
+    ): Promise<Request> => {
+      const granted =
+        grant === undefined
+          ? await grantFor({
+              provider: "openai",
+              host: new URL(url).hostname,
+              credential: "platform",
+            })
+          : grant;
+      return new Request(url, {
+        headers: {
+          upgrade: "websocket",
+          ...(granted === null ? {} : { [aiGrantHeader]: granted }),
+          ...headers,
+        },
+      });
+    };
+
+    it("refuses a socket without a platform grant, to any other path or host, without the placeholder, or without Grasp's key", async () => {
+      const organizationGrant = await grantFor({
+        provider: "openai",
+        host: "api.openai.com",
+      });
+      const elsewhereGrant = await grantFor({
+        provider: "openai",
+        host: "evil.example",
+        credential: "platform",
+      });
+      const refusals = {
+        forged: refusalOf(
+          await connect().fetch(await upgrade(realtimeUrl, { grant: "forged" }))
+        ),
+        organization: refusalOf(
+          await connect().fetch(
+            await upgrade(realtimeUrl, { grant: organizationGrant })
+          )
+        ),
+        responses: refusalOf(
+          await connect().fetch(
+            await upgrade("https://api.openai.com/v1/responses")
+          )
+        ),
+        conversation: refusalOf(
+          await connect().fetch(
+            await upgrade(
+              "https://api.openai.com/v1/realtime?model=gpt-realtime"
+            )
+          )
+        ),
+        elsewhere: refusalOf(
+          await connect().fetch(
+            await upgrade(
+              "https://evil.example/v1/realtime?intent=transcription",
+              {
+                grant: elsewhereGrant,
+              }
+            )
+          )
+        ),
+        ownKey: refusalOf(
+          await connect().fetch(
+            await upgrade(realtimeUrl, {
+              headers: { authorization: "Bearer sk-core-of-its-own" },
+            })
+          )
+        ),
+        noUpgrade: refusalOf(
+          await connect().fetch(
+            new Request(realtimeUrl, {
+              headers: {
+                [aiGrantHeader]: await grantFor({
+                  provider: "openai",
+                  host: "api.openai.com",
+                  credential: "platform",
+                }),
+                authorization: `Bearer ${aiCredentialPlaceholder}`,
+              },
+            })
+          )
+        ),
+        noPlatformKey: refusalOf(
+          await connect({ OPENAI_API_KEY: "" }).fetch(await upgrade())
+        ),
+      };
+
+      expect(refusals).toStrictEqual({
+        forged: "grant",
+        organization: "no_credential",
+        responses: "path",
+        conversation: "path",
+        elsewhere: "endpoint",
+        ownKey: "credential_header",
+        noUpgrade: "method",
+        noPlatformKey: "no_credential",
+      });
+      expect(sent).toStrictEqual([]);
+    });
+
+    it("opens OpenAI's socket with Grasp's key alone, and passes each message on both ways", async () => {
+      const response = await connect().fetch(await upgrade());
+      const core = response.webSocket;
+      core?.accept();
+      const heard = Promise.withResolvers<string>();
+      core?.addEventListener("message", (event) => {
+        heard.resolve(String(event.data));
+      });
+
+      core?.send('{"type":"session.update"}');
+      const [upstream] = upstreams;
+      await vi.waitFor(() => {
+        expect(upstream?.got).toStrictEqual(['{"type":"session.update"}']);
+      });
+      upstream?.socket.send('{"type":"session.updated"}');
+
+      const [request] = sent;
+      expect({
+        status: response.status,
+        answered: await heard.promise,
+        path: request?.path,
+        // Grasp's key in its one header; never the grant or the placeholder.
+        headers: Object.keys(request?.headers ?? {}).toSorted(),
+        key: request?.headers.authorization,
+      }).toStrictEqual({
+        status: 101,
+        answered: '{"type":"session.updated"}',
+        path: "/v1/realtime?intent=transcription",
+        headers: ["authorization", "upgrade"],
+        key: `Bearer ${platformKey}`,
+      });
+      core?.close(1000, "Done");
+      await expect(upstream?.closed).resolves.toBe(1000);
+    });
+
+    it("closes core's end when OpenAI's closes, and says a provider that won't upgrade refused", async () => {
+      const response = await connect().fetch(await upgrade());
+      const core = response.webSocket;
+      core?.accept();
+      const closed = Promise.withResolvers<number>();
+      core?.addEventListener("close", (event) => {
+        closed.resolve(event.code);
+      });
+      upstreams[0]?.socket.close(1011, "Gone");
+      nextAnswer = () => Response.json({ error: "no" }, { status: 401 });
+      const refused = await connect().fetch(await upgrade());
+
+      expect({
+        closed: await closed.promise,
+        refused: refusalOf(refused),
+      }).toStrictEqual({ closed: 1011, refused: "upgrade" });
     });
   });
 

@@ -409,8 +409,13 @@ export const verifyCapability = async (
 /** Keeps a model grant's MAC from ever passing for a capability's. */
 const modelGrantContext = "grasp-os model grant v1\n";
 
-/** The longest a model request may stream, as its grant bounds it. */
-export const modelGrantMaxStreamMs = 16 * 60_000;
+/**
+ * The longest a model request may stream, as its grant bounds it: a
+ * listening's realtime socket (core's models.ts, `listen`), open for up to
+ * an hour, is the longest. A text call's grant ends at its own deadline,
+ * 15 minutes at most, well before.
+ */
+export const modelGrantMaxStreamMs = 61 * 60_000;
 
 /** What a model grant says. Unknown fields make it invalid. */
 export const modelGrantClaimsSchema = z.strictObject({

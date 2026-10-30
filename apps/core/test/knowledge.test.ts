@@ -7,7 +7,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { createCollection } from "../src/knowledge/collection-rules.ts";
+import { streamText } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import {
@@ -15,6 +17,7 @@ import {
   waitingInOutbox,
   whileLogDown,
 } from "./maintenance.ts";
+import { plan } from "./platform-providers.ts";
 import {
   auditedDuring,
   openRpc,
@@ -663,21 +666,18 @@ describe("collections", () => {
       name: `Handbook ${unique()}`,
       access: "everyone",
     });
-    // Workers AI, the one outside system an upload reaches: its conversion
-    // answers as the real one would.
-    const converting = vi
-      .spyOn(env.AI, "toMarkdown")
-      .mockImplementation(async ({ name }: MarkdownDocument) => {
-        await Promise.resolve();
-        return {
-          id: crypto.randomUUID(),
-          name,
-          mimeType: "application/pdf",
-          format: "markdown",
-          tokens: 0,
-          data: "# Travel\nBook trains.",
-        };
-      });
+    // OpenAI, Grasp's own conversion and the one outside system an upload
+    // reaches (behind connect): it converts the one upload taken, as the
+    // real one would.
+    await plan(platformOpenAiKey, [
+      {
+        sse: streamText("openai-responses", {
+          text: "# Travel\nBook trains.",
+          inputTokens: 1000,
+          outputTokens: 10,
+        }),
+      },
+    ]);
     // What the collection offers, and what core does with an upload there
     // that passes every other check, on the same connection: taken (`ok`)
     // exactly where it is writable, and the one taken extracted to ready.
@@ -716,21 +716,17 @@ describe("collections", () => {
         core[Symbol.dispose]();
       }
     };
-    try {
-      expect({
-        owner: await offered(owner.session),
-        reader: await offered(reader.session),
-      }).toStrictEqual({
-        owner: { writable: true, upload: "ok", status: "ready" },
-        reader: {
-          writable: false,
-          upload: "knowledge.forbidden",
-          status: null,
-        },
-      });
-    } finally {
-      converting.mockRestore();
-    }
+    expect({
+      owner: await offered(owner.session),
+      reader: await offered(reader.session),
+    }).toStrictEqual({
+      owner: { writable: true, upload: "ok", status: "ready" },
+      reader: {
+        writable: false,
+        upload: "knowledge.forbidden",
+        status: null,
+      },
+    });
   });
 
   it("that are personal are invisible to everyone but their owner", async () => {

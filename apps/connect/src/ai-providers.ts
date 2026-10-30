@@ -1,5 +1,6 @@
 import {
   aiCredentialPlaceholder,
+  aiGrantHeader,
   aiKeyErrors,
   aiProviderHost,
   aiProviderIdSchema,
@@ -88,6 +89,13 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   limit's wait.
 // - A request that streams forever: the grant names the call's deadline,
 //   which cuts the provider's request off here too.
+// - A realtime socket (`modelSocket`, Grasp's live listening): the same
+//   grant, placeholder, host and credential checks as a request, only to
+//   the provider's realtime paths with their one query, and only on
+//   Grasp's own key (an organization's key never opens one). Connect holds
+//   both ends and passes each message on as it comes, keeping and logging
+//   none; when either end closes, so does the other, and both close at the
+//   grant's deadline.
 
 /** The vault context a provider's key is sealed under: its row and destination. */
 const contextOf = (provider: AiProviderId, baseUrl: string | null): string =>
@@ -478,6 +486,9 @@ const allowedQueries: ReadonlySet<string> = new Set(["", "?beta=true"]);
  */
 const deadlineBackstopMs = 5000;
 
+/** The longest a provider may take to accept a realtime socket. */
+const socketOpenMs = 10_000;
+
 /** Whether `url` may be sent to, `base`'s origin, checked again as it is sent. */
 const sendsToBase = (url: URL, base: URL, policy: EndpointPolicy): boolean => {
   const checked = checkEndpoint(url.href, policy);
@@ -719,6 +730,152 @@ export const modelFetch = async (
     return refused("redirect", claims);
   }
   return passedBack(answered);
+};
+
+/** Passes a message's `data` on to `to` while it is open; a closed socket drops it. */
+const passOn = (to: WebSocket, data: unknown): void => {
+  if (!(typeof data === "string" || data instanceof ArrayBuffer)) {
+    return;
+  }
+  try {
+    to.send(data);
+  } catch {
+    // Closed meanwhile: its close ends the other end too.
+  }
+};
+
+/** Closes `socket` with `code`, if it is still open. */
+const closeEnd = (socket: WebSocket, code: number): void => {
+  try {
+    // 1005 and 1006 are reported, never sent.
+    socket.close(code === 1005 || code === 1006 ? 1011 : code, "");
+  } catch {
+    // Closed already.
+  }
+};
+
+/**
+ * Opens a realtime WebSocket of a model call core's gateway decided (a
+ * listening, core's models.ts) to the provider, with Grasp's key, and
+ * relays it: the upgrade carries its grant (`aiGrantHeader`) and the
+ * placeholder where the key goes, to the provider's own realtime URL.
+ * Its client end, or connect's refusal (`aiRefusedHeader`).
+ */
+export const modelSocket = async (
+  env: Env,
+  signingKeys: readonly string[],
+  request: Request
+): Promise<Response> => {
+  let claims: ModelGrantClaims;
+  try {
+    claims = await verifyModelGrant(
+      signingKeys,
+      request.headers.get(aiGrantHeader)
+    );
+  } catch {
+    return refused("grant");
+  }
+  if (
+    request.method !== "GET" ||
+    request.headers.get("upgrade")?.toLowerCase() !== "websocket"
+  ) {
+    return refused("method", claims);
+  }
+  // Only Grasp's own key opens a socket: no organization's is ever held
+  // open for minutes on end.
+  if (claims.credential !== "platform") {
+    return refused("no_credential", claims);
+  }
+  if (!carriesPlaceholder(request, claims.provider)) {
+    return refused("credential_header", claims);
+  }
+  const destination = await destinationOf(env, claims);
+  if (destination === undefined) {
+    return refused("no_credential", claims);
+  }
+  const url = new URL(request.url);
+  const { base, key } = destination;
+  const checked = checkEndpoint(url.href, policyOf(env));
+  if (
+    url.hostname !== claims.host ||
+    "refused" in checked ||
+    url.origin !== base.origin ||
+    url.hash !== ""
+  ) {
+    return refused("endpoint", claims);
+  }
+  if (
+    !aiProviders[claims.provider].realtime.some(
+      ({ path, query }) => url.pathname === path && url.search === query
+    )
+  ) {
+    return refused("path", claims);
+  }
+  const startedAt = Date.now();
+  let answered: Response;
+  try {
+    answered = await fetch(url, {
+      headers: { upgrade: "websocket", authorization: `Bearer ${key}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(socketOpenMs),
+    });
+  } catch (error) {
+    log.warn("ai.unanswered", {
+      provider: claims.provider,
+      credential: claims.credential,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return refused("unreachable", claims);
+  }
+  const upstream = answered.webSocket;
+  if (upstream === null) {
+    log.warn("ai.socket_refused", {
+      provider: claims.provider,
+      status: answered.status,
+    });
+    await answered.body?.cancel();
+    return refused("upgrade", claims);
+  }
+  upstream.accept();
+  const { 0: client, 1: server } = new WebSocketPair();
+  server.accept();
+  log.info("ai.socket", {
+    provider: claims.provider,
+    credential: claims.credential,
+    request: claims.request,
+    ms: Date.now() - startedAt,
+  });
+  const ending = setTimeout(
+    () => {
+      closeEnd(upstream, 1000);
+      closeEnd(server, 1000);
+    },
+    Math.max(1, claims.notAfter - startedAt + deadlineBackstopMs)
+  );
+  const end = (code: number): void => {
+    clearTimeout(ending);
+    closeEnd(upstream, code);
+    closeEnd(server, code);
+  };
+  server.addEventListener("message", (event) => {
+    passOn(upstream, event.data);
+  });
+  upstream.addEventListener("message", (event) => {
+    passOn(server, event.data);
+  });
+  server.addEventListener("close", ({ code }) => {
+    end(code);
+  });
+  upstream.addEventListener("close", ({ code }) => {
+    end(code);
+  });
+  server.addEventListener("error", () => {
+    end(1011);
+  });
+  upstream.addEventListener("error", () => {
+    end(1011);
+  });
+  return new Response(null, { status: 101, webSocket: client });
 };
 
 /**
