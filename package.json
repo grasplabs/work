@@ -11,6 +11,7 @@
     "seed:admin": "node scripts/seed-admin.ts",
     "e2e": "playwright test",
     "e2e:admin": "playwright test -c playwright.admin.config.ts",
+    "cloudflare:setup": "node scripts/cloudflare-account-setup.ts",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
     "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",
