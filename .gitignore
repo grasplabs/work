@@ -16,6 +16,7 @@ test-results/
 .vite-hooks/_/
 release-out/
 wrangler.deploy.jsonc
+wrangler.local.jsonc
 scripts/lab/out/
 
 # Cloudflare cf CLI build output and generated types (apps/admin)

@@ -1,12 +1,17 @@
-import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
+import type {
+  DecisionAnswerInput,
+  DecisionView,
+} from "@grasp-os/shared/decisions";
 import type { TodayWaitsOn, WorkflowsToday } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import type { Session } from "../core.ts";
+import { cssVars } from "../css-vars.ts";
 import {
   confirmAndAnswer,
   DecisionConfirmDialog,
@@ -15,7 +20,17 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { handovers, hoursOf, journeyOf, laneDay, placeOf } from "./lanes.ts";
+import { useCore } from "../use-core.ts";
+import { useGrace } from "../use-grace.ts";
+import {
+  handovers,
+  hoursOf,
+  journeyOf,
+  laneDay,
+  laterDay,
+  listedRuns,
+  placeOf,
+} from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 
 // Runs › Today (prototype `components/workflows/today-lanes.tsx`): a lane
@@ -26,8 +41,10 @@ import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 // to the next, a light line joins its two dots. Pressing a dot follows its
 // item across the lanes, said under them ("Where is it"); when it waits on
 // the reader, the card says on whom and since when, with Reject or
-// Approve, five seconds to undo, then the decision's own confirmation and
-// answer. Narrower than 42rem, the lanes are a list.
+// Approve, the decision's own confirmation, then five seconds to undo
+// before the answer is given; leaving in those seconds gives it at once
+// (`useGrace`), as pausing a workflow does. Narrower than 42rem, the
+// lanes are a list.
 
 /** How tall a lane is, in pixels (`h-11`): its line runs through the middle. */
 const laneHeight = 44;
@@ -35,12 +52,8 @@ const laneHeight = 44;
 /** How long an answer can be taken back before it is given, in seconds. */
 const graceSeconds = 5;
 
-/** Sets the `--x` a dot or a trail is placed by: its share of the day. */
-const placedAt =
-  (share: number) =>
-  (element: HTMLElement | null): void => {
-    element?.style.setProperty("--x", `${share * 100}%`);
-  };
+/** Sets the `--x` a dot, a trail or an hour is placed by: its share of the day. */
+const placedAt = (share: number) => cssVars({ "--x": `${share * 100}%` });
 
 /** Grasp at work now: three ink dots. */
 const WorkingDots = () => {
@@ -64,12 +77,35 @@ const WorkingDots = () => {
   );
 };
 
-/** The mark of a run: filled, hollow, or orange. */
+/**
+ * How a run that ended without its result is marked: filled when it went
+ * by itself, hollow when it went to people, as any run; red when it
+ * failed, grey when it was cancelled.
+ */
+const unfinishedMarks: Readonly<
+  Record<"failed" | "cancelled", Record<"alone" | "people", string>>
+> = {
+  failed: {
+    alone: "bg-destructive",
+    people: "border-destructive bg-background border",
+  },
+  cancelled: {
+    alone: "bg-muted-foreground",
+    people: "border-muted-foreground bg-background border",
+  },
+};
+
+/** The mark of a run: filled, hollow, orange, or red or grey when unfinished. */
 const Mark = ({ run, large }: { run: LaneRun; large: boolean }) => {
   const size = cn(
     "size-2 rounded-full transition-transform duration-200",
     large && "scale-125"
   );
+  if (run.state === "failed" || run.state === "cancelled") {
+    return (
+      <span className={cn(size, unfinishedMarks[run.state][run.run.went])} />
+    );
+  }
   if (run.state === "waits") {
     return <span className={cn(size, "bg-status-attention")} />;
   }
@@ -119,6 +155,11 @@ const useRunText = (run: LaneRun): string => {
     running: t({ message: "running", context: "a run going on now" }),
     toPerson: t`went to people`,
     done: t({ message: "done by itself", context: "a run that ran alone" }),
+    failed: t({ message: "failed", context: "a run that ended in failure" }),
+    cancelled: t({
+      message: "cancelled",
+      context: "a run someone stopped before its end",
+    }),
   };
   return words[run.state];
 };
@@ -299,7 +340,7 @@ const Lanes = ({
                     dimmed && !lit.has(run.id) && "opacity-25"
                   )}
                   key={`${run.id} trail`}
-                  ref={placedAt(placeOf(run.at, day))}
+                  ref={placedAt(placeOf(run.waitsSince ?? run.at, day))}
                 />
               ) : null
             )}
@@ -389,7 +430,7 @@ const ListLane = ({
       {lane.running ? <WorkingDots /> : null}
     </span>
     <span className="flex flex-wrap items-center gap-1">
-      {lane.runs.slice(-12).map((run) => (
+      {listedRuns(lane, 12).map((run) => (
         <ListDot
           chosen={chosen === run.id}
           key={run.id}
@@ -401,56 +442,56 @@ const ListLane = ({
   </li>
 );
 
+/** Answers the decision `answering` confirmed, through its own confirmation. */
+const answerWith =
+  (answering: PendingConfirmation) =>
+  async (session: Session): Promise<DecisionView> =>
+    await confirmAndAnswer(
+      session,
+      answering,
+      async (confirmation) =>
+        await session.decisions.answer(
+          answering.decision.id,
+          answering.response,
+          confirmation
+        )
+    );
+
 /**
  * A wait on the reader: what it asks, on whom and since when, and Reject
- * or Approve. An answer waits five seconds with Undo, then goes through
- * the decision's own confirmation and answer.
+ * or Approve. A confirmed answer waits five seconds with Undo, then goes
+ * through the decision's own confirmation and answer.
  */
 const WaitsOnYou = ({ run }: { run: LaneRun }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const core = useCore();
   const { busy, failure, run: act } = useCoreAction();
   const [pending, setPending] = useState<PendingConfirmation>();
-  const [confirmed, setConfirmed] = useState<PendingConfirmation>();
-  const [left, setLeft] = useState<number | null>(null);
   const { waits } = run.run;
-  const answerNow = useEffectEvent((answering: PendingConfirmation) => {
-    void (async () => {
-      const answered = await act(
-        async (session) =>
-          await confirmAndAnswer(
-            session,
-            answering,
-            async (confirmation) =>
-              await session.decisions.answer(
-                answering.decision.id,
-                answering.response,
-                confirmation
-              )
-          )
-      );
-      if (answered !== undefined) {
-        await router.invalidate();
-      }
-    })();
+  const { held, hold, undo } = useGrace<PendingConfirmation>({
+    seconds: graceSeconds,
+    go: (answering) => {
+      void (async () => {
+        const answered = await act(answerWith(answering));
+        if (answered !== undefined) {
+          await router.invalidate();
+        }
+      })();
+    },
+    // Gone before the seconds were over: the answer was confirmed, so it
+    // is given, and Today says how the run stands when it is opened again.
+    goOnLeave: (answering) => {
+      void (async () => {
+        try {
+          await core.withSession(answerWith(answering));
+        } catch {
+          // Nobody is left on the card to tell; the decision still waits
+          // in the inbox, where it can be answered again.
+        }
+      })();
+    },
   });
-  useEffect(() => {
-    const timer =
-      left === null || confirmed === undefined
-        ? undefined
-        : setTimeout(() => {
-            if (left > 1) {
-              setLeft(left - 1);
-              return;
-            }
-            setLeft(null);
-            setConfirmed(undefined);
-            answerNow(confirmed);
-          }, 1000);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [left, confirmed]);
   const since = waits === null ? "" : formatTime(waits.since);
   const waitsSince = useWaitsSinceText(waits?.on ?? { kind: "you" }, since);
   if (waits === null) {
@@ -467,22 +508,16 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       await router.invalidate();
     }
   };
-  if (left !== null && confirmed !== undefined) {
+  if (held !== null) {
+    const { left } = held;
     return (
       <span aria-live="polite" className="ml-4 flex items-center gap-3">
         <span className="text-muted-foreground tabular-nums">
-          {confirmed.response.approved
+          {held.value.response.approved
             ? t`Approved in ${left} s`
             : t`Rejected in ${left} s`}
         </span>
-        <Button
-          onClick={() => {
-            setLeft(null);
-            setConfirmed(undefined);
-          }}
-          size="sm"
-          variant="outline"
-        >
+        <Button onClick={undo} size="sm" variant="outline">
           <Trans context="take an answer back before it counts">Undo</Trans>
         </Button>
       </span>
@@ -493,7 +528,16 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       <span className="font-medium">{waits.asks}</span>
       <span className="text-muted-foreground text-xs">{waitsSince}</span>
       <ErrorText>{failure}</ErrorText>
-      <span className="flex justify-end gap-2">
+      <span className="flex flex-wrap items-center justify-end gap-2">
+        {/* An answer with a comment, which a decision may require: on the
+            decision's own page, which has the field. */}
+        <Link
+          className="text-muted-foreground mr-auto text-xs hover:underline"
+          params={{ decision: waits.decision }}
+          to="/decisions/$decision"
+        >
+          <Trans>Answer with a comment</Trans>
+        </Link>
         <Button
           disabled={busy}
           onClick={() => {
@@ -520,8 +564,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
         }}
         onConfirm={(answering) => {
           setPending(undefined);
-          setConfirmed(answering);
-          setLeft(graceSeconds);
+          hold(answering);
         }}
         pending={pending}
         source="page"
@@ -581,7 +624,52 @@ const WhereItIs = ({
   );
 };
 
-export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
+/** How often Today is read again while it shows, in milliseconds. */
+const refreshMs = 30_000;
+
+/**
+ * The day as core serves it now: `loaded`, the page's read, then read
+ * again every `refreshMs` while the page is in view, so new waits come
+ * in, ended runs end and now moves on. Whichever read is the later wins.
+ */
+const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
+  const core = useCore();
+  const [read, setRead] = useState<WorkflowsToday>();
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const readAgain = async (): Promise<void> => {
+      if (document.visibilityState === "visible") {
+        try {
+          const next = await core.withSession(
+            async (session) => await session.workflows.today()
+          );
+          if (!stopped) {
+            setRead(next);
+          }
+        } catch {
+          // Shown as last read; the next read may reach core again.
+        }
+      }
+      if (!stopped) {
+        timer = setTimeout(() => {
+          void readAgain();
+        }, refreshMs);
+      }
+    };
+    timer = setTimeout(() => {
+      void readAgain();
+    }, refreshMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [core]);
+  return laterDay(loaded, read);
+};
+
+export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
+  const today = useLatestToday(loaded);
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
   const day = laneDay(today);
@@ -589,7 +677,7 @@ export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
   const run = all.find(({ id }) => id === chosen);
   const journey = run === undefined ? [] : journeyOf(day, run.key);
   const lit = new Set(journey.map(({ id }) => id));
-  const { unseen } = day;
+  const { cutOff, unseen } = day;
   return (
     <section
       aria-label={t({
@@ -619,6 +707,14 @@ export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
           </ul>
         </>
       )}
+      {cutOff > 0 ? (
+        <p className="text-muted-foreground text-xs">
+          {t`${plural(cutOff, {
+            one: "# earlier run today isn't shown: only the latest fit",
+            other: "# earlier runs today aren't shown: only the latest fit",
+          })}`}
+        </p>
+      ) : null}
       {unseen > 0 ? (
         <p className="text-muted-foreground text-xs">
           {t`${plural(unseen, {

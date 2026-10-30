@@ -8,7 +8,6 @@ import {
   dockDrawer,
   dockDrawerWidth,
   setDockDrawerWidth,
-  setDockMode,
   settledDrawerWidth,
   useDockDrawerWidth,
   widestDockDrawer,
@@ -29,10 +28,13 @@ export const useDockWidth = (
   drawer: boolean
 ): ((width: number) => void) => {
   const drawerWidth = useDockDrawerWidth();
-  const width = drawer ? drawerWidth : dockDrawer.normal;
+  // Again whenever the dock changes between the frame and the drawer: a
+  // drag shows a width of its own (the returned setter) that the frame
+  // mustn't keep, even when the kept width is the same as before.
   useLayoutEffect(() => {
+    const width = drawer ? drawerWidth : dockDrawer.normal;
     dock.current?.style.setProperty("--dock-width", `${width}px`);
-  }, [dock, width]);
+  }, [dock, drawer, drawerWidth]);
   // The room the pages that make room for the drawer leave it (dockDrawerRoom).
   useLayoutEffect(() => {
     document.documentElement.style.setProperty(
@@ -59,19 +61,21 @@ export const useDockWidth = (
 
 /**
  * A click into the folded box (`dock`), with a conversation behind it
- * (`unfolds`), opens the chat on it, even with the cursor already in the
+ * (`unfolds`), opens the chat on it (`onOpen`, the same as OpenChat's, so
+ * an App's chat is found either way), even with the cursor already in the
  * box. Tabbing into the box is to type in it; the keyboard's way in is
  * OpenChat.
  */
 export const useUnfoldOnPointer = (
   dock: RefObject<HTMLElement | null>,
-  unfolds: boolean
+  unfolds: boolean,
+  onOpen: () => void
 ): void => {
   useEffect(() => {
     const element = dock.current;
     const unfold = (event: Event): void => {
       if (event.target instanceof HTMLTextAreaElement) {
-        setDockMode("frame");
+        onOpen();
       }
     };
     if (unfolds) {
@@ -80,7 +84,7 @@ export const useUnfoldOnPointer = (
     return () => {
       element?.removeEventListener("pointerdown", unfold);
     };
-  }, [dock, unfolds]);
+  }, [dock, unfolds, onOpen]);
 };
 
 /**
