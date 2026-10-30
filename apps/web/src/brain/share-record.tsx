@@ -23,7 +23,7 @@ import {
 } from "@grasp-os/ui/components/radio-group";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Share2Icon } from "lucide-react";
+import { UsersIcon } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
@@ -209,7 +209,7 @@ export const ShareRecord = ({
     <Dialog onOpenChange={setOpen} open={open}>
       <div>
         <DialogTrigger render={<Button variant="outline" />}>
-          <Share2Icon data-icon="inline-start" />
+          <UsersIcon data-icon="inline-start" />
           <Trans>Share it</Trans>
         </DialogTrigger>
       </div>
