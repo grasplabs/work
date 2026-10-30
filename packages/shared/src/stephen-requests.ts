@@ -874,6 +874,12 @@ export interface WeeklySummary {
   teamsOpen: boolean;
 }
 
+/** The requests billed this month, the whole company's, against what the plan includes (null without a plan that counts them). */
+export interface MonthBilled {
+  billed: number;
+  included: number | null;
+}
+
 /** Stephen's week, for the card on top of Settings › Stephen. */
 export interface StephenWeek {
   /** People who asked him something these seven days, and people who may reach him. */
@@ -922,6 +928,8 @@ export interface StephenRequestsApi {
   setSummary: (via: SummaryVia | null) => Promise<void>;
   /** Stephen's week, for Settings › Stephen. */
   week: () => Promise<StephenWeek>;
+  /** The requests billed this month and what the plan includes, for Settings › Billing. */
+  billed: () => Promise<MonthBilled>;
 }
 
 /** Why a call on Stephen's requests was refused. */

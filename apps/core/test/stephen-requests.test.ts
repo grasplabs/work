@@ -429,17 +429,23 @@ describe("the requests report", setUpTime, () => {
     });
 
     const page = await owner.api.stephenRequests.report({ range: "month" });
+    const builder = await signedInApi(idp, "builder");
 
     expect({
+      // Settings › Billing's one number: the report's, without the report.
+      billed: await owner.api.stephenRequests.billed(),
+      builderBilled: await outcome(builder.api.stephenRequests.billed()),
       included: page.settings.requestsIncluded,
-      billed: page.report.total.billed,
+      reportBilled: page.report.total.billed,
       notPossible: page.report.notBilled.notPossible,
       pace: typeof page.pace,
       workflows: page.report.byKind.find(({ key }) => key === "workflow")
         ?.billed,
     }).toStrictEqual({
+      billed: { billed: 5, included: 400 },
+      builderBilled: "role.forbidden",
       included: 400,
-      billed: 5,
+      reportBilled: 5,
       notPossible: 5,
       pace: "number",
       workflows: 5,

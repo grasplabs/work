@@ -97,7 +97,10 @@ const useEased = (value: number): number => {
         frame = requestAnimationFrame(step);
       }
     };
-    frame = requestAnimationFrame(step);
+    // Nothing to count as the page first shows, or when read again unchanged.
+    if (start !== value) {
+      frame = requestAnimationFrame(step);
+    }
     return () => {
       cancelAnimationFrame(frame);
     };

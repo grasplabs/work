@@ -1,5 +1,7 @@
+import { failureText } from "@grasp-os/shared/errors";
 import { noBilling } from "@grasp-os/shared/org-settings";
-import type { RequestsPage } from "@grasp-os/shared/stephen-requests";
+import { roleErrors } from "@grasp-os/shared/roles";
+import type { MonthBilled } from "@grasp-os/shared/stephen-requests";
 import {
   Alert,
   AlertDescription,
@@ -11,6 +13,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLinkIcon, InfoIcon } from "lucide-react";
 
+import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -32,7 +35,29 @@ import {
 // is linked yet, so there is no plan, card or invoice, and every way into
 // Stripe is shown but not usable. Beside the plan, Stephen's requests
 // outside Grasp this month, which the plan bills, with the way to how they
-// are used; left out when core doesn't give them to the viewer.
+// are used: left out when core refuses them to the viewer, and saying why
+// when they can't be read otherwise.
+
+/** Stephen's requests this month as the page read them: the count, refused to the viewer, or why not read. */
+type RequestsRead =
+  | { state: "ready"; billed: MonthBilled }
+  | { state: "refused" }
+  | { state: "failed"; reason: string };
+
+/**
+ * Reads Stephen's requests this month on its own, so the page stands
+ * without them: core refuses them to whoever may not see them.
+ */
+const readRequests = async (session: Session): Promise<RequestsRead> => {
+  try {
+    return { state: "ready", billed: await session.stephenRequests.billed() };
+  } catch (error) {
+    if (roleErrors.codeOf(error) === "role.forbidden") {
+      return { state: "refused" };
+    }
+    return { state: "failed", reason: failureText(error) };
+  }
+};
 
 /** A way into Stripe's billing portal; shown but not usable without the link. */
 const StripeButton = ({ label }: { label: string }) => (
@@ -49,11 +74,22 @@ const Nothing = () => (
   </span>
 );
 
-/** Stephen's requests outside Grasp this month, against what the plan includes when it says. */
-const RequestsRow = ({ requests }: { requests: RequestsPage }) => {
+/** Stephen's requests outside Grasp this month, against what the plan includes when it says; or why they can't be read. */
+const RequestsRow = ({
+  requests,
+}: {
+  requests: Exclude<RequestsRead, { state: "refused" }>;
+}) => {
   const { t } = useLingui();
-  const used = formatNumber(requests.report.total.billed);
-  const included = requests.settings.requestsIncluded;
+  if (requests.state === "failed") {
+    return (
+      <SettingsRow label={t`Stephen’s requests`}>
+        <ErrorText>{requests.reason}</ErrorText>
+      </SettingsRow>
+    );
+  }
+  const used = formatNumber(requests.billed.billed);
+  const { included } = requests.billed;
   const of = included === null ? "" : formatNumber(included);
   return (
     <SettingsRow
@@ -132,7 +168,7 @@ const BillingPage = () => {
         >
           <Nothing />
         </SettingsRow>
-        {page.data.requests === null ? null : (
+        {page.data.requests.state === "refused" ? null : (
           <RequestsRow requests={page.data.requests} />
         )}
       </SettingsSection>
@@ -263,18 +299,7 @@ export const Route = createFileRoute("/_shell/settings/billing")({
     await loadFromCore(core, async (session) => {
       const [billing, requests] = await Promise.all([
         session.orgSettings.billing(),
-        // Its own read, so the page stands without it.
-        (async () => {
-          try {
-            return await session.stephenRequests.report({
-              range: "month",
-              place: null,
-              team: null,
-            });
-          } catch {
-            return null;
-          }
-        })(),
+        readRequests(session),
       ]);
       return { billing, requests };
     }),
