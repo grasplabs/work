@@ -623,6 +623,8 @@ export const createFromBlueprint = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: now,
+    removedAt: null,
+    removedBy: null,
   };
   const versionRow: VersionRow = {
     appId: app,
@@ -689,6 +691,8 @@ export const createFromBlueprint = async (
       statusChangedAt: sql<Date | null>`NULL`.as("status_changed_at"),
       statusChangedBy: sql<null>`NULL`.as("status_changed_by"),
       createdAt: sql<Date>`${appRow.createdAt.getTime()}`.as("created_at"),
+      removedAt: sql<Date | null>`NULL`.as("removed_at"),
+      removedBy: sql<string | null>`NULL`.as("removed_by"),
     })
     .from(blueprints)
     .where(

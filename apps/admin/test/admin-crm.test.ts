@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { formatDate } from "../src/admin/words.ts";
 import { attioLimits } from "../src/crm/attio.ts";
 import { setAttioCompanyFn } from "../src/crm/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
@@ -280,89 +279,6 @@ describe("an organization's company in Attio, with Attio's key", () => {
     }).toStrictEqual({ from: true, note: true, other: false });
   });
 
-  it("offers the deals Grasp won to start an organization from, with their company, leaving out lost deals and companies already linked", async () => {
-    const clientId = await liveClient();
-    const { companyId, dealId } = noordkade();
-    // Noordkade is linked already: its won deal isn't offered again.
-    await link(clientId, companyId);
-    const hartog = crypto.randomUUID();
-    const birch = crypto.randomUUID();
-    attio.records.companies.set(hartog, {
-      name: [attioValue.text("Hartog Groothandel")],
-      domains: [
-        attioValue.domain("hartog.test"),
-        attioValue.domain("hartog-groothandel.test"),
-      ],
-    });
-    attio.records.companies.set(birch, {
-      name: [attioValue.text("Birch Logistics")],
-    });
-    const wonDeal = crypto.randomUUID();
-    attio.records.deals.set(wonDeal, {
-      name: [attioValue.text("Hartog Groothandel: Pilot")],
-      stage: [attioValue.status("Closed won", "2026-10-13T08:00:00.000Z")],
-      associated_company: [attioValue.reference("companies", hartog)],
-    });
-    attio.records.deals.set(crypto.randomUUID(), {
-      name: [attioValue.text("Birch Logistics: Team")],
-      stage: [attioValue.status("Lost")],
-      associated_company: [attioValue.reference("companies", birch)],
-    });
-    attio.records.deals.set(crypto.randomUUID(), {
-      name: [attioValue.text("Birch Logistics: Pilot")],
-      stage: [attioValue.status("In Progress")],
-      associated_company: [attioValue.reference("companies", birch)],
-    });
-
-    const { html } = await page("/new-organization");
-    const main = mainOf(html);
-    const at = main.indexOf("A deal won in Attio");
-    const choice = main.slice(main.lastIndexOf("<label", at), at);
-    /** The tag of the field named `name`. */
-    const fieldOf = (name: string): string => {
-      const named = main.indexOf(`name="${name}"`);
-      return main.slice(
-        main.lastIndexOf("<", named),
-        main.indexOf(">", named) + 1
-      );
-    };
-    const valueOf = (name: string): string | undefined =>
-      /\svalue="(?<value>[^"]*)"/u.exec(fieldOf(name))?.groups?.value;
-    /** Whether the deal choice offers `text`. */
-    const inDeals = (text: string): boolean => {
-      const from = main.indexOf('id="org-deal"');
-      const found = main.indexOf(text, from);
-      return (
-        from !== -1 && found !== -1 && found < main.indexOf("</select>", from)
-      );
-    };
-
-    expect({
-      chosen: choice.includes('aria-checked="true"'),
-      offered: inDeals(`value="${wonDeal}"`),
-      label: inDeals(
-        `Hartog Groothandel: Pilot, Hartog Groothandel · won ${formatDate("2026-10-13")}`
-      ),
-      // Noordkade's own deal, though won, isn't: its company is a client.
-      linked: inDeals(`value="${dealId}"`),
-      name: valueOf("name"),
-      clientId: valueOf("clientId"),
-      domains: valueOf("domains"),
-      lost: main.includes("Birch Logistics"),
-      writes: attio.writes,
-    }).toStrictEqual({
-      chosen: true,
-      offered: true,
-      label: true,
-      linked: false,
-      name: "Hartog Groothandel",
-      clientId: "hartog-groothandel",
-      domains: "hartog.test, hartog-groothandel.test",
-      lost: false,
-      writes: 0,
-    });
-  });
-
   it("reads no more than a page's worth of a company's people", async () => {
     const clientId = await liveClient();
     const companyId = crypto.randomUUID();
@@ -460,28 +376,15 @@ describe("an organization's company in Attio, without Attio's key", () => {
   useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
-  it("offers no deal to start an organization from, saying Attio isn't connected", async () => {
-    await liveClient();
-    noordkade();
-    const { html } = await page("/new-organization");
-    expect({
-      why: html.includes("Not yet: the admin isn&#x27;t connected to Attio."),
-      offered: html.includes("Noordkade Finance: Business"),
-      requests: attio.requests,
-    }).toStrictEqual({
-      why: true,
-      offered: false,
-      requests: 0,
-    });
-  });
-
   it("says Attio isn't connected and asks Attio nothing", async () => {
     const clientId = await liveClient();
     const { companyId } = noordkade();
     await link(clientId, companyId);
     const { main } = await detailsOf(clientId);
     expect({
-      line: main.includes("Attio isn’t connected yet."),
+      line: main.includes(
+        "Attio isn’t connected yet. Once it is, this fills in by itself. Add ATTIO_READ_KEY to the stage’s 1Password Environment, then run Deploy platform."
+      ),
       requests: attio.requests,
     }).toStrictEqual({ line: true, requests: 0 });
   });

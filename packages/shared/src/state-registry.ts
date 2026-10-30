@@ -311,7 +311,11 @@ const coreDb: D1State = {
     ),
     run_brain_evidence: transient(
       `${core}workflows/host.ts`,
-      "What each run's latest recall cites, checked before its next calls."
+      "What each run's recalls and reads cite, checked before its next calls."
+    ),
+    run_chat_sources: transient(
+      `${core}workflow-starts.ts`,
+      "What the chat that had a run started had read, checked before its next calls."
     ),
     run_evidence_holds: transient(
       `${core}workflows/resource-reads.ts`,
@@ -510,6 +514,14 @@ const knowledgeDb: D1State = {
     brain_capture_cursors: exported(
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
+    ),
+    brain_eval_suite_versions: exported(
+      `${brain}eval-suites.ts`,
+      "Each learning suite version, frozen by its digests, and who accepted it."
+    ),
+    brain_eval_cases: exported(
+      `${brain}eval-suites.ts`,
+      "The cases of each learning suite version, by split, with their answer keys."
     ),
     brain_erased_evidence: exported(
       `${brain}outcomes.ts`,
@@ -760,6 +772,10 @@ const onboarding: DurableObjectState = {
     brain_sent: exported(
       `${core}onboarding/store.ts`,
       "Who each record the onboarding gave the brain rests on: what deleting an interview takes out of it."
+    ),
+    referrals: exported(
+      `${core}onboarding/store.ts`,
+      "Who said the work they were asked about isn't theirs, until who does what is put right."
     ),
     draw_failures: transient(
       `${core}onboarding/store.ts`,

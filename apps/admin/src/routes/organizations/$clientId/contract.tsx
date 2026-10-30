@@ -38,6 +38,7 @@ import { useOrganization } from "../../../admin/organization.tsx";
 import { RoomsLink } from "../../../admin/rooms-link.tsx";
 import { StripeLink } from "../../../admin/stripe-link.tsx";
 import {
+  addSecretStep,
   contractWords,
   euros,
   formatDate,
@@ -71,8 +72,8 @@ const plural = (count: number, one: string, other: string): string =>
   count === 1 ? one : other;
 
 /** What an outside system hasn't brought yet: one line, as the prototype says it for every source. */
-const notConnected = (name: string): string =>
-  `Once ${name} is connected, this fills in by itself.`;
+const notConnected = (name: string, secret: string): string =>
+  `Once ${name} is connected, this fills in by itself. ${addSecretStep(secret)}`;
 
 /** Each agreement by name. */
 const agreementWords: Record<keyof Agreed, string> = {
@@ -106,9 +107,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-4 py-4 sm:px-5">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span
       className={cn(
         "text-xs",
@@ -303,7 +302,7 @@ const lastSigned = (room: ProposalRoom): ProposalSignature | undefined =>
 const proposalLine = (proposal: Proposal): string => {
   switch (proposal.state) {
     case "not_connected": {
-      return notConnected("Rooms");
+      return notConnected("Rooms", "ROOMS_READ_TOKEN");
     }
     case "not_linked": {
       return "Not linked to its room in Rooms yet. Link it by the room’s id, and this fills in by itself.";
@@ -614,7 +613,7 @@ const unreadWords: Record<StripeReadError, string> = {
 const billingLine = (billing: Billing): string => {
   switch (billing.state) {
     case "not_connected": {
-      return notConnected("Stripe");
+      return notConnected("Stripe", "STRIPE_RESTRICTED_KEY");
     }
     case "not_linked": {
       return "Not linked to its customer in Stripe yet. Link it by the customer’s id, and this fills in by itself.";

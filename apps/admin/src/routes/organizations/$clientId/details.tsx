@@ -10,7 +10,12 @@ import type { ReactNode } from "react";
 import { AttioLink } from "../../../admin/attio-link.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { sourceNames } from "../../../admin/sections.ts";
-import { formatDate, formatList, money } from "../../../admin/words.ts";
+import {
+  addSecretStep,
+  formatDate,
+  formatList,
+  money,
+} from "../../../admin/words.ts";
 import type { AttioReadError } from "../../../crm/attio.ts";
 import type { Crm, CrmDeal, CrmRecords } from "../../../crm/crm.ts";
 
@@ -89,9 +94,7 @@ const Company = () => {
   return (
     <section className="bg-card flex flex-wrap items-start justify-between gap-x-8 gap-y-3 rounded-xl border px-5 py-4">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="text-2xl leading-tight font-medium tracking-tight">
-          {org.name}
-        </h2>
+        <h2 className="type-title">{org.name}</h2>
         <p className="text-muted-foreground">
           {about === "" ? "What it does is not known yet" : about}
         </p>
@@ -212,7 +215,7 @@ const noCallsLine = (crm: Crm): string => {
       return "Once it is linked to its company in Attio, above, this fills in by itself.";
     }
     case "not_connected": {
-      return `Once ${sourceNames.attio} is connected, this fills in by itself.`;
+      return `Once ${sourceNames.attio} is connected, this fills in by itself. ${addSecretStep("ATTIO_READ_KEY")}`;
     }
     default: {
       return crm satisfies never;
@@ -293,7 +296,7 @@ const attioUnreadWords: Record<AttioReadError, string> = {
 const crmLine = (crm: Crm): string => {
   switch (crm.state) {
     case "not_connected": {
-      return `${sourceNames.attio} isn’t connected yet. Once it is, this fills in by itself.`;
+      return `${sourceNames.attio} isn’t connected yet. Once it is, this fills in by itself. ${addSecretStep("ATTIO_READ_KEY")}`;
     }
     case "not_linked": {
       return "Not linked to its company in Attio yet. Link it by the company’s record id, and this fills in by itself.";

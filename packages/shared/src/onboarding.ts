@@ -284,6 +284,12 @@ export interface OnboardingView {
    * before their link can go out: new on a list saved while a plan was set.
    */
   waiting: number;
+  /**
+   * Whether the deployment can send mail where it runs: false where
+   * nothing is bound to send it, as on hosting where mail isn't available
+   * yet. Links then go out by hand alone.
+   */
+  mailSends: boolean;
 }
 
 /**
@@ -343,6 +349,22 @@ export interface LinkToSend {
   path: string | null;
   /** Out, and not taken by the admin since: new since they last took links. */
   fresh: boolean;
+  /** Their latest mail from Grasp, when it failed; null otherwise. */
+  failedMail: FailedMail | null;
+}
+
+/**
+ * Someone's latest mail from Grasp (their link, or the reminder), when it
+ * failed for good: which, why as the mail service said it, and when.
+ * Never its words or its address. Staff send it again (`sendMailAgain`)
+ * once what stopped it is put right.
+ */
+export interface FailedMail {
+  kind: "link" | "reminder";
+  /** The mail service's code, or core's own (`mail.unfilled`); null when it gave none. */
+  reason: string | null;
+  /** When it failed (ISO 8601). */
+  at: string;
 }
 
 /** How many weeks the programme with Grasp runs. */
