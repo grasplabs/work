@@ -671,6 +671,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * Discards the chat's draft of `app`: its changes go, its versions stay
+   * to restore one. Only while the person builds the App, as for
+   * restoring one.
+   */
+  async discardDraft(chatId: string, app: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      const { id } = await appFor(this.#env, by, app, "builder");
+      await this.#chatsOf(by.userId).discardDraft(
+        chatIdOf(chatId),
+        by.userId,
+        id,
+        actorOf(by)
+      );
+    });
+  }
+
+  /**
    * A screen of the chat's draft of `app`, to preview (preview.ts): only
    * while the person builds the App, as the agent must to write it. With
    * `version`, of that version of the draft, read-only: built the same

@@ -1337,7 +1337,8 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.deleted"
       | "chat.moved"
-      | "chat.draft_restored",
+      | "chat.draft_restored"
+      | "chat.draft_discarded",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -4476,6 +4477,34 @@ export class Workspace extends DurableObject<Env> {
     this.#dropPreview(id, appId);
     this.#draftsChanged(id);
     return restored;
+  }
+
+  /**
+   * Discards `personId`'s own chat's draft of App `appId`, audited as
+   * `by`'s: its changes go, its versions stay (to restore one), and its
+   * revision goes on, so a write of the agent's that read the draft
+   * before lands on nothing (`saveDraft`). Whatever the draft is now, as
+   * the person chose it; a draft that changes nothing is discarded all the
+   * same, and audited once each time.
+   */
+  discardDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    // No await from here to the outbox: the drop and its event are
+    // written together, as one of the object's turns.
+    const { revision } = this.draft(id, appId);
+    if (!this.dropDraft(id, appId, { revision })) {
+      throw appErrors.create("app.conflict");
+    }
+    this.#outboxed(by, "chat.draft_discarded", id, {
+      app: appId,
+      revision: revision + 1,
+    });
+    this.#deliverAudit();
   }
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
