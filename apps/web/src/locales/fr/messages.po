@@ -4328,6 +4328,10 @@ msgstr "Modifie les données du domaine"
 msgid "Changes to the domain's stores"
 msgstr "Modifications des magasins du domaine"
 
+#: src/screens/submission-recovery.tsx
+msgid "Changes whose outcome you may not have seen"
+msgstr "Modifications dont vous n’avez peut-être pas vu le résultat"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "Facturer"
@@ -5531,6 +5535,7 @@ msgstr "Découverte"
 msgid "Discovery sources"
 msgstr "Sources de détection"
 
+#: src/screens/submission-recovery.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Fermer"
@@ -5539,6 +5544,10 @@ msgstr "Fermer"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Ignorer"
+
+#: src/screens/submission-recovery.tsx
+msgid "Dismiss {operation}, sent {sent}"
+msgstr "Ignorer {operation}, envoyé {sent}"
 
 #: src/dashboard/signals.tsx
 msgid "Dismiss this signal about {name}"
@@ -7936,6 +7945,10 @@ msgstr "Elle a échoué sur ses enregistrements de test quand la version a été
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 msgstr "Il a échoué en agissant pour vous. Demandez à l’agent de le corriger : une nouvelle discussion s’ouvre, avec le rapport d’échec de l’exécution en pièce jointe."
 
+#: src/screens/submission-recovery.tsx
+msgid "It failed."
+msgstr "Cela a échoué."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "It happened"
@@ -8098,6 +8111,10 @@ msgstr "Il a été libéré le {when}, sans rien facturer."
 msgid "It went through no other workflow today."
 msgstr "Il n’est passé par aucun autre workflow aujourd’hui."
 
+#: src/screens/submission-recovery.tsx
+msgid "It went through."
+msgstr "Cela a abouti."
+
 #: src/workflows/files-and-apps.tsx
 msgid "It works in no app."
 msgstr "Il ne travaille dans aucune application."
@@ -8113,6 +8130,10 @@ msgstr "Elle n’existe plus, ou vous ne pouvez pas la lire."
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "Il se trouve après les {pageMaxLimit} premiers fichiers listés : ouvrez-le d’ici."
+
+#: src/screens/submission-recovery.tsx
+msgid "It’s too long ago to tell whether it went through. Check before you try again."
+msgstr "C’est trop ancien pour savoir si cela a abouti. Vérifiez avant de réessayer."
 
 #: src/workflows/traces.tsx
 msgid "Item {item}"
@@ -10718,6 +10739,10 @@ msgstr "Rien ne vous attend"
 msgid "Nothing waits on you."
 msgstr "Rien ne vous attend."
 
+#: src/screens/submission-recovery.tsx
+msgid "Nothing was saved."
+msgstr "Rien n’a été enregistré."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Rien pour l’instant"
@@ -12408,6 +12433,10 @@ msgstr "Prêt"
 #: src/workflows/item-test.tsx
 msgid "Real run"
 msgstr "Exécution réelle"
+
+#: src/screens/submission-recovery.tsx
+msgid "Reason: {category}."
+msgstr "Motif : {category}."
 
 #: src/chat/thread.tsx
 msgid "Reasoning"
@@ -14406,6 +14435,10 @@ msgstr "En suspens : {question}"
 msgid "Still open: {question} {who} can answer it."
 msgstr "En suspens : {question} {who} peut y répondre."
 
+#: src/screens/submission-recovery.tsx
+msgid "Still running."
+msgstr "Toujours en cours."
+
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "En attente"
@@ -15952,6 +15985,10 @@ msgstr "Cette application a quitté son cadre et a été arrêtée."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Cette application a perdu sa connexion avec la page et a été arrêtée."
+
+#: src/screens/submission-recovery.tsx
+msgid "This app sent these, but the page may have closed or lost its connection before it showed how they came out. Check each, then dismiss it."
+msgstr "Cette app les a envoyées, mais la page s’est peut-être fermée ou a perdu la connexion avant d’en montrer le résultat. Vérifiez chacune, puis ignorez-la."
 
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
@@ -17949,6 +17986,10 @@ msgstr "Où vivent vos données, et l’heure utilisée par Grasp."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Où, par exemple Dropbox"
+
+#: src/screens/submission-recovery.tsx
+msgid "Whether it went through can’t be told. Check before you try again."
+msgstr "Impossible de savoir si cela a abouti. Vérifiez avant de réessayer."
 
 #: src/settings/staff-access.tsx
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."
