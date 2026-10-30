@@ -19,6 +19,18 @@ export interface ValueBounds {
 }
 
 /**
+ * How deep and how big plain data may be by default: as deep as Cap'n
+ * Web reads a message by default, the deepest any reader of ours takes
+ * (a browser's connection, a screen's frame), and as big as the longest
+ * message workerd's RPC or Cap'n Web carries. A bound on the walk and the
+ * clone after it, not on what an App may answer, which its readers bound.
+ */
+export const plainDataBounds: ValueBounds = {
+  depth: 256,
+  size: 32 * 1024 * 1024,
+};
+
+/**
  * Which bound a value passed: too deep, too big, or holding an object of
  * a kind it can't be measured by (an unknown prototype).
  */

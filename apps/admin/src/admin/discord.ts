@@ -69,6 +69,7 @@ import { audit, adminDatabase } from "../db/act.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { boundedText } from "../request-body.ts";
 import { discordCommandName, discordSubcommands } from "./discord-commands.ts";
+import { discordPublicKey, snowflake, staffIds } from "./discord-settings.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where Discord posts interactions. */
@@ -93,9 +94,6 @@ const maxMessageChars = 2000;
 const PING = 1;
 const APPLICATION_COMMAND = 2;
 const EPHEMERAL = 64;
-
-/** A Discord id (a snowflake). */
-const snowflake = z.string().regex(/^\d{1,20}$/u);
 
 const optionSchema = z.object({
   name: z.string(),
@@ -174,15 +172,6 @@ export const signedByDiscord = async (
     return false;
   }
 };
-
-/** The Discord user ids that are Grasp's staff, from `DISCORD_STAFF_IDS`. */
-const staffIds = (env: Env): ReadonlySet<string> =>
-  new Set(
-    (env.DISCORD_STAFF_IDS ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => snowflake.safeParse(id).success)
-  );
 
 /** A question, as a subcommand asks it. */
 type Question =
@@ -549,7 +538,7 @@ const discordBot = (
         // again, the same way, before anything reaches a handler.
         webhookVerifier: async (request, body) =>
           await signedByDiscord(
-            env.DISCORD_PUBLIC_KEY ?? "",
+            discordPublicKey(env),
             request.headers.get("x-signature-ed25519") ?? "",
             request.headers.get("x-signature-timestamp") ?? "",
             body
@@ -592,7 +581,7 @@ export const discordInteraction = async (
     return refused(413, "Too large.");
   }
   const signed = await signedByDiscord(
-    env.DISCORD_PUBLIC_KEY ?? "",
+    discordPublicKey(env),
     request.headers.get("x-signature-ed25519") ?? "",
     request.headers.get("x-signature-timestamp") ?? "",
     body

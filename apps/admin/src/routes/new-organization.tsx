@@ -1,4 +1,5 @@
 import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Field,
   FieldContent,
@@ -39,6 +40,7 @@ import { formatDate } from "../admin/words.ts";
 import { signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { WonDeal } from "../crm/attio.ts";
 import { fetchWonDeals } from "../crm/functions.ts";
+import type { HostingKind } from "../hosting/organization.ts";
 import { fetchRoomsConnected } from "../proposal/functions.ts";
 import { clientIdProblem } from "../provision/client-id.ts";
 import { startClient } from "../provision/functions.ts";
@@ -169,6 +171,8 @@ const NewOrganization = () => {
       ? { name: "", clientId: "", domains: "" }
       : prefillOf(deal);
   const { busy, failure, run } = useProvisionAction();
+  const [hosting, setHosting] = useState<HostingKind>("grasp_cloud");
+  const [inEu, setInEu] = useState(true);
   const add = (form: FormData) => {
     const clientId = textOf(form, "clientId");
     const name = textOf(form, "name");
@@ -188,6 +192,8 @@ const NewOrganization = () => {
           name,
           ring: Number(textOf(form, "ring")),
           signIn: signInOf(form),
+          hosting,
+          jurisdiction: inEu ? "eu" : "none",
           ...(deal === undefined ? {} : { attioCompanyId: deal.companyId }),
         },
       });
@@ -305,10 +311,42 @@ const NewOrganization = () => {
           <FieldSet>
             <FieldLegend variant="label">Where its Grasp runs</FieldLegend>
             <FieldDescription>
-              Adding it starts nothing yet: on its Setup, you choose the release
-              it runs, and it is placed in the hosting destination that meets
-              its hosting policy and provisioned there.
+              Both are fixed once it is set up. On Grasp Cloud, setting it up
+              starts as soon as it is added; on its own premises, its Setup
+              shows the steps of its install.
             </FieldDescription>
+            <Field>
+              <FieldLabel htmlFor="org-hosting">Hosting</FieldLabel>
+              <NativeSelect
+                className="w-full"
+                id="org-hosting"
+                onChange={(event) => {
+                  setHosting(
+                    event.target.value === "on_prem" ? "on_prem" : "grasp_cloud"
+                  );
+                }}
+                value={hosting}
+              >
+                <NativeSelectOption value="grasp_cloud">
+                  Grasp Cloud
+                </NativeSelectOption>
+                <NativeSelectOption value="on_prem">
+                  On its own premises
+                </NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            {hosting === "grasp_cloud" ? (
+              <Field orientation="horizontal">
+                <Checkbox
+                  checked={inEu}
+                  id="org-in-eu"
+                  onCheckedChange={setInEu}
+                />
+                <FieldLabel htmlFor="org-in-eu">
+                  Keep its data in the EU
+                </FieldLabel>
+              </Field>
+            ) : null}
             <Field>
               <FieldLabel htmlFor="org-ring">Ring</FieldLabel>
               <NativeSelect
