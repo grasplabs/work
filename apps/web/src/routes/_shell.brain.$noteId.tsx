@@ -54,6 +54,7 @@ import {
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
+import { GapActions } from "../brain/gap-actions.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
@@ -607,6 +608,7 @@ const NoteToolbar = ({
           <BrainIcon />
           <Trans>Show in the brain</Trans>
         </Button>
+        {note.kind === "gap" ? <GapActions noteId={note.id} /> : null}
         <ExportButton note={note} source={source} />
         {onForget === undefined ? null : (
           <ForgetButton
