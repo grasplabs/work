@@ -1,6 +1,7 @@
 import { elsewhere, growth } from "@grasp-os/shared/stephen-requests";
 import type { Need, RequestsPage } from "@grasp-os/shared/stephen-requests";
 import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -294,7 +295,7 @@ export const RequestTable = ({
     setTrail([subject]);
   };
   return (
-    <section className="bg-card rounded-xl border">
+    <Card>
       <Tabs
         onValueChange={(value: unknown) => {
           if (isView(value)) {
@@ -303,7 +304,7 @@ export const RequestTable = ({
         }}
         value={view}
       >
-        <div className="px-6 pt-4">
+        <div className="px-6">
           <TabsList aria-label={t`What the table shows`} variant="line">
             <TabsTrigger className="flex-none" value="needs">
               {t({
@@ -383,6 +384,6 @@ export const RequestTable = ({
         range={page.range}
         trail={trail}
       />
-    </section>
+    </Card>
   );
 };

@@ -12,6 +12,13 @@ import {
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
 import { Switch } from "@grasp-os/ui/components/switch";
 import {
   Tooltip,
@@ -77,7 +84,7 @@ const Usage = ({ week }: { week: StephenWeek }) => {
   const { t } = useLingui();
   if (week.questions === 0) {
     return (
-      <p className="text-muted-foreground border-t px-5 py-3">
+      <p className="text-muted-foreground border-t pt-3">
         <Trans>Nobody asked him anything yet.</Trans>
       </p>
     );
@@ -88,7 +95,7 @@ const Usage = ({ week }: { week: StephenWeek }) => {
   const answered = formatNumber(week.answered);
   const questions = formatNumber(week.questions);
   return (
-    <div className="flex items-center gap-5 border-t px-5 py-4">
+    <div className="flex items-center gap-5 border-t pt-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="font-medium">{t`${asked} of ${reach} asked him this week`}</p>
         <Tooltip>
@@ -157,84 +164,91 @@ export const StephenCard = ({
   const { t } = useLingui();
   const [pausing, setPausing] = useState(false);
   return (
-    <section
-      aria-label="Stephen"
-      className="bg-card overflow-hidden rounded-xl border text-sm"
-    >
-      <div className="flex items-center gap-3 px-5 py-4">
-        <h2 className="min-w-0 flex-1 font-medium">Stephen</h2>
-        <span className="text-muted-foreground">
-          {reach.on ? t`On` : t`Paused outside Grasp`}
-        </span>
-        <Switch
-          aria-label={t`Stephen outside Grasp`}
-          checked={reach.on}
-          disabled={!can}
-          onCheckedChange={(on) => {
-            if (on) {
-              void onReach(true, reach.audience);
-              return;
-            }
-            setPausing(true);
-          }}
-        />
-      </div>
-      <div className="flex flex-col gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-        <span>
-          <Trans>Who can talk to him</Trans>
-        </span>
-        <AudienceControl
-          editable={can}
-          key={JSON.stringify(reach.audience)}
-          label={t`Who can talk to him`}
-          offers={["everyone", "teams", "nobody"]}
-          teams={reach.teams}
-          value={chosenOf(reach.audience)}
-          onSave={async (chosen) => {
-            await onReach(reach.on, audienceOf(chosen));
-          }}
-        />
-      </div>
-      {week === null ? null : <Usage week={week} />}
-      {week === null || week.unanswered.length === 0 ? null : (
-        <div className="border-t px-5 pt-3 pb-1">
-          <h3 className="text-muted-foreground">
-            <Trans>What he didn’t know</Trans>
-          </h3>
-          <ul>
-            {week.unanswered.map((row) => (
-              <UnknownRow key={row.question} row={row} />
-            ))}
-          </ul>
-        </div>
-      )}
-      <AlertDialog onOpenChange={setPausing} open={pausing}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Pause Stephen outside Grasp?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                He stops answering everywhere outside Grasp, and says so once to
-                whoever writes. Grasp’s chat keeps working.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void onReach(false, reach.audience);
+    <section aria-label="Stephen">
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2>Stephen</h2>
+          </CardTitle>
+          <CardAction>
+            <span className="flex items-center gap-3">
+              <span className="text-muted-foreground">
+                {reach.on ? t`On` : t`Paused outside Grasp`}
+              </span>
+              <Switch
+                aria-label={t`Stephen outside Grasp`}
+                checked={reach.on}
+                disabled={!can}
+                onCheckedChange={(on) => {
+                  if (on) {
+                    void onReach(true, reach.audience);
+                    return;
+                  }
+                  setPausing(true);
+                }}
+              />
+            </span>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+            <span>
+              <Trans>Who can talk to him</Trans>
+            </span>
+            <AudienceControl
+              editable={can}
+              key={JSON.stringify(reach.audience)}
+              label={t`Who can talk to him`}
+              offers={["everyone", "teams", "nobody"]}
+              teams={reach.teams}
+              value={chosenOf(reach.audience)}
+              onSave={async (chosen) => {
+                await onReach(reach.on, audienceOf(chosen));
               }}
-            >
-              <Trans>Pause</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            />
+          </div>
+          {week === null ? null : <Usage week={week} />}
+          {week === null || week.unanswered.length === 0 ? null : (
+            <div className="border-t pt-3">
+              <h3 className="text-muted-foreground">
+                <Trans>What he didn’t know</Trans>
+              </h3>
+              <ul>
+                {week.unanswered.map((row) => (
+                  <UnknownRow key={row.question} row={row} />
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+        <AlertDialog onOpenChange={setPausing} open={pausing}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                <Trans>Pause Stephen outside Grasp?</Trans>
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                <Trans>
+                  He stops answering everywhere outside Grasp, and says so once
+                  to whoever writes. Grasp’s chat keeps working.
+                </Trans>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                <Trans>Cancel</Trans>
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  void onReach(false, reach.audience);
+                }}
+              >
+                <Trans>Pause</Trans>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
     </section>
   );
 };
