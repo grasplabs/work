@@ -1,3 +1,4 @@
+import { Item, ItemGroup } from "@grasp-os/ui/components/item";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -15,7 +16,7 @@ const suggestions: readonly MessageDescriptor[] = [
 ];
 
 /** The starting questions; `onPick` asks the one picked, as it reads here. */
-export const Suggestions = ({
+export const StartingQuestions = ({
   disabled = false,
   onPick,
 }: {
@@ -24,24 +25,34 @@ export const Suggestions = ({
 }) => {
   const { t, i18n } = useLingui();
   return (
-    <ul aria-label={t`Questions to start with`} className="flex flex-col">
+    <ItemGroup
+      aria-label={t`Questions to start with`}
+      render={<ul />}
+      spacing="tight"
+    >
       {suggestions.map((suggestion) => {
         const question = i18n._(suggestion);
         return (
-          <li className="flex" key={suggestion.id}>
-            <button
-              className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 min-w-0 flex-1 truncate rounded-lg px-4.5 py-2 text-left text-sm transition-colors duration-150 outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50"
-              disabled={disabled}
+          <li key={suggestion.id}>
+            <Item
               onClick={() => {
                 onPick(question);
               }}
-              type="button"
+              render={
+                <button
+                  aria-label={question}
+                  disabled={disabled}
+                  type="button"
+                />
+              }
+              size="sm"
+              variant="quiet"
             >
               {question}
-            </button>
+            </Item>
           </li>
         );
       })}
-    </ul>
+    </ItemGroup>
   );
 };

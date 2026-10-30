@@ -211,7 +211,10 @@ const RequestsView = ({ page }: { page: RequestsPage }) => {
             : t`No requests in ${month}`}
         </Note>
       ) : null}
-      {!page.tooFew && page.report.total.requests > 0 ? (
+      {/* Needs you follows no filter or span: what waits stays in reach
+          when the report shows nothing. */}
+      {(!page.tooFew && page.report.total.requests > 0) ||
+      (aside?.needs?.length ?? 0) > 0 ? (
         <RequestTable
           busy={busy}
           needs={aside === undefined ? undefined : aside.needs}
@@ -232,6 +235,7 @@ const RequestsView = ({ page }: { page: RequestsPage }) => {
           }}
           page={page}
           place={place}
+          team={team}
         />
       ) : null}
     </>
