@@ -5,7 +5,6 @@ import type {
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 
 import type { Integration } from "../connections/integrations.ts";
-import { workflowsOf } from "../connections/integrations.ts";
 
 // The apps an independent workflow works in, from its connector bindings:
 // those an active approval serves through a connection (core's
@@ -47,11 +46,21 @@ export const workflowAppsOf = ({
   bindings: readonly WorkflowVersionBinding[];
   approvals: readonly WorkflowBindingApproval[];
 }): WorkflowApps => {
-  const connected = integrations.filter((integration) =>
-    workflowsOf(integration, uses).some(
-      (using) => using.kind === "independent" && using.id === workflow
-    )
+  // Each with only its connections that serve it: how it stands is theirs,
+  // never another account's of the same app this workflow doesn't use.
+  const serving = new Set(
+    uses
+      .filter(({ workflows }) =>
+        workflows.some(
+          (using) => using.kind === "independent" && using.id === workflow
+        )
+      )
+      .map(({ connectionId }) => connectionId)
   );
+  const connected = integrations.flatMap((integration) => {
+    const own = integration.connections.filter(({ id }) => serving.has(id));
+    return own.length === 0 ? [] : [{ ...integration, connections: own }];
+  });
   const served = new Set(
     approvals
       .filter(

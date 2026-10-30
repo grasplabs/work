@@ -193,7 +193,7 @@ export default function Tally() {
  * than the default 5 seconds.
  */
 const openTally = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/engines/${app}/apps/tally/full`);
+  await page.goto(`/domains/${app}/apps/tally/full`);
   const screen = page.frameLocator('iframe[title="tally app"]');
   await expect(screen.getByRole("status")).toContainText("in the App", {
     timeout: 20_000,
