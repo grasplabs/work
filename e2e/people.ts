@@ -363,6 +363,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainChanges: { member: "user" },
   brainTranscript: { member: "user" },
   brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   boardGoals: { admin: "admin", member: "user" },
