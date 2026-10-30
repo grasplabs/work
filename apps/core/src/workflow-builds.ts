@@ -14,6 +14,7 @@ import {
   maxTemplateKeyLength,
   taskAtLine,
 } from "@grasp-os/open-workflow/generate";
+import { profileLimits } from "@grasp-os/open-workflow/limits";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
@@ -169,8 +170,8 @@ const sealedTaskIdSchema = z
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u);
 
 /**
- * The most scopes one inside another a task runs in: `for` tasks around
- * it (spec 18, eight levels).
+ * The most scopes one inside another a task runs in: `for` and `fork`
+ * tasks around it (spec 18, eight levels).
  */
 export const maxTaskScopes = 8;
 
@@ -180,10 +181,17 @@ const taskBase = {
   /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
   steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
   /**
-   * The `for` tasks around it, outermost first: each of its steps runs in
-   * an item of each (generate.ts, `GeneratedTask.scope`).
+   * The `for` and `fork` tasks around it, outermost first: each of its
+   * steps runs in an item, or a branch, of each (generate.ts,
+   * `GeneratedTask.scope`).
    */
   scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
+  /**
+   * Beside `scope`: for each `fork` around it, the branch it is in, and
+   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
+   * runs its steps only in that branch of each fork.
+   */
+  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
   /** The descriptors of its input, output and export schemas. */
   schemas: z.strictObject({
     input: descriptorSchema.optional(),
@@ -306,7 +314,7 @@ export type SealedCall = z.infer<typeof sealedCallSchema>;
  * `GeneratedListen`): its event binding, its strategy, what of each event
  * it reads, and its filters, each a type and the CloudEvents attributes it
  * requires (by CloudEvents' rule for names), each a template the host
- * builds in the task's enter step.
+ * builds in the task's enter step, and its correlations.
  */
 const sealedListenSchema = z.strictObject({
   binding: aliasSchema,
@@ -321,6 +329,21 @@ const sealedListenSchema = z.strictObject({
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
           )
           .max(16),
+        // Each correlation by name, and the inbox attribute it correlates
+        // on (generate.ts, `GeneratedCorrelation`): never an expression.
+        correlate: z
+          .array(
+            z.strictObject({
+              name: z
+                .string()
+                .min(1)
+                .max(profileLimits.maxCorrelationNameLength),
+              attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
+            })
+          )
+          .min(1)
+          .max(profileLimits.maxCorrelations)
+          .optional(),
       })
     )
     .min(1)
@@ -366,6 +389,20 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...taskBase, kind: z.literal("set") }),
   z.strictObject({ ...taskBase, kind: z.literal("switch") }),
   z.strictObject({ ...taskBase, kind: z.literal("do") }),
+  z.strictObject({
+    ...taskBase,
+    kind: z.literal("fork"),
+    /**
+     * Its branches (generate.ts, `GeneratedTask.fork`): how many, each a
+     * scope of its own, and whether they race.
+     */
+    fork: z.strictObject({
+      branches: z.int().min(1).max(64),
+      compete: z.boolean(),
+    }),
+    // Its input.from, of the slots its module evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+  }),
   z.strictObject({
     ...taskBase,
     kind: z.literal("for"),
@@ -649,16 +686,20 @@ export const compileWorkflow = async (
             steps,
             schemas,
             scope,
+            branches,
             loop,
+            fork,
           }) => ({
             id,
             kind,
             pointer,
             steps,
             scope: [...scope],
+            branches: [...branches],
             ...(loop === undefined
               ? {}
               : { loop: z.json().parse(structuredClone(loop)) }),
+            ...(fork === undefined ? {} : { fork: { ...fork } }),
             // The SDK's descriptors and the templates, as the plain JSON
             // they are.
             schemas: z.json().parse(structuredClone(schemas)),

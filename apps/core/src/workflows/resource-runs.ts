@@ -1,3 +1,4 @@
+import { brainErrors } from "@grasp-os/brain/contract";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -46,6 +47,7 @@ import {
 import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
+  runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
   workflowResourceVersions,
@@ -77,6 +79,7 @@ import type { RunStep } from "./host.ts";
 import { admitAttempt } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
+import type { CallingRun } from "./resource-authority.ts";
 import {
   maxResultBytes,
   openRunMain,
@@ -85,6 +88,7 @@ import {
   ResourceRunHost,
 } from "./resource-host.ts";
 import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
 import type { EngineStatus } from "./runs.ts";
@@ -879,6 +883,27 @@ const acceptedOutput = (descriptor: string, value: unknown): unknown => {
   return checked.value;
 };
 
+/**
+ * The refusal of a run's end once it may no longer read what it recalled
+ * (`requireResourceRunEvidenceReadable`), as the isolate's errors are
+ * reported; undefined when it may. A passing failure propagates, so the
+ * engine tries the activation again.
+ */
+const evidenceRefusal = async (
+  env: Env,
+  run: CallingRun
+): Promise<StepError | undefined> => {
+  try {
+    await requireResourceRunEvidenceReadable(env, run);
+    return undefined;
+  } catch (error) {
+    if (brainErrors.codeOf(error) !== "brain.revoked") {
+      throw error;
+    }
+    return forIsolate(error);
+  }
+};
+
 /** What one activation of a hosted run runs, and what holds it to account. */
 export interface HostedActivation {
   readonly run: HostedResourceRun;
@@ -1001,7 +1026,16 @@ export const runActivation = async (
     result.ok && host.failureUntaken
       ? forIsolate(workflowErrors.create("workflow.invalid"))
       : undefined;
-  const failed = tampered ?? untaken ?? (result.ok ? undefined : result.error);
+  // Its output leaves the run (its parent, its screens, its details), and
+  // so does its failure: neither once it may no longer read what it
+  // recalled (resource-reads.ts). A run caught tampering fails all the
+  // same, but checked first: the refusal can hold what the run said.
+  const evidenceRefused = await evidenceRefusal(env, run.calling);
+  const failed =
+    evidenceRefused ??
+    tampered ??
+    untaken ??
+    (result.ok ? undefined : result.error);
   if (failed !== undefined) {
     throw namedError(failed.name, failed.message, failed.code);
   }
@@ -1179,11 +1213,36 @@ const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
   return { status: "failed", code: "workflow.child_output_too_large" };
 };
 
+/**
+ * Has run `parentRunId` hold child run `childRunId`'s evidence, and every
+ * run the child held (`runEvidenceHolds`): an output it takes may carry
+ * what any of them recalled, so before each of its releases the parent is
+ * checked against theirs too (resource-reads.ts). Kept before the parent
+ * is told, so no parent holds the output without them. Again, it adds
+ * nothing.
+ */
+const holdChildEvidence = async (
+  env: Env,
+  parentRunId: string,
+  childRunId: string
+): Promise<void> => {
+  await drizzle(env.DB).run(
+    sql`INSERT INTO ${runEvidenceHolds} (run_id, held_run_id)
+      SELECT ${parentRunId}, ${childRunId}
+      UNION SELECT ${parentRunId}, ${runEvidenceHolds.heldRunId}
+        FROM ${runEvidenceHolds} WHERE ${runEvidenceHolds.runId} = ${childRunId}
+      ON CONFLICT DO NOTHING`
+  );
+};
+
 export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
   if (row.parentRunId === null || unended.includes(row.status)) {
     return;
   }
   const end = await childEndOf(env, row);
+  if (end.status === "completed") {
+    await holdChildEvidence(env, row.parentRunId, row.id);
+  }
   const tell = async (told: ChildEnd) =>
     await runEngine(env).admitEvent(row.parentRunId ?? "", {
       type: childEndType(row.id),
@@ -1660,33 +1719,32 @@ export const stopRunsStartedBy = async (
 };
 
 /**
- * Whether an independent run App `app` started still has a stop claimed
- * for it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
- * whose sender died between the claim and the send. A restore waits for
- * these (app-status.ts).
+ * That an independent run App `app` started still has a stop claimed for
+ * it that hasn't ended it (`stopRunsStartedBy`): one in flight, or one
+ * whose sender died between the claim and the send. Read by the statement
+ * it is part of, so a write can wait for these where it lands
+ * (app-removal.ts).
+ */
+export const stopsUnsettledSql = (app: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${workflowResourceRuns} INNER JOIN ${workflowStartReceipts} ON ${workflowStartReceipts.id} = ${workflowResourceRuns.id} WHERE ${and(
+    eq(workflowStartReceipts.invokerType, "app"),
+    eq(workflowStartReceipts.invokerId, app),
+    inArray(workflowResourceRuns.status, unended),
+    isNotNull(workflowResourceRuns.stopRequestedAt)
+  )})`;
+
+/**
+ * Whether App `app` has a stop unsettled (`stopsUnsettledSql`). A restore
+ * waits for these (app-status.ts).
  */
 export const stopsUnsettled = async (
   env: Env,
   app: string
 ): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ one: sql`1` })
-    .from(workflowResourceRuns)
-    .innerJoin(
-      workflowStartReceipts,
-      eq(workflowStartReceipts.id, workflowResourceRuns.id)
-    )
-    .where(
-      and(
-        eq(workflowStartReceipts.invokerType, "app"),
-        eq(workflowStartReceipts.invokerId, app),
-        inArray(workflowResourceRuns.status, unended),
-        isNotNull(workflowResourceRuns.stopRequestedAt)
-      )
-    )
-    .limit(1)
-    .get();
-  return row !== undefined;
+  const row = await drizzle(env.DB).get<{ unsettled: number }>(
+    sql`SELECT ${stopsUnsettledSql(app)} AS unsettled`
+  );
+  return row?.unsettled === 1;
 };
 
 /**

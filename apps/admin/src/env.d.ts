@@ -1,27 +1,10 @@
-// What the admin reads from its env besides wrangler.jsonc's bindings,
-// which `wrangler types` can't see. The Access settings come from each
-// deploy's `--var` (the deploy workflows; `keep_vars` keeps them across a
-// deploy that passes none); the admin refuses every request without them.
-// CLIENT_DOMAIN comes the same way. Merged into the interface
-// worker-configuration.d.ts generates.
+// What the admin reads from its env that wrangler.jsonc doesn't set, so
+// `wrangler types` can't see it: settings neither stage has a value for
+// yet, and what local runs and tests set. The settings wrangler.jsonc sets
+// per stage (the Access pair, CLIENT_DOMAIN, ADMIN_HOST, OAUTH_RELAY and
+// the OAuth apps' client ids) are typed by worker-configuration.d.ts alone. Merged
+// into the interface it generates.
 interface __BaseEnv_Env {
-  /** The Access application's AUD tag (src/access.ts). */
-  CF_ACCESS_AUD?: string;
-  /** The Access team's URL, `https://<team>.cloudflareaccess.com` (src/access.ts). */
-  CF_ACCESS_ISS?: string;
-  /**
-   * The domain clients are served under, a client being `<id>.<domain>`
-   * (src/deploy/context.ts). No client is provisioned or deployed without it.
-   */
-  CLIENT_DOMAIN?: string;
-  /**
-   * Grasp's multi-tenant Entra and Google OAuth apps' client ids, which
-   * every client's core signs people in with (src/deploy/core-config.ts):
-   * not secrets. A client whose sign-in names an IdP without one isn't
-   * deployed.
-   */
-  ENTRA_CLIENT_ID?: string;
-  GOOGLE_CLIENT_ID?: string;
   /**
    * Grasp's own client: the deployment whose core answers Ask Grasp with
    * its model gateway (src/admin/ask.ts). Without it the chat says it isn't
@@ -34,11 +17,6 @@ interface __BaseEnv_Env {
    * Without it Rooms isn't read.
    */
   ROOMS_ORIGIN?: string;
-  /**
-   * Grasp's admin's own hostname, e.g. `admin.grasp.example`
-   * (src/admin-host.ts). Without it the admin answers on any hostname.
-   */
-  ADMIN_HOST?: string;
   /**
    * Grasp's Discord application's public key, hex: what every interaction
    * Discord posts to the bot is signed with (src/admin/discord.ts). Not a

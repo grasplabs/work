@@ -36,6 +36,7 @@ import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
+import { CapabilityChecklist } from "./capability-checks.tsx";
 import {
   offboardPlacedClientFn,
   placeAndProvisionFn,
@@ -216,6 +217,38 @@ const Facts = ({
   </dl>
 );
 
+/** Run statuses of an attempt that ended without finishing. */
+const endedRuns: ReadonlySet<string> = new Set([
+  "errored",
+  "terminated",
+  "gone",
+]);
+
+/**
+ * Why it stopped: the code its operation recorded, or, for one left
+ * running by an attempt that ended without saying why, how that ended.
+ */
+const stopCodeOf = (
+  operation: NonNullable<ClientHostingView["operation"]>,
+  run: ClientHostingView["run"]
+): string | null => {
+  if (operation.error !== null) {
+    return operation.error;
+  }
+  return operation.status === "running" && run !== null && endedRuns.has(run)
+    ? `run_${run}`
+    : null;
+};
+
+/** A stop's code, and what it means. */
+const StopReason = ({ code }: { code: string | null }) =>
+  code === null ? null : (
+    <p className="text-destructive text-sm" role="alert">
+      <span className="font-mono">{code}</span>
+      {`: ${operationErrorWords(code)}`}
+    </p>
+  );
+
 /** Where the client's provisioning operation is. */
 const Operation = ({
   operation,
@@ -235,12 +268,7 @@ const Operation = ({
         ["Updated (UTC)", formatTime(operation.updatedAt)],
       ]}
     />
-    {operation.error === null ? null : (
-      <p className="text-destructive text-sm" role="alert">
-        <span className="font-mono">{operation.error}</span>
-        {`: ${operationErrorWords(operation.error)}`}
-      </p>
-    )}
+    <StopReason code={stopCodeOf(operation, run)} />
   </div>
 );
 
@@ -420,6 +448,67 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
+/** That nothing runs until staff start it, and what they start it with. */
+const NotStarted = ({ imported }: { imported: boolean }) => (
+  <p className="text-sm">
+    {imported
+      ? "Nothing runs for it yet: provisioning starts only when you choose its release and start it here."
+      : "Nothing runs for it yet, and no release is imported to provision it with. CI publishes one on every merge to main, and the admin imports new ones every 5 minutes: once one is in, choose it here and start."}
+  </p>
+);
+
+/**
+ * What the policy needs of each destination the client is in or could go
+ * to, as a checklist with the form to record a check: the one it's
+ * placed in, or every shared one while it isn't placed.
+ */
+const Requirements = ({ view }: { view: ClientHostingView }) => {
+  if (view.active) {
+    return null;
+  }
+  const shown = view.destinations.filter((choice) =>
+    view.placement === null
+      ? choice.shared
+      : choice.id === view.placement.destinationId
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {shown.map((choice) => (
+        <div className="flex flex-col gap-2" key={choice.id}>
+          <h3 className="text-sm font-medium">
+            {`What ${view.policy.id} needs of ${choice.id}`}
+          </h3>
+          <CapabilityChecklist
+            checks={choice.checks}
+            destinationId={choice.id}
+          />
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/**
+ * Whether it runs, or would run, in a shared destination (Workers for
+ * Platforms), where its core sends no mail until GRA-965 qualifies it
+ * (`withoutMail`, src/hosting/operation.ts).
+ */
+const sharedHosting = (view: ClientHostingView): boolean => {
+  const id = view.placement?.destinationId ?? view.automatic.destinationId;
+  return view.destinations.some(
+    (choice) => choice.id === id && choice.kind === "workers_for_platforms"
+  );
+};
+
+/** That its core sends no mail, where its hosting gives it none yet. */
+const MailNotice = ({ view }: { view: ClientHostingView }) =>
+  sharedHosting(view) ? (
+    <p className="text-sm">
+      Mail: not available on this hosting yet (GRA-965). Its core sends none, so
+      its people get their interview links by hand.
+    </p>
+  ) : null;
+
 /** Whether it's still to provision: not live, done, or offboarded. */
 const provisionable = (view: ClientHostingView): boolean =>
   view.operation?.status !== "done" &&
@@ -477,6 +566,8 @@ export const ClientHosting = ({
           {`Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
         </p>
       )}
+      <Requirements view={view} />
+      <MailNotice view={view} />
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
       )}
@@ -486,6 +577,9 @@ export const ClientHosting = ({
       {view.placement === null ? null : <Offboarding view={view} />}
       {provisionable(view) ? (
         <div className="flex flex-col gap-4">
+          {view.operation === null ? (
+            <NotStarted imported={releases.length > 0} />
+          ) : null}
           {view.operation === null ? (
             <Field>
               <FieldLabel htmlFor="hosting-release">Release</FieldLabel>

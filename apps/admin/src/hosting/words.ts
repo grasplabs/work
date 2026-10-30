@@ -11,7 +11,7 @@ import type { DestinationProblem, PlaceRefusal } from "./placement.ts";
 import type { Capability } from "./policy.ts";
 
 /** Each capability a policy can require, as staff check it. */
-const capabilityWords: Readonly<Record<Capability, string>> = {
+export const capabilityWords: Readonly<Record<Capability, string>> = {
   "d1.eu_jurisdiction": "D1 databases are created in the EU jurisdiction",
   "r2.eu_jurisdiction":
     "R2 buckets, backups and workflow streams included, are in the EU jurisdiction",
@@ -50,8 +50,10 @@ export const problemWords = (problem: DestinationProblem): string => {
 };
 
 /** Why an operation stopped, by the inventory's code. */
-const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
+export const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   destination_unknown: "There's no such destination.",
+  destination_other_stage:
+    "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
   placement_refused:
     "That destination misses a requirement of the policy: each is listed with it.",
   placement_changed:
@@ -70,6 +72,8 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
   foreign_resource:
     "A binding would reach a resource that isn't this client's own.",
   unsupported_binding: "The release has a binding the admin doesn't map.",
+  resource_unnamed:
+    "The release has a resource the client naming scheme doesn't name: add it to the names module first.",
   unknown_placeholder:
     "The release names a placeholder the admin doesn't fill.",
   destination_unsupported:
@@ -86,6 +90,10 @@ const inventoryWords: Readonly<Record<InventoryErrorCode, string>> = {
 /** Why an operation stopped, by its own code. */
 const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   client_unknown: "There's no such client.",
+  destination_other_stage:
+    "That destination is in the other stage's clients' namespace: this admin places clients only in its own.",
+  stage_unset:
+    "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
   release_undeclared:
     "The release declares nothing of what its code works with.",
@@ -102,8 +110,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   operation_release_changed:
     "Its provisioning is with another release: that release stays for the operation.",
   unknown_worker: "The release has a Worker other than core and connect.",
-  model_spend_undecided:
-    "A Worker binds Workers AI, and placed clients get no model spend until a ceiling and the shared gateway are configured.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",
   wfp_schedule_unqualified:
@@ -139,10 +145,28 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
 };
 
+/**
+ * Why it stopped, where nothing in the operation said: what it works
+ * with couldn't be read, or its attempt ended without recording why.
+ */
+const startWords: Readonly<Record<string, string>> = {
+  client_domain_unset:
+    "This admin has no CLIENT_DOMAIN set, so it deploys no client: set it in its deploy, then resume.",
+  run_errored:
+    "Its attempt failed without recording why (it may have crashed or run out of retries): resume it, and look at the attempt's run if it fails again.",
+  run_terminated: "Its attempt was stopped before it finished: resume it.",
+  run_gone:
+    "Its attempt is gone, or never started: resume it to start a new one.",
+};
+
 const knownWords: Readonly<Record<string, string>> = {
   ...inventoryWords,
   ...operationWords,
+  ...startWords,
 };
+
+/** What a secret missing from Secrets Store is recorded as, before its name. */
+const storeSecretMissing = /^store_secret_missing: (?<name>\w+)$/u;
 
 /**
  * Why an operation stopped, by the code it recorded: its own, the
@@ -152,6 +176,10 @@ export const operationErrorWords = (code: string): string => {
   const known = knownWords[code];
   if (known !== undefined) {
     return known;
+  }
+  const secret = storeSecretMissing.exec(code)?.groups?.name;
+  if (secret !== undefined) {
+    return `Secrets Store has no ${secret}, so nothing was started: add it (Deploy platform copies the store's secrets from 1Password), then resume.`;
   }
   return code.startsWith("cloudflare_")
     ? "Cloudflare refused a call: its status and error codes are in the code."

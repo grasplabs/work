@@ -302,6 +302,8 @@ export const isolateCall = async (
         owner,
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: codeCallMs,
+        // Its run bindings' `AsyncLocalStorage`, as `workflowSandbox` gives it.
+        asyncContext: true,
       },
       signal === undefined ? {} : { signal }
     );
@@ -1094,6 +1096,8 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         owner,
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: runLoadMs,
+        // Its run bindings' `AsyncLocalStorage`, as `workflowSandbox` gives it.
+        asyncContext: true,
       };
       // Let go of once the run is cancelled or taken over, as it runs.
       const letGo = new AbortController();
