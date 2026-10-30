@@ -6,8 +6,21 @@ import type {
   TodayWaitsOn,
   WorkflowsToday,
 } from "@grasp-os/shared/workflows";
-import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  gte,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import type { Member } from "../auth/identity.ts";
 import {
@@ -44,7 +57,9 @@ import { visibleApps } from "./overview.ts";
 //   decisions read by run in one statement. On a busier day the newest
 //   are read, as a run waiting on the reader is a recent one; the older
 //   runs the reader may see are counted apart (`cutOff`) from those they
-//   may not (`unseen`), so neither number stands for the other.
+//   may not (`unseen`), so neither number stands for the other. A run
+//   waiting on the reader is read whatever its place in the day: past
+//   the newest `maxRuns` it would lose its dot and its answer.
 
 /** The most runs of each kind one day's read takes. */
 const maxRuns = 1000;
@@ -85,6 +100,36 @@ interface DayRun {
   status: TodayRun["status"];
   from: string | null;
 }
+
+/** Whose open decision `by` may answer now, of the run `run` names. */
+const waitsOn = (
+  db: DrizzleD1Database,
+  by: Member,
+  decisionRun: SQLiteColumn,
+  run: SQLiteColumn,
+  now: Date
+) =>
+  exists(
+    db
+      .select({ one: sql`1` })
+      .from(workflowDecisions)
+      .where(
+        and(
+          eq(decisionRun, run),
+          stillOpen(workflowDecisions, now),
+          answerableByNow(db, by.userId)
+        )
+      )
+  );
+
+/** `rows` and `more`, each run once, in `rows`' order then `more`'s. */
+const withWaits = <T extends { id: string }>(
+  rows: readonly T[],
+  more: readonly T[]
+): T[] => {
+  const ids = new Set(rows.map(({ id }) => id));
+  return [...rows, ...more.filter(({ id }) => !ids.has(id))];
+};
 
 /** The runs of the day, in the lanes of `lanes`, with their decisions. */
 const runsOf = async (
@@ -195,29 +240,54 @@ export const workflowsToday = async (
     ),
     gte(workflowResourceRuns.createdAt, since)
   );
+  const appColumns = {
+    id: workflowRuns.id,
+    appId: workflowRuns.appId,
+    workflowId: workflowRuns.workflowId,
+    status: workflowRuns.status,
+    createdAt: workflowRuns.createdAt,
+    endedAt: workflowRuns.endedAt,
+    rootRunId: workflowRuns.rootRunId,
+  };
+  const resourceColumns = {
+    id: workflowResourceRuns.id,
+    workflowId: workflowResourceRuns.workflowResourceId,
+    status: workflowResourceRuns.status,
+    createdAt: workflowResourceRuns.createdAt,
+    endedAt: workflowResourceRuns.endedAt,
+    invokerType: workflowStartReceipts.invokerType,
+    invokerId: workflowStartReceipts.invokerId,
+  };
   const [
-    appRuns,
+    newestAppRuns,
+    appWaits,
     appSeen,
     appTotal,
-    resourceRuns,
+    newestResourceRuns,
+    resourceWaits,
     resourceSeen,
     resourceTotal,
   ] = await Promise.all([
     appIds.length === 0
       ? []
       : db
-          .select({
-            id: workflowRuns.id,
-            appId: workflowRuns.appId,
-            workflowId: workflowRuns.workflowId,
-            status: workflowRuns.status,
-            createdAt: workflowRuns.createdAt,
-            endedAt: workflowRuns.endedAt,
-            rootRunId: workflowRuns.rootRunId,
-          })
+          .select(appColumns)
           .from(workflowRuns)
           .where(ofApps)
           .orderBy(desc(workflowRuns.createdAt))
+          .limit(maxRuns),
+    appIds.length === 0
+      ? []
+      : db
+          .select(appColumns)
+          .from(workflowRuns)
+          .where(
+            and(
+              ofApps,
+              isNull(workflowRuns.endedAt),
+              waitsOn(db, by, workflowDecisions.runId, workflowRuns.id, now)
+            )
+          )
           .limit(maxRuns),
     appIds.length === 0
       ? []
@@ -229,15 +299,7 @@ export const workflowsToday = async (
     resources.length === 0
       ? []
       : db
-          .select({
-            id: workflowResourceRuns.id,
-            workflowId: workflowResourceRuns.workflowResourceId,
-            status: workflowResourceRuns.status,
-            createdAt: workflowResourceRuns.createdAt,
-            endedAt: workflowResourceRuns.endedAt,
-            invokerType: workflowStartReceipts.invokerType,
-            invokerId: workflowStartReceipts.invokerId,
-          })
+          .select(resourceColumns)
           .from(workflowResourceRuns)
           .innerJoin(
             workflowStartReceipts,
@@ -245,6 +307,29 @@ export const workflowsToday = async (
           )
           .where(ofResources)
           .orderBy(desc(workflowResourceRuns.createdAt))
+          .limit(maxRuns),
+    resources.length === 0
+      ? []
+      : db
+          .select(resourceColumns)
+          .from(workflowResourceRuns)
+          .innerJoin(
+            workflowStartReceipts,
+            eq(workflowStartReceipts.id, workflowResourceRuns.id)
+          )
+          .where(
+            and(
+              ofResources,
+              isNull(workflowResourceRuns.endedAt),
+              waitsOn(
+                db,
+                by,
+                workflowDecisions.resourceRunId,
+                workflowResourceRuns.id,
+                now
+              )
+            )
+          )
           .limit(maxRuns),
     resources.length === 0
       ? []
@@ -261,6 +346,8 @@ export const workflowsToday = async (
       .from(workflowResourceRuns)
       .where(gte(workflowResourceRuns.createdAt, since)),
   ]);
+  const appRuns = withWaits(newestAppRuns, appWaits);
+  const resourceRuns = withWaits(newestResourceRuns, resourceWaits);
   const appNames = new Map<string, string>(
     apps.map(({ id, name }) => [id, name])
   );
