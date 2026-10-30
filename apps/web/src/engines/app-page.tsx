@@ -18,13 +18,12 @@ import {
   LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
-  SquarePenIcon,
 } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { setActiveChat } from "../chat/active-chat.ts";
-import { setDockMode } from "../chat/dock-mode.ts";
+import { appSlot, setActiveChat } from "../chat/active-chat.ts";
+import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
@@ -32,22 +31,24 @@ import { buildsApp } from "./app-role.ts";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 
 // An App's own page (grasplabs/prototype `routes/apps/$appId.tsx`): its bar
-// with its name, its screens as tabs, its settings, Edit and the Publish
-// menu; under the bar, that it is archived, with Restore; then the open
-// screen, or, while it has none, that it is only described, with the way
-// to design it in the chat. The prototype's app is our App (a domain), its
+// with its name, its screens as tabs, its settings and the Publish menu;
+// under the bar, that it is archived, with Restore; then the open screen,
+// or, while it has none, that it is only described, with the way to
+// design it in the chat. The prototype's app is our App (a domain), its
 // tabs our App's screens.
 //
-// Editing is the chat's: Edit opens the App's own chat beside the page
-// (the shell's dock, chat-dock.tsx), the one core keeps for the person and
-// the App (`chats.forApp`), where Grasp changes the App with them, as the
-// prototype's chat bottom right does. The Publish menu also gives the App
-// its own link (app-own-link.tsx); saving it as a blueprint, as the
-// prototype's does, waits on the blueprints page.
+// Changing it is the chat's, with no Edit button: for whoever changes it,
+// the chat bottom right is the App's own (the shell's dock, chat-dock.tsx),
+// the one core keeps for the person and the App (`chats.forApp`), where
+// Grasp changes the App with them, as the prototype's does. The page makes
+// room for it as a drawer. The Publish menu also gives the App its own
+// link (app-own-link.tsx); saving it as a blueprint, as the prototype's
+// does, waits on the blueprints page.
 
 /**
- * Opens the App's own chat beside the page, to change the App there: the
- * person's chat for it, which core makes the first time. Says why when
+ * Opens the App's own chat in the dock, to change the App there: the
+ * person's chat for it, which core makes the first time, in the dock's
+ * slot for the App, so their other chats stay as they were. Says why when
  * core refuses (they no longer build it, say).
  */
 const useAppChat = (app: string) => {
@@ -57,7 +58,7 @@ const useAppChat = (app: string) => {
     if (chat === undefined) {
       return;
     }
-    setActiveChat(chat.id);
+    setActiveChat(chat.id, appSlot(app));
     setDockMode("frame");
   };
   return {
@@ -268,8 +269,16 @@ export const AppPage = ({
   const archived = app.status === "archived";
   const editable = builds && !archived;
   const chat = useAppChat(app.id);
+  // The App's chat as a drawer down the right takes its room from the page.
+  const drawer = useDockMode() === "drawer" && editable;
   return (
-    <div className="flex min-h-0 flex-1 flex-col text-sm">
+    <div
+      className={
+        drawer
+          ? `flex min-h-0 flex-1 flex-col text-sm ${dockDrawerRoom}`
+          : "flex min-h-0 flex-1 flex-col text-sm"
+      }
+    >
       <div className="bg-background flex flex-none flex-wrap items-center gap-x-6 gap-y-2 border-b px-4 py-3 md:px-6">
         <span className="flex min-w-0 items-center gap-2.5">
           <span
@@ -292,20 +301,7 @@ export const AppPage = ({
           >
             <SettingsIcon />
           </Link>
-          {editable ? (
-            <>
-              <Button
-                disabled={chat.busy}
-                onClick={chat.handleOpen}
-                size="sm"
-                variant="outline"
-              >
-                <SquarePenIcon data-icon="inline-start" />
-                <Trans>Edit</Trans>
-              </Button>
-              <PublishMenu app={app} />
-            </>
-          ) : null}
+          {editable ? <PublishMenu app={app} /> : null}
         </span>
       </div>
       {chat.failure === undefined ? null : (

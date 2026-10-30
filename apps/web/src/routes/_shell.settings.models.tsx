@@ -243,7 +243,7 @@ const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
 const BindingCaps = ({ binding }: { binding: ModelBindingSpend }) => {
   if (binding.budgetDamaged) {
     return (
-      <span className="text-destructive">
+      <span className="text-status-attention">
         <Trans>Its budget can&apos;t be read, so it serves nothing.</Trans>
       </span>
     );
@@ -313,7 +313,7 @@ const SpentOf = ({
 const BindingAlert = ({ binding }: { binding: ModelBindingSpend }) => {
   if (binding.alert === "reached") {
     return (
-      <Badge variant="destructive">
+      <Badge variant="attention">
         <Trans>Cap reached</Trans>
       </Badge>
     );
@@ -385,7 +385,7 @@ const BindingBudgets = ({
                     {binding.alias}
                   </span>
                   {binding.model === null ? (
-                    <span className="text-destructive text-xs">
+                    <span className="text-status-attention text-xs">
                       <Trans>
                         What it is bound to can&apos;t be read, so it serves
                         nothing.

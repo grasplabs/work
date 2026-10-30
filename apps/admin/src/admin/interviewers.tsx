@@ -60,9 +60,7 @@ const Rating = ({ stats }: { stats: StephenStats }) => {
       {count > 0 ? (
         <div className="grid items-center gap-x-8 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)]">
           <div className="flex flex-col gap-1.5">
-            <span className="text-2xl leading-tight font-medium tabular-nums">
-              {`${decimal(average)} of 5`}
-            </span>
+            <span className="type-figure">{`${decimal(average)} of 5`}</span>
             <span aria-hidden className="flex gap-1">
               {RATINGS.map((rating) => (
                 <span

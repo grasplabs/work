@@ -102,6 +102,8 @@ import { answerInChat } from "./answer.ts";
 import {
   cancelAction,
   confirmAction,
+  helpfulAction,
+  notHelpfulAction,
   signInCard,
   startAction,
 } from "./cards.tsx";
@@ -115,6 +117,7 @@ import type { GmailKeys } from "./gmail.ts";
 import { pressCard } from "./press.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
+import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
@@ -1578,6 +1581,21 @@ export const channelResponse = async (
       locale,
     });
     await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+  });
+  // A thumb on one of his answers: kept on the request it is for, only
+  // when that request is the presser's own (stephen-requests.ts).
+  chat.onAction([helpfulAction, notHelpfulAction], async (event) => {
+    if (event.thread === null || event.value === undefined) {
+      return;
+    }
+    const rated = await rateRequest(env, {
+      userId,
+      requestId: event.value,
+      rating: event.actionId === helpfulAction ? "up" : "down",
+    });
+    if (rated) {
+      await event.thread.post(say("rated", localeOf(activity.locale)));
+    }
   });
   // A group chat's or channel's: only ever one that @mentioned the bot,
   // which the door let through with who is in it.

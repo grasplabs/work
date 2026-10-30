@@ -1,4 +1,4 @@
-import { releaseIdSchema } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { AdminPage } from "../../../admin/page.tsx";
