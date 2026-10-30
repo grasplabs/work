@@ -2913,6 +2913,20 @@ export class Workspace extends DurableObject<Env> {
         };
   }
 
+  /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
+  chatSummary(chatId: unknown, personId: string): ChatSummary {
+    const chat = this.#ownChat(chatId, personId);
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: this.#turns.has(chat.id),
+      projectId: chat.projectId,
+      appId: chat.appId,
+    };
+  }
+
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
   chatApp(chatId: ChatId): string | null {
     return (

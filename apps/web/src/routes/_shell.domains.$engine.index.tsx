@@ -37,7 +37,7 @@ import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/waiting.ts";
 import {
   AppStatusControls,
   StatusBadge,

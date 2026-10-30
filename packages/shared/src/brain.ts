@@ -372,11 +372,6 @@ export interface Workspace {
 }
 
 /**
- * The brain's workspace, assembled by core from what it holds: the
- * onboarding, the brain's records and the connections. Each part as the
- * person may read it; what core has no source for yet comes back empty.
- */
-/**
  * What a picture of a chat's thinking is drawn from (`brain.thinking`):
  * the brain's teams, what each said with the team that said it (the one
  * its source speaks for) and the role of who did, and its workflows with
@@ -391,6 +386,11 @@ export interface ThinkingGround {
   workflows: (Pick<Workflow, "id" | "name"> & { hours: number | null })[];
 }
 
+/**
+ * The brain's workspace, assembled by core from what it holds: the
+ * onboarding, the brain's records and the connections. Each part as the
+ * person may read it; what core has no source for yet comes back empty.
+ */
 export interface BrainApi {
   read: () => Promise<Workspace>;
   /**

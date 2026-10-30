@@ -99,31 +99,6 @@ export const forgetActiveChats = (): void => {
   }
 };
 
-/**
- * The App whose own chat in this tab is `chatId`, if one's is: what Chat
- * knows of a chat past the end of its list, which says it only of the
- * chats it lists.
- */
-export const appOfChat = (chatId: string): string | undefined => {
-  const prefix = keyOf(appSlot(""));
-  let kept: string[] = [];
-  try {
-    kept = Array.from(
-      { length: sessionStorage.length },
-      (_, index) => sessionStorage.key(index) ?? ""
-    ).filter((key) => key.startsWith(prefix));
-  } catch {
-    // See `read`: only the chats this page opened are known.
-  }
-  const apps = new Set([
-    ...kept.map((key) => key.slice(prefix.length)),
-    ...[...active.keys()].flatMap((slot) =>
-      slot.startsWith("app:") ? [slot.slice("app:".length)] : []
-    ),
-  ]);
-  return [...apps].find((app) => activeIn(appSlot(app)) === chatId);
-};
-
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener);
   return () => {
