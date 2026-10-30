@@ -446,6 +446,8 @@ const coreDb: D1State = {
     landscape_staged_people: transient(`${core}landscape.ts`),
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
+    brain_team_groups: exported(`${core}brain-team-groups.ts`),
+    brain_team_group_saves: exported(`${core}brain-team-groups.ts`),
     // Knowledge's host tables (src/db/core/schema.ts).
     collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),
@@ -636,6 +638,10 @@ const workspaces: DurableObjectState = {
     chat_projects: exported(`${core}workspace.ts`),
     chat_project_documents: exported(`${core}workspace.ts`),
     chat_messages: exported(`${core}workspace.ts`),
+    chat_search_text: exported(
+      `${core}workspace.ts`,
+      "Each message's words as a search reads them, kept as it is stored (or by the first search after, for one stored before); it moves with them, as nothing writes it again for messages already read."
+    ),
     chat_sources: exported(`${core}workspace.ts`),
     chat_run_sources: exported(`${core}workspace.ts`),
     chat_documents: exported(`${core}workspace.ts`),
@@ -778,6 +784,10 @@ const onboarding: DurableObjectState = {
     asked_about: exported(`${core}onboarding/store.ts`),
     drawn_works: exported(`${core}onboarding/store.ts`),
     settled_works: exported(`${core}onboarding/store.ts`),
+    more_voices: exported(
+      `${core}onboarding/store.ts`,
+      "The pieces of work the company asked to hear more people about: who is asked next is asked about these first."
+    ),
     checked_differences: exported(
       `${core}onboarding/store.ts`,
       "The differences whose two ways the brain's intake checked five or more people behind, by the drawing it checked."
