@@ -11,6 +11,7 @@ import type {
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -256,7 +257,7 @@ const WorkflowHeader = ({
     <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
       <div className="flex min-w-0 grow basis-96 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h1 className="type-title">{resource.name}</h1>
+          <PageHeaderTitle>{resource.name}</PageHeaderTitle>
           {status === undefined ? null : (
             <WorkflowStatus
               lifecycle={status}

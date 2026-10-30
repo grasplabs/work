@@ -4379,6 +4379,10 @@ msgstr "Les applications de chat où Grasp sait que c’est vous. Écrivez à Gr
 msgid "Chat name"
 msgstr "Nom du chat"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Largeur du chat"
+
 #: src/chat/chat-switcher.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
@@ -11236,7 +11240,7 @@ msgstr "Ouverte depuis le {date}. Tant qu’elle reste sans réponse, cette vale
 msgid "Open since Grasp's go on {since}."
 msgstr "Ouvert depuis le feu vert de Grasp le {since}."
 
-#: src/chat/chat-dock.tsx
+#: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Ouvrir le chat"
@@ -15856,6 +15860,10 @@ msgstr "Il n’y a pas encore de domaine que vous puissiez ouvrir. Les domaines 
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Il n’y a pas encore de workflows à lier."
+
+#: src/chat/dock-frame.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "Une conversation est en cours ici. Ouvrez le chat pour la voir."
 
 #: src/settings/teams.tsx
 msgid "There is a team with this name already."

@@ -1,5 +1,6 @@
 import { isKitComponent } from "@grasp-os/ui/catalog";
 import { demos } from "@grasp-os/ui/catalog/demos";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 
 // Local gallery of the UI kit: one component's demo per page, which the
@@ -19,7 +20,7 @@ const ComponentDemo = () => {
   const Demo = demos[name];
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <h1 className="type-title">{name}</h1>
+      <PageHeaderTitle>{name}</PageHeaderTitle>
       <div data-catalog-content="">
         <Demo />
       </div>
