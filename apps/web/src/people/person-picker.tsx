@@ -35,6 +35,29 @@ export interface Pickable {
 }
 
 /**
+ * One person in a list of people to pick from: their portrait and name,
+ * found by either their name or their email as typed.
+ */
+export const PersonOption = ({
+  person,
+  checked = false,
+  onSelect,
+}: {
+  person: Pickable;
+  checked?: boolean;
+  onSelect: () => void;
+}) => (
+  <CommandItem
+    data-checked={checked}
+    onSelect={onSelect}
+    value={`${person.name} ${person.email ?? ""}`}
+  >
+    <OwnerAvatar name={person.name} />
+    <span className="flex-1 truncate">{person.name}</span>
+  </CommandItem>
+);
+
+/**
  * The owner's button and its list. `people` is null while they're being
  * read: the list says so, and the page reads them only when it opens.
  */
@@ -122,8 +145,8 @@ export const PersonPicker = ({
                   <Trans>Nobody with that name.</Trans>
                 </CommandEmpty>
                 {people.map((person) => (
-                  <CommandItem
-                    data-checked={person.id === ownerId}
+                  <PersonOption
+                    checked={person.id === ownerId}
                     key={person.id}
                     onSelect={() => {
                       setOpen(false);
@@ -131,11 +154,8 @@ export const PersonPicker = ({
                         onPick(person);
                       }
                     }}
-                    value={`${person.name} ${person.email ?? ""}`}
-                  >
-                    <OwnerAvatar name={person.name} />
-                    <span className="flex-1 truncate">{person.name}</span>
-                  </CommandItem>
+                    person={person}
+                  />
                 ))}
               </>
             )}

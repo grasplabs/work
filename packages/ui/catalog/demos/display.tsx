@@ -57,6 +57,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   Item,
@@ -354,6 +355,13 @@ const SuccessMarkDemo = () => (
   </div>
 );
 
+const GraspMarkDemo = () => (
+  <div className="flex items-center gap-2">
+    <GraspMark className="size-6" variant="logo" />
+    <span className="font-medium">Grasp</span>
+  </div>
+);
+
 export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
@@ -366,6 +374,7 @@ export const displayDemos = {
   chart: ChartDemo,
   collapsible: CollapsibleDemo,
   empty: EmptyDemo,
+  "grasp-mark": GraspMarkDemo,
   item: ItemDemo,
   kbd: KbdDemo,
   progress: ProgressDemo,
