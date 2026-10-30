@@ -8,6 +8,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -242,9 +243,9 @@ const Engines = () => {
       <SiteHeader crumbs={[{ label: t`Domains` }]} />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-1">
-          <h1 className="type-title">
+          <PageHeaderTitle>
             <Trans>Domains</Trans>
-          </h1>
+          </PageHeaderTitle>
           <p className="text-muted-foreground">
             <Trans>
               Each domain runs one part of the business: its workflows, apps and

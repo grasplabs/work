@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import { Input } from "@grasp-os/ui/components/input";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
@@ -420,7 +421,9 @@ export const DocumentView = ({
                   />
                 </div>
               </div>
-              <h1 className="type-title wrap-break-word">{doc.title}</h1>
+              <PageHeaderTitle className="wrap-break-word">
+                {doc.title}
+              </PageHeaderTitle>
               {doc.description === "" ? null : (
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   {doc.description}
