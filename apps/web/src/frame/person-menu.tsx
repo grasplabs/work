@@ -80,7 +80,7 @@ const Who = ({ identity }: { identity: Identity }) => {
       </Avatar>
       <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
         <span className="truncate font-medium">{identity.name}</span>
-        <span className="text-muted-foreground truncate text-xs">
+        <span className="text-sidebar-foreground/70 truncate text-xs">
           {identity.staff ? t`${role}, Grasp staff` : role}
         </span>
       </span>
