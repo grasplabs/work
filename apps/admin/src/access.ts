@@ -55,7 +55,8 @@ const missCooldownMs = 30 * 1000;
  * fails ("Cannot perform I/O on behalf of a different request") or hangs.
  * Each request that finds no fresh keys fetches them itself.
  * `lastMissFetchAt` is when a JWT's unknown key id last made a request
- * fetch them again (`missCooldownMs`); null before any.
+ * try to fetch them again (`missCooldownMs`), recorded before that fetch
+ * starts, whether it then succeeds or not; null before any.
  */
 const keyCache = new Map<
   string,
@@ -67,13 +68,10 @@ const keySetSchema = z.object({
 });
 
 /**
- * The team's keys, fetched now, in the asking request, and kept; `miss`
- * when a JWT named a key id the kept keys didn't have.
+ * The team's keys, fetched now, in the asking request, and kept, with the
+ * last miss refetch as it was recorded (`lastMissFetchAt`).
  */
-const fetchKeys = async (
-  issuer: string,
-  miss: boolean
-): Promise<JSONWebKeySet> => {
+const fetchKeys = async (issuer: string): Promise<JSONWebKeySet> => {
   const response = await fetch(`${issuer}/cdn-cgi/access/certs`, {
     signal: AbortSignal.timeout(keysTimeoutMs),
   });
@@ -82,13 +80,10 @@ const fetchKeys = async (
     throw new Error(`Access keys answered ${String(response.status)}`);
   }
   const keys: JSONWebKeySet = keySetSchema.parse(await response.json());
-  const now = Date.now();
   keyCache.set(issuer, {
     keys,
-    fetchedAt: now,
-    lastMissFetchAt: miss
-      ? now
-      : (keyCache.get(issuer)?.lastMissFetchAt ?? null),
+    fetchedAt: Date.now(),
+    lastMissFetchAt: keyCache.get(issuer)?.lastMissFetchAt ?? null,
   });
   return keys;
 };
@@ -114,22 +109,31 @@ const verifyAccessToken = async (
   if (kept === undefined || Date.now() - kept.fetchedAt >= keysMaxAgeMs) {
     return await jwtVerify(
       token,
-      createLocalJWKSet(await fetchKeys(issuer, false)),
+      createLocalJWKSet(await fetchKeys(issuer)),
       options
     );
   }
   try {
     return await jwtVerify(token, createLocalJWKSet(kept.keys), options);
   } catch (error) {
-    const coolingDown =
-      kept.lastMissFetchAt !== null &&
-      Date.now() - kept.lastMissFetchAt < missCooldownMs;
-    if (!(error instanceof errors.JWKSNoMatchingKey) || coolingDown) {
+    if (!(error instanceof errors.JWKSNoMatchingKey)) {
       throw error;
     }
+    // Read, checked and recorded with nothing awaited in between, before
+    // the fetch: concurrent misses after this one refuse at once, and a
+    // fetch that fails still starts the cooldown.
+    const now = Date.now();
+    const current = keyCache.get(issuer) ?? kept;
+    if (
+      current.lastMissFetchAt !== null &&
+      now - current.lastMissFetchAt < missCooldownMs
+    ) {
+      throw error;
+    }
+    keyCache.set(issuer, { ...current, lastMissFetchAt: now });
     return await jwtVerify(
       token,
-      createLocalJWKSet(await fetchKeys(issuer, true)),
+      createLocalJWKSet(await fetchKeys(issuer)),
       options
     );
   }

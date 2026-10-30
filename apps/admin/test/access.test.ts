@@ -226,7 +226,7 @@ const signedBy = async (issuer: string, key: SigningKey): Promise<string> =>
  * A team of its own, so its keys are in no cache yet, serving `published`
  * at its keys URL as they stand when asked; each fetch counted.
  */
-const freshTeam = (published: { current: SigningKey[] }) => {
+const freshTeam = (published: { current: SigningKey[]; failing?: boolean }) => {
   const issuer = `https://team-${crypto.randomUUID().slice(0, 8)}.cloudflareaccess.com`;
   const fetches = { count: 0 };
   const earlier = vi.mocked(globalThis.fetch).getMockImplementation();
@@ -234,6 +234,9 @@ const freshTeam = (published: { current: SigningKey[] }) => {
     const { url } = new Request(input, init);
     if (url === `${issuer}/cdn-cgi/access/certs`) {
       fetches.count += 1;
+      if (published.failing === true) {
+        return new Response("unavailable", { status: 503 });
+      }
       return Response.json({ keys: published.current.map(({ jwk }) => jwk) });
     }
     if (earlier === undefined) {
@@ -319,5 +322,48 @@ describe("the Access signing keys", () => {
       refused: [403, 403],
       fetches: [2, 2],
     });
+  });
+
+  it("fetches the keys once for forged JWTs sent at once, the first starting the cooldown before its fetch", async () => {
+    const published = await signingKey("published");
+    const unknown = await signingKey("unknown");
+    const { issuer, fetches } = freshTeam({ current: [published] });
+    const on = { CF_ACCESS_ISS: issuer };
+    await statusOf(asStaff("/", await signedBy(issuer, published)), on);
+    const forged = await signedBy(issuer, unknown);
+
+    const statuses = await Promise.all(
+      Array.from(
+        { length: 5 },
+        async () => await statusOf(asStaff("/", forged), on)
+      )
+    );
+
+    expect({ statuses, fetches: fetches.count }).toStrictEqual({
+      statuses: [403, 403, 403, 403, 403],
+      fetches: 2,
+    });
+  });
+
+  it("starts the cooldown with a refetch that fails, so the next forged JWT fetches nothing", async () => {
+    const published = await signingKey("published");
+    const unknown = await signingKey("unknown");
+    const team: { current: SigningKey[]; failing?: boolean } = {
+      current: [published],
+    };
+    const { issuer, fetches } = freshTeam(team);
+    const on = { CF_ACCESS_ISS: issuer };
+    await statusOf(asStaff("/", await signedBy(issuer, published)), on);
+    const forged = await signedBy(issuer, unknown);
+    team.failing = true;
+
+    const first = await statusOf(asStaff("/", forged), on);
+    const fetchedFirst = fetches.count;
+    const second = await statusOf(asStaff("/", forged), on);
+
+    expect({
+      statuses: [first, second],
+      fetches: [fetchedFirst, fetches.count],
+    }).toStrictEqual({ statuses: [403, 403], fetches: [2, 2] });
   });
 });
