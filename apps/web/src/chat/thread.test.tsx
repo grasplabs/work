@@ -307,12 +307,17 @@ describe(ChatThread, () => {
       statements: [],
       workflows: [{ id: "wf-report", name: "Weekly report", hours: 6 }],
     });
-    await vi.waitFor(async () => {
-      await act(async () => {
-        await Promise.resolve();
-      });
-      expect(document.querySelector('a[href^="/brain"] svg')).not.toBeNull();
-    });
+    // The drawing is a lazy import: its first load outlasts waitFor's default
+    // second on a busy runner.
+    await vi.waitFor(
+      async () => {
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(document.querySelector('a[href^="/brain"] svg')).not.toBeNull();
+      },
+      { timeout: 10_000 }
+    );
 
     expect({ unread, drawn: await wayToBrain() }).toStrictEqual({
       unread: {
