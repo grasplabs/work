@@ -45,6 +45,7 @@ import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
+import type { DiagramPart } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
@@ -313,6 +314,25 @@ const WorkflowTabs = ({
   </TabsList>
 );
 
+/**
+ * What the page takes from the draft's checkpoint: the revision a test on
+ * recent items runs, none before the draft's first edit (revision 0 is
+ * the current version's definition); and its named parts, as its
+ * builders' drawing has them, for an Overview of a workflow drawn in parts.
+ */
+const checkpointOf = (
+  draft: Loaded<WorkflowDraft> | undefined
+): { checkpoint: number | null; parts: DiagramPart[] } => {
+  const saved = draft?.state === "ready" ? draft.data.checkpoint : null;
+  if (saved === null || saved === undefined) {
+    return { checkpoint: null, parts: [] };
+  }
+  return {
+    checkpoint: saved.revision > 0 ? saved.revision : null,
+    parts: partsOf(saved.diagram),
+  };
+};
+
 const WorkflowResourceView = ({
   resource,
   draft,
@@ -337,23 +357,16 @@ const WorkflowResourceView = ({
   const router = useRouter();
   const { currentVersion } = resource;
   const builder = resource.role === "builder";
-  const [tab, setTab] = useState<WorkflowTab>(
-    draft === undefined ? "versions" : "definition"
-  );
+  const start: WorkflowTab = draft === undefined ? "versions" : "definition";
+  const [tab, setTab] = useState<WorkflowTab>(start);
   const [part, setPart] = useState<TracesPart>("runs");
   // Files and apps reads what no other tab needs: only once it is opened,
   // then kept while another tab shows.
   const [filesOpened, setFilesOpened] = useState(false);
-  // A test on recent items runs a saved checkpoint: none before the
-  // draft's first edit (revision 0 is the current version's definition).
-  const saved =
-    draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
-  const checkpoint = saved > 0 ? saved : null;
-  // Its named parts, as its builders' drawing has them: an Overview of
-  // them only for a workflow drawn in parts.
-  const drawing =
-    draft?.state === "ready" ? draft.data.checkpoint?.diagram : undefined;
-  const parts = drawing === undefined ? [] : partsOf(drawing);
+  const { checkpoint, parts } = checkpointOf(draft);
+  // Its parts gone (a new checkpoint drawn in none), Overview goes too:
+  // the tab it was on shows where the page starts instead.
+  const shown = tab === "overview" && parts.length === 0 ? start : tab;
   return (
     <>
       <Tabs
@@ -364,7 +377,7 @@ const WorkflowResourceView = ({
           }
         }}
         spacing="none"
-        value={tab}
+        value={shown}
       >
         <div className="flex flex-col gap-3 border-b px-6 pt-5">
           <WorkflowHeader
