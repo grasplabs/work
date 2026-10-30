@@ -386,18 +386,18 @@ export const Traces = ({
           {t({ message: "Activity", context: "what a workflow did lately" })}
         </ToggleGroupItem>
       </ToggleGroup>
-      {part === "runs" ? (
-        <>
-          {checkpoint === null ? null : (
-            <ItemTest revision={checkpoint} workflow={workflow} />
-          )}
-          {runs.state === "ready" ? (
-            <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
-          ) : (
-            <NotLoadedState page={runs} />
-          )}
-        </>
-      ) : null}
+      {/* Kept while Activity shows: a test going on stays followed, and
+          the answers typed for it stay. */}
+      <div className="flex flex-col gap-6" hidden={part !== "runs"}>
+        {checkpoint === null ? null : (
+          <ItemTest revision={checkpoint} workflow={workflow} />
+        )}
+        {runs.state === "ready" ? (
+          <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
+        ) : (
+          <NotLoadedState page={runs} />
+        )}
+      </div>
       {part === "activity" ? (
         <ActivityList activity={activity} names={names} />
       ) : null}

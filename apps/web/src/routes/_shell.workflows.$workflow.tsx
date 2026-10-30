@@ -315,16 +315,32 @@ const WorkflowTabs = ({
 );
 
 /**
+ * The draft the page goes by: its editor's last save or read (`edited`),
+ * or the page's own read when that is at a later revision (read again
+ * after a publication).
+ */
+const latestDraftOf = (
+  loaded: Loaded<WorkflowDraft> | undefined,
+  edited: WorkflowDraft | undefined
+): WorkflowDraft | undefined => {
+  const read = loaded?.state === "ready" ? loaded.data : undefined;
+  if (edited === undefined) {
+    return read;
+  }
+  return read !== undefined && read.revision > edited.revision ? read : edited;
+};
+
+/**
  * What the page takes from the draft's checkpoint: the revision a test on
  * recent items runs, none before the draft's first edit (revision 0 is
  * the current version's definition); and its named parts, as its
  * builders' drawing has them, for an Overview of a workflow drawn in parts.
  */
 const checkpointOf = (
-  draft: Loaded<WorkflowDraft> | undefined
+  draft: WorkflowDraft | undefined
 ): { checkpoint: number | null; parts: DiagramPart[] } => {
-  const saved = draft?.state === "ready" ? draft.data.checkpoint : null;
-  if (saved === null || saved === undefined) {
+  const saved = draft?.checkpoint ?? null;
+  if (saved === null) {
     return { checkpoint: null, parts: [] };
   }
   return {
@@ -360,7 +376,10 @@ const WorkflowResourceView = ({
   const start: WorkflowTab = draft === undefined ? "versions" : "definition";
   const [tab, setTab] = useState<WorkflowTab>(start);
   const [part, setPart] = useState<TracesPart>("runs");
-  const { checkpoint, parts } = checkpointOf(draft);
+  // The draft as its editor last saved or read it, beside the page's read:
+  // whichever is at the later revision is the draft the page goes by.
+  const [edited, setEdited] = useState<WorkflowDraft>();
+  const { checkpoint, parts } = checkpointOf(latestDraftOf(draft, edited));
   // Its parts gone (a new checkpoint drawn in none), Overview goes too:
   // the tab it was on shows where the page starts instead.
   const shown = tab === "overview" && parts.length === 0 ? start : tab;
@@ -412,6 +431,7 @@ const WorkflowResourceView = ({
                 <DefinitionEditor
                   currentVersion={currentVersion}
                   loaded={draft.data}
+                  onDraft={setEdited}
                   onVersionMoved={() => {
                     void router.invalidate();
                   }}
