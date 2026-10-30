@@ -3,6 +3,7 @@ import type { ContactRole } from "@grasp-os/shared/admin/onboarding-admin";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLinkIcon, MailIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -94,7 +95,7 @@ const Company = () => {
   return (
     <section className="bg-card flex flex-wrap items-start justify-between gap-x-8 gap-y-3 rounded-xl border px-5 py-4">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="type-title">{org.name}</h2>
+        <PageHeaderTitle render={<h2>{org.name}</h2>} />
         <p className="text-muted-foreground">
           {about === "" ? "What it does is not known yet" : about}
         </p>
