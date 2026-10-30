@@ -64,6 +64,10 @@ import {
   GoLiveDecision,
   WorkflowStatus,
 } from "../workflows/workflow-status.tsx";
+import {
+  TriggersTabContent,
+  TriggersTabTrigger,
+} from "../workflows/workflow-triggers-tab.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
 // its definition as a draft they edit, check and publish; for everyone
@@ -330,7 +334,8 @@ type WorkflowTab =
   | "runs"
   | "files"
   | "parameters"
-  | "versions";
+  | "versions"
+  | "triggers";
 
 /** The tabs of a workflow's page, as the reader has them. */
 const WorkflowTabs = ({
@@ -362,6 +367,7 @@ const WorkflowTabs = ({
         <Trans context="tab listing the runs of workflows">Runs</Trans>
       </TabsTrigger>
     )}
+    <TriggersTabTrigger />
     <TabsTrigger value="files">
       <Trans context="tab of a workflow">Files and apps</Trans>
     </TabsTrigger>
@@ -435,7 +441,7 @@ const WorkflowResourceView = ({
     savedHere
   );
   const [tab, setTab] = useState<WorkflowTab>(
-    draft === undefined ? "versions" : "definition"
+    Route.useSearch().tab ?? (draft === undefined ? "versions" : "definition")
   );
   const [part, setPart] = useState<TracesPart>("runs");
   const checkpoint = checkpointOf(draft);
@@ -547,6 +553,11 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
+        <TriggersTabContent
+          builder={builder}
+          me={names.me}
+          workflow={resource.id}
+        />
         <TabsContent value="files">
           <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
             <FilesAndApps apps={apps} files={files} knowledge={knowledge} />
@@ -685,6 +696,8 @@ const WorkflowResourcePage = () => {
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
+  validateSearch: (search: Record<string, unknown>): { tab?: "triggers" } =>
+    search.tab === "triggers" ? { tab: "triggers" } : {},
   loader: async ({ context: { core }, params: { workflow } }) => {
     const [
       resource,

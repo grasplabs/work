@@ -132,6 +132,7 @@ describe("an independent workflow's triggers over /rpc", () => {
         createdAt: "",
         config: nightly,
         nextAt: "",
+        stopped: false,
       },
       nextAtIsAhead: true,
       listed: [trigger],
