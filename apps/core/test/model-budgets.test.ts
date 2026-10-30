@@ -13,9 +13,11 @@ import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answeringProvider } from "./model-provider.ts";
+import { answeringProvider, streamText } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
+import { plan } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -358,6 +360,78 @@ describe("model budgets", { timeout: 60_000 }, () => {
       ],
       // Four answers' cost, and nothing held.
       ledger: { spentMicros: 4 * (29_500 + 150), reservedMicros: 0 },
+    });
+  });
+
+  it("never count or stop a call on Grasp's own key: with the deployment's and the person's budgets used up, their next call is refused while a document converted for them still is, charged to Grasp", async () => {
+    const { call, month } = withRules(
+      { budgets: { deployment: { limit: 0.1 }, user: { limit: 0.1 } } },
+      times(4, dearAnswer)
+    );
+    const trigger = newPerson();
+    const ada = hello({ trigger });
+    const rulesEnv: Env = {
+      ...env,
+      MODEL_GATEWAY: {
+        budgets: { deployment: { limit: 0.1 }, user: { limit: 0.1 } },
+      },
+      MODEL_BUDGET_MONTH: month,
+    };
+
+    // $0.02965 a call on the organization's key: the fifth has no room.
+    await expect(
+      inTurn(Array.from({ length: 5 }, () => async () => await call(ada)))
+    ).resolves.toStrictEqual(["ok", "ok", "ok", "ok", "model.over_budget"]);
+    const before = await ledgerOf(month, trigger.userId);
+    await plan(platformOpenAiKey, [
+      {
+        sse: streamText("openai-responses", {
+          text: "# Expense policy",
+          inputTokens: 2000,
+          outputTokens: 100,
+        }),
+      },
+    ]);
+    const converted = await outcome(
+      models(rulesEnv).platformCall({
+        model: "openai/gpt-5.4-mini",
+        purpose: "knowledge.conversion",
+        trigger,
+        work: { platform: "document_conversion" },
+        input: "Write out this document as Markdown.",
+        document: {
+          name: "policy.pdf",
+          mediaType: "application/pdf",
+          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
+        },
+      })
+    );
+    const deployment = await modelLedger(env).spendOf(
+      month,
+      ["deployment"],
+      10
+    );
+    const grasp = await modelLedger(env).platformSpend([month]);
+
+    expect({
+      converted,
+      // Still refused on the organization's key.
+      after: await outcome(call(ada)),
+      user: await ledgerOf(month, trigger.userId),
+      deployment: deployment.deployment?.[0]?.spentMicros,
+      grasp: grasp.map(({ feature, model, micros }) => ({
+        feature,
+        model,
+        charged: micros > 0,
+      })),
+    }).toStrictEqual({
+      converted: "ok",
+      after: "model.over_budget",
+      user: before,
+      deployment: before.spentMicros,
+      grasp: [
+        { feature: "conversion", model: "openai/gpt-5.4-mini", charged: true },
+      ],
     });
   });
 
