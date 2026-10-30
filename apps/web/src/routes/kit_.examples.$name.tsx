@@ -1,6 +1,7 @@
 import { examples } from "@grasp-os/ui/catalog";
 import type { ExampleName } from "@grasp-os/ui/catalog";
 import { loadExample } from "@grasp-os/ui/catalog/examples";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
@@ -37,7 +38,7 @@ const ExampleDemo = () => {
   const Example = lazyExamples[name];
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <h1 className="type-title">{name}</h1>
+      <PageHeaderTitle>{name}</PageHeaderTitle>
       <Suspense>
         <div data-catalog-content="">
           <Example />

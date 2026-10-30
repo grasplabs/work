@@ -4366,6 +4366,10 @@ msgstr "Aplicaciones de chat en las que Grasp sabe que eres tú. Escribe a Grasp
 msgid "Chat name"
 msgstr "Nombre del chat"
 
+#: src/chat/drawer-edge.tsx
+msgid "Chat width"
+msgstr "Ancho del chat"
+
 #: src/chat/chat-switcher.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
@@ -11219,7 +11223,7 @@ msgstr "Abierta desde el {date}. Hasta que se responda, el dato sigue siendo des
 msgid "Open since Grasp's go on {since}."
 msgstr "Abierta desde el visto bueno de Grasp el {since}."
 
-#: src/chat/chat-dock.tsx
+#: src/chat/dock-frame.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Abrir el chat"
@@ -15832,6 +15836,10 @@ msgstr "Aún no hay dominios que puedas abrir. Los dominios se crean en el chat:
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Aún no hay flujos de trabajo que vincular."
+
+#: src/chat/dock-frame.tsx
+msgid "There is a conversation here. Open the chat to see it."
+msgstr "Aquí hay una conversación. Abre el chat para verla."
 
 #: src/settings/teams.tsx
 msgid "There is a team with this name already."

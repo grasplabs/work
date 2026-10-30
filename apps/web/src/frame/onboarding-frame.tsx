@@ -30,7 +30,7 @@ export const OnboardingFrame = ({
       </div>
     </main>
     <footer className="bg-background sticky bottom-0 flex h-18 flex-none items-center justify-between px-4 sm:px-10">
-      <GraspMark className="size-5" variant="logo" />
+      <GraspMark className="size-5" />
       <LanguageButton />
     </footer>
   </div>

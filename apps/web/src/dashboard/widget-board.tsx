@@ -15,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Tooltip,
   TooltipContent,
@@ -248,7 +249,7 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                 ))}
               </ul>
               <span className="flex w-full flex-col items-center border-t pt-2 text-center">
-                <span className="type-figure">{here.length}</span>
+                <Stat>{here.length}</Stat>
                 <span
                   className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs wrap-anywhere hyphens-auto"
                   lang={i18n.locale}
