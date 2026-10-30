@@ -23,6 +23,13 @@ import type { RefObject } from "react";
 const settlesWithinMs = 500;
 
 /**
+ * What a person scrolls a thread by: a wheel, a finger, a key (the arrows,
+ * Page Up and Down, Home and End, the space bar) or a pointer on its
+ * scrollbar. Any of them, and the thread stops keeping to its end.
+ */
+const scrolledBy = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
+
+/**
  * A thread opens at its end, and stays there while what is around it
  * settles: the chat dock's frame rises into place and its box is measured
  * a moment later, so the view gets smaller after the scroller went to the
@@ -46,17 +53,16 @@ const SettleAtEnd = ({
     const timer = setTimeout(stop, settlesWithinMs);
     if (element !== null) {
       observer.observe(element);
-      element.addEventListener("wheel", stop, { once: true, passive: true });
-      element.addEventListener("touchmove", stop, {
-        once: true,
-        passive: true,
-      });
+      for (const event of scrolledBy) {
+        element.addEventListener(event, stop, { once: true, passive: true });
+      }
     }
     return () => {
       clearTimeout(timer);
       stop();
-      element?.removeEventListener("wheel", stop);
-      element?.removeEventListener("touchmove", stop);
+      for (const event of scrolledBy) {
+        element?.removeEventListener(event, stop);
+      }
     };
   }, [scroller, scrollToEnd]);
   return null;

@@ -15,8 +15,8 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { RefObject, ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -28,7 +28,16 @@ import type { ChatSlot } from "./active-chat.ts";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { useFollowedChat } from "./chat-watch.ts";
 import { Composer } from "./composer.tsx";
-import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
+import {
+  dockDrawer,
+  dockDrawerWidth,
+  setDockDrawerWidth,
+  setDockMode,
+  settledDrawerWidth,
+  useDockDrawerWidth,
+  useDockMode,
+  widestDockDrawer,
+} from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
@@ -289,6 +298,39 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
 };
 
 /**
+ * How wide the frame or the drawer is, as a variable the dock's class
+ * reads (no inline style): the frame always as the drawer is at first, the
+ * drawer as its edge was dragged. A window made narrower takes the drawer
+ * in with it. Returns what the edge sets the width with while it is
+ * dragged.
+ */
+const useDockWidth = (
+  dock: RefObject<HTMLElement | null>,
+  drawer: boolean
+): ((width: number) => void) => {
+  const drawerWidth = useDockDrawerWidth();
+  const width = drawer ? drawerWidth : dockDrawer.normal;
+  useLayoutEffect(() => {
+    dock.current?.style.setProperty("--dock-width", `${width}px`);
+  }, [dock, width]);
+  useEffect(() => {
+    const fit = (): void => {
+      setDockDrawerWidth(
+        settledDrawerWidth(dockDrawerWidth(), widestDockDrawer(innerWidth))
+      );
+    };
+    fit();
+    addEventListener("resize", fit);
+    return () => {
+      removeEventListener("resize", fit);
+    };
+  }, []);
+  return (next) => {
+    dock.current?.style.setProperty("--dock-width", `${next}px`);
+  };
+};
+
+/**
  * The dock itself: on every page in the frame but Chat's, carrying on the
  * tab's open chat of `slot` (active-chat.ts).
  */
@@ -316,45 +358,36 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
   // the focus goes back to the box, so the cursor stays in it as the frame
   // opens, grows or folds away.
   const dock = useRef<HTMLElement>(null);
-  // Whether the box is being given the focus back by the dock itself, as
-  // it folds away: that focus doesn't open the chat again.
-  const refocusing = useRef(false);
   const focusBox = (): void => {
     requestAnimationFrame(() => {
-      refocusing.current = true;
       dock.current?.querySelector("textarea")?.focus();
-      refocusing.current = false;
     });
   };
   const moveTo = (next: DockMode): void => {
     setDockMode(next);
     focusBox();
   };
-  // A click or the focus into the folded box, with a conversation behind
-  // it, opens the chat on it: the box is the way in, with no arrow of its
-  // own. A click counts even with the cursor already in the box.
+  // A click into the folded box, with a conversation behind it, opens the
+  // chat on it: the box is the way in, with no arrow of its own. A click
+  // counts even with the cursor already in the box. Only a pointer opens
+  // it: tabbing into the box is to type in it, and sending opens the chat.
   const open = mode !== "bar";
   const unfolds = !open && chatId !== undefined;
   useEffect(() => {
     const element = dock.current;
     const unfold = (event: Event): void => {
-      if (event.target instanceof HTMLTextAreaElement && !refocusing.current) {
+      if (event.target instanceof HTMLTextAreaElement) {
         setDockMode("frame");
       }
     };
     if (unfolds) {
-      element?.addEventListener("focusin", unfold);
       element?.addEventListener("pointerdown", unfold);
     }
     return () => {
-      element?.removeEventListener("focusin", unfold);
       element?.removeEventListener("pointerdown", unfold);
     };
   }, [unfolds]);
-  // The drawer's width, as a variable its class reads: no inline style.
-  useEffect(() => {
-    dock.current?.style.setProperty("--dock-drawer", `${drawerWidth}px`);
-  }, [drawerWidth]);
+  const showWidth = useDockWidth(dock, mode === "drawer");
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
     <Composer
@@ -387,11 +420,11 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
     look =
-      "bg-card pointer-events-auto relative flex h-full w-(--dock-drawer) max-w-full flex-col border-l text-sm";
+      "bg-card pointer-events-auto relative flex h-full w-(--dock-width) max-w-full flex-col border-l text-sm";
   } else if (open) {
     place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
     look =
-      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-110.5 max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
+      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
   }
   return (
     <div className={place}>
@@ -407,6 +440,7 @@ const Dock = ({ slot, words }: { slot: ChatSlot; words: DockWords }) => {
               moveTo("frame");
             }}
             onDragging={setDragging}
+            onPreview={showWidth}
             width={drawerWidth}
           />
         ) : null}

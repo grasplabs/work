@@ -65,7 +65,6 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A callout for a message that needs attention, inline.",
     exports: ["Alert", "AlertAction", "AlertDescription", "AlertTitle"],
-    changes: "Rounded as every surface in Grasp's chat (`rounded-xl`).",
   },
   "alert-dialog": {
     status: "supported",
@@ -447,7 +446,7 @@ export const shadcnComponents = {
       "InputGroupTextarea",
     ],
     changes:
-      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is its edge in the keyboard's ink and a hair of ring, not a field's wide ring. In the `chat` size its buttons are rounded as every control is (`rounded-md`).",
+      "Adds the `prompt`, `chat` and `lg` sizes Grasp's own pages use. Its focus is the same ring as Input's. In the `chat` size its buttons are rounded as every control is (`rounded-md`).",
   },
   "input-otp": {
     status: "supported",
