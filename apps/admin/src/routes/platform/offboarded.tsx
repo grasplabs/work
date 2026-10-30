@@ -7,7 +7,7 @@ import { useState } from "react";
 import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { PlatformNav, platformCrumb } from "../../admin/platform-nav.tsx";
-import { Quiet } from "../../admin/release-parts.tsx";
+import { EmptySection } from "../../admin/section.tsx";
 import {
   deletePlacedClientFn,
   fetchOffboardedClients,
@@ -107,7 +107,7 @@ const OffboardedPage = () => {
     >
       <PlatformNav />
       {offboarded.length === 0 ? (
-        <Quiet>No client is offboarded.</Quiet>
+        <EmptySection>No client is offboarded.</EmptySection>
       ) : (
         <ul className="flex flex-col gap-4">
           {offboarded.map((client) => (

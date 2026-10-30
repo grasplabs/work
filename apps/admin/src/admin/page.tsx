@@ -93,7 +93,7 @@ export const PageBody = ({
 }) => (
   <div
     className={cn(
-      "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6 text-sm",
+      "mx-auto flex w-full flex-col gap-6 px-6 pt-7 pb-6",
       wide ? "max-w-7xl" : "max-w-5xl"
     )}
   >
