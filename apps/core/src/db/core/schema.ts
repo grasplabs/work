@@ -4199,6 +4199,9 @@ export const workflowResourceRuns = sqliteTable(
       table.createdAt,
       table.id
     ),
+    // Runs across workflows since a moment: how many ran today, of
+    // workflows the reader may see or not (workflows/today.ts).
+    index("workflow_resource_runs_created_idx").on(table.createdAt),
   ]
 );
 
