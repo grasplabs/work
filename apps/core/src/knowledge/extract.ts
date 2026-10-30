@@ -3,7 +3,7 @@ import type { Transcript } from "@grasp-os/brain/transcripts";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { log } from "@grasp-os/shared/log";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
-import { isolateBase } from "@grasp-os/shared/runtime";
+import { isolateBase, withNode } from "@grasp-os/shared/runtime";
 import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
@@ -137,7 +137,7 @@ export class ExtractorUnavailableError extends Error {
  */
 const isolateSettings = {
   ...isolateBase,
-  compatibilityFlags: [...isolateBase.compatibilityFlags, "nodejs_compat"],
+  compatibilityFlags: withNode(isolateBase.compatibilityFlags),
   env: {},
   globalOutbound: null,
   limits: { cpuMs: 20_000, subRequests: 0 },

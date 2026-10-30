@@ -20,6 +20,10 @@ import type {
 } from "@grasp-os/shared/connect";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import {
+  relayRedirectUri,
+  relayedClientOf,
+} from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq, like, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -74,7 +78,9 @@ import type { Vault } from "./vault.ts";
 //
 // A person starts it from their browser, signed in to core, and the
 // provider sends the browser back to core's callback on the same origin,
-// where their session cookie comes along (`SameSite=Lax` goes with a
+// straight or, for a Grasp-hosted client in relay mode, through the OAuth
+// relay (@grasp-os/shared/oauth-relay), where their session cookie comes
+// along (`SameSite=Lax` goes with a
 // top-level navigation). Core says who the person is on both requests, and
 // a flow only finishes for the person who started it. So a flow can't be
 // finished in anyone else's name: an attacker who gets a victim to finish
@@ -218,6 +224,7 @@ export const startConnection = async (
     provider: providerId,
     scope,
     origin,
+    callbackOrigin,
     returnTo,
     classes,
     sharedMailbox,
@@ -246,14 +253,24 @@ export const startConnection = async (
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
-  if (!provider.isTenant(tenant) || new URL(origin).origin !== origin) {
+  if (
+    !provider.isTenant(tenant) ||
+    new URL(origin).origin !== origin ||
+    // Only a stage's relay, for a client hosted in that same stage.
+    (callbackOrigin !== undefined &&
+      relayedClientOf(origin, callbackOrigin) === null)
+  ) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
 
   const state = randomToken();
   const verifier = randomToken();
   const stateHash = await sha256Hex(state);
-  const redirectUri = new URL(connectionCallbackPath, origin).href;
+  // The flow keeps it, and its exchange names this same one (`finishConnection`).
+  const redirectUri =
+    callbackOrigin === undefined
+      ? new URL(connectionCallbackPath, origin).href
+      : relayRedirectUri(callbackOrigin, "connections");
   await refusingErased(
     drizzle(env.DB)
       .insert(oauthFlows)

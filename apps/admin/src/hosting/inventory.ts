@@ -1,6 +1,6 @@
 /**
  * A client's private resources in its hosting destination (spec 37.2, 39):
- * which destination and policy it's placed under, and one inventory row per
+ * which destination it's placed in, and one inventory row per
  * logical role a release names, mapped to a physical resource no other
  * client has. Several clients may share a destination; nothing of theirs
  * is shared but the destination itself.
@@ -15,12 +15,17 @@
  * (src/deploy/), which doesn't read it yet: the real-account qualification
  * comes first.
  */
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
 import type { ConnectGatewayProps } from "@grasp-os/shared/connect-gateway";
-import { toHex } from "@grasp-os/shared/encoding";
+import {
+  clientResourceName,
+  clientsNamespace,
+  deploymentIdAlphabet,
+  deploymentIdLength,
+} from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { act, actIfChanged } from "../db/act.ts";
@@ -28,40 +33,25 @@ import type { Actor, AdminDatabase } from "../db/act.ts";
 import {
   clientPlacements,
   clientResources,
-  destinationCapabilityEvidence,
   hostingDestinations,
-  releases,
 } from "../db/schema.ts";
 import { holdsClient, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
-import {
-  capabilities,
-  destinationCapabilitiesSchema,
-  hostingPolicies,
-  hostingPolicyIdSchema,
-  placementProblems,
-} from "./policy.ts";
-import type {
-  DestinationCapabilities,
-  Evidence,
-  HostingPolicyId,
-  Jurisdiction,
-  PlacementProblem,
-} from "./policy.ts";
+import { clientHostingOf, resourceJurisdictionOf } from "./organization.ts";
 
 export const inventoryErrorCodes = [
   /** No destination by that id. */
   "destination_unknown",
-  /** The destination doesn't satisfy the policy, or doesn't serve it. */
-  "placement_refused",
+  /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
+  "destination_other_stage",
   /**
-   * The client is placed elsewhere or under another policy: moving it is a
+   * The client is placed elsewhere: moving it is a
    * migration onto new resources, never a relabel.
    */
   "placement_changed",
   /** The client has no placement yet. */
   "not_placed",
-  /** A release's bucket is outside the policy's jurisdiction. */
+  /** A release's bucket binding names no bucket. */
   "bucket_jurisdiction",
   /** A Durable Object migration the inventory can't follow without a decision (rename, transfer). */
   "unsupported_durable_object_migration",
@@ -73,6 +63,8 @@ export const inventoryErrorCodes = [
   "foreign_resource",
   /** A binding of a kind rendering doesn't map. */
   "unsupported_binding",
+  /** A release resource the client naming scheme doesn't name (@grasp-os/shared/names). */
+  "resource_unnamed",
   /** A binding that would take the Workers' Durable Objects out of the EU-restricted namespace. */
   "durable_object_jurisdiction",
   /** A binding names a placeholder rendering doesn't fill. */
@@ -85,12 +77,6 @@ export const inventoryErrorCodes = [
   "resource_outside_jurisdiction",
   /** Another runner took the client over: this one changes nothing more. */
   "runner_replaced",
-  /**
-   * Evidence observed against something the admin can't check: a
-   * release it hasn't imported, a commit no imported release was built
-   * from, a candidate, or a runtime profile the destination doesn't run.
-   */
-  "evidence_subject_unknown",
 ] as const;
 
 export type InventoryErrorCode = (typeof inventoryErrorCodes)[number];
@@ -98,17 +84,11 @@ export type InventoryErrorCode = (typeof inventoryErrorCodes)[number];
 /** Why placing, allocating or rendering stopped: a fixed code and identifiers only. */
 export class InventoryError extends Error {
   readonly code: InventoryErrorCode;
-  readonly problems: readonly PlacementProblem[];
 
-  constructor(
-    code: InventoryErrorCode,
-    message: string,
-    problems: readonly PlacementProblem[] = []
-  ) {
+  constructor(code: InventoryErrorCode, message: string) {
     super(message);
     this.name = "InventoryError";
     this.code = code;
-    this.problems = problems;
   }
 }
 
@@ -124,8 +104,6 @@ export interface DestinationInput {
   kind: DestinationKind;
   accountId: string | null;
   namespace: string | null;
-  policies: readonly HostingPolicyId[];
-  capabilities: DestinationCapabilities;
 }
 
 const destinationIdSchema = z
@@ -133,170 +111,35 @@ const destinationIdSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/u);
 
 /**
- * The runtime profile core runs on in each kind of destination: the only
- * profile evidence about that destination may name. Cloudflare's, as the
- * deploy sets `RUNTIME_PROFILE` (src/deploy/core-config.ts), or plain
- * workerd's, which its operator runs.
- */
-const runtimeProfiles = {
-  workers_for_platforms: "cloudflare",
-  dedicated: "cloudflare",
-  workerd: "workerd",
-} as const satisfies Record<DestinationKind, string>;
-
-type Subject = Evidence["subject"];
-
-/** Each capability `verified` lists, with what its evidence was observed against. */
-const subjectsOf = (verified: DestinationCapabilities) =>
-  Object.entries(verified).flatMap(([capability, entry]) =>
-    entry === undefined ? [] : [{ capability, subject: entry.evidence.subject }]
-  );
-
-/** The ids of every subject of `kind` that `verified`'s evidence names. */
-const idsOf = (
-  verified: DestinationCapabilities,
-  kind: Subject["kind"]
-): string[] => [
-  ...new Set(
-    subjectsOf(verified)
-      .filter(({ subject }) => subject.kind === kind)
-      .map(({ subject }) => subject.id)
-  ),
-];
-
-/** Which of `ids` name a release the admin imported. */
-const importedReleases = async (
-  db: AdminDatabase,
-  ids: readonly string[]
-): Promise<Set<string>> => {
-  if (ids.length === 0) {
-    return new Set();
-  }
-  const rows = await db
-    .select({ id: releases.id })
-    .from(releases)
-    .where(inArray(releases.id, [...ids]));
-  return new Set(rows.map(({ id }) => id));
-};
-
-/** Which of `commits` an imported release was built from. */
-const builtCommits = async (
-  db: AdminDatabase,
-  commits: readonly string[]
-): Promise<Set<string>> => {
-  if (commits.length === 0) {
-    return new Set();
-  }
-  const rows = await db
-    .selectDistinct({ commitSha: releases.commitSha })
-    .from(releases)
-    .where(inArray(releases.commitSha, [...commits]));
-  return new Set(rows.map(({ commitSha }) => commitSha));
-};
-
-/**
- * Throws unless the evidence in `verified`, for a destination of `kind`,
- * names only subjects the admin knows: a release it imported, a commit
- * one was built from, or the destination's own runtime profile. An
- * untrusted report of success, naming anything else, proves nothing about
- * what runs. A candidate is never known: the admin imports releases,
- * not candidates, so what was observed on one is recorded against the
- * release it became.
- */
-const assertSubjectsKnown = async (
-  db: AdminDatabase,
-  kind: DestinationKind,
-  verified: DestinationCapabilities
-): Promise<void> => {
-  const imported = await importedReleases(db, idsOf(verified, "release"));
-  const built = await builtCommits(db, idsOf(verified, "source"));
-  const known: Record<Subject["kind"], (id: string) => boolean> = {
-    release: (id) => imported.has(id),
-    source: (id) => built.has(id),
-    profile: (id) => id === runtimeProfiles[kind],
-    candidate: () => false,
-  };
-  const unknown = subjectsOf(verified).find(
-    ({ subject }) => !known[subject.kind](subject.id)
-  );
-  if (unknown !== undefined) {
-    throw new InventoryError(
-      "evidence_subject_unknown",
-      `${unknown.capability}'s evidence names ${unknown.subject.kind} ${unknown.subject.id}, which the admin can't check`
-    );
-  }
-};
-
-/**
- * Where `evidence`'s full record is, as the audit log keeps it: without
- * credentials, query or fragment, which a link to a test run may carry.
- */
-const recordOf = (evidence: Evidence): string => {
-  const url = new URL(evidence.record);
-  return `${url.origin}${url.pathname}`;
-};
-
-/** The audit detail of each capability `verified` lists: its status, subject and record. */
-const evidenceDetail = (
-  verified: DestinationCapabilities
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(verified).flatMap(([capability, entry]) =>
-      entry === undefined
-        ? []
-        : [
-            [
-              `evidence.${capability}`,
-              `${entry.status} ${entry.evidence.subject.kind}:${entry.evidence.subject.id} ${recordOf(entry.evidence)}`,
-            ],
-          ]
-    )
-  );
-
-/**
- * Records destination `input`, or replaces what it says about one: its
- * capabilities are re-verified as staff record new evidence. Placing a
- * client checks them again, so a capability withdrawn here stops the next
- * allocation for every client in it. Evidence must name a subject the
- * admin knows, and every capability's declaration, the unlisted ones as
- * unknown, is kept (`capabilityEvidence`).
+ * Records destination `input`, or replaces what it says about one. A
+ * Workers for Platforms
+ * destination must be in the admin's own `stage`'s clients' namespace
+ * (`destination_other_stage`): a staging admin never records one among
+ * production's clients, nor production's among staging's.
  */
 export const saveDestination = async (
   db: AdminDatabase,
   actor: Actor,
-  input: DestinationInput
+  input: DestinationInput,
+  stage: Stage
 ): Promise<void> => {
   destinationIdSchema.parse(input.id);
-  const policies = z.array(hostingPolicyIdSchema).parse(input.policies);
-  const verified = destinationCapabilitiesSchema.parse(input.capabilities);
-  await assertSubjectsKnown(db, input.kind, verified);
+  if (
+    input.kind === "workers_for_platforms" &&
+    input.namespace !== clientsNamespace(stage)
+  ) {
+    throw new InventoryError(
+      "destination_other_stage",
+      `${input.id}'s namespace ${String(input.namespace)} isn't this admin's own, ${clientsNamespace(stage)}`
+    );
+  }
   const now = new Date();
   const values = {
     kind: input.kind,
     accountId: input.accountId,
     namespace: input.namespace,
-    policies: JSON.stringify(policies),
-    capabilities: JSON.stringify(verified),
     updatedAt: now,
   };
-  // An insert per capability: a D1 statement binds at most 100 values.
-  const declarations = capabilities.map((capability) => {
-    const entry = verified[capability];
-    return db.insert(destinationCapabilityEvidence).values({
-      destinationId: input.id,
-      capability,
-      status: entry?.status ?? "unknown",
-      subjectKind: entry?.evidence.subject.kind ?? null,
-      subjectId: entry?.evidence.subject.id ?? null,
-      procedure: entry?.evidence.procedure ?? null,
-      observedAt:
-        entry === undefined ? null : new Date(entry.evidence.observedAt),
-      recordedBy: entry?.evidence.recordedBy ?? null,
-      record: entry?.evidence.record ?? null,
-      declaredBy: actor === "system" ? actor : actor.email,
-      declaredAt: now,
-    });
-  });
   await act(
     db,
     actor,
@@ -305,33 +148,10 @@ export const saveDestination = async (
         .insert(hostingDestinations)
         .values({ id: input.id, ...values, createdAt: now })
         .onConflictDoUpdate({ target: hostingDestinations.id, set: values }),
-      ...declarations,
     ],
-    {
-      action: "destination.save",
-      target: input.id,
-      detail: {
-        policies: policies.join(","),
-        capabilities: Object.keys(verified).join(","),
-        ...evidenceDetail(verified),
-      },
-    }
+    { action: "destination.save", target: input.id }
   );
 };
-
-export type CapabilityEvidence =
-  typeof destinationCapabilityEvidence.$inferSelect;
-
-/** Every capability destination `id` was declared with, in the order saved. */
-export const capabilityEvidence = async (
-  db: AdminDatabase,
-  id: string
-): Promise<CapabilityEvidence[]> =>
-  await db
-    .select()
-    .from(destinationCapabilityEvidence)
-    .where(eq(destinationCapabilityEvidence.destinationId, id))
-    .orderBy(asc(destinationCapabilityEvidence.id));
 
 export const destinationOf = async (db: AdminDatabase, id: string) => {
   const row = await db
@@ -342,45 +162,15 @@ export const destinationOf = async (db: AdminDatabase, id: string) => {
   if (row === undefined) {
     throw new InventoryError("destination_unknown", `No destination ${id}`);
   }
-  return {
-    ...row,
-    policies: z.array(z.string()).parse(JSON.parse(row.policies)),
-    capabilities: destinationCapabilitiesSchema.parse(
-      JSON.parse(row.capabilities)
-    ),
-  };
+  return row;
 };
-
-/** Throws unless `destinationId` satisfies every requirement of `policyId`. */
-export const assertPlaceable = async (
-  db: AdminDatabase,
-  destinationId: string,
-  policyId: HostingPolicyId
-): Promise<void> => {
-  const destination = await destinationOf(db, destinationId);
-  const problems = placementProblems(
-    hostingPolicies[policyId],
-    destination.policies,
-    destination.capabilities
-  );
-  if (problems.length > 0) {
-    throw new InventoryError(
-      "placement_refused",
-      `${destinationId} can't host ${policyId}: ${problems.map((problem) => ("capability" in problem ? `${problem.kind} ${problem.capability}` : problem.kind)).join(", ")}`,
-      problems
-    );
-  }
-};
-
-const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
-const DEPLOYMENT_ID_LENGTH = 10;
 
 /** A new deployment id: random, lowercase, never derived from the client. */
 const newDeploymentId = (): string =>
   Array.from(
-    crypto.getRandomValues(new Uint8Array(DEPLOYMENT_ID_LENGTH)),
+    crypto.getRandomValues(new Uint8Array(deploymentIdLength)),
     // 256 is a multiple of 32: no letter is likelier than another.
-    (byte) => BASE32[byte % BASE32.length]
+    (byte) => deploymentIdAlphabet[byte % deploymentIdAlphabet.length]
   ).join("");
 
 export const placementOf = async (
@@ -394,9 +184,9 @@ export const placementOf = async (
     .get();
 
 /**
- * Places client `clientId` in destination `destinationId` under policy
- * `policyId`, once: placing it again the same way returns the placement it
- * has. Moving it, or changing its policy, isn't a placement: a storage
+ * Places client `clientId` in destination `destinationId`, once: placing
+ * it again the same way returns the placement it has. Moving it isn't a
+ * placement: a storage
  * jurisdiction is set when a resource is created, so a change is
  * provision, copy, verify, cut over and retire onto new resources (spec
  * 38). This refuses it rather than relabel what's there.
@@ -404,12 +194,11 @@ export const placementOf = async (
 export const placeClient = async (
   db: AdminDatabase,
   actor: Actor,
-  placement: { clientId: string; destinationId: string; policyId: string }
+  placement: { clientId: string; destinationId: string }
 ): Promise<ClientPlacement> => {
-  const policyId = hostingPolicyIdSchema.parse(placement.policyId);
   const existing = await placementOf(db, placement.clientId);
   if (existing === undefined) {
-    await assertPlaceable(db, placement.destinationId, policyId);
+    await destinationOf(db, placement.destinationId);
     // A placement made at the same time wins or loses here; both callers
     // then compare against the one that stuck.
     await actIfChanged(
@@ -421,7 +210,6 @@ export const placeClient = async (
           clientId: placement.clientId,
           deploymentId: newDeploymentId(),
           destinationId: placement.destinationId,
-          policyId,
           placedBy: actor === "system" ? actor : actor.email,
           placedAt: new Date(),
         })
@@ -430,7 +218,6 @@ export const placeClient = async (
         action: "client.place",
         clientId: placement.clientId,
         target: placement.destinationId,
-        detail: { policy: policyId },
       }
     );
   }
@@ -438,13 +225,10 @@ export const placeClient = async (
   if (placed === undefined) {
     throw new Error(`${placement.clientId} has no placement after placing it`);
   }
-  if (
-    placed.destinationId !== placement.destinationId ||
-    placed.policyId !== policyId
-  ) {
+  if (placed.destinationId !== placement.destinationId) {
     throw new InventoryError(
       "placement_changed",
-      `${placement.clientId} is placed in ${placed.destinationId} under ${placed.policyId}; moving it is a migration`
+      `${placement.clientId} is placed in ${placed.destinationId}; moving it is a migration`
     );
   }
   return placed;
@@ -506,13 +290,10 @@ const durableObjectRoles = (worker: WorkerEntry): Role[] => {
 
 /**
  * Every private resource `manifest` needs of a client, once each: its
- * Workers' scripts, D1 databases, R2 buckets (each in `jurisdiction`, or
- * it stops) and Durable Object classes.
+ * Workers' scripts, D1 databases, R2 buckets (each named, or it stops)
+ * and Durable Object classes.
  */
-export const resourceRoles = (
-  manifest: ReleaseManifest,
-  jurisdiction: Jurisdiction
-): Role[] => {
+export const resourceRoles = (manifest: ReleaseManifest): Role[] => {
   const roles = new Map<string, Role>();
   const add = (role: Role) => roles.set(role.role, role);
   for (const worker of Object.values(manifest.workers)) {
@@ -534,13 +315,12 @@ export const resourceRoles = (
       if (binding.type !== "r2_bucket") {
         continue;
       }
-      if (
-        typeof binding.bucket_name !== "string" ||
-        binding.jurisdiction !== jurisdiction
-      ) {
+      // The release names its buckets; where each is kept is the
+      // organization's, recorded for every one of them alike.
+      if (typeof binding.bucket_name !== "string") {
         throw new InventoryError(
           "bucket_jurisdiction",
-          `${worker.name} binds ${binding.name} outside ${jurisdiction}`
+          `${worker.name} binds ${binding.name} without naming its bucket`
         );
       }
       add({
@@ -557,40 +337,31 @@ export const resourceRoles = (
   return [...roles.values()];
 };
 
-/** The longest name Workers, D1 and R2 all take. */
-const MAX_NAME = 63;
-const HASH_LENGTH = 8;
-
 /**
- * The name a resource has in the destination: the deployment id, then the
- * release's name for it, cut and suffixed with a hash of the whole when
- * it would be too long. Never the client's name, never a release's.
+ * The name the resource with role `role` has in the destination, by the
+ * names module (@grasp-os/shared/names): `grasp-<deployment id>-<its
+ * component and purpose>`. Never the client's name, never a release's. A
+ * role it doesn't name stops allocation (`resource_unnamed`).
  */
-export const physicalName = async (
-  deploymentId: string,
-  logicalName: string
-): Promise<string> => {
-  const name = `g${deploymentId}-${logicalName}`;
-  if (name.length <= MAX_NAME) {
-    return name;
+export const physicalName = (deploymentId: string, role: string): string => {
+  const name = clientResourceName(deploymentId, role);
+  if (name === undefined) {
+    throw new InventoryError(
+      "resource_unnamed",
+      `The release's ${role} has no name in the client naming scheme (@grasp-os/shared/names)`
+    );
   }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(name)
-  );
-  const hash = toHex(new Uint8Array(digest)).slice(0, HASH_LENGTH);
-  const kept = name.slice(0, MAX_NAME - HASH_LENGTH - 1).replace(/-+$/u, "");
-  return `${kept}-${hash}`;
+  return name;
 };
 
-const physicalNameOf = async (
+const physicalNameOf = (
   placement: ClientPlacement,
   scripts: ReadonlyMap<string, string>,
   role: Role,
   worker: string | undefined
-): Promise<string> => {
+): string => {
   if (role.kind !== "durable_object_class") {
-    return await physicalName(placement.deploymentId, role.logicalName);
+    return physicalName(placement.deploymentId, role.role);
   }
   // A class is named within its script: one namespace per script and class.
   const script = worker === undefined ? undefined : scripts.get(worker);
@@ -625,8 +396,9 @@ const matches = (row: ClientResource, wanted: ClientResource): boolean =>
  * named for its deployment, before any is created: running it again, or
  * for a later release, adds only what's new and changes nothing recorded.
  * A role recorded differently stops it; a Durable Object class a release
- * deleted is kept, tombstoned. Re-checks the destination against the
- * client's policy first, so a capability withdrawn since stops it.
+ * deleted is kept, tombstoned. Its databases and buckets are recorded in
+ * the organization's jurisdiction (src/hosting/organization.ts); one kept
+ * on its own premises gets nothing from Grasp's cloud.
  */
 export const allocateClientResources = async (
   db: AdminDatabase,
@@ -642,16 +414,20 @@ export const allocateClientResources = async (
   if (placement === undefined) {
     throw new InventoryError("not_placed", `${clientId} isn't placed`);
   }
-  const policyId = hostingPolicyIdSchema.parse(placement.policyId);
-  await assertPlaceable(db, placement.destinationId, policyId);
-  const jurisdiction = hostingPolicies[policyId].storageJurisdiction;
+  const hosting = await clientHostingOf(db, clientId);
+  if (hosting.hosting !== "grasp_cloud") {
+    throw new InventoryError(
+      "destination_unsupported",
+      `${clientId} is hosted on its own premises: Grasp's cloud creates nothing for it`
+    );
+  }
+  const jurisdiction = resourceJurisdictionOf(hosting.jurisdiction);
 
   const scripts = new Map<string, string>();
   for (const worker of Object.values(manifest.workers)) {
     scripts.set(
       worker.name,
-      // oxlint-disable-next-line no-await-in-loop -- core and connect
-      await physicalName(placement.deploymentId, worker.name)
+      physicalName(placement.deploymentId, `worker:${worker.name}`)
     );
   }
   const workerOf = new Map(
@@ -660,31 +436,27 @@ export const allocateClientResources = async (
     )
   );
   const now = new Date();
-  const wanted = await Promise.all(
-    resourceRoles(manifest, jurisdiction).map(
-      async (role): Promise<ClientResource> => ({
-        clientId,
-        role: role.role,
-        kind: role.kind,
-        destinationId: placement.destinationId,
-        physicalName: await physicalNameOf(
-          placement,
-          scripts,
-          role,
-          workerOf.get(role.role)
-        ),
-        providerId: null,
-        createRequestedBy: null,
-        jurisdiction,
-        owner: placement.deploymentId,
-        operationId,
-        lifecycle: role.tombstoned ? "tombstoned" : "allocated",
-        deletedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-    )
-  );
+  const wanted = resourceRoles(manifest).map((role): ClientResource => ({
+    clientId,
+    role: role.role,
+    kind: role.kind,
+    destinationId: placement.destinationId,
+    physicalName: physicalNameOf(
+      placement,
+      scripts,
+      role,
+      workerOf.get(role.role)
+    ),
+    providerId: null,
+    createRequestedBy: null,
+    jurisdiction,
+    owner: placement.deploymentId,
+    operationId,
+    lifecycle: role.tombstoned ? "tombstoned" : "allocated",
+    deletedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  }));
 
   const before = await clientInventory(db, clientId);
   const recorded = new Map(before.map((row) => [row.role, row]));
@@ -830,10 +602,11 @@ const unmappedBindings = new Set([
 
 /**
  * What core and connect read to take their Durable Objects out of the
- * EU-restricted namespace (`none`, for workerd and on-prem: core's
- * src/durable-objects.ts, connect's src/clock.ts). Unset is the EU, which
- * a placed client's policy requires, so no binding of a placed client's
- * Worker carries the name, whatever its kind or value.
+ * EU-restricted namespace (`none`: core's src/durable-objects.ts,
+ * connect's src/clock.ts). Unset is the EU. No binding of a release
+ * carries the name, whatever its kind or value: only rendering sets it,
+ * for an organization that keeps its data in no jurisdiction
+ * (`RenderOptions.durableObjects`).
  */
 const durableObjectJurisdiction = "DURABLE_OBJECT_JURISDICTION";
 
@@ -843,9 +616,16 @@ export interface RenderOptions {
    * A Workers for Platforms namespace: a user Worker can't bind another
    * by a service binding (10143, GRA-430), so each service binding binds
    * the connect gateway instead, its props naming the client's own script
-   * (@grasp-os/shared/connect-gateway, GRA-1217).
+   * (@grasp-os/shared/connect-gateway, GRA-1217): this one, the gateway of
+   * the namespace's stage (@grasp-os/shared/names). Unset elsewhere.
    */
-  connectGateway?: boolean;
+  connectGateway?: string;
+  /**
+   * Where the Worker makes its Durable Objects: in the EU-restricted
+   * namespace (unset, the default), or in none, for an organization that
+   * keeps its data in no jurisdiction.
+   */
+  durableObjects?: "eu" | "none";
 }
 
 /** One of `worker`'s Workers as the destination takes it. */
@@ -869,7 +649,7 @@ export const renderClientWorker = (
   worker: WorkerEntry,
   placement: ClientPlacement,
   inventory: readonly ClientResource[],
-  { connectGateway = false }: RenderOptions = {}
+  { connectGateway, durableObjects = "eu" }: RenderOptions = {}
 ): RenderedWorker => {
   const byRole = new Map(inventory.map((row) => [row.role, row]));
   const resource = (
@@ -945,13 +725,14 @@ export const renderClientWorker = (
           `r2:${String(binding.bucket_name)}`,
           "r2_bucket"
         );
-        if (binding.jurisdiction !== row.jurisdiction) {
-          throw new InventoryError(
-            "bucket_jurisdiction",
-            `${worker.name}'s ${binding.name} is outside ${row.jurisdiction}`
-          );
-        }
+        // In the jurisdiction the inventory records: none named for a
+        // bucket created without one.
         rendered.bucket_name = row.physicalName;
+        if (row.jurisdiction === "default") {
+          delete rendered.jurisdiction;
+        } else {
+          rendered.jurisdiction = row.jurisdiction;
+        }
         break;
       }
       case "service": {
@@ -960,7 +741,7 @@ export const renderClientWorker = (
           `worker:${String(binding.service)}`,
           "worker_script"
         ).physicalName;
-        if (!connectGateway) {
+        if (connectGateway === undefined) {
           rendered.service = script;
           break;
         }
@@ -976,7 +757,7 @@ export const renderClientWorker = (
         return {
           type: "service",
           name: binding.name,
-          service: connectGatewayScript,
+          service: connectGateway,
           props: { script } satisfies ConnectGatewayProps,
         };
       }
@@ -1017,6 +798,16 @@ export const renderClientWorker = (
   return {
     scriptName: resource("script", `worker:${worker.name}`, "worker_script")
       .physicalName,
-    bindings,
+    bindings:
+      durableObjects === "none"
+        ? [
+            ...bindings,
+            {
+              type: "plain_text",
+              name: durableObjectJurisdiction,
+              text: "none",
+            },
+          ]
+        : bindings,
   };
 };

@@ -1,10 +1,10 @@
 /**
  * The admin's hourly watch of Stephen at every client (src/clients/watch.ts),
- * through its own cron, against fake client cores and a fake Discord.
- * Written from how watching could fail: a signal over its bar nobody is
- * told of, told again every hour while it stays over, never told again
- * once it came back and went over again, a client nobody watches because
- * its core is older, or what the watch read not on the client's page.
+ * through its own cron, against fake client cores.
+ * Written from how watching could fail: a signal over its bar the client's
+ * Setup doesn't say needs a look, or still says so once it's back under, a
+ * client nobody watches because its core is older, or what the watch read
+ * not on the client's page.
  */
 import type {
   AdminSnapshot,
@@ -13,15 +13,7 @@ import type {
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
-import { z } from "zod";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fetchClientSetup } from "../src/clients/functions.ts";
 import { overBars } from "../src/clients/watch-signals.ts";
@@ -33,9 +25,9 @@ import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { callServerFn } from "./pages.ts";
+import { callServerFn, page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
-import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
+import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-watch-7a2c90";
 const cloudflare = mockCloudflareApi(token);
@@ -43,35 +35,7 @@ mockAccess();
 
 const db = adminDatabase(env.DB);
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
-const webhook = "https://discord.com/api/webhooks/321/test-watch-token";
 const watchCron = "45 * * * *";
-
-const messageSchema = z.object({ content: z.string() }).loose();
-
-/** Each message the fake Discord was posted, as its text. */
-const posted: string[] = [];
-
-/** Discord's webhook, keeping what's posted to it. */
-const mockDiscord = (): void => {
-  beforeEach(() => {
-    posted.length = 0;
-    const earlier = vi.mocked(globalThis.fetch).getMockImplementation();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const request = new Request(input, init);
-      if (new URL(request.url).hostname === "discord.com") {
-        posted.push(messageSchema.parse(await request.json()).content);
-        return new Response(null, { status: 204 });
-      }
-      if (earlier === undefined) {
-        throw new Error(`Unexpected outbound request to ${request.url}`);
-      }
-      return await earlier(input, init);
-    });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-};
 
 /** A day of Stephen with nothing amiss: answers, quick. */
 const quiet: AdminStephenSignals = {
@@ -122,60 +86,45 @@ const watch = async (): Promise<void> => {
   );
 };
 
-/** The posts about client `clientId`, by their title. */
-const toldOf = (clientId: string): string[] =>
-  posted
-    .filter((text) => text.includes(clientId))
-    .map((text) => text.split("\n")[0] ?? "");
+/** The needs client `clientId`'s Setup lists, as staff see the page. */
+const needsOf = async (clientId: string): Promise<string> => {
+  const { html } = await page(`/organizations/${clientId}/setup`, staff.email);
+  return html.replaceAll("&#x27;", "'");
+};
+
+/** What Stephen's need says, with `over` signals over their bar. */
+const overWords = (over: number): string =>
+  over === 1
+    ? "One of Stephen's signals is over its bar"
+    : `${over} of Stephen's signals are over its bar`;
 
 describe("the watch of Stephen", () => {
   useStoreSecrets({ deployer: token });
-  mockDiscord();
   beforeEach(async () => {
-    await setStoreSecret(
-      env.STAFF_ALERTS_WEBHOOK,
-      "STAFF_ALERTS_WEBHOOK",
-      webhook
-    );
     await db
       .update(clients)
       .set({ status: "offboarded" })
       .where(eq(clients.status, "active"));
   });
 
-  it("tells staff once of a count over its bar, not again while it stays over, and again once it went back and over again", async () => {
+  it("says on the client's Setup that a signal is over its bar, until it's back under", async () => {
     const acme = await liveClient();
     const calm = await liveClient();
     answering(acme.account, { ...quiet, failed: 10 });
     answering(calm.account, quiet);
 
     await watch();
-    await watch();
-    const whileOver = toldOf(acme.clientId);
+    const whileOver = await needsOf(acme.clientId);
+    const calmPage = await needsOf(calm.clientId);
     answering(acme.account, quiet);
     await watch();
-    answering(acme.account, { ...quiet, failed: 12 });
-    await watch();
+    const onceUnder = await needsOf(acme.clientId);
 
     expect({
-      whileOver,
-      after: toldOf(acme.clientId),
-      calm: toldOf(calm.clientId),
-      words: posted
-        .find((text) => text.includes(acme.clientId))
-        ?.split("\n")[1],
-    }).toStrictEqual({
-      whileOver: [
-        `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,
-      ],
-      after: [
-        `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,
-        `**Stephen: turns failing**: Acme ${acme.clientId} (${acme.clientId})`,
-      ],
-      calm: [],
-      words:
-        "10 of 50 turns in the last day ended in Stephen's line for a failure.",
-    });
+      whileOver: whileOver.includes(overWords(1)),
+      calm: calmPage.includes("over its bar:"),
+      onceUnder: onceUnder.includes("over its bar:"),
+    }).toStrictEqual({ whileOver: true, calm: false, onceUnder: false });
   });
 
   it("puts what it read on the client's page, a line a signal, and leaves a client whose core doesn't count Stephen yet unwatched", async () => {
@@ -199,7 +148,6 @@ describe("the watch of Stephen", () => {
     expect({
       acme: acmeSetup?.watched?.signals,
       older: olderSetup?.watched,
-      told: [...toldOf(acme.clientId), ...toldOf(older.clientId)],
     }).toStrictEqual({
       acme: {
         hours: 24,
@@ -216,9 +164,6 @@ describe("the watch of Stephen", () => {
         personalAgain: 0,
       },
       older: null,
-      told: [
-        `**Stephen: answers slow**: Acme ${acme.clientId} (${acme.clientId})`,
-      ],
     });
   });
 });
