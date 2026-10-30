@@ -13,6 +13,7 @@ import type {
   ChannelLinkOutcome,
   ChannelLinkPreview,
   ChannelLinkRefusal,
+  ChannelReach,
   ChannelUnlinked,
 } from "@grasp-os/shared/channel-accounts";
 import { randomToken, sha256Hex } from "@grasp-os/shared/encoding";
@@ -29,6 +30,7 @@ import { channelAccounts, channelLinks } from "../db/core/schema.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { stephenReachFor } from "./where.ts";
 
 // A person's accounts on chat platforms whose messages carry no Entra
 // object id (Slack, WhatsApp, Telegram...), linked to their Grasp person,
@@ -221,6 +223,12 @@ export class ChannelAccountsRpc
         .orderBy(desc(channelAccounts.linkedAt), desc(channelAccounts.id));
       return rows.map(accountOf);
     });
+  }
+
+  async reach(): Promise<ChannelReach[]> {
+    return await this.#asMember(
+      async ({ userId }) => await stephenReachFor(this.#env, userId)
+    );
   }
 
   async preview(secret: string): Promise<ChannelLinkPreview> {

@@ -115,21 +115,17 @@ import {
 } from "./gmail.ts";
 import type { GmailKeys } from "./gmail.ts";
 import { pressCard } from "./press.ts";
+import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
 import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
-import {
-  telegramAdapter,
-  telegramSetUp,
-  verifiedTelegramRequest,
-} from "./telegram.ts";
+import { telegramAdapter, verifiedTelegramRequest } from "./telegram.ts";
 import {
   verifiedWhatsAppRequest,
   whatsAppAdapter,
-  whatsAppSetUp,
   whatsAppSubscription,
 } from "./whatsapp.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
@@ -157,34 +153,6 @@ export const channelAdapters = async (
  * the mailbox the deployment set up (gmail.ts).
  */
 type Platform = keyof Awaited<ReturnType<typeof channelAdapters>> | "gmail";
-
-/**
- * Whether the deployment set `platform` up: Teams once it has the bot's id
- * and the client's Entra tenant, Slack once it has the app's signing
- * secret, without which every request would be refused anyway.
- */
-const isSetUp = (env: Env, platform: string): platform is Platform => {
-  if (platform === "gmail") {
-    return gmailSetUp(env) !== undefined;
-  }
-  if (platform === "whatsapp") {
-    return whatsAppSetUp(env);
-  }
-  if (platform === "telegram") {
-    return telegramSetUp(env);
-  }
-  if (platform === "slack") {
-    return (
-      env.SLACK_SIGNING_SECRET !== undefined && env.SLACK_SIGNING_SECRET !== ""
-    );
-  }
-  return (
-    platform === "teams" &&
-    env.TEAMS_BOT_ID !== undefined &&
-    env.TEAMS_BOT_ID !== "" &&
-    signInConfig(env)?.entra?.tenantId !== undefined
-  );
-};
 
 /** Largest request a platform may post: a Teams activity is far smaller. */
 const maxBodyBytes = 256 * 1024;
