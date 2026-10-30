@@ -281,12 +281,10 @@ export default function Server() {
         'screens/tickets.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: '
       ),
     ]);
-    // The theme's nearest reds: its chart hue and the warmth of the
-    // brain's dots (the brand's form-error red is further off).
-    expect(built.diagnostics[0]?.message).toContain("bg-hue-red");
-    expect(built.diagnostics[0]?.fix).toMatch(
-      /^Replace with "bg-(?:hue-red|brain-heat)"\.$/u
-    );
+    // The theme's nearest red: the warmth of the brain's dots (the
+    // brand's error red is further off).
+    expect(built.diagnostics[0]?.message).toContain("bg-brain-heat");
+    expect(built.diagnostics[0]?.fix).toBe('Replace with "bg-brain-heat".');
   });
 
   it("fails every other way a screen styles itself outside the kit, or loads from outside, saying what to do", async () => {
