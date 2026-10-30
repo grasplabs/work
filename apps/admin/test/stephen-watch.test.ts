@@ -186,15 +186,17 @@ describe("the watch of Stephen", () => {
 
     await watch();
 
-    const [acmeSetup, olderSetup] = await Promise.all(
-      [acme.clientId, older.clientId].map(
-        async (clientId) =>
-          await callServerFn(
-            fetchClientSetup,
-            { clientId },
-            { email: staff.email }
-          )
-      )
+    // One after another: in the test pool a request waiting on a module
+    // another request is loading is cancelled as hung (test/pages.ts).
+    const acmeSetup = await callServerFn(
+      fetchClientSetup,
+      { clientId: acme.clientId },
+      { email: staff.email }
+    );
+    const olderSetup = await callServerFn(
+      fetchClientSetup,
+      { clientId: older.clientId },
+      { email: staff.email }
     );
     expect({
       acme: acmeSetup?.watched?.signals,

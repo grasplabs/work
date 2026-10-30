@@ -108,18 +108,28 @@ describe("the kickoff from an organization's Steps", () => {
       .set({ status: "offboarded" })
       .where(eq(clients.id, offboarded.clientId));
 
-    const outcomes = await Promise.all([
-      bringIn(clientId, fileOf(transcript), null).then(
-        () => "answered",
-        () => "refused"
-      ),
-      bringIn(clientId, "A".repeat(transcriptBase64MaxLength + 4)).then(
-        () => "answered",
-        () => "refused"
-      ),
-      bringIn(offboarded.clientId, fileOf(transcript)),
-      bringIn("no-such-client", fileOf(transcript)),
-    ]);
+    // One after another: the file's first requests load the app's modules,
+    // and in the test pool a second request waiting on a module the first
+    // is loading is cancelled as hung (test/pages.ts).
+    const asks = [
+      async () =>
+        await bringIn(clientId, fileOf(transcript), null).then(
+          () => "answered",
+          () => "refused"
+        ),
+      async () =>
+        await bringIn(clientId, "A".repeat(transcriptBase64MaxLength + 4)).then(
+          () => "answered",
+          () => "refused"
+        ),
+      async () => await bringIn(offboarded.clientId, fileOf(transcript)),
+      async () => await bringIn("no-such-client", fileOf(transcript)),
+    ];
+    const outcomes: unknown[] = [];
+    for (const ask of asks) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, as above
+      outcomes.push(await ask());
+    }
     expect({
       outcomes,
       sent: account.kickoffAsks.length + offboarded.account.kickoffAsks.length,

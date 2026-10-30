@@ -9,41 +9,51 @@
 import { use, useDeferredValue, useEffect, useState } from "react";
 
 /** A value a loader has, or will have. */
-export type Deferred<T> = T | Promise<T>;
+export type Deferred<T> = T | PromiseLike<T>;
+
+/** A value already in, as `use` takes it: settled, so it reads it at once. */
+interface SettledThenable<T> extends PromiseLike<T> {
+  status: "fulfilled";
+  value: T;
+}
 
 /**
- * A promise of `value` that is already settled, marked as React marks
- * one it has read (`status`, `value`), so `use` returns it without
- * suspending. Not an async function: that would hand back a new
- * promise, without the marks.
+ * `value` as a thenable already settled, marked as React marks one it
+ * has read (`status`, `value`), so `use` returns it without suspending.
+ * Not a Promise: one made while rendering one request and kept for the
+ * next would be another request's I/O to the Workers runtime.
  */
-// oxlint-disable-next-line typescript/promise-function-async -- see above
-const settledThenable = <T,>(value: T): Promise<T> =>
-  Object.assign(Promise.resolve(value), { status: "fulfilled", value });
+const settledThenable = <T,>(value: T): SettledThenable<T> => ({
+  status: "fulfilled",
+  value,
+  // A promise only when one is asked for, in the request asking.
+  // oxlint-disable-next-line unicorn/no-thenable -- a thenable is what `use` takes
+  then: async (onFulfilled, onRejected) =>
+    await Promise.resolve(value).then(onFulfilled, onRejected),
+});
 
-/** Each value already in, as its settled promise: the same one every render. */
-const settledThenables = new WeakMap<object, Promise<unknown>>();
-const settledNull = settledThenable(null);
+/** Whether `value` is a thenable: a read still under way, as a loader hands it. */
+const isThenable = <T,>(value: Deferred<T>): value is PromiseLike<T> =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof Reflect.get(value, "then") === "function";
 
-/** `value` as a promise: itself when it is one, else settled already. */
-// oxlint-disable-next-line typescript/promise-function-async -- it returns the promise it is given, unwrapped
-const thenableOf = <T,>(value: Deferred<T>): Promise<T> => {
-  if (value instanceof Promise) {
+/** Each value already in, as its settled thenable: the same one every render. */
+const settledThenables = new WeakMap<object, SettledThenable<unknown>>();
+
+/** `value` as a thenable: itself when it is a promise, else settled already. */
+const thenableOf = <T,>(value: Deferred<T>): PromiseLike<T> => {
+  if (isThenable(value)) {
     return value;
   }
-  if (value === null) {
-    // SAFETY: `value` is null, so a promise of null is a promise of `T`.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return settledNull as Promise<T>;
-  }
-  if (typeof value !== "object") {
+  if (typeof value !== "object" || value === null) {
     return settledThenable(value);
   }
   const held = settledThenables.get(value);
   if (held !== undefined) {
-    // SAFETY: held for `value` alone, as a promise of it.
+    // SAFETY: held for `value` alone, as a thenable of it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return held as Promise<T>;
+    return held as PromiseLike<T>;
   }
   const made = settledThenable(value);
   settledThenables.set(value, made);
