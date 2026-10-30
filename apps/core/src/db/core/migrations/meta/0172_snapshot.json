@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fc90dbe6-111c-40d2-9545-7bf7e2d75664",
+  "id": "d3265adf-b19e-4624-a133-84ca8f60da44",
   "prevId": "d7239fbb-85fd-4ce8-9dcd-5104d3d97ec7",
   "tables": {
     "access_revocations": {
@@ -1749,242 +1749,6 @@
           "name": "app_versions_app_id_version_pk"
         }
       },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "app_webhook_deliveries": {
-      "name": "app_webhook_deliveries",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "webhook_id": {
-          "name": "webhook_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "event": {
-          "name": "event",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "dedupe": {
-          "name": "dedupe",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "occurred_at": {
-          "name": "occurred_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "submission": {
-          "name": "submission",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "values": {
-          "name": "values",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "values_left_out": {
-          "name": "values_left_out",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "delivery_at": {
-          "name": "delivery_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "app_webhook_deliveries_dedupe": {
-          "name": "app_webhook_deliveries_dedupe",
-          "columns": [
-            "webhook_id",
-            "dedupe"
-          ],
-          "isUnique": true
-        },
-        "app_webhook_deliveries_due": {
-          "name": "app_webhook_deliveries_due",
-          "columns": [
-            "delivery_at"
-          ],
-          "isUnique": false,
-          "where": "delivered_at IS NULL"
-        }
-      },
-      "foreignKeys": {
-        "app_webhook_deliveries_webhook_id_app_webhooks_id_fk": {
-          "name": "app_webhook_deliveries_webhook_id_app_webhooks_id_fk",
-          "tableFrom": "app_webhook_deliveries",
-          "tableTo": "app_webhooks",
-          "columnsFrom": [
-            "webhook_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "app_webhooks": {
-      "name": "app_webhooks",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "events": {
-          "name": "events",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "app_webhooks_app": {
-          "name": "app_webhooks_app",
-          "columns": [
-            "app_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "app_webhooks_app_id_apps_id_fk": {
-          "name": "app_webhooks_app_id_apps_id_fk",
-          "tableFrom": "app_webhooks",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -7222,6 +6986,66 @@
             "permission_id"
           ],
           "name": "run_brain_evidence_run_id_document_id_version_permission_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "run_chat_sources": {
+      "name": "run_chat_sources",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "run_chat_sources_run_id_source_id_pk": {
+          "columns": [
+            "run_id",
+            "source_id"
+          ],
+          "name": "run_chat_sources_run_id_source_id_pk"
         }
       },
       "uniqueConstraints": {},

@@ -109,6 +109,36 @@ const isAmbiguousPath = (pathname: string): boolean =>
     return decoded === "." || decoded === "..";
   });
 
+/**
+ * A file the frontend's build named by its content's hash (Vite's
+ * `assets/<name>-<hash>.<ext>`): it never changes under that name.
+ */
+const hashedAsset = /^\/assets\/[^/]+-[\w-]{8,}\.[a-z\d]+$/iu;
+
+/** Seconds a hashed file may be kept: a year, as long as caches keep anything. */
+const hashedAssetMaxAge = 31_536_000;
+
+/**
+ * How long a browser may keep `page`, served at `pathname`. A deployment
+ * in a dispatch namespace answers every static file `max-age=0` (GRA-430),
+ * so core says it: a hashed file for a year, unchanged; any page
+ * (index.html, for the frontend's own routes too, and for a hashed name
+ * that isn't there) only once checked again, so a release reaches everyone
+ * on their next load.
+ */
+const cacheControlOf = (pathname: string, page: Response): string | null => {
+  if (!page.ok) {
+    return null;
+  }
+  const html = page.headers.get("content-type")?.includes("text/html") ?? false;
+  if (html) {
+    return "no-cache";
+  }
+  return hashedAsset.test(pathname)
+    ? `public, max-age=${hashedAssetMaxAge}, immutable`
+    : null;
+};
+
 /** The frontend's files; unknown paths get index.html (single-page app). */
 const pageResponse = async (
   pathname: string,
@@ -117,7 +147,13 @@ const pageResponse = async (
 ): Promise<Response> => {
   const page = await env.ASSETS.fetch(request);
   if (pathname !== interviewPagePath) {
-    return page;
+    const cacheControl = cacheControlOf(pathname, page);
+    if (cacheControl === null) {
+      return page;
+    }
+    const cached = new Response(page.body, page);
+    cached.headers.set("cache-control", cacheControl);
+    return cached;
   }
   // The interview's page carries its link's secret: no referrer, whatever
   // it links to, and no copy kept.
