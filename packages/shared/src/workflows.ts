@@ -1501,6 +1501,11 @@ export interface WorkflowsToday {
   now: string;
   timeZone: string;
   lanes: TodayLane[];
+  /**
+   * The day's oldest runs the reader may see that the lanes leave out, on
+   * a day with more runs than one read takes; the newest are on the lanes.
+   */
+  cutOff: number;
   /** Runs of the day in workflows, or of people, the reader may not see. */
   unseen: number;
 }
