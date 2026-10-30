@@ -2523,6 +2523,10 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Toegevoegd"
 
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Toegevoegd {at}"
+
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "Een lid aan een domein toegevoegd"
@@ -4014,6 +4018,10 @@ msgstr "Roept {tools} aan (elk van hun methodes): kan iets wijzigen"
 msgid "Came in"
 msgstr "Binnengekomen"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Binnengekomen {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Kwam naar voren in {source}"
@@ -4216,6 +4224,10 @@ msgstr "Aanpassen: {text}"
 msgid "Changed"
 msgstr "Gewijzigd"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Gewijzigd {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Een chat gewijzigd"
@@ -4311,6 +4323,10 @@ msgstr "Wijzigt"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verloren ging, zodat niemand weet of ze effect hadden. Alleen die persoon kan op haar dashboard zeggen wat er gebeurde; volg het met haar op."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Wijzigingen sinds {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -10598,6 +10614,10 @@ msgstr "Niets gevonden."
 msgid "Nothing happened that matches."
 msgstr "Er is niets gebeurd dat overeenkomt."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Er is niets veranderd sinds {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -13757,6 +13777,7 @@ msgstr "Toon in het logboek"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -13965,6 +13986,10 @@ msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Sinds je laatst keek"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
