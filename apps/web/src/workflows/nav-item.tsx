@@ -66,7 +66,7 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
         </span>
         {/* Inside the link, so its name says how many need the person. */}
         {shown ? (
-          <SidebarMenuBadge className="top-1.5">
+          <SidebarMenuBadge placement="inside">
             <span aria-hidden="true">{waiting}</span>
             <span className="sr-only">
               <Plural
