@@ -509,7 +509,12 @@ export {
   versionInputSchema,
   wikiLinkPattern,
 } from "@grasp-os/brain/knowledge";
-export { searchQueryMaxLength } from "@grasp-os/brain/contract";
+export {
+  memoryKindSchema,
+  rememberTextMaxLength,
+  searchQueryMaxLength,
+} from "@grasp-os/brain/contract";
+export type { MemoryKind } from "@grasp-os/brain/contract";
 export type {
   Backlink,
   BacklinkPage,
