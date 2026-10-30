@@ -3697,6 +3697,7 @@ msgstr "Nicht lesbar"
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
 #: src/engines/new-domain-dialog.tsx
+#: src/engines/output-class.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -7433,6 +7434,14 @@ msgstr "Ihr Zugriff ist abgelaufen. Das Grasp-Team kann sie nicht neu verbinden:
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Domänen und Agenten behalten ihre Berechtigungen dafür."
 
+#: src/engines/output-class.tsx
+msgid "Its apps get its data again only once an admin approved exactly their code. Apps nobody approved stop getting it from their next call."
+msgstr "Ihre Apps erhalten ihre Daten wieder erst, wenn ein Admin genau ihren Code freigegeben hat. Apps, die niemand freigegeben hat, erhalten sie ab ihrem nächsten Aufruf nicht mehr."
+
+#: src/engines/output-class.tsx
+msgid "Its apps get its data whether or not anyone approved their code, so code nobody read can send it elsewhere. A permission granted to this domain later makes its data sensitive again."
+msgstr "Ihre Apps erhalten ihre Daten, ob jemand ihren Code freigegeben hat oder nicht, sodass Code, den niemand gelesen hat, sie anderswohin senden kann. Eine Berechtigung, die dieser Domäne später erteilt wird, macht ihre Daten wieder sensibel."
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts, statt ohne Budget zu laufen. Binde sie erneut, um ihr Budget neu festzulegen."
@@ -8182,10 +8191,34 @@ msgstr "{count} als erinnert markieren"
 msgid "Mark as"
 msgstr "Markieren als"
 
+#: src/engines/output-class.tsx
+msgid "Mark its data ordinary"
+msgstr "Ihre Daten als gewöhnlich markieren"
+
+#: src/engines/output-class.tsx
+msgid "Mark its data sensitive"
+msgstr "Ihre Daten als sensibel markieren"
+
+#: src/engines/output-class.tsx
+msgid "Mark ordinary"
+msgstr "Als gewöhnlich markieren"
+
 #: src/onboarding/interview-people.tsx
 msgctxt "button: note the one reminder as sent"
 msgid "Mark reminded"
 msgstr "Als erinnert markieren"
+
+#: src/engines/output-class.tsx
+msgid "Mark sensitive"
+msgstr "Als sensibel markieren"
+
+#: src/engines/output-class.tsx
+msgid "Mark this domain’s data ordinary?"
+msgstr "Die Daten dieser Domäne als gewöhnlich markieren?"
+
+#: src/engines/output-class.tsx
+msgid "Mark this domain’s data sensitive?"
+msgstr "Die Daten dieser Domäne als sensibel markieren?"
 
 #: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
