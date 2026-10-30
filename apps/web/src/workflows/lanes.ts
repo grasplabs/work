@@ -56,6 +56,8 @@ export interface LaneDay {
   from: number;
   now: number;
   lanes: Lane[];
+  /** The day's oldest runs the reader may see, past what one read takes. */
+  cutOff: number;
   /** Runs of the day the reader may not see: counted, never drawn. */
   unseen: number;
 }
@@ -133,6 +135,7 @@ export const laneDay = (today: WorkflowsToday): LaneDay => {
     from: Date.parse(today.from),
     now: Date.parse(today.now),
     lanes,
+    cutOff: today.cutOff,
     unseen: today.unseen,
   };
 };

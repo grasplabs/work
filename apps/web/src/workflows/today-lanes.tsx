@@ -1,12 +1,17 @@
-import type { DecisionAnswerInput } from "@grasp-os/shared/decisions";
+import type {
+  DecisionAnswerInput,
+  DecisionView,
+} from "@grasp-os/shared/decisions";
 import type { TodayWaitsOn, WorkflowsToday } from "@grasp-os/shared/workflows";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import type { Session } from "../core.ts";
+import { cssVars } from "../css-vars.ts";
 import {
   confirmAndAnswer,
   DecisionConfirmDialog,
@@ -15,6 +20,8 @@ import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
+import { useGrace } from "../use-grace.ts";
 import { handovers, hoursOf, journeyOf, laneDay, placeOf } from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 
@@ -26,8 +33,10 @@ import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 // to the next, a light line joins its two dots. Pressing a dot follows its
 // item across the lanes, said under them ("Where is it"); when it waits on
 // the reader, the card says on whom and since when, with Reject or
-// Approve, five seconds to undo, then the decision's own confirmation and
-// answer. Narrower than 42rem, the lanes are a list.
+// Approve, the decision's own confirmation, then five seconds to undo
+// before the answer is given; leaving in those seconds gives it at once
+// (`useGrace`), as pausing a workflow does. Narrower than 42rem, the
+// lanes are a list.
 
 /** How tall a lane is, in pixels (`h-11`): its line runs through the middle. */
 const laneHeight = 44;
@@ -35,12 +44,8 @@ const laneHeight = 44;
 /** How long an answer can be taken back before it is given, in seconds. */
 const graceSeconds = 5;
 
-/** Sets the `--x` a dot or a trail is placed by: its share of the day. */
-const placedAt =
-  (share: number) =>
-  (element: HTMLElement | null): void => {
-    element?.style.setProperty("--x", `${share * 100}%`);
-  };
+/** Sets the `--x` a dot, a trail or an hour is placed by: its share of the day. */
+const placedAt = (share: number) => cssVars({ "--x": `${share * 100}%` });
 
 /** Grasp at work now: three ink dots. */
 const WorkingDots = () => {
@@ -401,56 +406,56 @@ const ListLane = ({
   </li>
 );
 
+/** Answers the decision `answering` confirmed, through its own confirmation. */
+const answerWith =
+  (answering: PendingConfirmation) =>
+  async (session: Session): Promise<DecisionView> =>
+    await confirmAndAnswer(
+      session,
+      answering,
+      async (confirmation) =>
+        await session.decisions.answer(
+          answering.decision.id,
+          answering.response,
+          confirmation
+        )
+    );
+
 /**
  * A wait on the reader: what it asks, on whom and since when, and Reject
- * or Approve. An answer waits five seconds with Undo, then goes through
- * the decision's own confirmation and answer.
+ * or Approve. A confirmed answer waits five seconds with Undo, then goes
+ * through the decision's own confirmation and answer.
  */
 const WaitsOnYou = ({ run }: { run: LaneRun }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const core = useCore();
   const { busy, failure, run: act } = useCoreAction();
   const [pending, setPending] = useState<PendingConfirmation>();
-  const [confirmed, setConfirmed] = useState<PendingConfirmation>();
-  const [left, setLeft] = useState<number | null>(null);
   const { waits } = run.run;
-  const answerNow = useEffectEvent((answering: PendingConfirmation) => {
-    void (async () => {
-      const answered = await act(
-        async (session) =>
-          await confirmAndAnswer(
-            session,
-            answering,
-            async (confirmation) =>
-              await session.decisions.answer(
-                answering.decision.id,
-                answering.response,
-                confirmation
-              )
-          )
-      );
-      if (answered !== undefined) {
-        await router.invalidate();
-      }
-    })();
+  const { held, hold, undo } = useGrace<PendingConfirmation>({
+    seconds: graceSeconds,
+    go: (answering) => {
+      void (async () => {
+        const answered = await act(answerWith(answering));
+        if (answered !== undefined) {
+          await router.invalidate();
+        }
+      })();
+    },
+    // Gone before the seconds were over: the answer was confirmed, so it
+    // is given, and Today says how the run stands when it is opened again.
+    goOnLeave: (answering) => {
+      void (async () => {
+        try {
+          await core.withSession(answerWith(answering));
+        } catch {
+          // Nobody is left on the card to tell; the decision still waits
+          // in the inbox, where it can be answered again.
+        }
+      })();
+    },
   });
-  useEffect(() => {
-    const timer =
-      left === null || confirmed === undefined
-        ? undefined
-        : setTimeout(() => {
-            if (left > 1) {
-              setLeft(left - 1);
-              return;
-            }
-            setLeft(null);
-            setConfirmed(undefined);
-            answerNow(confirmed);
-          }, 1000);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [left, confirmed]);
   const since = waits === null ? "" : formatTime(waits.since);
   const waitsSince = useWaitsSinceText(waits?.on ?? { kind: "you" }, since);
   if (waits === null) {
@@ -467,22 +472,16 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       await router.invalidate();
     }
   };
-  if (left !== null && confirmed !== undefined) {
+  if (held !== null) {
+    const { left } = held;
     return (
       <span aria-live="polite" className="ml-4 flex items-center gap-3">
         <span className="text-muted-foreground tabular-nums">
-          {confirmed.response.approved
+          {held.value.response.approved
             ? t`Approved in ${left} s`
             : t`Rejected in ${left} s`}
         </span>
-        <Button
-          onClick={() => {
-            setLeft(null);
-            setConfirmed(undefined);
-          }}
-          size="sm"
-          variant="outline"
-        >
+        <Button onClick={undo} size="sm" variant="outline">
           <Trans context="take an answer back before it counts">Undo</Trans>
         </Button>
       </span>
@@ -520,8 +519,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
         }}
         onConfirm={(answering) => {
           setPending(undefined);
-          setConfirmed(answering);
-          setLeft(graceSeconds);
+          hold(answering);
         }}
         pending={pending}
         source="page"
@@ -589,7 +587,7 @@ export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
   const run = all.find(({ id }) => id === chosen);
   const journey = run === undefined ? [] : journeyOf(day, run.key);
   const lit = new Set(journey.map(({ id }) => id));
-  const { unseen } = day;
+  const { cutOff, unseen } = day;
   return (
     <section
       aria-label={t({
@@ -619,6 +617,14 @@ export const TodayLanes = ({ today }: { today: WorkflowsToday }) => {
           </ul>
         </>
       )}
+      {cutOff > 0 ? (
+        <p className="text-muted-foreground text-xs">
+          {t`${plural(cutOff, {
+            one: "# earlier run today isn't shown: only the latest fit",
+            other: "# earlier runs today aren't shown: only the latest fit",
+          })}`}
+        </p>
+      ) : null}
       {unseen > 0 ? (
         <p className="text-muted-foreground text-xs">
           {t`${plural(unseen, {
