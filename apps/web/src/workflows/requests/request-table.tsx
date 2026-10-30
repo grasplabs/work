@@ -8,6 +8,11 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
   Tabs,
   TabsContent,
   TabsList,
@@ -121,9 +126,13 @@ const Needs = ({
   }
   if (needs === null) {
     return (
-      <p className="text-muted-foreground mt-3 border-t px-6 py-10 text-center">
-        {t`What needs you can't be read right now.`}
-      </p>
+      <div className="mt-3 border-t">
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`What needs you can't be read right now.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     );
   }
   const waiting = needs.filter(
@@ -135,8 +144,12 @@ const Needs = ({
   return (
     <ul className="@container mt-3">
       {waiting.length === 0 ? (
-        <li className="text-muted-foreground border-t px-6 py-10 text-center">
-          {t`Nothing waits on you.`}
+        <li className="border-t">
+          <Empty size="sm">
+            <EmptyHeader>
+              <EmptyDescription>{t`Nothing waits on you.`}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         </li>
       ) : (
         <>

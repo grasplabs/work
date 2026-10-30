@@ -4,6 +4,12 @@ import type {
 } from "@grasp-os/shared/stephen-requests";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@grasp-os/ui/components/card";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -130,16 +136,18 @@ export const RequestSummary = ({
             )}
             <ErrorText>{failure}</ErrorText>
           </div>
-          <figure className="flex flex-col gap-2 rounded-lg border p-4">
-            <figcaption className="text-muted-foreground text-xs">
-              {t`Stephen · ${from} to ${to}`}
-            </figcaption>
-            <ul className="flex list-disc flex-col gap-1.5 pl-4">
-              {lines.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          </figure>
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription>{t`Stephen · ${from} to ${to}`}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="flex list-disc flex-col gap-1.5 pl-4">
+                {lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
         </div>
       </SheetContent>
     </Sheet>

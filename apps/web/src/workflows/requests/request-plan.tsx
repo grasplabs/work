@@ -12,6 +12,7 @@ import type {
   StephenRequestSettings,
 } from "@grasp-os/shared/stephen-requests";
 import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
 import {
   Area,
   Bar,
@@ -222,7 +223,7 @@ export const RequestPlan = ({
   } as const;
   const planLabel = t`Your plan · ${of}`;
   return (
-    <section className="bg-card flex flex-col gap-5 rounded-xl border py-6">
+    <Card>
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-6">
         <div className="flex flex-wrap gap-x-12 gap-y-3">
           <div className="flex min-w-0 flex-col gap-1">
@@ -353,6 +354,6 @@ export const RequestPlan = ({
           </ComposedChart>
         </ChartContainer>
       </div>
-    </section>
+    </Card>
   );
 };
