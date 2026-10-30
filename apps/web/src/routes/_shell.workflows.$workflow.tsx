@@ -204,6 +204,19 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
 };
 
 /**
+ * Whom the workflow belongs to: you, or its owner by name; someone else
+ * while their name isn't known (not listed, or not read yet), never an ID.
+ */
+const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
+  const { t } = useLingui();
+  if (owner === names.me) {
+    return t`Owned by you`;
+  }
+  const name = names.people.get(owner);
+  return name === undefined ? t`Owned by someone else` : t`Owned by ${name}`;
+};
+
+/**
  * Its name with whether it runs beside it; under them the process it
  * serves, its version, its owner, when its draft was saved, and what its
  * builders and owner reach from here; and, for whoever may decide it, the
@@ -224,10 +237,8 @@ const WorkflowHeader = ({
   savedAt: string | null;
 }) => {
   const router = useRouter();
-  const { t } = useLingui();
   const { currentVersion } = resource;
   const { me } = names;
-  const owner = names.people.get(resource.owner) ?? resource.owner;
   // As core answered the last change made here, until a later read of
   // it is loaded: whichever is at the later revision.
   const [changed, setChanged] = useState<WorkflowLifecycle>();
@@ -281,7 +292,7 @@ const WorkflowHeader = ({
             <SelfApprovedBadge lifecycle={status} />
           )}
           <span className="text-xs">
-            {resource.owner === me ? t`Owned by you` : t`Owned by ${owner}`}
+            <OwnedBy names={names} owner={resource.owner} />
           </span>
           {savedAt === null ? null : (
             <span className="text-xs">
