@@ -857,9 +857,14 @@ describe("the weekly summary", setUpTime, () => {
     const demoted = await signedInApi(idp, "admin");
     const mail = await captureMail(onboardingStore(env));
     const today = await companyDay(env);
-    // Queued three weeks ago, for the week before, and not sent since.
-    const week = dayFrom(weekOf(today), -28);
-    await seed(dayFrom(week, 2), people(7, {}));
+    // Queued a week ago, for the week before, and not sent since: what
+    // needed fixing then is known only as it stands now, so it names none.
+    const week = dayFrom(weekOf(today), -14);
+    const leave = await named("Request leave for next week");
+    await seed(dayFrom(week, 2), [
+      ...people(7, {}),
+      ...people(5, { ...leave, outcome: "notPossible", tools: [] }),
+    ]);
     await stays.api.stephenRequests.setSummary("email");
     await demoted.api.stephenRequests.setSummary("email");
     await env.DB.batch(
@@ -886,10 +891,12 @@ describe("the weekly summary", setUpTime, () => {
     expect({
       to: ours.map(({ to }) => to),
       ofItsWeek: String(ours[0]?.text).includes("7 requests last week."),
+      needs: String(ours[0]?.text).includes("New:"),
       rows: results.toSorted((a, b) => a.state.localeCompare(b.state)),
     }).toStrictEqual({
       to: [stays.person.email],
       ofItsWeek: true,
+      needs: false,
       rows: [
         { person: demoted.userId, state: "failed", reason: "not_reader" },
         { person: stays.userId, state: "sent", reason: null },

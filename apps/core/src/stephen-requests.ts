@@ -1067,15 +1067,18 @@ export const teamsChatOf = async (
 /**
  * The weekly summary as it would go to `userId` now, or, given the Monday
  * `weekFrom`, of that week as it went the Monday after: a summary sent
- * late still sums up the week it was queued for.
+ * late still sums up the week it was queued for. Needs and their statuses
+ * are only known as they are now, so a summary sent after its own week
+ * has passed names none rather than mix today's into an older week.
  */
 export const summaryFor = async (
   env: Env,
   userId: string,
   weekFrom?: string
 ): Promise<WeeklySummary> => {
-  const today =
-    weekFrom === undefined ? await companyDay(env) : dayFrom(weekFrom, 7);
+  const now = await companyDay(env);
+  const today = weekFrom === undefined ? now : dayFrom(weekFrom, 7);
+  const late = today < weekStart(now);
   const { week, before } = lastWeeks(today);
   const month = rangeSpan("month", today);
   const [settings, reach, reader, teamsChat] = await Promise.all([
@@ -1097,7 +1100,7 @@ export const summaryFor = async (
   const weekReport = requestsReport(requests, week, options);
   const beforeReport = requestsReport(requests, before, options);
   const monthReport = requestsReport(requests, month, options);
-  const needs = await needsOf(env, null, "en");
+  const needs = late ? [] : await needsOf(env, null, "en");
   const earlier = new Set(
     needsIn(beforeReport, reach, new Map()).map(({ key }) => key)
   );
