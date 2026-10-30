@@ -293,6 +293,10 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   };
   const [chat, ...rest] = everyone;
   const nav = [chat, "Dashboard", ...rest];
+  // Stephen's requests sit under Workflows for admins only.
+  const adminNav = nav.flatMap((section) =>
+    section === "Workflows" ? [section, "Requests"] : [section]
+  );
   const menu = ["Settings", "Sign out"];
   const account = ["Profile", "Notifications", "Security"];
   expect({
@@ -301,7 +305,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     user: await sidebarOf(user),
   }).toStrictEqual({
     admin: {
-      nav,
+      nav: adminNav,
       menu,
       settings: [
         "Workspace",

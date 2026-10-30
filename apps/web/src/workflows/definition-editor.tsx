@@ -134,7 +134,7 @@ export const DefinitionEditor = ({
   workflow: string;
   loaded: WorkflowDraft;
   currentVersion: number | null;
-  /** The draft as a save or a read here left it: its checkpoint, for a test. */
+  /** The draft as a save or a read here left it: its checkpoint, for a test, and when it was saved. */
   onDraft: (draft: WorkflowDraft) => void;
   onPublished: (version: WorkflowResourceVersion) => void;
   /** Someone published another version: the page reads the workflow again. */

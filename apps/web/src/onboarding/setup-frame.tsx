@@ -1,11 +1,11 @@
 import { Button } from "@grasp-os/ui/components/button";
+import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { GraspMark } from "../grasp-mark.tsx";
 import { LanguageButton } from "../language-picker.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
@@ -198,7 +198,7 @@ export const SetupFrame = ({
       </main>
       <footer className="bg-background setup-footer grid h-18 flex-none items-center px-4 sm:px-10">
         {/* The mark bottom left, across from the language. */}
-        <GraspMark className="text-foreground size-5" />
+        <GraspMark className="size-5" variant="logo" />
         <nav aria-label={t`Onboarding steps`} className="flex items-center">
           {word === undefined ? (
             <StepDots index={index} onGo={onGo} open={open} />

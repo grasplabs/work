@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { runStatusLabels } from "./resource-runs.tsx";
+import { runStatusLabels } from "./run-status.ts";
 
 // What happened to a workflow lately (`workflowResources.activity`), as
 // the prototype's bar under the canvas (`inside-activity.tsx`): closed it

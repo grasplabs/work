@@ -94,3 +94,9 @@ export const formatBytes = (bytes: number): string => {
     maximumFractionDigits: unit === 0 ? 0 : 1,
   }).format(value);
 };
+
+/** A time of day as the page's language writes it, such as "14:05" or "2:05 PM". */
+export const formatTime = (value: string | number | Date): string =>
+  new Intl.DateTimeFormat(i18n.locale, { timeStyle: "short" }).format(
+    new Date(value)
+  );

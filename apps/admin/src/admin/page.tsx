@@ -93,7 +93,7 @@ export const PageHeading = ({
   children?: ReactNode;
 }) => (
   <div className="flex flex-col gap-1">
-    <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+    <h1 className="type-title">{title}</h1>
     {description === undefined || description === "" ? null : (
       <p className="text-muted-foreground text-sm">{description}</p>
     )}
