@@ -75,6 +75,15 @@ export const formatEuro = (value: number): string =>
     maximumFractionDigits: 0,
   }).format(value);
 
+/** The ISO week number (1 to 53) of a day kept as an ISO date: week 1 holds the year's first Thursday. */
+export const isoWeek = (iso: string): number => {
+  const day = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  // The Thursday of the same week decides its year.
+  day.setUTCDate(day.getUTCDate() + 3 - ((day.getUTCDay() + 6) % 7));
+  const newYear = Date.UTC(day.getUTCFullYear(), 0, 1);
+  const dayOfYear = Math.round((day.getTime() - newYear) / 86_400_000);
+  return 1 + Math.floor(dayOfYear / 7);
+};
 /** The largest unit `formatBytes` steps up to, and the ones under it. */
 const byteUnits = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
 const bytesPerUnit = 1024;
