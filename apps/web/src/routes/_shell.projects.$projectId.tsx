@@ -32,7 +32,6 @@ import {
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import { FieldError } from "@grasp-os/ui/components/field";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Progress } from "@grasp-os/ui/components/progress";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { plural } from "@lingui/core/macro";
@@ -74,7 +73,7 @@ import { ProjectDialog } from "../chat/project-dialog.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import { ErrorText } from "../error-text.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
-import { Page } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -539,44 +538,40 @@ const Project = () => {
       <Page wide>
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-6">
-            <div className="flex items-start gap-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <PageHeaderTitle>{name}</PageHeaderTitle>
-                {goal === "" ? null : (
-                  <p className="text-muted-foreground line-clamp-2 text-pretty">
-                    {goal}
-                  </p>
-                )}
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  aria-label={t`More for the project ${name}`}
-                  render={<Button size="icon-sm" variant="ghost" />}
-                >
-                  <EllipsisIcon />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setEditing(true);
-                    }}
+            <PageHeading
+              action={
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label={t`More for the project ${name}`}
+                    render={<Button size="icon-sm" variant="ghost" />}
                   >
-                    <SlidersHorizontalIcon />
-                    <Trans>Edit project</Trans>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setDeletingProject(true);
-                    }}
-                    variant="destructive"
-                  >
-                    <Trash2Icon />
-                    <Trans>Delete project</Trans>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                    <EllipsisIcon />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setEditing(true);
+                      }}
+                    >
+                      <SlidersHorizontalIcon />
+                      <Trans>Edit project</Trans>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDeletingProject(true);
+                      }}
+                      variant="destructive"
+                    >
+                      <Trash2Icon />
+                      <Trans>Delete project</Trans>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              }
+              description={goal === "" ? undefined : goal}
+              title={name}
+            />
             <ProjectBox efforts={efforts} models={models} project={project} />
             <section
               aria-labelledby="project-chats"
