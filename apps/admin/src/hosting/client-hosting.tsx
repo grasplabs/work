@@ -1,42 +1,23 @@
 /**
  * A client's hosting, in its Setup in the admin (src/admin/setup.tsx),
- * which titles it: where it's placed, or where it would
- * go (the destination the admin picks by itself, and what keeps every
- * other from taking it), dedicated hosting as an advanced choice, and
- * starting or resuming its provisioning there, with where its operation
- * is (src/hosting/placement.ts). Once it's live, releasing it to a later
- * release and rolling it back to the one before, which run the same
- * operation again.
+ * folded away for staff: where it's placed, or where the admin places
+ * it by itself, where its data is kept, its
+ * operation, and trying again now once it stopped (src/hosting/placement.ts).
+ * Once it's live, releasing it to a later release and rolling it back to
+ * the one before, which run the same operation again.
  */
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldTitle,
-} from "@grasp-os/ui/components/field";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { rootRouteId, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
 import { thenRefresh, useAction } from "../use-action.ts";
-import { CapabilityChecklist } from "./capability-checks.tsx";
 import {
   discardClientFn,
   offboardPlacedClientFn,
@@ -45,28 +26,15 @@ import {
   rollbackPlacedClientFn,
 } from "./functions.ts";
 import type { OffboardResult, PlaceResult } from "./functions.ts";
-import type {
-  ClientHostingView,
-  DestinationChoice,
-  DestinationProblem,
-} from "./placement.ts";
+import { hostingWords } from "./organization.ts";
+import type { ClientHostingView } from "./placement.ts";
 import {
   discardRefusals,
   notStartedWords,
   offboardRefusals,
   operationErrorWords,
   placeRefusals,
-  problemWords,
 } from "./words.ts";
-
-/** What the radio for the automatic destination is worth. */
-const automatic = "automatic";
-
-const kindWords: Readonly<Record<DestinationChoice["kind"], string>> = {
-  workers_for_platforms: "shared",
-  dedicated: "dedicated",
-  workerd: "workerd",
-};
 
 const statusWords: Readonly<
   Record<NonNullable<ClientHostingView["operation"]>["status"], string>
@@ -76,132 +44,12 @@ const statusWords: Readonly<
   done: "done",
 };
 
-const problemKey = (problem: DestinationProblem): string =>
-  "capability" in problem
-    ? `${problem.kind}:${problem.capability}`
-    : problem.kind;
-
-/** What keeps a destination from taking the client, each in words. */
-const Problems = ({
-  problems,
-}: {
-  problems: readonly DestinationProblem[];
-}) => (
-  <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-5 text-sm">
-    {problems.map((problem) => (
-      <li key={problemKey(problem)}>{problemWords(problem)}</li>
-    ))}
-  </ul>
-);
-
-/** One destination to choose, or why it can't be. */
-const DestinationOption = ({
-  choice,
-  policyId,
-}: {
-  choice: DestinationChoice;
-  policyId: string;
-}) => {
-  const blocked = choice.problems.length > 0;
-  const id = `destination-${choice.id}`;
-  return (
-    <FieldLabel htmlFor={id}>
-      <Field data-disabled={blocked} orientation="horizontal">
-        <RadioGroupItem disabled={blocked} id={id} value={choice.id} />
-        <FieldContent>
-          <FieldTitle>
-            <span className="font-mono">{choice.id}</span>
-            <Badge variant="outline">{kindWords[choice.kind]}</Badge>
-          </FieldTitle>
-          {blocked ? (
-            <Problems problems={choice.problems} />
-          ) : (
-            <FieldDescription>{`Meets every requirement of ${policyId}.`}</FieldDescription>
-          )}
-        </FieldContent>
-      </Field>
-    </FieldLabel>
-  );
-};
-
-/** What the admin picks by itself, in words. */
 const automaticWords = (view: ClientHostingView): string => {
-  const { automatic: choice, policy } = view;
+  const { automatic: choice } = view;
   if (choice.destinationId !== null) {
-    return `Automatic: ${choice.destinationId}, the one shared destination that meets every requirement of ${policy.id}.`;
+    return `Goes in ${choice.destinationId}, Grasp's shared destination.`;
   }
-  return choice.reason === "several"
-    ? `Several shared destinations meet every requirement of ${policy.id}, so the admin doesn't pick one: choose it below.`
-    : `No shared destination meets every requirement of ${policy.id}, so nothing is picked. Each one's blocking requirements are below.`;
-};
-
-/** Where the client could go, the automatic destination first, dedicated hosting folded away. */
-const Destinations = ({
-  view,
-  chosen,
-  onChoose,
-}: {
-  view: ClientHostingView;
-  chosen: string;
-  onChoose: (destinationId: string) => void;
-}) => {
-  const shared = view.destinations.filter((choice) => choice.shared);
-  const others = view.destinations.filter((choice) => !choice.shared);
-  const picked = view.automatic.destinationId;
-  return (
-    <RadioGroup
-      onValueChange={(value) => {
-        onChoose(String(value));
-      }}
-      value={chosen}
-    >
-      <p className="text-sm">{automaticWords(view)}</p>
-      {picked === null ? null : (
-        <FieldLabel htmlFor="destination-automatic">
-          <Field orientation="horizontal">
-            <RadioGroupItem id="destination-automatic" value={automatic} />
-            <FieldContent>
-              <FieldTitle>{`Automatic (${picked})`}</FieldTitle>
-              <FieldDescription>
-                The shared destination the admin picks.
-              </FieldDescription>
-            </FieldContent>
-          </Field>
-        </FieldLabel>
-      )}
-      {shared
-        .filter((choice) => choice.id !== picked)
-        .map((choice) => (
-          <DestinationOption
-            choice={choice}
-            key={choice.id}
-            policyId={view.policy.id}
-          />
-        ))}
-      {others.length === 0 ? null : (
-        <Collapsible>
-          <CollapsibleTrigger render={<Button variant="outline" />}>
-            Advanced: dedicated hosting
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="mt-3 flex flex-col gap-3">
-              <p className="text-muted-foreground text-sm">
-                A destination for this client alone. Never picked by itself:
-                choose it only when this client calls for it.
-              </p>
-              {others.map((choice) => (
-                <DestinationOption
-                  choice={choice}
-                  key={choice.id}
-                  policyId={view.policy.id}
-                />
-              ))}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-    </RadioGroup>
-  );
+  return "No shared destination is recorded yet: the admin records its own as soon as a page reads it.";
 };
 
 /** Facts, as a list of terms. */
@@ -274,18 +122,6 @@ const Operation = ({
     <StopReason code={stopCodeOf(operation, run)} />
   </div>
 );
-
-/** What starting it says, by where the client is and the release picked. */
-const startWords = (view: ClientHostingView, releaseId: string): string => {
-  if (view.operation !== null) {
-    return releaseId === view.operation.releaseId
-      ? "Resume provisioning"
-      : `Resume provisioning on ${releaseId}`;
-  }
-  return view.placement === null
-    ? "Place and start provisioning"
-    : "Start provisioning";
-};
 
 /**
  * A live client's releases: a later one, the one a stopped release was
@@ -453,51 +289,7 @@ const Offboarding = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
-/** That nothing runs until staff start it, and what they start it with. */
-const NotStarted = ({ imported }: { imported: boolean }) => (
-  <p className="text-sm">
-    {imported
-      ? "Nothing runs for it yet: provisioning starts only when you choose its release and start it here."
-      : "Nothing runs for it yet, and no release is imported to provision it with. CI publishes one on every merge to main, and the admin imports new ones every 5 minutes: once one is in, choose it here and start."}
-  </p>
-);
-
-/**
- * What the policy needs of each destination the client is in or could go
- * to, as a checklist with the form to record a check: the one it's
- * placed in, or every shared one while it isn't placed.
- */
-const Requirements = ({ view }: { view: ClientHostingView }) => {
-  if (view.active) {
-    return null;
-  }
-  const shown = view.destinations.filter((choice) =>
-    view.placement === null
-      ? choice.shared
-      : choice.id === view.placement.destinationId
-  );
-  return (
-    <div className="flex flex-col gap-4">
-      {shown.map((choice) => (
-        <div className="flex flex-col gap-2" key={choice.id}>
-          <h3 className="text-sm font-medium">
-            {`What ${view.policy.id} needs of ${choice.id}`}
-          </h3>
-          <CapabilityChecklist
-            checks={choice.checks}
-            destinationId={choice.id}
-          />
-        </div>
-      ))}
-    </div>
-  );
-};
-
-/**
- * Whether it runs, or would run, in a shared destination (Workers for
- * Platforms), where its core sends no mail until GRA-965 qualifies it
- * (`withoutMail`, src/hosting/operation.ts).
- */
+/** Whether it is, or would be, in Grasp's shared destination. */
 const sharedHosting = (view: ClientHostingView): boolean => {
   const id = view.placement?.destinationId ?? view.automatic.destinationId;
   return view.destinations.some(
@@ -576,55 +368,6 @@ const Discard = ({ view }: { view: ClientHostingView }) => {
   );
 };
 
-/**
- * The releases starting or resuming it offers, newest first: any, before
- * it has an operation; once stopped, the one its operation has and every
- * newer one, which resuming switches it to while nothing is live
- * (src/hosting/operation.ts). None while its operation is going.
- */
-const offeredReleases = (
-  view: ClientHostingView,
-  releases: readonly { id: string; notes: string }[]
-): readonly { id: string; notes: string }[] => {
-  const { operation } = view;
-  if (operation === null) {
-    return releases;
-  }
-  if (view.going) {
-    return [];
-  }
-  const at = releases.findIndex(({ id }) => id === operation.releaseId);
-  // Older than every release listed: offered all the same, last, so a
-  // stopped operation can always be resumed on the release it has.
-  return at === -1
-    ? [...releases, { id: operation.releaseId, notes: "" }]
-    : releases.slice(0, at + 1);
-};
-
-/**
- * The release offered first: staff's pick while offered, else the newest
- * that fits the client (`suggestedReleaseId`), else what its operation
- * has, else the newest.
- */
-const releaseOffered = (
-  view: ClientHostingView,
-  offered: readonly { id: string }[],
-  picked: string | null
-): string => {
-  const isOffered = (id: string | null | undefined): id is string =>
-    id !== null && id !== undefined && offered.some((each) => each.id === id);
-  if (isOffered(picked)) {
-    return picked;
-  }
-  if (isOffered(view.suggestedReleaseId)) {
-    return view.suggestedReleaseId;
-  }
-  if (isOffered(view.operation?.releaseId)) {
-    return view.operation.releaseId;
-  }
-  return offered[0]?.id ?? "";
-};
-
 /** Whether it may be discarded: never placed, nothing started, not live or offboarded. */
 const discardable = (view: ClientHostingView): boolean =>
   view.placement === null &&
@@ -639,6 +382,13 @@ const provisionable = (view: ClientHostingView): boolean =>
   !view.active &&
   view.offboardedAt === null;
 
+/**
+ * Its hosting for staff, read-only: where it runs, where it is placed or
+ * would go, what each requirement stands at, its operation, and once it
+ * stopped or hasn't started, one button that tries again now, in the
+ * automatic destination with the newest release that fits, as the
+ * admin does by itself anyway.
+ */
 export const ClientHosting = ({
   view,
   releases,
@@ -648,15 +398,7 @@ export const ClientHosting = ({
 }) => {
   const router = useRouter();
   const { busy, failure, run } = useAction(placeRefusals);
-  const [chosen, setChosen] = useState(
-    view.automatic.destinationId === null ? "" : automatic
-  );
-  const [picked, setPicked] = useState<string | null>(null);
-  const offered = offeredReleases(view, releases);
-  const releaseId = releaseOffered(view, offered, picked);
-  const [blocking, setBlocking] = useState<DestinationProblem[]>([]);
-  const placing = view.placement === null;
-  const start = () => {
+  const retry = () => {
     void run(async () => {
       // Refreshed even when it fails: the client may be placed already.
       const result = await thenRefresh(
@@ -664,33 +406,32 @@ export const ClientHosting = ({
           await placeAndProvisionFn({
             data: {
               clientId: view.clientId,
-              releaseId,
-              policyId: view.policy.id,
-              destinationId: !placing || chosen === automatic ? null : chosen,
+              releaseId: null,
+              destinationId: null,
             },
           }),
         async () => {
           await router.invalidate({ sync: true });
         }
       );
-      setBlocking(result.problems);
       return result;
     });
   };
+  const stopped =
+    provisionable(view) &&
+    view.hosting.hosting === "grasp_cloud" &&
+    !view.going &&
+    view.operation?.status !== "done";
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1 text-sm">
-        <p>{`Policy: ${view.policy.id}`}</p>
-        <p className="text-muted-foreground">{view.policy.description}</p>
+        <p>{hostingWords(view.hosting)}</p>
       </div>
-      {view.placement === null ? (
-        <Destinations onChoose={setChosen} view={view} chosen={chosen} />
-      ) : (
-        <p className="text-sm">
-          {`Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
-        </p>
-      )}
-      <Requirements view={view} />
+      <p className="text-sm">
+        {view.placement === null
+          ? automaticWords(view)
+          : `Placed in ${view.placement.destinationId} by ${view.placement.placedBy} on ${formatTime(view.placement.placedAt)} UTC. It stays there: moving it is a migration.`}
+      </p>
       <MailNotice view={view} />
       {view.operation === null ? null : (
         <Operation operation={view.operation} run={view.run} />
@@ -700,38 +441,14 @@ export const ClientHosting = ({
       ) : null}
       {view.placement === null ? null : <Offboarding view={view} />}
       {discardable(view) ? <Discard view={view} /> : null}
-      {provisionable(view) ? (
+      {view.notStarted === null ? null : (
+        <p className="text-sm">{notStartedWords(view.notStarted)}</p>
+      )}
+      {stopped ? (
         <div className="flex flex-col gap-4">
-          {view.operation === null && view.notStarted === null ? (
-            <NotStarted imported={releases.length > 0} />
-          ) : null}
-          {view.notStarted === null ? null : (
-            <p className="text-sm">{notStartedWords(view.notStarted)}</p>
-          )}
-          {offered.length > 0 ? (
-            <Field>
-              <FieldLabel htmlFor="hosting-release">Release</FieldLabel>
-              <NativeSelect
-                id="hosting-release"
-                onChange={(event) => {
-                  setPicked(event.target.value);
-                }}
-                value={releaseId}
-              >
-                {offered.map((release) => (
-                  <NativeSelectOption key={release.id} value={release.id}>
-                    {release.id}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-          ) : null}
           <div className="flex flex-wrap items-center gap-4">
-            <Button
-              disabled={busy || releaseId === "" || (placing && chosen === "")}
-              onClick={start}
-            >
-              {startWords(view, releaseId)}
+            <Button disabled={busy} onClick={retry} variant="outline">
+              Retry now
             </Button>
             {failure === null ? null : (
               <p className="text-destructive text-sm" role="alert">
@@ -739,9 +456,6 @@ export const ClientHosting = ({
               </p>
             )}
           </div>
-          {failure === null || blocking.length === 0 ? null : (
-            <Problems problems={blocking} />
-          )}
         </div>
       ) : null}
     </div>

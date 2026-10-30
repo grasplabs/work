@@ -92,7 +92,6 @@ import {
   deploymentPrefix,
   placedModelGateway,
   platformWorkerName,
-  adminHost,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
@@ -112,6 +111,8 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -508,10 +509,13 @@ const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
  */
 const renderOptionsOf = (loaded: Loaded): RenderOptions => {
   const stage = stageOfNamespace(loaded.ownNamespace);
-  return loaded.destination.kind === "workers_for_platforms" &&
+  return {
+    ...(loaded.destination.kind === "workers_for_platforms" &&
     stage !== undefined
-    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
-    : {};
+      ? { connectGateway: platformWorkerName("connect-gateway", stage) }
+      : {}),
+    durableObjects: loaded.client.jurisdiction,
+  };
 };
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
@@ -1049,6 +1053,8 @@ interface Loaded {
     rotationLiveAt: Date | null;
     signIn: string | null;
     teamsBot: string | null;
+    /** Where its data is kept: what its Durable Objects are made in. */
+    jurisdiction: "eu" | "none";
   };
   /**
    * When `client` and the settings were about to be read: what core runs
@@ -1634,6 +1640,7 @@ const load = async (
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
       teamsBot: clients.teamsBot,
+      jurisdiction: clients.jurisdiction,
     })
     .from(clients)
     .where(eq(clients.id, held.clientId))
@@ -1745,43 +1752,79 @@ const assertReleaseFits = async (
   }
 };
 
-/** How many of the newest imported releases a provisioning looks through for one that fits. */
-const fittingReleasesLooked = 20;
+/** How many imported releases are read at a time while looking for one that fits. */
+const fittingReleasesPage = 20;
+
+/** Releases listed after `row`, newest first: built before it, or at once with a lower id. */
+const olderThan = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    lt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), lt(releases.id, row.id))
+  );
+
+/** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
+const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    gt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), gt(releases.id, row.id))
+  );
 
 /**
  * The newest imported release client `clientId` may be provisioned with
- * (`assertReleaseFits`), looking through the newest few; null when none
- * of them fits, or none is imported. What a client is provisioned with
- * when staff don't pick one, and what resuming offers first.
+ * (`assertReleaseFits`), looking through every imported release, newest
+ * first, a page at a time, never only a window of the newest; with
+ * `newerThan`, only releases built after that one (by when built, then
+ * id). Null when none fits. What a client is provisioned with when staff
+ * don't pick one, and what a retry moves a stopped one forward to.
  */
 export const newestFittingRelease = async (
   db: AdminDatabase,
-  clientId: string
+  clientId: string,
+  newerThan?: { id: string; builtAt: Date }
 ): Promise<string | null> => {
-  const newest = await db
-    .select({ id: releases.id, manifest: releases.manifest })
-    .from(releases)
-    .orderBy(desc(releases.builtAt), desc(releases.id))
-    .limit(fittingReleasesLooked);
-  for (const row of newest) {
-    const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
-    if (!parsed.success) {
-      continue;
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
-      await assertReleaseFits(db, clientId, parsed.data);
-      return row.id;
-    } catch (error) {
-      if (
-        !(error instanceof ProvisionOperationError) &&
-        !(error instanceof DeployError)
-      ) {
-        throw error;
+  let after: { id: string; builtAt: Date } | undefined;
+  for (;;) {
+    const page: { id: string; builtAt: Date; manifest: string }[] =
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time, newest first
+      await db
+        .select({
+          id: releases.id,
+          builtAt: releases.builtAt,
+          manifest: releases.manifest,
+        })
+        .from(releases)
+        .where(
+          and(
+            after === undefined ? undefined : olderThan(after),
+            newerThan === undefined ? undefined : newerThanRow(newerThan)
+          )
+        )
+        .orderBy(desc(releases.builtAt), desc(releases.id))
+        .limit(fittingReleasesPage);
+    for (const row of page) {
+      const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
+      if (!parsed.success) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
+        await assertReleaseFits(db, clientId, parsed.data);
+        return row.id;
+      } catch (error) {
+        if (
+          !(error instanceof ProvisionOperationError) &&
+          !(error instanceof DeployError)
+        ) {
+          throw error;
+        }
       }
     }
+    const last = page.at(-1);
+    if (last === undefined || page.length < fittingReleasesPage) {
+      return null;
+    }
+    after = last;
   }
-  return null;
 };
 
 /**
@@ -2910,11 +2953,7 @@ const runOperation = async (
     await validate(context, loaded);
 
     step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held, {
-      releaseId: loaded.operation.releaseId,
-      runId: held.runId,
-      record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
-    });
+    const inventory = await ensureClientResources(api, db, "system", held);
     // Before core goes live naming it: the gateway its model calls take.
     if (bindsModels(loaded.manifest)) {
       await assertHolds(db, held);
@@ -2957,15 +2996,6 @@ const runOperation = async (
     return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
-    // Provisioning's own check found a resource outside the policy's
-    // jurisdiction: the destination is marked so (src/hosting/provision.ts),
-    // and a person needs to look before anyone is placed there again.
-    if (code === "resource_outside_jurisdiction") {
-      await tellStaff(context, {
-        clientId: held.clientId,
-        kind: "hosting_check_failed",
-      });
-    }
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,
