@@ -21,15 +21,18 @@ import {
   DownloadIcon,
   LayoutGridIcon,
   ListIcon,
+  PlusIcon,
   Rows3Icon,
   SearchIcon,
 } from "lucide-react";
 import { useState } from "react";
 
+import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { formatNumber } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { AddAppDialog } from "../landscape/add-app-dialog.tsx";
 import { AppMosaic } from "../landscape/app-mosaic.tsx";
 import { AppTable } from "../landscape/app-table.tsx";
 import type { Density } from "../landscape/app-table.tsx";
@@ -61,15 +64,25 @@ import { applyPolicy, findingsWith } from "../policies/policy.ts";
 // app the company uses, how Grasp knows about it, what data it touches and
 // who owns it, as a table or a mosaic, to search, filter, sort and export.
 // Its apps are those Grasp knows from its integrations
-// (landscape/landscape-data.ts), marked by the company's policy rules. The
-// prototype adds an app by hand and names its owner here; Grasp keeps
-// neither yet, so the page has neither action.
+// (landscape/landscape-data.ts), marked by the company's policy rules. Add
+// app, as the prototype's, picks an app from the catalog, which opens where
+// it is connected, or asks Grasp for one the catalog doesn't have
+// (landscape/add-app-dialog.tsx). The prototype also names an app's owner
+// here; Grasp keeps no owners yet.
 
 type ToolbarMenu = "filter" | "layout" | "columns";
 
 const LandscapePage = () => {
   const { t } = useLingui();
-  const { apps: loaded, book: read, found } = Route.useLoaderData();
+  const {
+    apps: loaded,
+    book: read,
+    found,
+    integrations,
+  } = Route.useLoaderData();
+  const [adding, setAdding] = useState(false);
+  // The app Add app didn't find in the catalog, to ask Grasp for.
+  const [requesting, setRequesting] = useState<string | null>(null);
   const book = bookOf(read);
   const navigate = useNavigate();
   const view = Route.useSearch().view ?? "table";
@@ -130,7 +143,8 @@ const LandscapePage = () => {
               </InputGroupAddon>
             </InputGroup>
           </div>
-          <span className="text-muted-foreground tabular-nums">
+          {/* The prototype's size: the page's own, not its 14px. */}
+          <span className="text-muted-foreground text-base tabular-nums">
             {shown.length === total
               ? t`${plural(total, { one: "# app", other: "# apps" })}`
               : t`${plural(total, { one: `${shownCount} of # app`, other: `${shownCount} of # apps` })}`}
@@ -232,6 +246,14 @@ const LandscapePage = () => {
                 </ToolbarLabel>
               </Button>
             </Toolbar>
+            <Button
+              onClick={() => {
+                setAdding(true);
+              }}
+            >
+              <PlusIcon data-icon="inline-start" />
+              <Trans>Add app</Trans>
+            </Button>
           </div>
         </div>
 
@@ -256,6 +278,24 @@ const LandscapePage = () => {
           />
         ) : null}
       </Page>
+      <AddAppDialog
+        integrations={integrations}
+        onOpenChange={setAdding}
+        onRequest={setRequesting}
+        open={adding}
+      />
+      {/* Mounted with the name typed, so each request starts from it. */}
+      <RequestAppDialog
+        initial={requesting ?? ""}
+        integrations={integrations}
+        key={requesting ?? ""}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRequesting(null);
+          }
+        }}
+        open={requesting !== null}
+      />
     </>
   );
 };

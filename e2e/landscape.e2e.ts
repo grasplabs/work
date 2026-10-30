@@ -96,6 +96,25 @@ test("an admin finds a connected app in the landscape, with the engine that uses
   // which core records on the permission rather than the connection.
   await expect(page.getByText("Granted a permission").first()).toBeVisible();
 
+  // Add app: an app the catalog doesn't have is asked for under its name,
+  // and one it has opens where it is connected.
+  await page.goto("/landscape");
+  await page.getByRole("button", { name: "Add app" }).click();
+  const adding = page.getByRole("dialog", { name: "Add an app" });
+  await adding.getByRole("combobox").fill("Twinfield");
+  await adding
+    .getByRole("option", { name: "Ask Grasp to add “Twinfield”" })
+    .click();
+  const requesting = page.getByRole("dialog", { name: "Request an app" });
+  await expect(requesting.getByLabel("App")).toHaveValue("Twinfield");
+  await requesting.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Add app" }).click();
+  await adding.getByRole("combobox").fill("google");
+  await adding.getByRole("option", { name: /^Google Workspace/u }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Google Workspace" })
+  ).toBeVisible();
+
   // An app nothing in Grasp knows isn't there.
   await page.goto("/landscape/native:nothing/overview");
   await expect(
