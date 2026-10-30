@@ -177,6 +177,10 @@ export default {
       if (!loopbackHosts.has(url.hostname)) {
         return new Response("Forbidden", { status: 403 });
       }
+      // The seed offboards every client before it, so their accounts go
+      // too: the fake starts again, as each test's does, and never runs
+      // out of the databases it keeps clients' data in.
+      cloudflare.reset();
       return Response.json(await seed(cloudflare, tokens));
     }
     if (url.pathname === "/__e2e/seed-create" && request.method === "POST") {

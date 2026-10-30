@@ -1,17 +1,18 @@
 // Layout primitive, not in shadcn: a page's title, what it is for and its
-// actions. The actions move under the title on a phone.
+// actions, as the prototype's components/page.tsx lays them out. The title
+// keeps a width of its own, so actions beside it go to the next line rather
+// than squeezing it.
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 
 function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
   return (
     <header
       data-slot="page-header"
-      className={cn(
-        "flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between",
-        className
-      )}
+      className={cn("flex min-w-0 flex-wrap items-end gap-3", className)}
       {...props}
     />
   );
@@ -24,7 +25,7 @@ function PageHeaderContent({
   return (
     <div
       data-slot="page-header-content"
-      className={cn("flex min-w-0 flex-col gap-1", className)}
+      className={cn("flex min-w-0 flex-1 basis-64 flex-col gap-1", className)}
       {...props}
     />
   );
@@ -59,14 +60,44 @@ function PageHeaderTitle({
   });
 }
 
+const pageHeaderDescriptionVariants = cva(
+  "text-muted-foreground text-sm text-pretty",
+  {
+    variants: {
+      /** `two`: at most two lines, for a description someone wrote, such as a project's. */
+      lines: {
+        all: "",
+        two: "line-clamp-2",
+      },
+    },
+    defaultVariants: {
+      lines: "all",
+    },
+  }
+);
+
 function PageHeaderDescription({
   className,
+  lines = "all",
   ...props
-}: React.ComponentProps<"p">) {
+}: React.ComponentProps<"p"> &
+  VariantProps<typeof pageHeaderDescriptionVariants>) {
   return (
     <p
       data-slot="page-header-description"
-      className={cn("text-muted-foreground text-sm text-pretty", className)}
+      data-lines={lines}
+      className={cn(pageHeaderDescriptionVariants({ lines }), className)}
+      {...props}
+    />
+  );
+}
+
+/** Small marks under the title, such as a status badge. */
+function PageHeaderMeta({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="page-header-meta"
+      className={cn("mt-1 flex flex-wrap items-center gap-1.5", className)}
       {...props}
     />
   );
@@ -79,7 +110,10 @@ function PageHeaderActions({
   return (
     <div
       data-slot="page-header-actions"
-      className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
+      className={cn(
+        "ml-auto flex shrink-0 flex-wrap items-center gap-2",
+        className
+      )}
       {...props}
     />
   );
@@ -90,5 +124,6 @@ export {
   PageHeaderActions,
   PageHeaderContent,
   PageHeaderDescription,
+  PageHeaderMeta,
   PageHeaderTitle,
 };
