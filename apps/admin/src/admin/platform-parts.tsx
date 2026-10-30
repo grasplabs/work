@@ -130,6 +130,10 @@ export const eventWords = (
     "client.sign_in": `changed how ${company}'s people sign in`,
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
+    "platform.grasp_client":
+      company === ""
+        ? "chose no organization as Grasp's own"
+        : `chose ${company} as Grasp's own organization`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

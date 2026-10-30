@@ -33,9 +33,18 @@
   // OAUTH_RELAY "on" sends every client's sign-in and connections back
   // through the stage's OAuth relay, as every client this admin deploys is
   // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
-  // each client's own origin. One that's unset is a setting the admin
-  // works without, as src/env.d.ts says, except the Access pair, without
-  // which nothing is deployed.
+  // each client's own origin. ROOMS_ORIGIN is Grasp's Rooms' team origin
+  // (e.g. https://rooms.grasp.example), which the proposal under Contract
+  // is read from (src/proposal/rooms.ts); DISCORD_PUBLIC_KEY is Grasp's
+  // Discord application's public key, hex (General Information), which
+  // every interaction Discord posts to the bot is signed with, and
+  // DISCORD_STAFF_IDS the Discord user ids of Grasp's staff, comma-separated:
+  // the only people the bot answers (src/admin/discord.ts). An empty one is
+  // a setting not configured yet; the admin works without it (Rooms isn't
+  // read, the bot refuses everything), except the Access pair, without
+  // which nothing is deployed. Which organization is Grasp's own is chosen
+  // on Platform (the admin's database), and secrets live in the stage's
+  // 1Password Environment.
   "vars": {
     "STAGE": "production",
     "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
@@ -45,6 +54,9 @@
     "CLIENT_DOMAIN": "ongrasp.app",
     "ADMIN_HOST": "admin.ongrasp.app",
     "OAUTH_RELAY": "on",
+    "ROOMS_ORIGIN": "",
+    "DISCORD_PUBLIC_KEY": "",
+    "DISCORD_STAFF_IDS": "",
   },
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
@@ -248,6 +260,9 @@
         "CLIENT_DOMAIN": "staging.ongrasp.app",
         "ADMIN_HOST": "admin.staging.ongrasp.app",
         "OAUTH_RELAY": "on",
+        "ROOMS_ORIGIN": "",
+        "DISCORD_PUBLIC_KEY": "",
+        "DISCORD_STAFF_IDS": "",
       },
       "d1_databases": [
         {

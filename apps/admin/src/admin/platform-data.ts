@@ -45,6 +45,7 @@ export const staffActions = [
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "platform.grasp_client",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 
