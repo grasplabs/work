@@ -9301,6 +9301,10 @@ msgstr "Nu niet"
 msgid "Not offered"
 msgstr "Niet aangeboden"
 
+#: src/settings/sign-in-settings.tsx
+msgid "Not offered: its secret isn’t set"
+msgstr "Niet aangeboden: het secret ervan is niet ingesteld"
+
 #: src/landscape/overview-tab.tsx
 msgid "Not on file yet."
 msgstr "Nog niet vastgelegd."
@@ -9702,6 +9706,10 @@ msgstr "bij de gebeurtenis {event}, gefilterd"
 msgid "On the schedule set by {param} ({timeZone})"
 msgstr "Volgens het schema uit {param} ({timeZone})"
 
+#: src/settings/sign-in-settings.tsx
+msgid "On the sign-in page"
+msgstr "Op de inlogpagina"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "Onderweg"
@@ -9764,6 +9772,14 @@ msgstr "Eén echt geval"
 msgctxt "Pulse status"
 msgid "Online"
 msgstr "Online"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the Google Workspace {hostedDomain}."
+msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
+
+#: src/settings/sign-in-settings.tsx
+msgid "Only accounts of the tenant {tenantId}."
+msgstr "Alleen accounts van de tenant {tenantId}."
 
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
@@ -12221,6 +12237,7 @@ msgstr "Overal afmelden"
 
 #: src/brain/brain-atlas.ts
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/sign-in-settings.tsx
 msgid "Sign-in"
 msgstr "Inloggen"
 
@@ -12231,6 +12248,10 @@ msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Sign-in domains"
 msgstr "Inlogdomeinen"
+
+#: src/settings/sign-in-settings.tsx
+msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
+msgstr "Inloggen is nog niet ingesteld voor deze werkruimte, dus niemand kan inloggen. Grasp stelt het in."
 
 #: src/brain/brain-atlas.ts
 msgid "Sign-in shows the applications people log in to."
@@ -13225,6 +13246,10 @@ msgstr "De {top} die het meest uitgaven; anderen gaven minder uit."
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
 msgstr "Het account waarmee je bent ingelogd."
+
+#: src/settings/sign-in-settings.tsx
+msgid "The accounts people sign in to Grasp with. Grasp sets this up for your workspace: ask Grasp to change it."
+msgstr "De accounts waarmee mensen inloggen in Grasp. Grasp stelt dit in voor je werkruimte: vraag Grasp om het te wijzigen."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
