@@ -530,19 +530,6 @@
   padding-bottom: calc(var(--spacing) * 24);
 }
 
-/* The spine the brain's log hangs its days on (brain/brain-log.tsx): a quiet column of dots, as
-   the prototype draws it. */
-@utility log-spine {
-  background-image: radial-gradient(
-    circle,
-    var(--muted-foreground) 0.8px,
-    transparent 1.3px
-  );
-  background-size: 4px 6px;
-  background-repeat: repeat-y;
-  opacity: 0.4;
-}
-
 /* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)
    and whether its workflow is live (`data-live`), and every line in it follows (`WireLine` in
    `inside-flow.tsx`: `wire-base` is the line, `wire-grain` every third dot again a little larger,
@@ -911,24 +898,9 @@
   }
 }
 
-/* The line down between two blocks on a narrow canvas, where the chain stands top to bottom
-   (`thread-dots`), and the same dots for a line of any length: down (`dots-down`, the rail a
-   question's answers hang on) and across (`dots-across`, from that rail to an answer). */
-@utility thread-dots {
-  width: 2px;
-  height: 1rem;
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 2px 6.5px;
-  background-repeat: repeat-y;
-}
-
+/* A line of dots, down a page in the colour of the text it is set in (`text-*`): the spine the
+   brain's log hangs its days on (brain/brain-log.tsx). */
 @utility dots-down {
-  color: var(--wire);
   background-image: radial-gradient(
     circle,
     currentColor 0.8px,
@@ -936,17 +908,6 @@
   );
   background-size: 2px 6.5px;
   background-repeat: repeat-y;
-}
-
-@utility dots-across {
-  color: var(--wire);
-  background-image: radial-gradient(
-    circle,
-    currentColor 0.8px,
-    transparent 1px
-  );
-  background-size: 6.5px 2px;
-  background-repeat: repeat-x;
 }
 
 @media (prefers-reduced-motion: reduce) {

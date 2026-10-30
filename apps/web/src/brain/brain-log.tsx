@@ -240,7 +240,7 @@ const Days = ({ days, today }: { days: LogDay[]; today: string }) => {
     <ol className="relative flex flex-col">
       <span
         aria-hidden="true"
-        className="log-spine absolute top-2 bottom-0 left-2.5 w-1"
+        className="dots-down text-muted-foreground/60 absolute top-2 bottom-0 left-2.75 w-0.5"
       />
       {days.map(({ day, entries }) => (
         <li
