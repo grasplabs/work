@@ -18233,7 +18233,7 @@ msgstr "De widget wordt geschreven…"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Written"
-msgstr ""
+msgstr "Geschreven"
 
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: a document says it"
