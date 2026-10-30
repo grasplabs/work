@@ -462,12 +462,15 @@ export default class Connect
   // sealed here and never answered back, and every model request core's
   // gateway decided, sent on with the credential its grant names.
 
-  async saveAiProviderKey(request: unknown): Promise<AiProviderKey> {
-    return await saveAiProviderKey(this.env, request);
+  async saveAiProviderKey(
+    request: unknown,
+    by: unknown
+  ): Promise<AiProviderKey> {
+    return await saveAiProviderKey(this.env, request, by);
   }
 
-  async removeAiProviderKey(provider: unknown): Promise<boolean> {
-    return await removeAiProviderKey(this.env, provider);
+  async removeAiProviderKey(provider: unknown, by: unknown): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider, by);
   }
 
   async aiProviderKeys(): Promise<AiProviderKey[]> {
