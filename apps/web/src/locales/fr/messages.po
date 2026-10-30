@@ -2374,6 +2374,10 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Apports"
 
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Ajouté {at}"
+
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "A ajouté un membre à un domaine"
@@ -3686,6 +3690,10 @@ msgstr "Appelle {tools} (n'importe laquelle de leurs méthodes) : peut modifier 
 msgid "Came in"
 msgstr "Reçue"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Arrivé {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Évoqué dans {source}"
@@ -3866,6 +3874,10 @@ msgstr "Modifier : {text}"
 msgid "Changed"
 msgstr "Modifié"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Modifié {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "A modifié une discussion"
@@ -3957,6 +3969,10 @@ msgstr "Modifiée : lit et réécrit chaque enregistrement de {table}, quel qu'e
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Des modifications envoyées par Grasp pour quelqu'un dont la réponse s'est perdue : personne ne sait si elles ont pris effet. Seule cette personne peut dire ce qui s'est passé, sur son tableau de bord ; faites le suivi avec elle."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Changements depuis {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -9674,6 +9690,10 @@ msgstr "Aucun résultat."
 msgid "Nothing happened that matches."
 msgstr "Rien ne correspond."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Rien n’a changé depuis {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -12611,6 +12631,7 @@ msgstr "Afficher dans le journal"
 msgid "Show less"
 msgstr "Afficher moins"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -12813,6 +12834,10 @@ msgstr "La connexion se fait chez {app}. Elle prend environ une minute."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "La déconnexion n'a pas abouti"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Depuis votre dernière visite"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
