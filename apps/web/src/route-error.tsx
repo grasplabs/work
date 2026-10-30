@@ -7,6 +7,27 @@ import { isFileGone, isPageFault, reportError } from "./error-reports.ts";
 import { PageError } from "./frame/page-states.tsx";
 
 /**
+ * Loads Grasp anew, once for each file: what the router does when a page's
+ * component can't be fetched (TanStack's `lazyRouteComponent`, whose key
+ * this shares). A page's loader comes in the same file, and the router
+ * leaves its failure to the page's error. Gone again after that, the page
+ * says so, and trying again loads Grasp anew.
+ */
+const reloadOnce = (error: unknown): void => {
+  const key = `tanstack_router_reload:${error instanceof Error ? error.message : String(error)}`;
+  try {
+    if (sessionStorage.getItem(key) !== null) {
+      return;
+    }
+    sessionStorage.setItem(key, "1");
+  } catch {
+    // Storage blocked: no way to tell a second time, so the page says so.
+    return;
+  }
+  window.location.reload();
+};
+
+/**
  * Why a route failed, in words for the person: core's reason with its
  * reference, or, for a fault of the page's own, a plain "something went
  * wrong" with the reference its report got, so the person can quote
@@ -19,6 +40,11 @@ export const useRouteErrorReason = (error: unknown): string | undefined => {
     error: unknown;
     requestId?: string;
   }>();
+  useEffect(() => {
+    if (isFileGone(error)) {
+      reloadOnce(error);
+    }
+  }, [error]);
   useEffect(() => {
     let current = true;
     const report = async (): Promise<void> => {

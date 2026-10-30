@@ -14,10 +14,11 @@ import {
   WAITING,
 } from "./atlas-map.ts";
 import type { AtlasDots, MapFrame, NeuronMap, Turn } from "./atlas-map.ts";
-import { isRegion, REGION_IDS } from "./brain-atlas.ts";
+import { REGION_IDS } from "./brain-atlas.ts";
 import type { RegionId } from "./brain-atlas.ts";
 import { ALPHAS, HEATS, palette, rgb } from "./dot-ink.ts";
 import type { BrainDots } from "./dot-ink.ts";
+import { isRegion } from "./region-id.ts";
 import { pairAlongCurve, seeded } from "./reveal-motion.ts";
 
 /**

@@ -48,8 +48,14 @@ const ExampleDemo = () => {
 };
 
 export const Route = createFileRoute("/kit_/examples/$name")({
-  beforeLoad: ({ params }) => {
-    if (import.meta.env.MODE === "production" || !isExample(params.name)) {
+  // The inventory imported when it runs: a production build answers not
+  // found first, and never loads it.
+  beforeLoad: async ({ params }) => {
+    if (import.meta.env.MODE === "production") {
+      throw notFound();
+    }
+    const catalog = await import("@grasp-os/ui/catalog");
+    if (!Object.hasOwn(catalog.examples, params.name)) {
       throw notFound();
     }
   },

@@ -1,7 +1,7 @@
 import { canBuild } from "@grasp-os/shared/roles";
+import { runFilterStatuses } from "@grasp-os/shared/run-filter";
+import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { runFilterStatuses } from "@grasp-os/shared/workflows";
-import type { RunFilterStatus } from "@grasp-os/shared/workflows";
 import {
   Select,
   SelectContent,

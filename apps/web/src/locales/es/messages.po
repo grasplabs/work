@@ -1982,6 +1982,7 @@ msgid "Account"
 msgstr "Cuenta"
 
 #: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Action"
 msgstr "Acción"
 
@@ -4135,7 +4136,7 @@ msgstr "Cálculos"
 msgid "Condition {position}"
 msgstr "Condición {position}"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Configuration"
 msgstr "Configuración"
 
@@ -4654,7 +4655,7 @@ msgstr "Decidir"
 msgid "Decided on a held action"
 msgstr "Decidió sobre una acción retenida"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -6991,7 +6992,7 @@ msgstr "Ocurrió"
 msgid "It happened: {who}"
 msgstr "Ocurrió: {who}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Al salir se pierden los cambios sin guardar; lo que ya está guardado o en marcha se mantiene."
 
@@ -7515,7 +7516,7 @@ msgstr "Los responsables reciben su enlace {when}. Los demás justo después de 
 msgid "Leads talked: {count} of {of}"
 msgstr "Responsables que hablaron: {count} de {of}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Salir"
 
@@ -7540,7 +7541,7 @@ msgstr "Descartar"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Deja fuera los expedientes de personal y todo lo que trate de una sola persona."
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave this app?"
 msgstr "¿Salir de esta app?"
 
@@ -7767,6 +7768,7 @@ msgid "Loading"
 msgstr "Cargando"
 
 #: src/activity/audit-log.tsx
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -8007,7 +8009,7 @@ msgstr "Falta"
 msgid "Model"
 msgstr "Modelo"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Llamada al modelo"
 
@@ -10311,7 +10313,7 @@ msgstr "Por solicitud"
 msgid "Per request, in US dollars"
 msgstr "Por solicitud, en dólares estadounidenses"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Permiso"
 
@@ -10397,7 +10399,7 @@ msgstr "Medidas de la plataforma"
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 msgstr "Estadísticas de la plataforma. Este dominio puede leer los recuentos de ejecuciones y señales de todos los dominios, y mostrarlos a cualquiera que lo use"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Platform update"
 msgstr "Actualización de la plataforma"
 
@@ -10702,7 +10704,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "read"
 msgstr "leer"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Lectura"
 
@@ -12403,7 +12405,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Estado"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Quedarse"
 

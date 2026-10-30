@@ -1,5 +1,3 @@
-// Before anything builds a schema, as in core.ts.
-import "./zod-jitless.ts";
 import { authErrors } from "@grasp-os/shared/errors";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";

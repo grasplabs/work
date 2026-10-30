@@ -26,7 +26,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
@@ -37,7 +37,6 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
-import { CustomWidgetBlock } from "./custom-widget.tsx";
 import {
   addWidget,
   differsFromDefault,
@@ -69,6 +68,13 @@ import {
   useFull,
 } from "./widget-block.tsx";
 import { WidgetProgressLine } from "./widget-progress.tsx";
+
+// A widget Grasp made draws its charts with Recharts, which loads only on a
+// board that has one.
+const CustomWidgetBlock = lazy(async () => {
+  const { CustomWidgetBlock: block } = await import("./custom-widget.tsx");
+  return { default: block };
+});
 
 // The dashboard's widget board, under what waits on the person, as the
 // prototype's (`components/dashboard/widget-board.tsx`, `widget-add.tsx`,
@@ -604,7 +610,11 @@ const BoardWidget = ({
   }
   const widget = made.get(id);
   if (widget !== undefined) {
-    return <CustomWidgetBlock widget={widget} />;
+    return (
+      <Suspense fallback={<WidgetLoading title={widget.view.title} />}>
+        <CustomWidgetBlock widget={widget} />
+      </Suspense>
+    );
   }
   return board.made.state === "ready" ? null : (
     <NotRead loaded={board.made} title={title} />
