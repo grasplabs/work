@@ -18,7 +18,7 @@ import type {
   TriggerKind,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import { nextScheduledRun } from "@grasp-os/shared/workflows";
+import { maxFailedStarts, nextScheduledRun } from "@grasp-os/shared/workflows";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -743,6 +743,7 @@ interface TriggerRow {
   connectionResource: string | null;
   inputMapping: string | null;
   nextAt: Date | null;
+  failedStarts: number | null;
 }
 
 /** A system trigger's configuration, if its version keeps one. */
@@ -812,6 +813,12 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   createdAt: row.createdAt.toISOString(),
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
+  // Stopped by its own failing starts (workflows/schedule-triggers.ts):
+  // no next time, after `maxFailedStarts` in a row.
+  stopped:
+    row.kind === "schedule" &&
+    row.nextAt === null &&
+    (row.failedStarts ?? 0) >= maxFailedStarts,
 });
 
 /** The live triggers `where` finds, at their current versions, oldest first. */
@@ -839,6 +846,7 @@ const triggersWhere = async (
       connectionResource: triggerResourceVersions.connectionResource,
       inputMapping: triggerResourceVersions.inputMapping,
       nextAt: triggerSchedules.nextAt,
+      failedStarts: triggerSchedules.failedStarts,
     })
     .from(triggerResources)
     .innerJoin(

@@ -61,6 +61,10 @@ import {
   GoLiveDecision,
   WorkflowStatus,
 } from "../workflows/workflow-status.tsx";
+import {
+  TriggersTabContent,
+  TriggersTabTrigger,
+} from "../workflows/workflow-triggers-tab.tsx";
 
 // One independent workflow (platform specification 13): for its builders,
 // its definition as a draft they edit, check and publish; for everyone
@@ -342,7 +346,8 @@ type WorkflowTab =
   | "runs"
   | "files"
   | "parameters"
-  | "versions";
+  | "versions"
+  | "triggers";
 
 /** The tabs of a workflow's page, as the reader has them. */
 const WorkflowTabs = ({
@@ -379,6 +384,7 @@ const WorkflowTabs = ({
         <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     )}
+    <TriggersTabTrigger />
     <TabsTrigger value="files">
       <Trans context="tab of a workflow">Files and apps</Trans>
     </TabsTrigger>
@@ -469,7 +475,7 @@ const WorkflowResourceView = ({
     savedHere
   );
   const start: WorkflowTab = draft === undefined ? "versions" : "definition";
-  const [tab, setTab] = useState<WorkflowTab>(start);
+  const [tab, setTab] = useState<WorkflowTab>(Route.useSearch().tab ?? start);
   const [part, setPart] = useState<TracesPart>("runs");
   // The draft as its editor last saved or read it, beside the page's read:
   // whichever is at the later revision is the draft the page goes by.
@@ -583,6 +589,11 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
+        <TriggersTabContent
+          builder={builder}
+          me={names.me}
+          workflow={resource.id}
+        />
         {/* Files and apps reads what no other tab needs: only while it
             shows, afresh each time it is opened. */}
         <TabsContent value="files">
@@ -718,6 +729,8 @@ const WorkflowResourcePage = () => {
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
+  validateSearch: (search: Record<string, unknown>): { tab?: "triggers" } =>
+    search.tab === "triggers" ? { tab: "triggers" } : {},
   loader: async ({ context: { core }, params: { workflow } }) => {
     // Names only, and not waited for: IDs stand in until they come.
     const people = loadFromCore(core, readPeople);

@@ -138,6 +138,12 @@ export interface WorkflowTrigger {
    * starts kept failing (enabling it again starts it afresh).
    */
   nextAt: string | null;
+  /**
+   * Whether a schedule trigger stopped after its starts kept failing
+   * (`maxFailedStarts` in a row): it starts nothing until its owner
+   * enables it again, which starts its schedule afresh.
+   */
+  stopped: boolean;
 }
 
 /**
