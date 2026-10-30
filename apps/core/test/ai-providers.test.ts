@@ -755,6 +755,55 @@ describe("AI providers", { timeout: 60_000 }, () => {
       ]);
     });
 
+    it("never falls back for a call through an App's model binding, which goes to its approved model only", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [
+        { status: 429, headers: { "retry-after": "600" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+      const fields = await callOf(openaiCase.model);
+      const { work } = fields;
+      if (
+        work === undefined ||
+        !("context" in work) ||
+        work.context.type !== "app"
+      ) {
+        throw new Error("Expected an App's work");
+      }
+
+      const failed = await outcome(
+        models(env).call({
+          ...fields,
+          binding: { app: work.context.appId, alias: "writer", budget: null },
+          // The provider's wait outlasts it: never asked again either.
+          timeoutMs: 5000,
+        })
+      );
+
+      expect(failed).toBe("model.rate_limited");
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
+    it("never falls back for a call that allows one provider request only, as a workflow step does", async () => {
+      const keys = await fallingBack();
+      await plan(keys.openai, [
+        { status: 429, headers: { "retry-after": "1" } },
+        { status: 429, headers: { "retry-after": "1" } },
+      ]);
+      await plan(keys.claude, [answered("anthropic-messages", "From Claude.")]);
+
+      const failed = await outcome(
+        models(env).call({
+          ...(await callOf(openaiCase.model)),
+          providerRetries: false,
+        })
+      );
+
+      expect(failed).toBe("model.rate_limited");
+      await expect(carrying(keys.openai)).resolves.toHaveLength(1);
+      await expect(carrying(keys.claude)).resolves.toStrictEqual([]);
+    });
+
     it("falls back in an agent's loop too, before anything streamed", async () => {
       const keys = await fallingBack();
       await plan(keys.openai, [{ status: 403 }]);
