@@ -27,7 +27,7 @@ import {
 import { acceptedInput, pinned, startWorkflow } from "../workflow-starts.ts";
 import { startOfferCard } from "./cards.tsx";
 import type { Conversation } from "./connect-own.ts";
-import { pressedStart } from "./stephen-requests.ts";
+import { keepCardsOf, pressedStart } from "./stephen-requests.ts";
 import type { ChannelLocale, LineName } from "./words.ts";
 
 // Workflows people start by asking Stephen in a chat app. A workflow's
@@ -244,7 +244,11 @@ export const offerStart = async (
 export const postOffers = async (
   env: Env,
   thread: Pick<Conversation, "post">,
-  { chatId, userId }: { chatId: string; userId: string },
+  {
+    chatId,
+    userId,
+    requestId,
+  }: { chatId: string; userId: string; requestId: string | null },
   locale: ChannelLocale
 ): Promise<void> => {
   const now = new Date();
@@ -260,6 +264,12 @@ export const postOffers = async (
       )
     )
     .returning();
+  // Kept with the request whose answer posts them, so a press is its.
+  await keepCardsOf(
+    env,
+    requestId,
+    offers.map(({ id }) => `offer:${id}`)
+  );
   for (const offer of offers.toSorted(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
   )) {
@@ -357,7 +367,7 @@ export const pressOffer = async (
     // The press is part of the request that offered it, never one of its own.
     await pressedStart(env, {
       userId: offer.userId,
-      chatId: offer.chatId,
+      offerId: offer.id,
       workflowId: offer.workflowId,
       started: true,
     });
@@ -372,7 +382,7 @@ export const pressOffer = async (
     });
     await pressedStart(env, {
       userId: offer.userId,
-      chatId: offer.chatId,
+      offerId: offer.id,
       workflowId: offer.workflowId,
       started: false,
     });

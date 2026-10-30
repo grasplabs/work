@@ -70,8 +70,12 @@ const reach = new Map([["team-sales", 12]]);
 const pageOf = (filter: Partial<RequestsFilter> = {}): RequestsPage => {
   const shown = requests.filter(
     (each) =>
-      (filter.question === undefined || each.question === filter.question) &&
-      (filter.topic === undefined || each.topic === filter.topic)
+      (filter.question === undefined ||
+        filter.question === null ||
+        each.question === filter.question) &&
+      (filter.topic === undefined ||
+        filter.topic === null ||
+        each.topic === filter.topic)
   );
   return {
     today,
@@ -124,7 +128,11 @@ const leave: Need = {
 let root: Root | undefined;
 
 /** The table on `page`, with core faked behind it; what was marked and asked. */
-const shown = async (page: RequestsPage, needs: Need[]) => {
+const shown = async (
+  page: RequestsPage,
+  needs: Need[],
+  team: string | null = null
+) => {
   const marked: [string, NeedStatus | null][] = [];
   const read: Partial<RequestsFilter>[] = [];
   const switched: boolean[] = [];
@@ -169,6 +177,7 @@ const shown = async (page: RequestsPage, needs: Need[]) => {
         }}
         page={page}
         place={null}
+        team={team}
       />
     ),
   });
@@ -248,9 +257,50 @@ describe("the requests table", () => {
       why: true,
       proposal: true,
       asked: true,
-      read: [{ range: "month", place: null, question: "q-leave" }],
+      // Needs you follows no filter of the page.
+      read: [
+        {
+          range: "month",
+          place: null,
+          team: null,
+          topic: null,
+          person: null,
+          question: "q-leave",
+        },
+      ],
       marked: [["notPossible:q-leave", "fixed"]],
     });
+  });
+
+  it("opens a row's panel on the page's filters", async () => {
+    const { read } = await shown(pageOf(), [], "team-sales");
+
+    await press(button("What people ask"));
+    await press(button("Expenses"));
+
+    expect(read).toStrictEqual([
+      {
+        range: "month",
+        place: null,
+        team: "team-sales",
+        topic: "topic-expenses",
+        person: null,
+        question: null,
+      },
+    ]);
+  });
+
+  it("opens a panel from a panel on what both narrow to", async () => {
+    const { read } = await shown(pageOf(), []);
+
+    await press(button("What people ask"));
+    await press(button("Expenses"));
+    await press(button("Sales"));
+
+    expect(read.map(({ team, topic }) => ({ team, topic }))).toStrictEqual([
+      { team: null, topic: "topic-expenses" },
+      { team: "team-sales", topic: "topic-expenses" },
+    ]);
   });
 
   it("shows what people ask by topic, and people one by one only once an owner turns them on", async () => {
