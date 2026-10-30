@@ -20,7 +20,7 @@ export const defaultModelSpendCeiling = 250;
 
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
-  /** `r<run6>-<sha7>`. */
+  /** `YY.MM.N` (@grasp-os/shared/release-id); the commit is `commitSha`. */
   id: text().primaryKey(),
   commitSha: text("commit_sha").notNull(),
   /** The release's manifest, as CI wrote it: JSON. */

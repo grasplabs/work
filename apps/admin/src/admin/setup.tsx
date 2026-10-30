@@ -21,6 +21,11 @@ import type { ModelSpendReport } from "@grasp-os/shared/model-spend-report";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
+import {
   Table,
   TableBody,
   TableCell,
@@ -58,6 +63,8 @@ import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { ClientHosting } from "../hosting/client-hosting.tsx";
 import { retryProvisioningFn } from "../hosting/functions.ts";
 import type { ClientHostingView } from "../hosting/placement.ts";
+import { ProvisioningProgressView } from "../hosting/progress-view.tsx";
+import type { ProvisioningProgress } from "../hosting/progress.ts";
 import {
   notStartedWords,
   operationErrorWords,
@@ -778,6 +785,14 @@ const NeedAction = ({
   }
 };
 
+/** How long a company's progress stays on its Setup once it is ready. */
+const readyShownMs = 24 * 60 * 60 * 1000;
+
+/** Whether its setting up shows: while it goes or waits, and for a day once ready. */
+const showsProgress = (progress: ProvisioningProgress): boolean =>
+  progress.readyAt === null ||
+  Date.now() - progress.readyAt.getTime() < readyShownMs;
+
 /** Whether a company is in a hosting destination, or being provisioned in one. */
 const placedOf = (hosting: ClientHostingView | null): boolean =>
   hosting !== null &&
@@ -801,11 +816,22 @@ const HostingSection = ({
   (placedOf(hosting) ||
     setup.provisioning.client?.status === "provisioning") ? (
     <SetupSection
-      description="The hosting policy it is held to, and the destination that meets it."
+      description="Where it runs and where it is placed. Grasp sets it up, and tries again, by itself."
       title="Hosting"
     >
       <div className="border-t px-5 py-4">
-        <ClientHosting releases={releases} view={hosting} />
+        <Collapsible>
+          <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+            Show hosting details
+          </CollapsibleTrigger>
+          {/* Kept on the page while folded: found by the page's search, and
+              its state kept between refreshes. */}
+          <CollapsibleContent keepMounted>
+            <div className="mt-4">
+              <ClientHosting releases={releases} view={hosting} />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
     </SetupSection>
   ) : null;
@@ -945,6 +971,7 @@ const Status = ({
   view,
   quotaPolicy,
   modelSpend,
+  progress,
   hosting,
   releases,
   refresh,
@@ -959,11 +986,15 @@ const Status = ({
   /** Its spend this month as its core's ledger counts it, read live and not awaited; null when unknown. */
   modelSpend: Promise<ModelSpendReport | null>;
   hosting: ClientHostingView | null;
+  progress: ProvisioningProgress | null;
   releases: readonly { id: string; notes: string }[];
   refresh: Refresh;
 }) => (
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
+    {progress !== null && showsProgress(progress) ? (
+      <ProvisioningProgressView progress={progress} />
+    ) : null}
     {needs.length > 0 ? (
       <SetupSection
         description="The most pressing first."
@@ -1925,6 +1956,7 @@ export const OrgSetup = ({
   view,
   quotaPolicy,
   modelSpend,
+  progress,
   releases,
   hosting,
 }: {
@@ -1939,6 +1971,8 @@ export const OrgSetup = ({
   /** Every imported release, newest first. */
   releases: readonly { id: string; notes: string }[];
   hosting: ClientHostingView | null;
+  /** Its setting up, line by line; null when there's no such client. */
+  progress: ProvisioningProgress | null;
 }) => {
   const navigate = useNavigate();
   const refresh = useRefreshSetup();
@@ -1967,6 +2001,7 @@ export const OrgSetup = ({
           <Status
             clientId={clientId}
             hosting={hosting}
+            progress={progress}
             needs={needs}
             modelSpend={modelSpend}
             quotaPolicy={quotaPolicy}

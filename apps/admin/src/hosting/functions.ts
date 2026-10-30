@@ -28,6 +28,7 @@ import {
   placeInputSchema,
 } from "./placement.ts";
 import type { PlaceRefusal } from "./placement.ts";
+import { provisioningProgress } from "./progress.ts";
 import { resumeProvisioning } from "./reconcile.ts";
 import { releasePlacedClient } from "./workflow.ts";
 
@@ -53,6 +54,11 @@ const refusalOf = (error: unknown): PlaceResult | null => {
   }
   return null;
 };
+
+/** A client's setting up, line by line, as its progress view shows it. */
+export const fetchProvisioningProgress = createServerFn({ method: "GET" })
+  .validator(z.object({ clientId: z.string().min(1) }))
+  .handler(async ({ data }) => await provisioningProgress(env, data.clientId));
 
 export const fetchClientHosting = createServerFn({ method: "GET" })
   .validator(z.object({ clientId: z.string().min(1) }))
