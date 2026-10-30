@@ -222,13 +222,11 @@ export const startsFirst = (a: TimedFile, b: TimedFile): number => {
  * about 60 of the organization's jobs at once, so fewer, longer shards
  * let more pull requests through. On GitHub's 4-CPU runners the model
  * matched the shards' measured test steps (24 shards: at most 301 s
- * modelled, 313 s measured, October 2026). Eight minutes keeps a run's
- * wall clock close to the journeys' and a shard well inside the test
- * step's 15 and the stall reporter's 13: the whole suite in 15 shards of
- * 5 to 8 minutes instead of 24, core's screens (about 14 minutes on one
- * shard) on 3 of their own.
+ * modelled, 313 s measured, October 2026). Ten minutes keeps a shard well
+ * inside the test step's 15 and the stall reporter's 13: the whole suite
+ * in 13 shards instead of 24.
  */
-export const shardTargetSeconds = 480;
+export const shardTargetSeconds = 600;
 
 /** The most shards a run splits into, however long its files take. */
 export const maxShards = 16;

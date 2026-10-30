@@ -72,7 +72,7 @@ jobs:
   # workspace package runs the projects of that package and of every
   # package that depends on it, by pnpm's graph, and a change outside every
   # package (config, lockfile, CI, tooling) runs them all. The merge queue
-  # runs them all. Shards: the fewest that each end within about 8 minutes
+  # runs them all. Shards: the fewest that each end within about 10 minutes
   # by the durations (scripts/test-shards.ts), at most 16. Not for drafts.
   # Small on purpose: the checkout's last two commits, the cached install,
   # and a few seconds of Vitest resolving its projects (no tests run).
