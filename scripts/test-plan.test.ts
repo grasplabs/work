@@ -2,6 +2,16 @@
  * Which test projects a pull request runs (test-plan.ts): those with a file
  * in a package its changes reach, by pnpm's graph, and none other.
  */
+import { execFileSync } from "node:child_process";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
@@ -10,6 +20,7 @@ import {
   affectedProjects,
   packageOf,
   packagesSelected,
+  reachSince,
   reachedPackages,
 } from "./test-plan.ts";
 
@@ -75,14 +86,162 @@ describe("planning which test projects run", () => {
   });
 });
 
+/** A package.json of `name`, with these dependencies. */
+const manifest = (
+  name: string,
+  dependencies: Record<string, string> = {}
+): string => JSON.stringify({ name, version: "0.0.0", dependencies });
+
+/**
+ * A workspace of its own in a fresh git repository, its first commit the
+ * base: `lib`, `app` that depends on it, and `other` that doesn't.
+ * `change` appends to a file and commits it on top, as a pull request's
+ * merge commit stands on main's.
+ */
+const workspaceWithBase = (): {
+  repo: string;
+  base: string;
+  change: (file: string) => void;
+} => {
+  const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "test-plan-")));
+  const write = (file: string, content: string): void => {
+    mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    writeFileSync(path.join(repo, file), content);
+  };
+  write("package.json", manifest("repo"));
+  write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+  write("pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+  write(".github/workflows/ci.yml", "name: CI\n");
+  write("vite.config.ts", "export default {};\n");
+  write("packages/lib/package.json", manifest("lib"));
+  write("packages/lib/index.ts", "export const lib = 1;\n");
+  write("packages/app/package.json", manifest("app", { lib: "workspace:*" }));
+  write("packages/app/index.ts", "export const app = 1;\n");
+  write("packages/other/package.json", manifest("other"));
+  write("packages/other/index.ts", "export const other = 1;\n");
+  // Git's plumbing: a commit of the tree as it stands, with no hooks or
+  // user configuration involved.
+  const git = (...args: string[]): string =>
+    execFileSync("git", args, {
+      cwd: repo,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    }).trim();
+  const commit = (message: string, parents: readonly string[]): string => {
+    git("add", "--all");
+    const parentArgs = parents.flatMap((parent) => ["-p", parent]);
+    const made = git(
+      "commit-tree",
+      git("write-tree"),
+      ...parentArgs,
+      "-m",
+      message
+    );
+    git("update-ref", "HEAD", made);
+    return made;
+  };
+  git("init", "--quiet");
+  const base = commit("base", []);
+  return {
+    repo,
+    base,
+    change: (file) => {
+      appendFileSync(path.join(repo, file), "\n");
+      commit(`change ${file}`, [git("rev-parse", "HEAD")]);
+    },
+  };
+};
+
+const relativeTo = (repo: string, dirs: Iterable<string>): string[] =>
+  [...dirs].map((dir) => path.relative(repo, dir) || ".").toSorted();
+
+describe("following a pull request's changes from its base", () => {
+  it.each([
+    ["the lockfile", "pnpm-lock.yaml"],
+    ["a CI workflow", ".github/workflows/ci.yml"],
+    ["the repo's config", "vite.config.ts"],
+  ])("runs every project when %s changes", (_, file) => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      change(file);
+
+      expect(reachSince(base, repo).all).toBeTruthy();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a changed package and every package that depends on it, and no other", () => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      change("packages/lib/index.ts");
+      const reach = reachSince(base, repo);
+
+      expect(reach.all).toBeFalsy();
+      expect(relativeTo(repo, reach.changed)).toStrictEqual(["packages/lib"]);
+      expect(reach.all ? [] : relativeTo(repo, reach.affected)).toStrictEqual([
+        "packages/app",
+        "packages/lib",
+      ]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("reaches nothing when nothing changed", () => {
+    const { repo, base } = workspaceWithBase();
+    try {
+      const reach = reachSince(base, repo);
+
+      expect(reach.all).toBeFalsy();
+      expect(reach.all ? ["all"] : [...reach.affected]).toStrictEqual([]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("leaving out what no Vitest test sees", () => {
+  it("runs no project when only the journeys change", () => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      mkdirSync(path.join(repo, "e2e"));
+      change("e2e/apps.e2e.ts");
+      change("playwright.config.ts");
+      const reach = reachSince(base, repo);
+
+      expect(reach.all).toBeFalsy();
+      expect(reach.all ? ["all"] : [...reach.affected]).toStrictEqual([]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("doesn't reach a package through a dependency on another's build alone", () => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      change("packages/lib/index.ts");
+      const reach = reachSince(base, repo, new Map([["app", ["lib"]]]));
+
+      expect(reach.all ? [] : relativeTo(repo, reach.affected)).toStrictEqual([
+        "packages/lib",
+      ]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
 /** The workspace's shape where it matters: core uses ui, and web's build. */
 const workspace = [
   { name: "grasp-os", dir: root, dependsOn: ["/repo/packages/shared"] },
-  {
-    name: "@grasp-os/shared",
-    dir: "/repo/packages/shared",
-    dependsOn: [],
-  },
+  { name: "@grasp-os/shared", dir: "/repo/packages/shared", dependsOn: [] },
   {
     name: "@grasp-os/ui",
     dir: "/repo/packages/ui",
@@ -105,7 +264,7 @@ const workspace = [
   },
 ];
 
-describe("following a change through the workspace", () => {
+describe("following a change through Grasp's workspace", () => {
   it("reaches every package that depends on a changed one, directly or not", () => {
     expect(reachedPackages(workspace, ["/repo/packages/shared"])).toStrictEqual(
       new Set([

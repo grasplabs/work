@@ -18,7 +18,7 @@
 // `shards` (a JSON array of shard numbers, empty for none) to
 // $GITHUB_OUTPUT, and why to the step summary.
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { createVitest } from "vite-plus/test/node";
@@ -81,12 +81,15 @@ export const journeyFiles = [
  * package name: the dependent needs only the dependency's build. Core
  * depends on web for the frontend it serves (apps/core/wrangler.jsonc's
  * assets), and so that `vp run -r build` builds web first: core's build
- * writes the App compiler next to it. Core's tests never load it; they
- * serve a stand-in frontend (apps/core/test/global-setup.ts). The frontend
- * core really serves is tested by `workerd`'s smoke and the journeys,
- * which run on every ready pull request. Without this, a change to web
- * alone ran core's projects, four fifths of the suite's time (October
- * 2026). A package that depends on web for its code belongs elsewhere.
+ * writes the App compiler next to it. Core's tests never load it: no core
+ * file imports web, and the tests serve a stand-in frontend
+ * (apps/core/test/global-setup.ts writes it, and core's vite.config.ts
+ * points the pool's assets at it instead of wrangler.jsonc's). The
+ * frontend core really serves is tested by `workerd`'s smoke and the
+ * journeys, which run on every ready pull request. Without this, a change
+ * to web alone ran core's projects, four fifths of the suite's time
+ * (October 2026). A package that depends on web for its code belongs
+ * elsewhere.
  */
 export const buildOnlyDependencies: ReadonlyMap<string, readonly string[]> =
   new Map([["@grasp-os/core", ["@grasp-os/web"]]]);
@@ -130,21 +133,13 @@ export const reachedPackages = (
   return reached;
 };
 
-const linked = z.record(
-  z.string(),
-  z.object({ version: z.string(), path: z.string() })
-);
-const listed = z.array(
-  z.object({
-    name: z.string(),
-    path: z.string(),
-    dependencies: linked.optional(),
-    devDependencies: linked.optional(),
-  })
-);
+const listed = z.array(z.object({ name: z.string(), path: z.string() }));
 
-/** `vp pm ls` of the workspace's packages, those `filter` selects. */
-const listPackages = (filter?: string): z.infer<typeof listed> => {
+/** `vp pm ls` of the packages `filter` selects in the workspace at `cwd`. */
+const listPackages = (
+  filter: string | undefined,
+  cwd: string
+): z.infer<typeof listed> => {
   const output = execFileSync(
     "vp",
     [
@@ -161,27 +156,82 @@ const listPackages = (filter?: string): z.infer<typeof listed> => {
         (pattern) => `--changed-files-ignore-pattern=${pattern}`
       ),
     ],
-    { encoding: "utf-8" }
+    { cwd, encoding: "utf-8" }
   );
   return listed.parse(JSON.parse(output));
 };
 
-/** The workspace packages' directories, of those `filter` selects, by pnpm. */
-export const packagesSelected = (filter?: string): string[] =>
-  listPackages(filter).map(({ path: dir }) => dir);
+/**
+ * The workspace packages' directories, of those `filter` selects, by pnpm,
+ * in the workspace at `cwd`.
+ */
+export const packagesSelected = (
+  filter?: string,
+  cwd: string = process.cwd()
+): string[] => listPackages(filter, cwd).map(({ path: dir }) => dir);
 
-/** Every workspace package, with its workspace dependencies, by pnpm. */
-const workspacePackages = (): WorkspacePackage[] =>
-  listPackages().map((entry) => ({
-    name: entry.name,
-    dir: entry.path,
-    dependsOn: Object.values({
-      ...entry.dependencies,
-      ...entry.devDependencies,
-    })
-      .filter(({ version }) => version.startsWith("link:"))
-      .map(({ path: dir }) => dir),
-  }));
+const manifest = z.object({
+  dependencies: z.record(z.string(), z.string()).optional(),
+  devDependencies: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * Every workspace package in the workspace at `cwd`, by pnpm, with the
+ * workspace packages its package.json depends on, as pnpm's
+ * `...[<base>]` follows them, installed or not.
+ */
+const workspacePackages = (cwd: string): WorkspacePackage[] => {
+  const all = listPackages(undefined, cwd);
+  const dirOf = new Map(all.map(({ name, path: dir }) => [name, dir]));
+  return all.map(({ name, path: dir }) => {
+    const { dependencies, devDependencies } = manifest.parse(
+      JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8"))
+    );
+    return {
+      name,
+      dir,
+      dependsOn: Object.keys({ ...dependencies, ...devDependencies })
+        .map((dependency) => dirOf.get(dependency))
+        .filter((found) => found !== undefined),
+    };
+  });
+};
+
+/** What a change since a base reaches, by pnpm's graph. */
+export type Reach =
+  /** Files outside every package changed: any test may see them. */
+  | { readonly all: true; readonly changed: readonly string[] }
+  | {
+      readonly all: false;
+      /** The packages whose own files changed. */
+      readonly changed: readonly string[];
+      /** Those and every package that depends on one, directly or not. */
+      readonly affected: ReadonlySet<string>;
+    };
+
+/**
+ * The packages that changed since `base` (a commit) in the workspace at
+ * `root`, and what they reach. A change to the root's own files (config,
+ * the lockfile, CI, tooling) reaches everything; one to the journeys
+ * alone, nothing. What depends on a package only for its build
+ * (`buildOnly`) isn't reached through it.
+ */
+export const reachSince = (
+  base: string,
+  root: string,
+  buildOnly: ReadonlyMap<string, readonly string[]> = buildOnlyDependencies
+): Reach => {
+  // Changed itself, without what depends on it: the root's own files.
+  const changed = packagesSelected(`[${base}]`, root);
+  if (changed.includes(root)) {
+    return { all: true, changed };
+  }
+  return {
+    all: false,
+    changed,
+    affected: reachedPackages(workspacePackages(root), changed, buildOnly),
+  };
+};
 
 const writeOutput = (name: string, value: string): void => {
   const file = process.env.GITHUB_OUTPUT;
@@ -210,19 +260,18 @@ const plan = async (base: string | undefined): Promise<void> => {
     why =
       "No base to compare with (the merge queue, or a run by hand): every project.";
   } else {
-    // Changed itself, without what depends on it: the root's own files.
-    const changed = packagesSelected(`[${base}]`);
-    if (changed.includes(root)) {
+    const reach = reachSince(base, root);
+    if (reach.all) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const packages = workspacePackages();
-      const affected = reachedPackages(packages, changed);
+      const { changed, affected } = reach;
+      const packages = packagesSelected(undefined, root);
       projects = affectedProjects(
         specs.map((spec) => ({
           project: spec.project.name,
           file: spec.moduleId,
         })),
-        packages.map(({ dir }) => dir),
+        packages,
         affected
       );
       why = `Changed since ${base}: ${
