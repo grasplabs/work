@@ -120,8 +120,13 @@ interface __BaseEnv_Env {
   RUNTIME_PROFILE?: string;
   /**
    * On-prem only: the private hosts an OpenAI-compatible endpoint may be
-   * at, comma-separated, such as `models.acme.lan,10.0.0.8`. Never a cloud
-   * metadata address, whatever it names.
+   * at, comma-separated, each exactly as its URL names it, such as
+   * `models.acme.lan,10.0.0.8`. Never a cloud metadata address, whatever
+   * it names. Each named host also needs workerd's network opened to its
+   * own address, and to nothing else private: `allow = ["public",
+   * "10.0.0.8/32"]` on the network service connect fetches through, never
+   * `"private"`, which would let any name that resolves to a private
+   * address through (src/ai-endpoint-guard.ts).
    */
   AI_PRIVATE_HOSTS?: string;
   /**

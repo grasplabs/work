@@ -398,9 +398,13 @@ export const verifyCapability = async (
 // ai-providers.ts). Core signs it only once the model gateway decided the
 // call and the model ledger admitted the request (core's models.ts), for
 // exactly that request: the credential (the organization's or Grasp's),
-// the provider, the host it goes to and the ledger's ID for it. Made with
-// the same key and scheme as a capability, under a context of its own, so
-// one never passes for the other.
+// the provider, the host it goes to, the ledger's ID for it and the hash
+// of its body. Made with the same key and scheme as a capability, under a
+// context of its own, so one never passes for the other. A grant isn't
+// kept as used: within its few seconds it could be sent again, but only
+// with the very body core signed for, to the same host on the same
+// credential, and only by someone who read it out of core or connect,
+// which hold the signing key anyway.
 
 /** Keeps a model grant's MAC from ever passing for a capability's. */
 const modelGrantContext = "grasp-os model grant v1\n";
@@ -431,13 +435,19 @@ export const modelGrantClaimsSchema = z.strictObject({
   host: z.string().min(1).max(253),
   /** The model ledger's ID for the request, for connect's log. */
   request: z.uuid(),
+  /**
+   * The SHA-256 of the request's body, hex: connect sends only the body
+   * core signed for, so a grant taken elsewhere can't carry another
+   * request to the provider within its few seconds.
+   */
+  body: z.string().regex(/^[\da-f]{64}$/u),
 });
 export type ModelGrantClaims = z.infer<typeof modelGrantClaimsSchema>;
 
 /** What core signs a model grant for. */
 export type ModelGrantScope = Pick<
   ModelGrantClaims,
-  "credential" | "provider" | "host" | "request" | "notAfter"
+  "credential" | "provider" | "host" | "request" | "notAfter" | "body"
 >;
 
 /** Makes the grant for one provider request, valid to start for {@link capabilityTtlMs}. */
@@ -457,6 +467,7 @@ export const signModelGrant = async (
     provider: scope.provider,
     host: scope.host.toLowerCase(),
     request: scope.request,
+    body: scope.body,
   });
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));
   const mac = await crypto.subtle.sign(

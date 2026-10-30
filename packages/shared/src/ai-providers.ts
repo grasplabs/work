@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AuditActor } from "./audit.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // The AI providers an organization can reach its models through, one list
@@ -178,6 +179,8 @@ export const aiRefusals = [
   "credential_header",
   "redirect",
   "unreachable",
+  "body",
+  "stored",
 ] as const;
 export type AiRefusal = (typeof aiRefusals)[number];
 
@@ -233,7 +236,7 @@ export type AiModelChoice = z.output<typeof aiModelChoiceSchema>;
 /** A key connect keeps, as it shows it: never the key, only its mask. */
 export interface AiProviderKey {
   provider: AiProviderId;
-  /** The key's first and last characters, such as `sk-…a3f2`. */
+  /** The key's last four characters, such as `…a3f2`: never its start. */
   mask: string;
   /** For an OpenAI-compatible endpoint: the base URL its key goes to. */
   baseUrl: string | null;
@@ -293,6 +296,8 @@ export const aiProviderErrors = defineErrorFamily({
     "That model isn't one of a connected AI provider's.",
   "ai_provider.vault_unavailable":
     "Keys can't be stored safely right now, so it wasn't saved. Ask Grasp to check the deployment.",
+  "ai_provider.failed":
+    "The key couldn't be saved or removed. Try again, or ask Grasp to check the deployment.",
 });
 
 /**
@@ -329,6 +334,7 @@ export const aiKeyErrors = defineErrorFamily({
     "That address can't be used: it must be a public HTTPS address, not a private or internal one.",
   "ai_key.vault_unavailable":
     "Keys can't be stored safely right now: the deployment has no token key.",
+  "ai_key.failed": "The key couldn't be saved or removed.",
 });
 
 /**
@@ -336,10 +342,22 @@ export const aiKeyErrors = defineErrorFamily({
  * service binding. No method returns a key.
  */
 export interface AiProviderConnectApi {
-  /** Seals and keeps the organization's key for a provider, replacing any. */
-  saveAiProviderKey: (request: AiProviderKeySave) => Promise<AiProviderKey>;
-  /** Deletes the organization's key for a provider; whether it had one. */
-  removeAiProviderKey: (provider: AiProviderId) => Promise<boolean>;
+  /**
+   * Seals and keeps the organization's key for a provider, replacing any,
+   * and records it for the audit log in the same write, in `by`'s name.
+   */
+  saveAiProviderKey: (
+    request: AiProviderKeySave,
+    by: AuditActor
+  ) => Promise<AiProviderKey>;
+  /**
+   * Deletes the organization's key for a provider, recorded for the audit
+   * log in the same write, in `by`'s name; whether it had one.
+   */
+  removeAiProviderKey: (
+    provider: AiProviderId,
+    by: AuditActor
+  ) => Promise<boolean>;
   /** The organization's keys, as masks. */
   aiProviderKeys: () => Promise<AiProviderKey[]>;
   /** What core routes by (`AiProviderRoutes`). */

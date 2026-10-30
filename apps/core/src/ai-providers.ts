@@ -35,6 +35,7 @@ import {
 } from "./ai-model-choice.ts";
 import {
   auditedBatch,
+  drainConnectOutboxSoon,
   keepAuditEvent,
   outboxedIfChanged,
 } from "./audit-outbox.ts";
@@ -60,15 +61,21 @@ import type { SessionCheck } from "./session-check.ts";
 // - A key kept, logged or answered by core: `add` hands it straight to
 //   connect and keeps nothing; nothing here logs a request, an error's
 //   message or a parse's issues (which would quote it), and what connect
-//   answers is only ever a mask (`sk-…a3f2`).
+//   answers is only ever a mask (`…a3f2`).
 // - A key that reaches somewhere other than its provider: an
 //   OpenAI-compatible endpoint's base URL is checked by connect when it is
 //   saved (no private, internal or metadata address, HTTPS only) and again
 //   on every request, and is sealed with the key, which is only ever sent
 //   there.
 // - Someone other than the organization's own admins changing whose key
-//   pays: every change requires one, never Grasp staff, and is audited in
-//   their name with the provider and never the key.
+//   pays: every change requires one, never Grasp staff, checked again
+//   against the members table as it is made (a session's role may be a
+//   few minutes old), and is audited in their name with the provider and
+//   never the key: by connect, in the same write as the key's change, so
+//   a key never changes unrecorded.
+// - A failure that quotes what was written: an error connect didn't name
+//   (a database's, which quotes its query's values) is answered as
+//   `ai_provider.failed`, never passed on.
 // - A test that bypasses the gateway: it is one tiny call through the
 //   model gateway like any other, judged by the rules, admitted by the
 //   ledger against the admin's budgets, and audited.
@@ -85,6 +92,22 @@ const testTimeoutMs = 30_000;
 /** Only the organization's own admins change its providers, never Grasp staff. */
 const requireOwnAdmin = (by: Identity): void => {
   if (by.staff || !isAdmin(by.role)) {
+    log.warn("ai_provider.refused", { actor: by.userId });
+    throw roleErrors.create("role.forbidden");
+  }
+};
+
+/**
+ * `requireOwnAdmin`, and still an admin in the members table now: the
+ * session's role is only as fresh as its last check, and a key change
+ * can't wait for the next.
+ */
+const requireOwnAdminNow = async (env: Env, by: Identity): Promise<void> => {
+  requireOwnAdmin(by);
+  const still = await drizzle(env.DB).get<{ admin: number }>(
+    sql`SELECT ${activeMember(by.userId, ["admin"])} AS admin`
+  );
+  if (still.admin !== 1) {
     log.warn("ai_provider.refused", { actor: by.userId });
     throw roleErrors.create("role.forbidden");
   }
@@ -134,7 +157,13 @@ const refusalOf = (error: unknown): Error => {
   if (code === "ai_key.invalid") {
     return aiProviderErrors.create("ai_provider.invalid");
   }
-  return error instanceof Error ? error : new Error("Saving the key failed");
+  // Anything else, connect's `ai_key.failed` or an error it didn't name,
+  // is never passed on: a database error's message quotes its query's
+  // values, a sealed key and its mask among them. By its kind alone.
+  log.error("ai_provider.write_failed", {
+    error: error instanceof Error ? error.name : "unknown",
+  });
+  return aiProviderErrors.create("ai_provider.failed");
 };
 
 /** The organization's providers, as its admins see them. */
@@ -155,36 +184,28 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
   };
 };
 
-/** Adds or replaces the provider's key in connect, and audits it. */
+/**
+ * Adds or replaces the provider's key in connect, which audits it in the
+ * same write, in the admin's name.
+ */
 const addProvider = async (
   env: Env,
   by: Identity,
   request: unknown
 ): Promise<AiProviderListed> => {
-  requireOwnAdmin(by);
+  await requireOwnAdminNow(env, by);
   const parsed = aiProviderAddSchema.safeParse(request);
   if (!parsed.success) {
     throw aiProviderErrors.create("ai_provider.invalid");
   }
   const add: AiProviderAdd = parsed.data;
-  const before = await env.CONNECT.aiProviderKeys();
   let saved: AiProviderKey;
   try {
-    saved = await env.CONNECT.saveAiProviderKey(add);
+    saved = await env.CONNECT.saveAiProviderKey(add, actorOf(by));
   } catch (error) {
     throw refusalOf(error);
   }
-  const replaced = before.some(({ provider }) => provider === add.provider);
-  await keepAuditEvent(env, drizzle(env.DB), {
-    actor: actorOf(by),
-    action: replaced ? "ai_provider.replaced" : "ai_provider.added",
-    target: { type: "ai_provider", id: add.provider },
-    detail: {
-      provider: add.provider,
-      endpointHost:
-        saved.baseUrl === null ? null : new URL(saved.baseUrl).hostname,
-    },
-  });
+  drainConnectOutboxSoon(env);
   return listed(saved, await modelLedger(env).providerHealth());
 };
 
@@ -325,26 +346,29 @@ const setModels = async (
   }
 };
 
-/** Removes the provider's key from connect, and audits it when it had one. */
+/**
+ * Removes the provider's key from connect, which audits it in the same
+ * write when it had one, in the admin's name.
+ */
 const removeProvider = async (
   env: Env,
   by: Identity,
   provider: unknown
 ): Promise<void> => {
-  requireOwnAdmin(by);
+  await requireOwnAdminNow(env, by);
   const parsed = aiProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiProviderErrors.create("ai_provider.invalid");
   }
-  if (!(await env.CONNECT.removeAiProviderKey(parsed.data))) {
-    return;
+  let removed: boolean;
+  try {
+    removed = await env.CONNECT.removeAiProviderKey(parsed.data, actorOf(by));
+  } catch (error) {
+    throw refusalOf(error);
   }
-  await keepAuditEvent(env, drizzle(env.DB), {
-    actor: actorOf(by),
-    action: "ai_provider.removed",
-    target: { type: "ai_provider", id: parsed.data },
-    detail: { provider: parsed.data },
-  });
+  if (removed) {
+    drainConnectOutboxSoon(env);
+  }
 };
 
 /** The organization's AI providers over `/rpc`, for admins. */
