@@ -151,7 +151,9 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^28px "Newsreader Variable"/u);
+    // The page's title, as every page's (`PageHeaderTitle`: the serif at
+    // `text-3xl`, AGENTS.md's Type).
+    .toMatch(/^30px "Newsreader Variable"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Who" })
