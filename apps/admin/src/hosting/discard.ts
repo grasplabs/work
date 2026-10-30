@@ -130,7 +130,7 @@ const stillDiscardable = (clientId: string): SQL =>
 /**
  * Discards client `clientId`, as `staff`, audited (`client.discard`):
  * its record and what only the admin keeps of it (settings, sealed
- * secrets, reads, its watch, alerts and an ended runner's claim), in one
+ * secrets, reads, its watch and an ended runner's claim), in one
  * batch. Refused unless it was never placed and has nothing recorded
  * anywhere (`DiscardErrorCode`). Its id is free afterwards.
  */
