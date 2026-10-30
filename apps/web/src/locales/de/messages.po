@@ -4328,6 +4328,10 @@ msgstr "Ändert die Daten der Domäne"
 msgid "Changes to the domain's stores"
 msgstr "Änderungen an den Speichern der Domäne"
 
+#: src/screens/submission-recovery.tsx
+msgid "Changes whose outcome you may not have seen"
+msgstr "Änderungen, deren Ergebnis Sie vielleicht nicht gesehen haben"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "Berechnen"
@@ -5531,6 +5535,7 @@ msgstr "Erkennung"
 msgid "Discovery sources"
 msgstr "Erkennungsquellen"
 
+#: src/screens/submission-recovery.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Schließen"
@@ -5539,6 +5544,10 @@ msgstr "Schließen"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Ausblenden"
+
+#: src/screens/submission-recovery.tsx
+msgid "Dismiss {operation}, sent {sent}"
+msgstr "{operation} ausblenden, gesendet {sent}"
 
 #: src/dashboard/signals.tsx
 msgid "Dismiss this signal about {name}"
@@ -7936,6 +7945,10 @@ msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegel
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 msgstr "Er ist fehlgeschlagen, als in Ihrem Namen gehandelt wurde. Bitten Sie den Agenten um Behebung: Ein neuer Chat beginnt, mit dem Fehlerbericht des Laufs im Anhang."
 
+#: src/screens/submission-recovery.tsx
+msgid "It failed."
+msgstr "Es ist fehlgeschlagen."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "It happened"
@@ -8098,6 +8111,10 @@ msgstr "Er wurde am {when} freigegeben, ohne Kosten."
 msgid "It went through no other workflow today."
 msgstr "Es lief heute durch keinen anderen Workflow."
 
+#: src/screens/submission-recovery.tsx
+msgid "It went through."
+msgstr "Es ist durchgegangen."
+
 #: src/workflows/files-and-apps.tsx
 msgid "It works in no app."
 msgstr "Er arbeitet in keiner App."
@@ -8113,6 +8130,10 @@ msgstr "Sie wurde entfernt, oder Sie dürfen sie nicht lesen."
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "Sie steht nach den ersten {pageMaxLimit} aufgelisteten Dateien: Öffnen Sie sie von hier."
+
+#: src/screens/submission-recovery.tsx
+msgid "It’s too long ago to tell whether it went through. Check before you try again."
+msgstr "Es ist zu lange her, um zu sagen, ob es durchgegangen ist. Prüfen Sie es, bevor Sie es erneut versuchen."
 
 #: src/workflows/traces.tsx
 msgid "Item {item}"
@@ -10718,6 +10739,10 @@ msgstr "Nichts wartet auf Sie"
 msgid "Nothing waits on you."
 msgstr "Nichts wartet auf Sie."
 
+#: src/screens/submission-recovery.tsx
+msgid "Nothing was saved."
+msgstr "Nichts wurde gespeichert."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Noch nichts"
@@ -12408,6 +12433,10 @@ msgstr "Bereit"
 #: src/workflows/item-test.tsx
 msgid "Real run"
 msgstr "Echter Lauf"
+
+#: src/screens/submission-recovery.tsx
+msgid "Reason: {category}."
+msgstr "Grund: {category}."
 
 #: src/chat/thread.tsx
 msgid "Reasoning"
@@ -14406,6 +14435,10 @@ msgstr "Noch offen: {question}"
 msgid "Still open: {question} {who} can answer it."
 msgstr "Noch offen: {question} {who} kann sie beantworten."
 
+#: src/screens/submission-recovery.tsx
+msgid "Still running."
+msgstr "Läuft noch."
+
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Wartet noch"
@@ -15952,6 +15985,10 @@ msgstr "Diese App hat ihren Rahmen verlassen und wurde gestoppt."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Diese App hat ihre Verbindung zur Seite verloren und wurde gestoppt."
+
+#: src/screens/submission-recovery.tsx
+msgid "This app sent these, but the page may have closed or lost its connection before it showed how they came out. Check each, then dismiss it."
+msgstr "Diese App hat sie gesendet, aber die Seite wurde vielleicht geschlossen oder hat die Verbindung verloren, bevor sie das Ergebnis zeigte. Prüfen Sie jede Änderung und blenden Sie sie dann aus."
 
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
@@ -17949,6 +17986,10 @@ msgstr "Wo Ihre Daten liegen und welche Zeit Grasp verwendet."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Wo, zum Beispiel Dropbox"
+
+#: src/screens/submission-recovery.tsx
+msgid "Whether it went through can’t be told. Check before you try again."
+msgstr "Ob es durchgegangen ist, lässt sich nicht sagen. Prüfen Sie es, bevor Sie es erneut versuchen."
 
 #: src/settings/staff-access.tsx
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."

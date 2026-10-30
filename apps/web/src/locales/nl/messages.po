@@ -4328,6 +4328,10 @@ msgstr "Wijzigt de gegevens van het domein"
 msgid "Changes to the domain's stores"
 msgstr "Wijzigingen in de opslag van het domein"
 
+#: src/screens/submission-recovery.tsx
+msgid "Changes whose outcome you may not have seen"
+msgstr "Wijzigingen waarvan je de uitkomst misschien niet hebt gezien"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "In rekening brengen"
@@ -5531,6 +5535,7 @@ msgstr "Ontdekking"
 msgid "Discovery sources"
 msgstr "Gevonden via"
 
+#: src/screens/submission-recovery.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Sluiten"
@@ -5539,6 +5544,10 @@ msgstr "Sluiten"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Verbergen"
+
+#: src/screens/submission-recovery.tsx
+msgid "Dismiss {operation}, sent {sent}"
+msgstr "{operation} verbergen, verstuurd {sent}"
 
 #: src/dashboard/signals.tsx
 msgid "Dismiss this signal about {name}"
@@ -7936,6 +7945,10 @@ msgstr "Ze faalde op haar testrecords toen de versie werd verzegeld: ze draait o
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 msgstr "Het mislukte terwijl er namens jou werd gehandeld. Vraag de agent om het te herstellen: er begint een nieuwe chat, met het foutrapport van de run als bijlage."
 
+#: src/screens/submission-recovery.tsx
+msgid "It failed."
+msgstr "Het is mislukt."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "It happened"
@@ -8098,6 +8111,10 @@ msgstr "Het is op {when} vrijgegeven, zonder kosten."
 msgid "It went through no other workflow today."
 msgstr "Het ging vandaag door geen andere workflow."
 
+#: src/screens/submission-recovery.tsx
+msgid "It went through."
+msgstr "Het is gelukt."
+
 #: src/workflows/files-and-apps.tsx
 msgid "It works in no app."
 msgstr "Hij werkt in geen enkele app."
@@ -8113,6 +8130,10 @@ msgstr "Ze bestaat niet meer, of je mag ze niet lezen."
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "Het staat na de eerste {pageMaxLimit} getoonde bestanden: open het van hier."
+
+#: src/screens/submission-recovery.tsx
+msgid "It’s too long ago to tell whether it went through. Check before you try again."
+msgstr "Het is te lang geleden om te zeggen of het gelukt is. Controleer het voordat je het opnieuw probeert."
 
 #: src/workflows/traces.tsx
 msgid "Item {item}"
@@ -10718,6 +10739,10 @@ msgstr "Er wacht niets op je"
 msgid "Nothing waits on you."
 msgstr "Er wacht niets op je."
 
+#: src/screens/submission-recovery.tsx
+msgid "Nothing was saved."
+msgstr "Er is niets opgeslagen."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
@@ -12408,6 +12433,10 @@ msgstr "Klaar"
 #: src/workflows/item-test.tsx
 msgid "Real run"
 msgstr "Echte run"
+
+#: src/screens/submission-recovery.tsx
+msgid "Reason: {category}."
+msgstr "Reden: {category}."
 
 #: src/chat/thread.tsx
 msgid "Reasoning"
@@ -14406,6 +14435,10 @@ msgstr "Nog open: {question}"
 msgid "Still open: {question} {who} can answer it."
 msgstr "Nog open: {question} {who} kan het beantwoorden."
 
+#: src/screens/submission-recovery.tsx
+msgid "Still running."
+msgstr "Loopt nog."
+
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Wacht nog"
@@ -15952,6 +15985,10 @@ msgstr "Deze app heeft zijn frame verlaten en is gestopt."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Deze app is de verbinding met de pagina kwijtgeraakt en is gestopt."
+
+#: src/screens/submission-recovery.tsx
+msgid "This app sent these, but the page may have closed or lost its connection before it showed how they came out. Check each, then dismiss it."
+msgstr "Deze app heeft ze verstuurd, maar de pagina is misschien gesloten of verloor de verbinding voordat ze liet zien hoe het afliep. Controleer ze een voor een en verberg ze daarna."
 
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
@@ -17949,6 +17986,10 @@ msgstr "Waar je data staat, en welke tijdzone Grasp gebruikt."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Waar, bijvoorbeeld Dropbox"
+
+#: src/screens/submission-recovery.tsx
+msgid "Whether it went through can’t be told. Check before you try again."
+msgstr "Of het gelukt is, valt niet te zeggen. Controleer het voordat je het opnieuw probeert."
 
 #: src/settings/staff-access.tsx
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."

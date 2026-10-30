@@ -16,6 +16,7 @@ import {
   useScreenNavigate,
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
+import { SubmissionRecovery } from "../screens/submission-recovery.tsx";
 
 // One of an engine's apps (core's screens), in the Grasp frame: the site
 // header with the way back to its engine and "Open full page", then the
@@ -67,6 +68,7 @@ const AppPage = () => {
           { label: screen },
         ]}
       />
+      <SubmissionRecovery app={engine} key={engine} />
       <div className="flex min-h-0 flex-1 flex-col">
         <ScreenFrame
           app={engine}

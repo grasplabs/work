@@ -4328,6 +4328,10 @@ msgstr "Changes the domain's data"
 msgid "Changes to the domain's stores"
 msgstr "Changes to the domain's stores"
 
+#: src/screens/submission-recovery.tsx
+msgid "Changes whose outcome you may not have seen"
+msgstr "Changes whose outcome you may not have seen"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "Charge"
@@ -5531,6 +5535,7 @@ msgstr "Discovery"
 msgid "Discovery sources"
 msgstr "Discovery sources"
 
+#: src/screens/submission-recovery.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
@@ -5539,6 +5544,10 @@ msgstr "Dismiss"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Dismiss"
+
+#: src/screens/submission-recovery.tsx
+msgid "Dismiss {operation}, sent {sent}"
+msgstr "Dismiss {operation}, sent {sent}"
 
 #: src/dashboard/signals.tsx
 msgid "Dismiss this signal about {name}"
@@ -7936,6 +7945,10 @@ msgstr "It failed on its fixtures when the version was sealed: it runs on no rec
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 msgstr "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
 
+#: src/screens/submission-recovery.tsx
+msgid "It failed."
+msgstr "It failed."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "It happened"
@@ -8098,6 +8111,10 @@ msgstr "It was released on {when}, charging nothing."
 msgid "It went through no other workflow today."
 msgstr "It went through no other workflow today."
 
+#: src/screens/submission-recovery.tsx
+msgid "It went through."
+msgstr "It went through."
+
 #: src/workflows/files-and-apps.tsx
 msgid "It works in no app."
 msgstr "It works in no app."
@@ -8113,6 +8130,10 @@ msgstr "It's gone, or you can't read it."
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
 msgstr "It's past the first {pageMaxLimit} files listed: open it from here."
+
+#: src/screens/submission-recovery.tsx
+msgid "It’s too long ago to tell whether it went through. Check before you try again."
+msgstr "It’s too long ago to tell whether it went through. Check before you try again."
 
 #: src/workflows/traces.tsx
 msgid "Item {item}"
@@ -10718,6 +10739,10 @@ msgstr "Nothing waits on you"
 msgid "Nothing waits on you."
 msgstr "Nothing waits on you."
 
+#: src/screens/submission-recovery.tsx
+msgid "Nothing was saved."
+msgstr "Nothing was saved."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nothing yet"
@@ -12408,6 +12433,10 @@ msgstr "Ready"
 #: src/workflows/item-test.tsx
 msgid "Real run"
 msgstr "Real run"
+
+#: src/screens/submission-recovery.tsx
+msgid "Reason: {category}."
+msgstr "Reason: {category}."
 
 #: src/chat/thread.tsx
 msgid "Reasoning"
@@ -14406,6 +14435,10 @@ msgstr "Still open: {question}"
 msgid "Still open: {question} {who} can answer it."
 msgstr "Still open: {question} {who} can answer it."
 
+#: src/screens/submission-recovery.tsx
+msgid "Still running."
+msgstr "Still running."
+
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Still waiting"
@@ -15952,6 +15985,10 @@ msgstr "This app left its frame and was stopped."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "This app lost its connection to the page and was stopped."
+
+#: src/screens/submission-recovery.tsx
+msgid "This app sent these, but the page may have closed or lost its connection before it showed how they came out. Check each, then dismiss it."
+msgstr "This app sent these, but the page may have closed or lost its connection before it showed how they came out. Check each, then dismiss it."
 
 #: src/link-confirmation.tsx
 msgid "This app wants to open a page on another site in a new tab. Open it only if you expected to go there."
@@ -17949,6 +17986,10 @@ msgstr "Where your data lives, and the time Grasp uses."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Where, for example Dropbox"
+
+#: src/screens/submission-recovery.tsx
+msgid "Whether it went through can’t be told. Check before you try again."
+msgstr "Whether it went through can’t be told. Check before you try again."
 
 #: src/settings/staff-access.tsx
 msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."
