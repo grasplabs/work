@@ -131,6 +131,12 @@ const teamRowOf = (html: string, team: string): string[] => {
   );
 };
 
+/**
+ * The first key figure after a label: the kit's `Stat`, by the slot it
+ * names itself with, however the page lays it out around it.
+ */
+const statAfterLabel = /data-slot="stat"[^>]*>(?<value>[^<]*)</u;
+
 describe("an organization's brain", () => {
   useStoreSecrets({ deployer: token });
 
@@ -149,9 +155,7 @@ describe("an organization's brain", () => {
       const at = numbers.indexOf(`>${label}</span>`);
       return at === -1
         ? ""
-        : (/<span class="[^"]*\bcol-span-2 row-start-2[^"]*">(?<value>[^<]*)</u.exec(
-            numbers.slice(at)
-          )?.groups?.value ?? "");
+        : (statAfterLabel.exec(numbers.slice(at))?.groups?.value ?? "");
     };
 
     expect({

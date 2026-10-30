@@ -1631,11 +1631,14 @@ describe("chat agent after a restart", () => {
     await ask("What is 6 * 7?");
     // The object died while the step ran: the step's call was kept, as the
     // loop keeps each message it finishes, but its result and the answer
-    // weren't.
+    // weren't, nor the searchable text of either (chat_search_text, which
+    // is written with each message it holds).
     await runInDurableObject(stub, (_instance, state) => {
+      const lost = "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2";
       state.storage.sql.exec(
-        "DELETE FROM chat_messages WHERE id IN (SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2)"
+        `DELETE FROM chat_search_text WHERE message_id IN (${lost})`
       );
+      state.storage.sql.exec(`DELETE FROM chat_messages WHERE id IN (${lost})`);
     });
 
     await evictDurableObject(stub);
