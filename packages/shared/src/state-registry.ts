@@ -604,6 +604,10 @@ const connectDb: D1State = {
       `${connect}vault.ts`,
       "OAuth tokens sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
     ),
+    ai_provider_keys: secret(
+      `${connect}ai-providers.ts`,
+      "Organizations' AI provider keys sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
+    ),
     audit_outbox: exported(`${connect}audit.ts`),
     audit_outbox_rejected: exported(`${connect}audit.ts`),
     call_changes: exported(`${connect}changes.ts`),
@@ -850,6 +854,10 @@ const modelLedger: DurableObjectState = {
     spend: exported(`${core}model-ledger.ts`),
     alerts: exported(`${core}model-ledger.ts`),
     person_limits: exported(`${core}model-ledger.ts`),
+    provider_health: cache(
+      `${core}model-ledger.ts`,
+      "Each provider's last success and failure, by whose key: the next calls write it again."
+    ),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },
 };
