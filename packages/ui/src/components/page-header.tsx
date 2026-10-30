@@ -5,6 +5,8 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@grasp-os/ui/lib/utils";
+import { cva } from "class-variance-authority";
+import type { VariantProps } from "class-variance-authority";
 
 function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
   return (
@@ -57,14 +59,44 @@ function PageHeaderTitle({
   });
 }
 
+const pageHeaderDescriptionVariants = cva(
+  "text-muted-foreground text-sm text-pretty",
+  {
+    variants: {
+      /** `two`: at most two lines, for a description someone wrote, such as a project's. */
+      lines: {
+        all: "",
+        two: "line-clamp-2",
+      },
+    },
+    defaultVariants: {
+      lines: "all",
+    },
+  }
+);
+
 function PageHeaderDescription({
   className,
+  lines = "all",
   ...props
-}: React.ComponentProps<"p">) {
+}: React.ComponentProps<"p"> &
+  VariantProps<typeof pageHeaderDescriptionVariants>) {
   return (
     <p
       data-slot="page-header-description"
-      className={cn("text-muted-foreground text-sm text-pretty", className)}
+      data-lines={lines}
+      className={cn(pageHeaderDescriptionVariants({ lines }), className)}
+      {...props}
+    />
+  );
+}
+
+/** Small marks under the title, such as a status badge. */
+function PageHeaderMeta({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="page-header-meta"
+      className={cn("mt-1 flex flex-wrap items-center gap-1.5", className)}
       {...props}
     />
   );
@@ -91,5 +123,6 @@ export {
   PageHeaderActions,
   PageHeaderContent,
   PageHeaderDescription,
+  PageHeaderMeta,
   PageHeaderTitle,
 };

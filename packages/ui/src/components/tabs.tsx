@@ -7,16 +7,23 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
 // The room between the tabs and what they show: `none` where the row of
-// tabs sits in a bar of its own, ruled off from the panel under it.
+// tabs sits in a bar of its own, ruled off from the panel under it. The
+// size of the text in them: the page's (`default`), or `sm` where the
+// tabs and what they show are a record's details, as an integration's.
 const tabsVariants = cva("group/tabs flex data-horizontal:flex-col", {
   variants: {
     spacing: {
       default: "gap-2",
       none: "gap-0",
     },
+    size: {
+      default: "",
+      sm: "text-sm",
+    },
   },
   defaultVariants: {
     spacing: "default",
+    size: "default",
   },
 });
 
@@ -24,6 +31,7 @@ function Tabs({
   className,
   orientation = "horizontal",
   spacing = "default",
+  size = "default",
   ...props
 }: TabsPrimitive.Root.Props & VariantProps<typeof tabsVariants>) {
   return (
@@ -31,8 +39,9 @@ function Tabs({
       data-slot="tabs"
       data-orientation={orientation}
       data-spacing={spacing}
+      data-size={size}
       orientation={orientation}
-      className={cn(tabsVariants({ spacing }), className)}
+      className={cn(tabsVariants({ spacing, size }), className)}
       {...props}
     />
   );
