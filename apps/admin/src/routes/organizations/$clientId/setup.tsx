@@ -9,7 +9,6 @@ import {
   fetchClientSetup,
 } from "../../../clients/functions.ts";
 import { fetchClientHosting } from "../../../hosting/functions.ts";
-import { hostingPolicyIds } from "../../../hosting/policy.ts";
 import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
@@ -40,6 +39,8 @@ const Setup = () => {
  * (`/clients/$clientId`) was.
  */
 export const Route = createFileRoute("/organizations/$clientId/setup")({
+  // Being set up, or not answering, its core has nothing for it: it shows from what the admin recorded.
+  staticData: { withoutCore: true },
   // A tab it doesn't have is left out: the router keeps what this doesn't name.
   validateSearch: (search: Record<string, unknown>): { tab?: SetupTab } => {
     const tab = setupTabs.find((each) => each === search.tab);
@@ -70,9 +71,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     const [setup, { releases }, hosting] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
-      fetchClientHosting({
-        data: { clientId: params.clientId, policyId: hostingPolicyIds[0] },
-      }),
+      fetchClientHosting({ data: { clientId: params.clientId } }),
     ]);
     if (setup === null) {
       throw notFound();

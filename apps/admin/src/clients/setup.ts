@@ -27,6 +27,7 @@ import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
+import { daysUntil } from "./teams-bot.ts";
 import type { TeamsBot } from "./teams-bot.ts";
 import type { WatchedSignals } from "./watch-signals.ts";
 import { lastWatched } from "./watch.ts";
@@ -77,6 +78,12 @@ export interface ClientSetup {
   signInOverridden: boolean;
   /** Its own Teams bot (src/clients/teams-bot.ts); null when it has none. */
   teamsBot: TeamsBot | null;
+  /**
+   * Days until its Teams bot's secret expires, read now: negative once it
+   * has; null without a bot. Microsoft refuses every send once it has, and
+   * Stephen goes silent in Teams.
+   */
+  teamsBotSecretDays: number | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
   /**
@@ -279,6 +286,10 @@ export const getClientSetup = async (
     signIn: settings?.signIn ?? null,
     signInOverridden: settings?.signInOverridden ?? false,
     teamsBot: settings?.teamsBot ?? null,
+    teamsBotSecretDays:
+      settings?.teamsBot === null || settings?.teamsBot === undefined
+        ? null
+        : daysUntil(settings.teamsBot.secretExpiresOn, new Date()),
     configPending: settings?.configPending ?? false,
     sealedSecrets,
     watched,

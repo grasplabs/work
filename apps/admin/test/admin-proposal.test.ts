@@ -278,7 +278,9 @@ describe("an organization's proposal, without Rooms' token", () => {
     await link(clientId, crypto.randomUUID());
     const contract = await contractOf(clientId);
     expect({
-      line: contract.includes("Once Rooms is connected"),
+      line: contract.includes(
+        "Once Rooms is connected, this fills in by itself. Add ROOMS_READ_TOKEN to the stage’s 1Password Environment, then run Deploy platform."
+      ),
       requests: rooms.requests,
     }).toStrictEqual({ line: true, requests: 0 });
   });

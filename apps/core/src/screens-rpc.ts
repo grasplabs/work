@@ -1535,11 +1535,18 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     decision: string,
     answer: unknown
   ): Promise<DecisionReview> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "reviewDecision",
       async (by) =>
-        await reviewScreenDecision(env, by, app, run, decision, answer)
+        await reviewScreenDecision(
+          env,
+          by,
+          { app, version: build?.version },
+          run,
+          decision,
+          answer
+        )
     );
   }
 
@@ -1549,14 +1556,14 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     revision: string,
     answer: unknown
   ): Promise<DecisionConfirmation> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "confirmDecision",
       async (by) =>
         await confirmScreenDecision(
           env,
           by,
-          app,
+          { app, version: build?.version },
           run,
           decision,
           revision,
@@ -1571,11 +1578,19 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     answer: unknown,
     confirmation?: string
   ): Promise<DecisionView> {
-    const { env, app } = this.#connection;
+    const { env, app, build } = this.#connection;
     return await this.#delivered(
       "decide",
       async (by) =>
-        await decideScreenRun(env, by, app, run, decision, answer, confirmation)
+        await decideScreenRun(
+          env,
+          by,
+          { app, version: build?.version },
+          run,
+          decision,
+          answer,
+          confirmation
+        )
     );
   }
 

@@ -9,6 +9,7 @@
  */
 import type { WonDeal } from "../crm/attio.ts";
 import type { WonDeals } from "../crm/crm.ts";
+import { addSecretStep } from "./words.ts";
 
 /** Where a new organization's details can come from. */
 export interface StartingPoint {
@@ -45,7 +46,7 @@ const startingPoints: readonly StartingPoint[] = [
 const attioUnavailable = (won: WonDeals): string | null => {
   switch (won.state) {
     case "not_connected": {
-      return "Not yet: the admin isn't connected to Attio.";
+      return `Not yet: the admin isn't connected to Attio. ${addSecretStep("ATTIO_READ_KEY")}`;
     }
     case "unread": {
       return "Attio can't be read now: try again in a moment.";

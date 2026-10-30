@@ -24,6 +24,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { fixtureRunSessionOf } from "../src/workflows/fixture-run-sessions.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
@@ -482,6 +483,35 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
       completed: 0,
       asked: 0,
     });
+  });
+
+  it("leave no way into a closed test for a run it recorded as it closed", async () => {
+    const { release } = await requestsApp(
+      async (by) => await workflowOf(by, greeting())
+    );
+    const session = await sessionOf(release);
+    const request = await startOf(release, { who: "Ada" });
+    // Every ID made meanwhile, the run's among them.
+    const made: string[] = [];
+    const randomUUID = crypto.randomUUID.bind(crypto);
+    const ids = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      const id = randomUUID();
+      made.push(id);
+      return id;
+    });
+    let started: number | string;
+    try {
+      // The test closes while its run is being recorded.
+      const starting = session.start("desk-user", request);
+      await session.close();
+      started = startedAs(await starting);
+    } finally {
+      ids.mockRestore();
+    }
+    expect({
+      refused: typeof started,
+      reachable: made.filter((id) => fixtureRunSessionOf(id) !== undefined),
+    }).toStrictEqual({ refused: "string", reachable: [] });
   });
 
   it("answer only about the runs their own test started", async () => {
