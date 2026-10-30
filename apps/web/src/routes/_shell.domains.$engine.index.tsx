@@ -1,4 +1,4 @@
-import type { App, AppContents, AppMember } from "@grasp-os/shared/apps";
+import type { App, AppContents } from "@grasp-os/shared/apps";
 import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -8,21 +8,12 @@ import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   Await,
@@ -39,6 +30,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { AppMembers, ShareOnBar } from "../engines/app-sharing.tsx";
 import {
   AppStatusControls,
   StatusBadge,
@@ -57,7 +49,6 @@ import {
   PageNotLoaded,
 } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
@@ -339,76 +330,6 @@ const Integrations = ({
   </Later>
 );
 
-const MembersTable = ({ members }: { members: AppMember[] }) => {
-  const { i18n } = useLingui();
-  if (members.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>It isn&apos;t shared with anyone.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="bg-card overflow-hidden rounded-xl border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">
-              <Trans>Shared with</Trans>
-            </TableHead>
-            <TableHead className="w-40" variant="card">
-              <Trans>Role</Trans>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {members.map((member) => (
-            <TableRow key={`${member.type}:${member.id}`}>
-              <TableCell variant="card">
-                {member.type === "team"
-                  ? i18n._(
-                      msg`${ph({ team: member.name ?? member.id })} (team)`
-                    )
-                  : (member.name ?? member.id)}
-              </TableCell>
-              <TableCell variant="card">{roleLabel(member.role)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-};
-
-/**
- * Who opens the engine: its owner and the admins, who build it, and the
- * people and teams it is shared with, each as a user or a builder.
- */
-const Members = ({
-  app,
-  members,
-  identity,
-}: {
-  app: App;
-  members: Deferred<AppMember[]>;
-  identity: Identity;
-}) => {
-  const { t } = useLingui();
-  const { owner } = app;
-  return (
-    <div className="flex flex-col gap-3">
-      <p>
-        {owner === identity.userId
-          ? t`Created by you.`
-          : t`Created by the member ${owner}.`}
-      </p>
-      <Later promise={members}>
-        {(listed) => <MembersTable members={listed} />}
-      </Later>
-    </div>
-  );
-};
-
 /** The engine's approved npm packages, as the tab's last read found them. */
 const Packages = ({
   packages,
@@ -578,8 +499,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
-        {/* On its bar, as the prototype's Publish: for who builds. */}
-        <AppStatusControls app={app} identity={identity} />
+        <div className="flex flex-wrap items-center gap-2">
+          <ShareOnBar app={app} identity={identity} members={members} />
+          {/* On its bar, as the prototype's Publish: for who builds. */}
+          <AppStatusControls app={app} identity={identity} />
+        </div>
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
       <Tabs
@@ -701,7 +625,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </TabsContent>
         <TabsContent value="members">
           <div className="pt-4">
-            <Members app={app} identity={identity} members={members} />
+            <Later promise={members}>
+              {(listed) => (
+                <AppMembers app={app} identity={identity} members={listed} />
+              )}
+            </Later>
           </div>
         </TabsContent>
       </Tabs>

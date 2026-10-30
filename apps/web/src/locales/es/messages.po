@@ -1493,7 +1493,7 @@ msgstr "{team} · aún no disponible"
 msgid "{team} · our email didn’t reach them"
 msgstr "{team} · nuestro correo no les llegó"
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 msgid "{team} (team)"
 msgstr "{team} (equipo)"
 
@@ -2196,6 +2196,7 @@ msgstr "Cuenta"
 msgid "Action"
 msgstr "Acción"
 
+#: src/engines/app-sharing.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -3695,6 +3696,7 @@ msgstr "No se puede leer"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-sharing.tsx
 #: src/engines/app-status.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
@@ -4729,13 +4731,9 @@ msgstr "Creó una colección"
 msgid "Created a team"
 msgstr "Creó un equipo"
 
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "Created by the member {owner}."
-msgstr "Creada por el miembro {owner}."
-
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "Created by you."
-msgstr "Creada por ti."
+#: src/engines/app-sharing.tsx
+msgid "Created by you. It opens for you, the admins, and whoever it is shared with."
+msgstr "Creado por ti. Se abre para ti, los administradores y quienes tengan acceso compartido."
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -7313,9 +7311,9 @@ msgstr "No se ofrece a tu organización: ofrécelo en su Resumen antes de conect
 msgid "It isn't offered to your organization."
 msgstr "No se ofrece a tu organización."
 
-#: src/routes/_shell.domains.$engine.index.tsx
-msgid "It isn't shared with anyone."
-msgstr "No está compartida con nadie."
+#: src/engines/app-sharing.tsx
+msgid "It isn’t shared with anyone."
+msgstr "No está compartido con nadie."
 
 #: src/onboarding/setup-steps.tsx
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
@@ -7332,6 +7330,10 @@ msgstr "Ya no se ejecuta (podía cambiar cosas)."
 #: src/chat/builds.tsx
 msgid "It no longer runs."
 msgstr "Ya no se ejecuta."
+
+#: src/engines/app-sharing.tsx
+msgid "It opens for the member who created it, the admins, and whoever it is shared with."
+msgstr "Se abre para el miembro que lo creó, los administradores y quienes tengan acceso compartido."
 
 #: src/workflows/files-and-apps.tsx
 msgid "It reads no Knowledge."
@@ -9191,6 +9193,10 @@ msgstr "No interviene nadie: Grasp lo hace todo."
 msgid "Nobody else to add."
 msgstr "No hay nadie más que añadir."
 
+#: src/engines/app-sharing.tsx
+msgid "Nobody else to share with."
+msgstr "No hay nadie más con quien compartir."
+
 #: src/settings/staff-access.tsx
 msgid "Nobody from Grasp can sign in to this workspace now."
 msgstr "Nadie de Grasp puede iniciar sesión en este espacio de trabajo ahora."
@@ -10640,6 +10646,7 @@ msgstr "PDF, Word, Excel, PowerPoint o texto"
 msgid "Pending"
 msgstr "Pendiente"
 
+#: src/engines/app-sharing.tsx
 #: src/onboarding/interview-people.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
@@ -11260,6 +11267,7 @@ msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Repaso"
 
+#: src/engines/app-sharing.tsx
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
 msgstr "Leyendo personas y equipos…"
@@ -11835,15 +11843,23 @@ msgctxt "business process"
 msgid "Risk-to-Compliance"
 msgstr "Risk-to-Compliance"
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
 
+#: src/engines/app-sharing.tsx
+msgid "Role of {name}"
+msgstr "Rol de {name}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rol de {who}"
+
+#: src/engines/app-sharing.tsx
+msgid "Role to share with"
+msgstr "Rol con el que compartir"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12241,6 +12257,7 @@ msgstr "Buscar personas"
 msgid "Search people and devices"
 msgstr "Buscar personas y dispositivos"
 
+#: src/engines/app-sharing.tsx
 #: src/settings/package-approvers.tsx
 msgid "Search people and teams"
 msgstr "Buscar personas y equipos"
@@ -12484,6 +12501,14 @@ msgstr "Resuelto: {choice}"
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Varios flujos funcionan con IA, en la mayor parte del trabajo manual."
 
+#: src/engines/app-sharing.tsx
+msgid "Share"
+msgstr "Compartir"
+
+#: src/engines/app-sharing.tsx
+msgid "Share as"
+msgstr "Compartir como"
+
 #: src/brain/share-record.tsx
 msgid "Share it"
 msgstr "Compartirlo"
@@ -12516,7 +12541,7 @@ msgstr "Buzones compartidos, calendarios de compañeros y los archivos de la emp
 msgid "Shared mailboxes, registers and the company's records, after they press a card."
 msgstr "Buzones compartidos, registros y los datos de la empresa, después de pulsar una tarjeta."
 
-#: src/routes/_shell.domains.$engine.index.tsx
+#: src/engines/app-sharing.tsx
 msgid "Shared with"
 msgstr "Compartida con"
 
@@ -13239,6 +13264,18 @@ msgstr "Parar y preguntar"
 msgid "Stop for now"
 msgstr "Parar aquí"
 
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing"
+msgstr "Dejar de compartir"
+
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing with {name}"
+msgstr "Dejar de compartir con {name}"
+
+#: src/engines/app-sharing.tsx
+msgid "Stop sharing with {name}?"
+msgstr "¿Dejar de compartir con {name}?"
+
 #: src/chat/thread.tsx
 #: src/inbox/items.ts
 msgid "Stopped"
@@ -13561,6 +13598,7 @@ msgid "Team: {name}"
 msgstr "Equipo: {name}"
 
 #: src/brain/brain.ts
+#: src/engines/app-sharing.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/routes/_shell.settings.brain.tsx
@@ -14546,6 +14584,10 @@ msgstr "Su enlace deja de funcionar, y lo que dijo se va con él."
 msgid "Their numbers show once the first person starts their interview."
 msgstr "Las cifras aparecen en cuanto la primera persona empieza su entrevista."
 
+#: src/engines/app-sharing.tsx
+msgid "Their open screens of it stop within seconds, and they can no longer open it. You can share it with them again."
+msgstr "Sus pantallas abiertas se detienen en segundos y ya no pueden abrirlo. Puedes volver a compartirlo con ellos."
+
 #: src/settings/person-limits.tsx
 msgid "Their own limit"
 msgstr "Su propio límite"
@@ -15426,6 +15468,10 @@ msgstr "Evento ilegible"
 #: src/workflows/definition-editor.tsx
 msgid "Unsaved changes"
 msgstr "Cambios sin guardar"
+
+#: src/engines/app-sharing.tsx
+msgid "Unshare"
+msgstr "Dejar de compartir"
 
 #: src/settings/staff-access.tsx
 msgid "Until"
