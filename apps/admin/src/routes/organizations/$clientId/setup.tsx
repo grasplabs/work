@@ -9,7 +9,6 @@ import {
   fetchClientSetup,
 } from "../../../clients/functions.ts";
 import { fetchClientHosting } from "../../../hosting/functions.ts";
-import { hostingPolicyIds } from "../../../hosting/policy.ts";
 import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
@@ -72,9 +71,7 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     const [setup, { releases }, hosting] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
-      fetchClientHosting({
-        data: { clientId: params.clientId, policyId: hostingPolicyIds[0] },
-      }),
+      fetchClientHosting({ data: { clientId: params.clientId } }),
     ]);
     if (setup === null) {
       throw notFound();

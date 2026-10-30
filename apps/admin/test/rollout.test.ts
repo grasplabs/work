@@ -2867,7 +2867,6 @@ describe("rolling out a release that raises a platform limit", () => {
           clientId: id,
           deploymentId: id.replace("fleet-", "d"),
           destinationId,
-          policyId: "eu-storage",
           placedBy: staff.email,
           placedAt: now,
         }),

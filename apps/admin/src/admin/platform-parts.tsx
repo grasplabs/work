@@ -52,6 +52,7 @@ const driftWords: Record<
 const notStartedLine: Record<NotStarted | "ready", string> = {
   no_destination: "Not started: no hosting destination ready.",
   no_release: "Not started: no release imported yet.",
+  on_prem: "On-premises: on-prem setup arrives with GRA-1291.",
   ready: "Not started: provision it from its Setup.",
 };
 

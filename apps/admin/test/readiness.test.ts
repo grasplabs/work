@@ -1,22 +1,19 @@
 /**
  * Platform's Readiness (src/admin/readiness.ts), through the admin's
  * entry, written from how onboarding fails when nobody looked first: a
- * stage or domain misset, no destination that qualifies, no release, a
+ * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
  * namespace, model spend undecided; and an optional feature left
  * unconfigured without saying so.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fetchReadiness } from "../src/admin/readiness.ts";
 import type { Readiness } from "../src/admin/readiness.ts";
-import {
-  destinationCapabilityEvidence,
-  hostingDestinations,
-  releases,
-} from "../src/db/schema.ts";
+import { hostingDestinations, releases } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination } from "./hosting.ts";
@@ -65,7 +62,6 @@ describe("Platform's Readiness", () => {
   // The database outlives each test: each starts with no destination or
   // release, as an admin set up from nothing.
   beforeEach(async () => {
-    await db.delete(destinationCapabilityEvidence);
     await db.delete(hostingDestinations);
     await db.delete(releases);
   });
@@ -134,7 +130,7 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("is ready once a destination qualifies, a release is imported and the deployer reaches its namespace, and Home's banner goes", async () => {
+  it("is ready once a shared destination exists, a release is imported and the deployer reaches its namespace, and Home's banner goes", async () => {
     const account = cloudflare.addAccount("Grasp clients");
     account.namespaces.set(clientsNamespace("production"), new Map());
     const destinationId = await destination({ accountId: account.id });
@@ -146,6 +142,7 @@ describe("Platform's Readiness", () => {
     expect({
       statuses: statuses(read),
       blocking: read.blocking,
+      destination: wordsOf(read, "destination"),
       deployer: wordsOf(read, "deployer"),
       banner: home.html.includes("Grasp can&#x27;t onboard"),
     }).toMatchObject({
@@ -159,6 +156,7 @@ describe("Platform's Readiness", () => {
         model_spend: "ready",
       },
       blocking: 0,
+      destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
       deployer: `The deployer's token reaches ${clientsNamespace("production")} in ${destinationId}'s account.`,
       banner: false,
     });
@@ -194,24 +192,37 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("is ready when the deployer reaches any of several destinations that qualify, which staff can choose", async () => {
+  it("checks the deployer against the one shared destination new organizations go in, of several", async () => {
     const theirs = cloudflare.addAccount("Not ours", "someone@else.test");
     theirs.namespaces.set(clientsNamespace("production"), new Map());
     const ours = cloudflare.addAccount("Grasp clients");
     ours.namespaces.set(clientsNamespace("production"), new Map());
-    await destination({ accountId: theirs.id });
+    const unreachable = await destination({ accountId: theirs.id });
     const reachable = await destination({ accountId: ours.id });
+    // The reachable one recorded first: new organizations go in it.
+    await db
+      .update(hostingDestinations)
+      .set({ createdAt: new Date(Date.now() - 86_400_000) })
+      .where(eq(hostingDestinations.id, reachable));
 
-    const read = await withVars(production, readiness);
+    const first = await withVars(production, readiness);
+    // Now the unreachable one is the older: it's where they'd go.
+    await db
+      .update(hostingDestinations)
+      .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
+      .where(eq(hostingDestinations.id, unreachable));
+    const second = await withVars(production, readiness);
 
     expect({
-      destination: statuses(read).destination,
-      deployer: statuses(read).deployer,
-      words: wordsOf(read, "deployer"),
+      first: [statuses(first).destination, statuses(first).deployer],
+      firstWords: wordsOf(first, "deployer"),
+      second: [statuses(second).destination, statuses(second).deployer],
+      secondWords: wordsOf(second, "deployer").includes(unreachable),
     }).toStrictEqual({
-      destination: "ready",
-      deployer: "ready",
-      words: `The deployer's token reaches ${clientsNamespace("production")} in ${reachable}'s account.`,
+      first: ["ready", "ready"],
+      firstWords: `The deployer's token reaches ${clientsNamespace("production")} in ${reachable}'s account.`,
+      second: ["ready", "blocked"],
+      secondWords: true,
     });
   });
 
