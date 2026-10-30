@@ -2,7 +2,14 @@ import { dayFrom, spanBefore, weekOf } from "@grasp-os/shared/stephen-requests";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { companyDay } from "../src/channels/stephen-requests.ts";
+import {
+  companyDay,
+  heardRequest,
+  keepCardsOf,
+  pressedChanges,
+  pressedStart,
+  settleRequest,
+} from "../src/channels/stephen-requests.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { sendStephenSummaries } from "../src/stephen-summary.ts";
 import { says } from "./agent-chat.ts";
@@ -67,6 +74,7 @@ const cleanUp = async (): Promise<void> => {
     env.DB.prepare("DELETE FROM stephen_request_questions"),
     env.DB.prepare("DELETE FROM stephen_request_topics"),
     env.DB.prepare("DELETE FROM stephen_request_needs"),
+    env.DB.prepare("DELETE FROM stephen_request_cards"),
     env.DB.prepare("DELETE FROM stephen_request_proposals"),
     env.DB.prepare("DELETE FROM stephen_summary_readers"),
     env.DB.prepare("DELETE FROM stephen_summaries"),
@@ -77,6 +85,7 @@ const cleanUp = async (): Promise<void> => {
 /** A request as a fixture: done and answered, unless said otherwise. */
 interface Seeded {
   day?: string;
+  place?: string;
   person: string;
   team?: string | null;
   kind?: string;
@@ -93,10 +102,11 @@ const seed = async (day: string, requests: Seeded[]): Promise<void> => {
   await env.DB.batch(
     requests.map((request) =>
       env.DB.prepare(
-        "INSERT INTO stephen_requests (id, day, place, person_id, team_id, kind, outcome, topic_id, question_id, tools, missing, rating) VALUES (?, ?, 'teams', ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO stephen_requests (id, day, place, person_id, team_id, kind, outcome, topic_id, question_id, tools, missing, rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
         `teams:${crypto.randomUUID()}`,
         request.day ?? day,
+        request.place ?? "teams",
         request.person,
         request.team ?? null,
         request.kind ?? "answered",
@@ -206,6 +216,47 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
     });
   });
 
+  it("isn't billed until it is known he answered it, and its answer takes a thumb without sources", async () => {
+    const { userId, teams } = await member(
+      idp,
+      says("The office opens at eight.")
+    );
+    // Sorting fails, however often it is tried: whether he answered
+    // can't be known.
+    stephenRequestReplies.push(
+      ...Array.from({ length: 5 }, () => ({
+        text: "Not what was asked for.",
+        inputTokens: 10,
+        outputTokens: 10,
+      }))
+    );
+    const message = messageFrom(teams, { text: "When does the office open?" });
+
+    await post(message);
+
+    const kept = await vi.waitFor(
+      async () => {
+        const [now] = await keptOf(userId);
+        expect(now?.outcome).not.toBe("stopped");
+        return now;
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const thumbs = await vi.waitFor(
+      async () => {
+        const { activities } = await reached(teams.conversation);
+        const posted = JSON.stringify(activities);
+        expect(posted).toContain("answer.helpful");
+        return posted.includes(`teams:${message.id}`);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    expect({ outcome: kept?.outcome, thumbs }).toStrictEqual({
+      outcome: "unanswered",
+      thumbs: true,
+    });
+  });
+
   it("is not answered when he said he didn't know, and takes a thumb from its own person only", async () => {
     const { userId, teams } = await member(
       idp,
@@ -233,6 +284,118 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
     }).toStrictEqual({ outcome: "unanswered", byOther: null, byThem: "down" });
     const { lines } = await reached(teams.conversation);
     expect(lines.at(-1)).toBe("Thanks for letting me know.");
+  });
+});
+
+describe("a request a card's press belongs to", setUpTime, () => {
+  afterEach(cleanUp);
+
+  it("keeps a change whose confirmation failed before the answer was sorted as failed, once settled", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const ids = Array.from({ length: 5 }, (_, at) => ({
+      id: `teams:held-${at}`,
+      person: `person-${crypto.randomUUID()}`,
+    }));
+    // Taken in, as each message is: stopped, with nothing heard yet.
+    await env.DB.batch(
+      ids.map(({ id, person }) =>
+        env.DB.prepare(
+          "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES (?, ?, 'teams', ?, 'answered', 'stopped', '[]', '[]')"
+        ).bind(id, today, person)
+      )
+    );
+    const calls = [
+      {
+        method: "connections.call",
+        target: null,
+        summary: {
+          connection: "OUTLOOK",
+          action: "send_mail",
+          app: "microsoft",
+        },
+        outcome: "pending" as const,
+        reason: null,
+      },
+    ];
+
+    for (const { id, person } of ids) {
+      // The answer is in and its card is up; the sorting is still running
+      // when the person confirms, and the change fails.
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await heardRequest(env, id, { calls, cited: false });
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await keepCardsOf(env, id, [`write:${id}`]);
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await pressedChanges(env, {
+        userId: person,
+        writeId: id,
+        action: "send_mail",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await settleRequest(env, id, {
+        chatId: "chat-1",
+        ended: "answered",
+        calls,
+        cited: false,
+        sorted: { topicId: null, questionId: null, answered: true },
+      });
+    }
+
+    const page = await owner.api.stephenRequests.report({ range: "month" });
+    expect(
+      page.report.byTool.find(({ key }) => key === "microsoft.send_mail")
+    ).toStrictEqual({
+      key: "microsoft.send_mail",
+      calls: 5,
+      failed: 5,
+      people: 5,
+    });
+  });
+
+  it("is the one whose answer posted the card, whatever was asked in the chat since, and only its own person's", async () => {
+    const changes = JSON.stringify([{ id: "microsoft.send_mail", ok: true }]);
+    await env.DB.batch(
+      ["teams:older", "teams:newer"].map((id) =>
+        env.DB.prepare(
+          "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing, chat_id) VALUES (?, '2026-10-01', 'teams', 'person-ann', 'changed', 'done', ?, '[]', 'chat-1')"
+        ).bind(id, changes)
+      )
+    );
+    await keepCardsOf(env, "teams:older", ["offer:offer-1", "write:write-1"]);
+
+    await pressedStart(env, {
+      userId: "person-bo",
+      offerId: "offer-1",
+      workflowId: "wf-1",
+      started: true,
+    });
+    await pressedStart(env, {
+      userId: "person-ann",
+      offerId: "offer-1",
+      workflowId: "wf-1",
+      started: true,
+    });
+    await pressedChanges(env, {
+      userId: "person-ann",
+      writeId: "write-1",
+      action: "send_mail",
+    });
+
+    const { results } = await env.DB.prepare(
+      "SELECT id, kind, tools FROM stephen_requests ORDER BY id"
+    ).all<{ id: string; kind: string; tools: string }>();
+    expect(results).toStrictEqual([
+      { id: "teams:newer", kind: "changed", tools: changes },
+      {
+        id: "teams:older",
+        kind: "workflow",
+        tools: JSON.stringify([
+          { id: "microsoft.send_mail", ok: false },
+          { id: "workflow:wf-1", ok: true },
+        ]),
+      },
+    ]);
   });
 });
 
@@ -318,6 +481,156 @@ describe("the requests report", setUpTime, () => {
       nowTotal: 5,
       before: null,
       person: "role.forbidden",
+    });
+  });
+
+  it("never points at fewer than five people, whichever filters it combines", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const often = await named("How do I book a meeting room?");
+    const rare = await named("Who signs the lease?");
+    const lastMonth = spanBefore("month", today)?.from;
+    await seed(today, [
+      ...people(6, { team: "team-big", ...often }),
+      ...people(2, { team: "team-small", ...often }),
+      ...people(2, { team: "team-big", place: "slack", ...rare }),
+      // One of six used a tool: the topic's row never names it.
+      ...people(1, {
+        team: "team-big",
+        ...often,
+        tools: [{ id: "afas.leave_request", ok: true }],
+      }),
+      ...people(2, { team: "team-big", ...often, day: lastMonth }),
+    ]);
+    const choices = {
+      place: [null, "teams", "slack"],
+      team: [null, "team-big", "team-small"],
+      topic: [null, often.topic],
+      question: [null, often.question, rare.question],
+    };
+    const filters = choices.place.flatMap((place) =>
+      choices.team.flatMap((team) =>
+        choices.topic.flatMap((topic) =>
+          choices.question.map((question) => ({ place, team, topic, question }))
+        )
+      )
+    );
+
+    const pointing = [];
+    for (const filter of filters) {
+      // oxlint-disable-next-line no-await-in-loop -- one filter at a time
+      const page = await admin.api.stephenRequests.report({
+        range: "month",
+        ...filter,
+      });
+      const { report, before } = page;
+      const groups = [
+        ...report.byTeam,
+        ...report.byPlace,
+        ...report.byTopic,
+        ...report.byKind.filter(({ key }) => key !== "notBilled"),
+        ...report.byTool,
+      ].filter(({ key }) => key !== "elsewhere");
+      // The whole company's totals are the company's; a narrowed report's
+      // are held to the floor, now and the span before.
+      const narrowed = Object.values(filter).some((value) => value !== null);
+      const few = [
+        ...(narrowed
+          ? [
+              report.total.people,
+              ...(before === null ? [] : [before.total.people]),
+            ]
+          : []),
+        ...groups.map(({ people: count }) => count),
+        ...report.questions.map(({ people: count }) => count),
+      ].filter((count) => count > 0 && count < 5);
+      if (!page.tooFew && few.length > 0) {
+        pointing.push({ filter, few });
+      }
+    }
+    const all = await admin.api.stephenRequests.report({ range: "month" });
+
+    expect({
+      pointing,
+      topicTools: all.report.byTopic
+        .find(({ key }) => key === often.topic)
+        ?.tools.map(({ key }) => key),
+    }).toStrictEqual({ pointing: [], topicTools: ["brain"] });
+  });
+
+  it("keeps a person's panel to counts, never narrowed to what they asked", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const leave = await named("How do I request leave?");
+    await seed(today, [
+      {
+        person: "person-ann",
+        ...leave,
+        kind: "lookedUp",
+        rating: "down",
+        tools: [{ id: "afas.leave_balance", ok: true }],
+      },
+      { person: "person-ann", ...leave, outcome: "unanswered" },
+      ...people(5, leave),
+    ]);
+    await owner.api.stephenRequests.updateSettings({ requestsPerPerson: true });
+
+    const page = await owner.api.stephenRequests.report({
+      range: "month",
+      person: "person-ann",
+    });
+    const { report } = page;
+
+    expect({
+      total: report.total,
+      billedByDay: report.bars.reduce(
+        (sum, bar) =>
+          sum + Object.values(bar.places).reduce((a, b) => a + b, 0),
+        0
+      ),
+      kinds: report.bars.flatMap((bar) =>
+        Object.values(bar.kinds).filter((count) => count > 0)
+      ),
+      told: {
+        byKind: report.byKind,
+        byTopic: report.byTopic,
+        byTool: report.byTool,
+        questions: report.questions,
+        thumbs: report.thumbs,
+        notBilled: report.notBilled,
+        before: page.before,
+        named: page.questions,
+      },
+      byQuestion: await outcome(
+        owner.api.stephenRequests.report({
+          range: "month",
+          person: "person-ann",
+          question: leave.question,
+        })
+      ),
+      byTopic: await outcome(
+        owner.api.stephenRequests.report({
+          range: "month",
+          person: "person-ann",
+          topic: leave.topic,
+        })
+      ),
+    }).toStrictEqual({
+      total: { requests: 2, billed: 1, people: 1 },
+      billedByDay: 1,
+      kinds: [],
+      told: {
+        byKind: [],
+        byTopic: [],
+        byTool: [],
+        questions: [],
+        thumbs: { up: 0, down: 0 },
+        notBilled: { unanswered: 0, notPossible: 0, stopped: 0, failed: 0 },
+        before: null,
+        named: [],
+      },
+      byQuestion: "stephen_requests.filter_invalid",
+      byTopic: "stephen_requests.filter_invalid",
     });
   });
 
@@ -545,7 +858,14 @@ describe("Stephen's week", setUpTime, () => {
       packs: week.packs,
     }).toStrictEqual({
       asked: 10,
-      weeks: [2, 10],
+      // Eight weeks, the quiet ones as none, this week last.
+      weeks: Array.from({ length: 8 }, (_, index) => {
+        const monday = dayFrom(weekOf(today), -7 * (7 - index));
+        if (monday === weekOf(today)) {
+          return 10;
+        }
+        return monday === weekOf(dayFrom(today, -20)) ? 2 : 0;
+      }),
       answered: 7,
       questions: 12,
       unanswered: [
@@ -594,6 +914,109 @@ describe("the weekly summary", setUpTime, () => {
       to: owner.person.email,
       lines: true,
       teamsRefused: "stephen_requests.teams_closed",
+    });
+  });
+
+  it("goes only to who is still an admin asking for it as it is sent, and sums up the week it was queued for", async () => {
+    const stays = await signedInApi(idp, "admin");
+    const demoted = await signedInApi(idp, "admin");
+    const mail = await captureMail(onboardingStore(env));
+    const today = await companyDay(env);
+    // Queued a week ago, for the week before, and not sent since: what
+    // needed fixing then is known only as it stands now, so it names none.
+    const week = dayFrom(weekOf(today), -14);
+    const leave = await named("Request leave for next week");
+    await seed(dayFrom(week, 2), [
+      ...people(7, {}),
+      ...people(5, { ...leave, outcome: "notPossible", tools: [] }),
+    ]);
+    await stays.api.stephenRequests.setSummary("email");
+    await demoted.api.stephenRequests.setSummary("email");
+    await env.DB.batch(
+      [stays.userId, demoted.userId].map((userId) =>
+        env.DB.prepare(
+          "INSERT INTO stephen_summaries (week, person_id, via, state, attempts, queued_at) VALUES (?, ?, 'email', 'queued', 0, ?)"
+        ).bind(week, userId, Date.now())
+      )
+    );
+    await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+      .bind(demoted.userId)
+      .run();
+    const sent = mail.sent.length;
+
+    // Any day but Monday: only what is queued goes.
+    const tomorrow = dayFrom(today, 1);
+    const day = weekOf(tomorrow) === tomorrow ? dayFrom(tomorrow, 1) : tomorrow;
+    await sendStephenSummaries(env, new Date(`${day}T10:00:00Z`));
+
+    const ours = mail.sent.slice(sent);
+    const { results } = await env.DB.prepare(
+      "SELECT person_id AS person, state, reason FROM stephen_summaries"
+    ).all<{ person: string; state: string; reason: string | null }>();
+    expect({
+      to: ours.map(({ to }) => to),
+      ofItsWeek: String(ours[0]?.text).includes("7 requests last week."),
+      needs: String(ours[0]?.text).includes("New:"),
+      rows: results.toSorted((a, b) => a.state.localeCompare(b.state)),
+    }).toStrictEqual({
+      to: [stays.person.email],
+      ofItsWeek: true,
+      needs: false,
+      rows: [
+        { person: demoted.userId, state: "failed", reason: "not_reader" },
+        { person: stays.userId, state: "sent", reason: null },
+      ],
+    });
+  });
+
+  it("goes once even when a run that took it never came back, and is given up once its tries are spent", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const mail = await captureMail(onboardingStore(env));
+    const today = await companyDay(env);
+    const week = dayFrom(weekOf(today), -7);
+    await owner.api.stephenRequests.setSummary("email");
+    await other.api.stephenRequests.setSummary("email");
+    const now = Date.now();
+    // A run took each and was cut off mid-send: one with tries left,
+    // one on its last.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO stephen_summaries (week, person_id, via, state, attempts, queued_at, claimed_until) VALUES (?, ?, 'email', 'queued', 1, ?, ?)"
+      ).bind(week, owner.userId, now, now + 5 * 60_000),
+      env.DB.prepare(
+        "INSERT INTO stephen_summaries (week, person_id, via, state, attempts, queued_at, claimed_until) VALUES (?, ?, 'email', 'queued', 5, ?, ?)"
+      ).bind(week, other.userId, now, now + 5 * 60_000),
+    ]);
+    const sent = mail.sent.length;
+    const at = (minutes: number) => new Date(now + minutes * 60_000);
+
+    // While the claim holds, two runs at once pass it by.
+    await Promise.all([
+      sendStephenSummaries(env, at(1)),
+      sendStephenSummaries(env, at(1)),
+    ]);
+    const whileHeld = mail.sent.length - sent;
+    // Once it ends, it goes, once, however many runs.
+    await Promise.all([
+      sendStephenSummaries(env, at(11)),
+      sendStephenSummaries(env, at(11)),
+    ]);
+
+    const { results } = await env.DB.prepare(
+      "SELECT person_id AS person, state, reason FROM stephen_summaries"
+    ).all<{ person: string; state: string; reason: string | null }>();
+    expect({
+      whileHeld,
+      after: mail.sent.slice(sent).map(({ to }) => to),
+      rows: results.toSorted((a, b) => a.state.localeCompare(b.state)),
+    }).toStrictEqual({
+      whileHeld: 0,
+      after: [owner.person.email],
+      rows: [
+        { person: other.userId, state: "failed", reason: "unfinished" },
+        { person: owner.userId, state: "sent", reason: null },
+      ],
     });
   });
 });
