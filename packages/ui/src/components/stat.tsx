@@ -9,7 +9,7 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
 const statVariants = cva(
-  "fill-current font-serif text-[1.75rem] leading-none font-light tracking-[-0.03em] lining-nums tabular-nums",
+  "fill-current font-serif leading-none font-light tracking-[-0.03em] lining-nums tabular-nums",
   {
     variants: {
       variant: {
@@ -19,25 +19,33 @@ const statVariants = cva(
         // A figure that needs someone: in the attention amber.
         attention: "text-status-attention",
       },
+      size: {
+        default: "text-[1.75rem]",
+        // In a narrow container, such as a small ring of a dashboard
+        // block: the product's size, and the figure's own from the
+        // container's `@sm` on.
+        compact: "text-sm @sm:text-[1.75rem]",
+      },
     },
-    defaultVariants: { variant: "default" },
+    defaultVariants: { variant: "default", size: "default" },
   }
 );
 
 function Stat({
   className,
   variant = "default",
+  size = "default",
   render,
   ...props
 }: useRender.ComponentProps<"span"> & VariantProps<typeof statVariants>) {
   return useRender({
     defaultTagName: "span",
     props: mergeProps<"span">(
-      { className: cn(statVariants({ variant }), className) },
+      { className: cn(statVariants({ variant, size }), className) },
       props
     ),
     render,
-    state: { slot: "stat", variant },
+    state: { slot: "stat", variant, size },
   });
 }
 

@@ -525,6 +525,10 @@ msgstr "{count} verzoeken vorige week, {by} minder dan de week ervoor"
 msgid "{count} requests last week, {by} more than the week before"
 msgstr "{count} verzoeken vorige week, {by} meer dan de week ervoor"
 
+#: src/workflows/today-lanes.tsx
+msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
+msgstr "{cutOff, plural, one {# eerdere run van vandaag staat er niet bij: alleen de nieuwste passen} other {# eerdere runs van vandaag staan er niet bij: alleen de nieuwste passen}}"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{daily} a day"
 msgstr "{daily} per dag"
@@ -3033,6 +3037,10 @@ msgstr "Antwoorden vóór"
 msgid "Answer in the brain"
 msgstr "Beantwoorden in het brein"
 
+#: src/workflows/today-lanes.tsx
+msgid "Answer with a comment"
+msgstr "Antwoorden met een opmerking"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -4065,6 +4073,11 @@ msgstr "Niet leesbaar"
 #: src/settings/teams.tsx
 msgid "Cancel"
 msgstr "Annuleren"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "cancelled"
+msgstr "geannuleerd"
 
 #: src/workflows/runs.tsx
 msgid "Cancelled"
@@ -6393,6 +6406,11 @@ msgstr "Wordt uitgelezen"
 #: src/onboarding/interview-list.tsx
 msgid "Facts agreed"
 msgstr "Feiten akkoord"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "mislukt"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
@@ -11459,10 +11477,17 @@ msgstr "Overzicht"
 msgid "Own list or tool"
 msgstr "Eigen lijst of tool"
 
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by {name}"
+msgstr "Eigenaar: {name}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Owned by {owner}"
 msgstr "Eigenaar: {owner}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by someone else"
+msgstr "Eigenaar: iemand anders"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx

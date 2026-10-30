@@ -7,11 +7,6 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-// Light or dark as the platform has it: the web's own script, the one
-// file for both, run in <head> before first paint so the admin never
-// flashes light. The admin has no choice of its own, so it follows the
-// system's colour scheme.
-import themeScript from "../../../web/public/theme.js?url";
 import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
@@ -81,7 +76,9 @@ export const Route = createRootRoute({
       { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }],
-    scripts: [{ src: themeScript }],
+    // Light or dark as the system has it, set before first paint
+    // (public/theme.js, the admin's own), so the admin never flashes light.
+    scripts: [{ src: "/theme.js" }],
   }),
   shellComponent: RootDocument,
   component: Frame,
