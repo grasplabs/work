@@ -50,6 +50,7 @@ import type { Names } from "../workflows/activity-bar.tsx";
 import { AskStephen } from "../workflows/ask-stephen.tsx";
 import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
+import { DeleteWorkflow } from "../workflows/delete-workflow.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
@@ -59,6 +60,7 @@ import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
+import { VersionSource } from "../workflows/version-source.tsx";
 import { workflowAppsOf } from "../workflows/workflow-apps.ts";
 import type { WorkflowApps } from "../workflows/workflow-apps.ts";
 import {
@@ -574,6 +576,12 @@ const WorkflowResourceView = ({
             ) : (
               <NotLoadedState page={versions} />
             )}
+            <VersionSource
+              builder={builder}
+              versions={versions}
+              workflow={resource.id}
+            />
+            <DeleteWorkflow admin={admin} resource={resource} />
           </div>
         </TabsContent>
       </Tabs>
