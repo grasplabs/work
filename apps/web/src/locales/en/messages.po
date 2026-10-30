@@ -1619,6 +1619,14 @@ msgstr "{who} consented to this before connecting it:"
 msgid "{who} is talking"
 msgstr "{who} is talking"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs, and named {named} for it."
+msgstr "{who} said the work they were asked about isn't theirs, and named {named} for it."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs. Whom they named isn't on the list."
+msgstr "{who} said the work they were asked about isn't theirs. Whom they named isn't on the list."
+
 #: src/interview/talk.tsx
 msgid "{who}, asking."
 msgstr "{who}, asking."
@@ -6862,8 +6870,8 @@ msgid "I talk to each team lead first, so they hear about me before their team d
 msgstr "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
 
 #: src/interview/before.tsx
-msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
-msgstr "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
+msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
+msgstr "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -16061,6 +16069,15 @@ msgstr "Who decides, who can block"
 msgid "who do it have talked"
 msgstr "who do it have talked"
 
+#: src/interview/words.ts
+msgid "Who does it"
+msgstr "Who does it"
+
+#: src/onboarding/interview-words.ts
+msgctxt "kind of fact"
+msgid "Who does it"
+msgstr "Who does it"
+
 #: src/brain/brain-atlas.ts
 msgid "Who does what"
 msgstr "Who does what"
@@ -16625,6 +16642,10 @@ msgstr "Your choice"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
+
+#: src/interview/words.ts
+msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
+msgstr "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."

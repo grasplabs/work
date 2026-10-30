@@ -1619,6 +1619,14 @@ msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 msgid "{who} is talking"
 msgstr "{who} praat"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs, and named {named} for it."
+msgstr "{who} zei dat het werk waarnaar gevraagd werd niet van hen is, en noemde {named} ervoor."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs. Whom they named isn't on the list."
+msgstr "{who} zei dat het werk waarnaar gevraagd werd niet van hen is. Wie ze noemden, staat niet op de lijst."
+
 #: src/interview/talk.tsx
 msgid "{who}, asking."
 msgstr "{who} stelt een vraag."
@@ -6862,8 +6870,8 @@ msgid "I talk to each team lead first, so they hear about me before their team d
 msgstr "Ik praat eerst met elke teamleider, zodat die over mij hoort voordat het team dat doet. Controleer wie welk team leidt, en welke teams meedoen."
 
 #: src/interview/before.tsx
-msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
-msgstr "Ik schrijf op wat je vertelt. Aan het eind lees ik het voor, en jij zegt wat niet klopt. Je stem wordt niet bewaard. Je bedrijf ziet nooit wat één persoon zei, alleen wat vijf of meer mensen zeiden, samengenomen."
+msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
+msgstr "Ik schrijf op wat je vertelt. Aan het eind lees ik het voor, en jij zegt wat niet klopt. Je stem wordt niet bewaard."
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -16061,6 +16069,15 @@ msgstr "Wie beslist, wie kan blokkeren"
 msgid "who do it have talked"
 msgstr "die het doen hebben gepraat"
 
+#: src/interview/words.ts
+msgid "Who does it"
+msgstr "Wie het doet"
+
+#: src/onboarding/interview-words.ts
+msgctxt "kind of fact"
+msgid "Who does it"
+msgstr "Wie het doet"
+
 #: src/brain/brain-atlas.ts
 msgid "Who does what"
 msgstr "Wie wat doet"
@@ -16625,6 +16642,10 @@ msgstr "Jouw keuze"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inloggen; een beheerder kan een sessie eerder beëindigen bij Leden en rollen."
+
+#: src/interview/words.ts
+msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
+msgstr "Je bedrijf ziet nooit wat één persoon zei, of diens naam: alleen wat vijf of meer mensen over hetzelfde werk vertelden, samengenomen per team."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."

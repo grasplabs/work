@@ -1619,6 +1619,14 @@ msgstr "{who} dio su consentimiento antes de conectarlo:"
 msgid "{who} is talking"
 msgstr "{who} está hablando"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs, and named {named} for it."
+msgstr "{who} dijo que el trabajo por el que se le preguntó no es suyo y nombró a {named} para ello."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{who} said the work they were asked about isn't theirs. Whom they named isn't on the list."
+msgstr "{who} dijo que el trabajo por el que se le preguntó no es suyo. La persona que nombró no está en la lista."
+
 #: src/interview/talk.tsx
 msgid "{who}, asking."
 msgstr "{who}, preguntando."
@@ -6862,8 +6870,8 @@ msgid "I talk to each team lead first, so they hear about me before their team d
 msgstr "Hablo primero con cada responsable de equipo, para que sepa de mí antes que su equipo. Comprueba quién dirige cada equipo y qué equipos participan."
 
 #: src/interview/before.tsx
-msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept. Your company never sees what one person said, only what five or more people said, put together."
-msgstr "Apunto lo que me cuentas. Al final te lo leo y tú dices qué está mal. Tu voz no se guarda. Tu empresa nunca ve lo que dijo una sola persona, solo lo que dijeron cinco personas o más, todo junto."
+msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
+msgstr "Apunto lo que me cuentas. Al final te lo leo y tú dices qué está mal. Tu voz no se guarda."
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -16061,6 +16069,15 @@ msgstr "Quién decide, quién puede bloquear"
 msgid "who do it have talked"
 msgstr "de los que lo hacen han hablado"
 
+#: src/interview/words.ts
+msgid "Who does it"
+msgstr "Quién lo hace"
+
+#: src/onboarding/interview-words.ts
+msgctxt "kind of fact"
+msgid "Who does it"
+msgstr "Quién lo hace"
+
 #: src/brain/brain-atlas.ts
 msgid "Who does what"
 msgstr "Quién hace qué"
@@ -16625,6 +16642,10 @@ msgstr "Tu decisión"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Tu cuenta de la empresa. Al dejar la empresa ya no se puede iniciar sesión de nuevo; un administrador puede cerrar antes una sesión en Miembros y roles."
+
+#: src/interview/words.ts
+msgid "Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team."
+msgstr "Tu empresa nunca ve lo que dijo una sola persona, ni su nombre: solo lo que cinco personas o más contaron sobre el mismo trabajo, todo junto por equipo."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."
