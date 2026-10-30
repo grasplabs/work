@@ -22,7 +22,12 @@ import { checkOf, turnHeldWrites } from "./held.ts";
 import { sortRequest } from "./request-sorting.ts";
 import { countAnswered, countSignal } from "./signals.ts";
 import type { ChannelSignal } from "./signals.ts";
-import { keepCardsOf, settleRequest, takeRequest } from "./stephen-requests.ts";
+import {
+  heardRequest,
+  keepCardsOf,
+  settleRequest,
+  takeRequest,
+} from "./stephen-requests.ts";
 import type { Settled } from "./stephen-requests.ts";
 import { teamsAdapter } from "./teams.ts";
 import { channelLocales, languageOf, say } from "./words.ts";
@@ -403,9 +408,14 @@ const answerOne = async (
     await postIn(env, platform, thread, say("failed", locale));
     return;
   }
-  // Sorted and settled once the person has the answer, as it takes a
-  // model call of its own; never kept from it by a card after the answer
-  // that couldn't be posted (`quietly`).
+  // What the turn did is kept now, before any card of the answer can be
+  // pressed, so a press finds the tools it changes. Sorted and settled
+  // once the person has the answer, as that takes a model call of its
+  // own; never kept from it by a card after the answer that couldn't be
+  // posted (`quietly`).
+  if (requestId !== null) {
+    await heardRequest(env, requestId, { calls, cited });
+  }
   const recorded = async () => {
     await settle({ chatId, ended: "answered", calls, cited }, final);
   };

@@ -525,6 +525,10 @@ msgstr "{count} solicitudes la semana pasada, un {by} menos que la semana anteri
 msgid "{count} requests last week, {by} more than the week before"
 msgstr "{count} solicitudes la semana pasada, un {by} más que la semana anterior"
 
+#: src/workflows/today-lanes.tsx
+msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
+msgstr "{cutOff, plural, one {# ejecución anterior de hoy no se muestra: solo caben las más recientes} other {# ejecuciones anteriores de hoy no se muestran: solo caben las más recientes}}"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{daily} a day"
 msgstr "{daily} al día"
@@ -3025,6 +3029,10 @@ msgstr "Responder antes de"
 msgid "Answer in the brain"
 msgstr "Responder en el cerebro"
 
+#: src/workflows/today-lanes.tsx
+msgid "Answer with a comment"
+msgstr "Responder con un comentario"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -4053,6 +4061,11 @@ msgstr "No se puede leer"
 #: src/settings/teams.tsx
 msgid "Cancel"
 msgstr "Cancelar"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "cancelled"
+msgstr "cancelada"
 
 #: src/workflows/runs.tsx
 msgid "Cancelled"
@@ -6381,6 +6394,11 @@ msgstr "Extrayendo"
 #: src/onboarding/interview-list.tsx
 msgid "Facts agreed"
 msgstr "Hechos aceptados"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "fallida"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
@@ -11436,10 +11454,17 @@ msgstr "Resumen"
 msgid "Own list or tool"
 msgstr "Lista o herramienta propia"
 
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by {name}"
+msgstr "Responsable: {name}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Owned by {owner}"
 msgstr "Responsable: {owner}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by someone else"
+msgstr "Responsable: otra persona"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx

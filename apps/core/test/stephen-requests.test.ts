@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   companyDay,
+  heardRequest,
   keepCardsOf,
   pressedChanges,
   pressedStart,
+  settleRequest,
 } from "../src/channels/stephen-requests.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { sendStephenSummaries } from "../src/stephen-summary.ts";
@@ -287,6 +289,69 @@ describe("a message Stephen takes on in Teams", setUpTime, () => {
 
 describe("a request a card's press belongs to", setUpTime, () => {
   afterEach(cleanUp);
+
+  it("keeps a change whose confirmation failed before the answer was sorted as failed, once settled", async () => {
+    const owner = await signedInApi(idp, "admin");
+    const today = await companyDay(env);
+    const ids = Array.from({ length: 5 }, (_, at) => ({
+      id: `teams:held-${at}`,
+      person: `person-${crypto.randomUUID()}`,
+    }));
+    // Taken in, as each message is: stopped, with nothing heard yet.
+    await env.DB.batch(
+      ids.map(({ id, person }) =>
+        env.DB.prepare(
+          "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES (?, ?, 'teams', ?, 'answered', 'stopped', '[]', '[]')"
+        ).bind(id, today, person)
+      )
+    );
+    const calls = [
+      {
+        method: "connections.call",
+        target: null,
+        summary: {
+          connection: "OUTLOOK",
+          action: "send_mail",
+          app: "microsoft",
+        },
+        outcome: "pending" as const,
+        reason: null,
+      },
+    ];
+
+    for (const { id, person } of ids) {
+      // The answer is in and its card is up; the sorting is still running
+      // when the person confirms, and the change fails.
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await heardRequest(env, id, { calls, cited: false });
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await keepCardsOf(env, id, [`write:${id}`]);
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await pressedChanges(env, {
+        userId: person,
+        writeId: id,
+        action: "send_mail",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- in the order a turn runs
+      await settleRequest(env, id, {
+        chatId: "chat-1",
+        ended: "answered",
+        calls,
+        cited: false,
+        sorted: { topicId: null, questionId: null, answered: true },
+      });
+    }
+
+    const page = await owner.api.stephenRequests.report({ range: "month" });
+    expect(
+      page.report.byTool.find(({ key }) => key === "microsoft.send_mail")
+    ).toStrictEqual({
+      key: "microsoft.send_mail",
+      calls: 5,
+      failed: 5,
+      people: 5,
+    });
+  });
 
   it("is the one whose answer posted the card, whatever was asked in the chat since, and only its own person's", async () => {
     const changes = JSON.stringify([{ id: "microsoft.send_mail", ok: true }]);

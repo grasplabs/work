@@ -31,6 +31,22 @@ type Outcome =
   | { kind: "published"; version: number }
   | { kind: "failed"; reason: string };
 
+/**
+ * `saved`, an edit's answer, keeping the checkpoint `held` already drew
+ * when the edit left it as it was (it didn't pass): its diagram, doors
+ * and all, which the answer draws without doors (`WorkflowDraft`).
+ */
+const withHeldCheckpoint = (
+  held: WorkflowDraft,
+  saved: WorkflowDraft
+): WorkflowDraft => {
+  const kept =
+    saved.checkpoint !== null &&
+    saved.checkpoint.revision === held.checkpoint?.revision &&
+    saved.checkpoint.source === held.checkpoint.source;
+  return kept ? { ...saved, checkpoint: held.checkpoint } : saved;
+};
+
 /** One problem core found, where it is, and what to change. */
 const Problem = ({ problem }: { problem: WorkflowDefinitionProblem }) => (
   <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
@@ -127,22 +143,27 @@ export const DefinitionEditor = ({
   workflow,
   loaded,
   currentVersion,
+  onDraft,
   onPublished,
   onVersionMoved,
-  onDraftRead,
 }: {
   workflow: string;
   loaded: WorkflowDraft;
   currentVersion: number | null;
+  /** The draft as a save or a read here left it: its checkpoint, for a test, and when it was saved. */
+  onDraft: (draft: WorkflowDraft) => void;
   onPublished: (version: WorkflowResourceVersion) => void;
   /** Someone published another version: the page reads the workflow again. */
   onVersionMoved: () => void;
-  /** The draft as core answered a save or a read again: when it was saved. */
-  onDraftRead: (draft: WorkflowDraft) => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const [draft, setDraft] = useState(loaded);
+  // What a save or a read here left, here and on the page around it.
+  const took = (next: WorkflowDraft): void => {
+    setDraft(next);
+    onDraft(next);
+  };
   const [text, setText] = useState(loaded.source);
   const [modules, setModules] = useState(loaded.modules);
   const [busy, setBusy] = useState(false);
@@ -170,8 +191,7 @@ export const DefinitionEditor = ({
             modules,
           })
       );
-      setDraft(saved);
-      onDraftRead(saved);
+      took(withHeldCheckpoint(draft, saved));
       setOutcome({ kind: "saved" });
     } catch (error) {
       setOutcome(
@@ -192,8 +212,7 @@ export const DefinitionEditor = ({
       const latest = await core.withSession(
         async (session) => await session.workflowResources.draft(workflow)
       );
-      setDraft(latest);
-      onDraftRead(latest);
+      took(latest);
       if (replace) {
         setText(latest.source);
         setModules(latest.modules);
