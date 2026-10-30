@@ -6,6 +6,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
@@ -121,7 +122,9 @@ const AppHeader = ({
     <div className="flex items-center gap-4">
       <AppLogo name={app.name} />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h1 className="type-title truncate">{app.name}</h1>
+        <PageHeaderTitle className="min-w-0">
+          <span className="block truncate">{app.name}</span>
+        </PageHeaderTitle>
         <span className="text-muted-foreground truncate">{about}</span>
       </div>
       <div className="ml-auto flex items-center gap-2">
