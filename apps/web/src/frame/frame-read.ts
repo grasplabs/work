@@ -1,5 +1,5 @@
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { frameReadMs } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -11,18 +11,29 @@ import { useCore } from "../use-core.ts";
  * a page (the router reads that page again, its address unchanged); and on
  * the way to another page once what was read is older than
  * {@link frameReadMs}, for what others changed meanwhile. Not on every
- * click: a page of its own reads what it shows. `readAgain` forgets what
- * was read and reads it now, as after core was out of reach. Of the reads
- * it starts itself, only the latest one's answer is kept. `read` must be
- * the same function on every render (one outside the component).
+ * click: a page of its own reads what it shows. Nothing is read while
+ * `shown` is false; what was read stays, and it is read again once shown.
+ * `readAgain` forgets what was read and reads it now, as after core was
+ * out of reach. Only the latest read's answer is kept, and none once the
+ * frame is gone. `read` must be the same function on every render (one
+ * outside the component).
  */
 export const useFrameRead = <T>(
-  read: (core: CoreConnection, signal?: AbortSignal) => Promise<T>
+  read: (core: CoreConnection, signal: AbortSignal) => Promise<T>,
+  shown = true
 ): { value: T | undefined; readAgain: () => void } => {
   const router = useRouter();
   const core = useCore();
   const [value, setValue] = useState<T>();
+  // The read the effect guards, for `readAgain`; none while nothing reads.
+  const again = useRef<(() => void) | null>(null);
   useEffect(() => {
+    if (!shown) {
+      // Nothing reads while hidden, so there is nothing to read again.
+      return () => {
+        again.current = null;
+      };
+    }
     const left = new AbortController();
     let latest = 0;
     let readAt = 0;
@@ -36,6 +47,10 @@ export const useFrameRead = <T>(
       }
     };
     void readNow();
+    again.current = () => {
+      setValue(undefined);
+      void readNow();
+    };
     // Not when only the search changes, as a filter typed into does.
     const unsubscribe = router.subscribe(
       "onResolved",
@@ -51,15 +66,13 @@ export const useFrameRead = <T>(
       // Nothing read after this is shown.
       left.abort();
       unsubscribe();
+      again.current = null;
     };
-  }, [router, core, read]);
+  }, [router, core, read, shown]);
   return {
     value,
     readAgain: () => {
-      setValue(undefined);
-      void (async () => {
-        setValue(await read(core));
-      })();
+      again.current?.();
     },
   };
 };

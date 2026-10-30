@@ -1,4 +1,5 @@
 import { authErrors } from "@grasp-os/shared/errors";
+import { roleErrors } from "@grasp-os/shared/roles";
 import {
   afterEach,
   beforeEach,
@@ -35,7 +36,13 @@ import { tabLink } from "./screens/tab-link.ts";
  * answer, if given), nobody, or core down.
  */
 type Answer =
-  | { userId: string; name?: string; held?: Promise<unknown> }
+  | {
+      userId: string;
+      name?: string;
+      held?: Promise<unknown>;
+      /** Their session ended: core refuses to say who they are. */
+      gone?: boolean;
+    }
   | "nobody"
   | "down";
 
@@ -75,7 +82,10 @@ const tab = (answers: Answer[]) => {
             return await Promise.resolve({});
           }
           // As it is when asked: a test may rename the person meanwhile.
-          const { userId, name } = answer;
+          const { userId, name, gone } = answer;
+          if (gone === true) {
+            throw authErrors.create("auth.unauthenticated");
+          }
           return await Promise.resolve(
             name === undefined ? { userId } : { userId, name }
           );
@@ -573,5 +583,68 @@ describe("who the shell knows is signed in", () => {
       ],
       pings: ["ping", "ping"],
     });
+  });
+
+  it("asks again at once when core refuses a call for the person's role, and the page after shows what core says now", async () => {
+    const person = { userId: "one", name: "Admin" };
+    const { core } = tab([person]);
+    await shellStatus(core);
+    person.name = "Member";
+
+    const refused = await refusal(
+      core.withSession(async () => {
+        throw await Promise.resolve(roleErrors.create("role.forbidden"));
+      })
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const { identity } = await shellStatus(core);
+
+    expect({
+      refused: roleErrors.codeOf(refused),
+      name: identity?.name,
+    }).toStrictEqual({ refused: "role.forbidden", name: "Member" });
+  });
+
+  it("sends the page after to sign in once core, asked again behind the page, says nobody is, and asks core itself from then on", async () => {
+    const person: { userId: string; gone?: boolean } = { userId: "one" };
+    const { core, asked } = tab([person]);
+    await shellStatus(core);
+    person.gone = true;
+    await vi.advanceTimersByTimeAsync(frameReadMs);
+
+    const shown = await shellStatus(core);
+    await vi.advanceTimersByTimeAsync(0);
+    asked.length = 0;
+    const after = await shellStatus(core);
+    const again = await shellStatus(core);
+
+    expect({
+      shown: shown.identity?.userId,
+      after: after.identity,
+      again: again.identity,
+      pings: asked.filter((name) => name === "ping"),
+    }).toStrictEqual({
+      shown: "one",
+      after: undefined,
+      again: undefined,
+      // Nobody is never kept: each page asks.
+      pings: ["ping", "ping"],
+    });
+  });
+
+  it("serves what it knows while core is out of reach mid-session, so each page shows its own reads failing", async () => {
+    const { core, opened } = tab([one, "down"]);
+    const before = await shellStatus(core);
+    opened[0]?.break();
+
+    const meanwhile = await shellStatus(core);
+    await vi.advanceTimersByTimeAsync(frameReadMs);
+    const old = await shellStatus(core);
+    // The ask behind the page gives up; what core said last stands.
+    await vi.advanceTimersByTimeAsync(20_000);
+    const afterAsk = await shellStatus(core);
+
+    expect([meanwhile, old, afterAsk]).toStrictEqual([before, before, before]);
+    expect(before).toMatchObject({ connected: true, identity: one });
   });
 });
