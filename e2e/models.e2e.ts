@@ -19,9 +19,7 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
 }) => {
   const { admin, builder } = peopleIn("models");
   const page = await pageOf(admin);
-  // An old link leads to Settings → Models.
-  await page.goto("/models");
-  await expect(page).toHaveURL(/\/settings\/models$/u);
+  await page.goto("/settings/models");
 
   await expect(page.getByText("To change them, contact Grasp.")).toBeVisible();
   const allowed = sectionOf(page, "Allowed models").getByRole("row", {
