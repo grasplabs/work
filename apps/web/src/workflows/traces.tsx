@@ -34,6 +34,7 @@ import { ActivityLine, activityKey } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { followedTrace } from "./followed-trace.ts";
 import { ItemTest } from "./item-test.tsx";
+import { ListedCount } from "./listed-count.tsx";
 import { OpenRun } from "./resource-runs.tsx";
 import { RunSheet } from "./run-detail.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
@@ -341,14 +342,6 @@ const ActivityList = ({
   );
 };
 
-/** How many there are, beside a part's name, once read; nothing before any. */
-const Count = ({ loaded }: { loaded: Loaded<unknown[]> }) =>
-  loaded.state === "ready" && loaded.data.length > 0 ? (
-    <span className="text-muted-foreground tabular-nums">
-      {loaded.data.length}
-    </span>
-  ) : null;
-
 export const Traces = ({
   workflow,
   runs,
@@ -389,11 +382,19 @@ export const Traces = ({
         {/* Quiet, each with how many, as the prototype has them. */}
         <ToggleGroupItem value="runs">
           {t({ message: "Runs", context: "activity of a workflow: what ran" })}
-          <Count loaded={runs} />
+          <ListedCount
+            count={runs.state === "ready" ? runs.data.length : undefined}
+            of="runs"
+          />
         </ToggleGroupItem>
         <ToggleGroupItem value="activity">
           {t({ message: "Activity", context: "what a workflow did lately" })}
-          <Count loaded={activity} />
+          <ListedCount
+            count={
+              activity.state === "ready" ? activity.data.length : undefined
+            }
+            of="activity"
+          />
         </ToggleGroupItem>
       </ToggleGroup>
       {/* Kept while Activity shows: a test going on stays followed, and

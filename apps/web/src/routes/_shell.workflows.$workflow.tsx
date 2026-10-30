@@ -50,6 +50,7 @@ import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
 import type { DiagramPart } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
+import { ListedCount } from "../workflows/listed-count.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
@@ -343,12 +344,6 @@ type WorkflowTab =
   | "parameters"
   | "versions";
 
-/** How many runs, beside the name of their tab; nothing before any. */
-const RunCount = ({ count }: { count: number | undefined }) =>
-  count === undefined || count === 0 ? null : (
-    <span className="text-muted-foreground tabular-nums">{count}</span>
-  );
-
 /** The tabs of a workflow's page, as the reader has them. */
 const WorkflowTabs = ({
   overview,
@@ -376,12 +371,12 @@ const WorkflowTabs = ({
     {builder ? (
       <TabsTrigger value="traces">
         <Trans context="tab of a workflow">Traces</Trans>
-        <RunCount count={runs} />
+        <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     ) : (
       <TabsTrigger value="runs">
         <Trans context="tab listing the runs of workflows">Runs</Trans>
-        <RunCount count={runs} />
+        <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     )}
     <TabsTrigger value="files">
@@ -509,7 +504,7 @@ const WorkflowResourceView = ({
         </div>
         {parts.length === 0 ? null : (
           <TabsContent value="overview">
-            <div className="mx-auto w-full max-w-6xl px-6 pt-8 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               <DiagramOverview
                 onShow={({ n }) => {
                   setTab("definition");
@@ -528,7 +523,7 @@ const WorkflowResourceView = ({
         {draft === undefined ? null : (
           // Kept while another tab shows: what was typed stays.
           <TabsContent keepMounted value="definition">
-            <div className="flex flex-col gap-8 px-6 pt-6 pb-8">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pt-6 pb-8">
               {draft.state === "ready" ? (
                 <DefinitionEditor
                   currentVersion={currentVersion}
@@ -559,7 +554,7 @@ const WorkflowResourceView = ({
         {builder ? (
           // Kept while another tab shows: a test going on stays followed.
           <TabsContent keepMounted value="traces">
-            <div className="px-6 pt-6 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               <Traces
                 activity={activity}
                 admin={admin}
@@ -574,7 +569,7 @@ const WorkflowResourceView = ({
           </TabsContent>
         ) : (
           <TabsContent value="runs">
-            <div className="px-6 pt-6 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               {runs.state === "ready" ? (
                 <ResourceRuns
                   admin={admin}
@@ -591,7 +586,7 @@ const WorkflowResourceView = ({
         {/* Files and apps reads what no other tab needs: only while it
             shows, afresh each time it is opened. */}
         <TabsContent value="files">
-          <div className="px-6 pt-6 pb-8">
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             <FilesAndApps
               currentVersion={currentVersion}
               versions={versions}
@@ -601,7 +596,7 @@ const WorkflowResourceView = ({
         </TabsContent>
         {/* Kept while another tab shows: what was typed stays. */}
         <TabsContent keepMounted value="parameters">
-          <div className="px-6 pt-6 pb-8">
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             {params.state === "ready" ? (
               <ResourceParams
                 editable={builder}
@@ -614,7 +609,7 @@ const WorkflowResourceView = ({
           </div>
         </TabsContent>
         <TabsContent value="versions">
-          <div className="px-6 pt-6 pb-8">
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             {versions.state === "ready" ? (
               <Versions versions={versions.data} />
             ) : (

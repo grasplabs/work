@@ -5,6 +5,7 @@ import { watchRow } from "@grasp-os/ui/lib/row-ends";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
+import type { ComponentProps } from "react";
 
 // The room between the tabs and what they show: `none` where the row of
 // tabs sits in a bar of its own, ruled off from the panel under it.
@@ -124,6 +125,26 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   );
 }
 
+// How many a tab holds, after its name, quiet: "All 14". Read out as `label`
+// ("14 workflows"), in the page's language, since a bare number says little.
+function TabsCount({
+  className,
+  label,
+  children,
+  ...props
+}: ComponentProps<"span"> & { label: string }) {
+  return (
+    <span
+      data-slot="tabs-count"
+      className={cn("text-muted-foreground tabular-nums", className)}
+      {...props}
+    >
+      <span aria-hidden="true">{children}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
     <TabsPrimitive.Panel
@@ -134,4 +155,11 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants };
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsCount,
+  TabsContent,
+  tabsListVariants,
+};
