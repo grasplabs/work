@@ -4610,6 +4610,10 @@ msgstr "Kopiëren als Markdown"
 msgid "Copy code"
 msgstr "Code kopiëren"
 
+#: src/screens/copy-deep-link.tsx
+msgid "Copy link"
+msgstr "Link kopiëren"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Tabel kopiëren"
@@ -4663,6 +4667,10 @@ msgstr "kon niet worden gelezen"
 #: src/workflows/team-picker.tsx
 msgid "Couldn't change the team of {named}"
 msgstr "Het team van {named} kon niet worden gewijzigd"
+
+#: src/screens/copy-deep-link.tsx
+msgid "Couldn't copy the link"
+msgstr "De link kon niet worden gekopieerd"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -7945,6 +7953,10 @@ msgstr "Link verstuurd"
 #: src/onboarding/interview-words.ts
 msgid "Link out on {date}"
 msgstr "Link verstuurd op {date}"
+
+#: src/screens/copy-deep-link.tsx
+msgid "Link to {title} copied"
+msgstr "Link naar {title} gekopieerd"
 
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
