@@ -380,3 +380,93 @@ test("what staff type in a Setup stays as its core's answer comes in", async ({
   await expect(field).toHaveValue("typed-before-the-answer");
   await core(request, answered, 0);
 });
+
+/** Every path a seeded core was asked for so far. */
+const coreAsked = async (
+  request: APIRequestContext,
+  clientId: string
+): Promise<string[]> => {
+  const response = await request.post("/__e2e/core", { data: { clientId } });
+  expect(response.status()).toBe(200);
+  return z.object({ asked: z.array(z.string()) }).parse(await response.json())
+    .asked;
+};
+
+test("opening an organization while the frame reads it again waits on that read, asking its core once", async ({
+  page,
+  request,
+}) => {
+  const { answered, unset } = await seed(request);
+  await page.goto(sectionPath(unset, "setup"), { waitUntil: "networkidle" });
+  // Well under the frame's deadline and the page's wait on it, past the click.
+  await core(request, answered, 1500);
+  const before = await core(request, answered);
+
+  // The frame read again, as it is once its read went stale.
+  await page.evaluate(() => {
+    // The router the page made: TanStack Router keeps it on the window.
+    const router: unknown = Reflect.get(globalThis, "__TSR_ROUTER__");
+    if (typeof router !== "object" || router === null) {
+      throw new Error("The page has no router");
+    }
+    const invalidate: unknown = Reflect.get(router, "invalidate");
+    if (typeof invalidate !== "function") {
+      throw new TypeError("The page's router can't be read again");
+    }
+    void Reflect.apply(invalidate, router, [
+      {
+        filter: (match: { routeId: string }) => match.routeId === "__root__",
+      },
+    ]);
+  });
+  await page
+    .getByRole("navigation", { name: "Organizations" })
+    .getByRole("link", { name: "Answering Acme" })
+    .click();
+  expect(await core(request, answered)).toBe(before);
+
+  await expect(
+    page.getByRole("main").getByRole("heading", {
+      level: 1,
+      name: "Answering Acme",
+    })
+  ).toBeVisible();
+  await expect(page.getByText("Read just now.")).toBeVisible({
+    timeout: 10_000,
+  });
+  expect(await core(request, answered)).toBe(before + 1);
+  await core(request, answered, 0);
+});
+
+test("pointing at an organization's Setup asks its core nothing, and opening it does", async ({
+  page,
+  request,
+}) => {
+  const { answered } = await seed(request);
+  await page.goto(sectionPath(answered, ""), { waitUntil: "networkidle" });
+  const asked = await coreAsked(request, answered);
+  const before = asked.length;
+
+  const setup = page
+    .getByRole("navigation", { name: "Answering Acme" })
+    .locator(`a[href="${sectionPath(answered, "setup")}"]`)
+    .last();
+  await setup.hover();
+  await setup.focus();
+  // Past the router's preload delay, and any read a preload would start.
+  await page.waitForTimeout(1500);
+  // Its quota policy and spend are read from its core only once it is opened.
+  const pointed = await coreAsked(request, answered);
+  expect(pointed.slice(before)).toStrictEqual([]);
+
+  await setup.click();
+  await expect(
+    page.getByRole("main").getByRole("heading", { level: 1, name: "Setup" })
+  ).toBeVisible();
+  await expect
+    .poll(async () => {
+      const opened = await coreAsked(request, answered);
+      return opened.length;
+    })
+    .toBeGreaterThan(before);
+});

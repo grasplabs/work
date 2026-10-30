@@ -73,11 +73,15 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     const tab = setupTabs.find((each) => each === search.tab);
     return { tab: tab === "status" ? undefined : tab };
   },
-  loader: async ({ params }) => {
+  loader: async ({ params, preload }) => {
     // Not awaited: a slow or unreachable core never holds up the Setup. A
     // read that fails (the database included) shows no section, never the
-    // route's error page in place of the Setup.
+    // route's error page in place of the Setup. Neither asks the core on a
+    // preload (a link pointed at): that waits until the Setup is opened.
     const quotaPolicy = (async () => {
+      if (preload) {
+        return null;
+      }
       try {
         return await fetchClientQuotaPolicy({
           data: { clientId: params.clientId },
@@ -87,6 +91,9 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
       }
     })();
     const modelSpend = (async () => {
+      if (preload) {
+        return null;
+      }
       try {
         return await fetchClientModelSpend({
           data: { clientId: params.clientId },
@@ -107,5 +114,8 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     }
     return { setup, releases, hosting, quotaPolicy, modelSpend };
   },
+  // A preload holds what the admin recorded alone: opened, the Setup loads
+  // anew and asks its core.
+  preloadStaleTime: 0,
   component: Setup,
 });
