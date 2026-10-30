@@ -18,14 +18,18 @@ import { env } from "cloudflare:workers";
 import { count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { ifStored } from "../clients/grid.ts";
 import { adminDatabase } from "../db/act.ts";
 import {
   defaultModelSpendCeiling,
   hostingDestinations,
   releases,
 } from "../db/schema.ts";
-import { clientDomain, deployerApi, storeSecret } from "../deploy/context.ts";
+import {
+  clientDomain,
+  deployerApi,
+  ifStored,
+  storeSecret,
+} from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
