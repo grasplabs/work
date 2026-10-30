@@ -75,9 +75,7 @@ const Done = ({ children }: { children: ReactNode }) => (
 /** One number and what it counts. */
 const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
@@ -968,9 +966,7 @@ const Header = ({
   return (
     <section className="bg-card overflow-hidden rounded-xl border text-sm">
       <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="text-2xl leading-tight font-medium tracking-tight">
-          {work.name}
-        </h2>
+        <h2 className="type-title">{work.name}</h2>
         <p className="text-muted-foreground">{team}</p>
         <p aria-live="polite">
           <StandsLine record={record} />

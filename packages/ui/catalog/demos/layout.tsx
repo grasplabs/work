@@ -19,6 +19,7 @@ import {
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
+import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import {
   SplitPane,
   SplitPaneAside,
@@ -113,7 +114,21 @@ const StackDemo = () => (
   </Stack>
 );
 
+const PaintedFieldDemo = () => (
+  <PaintedField
+    className="flex h-40 flex-col justify-end gap-1 rounded-xl p-5"
+    painting="dawn"
+    pattern="columns"
+  >
+    <p className="type-heading">Three invoices wait on you</p>
+    <p className="text-muted-foreground text-sm">
+      The oldest came in on Monday.
+    </p>
+  </PaintedField>
+);
+
 export const layoutDemos = {
+  "painted-field": PaintedFieldDemo,
   direction: DirectionDemo,
   grid: GridDemo,
   inline: InlineDemo,
