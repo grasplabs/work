@@ -244,7 +244,7 @@ describe("the interview link emails", () => {
     });
   });
 
-  it("are sent again by staff when one failed, audited without whom", async () => {
+  it("say whose failed, to staff and the company's admin, and are sent again by staff, audited without whom", async () => {
     const { api } = await signedInApi(idp, "admin");
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(session);
@@ -269,6 +269,23 @@ describe("the interview link emails", () => {
     });
     await store.deliverMail();
     const failed = mail.tried.length - mail.sent.length;
+    /** What staff and the company's admin are told of oli's and ona's mail. */
+    const told = async () => {
+      const interview = await staff.onboardingStaff.interview("oli");
+      const links = await api.onboarding.links();
+      const { failedMail } = interview;
+      return {
+        staff:
+          failedMail === null
+            ? null
+            : { kind: failedMail.kind, reason: failedMail.reason },
+        admin: links.map((link) => [
+          link.person,
+          link.failedMail?.kind ?? null,
+        ]),
+      };
+    };
+    const toldFailed = await told();
     const byAdmin = await outcome(api.onboardingStaff.sendMailAgain("oli"));
     const audited = await auditedDuring(async () => {
       await staff.onboardingStaff.sendMailAgain("oli");
@@ -277,10 +294,27 @@ describe("the interview link emails", () => {
     const nothingFailed = await outcome(
       staff.onboardingStaff.sendMailAgain("ona")
     );
+    const toldSent = await told();
     const { entries } = await staff.onboardingStaff.log({ what: "mail" });
     const resent = audited.filter(
       ({ action }) => action === "onboarding.mail.resent"
     );
+    expect({ toldFailed, toldSent }).toStrictEqual({
+      toldFailed: {
+        staff: { kind: "link", reason: "E_RECIPIENT_SUPPRESSED" },
+        admin: [
+          ["oli", "link"],
+          ["ona", null],
+        ],
+      },
+      toldSent: {
+        staff: null,
+        admin: [
+          ["oli", null],
+          ["ona", null],
+        ],
+      },
+    });
     expect({
       failed,
       byAdmin,
