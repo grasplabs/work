@@ -1518,6 +1518,10 @@ msgstr "{subject}: {actions} op {object}"
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# daarvan is een tijdvreter, zoals het team het zei.} other {# daarvan zijn tijdvreters, zoals de teams het zeiden.}}"
 
+#: src/engines/app-errors.tsx
+msgid "{suppressed, plural, one {At least # more report was dropped: the app reported more than it may in a minute.} other {At least # more reports were dropped: the app reported more than it may in a minute.}}"
+msgstr "{suppressed, plural, one {Minstens # melding meer is weggegooid: de app meldde meer dan hij per minuut mag.} other {Minstens # meldingen meer zijn weggegooid: de app meldde meer dan hij per minuut mag.}}"
+
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "{takingPart, plural, one {# takes part} other {# take part}}"
 msgstr "{takingPart, plural, one {# doet mee} other {# doen mee}}"
@@ -6077,6 +6081,10 @@ msgstr "Een verwijderd lid gewist"
 msgid "Error"
 msgstr "Fout"
 
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Errors"
+msgstr "Fouten"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "EU routing"
 msgstr "EU-routering"
@@ -8469,6 +8477,7 @@ msgstr "Talen"
 msgid "Languages he interviews in"
 msgstr "Talen waarin hij interviewt"
 
+#: src/engines/app-errors.tsx
 #: src/inbox/items.ts
 msgid "Last"
 msgstr "Laatst"
@@ -8831,6 +8840,10 @@ msgstr "Logboek"
 msgctxt "onboarding area section"
 msgid "Log"
 msgstr "Logboek"
+
+#: src/engines/app-errors.tsx
+msgid "Logged error"
+msgstr "Gelogde fout"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -10718,6 +10731,10 @@ msgstr "Er wacht niets op je"
 msgid "Nothing waits on you."
 msgstr "Er wacht niets op je."
 
+#: src/engines/app-errors.tsx
+msgid "Nothing went wrong in its apps or its server code so far."
+msgstr "In de apps en de servercode is tot nu toe niets misgegaan."
+
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
@@ -11975,6 +11992,10 @@ msgstr "Privacybeleid"
 msgid "Probably two workflows in one, or teams that work differently."
 msgstr "Waarschijnlijk twee workflows in één, of teams die anders werken."
 
+#: src/engines/app-errors.tsx
+msgid "Problem"
+msgstr "Probleem"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
 msgstr "Procedures, handboeken, handleidingen. Koppel de plekken waar ze staan, en ik lees alleen wat je met me deelt."
@@ -12452,6 +12473,10 @@ msgstr "Herontworpen of in test"
 msgctxt "how far a team is with AI"
 msgid "Redesigning"
 msgstr "Herontwerp"
+
+#: src/engines/app-errors.tsx
+msgid "Refresh"
+msgstr "Vernieuwen"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Region"
@@ -13594,6 +13619,10 @@ msgstr "Gestuurd naar: {who}"
 msgid "Served by"
 msgstr "Ondersteund door"
 
+#: src/engines/app-errors.tsx
+msgid "Server"
+msgstr "Server"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
 msgid "Server"
@@ -13602,6 +13631,18 @@ msgstr "Server"
 #: src/chat/builds.tsx
 msgid "Server code"
 msgstr "Servercode"
+
+#: src/engines/app-errors.tsx
+msgid "Server error"
+msgstr "Serverfout"
+
+#: src/engines/app-errors.tsx
+msgid "Server log"
+msgstr "Serverlog"
+
+#: src/engines/app-errors.tsx
+msgid "Server warning"
+msgstr "Serverwaarschuwing"
 
 #: src/onboarding/hr-leads.tsx
 msgid "Service user ID"
@@ -16298,6 +16339,10 @@ msgstr "Verlopen: {timedOut}"
 msgid "Timeline"
 msgstr "Tijdlijn"
 
+#: src/engines/app-errors.tsx
+msgid "Times"
+msgstr "Aantal"
+
 #: src/policies/policy-editing.tsx
 msgctxt "the title of a policy document"
 msgid "Title"
@@ -16585,6 +16630,10 @@ msgstr "Onbeantwoorde vraag"
 msgid "Uncategorized"
 msgstr "Zonder categorie"
 
+#: src/engines/app-errors.tsx
+msgid "Uncaught error"
+msgstr "Onafgevangen fout"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Onder de 5"
@@ -16624,6 +16673,10 @@ msgstr "Draait de wijzigingen terug na een fout"
 #: src/workflows/history-view.tsx
 msgid "Undoing its changes after it was cancelled"
 msgstr "Draait de wijzigingen terug na annulering"
+
+#: src/engines/app-errors.tsx
+msgid "Unhandled rejection"
+msgstr "Onafgehandelde afwijzing"
 
 #: src/activity/pending.tsx
 msgid "Unknown"
@@ -16918,6 +16971,7 @@ msgstr "Nu controleren"
 msgid "Verify the chain"
 msgstr "Keten controleren"
 
+#: src/engines/app-errors.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -17193,6 +17247,10 @@ msgstr "wacht op je rol, {role}"
 #: src/workflows/today-lanes.tsx
 msgid "waits on your team, {team}"
 msgstr "wacht op je team, {team}"
+
+#: src/engines/app-errors.tsx
+msgid "Warning"
+msgstr "Waarschuwing"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -17847,6 +17905,7 @@ msgstr "Wanneer stoppen"
 msgid "When to use it"
 msgstr "Wanneer je haar gebruikt"
 
+#: src/engines/app-errors.tsx
 #: src/interview/words.ts
 #: src/onboarding/work-record.tsx
 msgid "Where"
