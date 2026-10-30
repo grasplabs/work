@@ -431,6 +431,7 @@ const coreDb: D1State = {
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
     brain_team_groups: exported(`${core}brain-team-groups.ts`),
+    brain_team_group_saves: exported(`${core}brain-team-groups.ts`),
     // Knowledge's host tables (src/db/core/schema.ts).
     collection_teams: exported(`${core}knowledge/collection-rules.ts`),
     app_entries: cache(`${core}knowledge/apps-collection.ts`),

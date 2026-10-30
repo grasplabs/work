@@ -5030,6 +5030,21 @@ export const brainTeamGroups = sqliteTable("brain_team_groups", {
 });
 
 /**
+ * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
+ * the groups whole, as they were before and as confirmed, so an earlier
+ * set can be put back. Never changed or deleted; the audit event of the
+ * save names its id, and who saved it.
+ */
+export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
+  id: text().primaryKey(),
+  savedAt: timestamp("saved_at").notNull(),
+  /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
+  before: text().notNull(),
+  /** The groups as confirmed, as JSON, the same way. */
+  after: text().notNull(),
+});
+
+/**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
  * gap was asked about, answered or closed, each set once, never cleared.
  * A gap with no row is open and nobody was asked.

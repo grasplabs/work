@@ -12,7 +12,8 @@ import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 // brain-team-groups.ts). What can go wrong, tried here: someone who isn't
 // an admin regrouping the company; a group naming a team the brain
 // doesn't have, or one team in two groups; a change kept without its
-// audit event; Grasp's proposal taken for the company's word, given more
+// audit event, or an earlier set lost to it; Grasp's proposal taken for
+// the company's word, given more
 // than the teams' names, or trusted when it leaves a team out or invents
 // one.
 
@@ -66,7 +67,12 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         .map(({ actor, provenance, detail }) => ({
           actor: actor.type,
           provenance,
-          detail,
+          // The save that keeps the groups before and after, by its id.
+          detail: {
+            ...detail,
+            before: typeof detail?.before,
+            save: typeof detail?.save,
+          },
         })),
       // A member reads the groups as they read the teams: the staff list
       // is the admin's, so its teams aren't theirs, nor are the groups.
@@ -91,10 +97,51 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         {
           actor: "person",
           provenance: ["front", "back"],
-          detail: { groups: 2 },
+          detail: { groups: 2, before: "number", save: "string" },
         },
       ],
       member: [],
+    });
+  });
+
+  it("keep each confirmed set whole, before and after, so an earlier one can be put back", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    const finance = `team-finance-${tag}`;
+    const sales = `team-sales-${tag}`;
+    const support = `team-support-${tag}`;
+    const first = [
+      { id: "front", name: "Front office", teamIds: [sales, support] },
+      { id: "back", name: "Back office", teamIds: [finance] },
+    ];
+    await admin.api.brain.saveTeamGroups(first);
+    const events = await auditedDuring(async () => {
+      await admin.api.brain.saveTeamGroups([
+        { id: "all", name: "Everyone", teamIds: [finance, sales, support] },
+      ]);
+    });
+    const saved = events.find(
+      ({ action }) => action === "brain.team_groups.saved"
+    );
+    const kept = await env.DB.prepare(
+      "SELECT before, after FROM brain_team_group_saves WHERE id = ?"
+    )
+      .bind(saved?.detail?.save ?? "")
+      .first<{ before: string; after: string }>();
+
+    expect(kept).toStrictEqual({
+      before: JSON.stringify(
+        first.map((group) => ({ ...group, confirmed: true }))
+      ),
+      after: JSON.stringify([
+        {
+          id: "all",
+          name: "Everyone",
+          teamIds: [finance, sales, support],
+          confirmed: true,
+        },
+      ]),
     });
   });
 

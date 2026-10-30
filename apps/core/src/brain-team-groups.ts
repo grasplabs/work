@@ -9,7 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
-import { brainTeamGroups } from "./db/core/schema.ts";
+import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
 import { gatewaySettings, modelForRole, models } from "./models.ts";
 import type { ModelsEnv } from "./models.ts";
 
@@ -31,6 +31,10 @@ import type { ModelsEnv } from "./models.ts";
 //   out, or names twice, gets a group of its own.
 // - Who reads them: every member, as `brain.read` serves them; a group
 //   names teams by id, which the reader's own teams resolve.
+// - What is kept of a change: each confirmation keeps the groups whole,
+//   before and as confirmed (`brain_team_group_saves`), never changed, so
+//   an earlier set can be put back; its audit event names that save. The
+//   names stay out of the audit log, which holds identifiers only.
 
 const storedIdsSchema = z.array(z.string());
 
@@ -111,16 +115,27 @@ export const saveTeamGroups = async (
   if (groups.some(({ teamIds }) => teamIds.some((id) => !known.has(id)))) {
     throw brainErrors.create("brain.team_groups_invalid");
   }
+  const before = await teamGroupsOf(env);
+  const savedAt = new Date();
+  const save = crypto.randomUUID();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
+    db.insert(brainTeamGroupSaves).values({
+      id: save,
+      savedAt,
+      before: JSON.stringify(before),
+      after: JSON.stringify(
+        groups.map((group) => ({ ...group, confirmed: true }))
+      ),
+    }),
     db.delete(brainTeamGroups),
-    ...insertsOf(db, rowsOf(groups, new Date(), 0)),
+    ...insertsOf(db, rowsOf(groups, savedAt, 0)),
     outboxed(db, {
       actor: actorOf(person),
       action: "brain.team_groups.saved",
       target: { type: "brain", id: "team_groups" },
       provenance: groups.map(({ id }) => id),
-      detail: { groups: groups.length },
+      detail: { groups: groups.length, before: before.length, save },
     }),
   ]);
   return await teamGroupsOf(env);
