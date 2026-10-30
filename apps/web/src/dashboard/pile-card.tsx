@@ -8,6 +8,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Tooltip,
   TooltipContent,
@@ -202,9 +203,11 @@ export const PileCard = ({
           </span>
           <Trans>Waiting on you</Trans>
         </p>
-        <h2 className="type-title max-w-3xl break-words" id={nameId}>
-          {name}
-        </h2>
+        <PageHeaderTitle
+          className="max-w-3xl break-words"
+          id={nameId}
+          render={<h2>{name}</h2>}
+        />
       </div>
       {details === undefined ? null : (
         <div className="relative flex w-full max-w-2xl min-w-0 flex-col gap-3 text-left">

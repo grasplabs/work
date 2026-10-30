@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
@@ -5,7 +6,8 @@ import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
-// (Save as PDF), from the Markdown set as an A4 page in Geist, as in the
+// (Save as PDF), from the Markdown set as an A4 page in Geist, its title in
+// Newsreader (the kit's PageHeaderTitle), as in the
 // prototype (`lib/export-file.ts`); no PDF is drawn in the app itself.
 //
 // The page to print is a frame of this origin, so it keeps this page's
@@ -69,7 +71,7 @@ const PrintPage = ({
   markdown: string;
 }) => (
   <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
-    <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
+    <PageHeaderTitle>{title}</PageHeaderTitle>
     <PlainMarkdown
       text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
     />
@@ -176,10 +178,15 @@ export const printAsPdf = async (
       await eventOrTimeout(link, "load");
     })
   );
-  // Laid out, so the page asks for Geist; then Geist, or the PDF falls back
-  // to the system's font.
+  // Laid out, so the page asks for Geist and the title's Newsreader; then
+  // both, or the PDF falls back to the system's fonts.
   page.body.getBoundingClientRect();
-  await withinTime(page.fonts.load('1em "Geist Variable"'));
+  await withinTime(
+    Promise.all([
+      page.fonts.load('1em "Geist Variable"'),
+      page.fonts.load('300 1em "Newsreader Variable"'),
+    ])
+  );
   await withinTime(page.fonts.ready);
   if (removed) {
     return;

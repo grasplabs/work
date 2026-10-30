@@ -85,7 +85,7 @@ export const shadcnComponents = {
       "AlertDialogTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
+      "The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. Its content floats on `shadow-lifted`, and its title is set in the serif.",
   },
   "aspect-ratio": {
     status: "supported",
@@ -156,7 +156,7 @@ export const shadcnComponents = {
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class. The default and `ask` variants go forest under the pointer (`primary-hover`).",
+      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class.",
   },
   "button-group": {
     status: "supported",
@@ -188,7 +188,7 @@ export const shadcnComponents = {
       "CardTitle",
     ],
     changes:
-      "Has the brand's hairline (`ring-hairline`) and long soft shadow (`shadow-block`).",
+      "Rests on the page with the brand's long soft shadow (`shadow-block`).",
   },
   carousel: {
     status: "supported",
@@ -339,7 +339,7 @@ export const shadcnComponents = {
       "DialogTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted`, and its title is set in `type-heading`.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted`, and its title is set in the serif.",
   },
   direction: {
     status: "supported",
@@ -363,7 +363,7 @@ export const shadcnComponents = {
       "DrawerTrigger",
     ],
     changes:
-      "The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. Its title is set in `type-heading`.",
+      "The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. Its title is set in the serif.",
   },
   "dropdown-menu": {
     status: "supported",
@@ -673,7 +673,7 @@ export const shadcnComponents = {
       "SheetTrigger",
     ],
     changes:
-      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `veil`, a wash of the brand's ink, instead of raw black. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted` and moves on the house curve; its title is set in `type-heading`.",
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim`, a wash of the brand's ink. The content is never taller than the screen: it scrolls, with its header and footer kept in view, so a dialog's actions stay reachable on a short screen. Its content floats on `shadow-lifted` and moves on the house curve; its title is set in the serif.",
   },
   sidebar: {
     status: "supported",
@@ -706,7 +706,7 @@ export const shadcnComponents = {
       "useSidebar",
     ],
     changes:
-      'The container and the phone\'s sheet draw the brand book\'s Rings, rising faintly from the foot (`patterned`, `data-pattern="rings"`, `data-from="bottom"`), and the inset variant\'s inner ground is clear so they show.',
+      "The container and the phone's sheet draw the brand book's Rings, rising faintly from the foot (`patterned`), and the inset variant's inner ground is clear so they show.",
   },
   skeleton: {
     status: "supported",
@@ -867,7 +867,8 @@ export const graspComponents = {
   },
   "page-header": {
     status: "supported",
-    summary: "A page's title, description and actions.",
+    summary:
+      "A page's title, in the serif, its description and actions. The title's `render` makes it another heading.",
     exports: [
       "PageHeader",
       "PageHeaderActions",
