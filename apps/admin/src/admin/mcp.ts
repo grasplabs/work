@@ -39,9 +39,9 @@
  *   that can act: its text carries ids, roles and numbers, a company's
  *   names only as data in its structured content, and no person's name
  *   or research text at all (`callAdminTool`, decision D5 on GRA-656).
- *   The integrations to build name each app by an id nobody at a company
- *   wrote (`integrationsToBuild`); the app's name as a company asked for
- *   it, and why Grasp declined one, are data in the structured content.
+ *   The apps asked for name each app by an id nobody at a company wrote
+ *   (`appsAsked`); the app's name as a company asked for it is data in
+ *   the structured content.
  * - Audit. Each call is recorded as `admin.mcp.call` by the staff member,
  *   before anything is read: the tool and the identifiers it was asked
  *   about, never free text beyond the organization asked for. Each core
@@ -49,7 +49,7 @@
  */
 import { Validator } from "@cfworker/json-schema";
 import type { Schema } from "@cfworker/json-schema";
-import type { IntegrationBuild } from "@grasp-os/shared/admin/admin-integrations";
+import type { AskedApp } from "@grasp-os/shared/admin/admin-integrations";
 import {
   ADMIN_MCP_INSTRUCTIONS,
   ADMIN_TOOLS,
@@ -68,12 +68,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { allBuilds } from "../builds/builds.ts";
 import { clientAdmins } from "../clients/admin.ts";
 import type { AdminReadOptions } from "../clients/admin.ts";
 import { audit, adminDatabase } from "../db/act.ts";
 import { boundedText } from "../request-body.ts";
-import { integrationsToBuild } from "./integrations-asked.ts";
+import { appsAsked } from "./integrations-asked.ts";
 import { organizationsOf } from "./views.ts";
 
 /** Where the admin's MCP is served. */
@@ -155,20 +154,17 @@ const viewsNow = async (
   reads: AdminReadOptions | undefined
 ): Promise<{
   views: AdminView[];
-  builds: IntegrationBuild[];
+  apps: AskedApp[];
   unanswered: number;
 }> => {
-  const [admins, recorded] = await Promise.all([
-    clientAdmins(env, staff, reads),
-    allBuilds(adminDatabase(env.DB)),
-  ]);
+  const admins = await clientAdmins(env, staff, reads);
   const organizations = organizationsOf(admins);
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
   );
   return {
     views,
-    builds: integrationsToBuild(admins, recorded),
+    apps: appsAsked(admins),
     unanswered: organizations.length - views.length,
   };
 };
@@ -235,17 +231,14 @@ const serverFor = (
       target: name,
       detail: auditedArguments(input),
     });
-    const { views, builds, unanswered } = await viewsNow(
+    const { views, apps, unanswered } = await viewsNow(
       env,
       staff,
       options.reads
     );
     const today = options.today?.() ?? new Date().toISOString().slice(0, 10);
     return resultOf(
-      withUnanswered(
-        callAdminTool(name, input, views, today, builds),
-        unanswered
-      )
+      withUnanswered(callAdminTool(name, input, views, today, apps), unanswered)
     );
   });
   return mcp;

@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 // flashes light. The admin has no choice of its own, so it follows the
 // system's colour scheme.
 import themeScript from "../../../web/public/theme.js?url";
+import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
@@ -83,5 +84,6 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   component: Frame,
+  errorComponent: FrameFailure,
   notFoundComponent: NotFound,
 });

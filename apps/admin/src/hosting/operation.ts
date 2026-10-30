@@ -54,22 +54,28 @@
  * fencing: a call already in flight can still land, and the runner that
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
+ * Model spend (GRA-141): core reaches models through an AI Gateway in the
+ * destination's account (`modelGatewayOf`): the client's own in a
+ * dedicated account, the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), ensured with the client's resources.
+ * Its core's model gateway holds every client to its monthly ceiling, the
+ * deployment budget its vars carry (src/deploy/core-vars.ts
+ * `withSpendCeiling`), so no client has unbounded spend on the account.
+ *
  * Not here, on purpose:
  * - A probe of an owned workflow's run: core's probe asks its identity,
  *   every private binding of core and connect (databases, buckets,
  *   Durable Object namespaces, the sandbox with a fresh isolate's answer,
  *   connect) and both clocks, but starts no workflow.
- * - The model-spend admission ceiling (40.5) waits for a product decision
- *   (GRA-141), and the shared AI Gateway reference for a destination (37.5)
- *   isn't recorded yet. Until both exist, a release whose Worker binds
- *   Workers AI is refused (`model_spend_undecided`) rather than given
- *   unbounded spend on the destination's account.
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
- *   (`wfp_binding_unqualified`): a release that sends mail among them, as
- *   whether a user Worker can send through a `send_email` binding at all
- *   is a spike of its own. The admin probes a user Worker in the
+ *   (`wfp_binding_unqualified`). Mail is the exception: whether a user
+ *   Worker can send through a `send_email` binding at all is a spike of
+ *   its own (GRA-965), so there a release's `send_email` bindings are left
+ *   out (`withoutMail`) rather than refused. Its core then sends no mail,
+ *   and says so (core's src/mail.ts), and no sending domain is set up. The
+ *   admin probes a user Worker in the
  *   namespace it and the router bind (`router.namespace`) through
  *   that binding, as the router then reaches it (GRA-283); one in any
  *   other namespace stops at the probe (`probe_unqualified`), its
@@ -80,12 +86,16 @@
  * fingerprints.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
+  placedModelGateway,
   platformWorkerName,
+  adminHost,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -111,7 +121,7 @@ import type { StaffAlert } from "../alerts.ts";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
-import { findD1Database } from "../cloudflare/accounts.ts";
+import { ensureAiGateway, findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -140,6 +150,7 @@ import {
   incompatibility,
 } from "../deploy/compatibility.ts";
 import {
+  clientGatewayId,
   clientMailDomain,
   clientRuntimeProfile,
   derivedCoreConfig,
@@ -224,11 +235,6 @@ export const provisionOperationErrorCodes = [
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
   "unknown_worker",
-  /**
-   * A Worker binds Workers AI: no model spend until a ceiling is configured
-   * (GRA-141) and the destination's shared gateway is recorded (spec 37.5).
-   */
-  "model_spend_undecided",
   /** A binding kind Workers for Platforms doesn't document for user Workers. */
   "wfp_binding_unqualified",
   /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
@@ -346,6 +352,8 @@ export interface ProvisionContext {
      * stage's, no operation runs (`stage_unset`).
      */
     namespace?: string;
+    /** Relay mode for its core's sign-in (src/deploy/context.ts, `oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
@@ -450,16 +458,18 @@ const appSchema = z.enum(apps);
 
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
- * Workers: D1, R2 and Durable Objects (configuration/bindings), and
- * static assets (configuration/static-assets), and what the GRA-430 run
+ * Workers: D1, R2, Durable Objects and Workers AI
+ * (configuration/bindings), and static assets
+ * (configuration/static-assets), and what the GRA-430 run
  * on a real namespace (28 Oct) qualified: the Worker Loader, version
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
  * `send_email` binding uploads, but whether it delivers is GRA-965's
- * spike, still open. The vars and secrets the admin adds go in the
+ * spike, still open: it's left out there (`withoutMail`). The vars and secrets the admin adds go in the
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
+  "ai",
   "d1",
   "r2_bucket",
   "durable_object_namespace",
@@ -468,6 +478,27 @@ const wfpBindings: ReadonlySet<string> = new Set([
   "version_metadata",
   "service",
 ]);
+
+/**
+ * `manifest` as a Workers for Platforms namespace runs it: every Worker
+ * without its `send_email` bindings, as whether a user Worker can send
+ * mail at all is GRA-965's spike, still open. Its core then has no `EMAIL`
+ * and sends nothing, saying why (core's src/mail.ts), and the operation
+ * sets up no sending domain (`setUpMail`). A dedicated destination keeps
+ * its mail.
+ */
+const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
+  ...manifest,
+  workers: Object.fromEntries(
+    Object.entries(manifest.workers).map(([name, worker]) => [
+      name,
+      {
+        ...worker,
+        bindings: worker.bindings.filter(({ type }) => type !== "send_email"),
+      },
+    ])
+  ),
+});
 
 /**
  * How `loaded`'s destination takes a Worker's bindings: in a Workers for
@@ -1354,17 +1385,10 @@ const targetOf = (
 
 /**
  * Throws unless the destination can run `worker` as the release declares
- * it: no Workers AI anywhere (`model_spend_undecided`), and in a Workers
- * for Platforms namespace only documented bindings and no cron triggers.
+ * it: in a Workers for Platforms namespace only documented bindings and
+ * no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
-  const ai = worker.bindings.find(({ type }) => type === "ai");
-  if (ai !== undefined) {
-    throw new ProvisionOperationError(
-      "model_spend_undecided",
-      `${worker.name}'s ${ai.name} binds Workers AI, but no spend ceiling or shared gateway is configured for placed clients`
-    );
-  }
   if (loaded.destination.kind !== "workers_for_platforms") {
     return;
   }
@@ -1395,26 +1419,58 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 };
 
 /**
- * Core's vars: its derived sign-in and runtime profile, the client's
- * settings, and the change core records. No `MODEL_GATEWAY`: a placed
- * client's gateway is the destination's shared one (spec 37.5), which
- * isn't recorded yet, and no Worker of a placed client binds Workers AI
- * (`assertRunnable`).
+ * The AI Gateway `loaded`'s core reaches models through, in its
+ * destination's account: the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), the client's own in a dedicated one.
+ */
+const modelGatewayOf = (loaded: Loaded): string => {
+  if (loaded.destination.kind !== "workers_for_platforms") {
+    return clientGatewayId;
+  }
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  if (stage === undefined) {
+    throw new ProvisionOperationError(
+      "stage_unset",
+      "This admin's STAGE is neither staging nor production: it runs no operation"
+    );
+  }
+  return placedModelGateway(stage);
+};
+
+/** Whether any of the release's Workers binds Workers AI. */
+const bindsModels = (manifest: ReleaseManifest): boolean =>
+  Object.values(manifest.workers).some((worker) =>
+    worker.bindings.some(({ type }) => type === "ai")
+  );
+
+/**
+ * Core's vars: its derived sign-in, runtime profile and model gateway
+ * (`modelGatewayOf`), the client's settings, its monthly model spend
+ * ceiling as the gateway's budget, and the change core records.
  */
 const coreVarsOf = async (
   context: ProvisionContext,
   loaded: Loaded
 ): Promise<Record<string, unknown>> => {
-  const { MODEL_GATEWAY: _gateway, ...derived } = derivedCoreConfig({
+  const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
+    ...(context.router.oauthRelay === undefined
+      ? {}
+      : { oauthRelay: context.router.oauthRelay }),
   });
   return await configuredCoreVars(
     context.db,
     loaded.held.clientId,
-    derived,
+    {
+      ...derived,
+      MODEL_GATEWAY: {
+        gateway: modelGatewayOf(loaded),
+        models: defaultGatewayModels,
+      },
+    },
     {
       by: loaded.operation.startedBy,
       // What started it: a release, or new settings or secrets on the
@@ -1527,7 +1583,10 @@ const load = async (
   return {
     operation,
     held,
-    manifest,
+    manifest:
+      destination.kind === "workers_for_platforms"
+        ? withoutMail(manifest)
+        : manifest,
     placement,
     destination,
     accountId: destination.accountId,
@@ -2605,6 +2664,34 @@ const recordFailure = async (
   }
 };
 
+/**
+ * Records client `held.clientId`'s operation failed with `code` at its
+ * first step, audited, when runner `held` stopped before it could run it:
+ * what it works with couldn't be read (a secret missing from Secrets
+ * Store, no client domain). Only while that attempt of the runner
+ * (`held.attempt`, taken first) still holds the client and the operation
+ * is running: never over another runner's, nor a retry's that took the
+ * client over, nor what a run recorded. Staff then read why on its Setup, rather than an
+ * operation left running by a run that's gone.
+ */
+export const recordUnstarted = async (
+  db: AdminDatabase,
+  held: HeldClient,
+  code: string
+): Promise<void> => {
+  const operation = await provisionOf(db, held.clientId);
+  if (operation?.status !== "running") {
+    return;
+  }
+  log.error("provision.failed", {
+    operation: operation.id,
+    clientId: held.clientId,
+    step: "validated",
+    error: code,
+  });
+  await recordFailure(db, { operation, held }, "validated", code);
+};
+
 /** Where a run of the operation stopped, recorded, and what stopped it. */
 interface Stopped {
   operation: Operation;
@@ -2612,6 +2699,25 @@ interface Stopped {
   code: string;
   error: unknown;
 }
+
+/**
+ * Sends `alert` to staff, a failure logged and not thrown: an alert that
+ * can't be sent never hides what the operation did, or why it stopped.
+ */
+const tellStaff = async (
+  context: ProvisionContext,
+  alert: StaffAlert
+): Promise<void> => {
+  try {
+    await context.alert?.(alert);
+  } catch (error) {
+    log.error("provision.alert_unsent", {
+      clientId: alert.clientId,
+      kind: alert.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
+};
 
 /**
  * Runs client `held.clientId`'s operation once from its first step, as
@@ -2636,10 +2742,9 @@ const runOperation = async (
     // STAGE names no stage has no namespace of its own to hold a client
     // to, and never takes itself for production.
     const ownNamespace = context.router.namespace;
-    if (
-      ownNamespace === undefined ||
-      stageOfNamespace(ownNamespace) === undefined
-    ) {
+    const ownStage =
+      ownNamespace === undefined ? undefined : stageOfNamespace(ownNamespace);
+    if (ownNamespace === undefined || ownStage === undefined) {
       throw new ProvisionOperationError(
         "stage_unset",
         "This admin's STAGE is neither staging nor production: it runs no operation"
@@ -2653,7 +2758,16 @@ const runOperation = async (
     await validate(context, loaded);
 
     step = "resources";
-    const inventory = await ensureClientResources(api, db, "system", held);
+    const inventory = await ensureClientResources(api, db, "system", held, {
+      releaseId: loaded.operation.releaseId,
+      runId: held.runId,
+      record: `https://${adminHost(ownStage)}/organizations/${held.clientId}/setup`,
+    });
+    // Before core goes live naming it: the gateway its model calls take.
+    if (bindsModels(loaded.manifest)) {
+      await assertHolds(db, held);
+      await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
+    }
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
@@ -2691,6 +2805,15 @@ const runOperation = async (
     return undefined;
   } catch (error) {
     const code = operationErrorCode(error);
+    // Provisioning's own check found a resource outside the policy's
+    // jurisdiction: the destination is marked so (src/hosting/provision.ts),
+    // and a person needs to look before anyone is placed there again.
+    if (code === "resource_outside_jurisdiction") {
+      await tellStaff(context, {
+        clientId: held.clientId,
+        kind: "hosting_check_failed",
+      });
+    }
     log.error("provision.failed", {
       operation: operation.id,
       clientId: held.clientId,
@@ -2731,25 +2854,6 @@ const rollsBack = async (
     .where(eq(clients.id, operation.clientId))
     .get();
   return client?.status === "active";
-};
-
-/**
- * Sends `alert` to staff, a failure logged and not thrown: an alert that
- * can't be sent never hides what the operation did, or why it stopped.
- */
-const tellStaff = async (
-  context: ProvisionContext,
-  alert: StaffAlert
-): Promise<void> => {
-  try {
-    await context.alert?.(alert);
-  } catch (error) {
-    log.error("provision.alert_unsent", {
-      clientId: alert.clientId,
-      kind: alert.kind,
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
 };
 
 /**

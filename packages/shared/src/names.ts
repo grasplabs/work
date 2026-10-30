@@ -10,6 +10,7 @@
  * | Releases bucket (R2)         | `grasp-releases`        | `grasp-releases-staging`         |
  * | Router's hostname map (KV)   | `grasp-router-hosts`    | `grasp-router-hosts-staging`     |
  * | Clients' dispatch namespace  | `grasp-clients`         | `grasp-clients-staging`          |
+ * | Placed clients' AI Gateway   | `grasp-models`          | `grasp-models-staging`           |
  * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
  * | Clients' domain              | `ongrasp.app`           | `staging.ongrasp.app`            |
  * | Admin's host                 | `admin.ongrasp.app`     | `admin.staging.ongrasp.app`      |
@@ -97,6 +98,41 @@ export const adminHost = (stage: Stage): string =>
 export const authRelayHost = (stage: Stage): string =>
   `auth.${clientDomain(stage)}`;
 
+/** The Cloudflare zone every stage's hostnames are in: production's domain. */
+export const platformZone = productionDomain;
+
+/**
+ * Where a platform Worker answers in `stage`, as its wrangler.jsonc
+ * declares it (`routes`), so every deploy applies it:
+ *
+ * - the admin, on a route for its own hostname, `adminHost`;
+ * - the router, on a route for every host below `clientDomain` (each
+ *   client's, and the auth relay's);
+ * - the connect gateway, nowhere: it is reached by service binding alone.
+ *
+ * All in `platformZone`, whose proxied wildcard DNS records cover them.
+ * The admin's is a route, not a Custom Domain: Cloudflare runs a zone's
+ * routes before a Custom Domain's Worker, so the router's wildcard would
+ * take the admin's hostname from one. Among routes, the most specific
+ * that matches wins: the admin's exact host beats the router's wildcard,
+ * and staging's `*.staging.ongrasp.app/*` beats production's
+ * `*.ongrasp.app/*`, which matches staging's hosts too, as `*` takes any
+ * number of labels. Each router still refuses another stage's host
+ * itself (`stageOfHost`), should a route ever send it one.
+ */
+export const platformRoutes = (
+  worker: PlatformWorker,
+  stage: Stage
+): { pattern: string; zone_name: string }[] => {
+  if (worker === "admin") {
+    return [{ pattern: `${adminHost(stage)}/*`, zone_name: platformZone }];
+  }
+  if (worker === "router") {
+    return [{ pattern: `*.${clientDomain(stage)}/*`, zone_name: platformZone }];
+  }
+  return [];
+};
+
 /**
  * The stage hostname `host` belongs to: staging for staging's domain and
  * everything below it, production for anything else. Staging's domain
@@ -131,6 +167,16 @@ export const storeSecretName = (name: string, stage: Stage): string =>
  */
 export const clientsNamespace = (stage: Stage): string =>
   staged(`${namePrefix}clients`, stage);
+
+/**
+ * The AI Gateway `stage`'s placed clients' model calls go through, one per
+ * destination account (spec 37.5). It caches nothing, and core turns
+ * payload logging off on every call, so no client's prompts or replies
+ * are kept beside another's. What each client may spend is its own core's
+ * budget, which core's model gateway enforces.
+ */
+export const placedModelGateway = (stage: Stage): string =>
+  staged(`${namePrefix}models`, stage);
 
 /** The stage whose clients' namespace `namespace` is, if it's either's. */
 export const stageOfNamespace = (namespace: unknown): Stage | undefined =>

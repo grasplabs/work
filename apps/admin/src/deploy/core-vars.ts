@@ -9,7 +9,7 @@ import type { PlatformChange } from "@grasp-os/shared/platform-change";
 import { eq } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
-import { settings } from "../db/schema.ts";
+import { clients, settings } from "../db/schema.ts";
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 
@@ -24,6 +24,53 @@ export const mailSenderOf = (
   clientId: string
 ): string => onboardingSender(clientId, context.router.domain).address;
 
+/**
+ * `vars` with client's monthly model spend ceiling, `euros`, as its model
+ * gateway's deployment budget (core's src/model-budgets.ts), which the
+ * gateway enforces before every provider request (GRA-141). A setting's
+ * own deployment budget stays only where it's lower, so no setting raises
+ * the ceiling. The gateway counts providers' list prices in US dollars:
+ * the euros go in as dollars, and since a euro is worth at least about a
+ * dollar, spend never passes the ceiling in euros. Without a gateway, core
+ * makes no model call, so there's nothing to bound.
+ */
+export const withSpendCeiling = (
+  vars: Readonly<Record<string, unknown>>,
+  euros: number
+): Record<string, unknown> => {
+  const gateway = vars.MODEL_GATEWAY;
+  if (typeof gateway !== "object" || gateway === null) {
+    return { ...vars };
+  }
+  const budgets: unknown = Reflect.get(gateway, "budgets");
+  const set: unknown =
+    typeof budgets === "object" && budgets !== null
+      ? Reflect.get(budgets, "deployment")
+      : undefined;
+  const setLimit: unknown =
+    typeof set === "object" && set !== null
+      ? Reflect.get(set, "limit")
+      : undefined;
+  const setAlert: unknown =
+    typeof set === "object" && set !== null
+      ? Reflect.get(set, "alertAt")
+      : undefined;
+  return {
+    ...vars,
+    MODEL_GATEWAY: {
+      ...gateway,
+      budgets: {
+        ...(typeof budgets === "object" && budgets !== null ? budgets : {}),
+        deployment: {
+          limit:
+            typeof setLimit === "number" ? Math.min(setLimit, euros) : euros,
+          alertAt: typeof setAlert === "number" ? setAlert : 80,
+        },
+      },
+    },
+  };
+};
+
 /** Setting `key`'s value, stored as JSON; `setting_invalid` when it isn't. */
 const settingValue = (key: string, value: string): unknown => {
   try {
@@ -37,7 +84,8 @@ const settingValue = (key: string, value: string): unknown => {
 /**
  * Client `clientId`'s core vars from its `derived` config: each replaced
  * by the client's setting of the same name, its other settings, and
- * `change` as `PLATFORM_CHANGE`, checked as `coreVars` says, its
+ * `change` as `PLATFORM_CHANGE`, its model spend ceiling as its gateway's
+ * deployment budget (`withSpendCeiling`), checked as `coreVars` says, its
  * `MAIL_FROM` against `mailSender`, the address its mail is locked to.
  */
 export const configuredCoreVars = async (
@@ -58,16 +106,27 @@ export const configuredCoreVars = async (
       `The setting ${unknown.key} isn't a deployment config var`
     );
   }
-  const vars = {
-    ...derived,
-    ...Object.fromEntries(
-      rows.map(({ key, value }): [string, unknown] => [
-        key,
-        settingValue(key, value),
-      ])
-    ),
-    PLATFORM_CHANGE: change,
-  };
+  const client = await db
+    .select({ ceiling: clients.modelSpendCeiling })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client === undefined) {
+    throw new Error(`No client ${clientId}`);
+  }
+  const vars = withSpendCeiling(
+    {
+      ...derived,
+      ...Object.fromEntries(
+        rows.map(({ key, value }): [string, unknown] => [
+          key,
+          settingValue(key, value),
+        ])
+      ),
+      PLATFORM_CHANGE: change,
+    },
+    client.ceiling
+  );
   // The config that goes out, settings included: never a SIGN_IN no admin
   // can sign in with, nor a var core can't parse, nor a MAIL_FROM its EMAIL
   // binding won't send from.
