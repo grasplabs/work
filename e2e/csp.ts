@@ -1,3 +1,4 @@
+import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
 import { expect } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 
@@ -36,16 +37,48 @@ export const recordCspViolations = async (page: Page): Promise<string[]> => {
   return violations;
 };
 
+/** The browser's console reports a Content Security Policy violation so. */
+const cspReport = /content[ -]security[ -]policy/iu;
+
+/**
+ * Whether a console report at `url` is the product page's own: from one
+ * of its documents or scripts, not a screen's frame or module, and not
+ * from where Chromium gives none (a screen's frame has an opaque origin).
+ */
+const fromProductPage = (url: string): boolean => {
+  if (url === "") {
+    return false;
+  }
+  const { pathname } = new URL(url);
+  return (
+    pathname !== screenFramePath && !pathname.startsWith(`${screenModulePath}/`)
+  );
+};
+
 /**
  * Adds to `violations` what violates the product page's own policy on
- * every page of `context`, from the `securitypolicyviolation` event of each
- * page's top document. Not its screens' frames: they have a policy of their
- * own, which journeys break on purpose to show that it holds.
+ * every page of `context`: from the `securitypolicyviolation` event of each
+ * page's top document, and from the console. Not its screens' frames: they
+ * have a policy of their own, which journeys break on purpose to show that
+ * it holds.
  */
 const watchProductPages = async (
   context: BrowserContext,
   violations: string[]
 ): Promise<void> => {
+  context.on("console", (message) => {
+    const text = message.text();
+    // Chromium puts a frame's refused navigation on the top page's console,
+    // whichever frame's policy refused it. The top document's own refusals
+    // reach its `securitypolicyviolation` event below all the same.
+    if (
+      cspReport.test(text) &&
+      !text.startsWith("Framing ") &&
+      fromProductPage(message.location().url)
+    ) {
+      violations.push(text);
+    }
+  });
   await context.exposeFunction("reportCspViolation", (violation: string) => {
     violations.push(violation);
   });
