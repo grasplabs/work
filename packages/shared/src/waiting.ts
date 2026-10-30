@@ -17,6 +17,7 @@ import type { AppId } from "./ids.ts";
 import type {
   GapAskedNotification,
   RunFailedNotification,
+  PackageRevokedNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
@@ -147,6 +148,13 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/** Packages of an App or workflow the person builds or approved, revoked as malware: replaced where they build it. */
+export interface RevokedPackageItem extends ItemBase {
+  kind: "revokedPackage";
+  verdicts: never[];
+  notification: PackageRevokedNotification;
+}
+
 /** A connection whose access ran out, which the person can sign in to again on its page. */
 export interface SignInAgainItem extends ItemBase {
   kind: "signInAgain";
@@ -174,6 +182,7 @@ export type WaitingItem =
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | RevokedPackageItem
   | SignInAgainItem
   | DecisionItem;
 

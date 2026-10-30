@@ -55,6 +55,7 @@ export type InboxKind =
   | "appApproval"
   | "failedRun"
   | "stoppedSchedule"
+  | "revokedPackage"
   | "decision";
 
 /** Where an item can be opened: the page of what it is about. */
@@ -84,6 +85,7 @@ export type InboxSource =
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
+  | { type: "revoked"; notification: PackageRevokedNotification }
   | { type: "decision"; decision: DecisionView };
 
 export interface InboxItem {
@@ -134,6 +136,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   appApproval: "apps",
   failedRun: "workflows",
   stoppedSchedule: "workflows",
+  revokedPackage: "apps",
   decision: "workflows",
 };
 
@@ -475,6 +478,58 @@ const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
     ];
   });
 
+/** Packages of an App or workflow revoked as malware: what the notification says of it. */
+type PackageRevokedNotification = Extract<
+  NotificationsPage["page"]["notifications"][number],
+  { type: "package_revoked" }
+>;
+
+/** What a revocation is about: its name and the page it is replaced on. */
+const revokedSubject = (
+  subject: PackageRevokedNotification["subject"]
+): { name: string; about: Target } =>
+  subject.type === "app"
+    ? {
+        name: subject.appName,
+        about: { kind: "engine", engine: subject.app },
+      }
+    : {
+        name: subject.workflowName,
+        about: { kind: "independentWorkflow", workflow: subject.workflow },
+      };
+
+/** Packages of an App or workflow the person builds or approved, revoked because one was reported as malware. */
+const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
+  failed.page.notifications.flatMap((notification): InboxItem[] => {
+    if (notification.type !== "package_revoked") {
+      return [];
+    }
+    const { at, advisory } = notification;
+    const { name, about } = revokedSubject(notification.subject);
+    const revoked = `${notification.package.name}@${notification.package.version}`;
+    return [
+      {
+        id: `revoked:${notification.id}`,
+        kind: "revokedPackage",
+        title: t`Packages of ${name} were revoked as malware`,
+        context: name,
+        body: [
+          t`${revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of ${name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved.`,
+        ],
+        facts: [
+          { label: t`Package`, value: revoked },
+          { label: t`Advisory`, value: advisory },
+          { label: t`Revoked`, value: formatDateTime(at) },
+        ],
+        about,
+        forWhom: { person: me },
+        date: at,
+        urgent: true,
+        source: { type: "revoked", notification },
+      },
+    ];
+  });
+
 /** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
 const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   failed.page.notifications.flatMap((notification): InboxItem[] => {
@@ -606,6 +661,7 @@ export const inboxItems = (
     ...(failed === undefined ? [] : failedItems(failed, me)),
     ...(failed === undefined ? [] : askedItems(failed, me)),
     ...(failed === undefined ? [] : stoppedItems(failed, me)),
+    ...(failed === undefined ? [] : revokedItems(failed, me)),
     ...reconnect,
   ].toSorted(order);
 };
