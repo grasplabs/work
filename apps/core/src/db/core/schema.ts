@@ -1007,6 +1007,16 @@ export const appVersions = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     /**
+     * The names of the version's screens (JSON, `screensIn`), written when
+     * it is committed: so listing every screen someone can open, across
+     * their Apps, is one query and reads no files (`listScreens`). A row
+     * the previous release writes gets none (the default).
+     */
+    screens: text({ mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
      * The App's bindings each of the version's workflows calls, by
      * workflow ID (JSON, `WorkflowCalls`), written when it is committed
      * from the same reading its review shows: a run's calls are held to

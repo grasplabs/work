@@ -31,7 +31,7 @@ jobs:
   static:
     name: static
     if: github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,7 +68,7 @@ jobs:
   test:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     # The test step's 15 minutes, and room for the steps around it.
     timeout-minutes: 21
     strategy:
@@ -216,7 +216,7 @@ jobs:
     name: check
     needs: [static, release, test]
     if: always() && github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
@@ -353,7 +353,7 @@ jobs:
     name: e2e
     needs: [e2e]
     if: always() && github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
@@ -401,7 +401,7 @@ jobs:
   workerd:
     name: workerd
     if: github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -429,7 +429,7 @@ jobs:
   # for byte.
   release:
     name: release
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -474,7 +474,7 @@ jobs:
   conventions:
     name: conventions
     if: github.event_name == 'pull_request'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -499,7 +499,7 @@ jobs:
   stephen:
     name: stephen
     if: github.event_name != 'push'
-    runs-on: boat
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
