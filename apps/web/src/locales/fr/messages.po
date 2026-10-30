@@ -1240,6 +1240,10 @@ msgstr "{role}, invitation du {date}, pas encore d’entretien"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, ni invitation ni entretien pour l’instant"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Réussie sur # enregistrement réel} other {Réussie sur # enregistrements réels}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run} : terminée"
@@ -2337,12 +2341,13 @@ msgstr "Agent {agent}"
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} pour {person}"
 
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} pour {person}, dans {app}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -5692,6 +5697,7 @@ msgstr "Tout le monde a parlé"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Tout le monde dans l’organisation, et leurs agents."
+
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Tous ceux avec qui il est partagé, et leurs agents, le lisent comme accepté. Le vôtre reste tel quel."
@@ -7218,9 +7224,17 @@ msgstr "Ce n'est pas arrivé : {who}"
 msgid "it didn't pass"
 msgstr "elle n'a pas réussi"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Elle a échoué dans son ensemble : c'est son code qui a échoué, pas un enregistrement. Cette version ne peut pas devenir la version actuelle tant qu'un échantillon plus récent ne réussit pas."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Elle a échoué sur ses enregistrements de test quand la version a été scellée : elle ne s'exécute sur aucun enregistrement, et la version ne peut pas être rendue actuelle"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Elle a échoué sur l'enregistrement {record}. Cette version ne peut pas devenir la version actuelle tant qu'un échantillon plus récent ne réussit pas."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9007,6 +9021,10 @@ msgstr "sans motif indiqué"
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du domaine."
 
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "Il ne reste aucun enregistrement à transformer."
+
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Aucun souvenir pour l'instant"
@@ -9163,12 +9181,13 @@ msgstr "Personne n'approuve encore de paquets : chaque demande de paquets attend
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Personne ne sait pourquoi. Cela attend que quelqu’un l’explique."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14268,6 +14287,7 @@ msgstr "Le CSE n’a pas été consulté"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Leur accès prend alors fin de lui-même."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Leur lien a échoué le {on} : {reason}. Corrigez ce qui l’a bloqué, puis renvoyez-le."
@@ -14982,6 +15002,14 @@ msgstr "Réessayer"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Essayez une autre recherche, ou effacez les filtres pour voir tout le journal."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Réessayer"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "Essayer sur des enregistrements réels"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx

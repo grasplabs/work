@@ -1240,6 +1240,10 @@ msgstr "{role}, uitgenodigd op {date}, nog niet geïnterviewd"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, nog niet uitgenodigd, nog niet geïnterviewd"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Geslaagd op # echt record} other {Geslaagd op # echte records}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run}: voltooid"
@@ -2337,12 +2341,13 @@ msgstr "Agent {agent}"
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} voor {person}"
 
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Agents lezen dit voordat ze erin kijken."
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} voor {person}, in {app}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Agents lezen dit voordat ze erin kijken."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -5692,6 +5697,7 @@ msgstr "Iedereen heeft gepraat"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Iedereen in de organisatie, en hun agents."
+
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Iedereen met wie het gedeeld wordt, en hun agents, lezen het als geaccepteerd. Het jouwe blijft zoals het is."
@@ -7218,9 +7224,17 @@ msgstr "Het is niet gebeurd: {who}"
 msgid "it didn't pass"
 msgstr "ze slaagde niet"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Hij is als geheel mislukt: de code is mislukt, niet een record. Deze versie kan pas actueel worden gemaakt als een nieuwere steekproef slaagt."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Ze faalde op haar testrecords toen de versie werd verzegeld: ze draait op geen enkel record, en de versie kan niet actueel worden gemaakt"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Hij is mislukt op het record {record}. Deze versie kan pas actueel worden gemaakt als een nieuwere steekproef slaagt."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9007,6 +9021,10 @@ msgstr "geen reden opgegeven"
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Geen enkel record is de oorzaak, dus een beheerder kan de wijziging alleen opgeven, op de pagina van het domein."
 
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "Er zijn geen records meer over om om te zetten."
+
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Nog geen herinneringen"
@@ -9163,12 +9181,13 @@ msgstr "Nog niemand keurt pakketten goed, dus elk pakketverzoek wacht."
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kan zeggen waarom. Het wacht tot iemand het uitlegt."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Er is niemand anders om toe te voegen."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14268,6 +14287,7 @@ msgstr "De ondernemingsraad is niet gehoord"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Dan stopt hun toegang vanzelf."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Hun link is op {on} mislukt: {reason}. Los op wat hem tegenhield en verstuur hem dan opnieuw."
@@ -14982,6 +15002,14 @@ msgstr "Opnieuw proberen"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Probeer een andere zoekopdracht, of wis de filters om de hele audittrail te zien."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Opnieuw proberen"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "Uitproberen op echte records"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx

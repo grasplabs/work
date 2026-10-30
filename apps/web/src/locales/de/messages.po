@@ -1240,6 +1240,10 @@ msgstr "{role}, eingeladen am {date}, noch nicht interviewt"
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, noch nicht eingeladen, noch nicht interviewt"
 
+#: src/engines/migration-sample.tsx
+msgid "{rows, plural, one {Passed on # real record} other {Passed on # real records}}"
+msgstr "{rows, plural, one {Bei # echten Datensatz bestanden} other {Bei # echten Datensätzen bestanden}}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{run}: completed"
 msgstr "{run}: abgeschlossen"
@@ -2337,12 +2341,13 @@ msgstr "Agent {agent}"
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} für {person}"
 
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Agenten lesen dies, bevor sie hineinschauen."
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} für {person}, in {app}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Agenten lesen dies, bevor sie hineinschauen."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -5692,6 +5697,7 @@ msgstr "Alle haben gesprochen"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Alle in der Organisation und ihre Agenten."
+
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Alle, mit denen es geteilt wird, und ihre Agenten lesen es als akzeptiert. Dein eigener Eintrag bleibt, wie er ist."
@@ -7218,9 +7224,17 @@ msgstr "Es ist nicht geschehen: {who}"
 msgid "it didn't pass"
 msgstr "sie hat nicht bestanden"
 
+#: src/engines/migration-sample.tsx
+msgid "It failed as a whole: its code failed, not a record. This version can't be made current until a newer sample passes."
+msgstr "Sie ist als Ganzes fehlgeschlagen: Ihr Code ist fehlgeschlagen, nicht ein Datensatz. Diese Version kann erst aktuell gemacht werden, wenn eine neuere Stichprobe besteht."
+
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegelt wurde: Sie läuft auf keinem Datensatz, und die Version kann nicht aktuell gemacht werden"
+
+#: src/engines/migration-sample.tsx
+msgid "It failed on the record {record}. This version can't be made current until a newer sample passes."
+msgstr "Sie ist beim Datensatz {record} fehlgeschlagen. Diese Version kann erst aktuell gemacht werden, wenn eine neuere Stichprobe besteht."
 
 #: src/inbox/items.ts
 msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
@@ -9007,6 +9021,10 @@ msgstr "ohne Angabe eines Grunds"
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
 msgstr "Kein Datensatz ist schuld, daher kann ein Admin die Änderung auf der Seite der Domäne nur verwerfen."
 
+#: src/engines/migration-sample.tsx
+msgid "No records are left for it to transform."
+msgstr "Es sind keine Datensätze mehr zu transformieren."
+
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Noch keine Einträge"
@@ -9163,12 +9181,13 @@ msgstr "Noch niemand gibt Pakete frei, daher wartet jede Paketanfrage."
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kann sagen, warum. Es wartet, bis jemand es erklärt."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Niemand sonst zum Hinzufügen."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14268,6 +14287,7 @@ msgstr "Der Betriebsrat wurde nicht angehört"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Dann endet ihr Zugriff von selbst."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Ihr Link ist am {on} fehlgeschlagen: {reason}. Beheben Sie, was ihn aufgehalten hat, und senden Sie ihn dann erneut."
@@ -14982,6 +15002,14 @@ msgstr "Erneut versuchen"
 #: src/landscape/audit-trail.tsx
 msgid "Try another search, or clear the filters to see the whole trail."
 msgstr "Versuchen Sie eine andere Suche, oder setzen Sie die Filter zurück, um das ganze Protokoll zu sehen."
+
+#: src/engines/migration-sample.tsx
+msgid "Try it again"
+msgstr "Erneut versuchen"
+
+#: src/engines/migration-sample.tsx
+msgid "Try it on real records"
+msgstr "An echten Datensätzen ausprobieren"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
