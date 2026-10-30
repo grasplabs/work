@@ -1065,22 +1065,44 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("starting it again resumes the client's one operation, and refuses another release", async () => {
+  it("starting it again resumes the client's one operation, switched to a newer release while nothing is live, and refuses an older one", async () => {
+    const older = await importRelease("dedicated");
     const manifest = await importRelease("dedicated");
     const { clientId, operationId, held } = await setUp("dedicated", manifest);
     await expect(
       startClientProvision(db, staff, held, manifest.releaseId)
     ).resolves.toBe(operationId);
-    const other = await importRelease("dedicated");
     await expect(
-      startClientProvision(db, staff, held, other.releaseId)
+      startClientProvision(db, staff, held, older.releaseId)
     ).rejects.toMatchObject({ code: "operation_release_changed" });
+    const newer = await importRelease("dedicated");
+    await expect(
+      startClientProvision(db, staff, held, newer.releaseId)
+    ).resolves.toBe(operationId);
     await expect(
       db
-        .select({ id: clientProvisions.id })
+        .select({
+          id: clientProvisions.id,
+          releaseId: clientProvisions.releaseId,
+        })
         .from(clientProvisions)
         .where(eq(clientProvisions.clientId, clientId))
-    ).resolves.toStrictEqual([{ id: operationId }]);
+    ).resolves.toStrictEqual([{ id: operationId, releaseId: newer.releaseId }]);
+  });
+
+  it("keeps a live client's operation on its release: provisioning never switches what runs", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    await runClientProvision(context, held);
+    const newer = await importRelease("dedicated");
+
+    await expect(
+      startClientProvision(db, staff, held, newer.releaseId)
+    ).rejects.toMatchObject({ code: "operation_release_changed" });
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      releaseId: manifest.releaseId,
+      status: "done",
+    });
   });
 
   it.each(stops)(

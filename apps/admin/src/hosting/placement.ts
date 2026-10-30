@@ -35,11 +35,16 @@ import {
   placementOf,
 } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
-import { ProvisionOperationError, provisionOf } from "./operation.ts";
+import {
+  newestFittingRelease,
+  ProvisionOperationError,
+  provisionOf,
+} from "./operation.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
 import {
   destinationCapabilitiesSchema,
   hostingPolicies,
+  hostingPolicyIds,
   hostingPolicyIdSchema,
   placementProblems,
   selfCheckedCapabilities,
@@ -159,6 +164,18 @@ export interface ClientHostingView {
     startedBy: string;
     updatedAt: Date;
   } | null;
+  /**
+   * The newest imported release it may be provisioned with
+   * (`newestFittingRelease`): what starting or resuming offers first;
+   * null when none fits.
+   */
+  suggestedReleaseId: string | null;
+  /**
+   * Why its provisioning hasn't started, while it has no operation: no
+   * shared destination to place it in by itself, or no release it may be
+   * provisioned with. Null once it has one, or when nothing keeps it.
+   */
+  notStarted: NotStarted | null;
   /**
    * Its current attempt's status, when its runner is a provisioning
    * attempt; `gone` when its operation runs with no runner at all, as
@@ -383,6 +400,24 @@ const attemptOf = (
   return current.kind === "provision_placed" ? current.status : null;
 };
 
+/**
+ * Why a client's provisioning hasn't started by itself: no shared
+ * destination for the admin to pick
+ * (`no_destination`), or no imported release fits it (`no_release`).
+ */
+export type NotStarted = "no_destination" | "no_release";
+
+/** What keeps client `clientId`'s provisioning from starting, given what it would start with. */
+const notStartedOf = (
+  automatic: AutomaticChoice,
+  suggestedReleaseId: string | null
+): NotStarted | null => {
+  if (automatic.destinationId === null) {
+    return "no_destination";
+  }
+  return suggestedReleaseId === null ? "no_release" : null;
+};
+
 /** Client `clientId`'s hosting under `policyId`, or null when there's no such client. */
 export const getClientHosting = async (
   env: Env,
@@ -413,6 +448,14 @@ export const getClientHosting = async (
   const operation = await provisionOf(db, clientId);
   const current = await currentRun(env, clientId);
   const attempt = attemptOf(current, operation?.status);
+  const automatic =
+    placement === undefined
+      ? automaticChoice(destinations)
+      : { destinationId: placement.destinationId, reason: null };
+  const suggestedReleaseId =
+    client.status === "provisioning"
+      ? await newestFittingRelease(db, clientId)
+      : null;
   return {
     clientId,
     policy: { id: policy.id, description: policy.description },
@@ -426,10 +469,7 @@ export const getClientHosting = async (
             placedAt: placement.placedAt,
           },
     destinations,
-    automatic:
-      placement === undefined
-        ? automaticChoice(destinations)
-        : { destinationId: placement.destinationId, reason: null },
+    automatic,
     active: client.status === "active",
     offboardedAt: client.offboardedAt,
     operation:
@@ -444,6 +484,11 @@ export const getClientHosting = async (
             startedBy: operation.startedBy,
             updatedAt: operation.updatedAt,
           },
+    suggestedReleaseId,
+    notStarted:
+      operation === undefined && client.status === "provisioning"
+        ? notStartedOf(automatic, suggestedReleaseId)
+        : null,
     run: attempt,
     going: attempt !== null && !hasEnded(attempt),
   };
@@ -457,6 +502,8 @@ export const placementErrorCodes = [
    * its own): placing it would take that run's claim, so it could never resume.
    */
   "other_run_held",
+  /** No release was chosen, and no imported release fits the client (`newestFittingRelease`). */
+  "no_fitting_release",
 ] as const;
 
 export type PlacementErrorCode = (typeof placementErrorCodes)[number];
@@ -478,10 +525,14 @@ export type PlaceRefusal =
   | ProvisionOperationErrorCode
   | Extract<ProvisionError["code"], "already_running" | "not_provisioning">;
 
-/** What staff ask: provision `clientId` with `releaseId` under `policyId`, in `destinationId` or the automatic one (null). */
+/**
+ * What staff ask: provision `clientId` with `releaseId` (null: the newest
+ * that fits it) under `policyId`, in `destinationId` or the automatic one
+ * (null).
+ */
 export const placeInputSchema = z.object({
   clientId: z.string().min(1),
-  releaseId: z.string().min(1),
+  releaseId: z.string().min(1).nullable(),
   policyId: hostingPolicyIdSchema,
   destinationId: z.string().min(1).nullable(),
 });
@@ -506,7 +557,7 @@ export const placeAndProvision = async (
   input: PlaceInput
 ): Promise<string> => {
   const db = adminDatabase(env.DB);
-  const { clientId, releaseId, policyId } = input;
+  const { clientId, policyId } = input;
   const client = await db
     .select({ status: clients.status })
     .from(clients)
@@ -537,6 +588,14 @@ export const placeAndProvision = async (
     throw new PlacementError(
       "other_run_held",
       `Client ${clientId}'s last run, ${run.runId}, is a ${run.kind} run`
+    );
+  }
+  const releaseId =
+    input.releaseId ?? (await newestFittingRelease(db, clientId));
+  if (releaseId === null) {
+    throw new PlacementError(
+      "no_fitting_release",
+      `No imported release fits ${clientId}`
     );
   }
   if ((await importedManifest(db, releaseId)) === null) {
@@ -582,4 +641,62 @@ export const placeAndProvision = async (
     });
   }
   return await provisionPlacedClient(env, staff, clientId, releaseId);
+};
+
+/** What each placement refusal says of why provisioning didn't start. */
+const notStartedCodes: Readonly<Record<PlacementErrorCode, string>> = {
+  no_automatic_destination: "no_destination",
+  no_fitting_release: "no_release",
+  other_run_held: "other_run_held",
+};
+
+/**
+ * The default policy a client's provisioning starts under by itself
+ * (`provisionIfReady`), and whether there's a destination the admin picks
+ * for it (`notStartedOf`): the one place the auto-start names a policy.
+ */
+const [startPolicy] = hostingPolicyIds;
+
+/** The destination the admin picks by itself for a client starting now. */
+export const startDestination = async (
+  db: AdminDatabase
+): Promise<AutomaticChoice> =>
+  automaticChoice(await destinationChoices(db, startPolicy));
+
+/**
+ * Starts provisioning client `clientId`, as `staff`, when nothing keeps
+ * it: in the automatic destination, with the newest release that fits it
+ * (`placeAndProvision`). What adding a client does at once, so a client
+ * with somewhere to go and a release to go with is never left waiting
+ * for a click. Answers the attempt's id, or why it didn't start: no
+ * destination or release (`NotStarted`), or the refusal's code.
+ */
+export const provisionIfReady = async (
+  env: Env,
+  staff: Staff,
+  clientId: string
+): Promise<
+  { runId: string; notStarted: null } | { runId: null; notStarted: string }
+> => {
+  try {
+    const runId = await placeAndProvision(env, staff, {
+      clientId,
+      releaseId: null,
+      policyId: startPolicy,
+      destinationId: null,
+    });
+    return { runId, notStarted: null };
+  } catch (error) {
+    if (error instanceof PlacementError) {
+      return { runId: null, notStarted: notStartedCodes[error.code] };
+    }
+    if (
+      error instanceof InventoryError ||
+      error instanceof ProvisionOperationError ||
+      error instanceof ProvisionError
+    ) {
+      return { runId: null, notStarted: error.code };
+    }
+    throw error;
+  }
 };

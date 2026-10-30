@@ -7,7 +7,11 @@
 import type { InventoryErrorCode } from "./inventory.ts";
 import type { OffboardingErrorCode } from "./offboarding.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
-import type { DestinationProblem, PlaceRefusal } from "./placement.ts";
+import type {
+  DestinationProblem,
+  NotStarted,
+  PlaceRefusal,
+} from "./placement.ts";
 import type { Capability } from "./policy.ts";
 
 /** Each capability a policy can require, as staff check it. */
@@ -108,7 +112,7 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   release_history_incomplete:
     "A release between where the client starts and this one isn't imported, so its evidence can't be read: import it first.",
   operation_release_changed:
-    "Its provisioning is with another release: that release stays for the operation.",
+    "Its provisioning is on a newer release already, or it's live: pick that release or a later one.",
   unknown_worker: "The release has a Worker other than core and connect.",
   wfp_binding_unqualified:
     "A Worker has a binding Workers for Platforms doesn't document for user Workers.",
@@ -194,6 +198,8 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
     "There's no one shared destination to pick by itself: choose one.",
   other_run_held:
     "Another kind of run last worked on the client: let it end first.",
+  no_fitting_release:
+    "No imported release can provision it yet: CI publishes one per merge, and the admin imports it within 5 minutes. Look at Releases if none comes.",
   already_running:
     "Something is working on the client already: wait for it to end.",
   not_provisioning:
@@ -221,3 +227,14 @@ export const offboardRefusals: Readonly<Record<OffboardingErrorCode, string>> =
     hostname_not_ours:
       "Its hostname routes to another client in the router's map, so it was left: find out why before offboarding it.",
   };
+
+/** Why setting it up hasn't started, and the next step, in a sentence. */
+export const notStartedWords = (why: NotStarted | null): string => {
+  if (why === "no_destination") {
+    return "Not started: no hosting destination ready. Record a shared destination on Platform, or choose one below.";
+  }
+  if (why === "no_release") {
+    return "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.";
+  }
+  return "Not started: provision it from Hosting.";
+};

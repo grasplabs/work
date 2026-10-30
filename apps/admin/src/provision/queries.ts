@@ -2,9 +2,12 @@
 import { eq } from "drizzle-orm";
 
 import { adminDatabase } from "../db/act.ts";
+import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
-import { provisionOf } from "../hosting/operation.ts";
+import { newestFittingRelease, provisionOf } from "../hosting/operation.ts";
+import { startDestination } from "../hosting/placement.ts";
+import type { NotStarted } from "../hosting/placement.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
 
 /**
@@ -43,8 +46,32 @@ export interface ProvisioningView {
    * hasn't stopped.
    */
   stopped: { step: string; error: string } | null;
+  /**
+   * While it's `placing`: why its provisioning hasn't started (no
+   * destination, no release), or null when nothing keeps it and staff
+   * start it from Hosting. Null in every other phase.
+   */
+  notStarted: NotStarted | null;
   phase: ProvisioningPhase;
 }
+
+/**
+ * Why client `clientId`'s provisioning hasn't started: no shared
+ * destination the admin picks by itself under the default policy, or no
+ * imported release that fits it; null when nothing keeps it.
+ */
+export const notStartedOf = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<NotStarted | null> => {
+  const destination = await startDestination(db);
+  if (destination.destinationId === null) {
+    return "no_destination";
+  }
+  return (await newestFittingRelease(db, clientId)) === null
+    ? "no_release"
+    : null;
+};
 
 /** Client `clientId`'s provisioning, or null when the admin has no record of it. */
 export const getProvisioning = async (
@@ -73,11 +100,16 @@ export const getProvisioning = async (
     client,
   };
   if (client.status !== "provisioning") {
-    return { ...view, stopped: null, phase: "active" };
+    return { ...view, stopped: null, notStarted: null, phase: "active" };
   }
   const operation = await provisionOf(db, clientId);
   if (operation === undefined) {
-    return { ...view, stopped: null, phase: "placing" };
+    return {
+      ...view,
+      stopped: null,
+      notStarted: await notStartedOf(db, clientId),
+      phase: "placing",
+    };
   }
   if (operation.status === "failed") {
     return {
@@ -86,13 +118,14 @@ export const getProvisioning = async (
         step: operation.step ?? "validated",
         error: operation.error ?? "unknown",
       },
+      notStarted: null,
       phase: "failed",
     };
   }
   const run = await currentRun(env, clientId);
   const gone = run === null || isReplaceable(run.status);
   if (!gone || operation.status === "done") {
-    return { ...view, stopped: null, phase: "provisioning" };
+    return { ...view, stopped: null, notStarted: null, phase: "provisioning" };
   }
   return {
     ...view,
@@ -101,6 +134,7 @@ export const getProvisioning = async (
       step: operation.step ?? "validated",
       error: `run_${run?.status ?? "gone"}`,
     },
+    notStarted: null,
     phase: "failed",
   };
 };
