@@ -412,14 +412,18 @@ const ReplyText = ({
   text,
   citations,
   written,
+  compact,
 }: {
   text: string;
   citations?: ChatCitation[];
   /** Still being written: each new word fades in. */
   written: boolean;
+  /** In the chat dock: the size of the rest of the dock. */
+  compact: boolean;
 }) => (
   <MessageResponse
     cited={citations?.map(({ documentId }) => documentId)}
+    compact={compact}
     sources={useCitedDocuments()}
     text={text}
     written={written}
@@ -503,6 +507,20 @@ const ReplySteps = ({
   );
 };
 
+/**
+ * Whether the reply at `index` (or one being written after the last)
+ * goes on from an earlier reply to the same question: a step's result
+ * between them is no message of the thread's. Its words then stand right
+ * under that reply's steps, as one answer does in the prototype, not a
+ * message's distance away.
+ */
+const goesOn = (messages: readonly ChatMessage[], index: number): boolean =>
+  messages.slice(0, index).findLast(({ role }) => role !== "result")?.role ===
+  "assistant";
+
+/** Takes back the thread's gap between messages, to the gap within one. */
+const goesOnClass = (compact: boolean): string => (compact ? "-mt-4" : "-mt-5");
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -515,6 +533,7 @@ const Reply = ({
   sign,
   onRetry,
   cited,
+  compact,
 }: {
   reply: Omit<ChatPartial, "reasoning"> & {
     /** What the model thought before it, when it thought. */
@@ -539,6 +558,8 @@ const Reply = ({
   onRetry?: () => void;
   /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
   cited?: { chatId: string; messageId: number };
+  /** In the chat dock: its answer at the dock's size. */
+  compact: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const answer = reply.text.trim();
@@ -560,6 +581,7 @@ const Reply = ({
           {answer === "" ? null : (
             <ReplyText
               citations={reply.citations}
+              compact={compact}
               text={reply.text}
               written={writing}
             />
@@ -778,7 +800,7 @@ export const ChatThread = ({
                 <Spinner aria-label={t`Loading…`} />
               </li>
             )}
-            {messages.map((message) => {
+            {messages.map((message, index) => {
               if (message.role === "user") {
                 return (
                   <li key={message.id}>
@@ -790,8 +812,14 @@ export const ChatThread = ({
               }
               if (message.role === "assistant") {
                 return (
-                  <li key={message.id}>
+                  <li
+                    className={
+                      goesOn(messages, index) ? goesOnClass(compact) : undefined
+                    }
+                    key={message.id}
+                  >
                     <Reply
+                      compact={compact}
                       onRetry={
                         !running && message === lastAnswer && answersLast
                           ? onRetry
@@ -821,8 +849,16 @@ export const ChatThread = ({
               return null;
             })}
             {shown === null ? null : (
-              <li aria-busy="true">
+              <li
+                aria-busy="true"
+                className={
+                  goesOn(messages, messages.length)
+                    ? goesOnClass(compact)
+                    : undefined
+                }
+              >
                 <Reply
+                  compact={compact}
                   output={output}
                   reply={{
                     ...shown,

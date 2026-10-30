@@ -314,6 +314,21 @@
 }
 
 /*
+ * Grasp's answers in the chat, set for reading as shadcn/typeset sets
+ * reading text: 15px with room between the lines, an eighth larger on a
+ * phone, where it is read from further off. Not in the chat dock, which
+ * keeps the size of the page around it.
+ */
+@utility type-answer {
+  font-size: 1.0546875rem;
+  line-height: 1.7;
+
+  @media (width >= 48rem) {
+    font-size: 0.9375rem;
+  }
+}
+
+/*
  * The brand's one highlight of words: a line under them, from lime to
  * green and 0.09em thick, never a marker behind them (brand book, chapter
  * 04). For what Grasp heard or marked in what someone said, inside running

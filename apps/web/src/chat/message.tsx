@@ -96,24 +96,30 @@ export const MessageAction = ({
  * An answer's words, as Markdown, its links to the notes it cites
  * (`cited`, a stored answer's citations) opening them, each an inline
  * citation once core has said what the span cites (`sources`); one still
- * being written cites none.
+ * being written cites none. Set for reading, as the prototype sets its
+ * answers (`type-answer`), unless `compact`: in the chat dock it keeps the
+ * dock's size.
  */
 export const MessageResponse = ({
   text,
   cited,
   sources,
   written = false,
+  compact = false,
 }: {
   text: string;
   cited?: readonly string[];
   sources?: readonly ChatCitedDocument[];
   /** Still being written: each new word fades in. */
   written?: boolean;
+  compact?: boolean;
 }) => (
-  <AnswerMarkdown
-    cited={cited}
-    sources={sources}
-    text={text}
-    written={written}
-  />
+  <div className={compact ? undefined : "type-answer"}>
+    <AnswerMarkdown
+      cited={cited}
+      sources={sources}
+      text={text}
+      written={written}
+    />
+  </div>
 );
