@@ -2,7 +2,6 @@ import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
   BrainChangePage,
-  BrainNotePage,
   Company,
   Connection,
   Gap,
@@ -40,7 +39,6 @@ import {
   gapsWith,
   redactGapAnswer,
 } from "./brain-gaps.ts";
-import { brainNotes } from "./brain-notes.ts";
 import {
   addBrainRecords,
   datedInOrder,
@@ -1048,13 +1046,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await brainTranscript(this.#env, person, sourceId)
-    );
-  }
-
-  async notes(options?: unknown): Promise<BrainNotePage> {
-    return await withPerson(
-      this.#check,
-      async (person) => await brainNotes(brainOf(this.#env), person, options)
     );
   }
 
