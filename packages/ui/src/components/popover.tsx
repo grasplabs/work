@@ -44,7 +44,7 @@ function PopoverContent({
           data-slot="popover-content"
           data-variant={variant}
           className={cn(
-            "bg-popover text-popover-foreground ring-foreground/10 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 z-50 flex max-h-(--available-height) w-72 origin-(--transform-origin) flex-col overflow-y-auto rounded-md text-sm shadow-md ring-1 outline-hidden duration-100",
+            "bg-popover shadow-lifted text-popover-foreground data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 z-50 flex max-h-(--available-height) w-72 origin-(--transform-origin) flex-col overflow-y-auto rounded-md text-sm outline-hidden duration-100",
             variant === "default" && "gap-4 p-4",
             variant === "flush" && "gap-0 p-0",
             variant === "snug" && "gap-3 p-4",
