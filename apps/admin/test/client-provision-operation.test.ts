@@ -1981,7 +1981,7 @@ describe("provisioning a placed client", () => {
         .map(({ name }) => name),
       // No AI Gateway is made or read, and core is given no model allowlist.
       gatewayCalls: cloudflare.calls.filter(({ path }) =>
-        path.includes("/ai-gateway")
+        path.includes("/gateways")
       ).length,
       modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
       // Grasp's AI features as the platform chose them: the defaults, none chosen.
@@ -2047,7 +2047,7 @@ describe("provisioning a placed client", () => {
     expect({
       operation: await operationOf(clientId),
       gatewayCalls: cloudflare.calls.filter(({ path }) =>
-        path.includes("/ai-gateway")
+        path.includes("/gateways")
       ).length,
       keys: { core: aiKeys(core), connect: aiKeys(connect) },
       routed: await routed(clientId),
