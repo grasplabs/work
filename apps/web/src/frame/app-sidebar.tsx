@@ -65,15 +65,20 @@ const onboarding: Section = {
   icon: ClipboardCheckIcon,
 };
 
-/** A section's entry: Chat is only itself; any other holds the pages under it. */
+/**
+ * A section's entry: Chat is itself and its projects' pages; any other
+ * holds the pages under it.
+ */
 const SectionItem = ({ section }: { section: Section }) => {
   const { i18n } = useLingui();
   const matchRoute = useMatchRoute();
   const { to, label, icon: Icon } = section;
+  const inProject =
+    to === "/" && matchRoute({ to: "/projects/$projectId" }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={matchRoute({ to, fuzzy: to !== "/" }) !== false}
+        isActive={inProject || matchRoute({ to, fuzzy: to !== "/" }) !== false}
         render={<Link to={to} />}
       >
         <Icon />
