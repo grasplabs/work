@@ -6111,8 +6111,8 @@ msgid "Event timeline"
 msgstr "Event timeline"
 
 #: src/settings/audit-archive.tsx
-msgid "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
-msgstr "Events older than the audit trail keeps, moved to the archive. The search uses the filters above."
+msgid "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
+msgstr "Events older than the audit trail keeps, moved to the archive. The search and the export use the filters above."
 
 #: src/routes/_shell.landscape.index.tsx
 msgid "Every app your teams use: how Grasp knows about it, what data it touches and who owns it."
@@ -6361,10 +6361,12 @@ msgstr "Export"
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.index.tsx
 #: src/routes/_shell.onboarding.log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "Export CSV"
 
 #: src/activity/audit-log.tsx
+#: src/settings/audit-archive.tsx
 msgid "Export JSON"
 msgstr "Export JSON"
 
@@ -6375,6 +6377,10 @@ msgstr "Export report"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Export the audit trail"
+
+#: src/settings/audit-archive.tsx
+msgid "Export with archive"
+msgstr "Export with archive"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
