@@ -2523,6 +2523,10 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Aporta"
 
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Añadido {at}"
+
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "Añadió un miembro a un dominio"
@@ -4014,6 +4018,10 @@ msgstr "Llama a {tools} (cualquiera de sus métodos): puede cambiar algo"
 msgid "Came in"
 msgstr "Recibida"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Llegó {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Surgió en {source}"
@@ -4216,6 +4224,10 @@ msgstr "Cambiar: {text}"
 msgid "Changed"
 msgstr "Cambiado"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Cambiado {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Cambió un chat"
@@ -4311,6 +4323,10 @@ msgstr "Cambia"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Cambios que Grasp envió por alguien cuya respuesta se perdió, así que nadie sabe si surtieron efecto. Solo esa persona puede decir qué pasó, en su panel; haz el seguimiento con ella."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Cambios desde {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -10598,6 +10614,10 @@ msgstr "No se ha encontrado nada."
 msgid "Nothing happened that matches."
 msgstr "No pasó nada que coincida."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "No ha cambiado nada desde {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -13757,6 +13777,7 @@ msgstr "Mostrar en el registro"
 msgid "Show less"
 msgstr "Mostrar menos"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -13965,6 +13986,10 @@ msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "No se pudo cerrar la sesión"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Desde la última vez que miraste"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"

@@ -23,6 +23,7 @@ import { brainLog, logColumns, logTabs, tabOf } from "./brain-log.ts";
 import type { LogDay, LogDot, LogEntry, LogKind, LogTab } from "./brain-log.ts";
 import { useLessMotion } from "./less-motion.ts";
 import { Mark } from "./region-marks.tsx";
+import { SinceLastLook } from "./since-last-look.tsx";
 
 /** What each kind of line looks like. */
 const icons: Record<LogKind, LucideIcon> = {
@@ -306,6 +307,7 @@ export const BrainLog = () => {
           <ActivityIcon className="size-5" />
           <Trans context="the brain's log">Activity</Trans>
         </h1>
+        <SinceLastLook />
         <Tabs
           onValueChange={(value: LogTab) => {
             setTab(value);

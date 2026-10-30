@@ -2523,6 +2523,10 @@ msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Added"
 
+#: src/brain/since-last-look.tsx
+msgid "Added {at}"
+msgstr "Added {at}"
+
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
 msgstr "Added a member to a domain"
@@ -4014,6 +4018,10 @@ msgstr "Calls {tools} (any of their methods): may change things"
 msgid "Came in"
 msgstr "Came in"
 
+#: src/brain/since-last-look.tsx
+msgid "Came in {at}"
+msgstr "Came in {at}"
+
 #: src/brain/brain.ts
 msgid "Came up in {source}"
 msgstr "Came up in {source}"
@@ -4216,6 +4224,10 @@ msgstr "Change: {text}"
 msgid "Changed"
 msgstr "Changed"
 
+#: src/brain/since-last-look.tsx
+msgid "Changed {at}"
+msgstr "Changed {at}"
+
 #: src/activity/audit-words.ts
 msgid "Changed a chat"
 msgstr "Changed a chat"
@@ -4311,6 +4323,10 @@ msgstr "Changes"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
+
+#: src/brain/since-last-look.tsx
+msgid "Changes since {when}"
+msgstr "Changes since {when}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -10598,6 +10614,10 @@ msgstr "Nothing found."
 msgid "Nothing happened that matches."
 msgstr "Nothing happened that matches."
 
+#: src/brain/since-last-look.tsx
+msgid "Nothing has changed since {when}."
+msgstr "Nothing has changed since {when}."
+
 #: src/dashboard/activity.tsx
 #: src/workflows/activity-bar.tsx
 #: src/workflows/traces.tsx
@@ -13757,6 +13777,7 @@ msgstr "Show in the log"
 msgid "Show less"
 msgstr "Show less"
 
+#: src/brain/since-last-look.tsx
 #: src/knowledge/nav.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -13965,6 +13986,10 @@ msgstr "Signing in happens at {app}. It takes about a minute."
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
+
+#: src/brain/since-last-look.tsx
+msgid "Since you last looked"
+msgstr "Since you last looked"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
