@@ -8999,6 +8999,7 @@ msgstr "¿Sin Microsoft ni Google? Una lista de personal también sirve."
 
 #: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
+#: src/workflows/requests/request-needs.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aún no hay ningún modelo configurado en este despliegue."
 

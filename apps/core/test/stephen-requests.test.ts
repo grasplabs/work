@@ -1,6 +1,6 @@
 import { dayFrom, spanBefore, weekOf } from "@grasp-os/shared/stephen-requests";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { companyDay } from "../src/channels/stephen-requests.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -359,12 +359,60 @@ describe("the requests report", setUpTime, () => {
       staffSees: null,
       events: [
         {
+          action: "stephen_requests.settings.updated",
+          detail: { field: "requestsIncluded" },
+        },
+        {
           action: "stephen_requests.per_person.turned_on",
-          detail: { fields: "requestsIncluded,requestsPerPerson" },
+          detail: { field: "requestsPerPerson" },
         },
       ],
       builder: "role.forbidden",
       staffTurnsOn: "role.forbidden",
+    });
+  });
+
+  it("keeps what two owners change at once, each change audited as the one who made it", async () => {
+    const [ann, bo] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    await ann.api.stephenRequests.updateSettings({
+      minutesSaved: { answered: 2 },
+    });
+
+    const events = await auditedDuring(async () => {
+      await Promise.all([
+        ann.api.stephenRequests.updateSettings({ requestsIncluded: 400 }),
+        bo.api.stephenRequests.updateSettings({
+          minutesSaved: { workflow: 30 },
+        }),
+      ]);
+    });
+    const unchanged = await auditedDuring(async () => {
+      await bo.api.stephenRequests.updateSettings({ requestsIncluded: 400 });
+    });
+
+    expect({
+      settings: await ann.api.stephenRequests.settings(),
+      events: events
+        .map(({ actor, detail }) => ({
+          by: actor.type === "person" ? actor.userId : actor.type,
+          detail,
+        }))
+        .toSorted((a, b) => a.by.localeCompare(b.by)),
+      unchanged,
+    }).toStrictEqual({
+      settings: {
+        requestsIncluded: 400,
+        minutesSaved: { answered: 2, workflow: 30 },
+        requestsPerPerson: false,
+      },
+      events: [
+        { by: ann.userId, detail: { field: "requestsIncluded" } },
+        { by: bo.userId, detail: { field: "minutesSaved" } },
+      ].toSorted((a, b) => a.by.localeCompare(b.by)),
+      unchanged: [],
     });
   });
 
@@ -424,12 +472,23 @@ describe("Needs you", setUpTime, () => {
       outputTokens: 10,
     });
 
-    const [need] = await owner.api.stephenRequests.needs("en");
+    const [first] = await owner.api.stephenRequests.needs("en");
+    // Made after the read answered, so Needs you never waits on the model.
+    const need = await vi.waitFor(
+      async () => {
+        const [now] = await owner.api.stephenRequests.needs("en");
+        expect(now?.proposal).toBeTypeOf("string");
+        return now;
+      },
+      { timeout: 30_000, interval: 200 }
+    );
     await owner.api.stephenRequests.setNeedStatus(need?.key ?? "", "fixed");
     await seed(today, people(2, { ...leave, outcome: "notPossible" }));
     const [fixed] = await owner.api.stephenRequests.needs("en");
 
     expect({
+      first: { proposal: first?.proposal, proposing: first?.proposing },
+      proposing: need?.proposing,
       kind: need?.kind,
       label: need?.label,
       missing: need?.missing,
@@ -439,6 +498,8 @@ describe("Needs you", setUpTime, () => {
       // Kept, not asked of the model again.
       proposalAgain: fixed?.proposal,
     }).toStrictEqual({
+      first: { proposal: null, proposing: true },
+      proposing: false,
       kind: "notPossible",
       label: "Request leave for next week",
       missing: [{ id: "afas.leave", why: "actionOff" }],

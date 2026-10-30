@@ -6,22 +6,30 @@ import type {
   RequestsPage,
   WeeklySummary,
 } from "@grasp-os/shared/stephen-requests";
-import { i18n } from "@lingui/core";
+import { Card } from "@grasp-os/ui/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
 import { useLingui } from "@lingui/react/macro";
 import {
   createFileRoute,
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatMonth } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore } from "../load-from-core.tsx";
+import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { RequestFilters } from "../workflows/requests/request-filters.tsx";
 import { RequestPlan } from "../workflows/requests/request-plan.tsx";
 import { RequestSummary } from "../workflows/requests/request-summary.tsx";
@@ -34,7 +42,9 @@ import { RequestTable } from "../workflows/requests/request-table.tsx";
 // (request-table.tsx). Counts only, never anyone's own words, and no group
 // of fewer than five on its own: core folds them before the page sees
 // them (stephen-requests.ts). For owners and admins; core refuses anyone
-// else. The span and the filters are in the address.
+// else. The span and the filters are in the address, and only the report
+// follows them: what needs fixing and the weekly summary don't, so they
+// are read on their own, once, without holding up the page.
 
 interface RequestsSearch {
   range?: RequestRange;
@@ -42,65 +52,118 @@ interface RequestsSearch {
   team?: string;
 }
 
-/** What the page read: the report, and what needs fixing and the weekly summary where they could be read. */
-interface Read {
-  page: RequestsPage;
+/** How long to wait before reading again while Grasp makes proposals. */
+const proposalWait = 4000;
+
+/** Most times to read again for proposals: a model that keeps failing ends it. */
+const proposalReads = 8;
+
+/** What needs fixing (null when it can't be read) and the summary (null when it can't, or isn't the viewer's to set). */
+interface Aside {
   needs: Need[] | null;
   summary: WeeklySummary | null;
 }
 
-/** A read that may fail on its own without failing the page. */
-const orNull = async <T,>(read: () => Promise<T>): Promise<T | null> => {
-  try {
-    return await read();
-  } catch {
-    return null;
-  }
+/** Reads what needs fixing and the summary. Outside components, as the React Compiler can't compile `try`. */
+const readAside = async (
+  core: CoreConnection,
+  locale: string,
+  canManage: boolean
+): Promise<Aside> => {
+  const read = await loadFromCore(core, async (session) => {
+    const [needs, summary] = await Promise.all([
+      orNull(async () => await session.stephenRequests.needs(locale)),
+      canManage
+        ? orNull(async () => await session.stephenRequests.summary())
+        : null,
+    ]);
+    return { needs, summary };
+  });
+  return read.state === "ready" ? read.data : { needs: null, summary: null };
 };
 
-const readPage = async (
-  session: Session,
-  { range = "month", place, team }: RequestsSearch
-): Promise<Read> => {
-  const [page, needs, summary] = await Promise.all([
-    session.stephenRequests.report({
-      range,
-      place: place ?? null,
-      team: team ?? null,
-    }),
-    orNull(async () => await session.stephenRequests.needs(i18n.locale)),
-    orNull(async () => await session.stephenRequests.summary()),
-  ]);
-  return { page, needs, summary };
+/**
+ * What needs fixing and the weekly summary, read once the page shows
+ * (undefined until then), again in a while as long as Grasp is still
+ * making proposals, a few times at most, and again on `reread`.
+ */
+const useAside = (canManage: boolean) => {
+  const core = useCore();
+  const { i18n } = useLingui();
+  const { locale } = i18n;
+  const [aside, setAside] = useState<Aside>();
+  useEffect(() => {
+    let current = true;
+    let reads = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = async (): Promise<void> => {
+      const got = await readAside(core, locale, canManage);
+      if (!current) {
+        return;
+      }
+      setAside(got);
+      reads += 1;
+      if (
+        got.needs?.some((need) => need.proposing) === true &&
+        reads <= proposalReads
+      ) {
+        timer = setTimeout(() => {
+          void read();
+        }, proposalWait);
+      }
+    };
+    void read();
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [core, locale, canManage]);
+  const reread = async (): Promise<void> => {
+    setAside(await readAside(core, locale, canManage));
+  };
+  return { aside, reread };
 };
 
-const RequestsView = ({ read }: { read: Read }) => {
+/** The page's one line in a card, where the table would be. */
+const Note = ({ children }: { children: string }) => (
+  <Card>
+    <Empty>
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  </Card>
+);
+
+const RequestsView = ({ page }: { page: RequestsPage }) => {
   const { t } = useLingui();
   const router = useRouter();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/workflows/requests" });
   const { busy, failure, run } = useCoreAction();
-  const { page, needs, summary } = read;
+  const canManage = page.canSetPerPerson;
+  const { aside, reread } = useAside(canManage);
   const refresh = async (): Promise<void> => {
-    await router.invalidate({ sync: true });
+    await Promise.all([reread(), router.invalidate({ sync: true })]);
   };
+  // Only what the person changed, so a change someone else made meanwhile stays.
   const change = async (
     action: (session: Session) => Promise<unknown>
   ): Promise<void> => {
     await run(async (session) => {
       await action(session);
     });
-    await refresh();
+    await router.invalidate({ sync: true });
   };
   const place = search.place ?? null;
   const team = search.team ?? null;
   const narrowed = place !== null || team !== null;
   const month = formatMonth(page.report.from);
+  const summary = aside?.summary ?? null;
   const setMinutes = (kind: RequestKind, minutes: number) => {
     void change(async (session) => {
       await session.stephenRequests.updateSettings({
-        ...page.settings,
-        minutesSaved: { ...page.settings.minutesSaved, [kind]: minutes },
+        minutesSaved: { [kind]: minutes },
       });
     });
   };
@@ -108,9 +171,9 @@ const RequestsView = ({ read }: { read: Read }) => {
     <>
       <PageHeading
         action={
-          summary === null ? undefined : (
+          canManage && summary !== null ? (
             <RequestSummary onChanged={refresh} summary={summary} />
-          )
+          ) : undefined
         }
         title={t({
           message: "Requests",
@@ -129,7 +192,7 @@ const RequestsView = ({ read }: { read: Read }) => {
         team={team}
       />
       <RequestPlan
-        canSet={page.canSetPerPerson}
+        canSet={canManage}
         narrowed={narrowed}
         onRange={(range) => {
           void navigate({ search: { ...search, range } });
@@ -139,23 +202,19 @@ const RequestsView = ({ read }: { read: Read }) => {
       />
       <ErrorText>{failure}</ErrorText>
       {page.tooFew ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-12 text-center">
-          <span>{t`Fewer than five people: this isn't shown on its own.`}</span>
-        </p>
+        <Note>{t`Fewer than five people: this isn't shown on its own.`}</Note>
       ) : null}
       {!page.tooFew && page.report.total.requests === 0 ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-12 text-center">
-          <span>
-            {page.range === "year"
-              ? t`No requests in the last twelve months`
-              : t`No requests in ${month}`}
-          </span>
-        </p>
+        <Note>
+          {page.range === "year"
+            ? t`No requests in the last twelve months`
+            : t`No requests in ${month}`}
+        </Note>
       ) : null}
       {!page.tooFew && page.report.total.requests > 0 ? (
         <RequestTable
           busy={busy}
-          needs={needs}
+          needs={aside === undefined ? undefined : aside.needs}
           onChanged={refresh}
           onOnlyTeam={
             team === null
@@ -167,7 +226,6 @@ const RequestsView = ({ read }: { read: Read }) => {
           onPerPerson={(on) => {
             void change(async (session) => {
               await session.stephenRequests.updateSettings({
-                ...page.settings,
                 requestsPerPerson: on,
               });
             });
@@ -194,7 +252,7 @@ const RequestsRoute = () => {
       />
       <Page wide>
         {read.state === "ready" ? (
-          <RequestsView read={read.data} />
+          <RequestsView page={read.data} />
         ) : (
           <>
             <PageHeading title={title} />
@@ -216,7 +274,18 @@ export const Route = createFileRoute("/_shell/workflows/requests")({
     };
   },
   loaderDeps: ({ search }) => search,
-  loader: async ({ context: { core }, deps }) =>
-    await loadFromCore(core, async (session) => await readPage(session, deps)),
+  loader: async ({
+    context: { core },
+    deps: { range = "month", place, team },
+  }) =>
+    await loadFromCore(
+      core,
+      async (session) =>
+        await session.stephenRequests.report({
+          range,
+          place: place ?? null,
+          team: team ?? null,
+        })
+    ),
   component: RequestsRoute,
 });
