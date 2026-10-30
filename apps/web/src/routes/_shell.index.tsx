@@ -8,7 +8,7 @@ import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
-import { activeChat, appOfChat, setActiveChat } from "../chat/active-chat.ts";
+import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { ChatMore } from "../chat/chat-more.tsx";
@@ -43,6 +43,8 @@ import { usePageSidePanel } from "../screens/app-panel-context.tsx";
 
 interface ChatPage {
   chats: ChatSummary[];
+  /** The open chat, when it is past the end of `chats`. */
+  beyond?: ChatSummary;
   /** The person's projects, newest first. */
   projects: ChatProject[];
   /** The models a question may name, the default first. */
@@ -298,19 +300,21 @@ const Chat = () => {
   const [panel, setPanel] = useState(Route.useSearch().panel === true);
   // Whether the open chat's agent has an App to show beside it.
   const [building, setBuilding] = useState(false);
-  // One past the list's newest opens too, as core finds it (or says why
-  // not); whose it is the tab knows if it is an App's it opened.
+  // One past the list's newest opens too, as core keeps it (`beyond`,
+  // whose App it is for included), or, where core can't find it, to say
+  // why not.
   const chat =
     page.state !== "ready" || open === undefined
       ? undefined
-      : (page.data.chats.find(({ id }) => id === open) ?? {
+      : (page.data.chats.find(({ id }) => id === open) ??
+        (page.data.beyond?.id === open ? page.data.beyond : undefined) ?? {
           id: open,
           title: t`Chat`,
           createdAt: "",
           lastAt: "",
           running: false,
           projectId: null,
-          appId: appOfChat(open) ?? null,
+          appId: null,
         });
   // The open chat: the chat dock carries it on on every other page. An
   // App's own chat stays the App's, in the dock on its page, and leaves
@@ -432,6 +436,21 @@ const Chat = () => {
   );
 };
 
+/**
+ * Chat `chatId`, past the end of the list, as core keeps it; none where
+ * core can't find it, and the chat opens to say why.
+ */
+const chatPastTheList = async (
+  session: Session,
+  chatId: string
+): Promise<ChatSummary | undefined> => {
+  try {
+    return await session.chats.summary(chatId);
+  } catch {
+    return undefined;
+  }
+};
+
 export const Route = createFileRoute("/_shell/")({
   pendingComponent: PageLoading,
   validateSearch: (
@@ -460,7 +479,8 @@ export const Route = createFileRoute("/_shell/")({
       throw redirect({ to: "/", search: { chat: active }, replace: true });
     }
   },
-  loader: async ({ context: { core } }) =>
+  loaderDeps: ({ search }) => ({ chat: search.chat }),
+  loader: async ({ context: { core }, deps: { chat } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
       const [chats, projects, models, efforts, sourceNames, organizationName] =
         await Promise.all([
@@ -471,8 +491,15 @@ export const Route = createFileRoute("/_shell/")({
           readSourceNames(session),
           readOrganizationName(session),
         ]);
+      // A chat past the list's end, as core keeps it, so whose it is (an
+      // App's) is known; one core can't find opens to say why.
+      const beyond =
+        chat === undefined || chats.some(({ id }) => id === chat)
+          ? undefined
+          : await chatPastTheList(session, chat);
       return {
         chats,
+        ...(beyond === undefined ? {} : { beyond }),
         projects,
         models,
         efforts,

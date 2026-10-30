@@ -463,6 +463,10 @@ msgstr "{count, plural, one {# Workflow dient ihm} other {# Workflows dienen ihm
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {# Dokument hinzufügen} other {# Dokumente hinzufügen}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
+msgstr "{count, plural, one {Zähle die Stunden von # Workflow zusammen} other {Zähle die Stunden von # Workflows zusammen}}"
+
 #: src/chat/sources.tsx
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antworten stützen sich auf # Quelle} other {Antworten stützen sich auf # Quellen}}"
@@ -471,6 +475,10 @@ msgstr "{count, plural, one {Antworten stützen sich auf # Quelle} other {Antwor
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {einmal} other {#-mal}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
+msgstr "{count, plural, one {Lese # Workflow} other {Lese # Workflows}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {The board set # goal for the sprint.} other {The board set # goals for the sprint.}}"
 msgstr "{count, plural, one {Die Geschäftsleitung hat # Ziel für den Sprint gesetzt.} other {Die Geschäftsleitung hat # Ziele für den Sprint gesetzt.}}"
@@ -478,6 +486,10 @@ msgstr "{count, plural, one {Die Geschäftsleitung hat # Ziel für den Sprint ge
 #: src/connections/workflows-using.tsx
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Von # Workflow genutzt} other {Von # Workflows genutzt}}"
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{count, plural, other {# not counted yet}}"
+msgstr "{count, plural, other {# noch nicht gezählt}}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{count} of {finished} said how it was, at the end of their interview."
@@ -590,6 +602,10 @@ msgstr "{done} erledigt · {failed} fehlgeschlagen · 30 Tage"
 #: src/brain/brain-atlas.ts
 msgid "{drawn} drawn in the builder"
 msgstr "{drawn} im Builder gezeichnet"
+
+#: src/brain/thinking/work-hours.tsx
+msgid "{each, plural, one {# hour a week} other {# hours a week}}"
+msgstr "{each, plural, one {# Stunde pro Woche} other {# Stunden pro Woche}}"
 
 #: src/dashboard/spend-widget.tsx
 msgid "{each} a run"
@@ -720,6 +736,10 @@ msgstr "{holder}: {actions} auf {resource}"
 msgid "{hostCopies, plural, one {# copy outside Knowledge cleaned} other {# copies outside Knowledge cleaned}}"
 msgstr "{hostCopies, plural, one {# Kopie außerhalb von Wissen bereinigt} other {# Kopien außerhalb von Wissen bereinigt}}"
 
+#: src/brain/thinking/use-thinking.ts
+msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
+msgstr "{hours, plural, one {# Stunde pro Woche in allem, was Grasp zählen kann} other {# Stunden pro Woche in allem, was Grasp zählen kann}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# Stunde} other {# Stunden}}"
@@ -728,6 +748,10 @@ msgstr "{hours, plural, one {# Stunde} other {# Stunden}}"
 msgctxt "hours, short"
 msgid "{hours} h"
 msgstr "{hours} Std."
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{hours} of the {all} hours a week"
+msgstr "{hours} der {all} Stunden pro Woche"
 
 #: src/settings/week-hours.tsx
 msgid "{hoursOn, plural, one {On # hour a week: {summary}.} other {On # hours a week: {summary}.}}"
@@ -1078,6 +1102,10 @@ msgstr "{name}, wo geht in Ihrer Woche die Zeit hin?"
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
+
+#: src/brain/thinking/use-thinking.ts
+msgid "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
+msgstr "{name}: {hours, plural, one {# Stunde pro Woche} other {# Stunden pro Woche}}"
 
 #: src/onboarding/work-record.tsx
 msgid "{name}: {outOfTen} in 10"
@@ -7315,6 +7343,10 @@ msgstr "Nicht gehostet in {regions}"
 msgid "Hosted outside all of"
 msgstr "Gehostet außerhalb aller"
 
+#: src/brain/thinking/work-hours.tsx
+msgid "Hours not known yet"
+msgstr "Stunden noch nicht bekannt"
+
 #: src/policies/policy-editing.tsx
 msgid "How condition {position} reads"
 msgstr "Wie Bedingung {position} lautet"
@@ -13204,6 +13236,7 @@ msgid "See an example"
 msgstr "Beispiel ansehen"
 
 #: src/chat/answer-thinking.tsx
+#: src/chat/thinking-card.tsx
 msgid "See it in the brain"
 msgstr "Im Gehirn ansehen"
 
@@ -17533,6 +17566,10 @@ msgstr "Wo Personen aufhören"
 msgctxt "what Grasp knows, by source"
 msgid "Where the documents live"
 msgstr "Wo die Dokumente liegen"
+
+#: src/brain/thinking/shapes.ts
+msgid "Where the hours go"
+msgstr "Wohin die Stunden gehen"
 
 #: src/onboarding/interview-people.tsx
 msgid "Where the link stands"
