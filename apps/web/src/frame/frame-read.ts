@@ -1,0 +1,65 @@
+import { useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+
+import { frameReadMs } from "../core-connection.ts";
+import type { CoreConnection } from "../core-connection.ts";
+import { useCore } from "../use-core.ts";
+
+/**
+ * What the frame reads for itself beside every page (the sidebar's counts,
+ * the chat dock's models): read once it is shown; again after a change on
+ * a page (the router reads that page again, its address unchanged); and on
+ * the way to another page once what was read is older than
+ * {@link frameReadMs}, for what others changed meanwhile. Not on every
+ * click: a page of its own reads what it shows. `readAgain` forgets what
+ * was read and reads it now, as after core was out of reach. Of the reads
+ * it starts itself, only the latest one's answer is kept. `read` must be
+ * the same function on every render (one outside the component).
+ */
+export const useFrameRead = <T>(
+  read: (core: CoreConnection, signal?: AbortSignal) => Promise<T>
+): { value: T | undefined; readAgain: () => void } => {
+  const router = useRouter();
+  const core = useCore();
+  const [value, setValue] = useState<T>();
+  useEffect(() => {
+    const left = new AbortController();
+    let latest = 0;
+    let readAt = 0;
+    const readNow = async (): Promise<void> => {
+      latest += 1;
+      const mine = latest;
+      readAt = Date.now();
+      const answer = await read(core, left.signal);
+      if (mine === latest && !left.signal.aborted) {
+        setValue(answer);
+      }
+    };
+    void readNow();
+    // Not when only the search changes, as a filter typed into does.
+    const unsubscribe = router.subscribe(
+      "onResolved",
+      ({ pathChanged, hrefChanged }) => {
+        const changed = !hrefChanged;
+        const old = pathChanged && Date.now() - readAt >= frameReadMs;
+        if (changed || old) {
+          void readNow();
+        }
+      }
+    );
+    return () => {
+      // Nothing read after this is shown.
+      left.abort();
+      unsubscribe();
+    };
+  }, [router, core, read]);
+  return {
+    value,
+    readAgain: () => {
+      setValue(undefined);
+      void (async () => {
+        setValue(await read(core));
+      })();
+    },
+  };
+};

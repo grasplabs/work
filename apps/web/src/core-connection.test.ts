@@ -9,7 +9,12 @@ import {
 } from "vite-plus/test";
 
 import { activeChat, setActiveChat } from "./chat/active-chat.ts";
-import { CoreConnection, signOut } from "./core-connection.ts";
+import {
+  CoreConnection,
+  frameReadMs,
+  shellStatus,
+  signOut,
+} from "./core-connection.ts";
 import type { SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
 import { tabLink } from "./screens/tab-link.ts";
@@ -29,7 +34,10 @@ import { tabLink } from "./screens/tab-link.ts";
  * Who a new connection says is signed in: a person (once `held` lets it
  * answer, if given), nobody, or core down.
  */
-type Answer = { userId: string; held?: Promise<unknown> } | "nobody" | "down";
+type Answer =
+  | { userId: string; name?: string; held?: Promise<unknown> }
+  | "nobody"
+  | "down";
 
 /** A stand-in connection to core, and what happened to it. */
 interface Fake {
@@ -47,6 +55,8 @@ interface Fake {
 const tab = (answers: Answer[]) => {
   const opened: Fake[] = [];
   const ended: string[] = [];
+  /** What the tab asked core, by name, on any connection. */
+  const asked: string[] = [];
   let back: (() => void) | undefined;
   const core = new CoreConnection({
     onSessionEnded: () => {
@@ -59,10 +69,17 @@ const tab = (answers: Answer[]) => {
       }
       let broken: (() => void) | undefined;
       const session = {
-        whoami: async () =>
-          await Promise.resolve(
-            typeof answer === "object" ? { userId: answer.userId } : {}
-          ),
+        whoami: async () => {
+          asked.push("whoami");
+          if (typeof answer !== "object") {
+            return await Promise.resolve({});
+          }
+          // As it is when asked: a test may rename the person meanwhile.
+          const { userId, name } = answer;
+          return await Promise.resolve(
+            name === undefined ? { userId } : { userId, name }
+          );
+        },
       };
       const fake: Fake = {
         answer,
@@ -84,7 +101,14 @@ const tab = (answers: Answer[]) => {
           }
           return session;
         },
-        ping: async () => await Promise.resolve("pong"),
+        ping: async () => {
+          asked.push("ping");
+          return await Promise.resolve("pong");
+        },
+        signInOptions: async () => {
+          asked.push("signInOptions");
+          return await Promise.resolve([]);
+        },
         onRpcBroken: (onBroken: () => void) => {
           broken = onBroken;
         },
@@ -104,6 +128,7 @@ const tab = (answers: Answer[]) => {
     core,
     opened,
     ended,
+    asked,
     comeBack: () => {
       back?.();
     },
@@ -473,5 +498,80 @@ describe("the tab's one connection to core", () => {
       }
     }
     expect(attempts).toStrictEqual([1, 3, 7, 15, 31]);
+  });
+});
+
+// Who the shell knows is signed in, on every way to a page: asked of core
+// once, not on every click. How it could go wrong, each tried below: a
+// round trip before every page's own reads; a changed name, role or team
+// never shown; nobody signed in remembered, so signing in never counts.
+describe("who the shell knows is signed in", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("asks core once, then knows it on every page after without asking", async () => {
+    const { core, asked } = tab([one]);
+    const first = await shellStatus(core);
+    asked.length = 0;
+
+    const later = [
+      await shellStatus(core),
+      await shellStatus(core),
+      await shellStatus(core),
+    ];
+
+    expect({ asked, later }).toStrictEqual({
+      asked: [],
+      later: [first, first, first],
+    });
+    expect(first.identity?.userId).toBe("one");
+  });
+
+  it("shows what it knows at once once it's half a minute old, and asks again behind the page for the page after", async () => {
+    const person = { userId: "one", name: "One" };
+    const { core, asked } = tab([person]);
+    await shellStatus(core);
+    person.name = "Uno";
+    await vi.advanceTimersByTimeAsync(frameReadMs);
+    asked.length = 0;
+
+    const shown = await shellStatus(core);
+    const meanwhile = await shellStatus(core);
+    await vi.advanceTimersByTimeAsync(0);
+    const after = await shellStatus(core);
+
+    expect({
+      names: [shown, meanwhile, after].map(({ identity }) => identity?.name),
+      asked: asked.toSorted(),
+    }).toStrictEqual({
+      names: ["One", "One", "Uno"],
+      // Asked once, however many pages were opened meanwhile.
+      asked: ["ping", "signInOptions", "whoami"],
+    });
+  });
+
+  it("asks core on every page while nobody is signed in", async () => {
+    const { core, asked } = tab(["nobody"]);
+
+    const statuses = [await shellStatus(core), await shellStatus(core)];
+
+    expect({
+      signedIn: statuses.map(({ connected, identity }) => ({
+        connected,
+        identity,
+      })),
+      pings: asked.filter((name) => name === "ping"),
+    }).toStrictEqual({
+      signedIn: [
+        { connected: true, identity: undefined },
+        { connected: true, identity: undefined },
+      ],
+      pings: ["ping", "ping"],
+    });
   });
 });
