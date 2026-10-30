@@ -105,7 +105,10 @@ const OrgReadContext = createContext<Deferred<OrgRead> | undefined>(undefined);
 
 /** Never settles: what a part waits on while its organization's core isn't asked yet. */
 // Never resolved: asked once the page is opened, which loads it anew.
-const { promise: notAsked } = Promise.withResolvers<never>();
+const notAsked: PromiseLike<never> = {
+  // oxlint-disable-next-line unicorn/no-thenable -- a thenable is what `use` takes
+  then: () => notAsked,
+};
 
 /**
  * What the page read of its organization's core, once it is in: the
