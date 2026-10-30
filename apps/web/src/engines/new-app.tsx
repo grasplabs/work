@@ -29,10 +29,7 @@ export const NewApp = ({
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
-            <h1
-              className="text-2xl font-medium tracking-tight text-balance"
-              id="new-app"
-            >
+            <h1 className="type-title" id="new-app">
               <Trans>What should the app show, and for whom?</Trans>
             </h1>
           </div>

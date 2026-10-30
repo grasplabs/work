@@ -302,7 +302,7 @@ const ReviewDetails = ({
           <h4 className="font-medium">
             <Trans>Server code</Trans>
           </h4>
-          <Badge variant="destructive">
+          <Badge variant="attention">
             {i18n._(serverChangeWarnings[review.server])}
           </Badge>
           <ServerCode code={serverCode} onRetry={onRetryServerCode} />
@@ -314,7 +314,7 @@ const ReviewDetails = ({
             <Trans>Migrations</Trans>
           </h4>
           {review.migrations === null ? (
-            <Badge variant="destructive">
+            <Badge variant="attention">
               {t`Its migrations can't be read: it may rewrite the records of any table`}
             </Badge>
           ) : (
@@ -325,11 +325,11 @@ const ReviewDetails = ({
                 return (
                   <li className="flex flex-col gap-1" key={name}>
                     <code className="font-mono">{name}</code>
-                    <Badge variant="destructive">
+                    <Badge variant="attention">
                       {migrationWarning(change, table)}
                     </Badge>
                     {fixtures.failed ? (
-                      <Badge variant="destructive">{fixtures.text}</Badge>
+                      <Badge variant="attention">{fixtures.text}</Badge>
                     ) : (
                       <p className="text-muted-foreground">{fixtures.text}</p>
                     )}
@@ -352,7 +352,7 @@ const ReviewDetails = ({
                   {i18n._(workflowChangeWords[workflow.change])}{" "}
                   <code className="font-mono">{workflow.id}</code>
                   {workflow.sideEffect && workflow.change !== "removed" ? (
-                    <Badge variant="destructive">
+                    <Badge variant="attention">
                       <Trans>May change something outside Grasp</Trans>
                     </Badge>
                   ) : null}
@@ -396,7 +396,7 @@ const ReviewDetails = ({
                     <span className="flex items-center gap-2" key={step.name}>
                       {stepChangeText(step.change, step.name)}
                       {step.sideEffect ? (
-                        <Badge variant="destructive">
+                        <Badge variant="attention">
                           <Trans>May change something outside Grasp</Trans>
                         </Badge>
                       ) : null}
@@ -444,7 +444,7 @@ const ReviewDetails = ({
                 <li className="flex items-center gap-2" key={change.name}>
                   {text}
                   {widens ? (
-                    <Badge variant="destructive">
+                    <Badge variant="attention">
                       <Trans>Changes the domain&apos;s data</Trans>
                     </Badge>
                   ) : null}
@@ -522,7 +522,7 @@ const ReviewDetails = ({
           {review.tests.status === "failed" ? t`Workflow tests fail:` : null}
         </p>
         {review.tests.failures.map((failure) => (
-          <p className="text-destructive" key={failure}>
+          <p className="text-status-attention" key={failure}>
             {failure}
           </p>
         ))}
@@ -854,7 +854,7 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-3 text-sm">
       <TriangleAlertIcon
         aria-hidden="true"
-        className="text-destructive size-4 flex-none"
+        className="text-status-attention size-4 flex-none"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="font-medium">

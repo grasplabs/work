@@ -58,9 +58,10 @@ test("staff release a placed client, roll it back and offboard it", async ({
   const { clientId, releaseIds } = await seed(request);
   const [first, second] = releaseIds;
 
-  // Live on the first.
+  // Live on the first, its hosting folded away under its Setup.
   await visit(page, `/organizations/${clientId}/setup`);
   const section = hosting(page);
+  await section.getByRole("button", { name: "Show hosting details" }).click();
   await doneOn(page, first);
 
   // Released to the later one.
