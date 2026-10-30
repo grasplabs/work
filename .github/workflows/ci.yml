@@ -260,7 +260,10 @@ jobs:
       # in a home it doesn't own. A host IPC namespace, so Chromium's shared
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
-    runs-on: boat
+    # On GitHub's runners for now: the container runs as uid 1001, the
+    # GitHub runner's user, and boat's runner user differs, so the job
+    # can't write the runner's files there.
+    runs-on: ubuntu-latest
     # About 1 minute of setup and 2 for the stack to build and start, then
     # each part's tests.
     timeout-minutes: 20
@@ -372,7 +375,8 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
-    runs-on: boat
+    # On GitHub's runners, as e2e above.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
