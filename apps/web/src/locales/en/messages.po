@@ -1349,6 +1349,10 @@ msgstr "{team} · new"
 msgid "{team} · not out yet"
 msgstr "{team} · not out yet"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "{team} · our email didn’t reach them"
+msgstr "{team} · our email didn’t reach them"
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (team)"
@@ -3500,6 +3504,7 @@ msgstr "Can’t be read"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/interview-actions.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
@@ -4723,6 +4728,10 @@ msgstr "Delete {first}'s interview for good, with all they said?"
 #: src/policies/policy-editing.tsx
 msgid "Delete {name}?"
 msgstr "Delete {name}?"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Delete and start over"
+msgstr "Delete and start over"
 
 #: src/interview/closed.tsx
 msgid "Delete it"
@@ -5965,6 +5974,10 @@ msgstr "For the people it is shared with"
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
 msgstr "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
 
+#: src/onboarding/interview-actions.tsx
+msgid "For when their link doesn't reach them, or no longer opens for them."
+msgstr "For when their link doesn't reach them, or no longer opens for them."
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"
@@ -6056,6 +6069,10 @@ msgstr "Gets its links once the team is told"
 msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "Getting ready"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Give {name} a new start?"
+msgstr "Give {name} a new start?"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Give the go"
@@ -6430,6 +6447,10 @@ msgstr "Hello"
 msgctxt "part of an interview"
 msgid "Hello"
 msgstr "Hello"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Help them in"
+msgstr "Help them in"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -7838,6 +7859,10 @@ msgstr "Made with Grasp on {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Mail"
+msgstr "Mail"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail and messages to other people, after they press a card with every recipient."
@@ -8354,6 +8379,10 @@ msgstr "New rule"
 msgid "New since the last approval: {added}"
 msgstr "New since the last approval: {added}"
 
+#: src/onboarding/interview-actions.tsx
+msgid "New start"
+msgstr "New start"
+
 #: src/workflows/independent-workflows.tsx
 msgid "New workflow"
 msgstr "New workflow"
@@ -8638,6 +8667,10 @@ msgstr "No longer used: {removed}"
 msgid "No longer where it was"
 msgstr "No longer where it was"
 
+#: src/onboarding/interview-actions.tsx
+msgid "No mail to them failed."
+msgstr "No mail to them failed."
+
 #: src/onboarding/organization-words.ts
 msgid "No map of its work came of the lead's interview"
 msgstr "No map of its work came of the lead's interview"
@@ -8721,6 +8754,10 @@ msgstr "No policies yet. Upload one to have Grasp propose its rules."
 msgctxt "Pulse status"
 msgid "No Pulse"
 msgstr "No Pulse"
+
+#: src/onboarding/interview-actions.tsx
+msgid "no reason given"
+msgstr "no reason given"
 
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
@@ -9983,6 +10020,10 @@ msgstr "Otherwise:"
 #: src/workflows/workflow-diagram.tsx
 msgid "Otherwise: {name}"
 msgstr "Otherwise: {name}"
+
+#: src/onboarding/failed-mail.tsx
+msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
+msgstr "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
@@ -11775,6 +11816,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Send"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Send again"
+msgstr "Send again"
+
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
 msgstr "Send answer"
@@ -12290,6 +12335,10 @@ msgstr "Start again from version {newerVersion}"
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Start by typing"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Start over on a new device"
+msgstr "Start over on a new device"
 
 #: src/tour/tour-script.ts
 msgid "Start the tour"
@@ -13763,6 +13812,10 @@ msgstr "The workflow run that asked this has ended, so this decision has closed.
 msgid "The works council hasn't been heard"
 msgstr "The works council hasn't been heard"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Their link stops working, and what they said goes with them."
 msgstr "Their link stops working, and what they said goes with them."
@@ -13786,6 +13839,10 @@ msgstr "Their own: {minutes}"
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
 msgstr "Their rating"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Their reminder failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Their reminder failed on {on}: {reason}. Put right what stopped it, then send it again."
 
 #: src/settings/person-limits.tsx
 msgid "Their team's limit"
@@ -15442,6 +15499,10 @@ msgstr "What the vendor publishes about its certificates."
 msgid "What the workspace pays for Grasp."
 msgstr "What the workspace pays for Grasp."
 
+#: src/onboarding/interview-actions.tsx
+msgid "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked."
+msgstr "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked."
+
 #: src/brain/brain-article/statements-by-kind.tsx
 msgid "What they told us"
 msgstr "What they told us"
@@ -15573,6 +15634,10 @@ msgstr "When something needs you"
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
 msgstr "When the event {event} happens"
+
+#: src/onboarding/interview-actions.tsx
+msgid "When they lost the device their interview was on. Only on their request."
+msgstr "When they lost the device their interview was on. Only on their request."
 
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
