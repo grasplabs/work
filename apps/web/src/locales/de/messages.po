@@ -5013,6 +5013,10 @@ msgstr "Code kopieren"
 msgid "Copy fingerprint"
 msgstr "Fingerabdruck kopieren"
 
+#: src/screens/copy-deep-link.tsx
+msgid "Copy link"
+msgstr "Link kopieren"
+
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
 msgstr "Tabelle kopieren"
@@ -5083,6 +5087,10 @@ msgstr "konnte nicht gelesen werden"
 #: src/workflows/team-picker.tsx
 msgid "Couldn't change the team of {named}"
 msgstr "Das Team von {named} konnte nicht geändert werden"
+
+#: src/screens/copy-deep-link.tsx
+msgid "Couldn't copy the link"
+msgstr "Der Link konnte nicht kopiert werden"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
@@ -8715,6 +8723,10 @@ msgstr "Link verschickt"
 #: src/onboarding/interview-words.ts
 msgid "Link out on {date}"
 msgstr "Link verschickt am {date}"
+
+#: src/screens/copy-deep-link.tsx
+msgid "Link to {title} copied"
+msgstr "Link zu {title} kopiert"
 
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
