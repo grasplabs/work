@@ -40,7 +40,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import type { TeamChoice } from "../workflows/team-picker.tsx";
 import { SettingsSection } from "./settings-parts.tsx";
 
-// Settings › Packages › Who approves packages (GRA-1300): the members and
+// Settings › Packages › Who approves packages: the members and
 // teams an admin gave `dependencies.approve`, the one permission that
 // decides an App's or a workflow's npm packages. No role includes it, an
 // admin's neither, so until someone is given it here every package
