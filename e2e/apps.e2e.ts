@@ -317,6 +317,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Pulse",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
+        // The groups of teams the brain is laid out by.
+        "Brain",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
