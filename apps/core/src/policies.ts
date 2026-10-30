@@ -154,7 +154,7 @@ const exceptionOf = (row: ExceptionRow): PolicyException => ({
 });
 
 /** Every policy, rule and exception, newest first. */
-const readBook = async (env: Env): Promise<PolicyBook> => {
+export const readBook = async (env: Env): Promise<PolicyBook> => {
   const db = drizzle(env.DB);
   const [documents, rules, exceptions] = await db.batch([
     db.select().from(policyDocuments).orderBy(desc(policyDocuments.uploadedAt)),

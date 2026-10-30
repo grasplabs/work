@@ -47,6 +47,7 @@ import {
   gapsWith,
   redactGapAnswer,
 } from "./brain-gaps.ts";
+import { brainLandscapeAndPolicies } from "./brain-landscape.ts";
 import { brainNotes } from "./brain-notes.ts";
 import {
   addBrainRecords,
@@ -123,8 +124,10 @@ import { visibleApps } from "./workflows/overview.ts";
 // | goals              | the brain's records, for everyone signed in; each goal's |
 // |                    | linked workflows only as far as the person may see their |
 // |                    | App, while it still has them                             |
-// | landscape,         | nothing core can read holds them yet: empty              |
-// | policies           |                                                          |
+// | landscape          | the apps the landscape found (landscape.ts), for         |
+// |                    | everyone signed in, as its own read gives them           |
+// | policies           | the policy manager's documents (policies.ts), for        |
+// |                    | everyone signed in, as its own read gives them           |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
 // the documents shared) is the admin's: its own RPC shows the roster, the
@@ -1029,7 +1032,7 @@ export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [core, name, connections, transcribed, groups, weeks] =
+  const [core, name, connections, transcribed, groups, weeks, apps] =
     await Promise.all([
       readBrainCore(env, person),
       organizationName(env),
@@ -1037,6 +1040,7 @@ export const readBrain = async (
       knowledgeTranscriptSources(env, person),
       teamGroupsOf(env),
       onboardingStore(env).interviewWeeks(),
+      brainLandscapeAndPolicies(env, new Date()),
     ]);
   const { facts, records, teams } = core;
   const sources = await recordSources(env, core);
@@ -1070,8 +1074,8 @@ export const readBrain = async (
     gaps: await brainGaps(env, person, records),
     workflows: records.workflows,
     connections,
-    landscape: [],
-    policies: [],
+    landscape: apps.landscape,
+    policies: apps.policies,
   };
 };
 
