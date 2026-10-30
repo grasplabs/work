@@ -178,6 +178,7 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "package-artifacts",
   "platform",
   "policies",
+  "projects",
   "rpc",
   "screen-frame",
   "screen-modules",

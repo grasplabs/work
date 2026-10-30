@@ -1,4 +1,5 @@
 import { isAdmin } from "@grasp-os/shared/roles";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
 import { BrainIcon } from "lucide-react";
@@ -111,7 +112,7 @@ const SectionPage = () => {
               {shownCount(folder)}
             </span>
           </div>
-          <h1 className="type-title">{i18n._(groupLabel[section.group])}</h1>
+          <PageHeaderTitle>{i18n._(groupLabel[section.group])}</PageHeaderTitle>
           <p className="text-muted-foreground text-sm leading-relaxed">
             {i18n._(section.description)}
           </p>
