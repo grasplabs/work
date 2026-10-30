@@ -603,6 +603,10 @@ msgstr "{failures, plural, one {Once} other {# times}}"
 msgid "{file} removed"
 msgstr "{file} removed"
 
+#: src/engines/blueprint-update.tsx
+msgid "{files, plural, one {It changes # file. Review it before you take it.} other {It changes # files. Review it before you take it.}}"
+msgstr "{files, plural, one {It changes # file. Review it before you take it.} other {It changes # files. Review it before you take it.}}"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{finished} of {started}"
 msgstr "{finished} of {started}"
@@ -720,6 +724,10 @@ msgstr "{inDays, plural, one {Your next report is ready tomorrow} other {Your ne
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
 msgstr "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
+
+#: src/engines/blueprint-update.tsx
+msgid "{kept, plural, one {# file stays as your builders made it} other {# files stay as your builders made them}}"
+msgstr "{kept, plural, one {# file stays as your builders made it} other {# files stay as your builders made them}}"
 
 #: src/onboarding/interview-list.tsx
 msgid "{kept} of {written}"
@@ -2356,6 +2364,7 @@ msgid "Add the team"
 msgstr "Add the team"
 
 #: src/chat/builds.tsx
+#: src/engines/blueprint-update.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Added"
@@ -2427,6 +2436,10 @@ msgstr "Admins alerted at {alertAt}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins can change anyone's role, end their sessions and remove them, other admins included."
+
+#: src/engines/blueprint-update.tsx
+msgid "After"
+msgstr "After"
 
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
@@ -3406,6 +3419,10 @@ msgstr "Back to what is still missing"
 msgid "Base URL"
 msgstr "Base URL"
 
+#: src/engines/blueprint-update.tsx
+msgid "Before"
+msgstr "Before"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Before"
@@ -3521,6 +3538,10 @@ msgstr "Board goals"
 msgctxt "dashboard widget"
 msgid "Board goals"
 msgstr "Board goals"
+
+#: src/engines/blueprint-update.tsx
+msgid "Both the blueprint and your builders changed these, so the blueprint's change to them is left out."
+msgstr "Both the blueprint and your builders changed these, so the blueprint's change to them is left out."
 
 #: src/engines/resource-bindings.tsx
 msgid "Bound"
@@ -3696,6 +3717,7 @@ msgstr "Can’t be read"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/blueprint-update.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
@@ -3854,6 +3876,7 @@ msgid "Change: {text}"
 msgstr "Change: {text}"
 
 #: src/chat/builds.tsx
+#: src/engines/blueprint-update.tsx
 msgid "Changed"
 msgstr "Changed"
 
@@ -4137,6 +4160,7 @@ msgstr "Clear filters"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/blueprint-update.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -7233,6 +7257,10 @@ msgstr "Issue-to-Resolution"
 msgid "it answered something that isn't its records"
 msgstr "it answered something that isn't its records"
 
+#: src/engines/blueprint-update.tsx
+msgid "It becomes this domain's next version, which runs once it is made current. Nothing your builders changed is overwritten."
+msgstr "It becomes this domain's next version, which runs once it is made current. Nothing your builders changed is overwritten."
+
 #: src/dashboard/outcome-card.tsx
 msgid "It can be sent once more, exactly as before. Nothing is undone."
 msgstr "It can be sent once more, exactly as before. Nothing is undone."
@@ -7348,6 +7376,10 @@ msgstr "It rests on nothing you can see."
 #: src/brain/lessons-view.tsx
 msgid "It rests on turns you were not part of."
 msgstr "It rests on turns you were not part of."
+
+#: src/engines/blueprint-update.tsx
+msgid "It runs once it is made current."
+msgstr "It runs once it is made current."
 
 #: src/brain/remember-dialog.tsx
 msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
@@ -9336,6 +9368,10 @@ msgstr "None of the domain's integration permissions serves {contract} with ever
 #: src/engines/resource-bindings.tsx
 msgid "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
 msgstr "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+
+#: src/engines/blueprint-update.tsx
+msgid "None of this domain's files change."
+msgstr "None of this domain's files change."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"
@@ -11489,6 +11525,7 @@ msgid "Remove: {item}"
 msgstr "Remove: {item}"
 
 #: src/chat/builds.tsx
+#: src/engines/blueprint-update.tsx
 #: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Removed"
@@ -11737,6 +11774,10 @@ msgstr "Review overdue"
 #: src/dashboard/to-do.tsx
 msgid "Review the apps of {name}"
 msgstr "Review the apps of {name}"
+
+#: src/engines/blueprint-update.tsx
+msgid "Review the update"
+msgstr "Review the update"
 
 #. placeholder {0}: lesson.revision
 #. placeholder {0}: record.revision
@@ -13371,6 +13412,10 @@ msgstr "Take out of the project"
 msgid "Take out: {text}"
 msgstr "Take out: {text}"
 
+#: src/engines/blueprint-update.tsx
+msgid "Take the blueprint's update?"
+msgstr "Take the blueprint's update?"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Take the go back"
 msgstr "Take the go back"
@@ -13386,6 +13431,10 @@ msgstr "Take the tour"
 #: src/frame/person-menu.tsx
 msgid "Take the tour again"
 msgstr "Take the tour again"
+
+#: src/engines/blueprint-update.tsx
+msgid "Take the update"
+msgstr "Take the update"
 
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
@@ -13841,6 +13890,14 @@ msgstr "The apps your workflows can work in. Grasp only does what you allow per 
 #: src/settings/audit-chain.tsx
 msgid "The audit trail has no entries yet: there is nothing to verify."
 msgstr "The audit trail has no entries yet: there is nothing to verify."
+
+#: src/engines/blueprint-update.tsx
+msgid "The blueprint this domain was made from has an update"
+msgstr "The blueprint this domain was made from has an update"
+
+#: src/engines/blueprint-update.tsx
+msgid "The blueprint's update is version {version}"
+msgstr "The blueprint's update is version {version}"
 
 #: src/brain/brain-atlas.ts
 msgid "The board"
