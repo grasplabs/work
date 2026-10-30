@@ -49,9 +49,7 @@ const automaticWords = (view: ClientHostingView): string => {
   if (choice.destinationId !== null) {
     return `Goes in ${choice.destinationId}, Grasp's shared destination.`;
   }
-  return choice.reason === "several"
-    ? "Several shared destinations are recorded, so the admin doesn't pick one."
-    : "No shared destination is recorded yet: the admin records its own as soon as a page reads it.";
+  return "No shared destination is recorded yet: the admin records its own as soon as a page reads it.";
 };
 
 /** Facts, as a list of terms. */

@@ -1753,6 +1753,30 @@ const assertReleaseFits = async (
 /** How many of the newest imported releases a provisioning looks through for one that fits. */
 const fittingReleasesLooked = 20;
 
+/** Whether client `clientId` may be provisioned with imported release `releaseId` (`assertReleaseFits`). */
+export const releaseFits = async (
+  db: AdminDatabase,
+  clientId: string,
+  releaseId: string
+): Promise<boolean> => {
+  const manifest = await importedManifest(db, releaseId);
+  if (manifest === null) {
+    return false;
+  }
+  try {
+    await assertReleaseFits(db, clientId, manifest);
+    return true;
+  } catch (error) {
+    if (
+      error instanceof ProvisionOperationError ||
+      error instanceof DeployError
+    ) {
+      return false;
+    }
+    throw error;
+  }
+};
+
 /**
  * The newest imported release client `clientId` may be provisioned with
  * (`assertReleaseFits`), looking through the newest few; null when none

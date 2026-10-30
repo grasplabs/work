@@ -134,7 +134,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("asks who an organization is, its sign-in and its ring on adding it, and no account to adopt or release", async () => {
+  it("asks who an organization is, its sign-in, its ring and where it runs on adding it, and no account to adopt or release", async () => {
     const { status, html } = await page("/new-organization");
 
     expect({
@@ -148,12 +148,20 @@ describe("the company pages, in the admin", () => {
         'name="domains"',
         'name="admins"',
       ].every((field) => html.includes(field)),
+      // Grasp Cloud with its data in the EU unless staff choose otherwise.
+      hosting: [
+        'id="org-hosting"',
+        "Grasp Cloud",
+        "On its own premises",
+        "Keep its data in the EU",
+      ].every((text) => html.includes(text)),
     }).toStrictEqual({
       status: 200,
       form: true,
       account: false,
       release: false,
       signIn: true,
+      hosting: true,
     });
   });
 

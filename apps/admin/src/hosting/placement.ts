@@ -16,13 +16,17 @@ import {
   stageNamed,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, count, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, hostingDestinations } from "../db/schema.ts";
+import {
+  clientPlacements,
+  clients,
+  hostingDestinations,
+} from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
 import { currentRun, hasEnded } from "../runners.ts";
@@ -31,6 +35,7 @@ import { InventoryError, placeClient, placementOf } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
 import {
   newestFittingRelease,
+  releaseFits,
   ProvisionOperationError,
   provisionOf,
 } from "./operation.ts";
@@ -59,16 +64,18 @@ export interface DestinationChoice {
   shared: boolean;
   /** Empty when it can take the client. */
   problems: DestinationProblem[];
+  /** How many clients are placed in it. */
+  clients: number;
+  createdAt: Date;
 }
 
 /**
  * The destination the admin picks by itself, or why there's none:
- * `none` when no shared destination can take it, `several` when more
- * than one can.
+ * `none` when no shared destination can take it.
  */
 export type AutomaticChoice =
   | { destinationId: string; reason: null }
-  | { destinationId: null; reason: "none" | "several" };
+  | { destinationId: null; reason: "none" };
 
 /** A client's hosting, as its page shows it. */
 export interface ClientHostingView {
@@ -200,6 +207,19 @@ export const destinationChoices = async (
     .from(hostingDestinations)
     .orderBy(asc(hostingDestinations.id))
     .all();
+  const placed = await db
+    .select({
+      destinationId: clientPlacements.destinationId,
+      placedClients: count(),
+    })
+    .from(clientPlacements)
+    .groupBy(clientPlacements.destinationId);
+  const clientsIn = new Map(
+    placed.map(({ destinationId, placedClients }) => [
+      destinationId,
+      placedClients,
+    ])
+  );
   return rows
     .map((row) => ({
       id: row.id,
@@ -208,33 +228,33 @@ export const destinationChoices = async (
       problems: provisionable(row)
         ? []
         : [{ kind: "not_provisionable" as const }],
+      clients: clientsIn.get(row.id) ?? 0,
+      createdAt: row.createdAt,
     }))
     .toSorted((a, b) => kindOrder[a.kind] - kindOrder[b.kind]);
 };
 
 /**
- * The destination the admin picks by itself from `choices`: the shared
- * one it provisions in, when exactly one is. Conservative on purpose,
- * since a placement is for good (moving a client is a migration): spec
- * 37.2 keeps one shared namespace per environment, so two mean someone
- * recorded more than one place a client could go, and which one is
- * theirs to say, not the admin's to guess. With none, nothing is picked
- * either: dedicated hosting is never a fallback.
+ * The destination the admin picks by itself from `choices`: of the
+ * shared ones it provisions in, the one with the fewest clients, the
+ * oldest on a tie, then by id, so the pick is the same however often it
+ * is asked and never left to staff. With none, nothing is picked:
+ * dedicated hosting is never a fallback.
  */
 export const automaticChoice = (
   choices: readonly DestinationChoice[]
 ): AutomaticChoice => {
-  const placeable = choices.filter(
-    (choice) => choice.shared && choice.problems.length === 0
-  );
-  const [only, ...others] = placeable;
-  if (only === undefined) {
-    return { destinationId: null, reason: "none" };
-  }
-  if (others.length > 0) {
-    return { destinationId: null, reason: "several" };
-  }
-  return { destinationId: only.id, reason: null };
+  const [picked] = choices
+    .filter((choice) => choice.shared && choice.problems.length === 0)
+    .toSorted(
+      (a, b) =>
+        a.clients - b.clients ||
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        a.id.localeCompare(b.id)
+    );
+  return picked === undefined
+    ? { destinationId: null, reason: "none" }
+    : { destinationId: picked.id, reason: null };
 };
 
 /**
@@ -391,6 +411,26 @@ export const placeInputSchema = z.object({
 export type PlaceInput = z.infer<typeof placeInputSchema>;
 
 /**
+ * The release a provisioning started or resumed without one picked runs
+ * with: its operation's own, while that still fits the client
+ * (`releaseFits`), so a stopped one resumes as it was; else the newest
+ * that fits (`newestFittingRelease`).
+ */
+const resumeRelease = async (
+  db: AdminDatabase,
+  clientId: string
+): Promise<string | null> => {
+  const operation = await provisionOf(db, clientId);
+  if (
+    operation !== undefined &&
+    (await releaseFits(db, clientId, operation.releaseId))
+  ) {
+    return operation.releaseId;
+  }
+  return await newestFittingRelease(db, clientId);
+};
+
+/**
  * Places client `input.clientId`, as `staff`, unless it's placed already,
  * and starts provisioning it with `input.releaseId`, or resumes the
  * operation it has (`provisionPlacedClient`). Without a destination, the
@@ -449,8 +489,7 @@ export const placeAndProvision = async (
       `Client ${clientId}'s last run, ${run.runId}, is a ${run.kind} run`
     );
   }
-  const releaseId =
-    input.releaseId ?? (await newestFittingRelease(db, clientId));
+  const releaseId = input.releaseId ?? (await resumeRelease(db, clientId));
   if (releaseId === null) {
     throw new PlacementError(
       "no_fitting_release",

@@ -248,29 +248,67 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("picks nothing when several shared destinations qualify, for staff to choose", async () => {
-    await destination();
-    const second = await destination();
-    const clientId = await client();
+  it("picks, of several shared destinations, the one with the fewest clients, the oldest on a tie, and places there", async () => {
+    const older = await destination();
+    const newer = await destination();
+    // Recorded a day apart: the tie between them goes to the older.
+    await db
+      .update(hostingDestinations)
+      .set({ createdAt: new Date(Date.now() - 86_400_000) })
+      .where(eq(hostingDestinations.id, older));
+    const first = await client();
+    const second = await client();
     const releaseId = await importedRelease();
 
-    const view = await hostingOf(clientId);
-    expect(view.automatic).toStrictEqual({
-      destinationId: null,
-      reason: "several",
-    });
-    await expect(place(clientId, releaseId, null)).resolves.toMatchObject({
-      refused: "no_automatic_destination",
-    });
-
+    const tied = await hostingOf(first);
     using attempts = followAttempts();
-    await expect(place(clientId, releaseId, second)).resolves.toMatchObject({
-      refused: null,
-    });
+    const placedFirst = await place(first, releaseId, null);
     await latestStopped(attempts);
-    await expect(placementOf(clientId)).resolves.toStrictEqual({
-      destinationId: second,
+    // The older one now has a client: the next goes in the other.
+    const fewer = await hostingOf(second);
+    const placedSecond = await place(second, releaseId, null);
+    await latestStopped(attempts);
+
+    expect({
+      tied: tied.automatic,
+      placedFirst: placedFirst.refused,
+      firstIn: await placementOf(first),
+      fewer: fewer.automatic,
+      placedSecond: placedSecond.refused,
+      secondIn: await placementOf(second),
+    }).toStrictEqual({
+      tied: { destinationId: older, reason: null },
+      placedFirst: null,
+      firstIn: { destinationId: older },
+      fewer: { destinationId: newer, reason: null },
+      placedSecond: null,
+      secondIn: { destinationId: newer },
     });
+  });
+
+  it("tries a stopped provisioning again on its own release while that still fits, not the newest", async () => {
+    await destination();
+    const clientId = await client();
+    const own = await importedRelease();
+    using attempts = followAttempts();
+    await place(clientId, own, null);
+    await latestStopped(attempts);
+    await importedRelease();
+
+    // Retry, as its Setup's button asks: no release named.
+    const retried = await callServerFn(
+      placeAndProvisionFn,
+      { clientId, releaseId: null, destinationId: null },
+      { email: caller }
+    );
+    await latestStopped(attempts);
+    const operation = await operationOf(clientId);
+
+    expect({
+      retried: retried.refused,
+      operation: operation?.releaseId,
+      switched: await actorsOf(clientId, "provision.switch_release"),
+    }).toStrictEqual({ retried: null, operation: own, switched: [] });
   });
 
   it("places the client in a dedicated destination staff choose", async () => {
