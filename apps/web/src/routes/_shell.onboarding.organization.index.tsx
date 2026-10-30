@@ -8,6 +8,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -257,7 +258,7 @@ const Figures = ({ organization }: { organization: StaffOrganization }) => {
           key={figure.key}
         >
           <span className="text-muted-foreground text-xs">{figure.label}</span>
-          <span className="type-figure">{figure.value}</span>
+          <Stat>{figure.value}</Stat>
           <span className="text-muted-foreground text-xs">{figure.sub}</span>
         </div>
       ))}

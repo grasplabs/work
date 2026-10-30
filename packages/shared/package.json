@@ -58,6 +58,7 @@
     "./channel-keys": "./src/channel-keys.ts",
     "./channels": "./src/channels.ts",
     "./chat": "./src/chat.ts",
+    "./chat-search": "./src/chat-search.ts",
     "./chunks": "./src/chunks.ts",
     "./client-secrets": "./src/client-secrets.ts",
     "./config": "./src/config.ts",

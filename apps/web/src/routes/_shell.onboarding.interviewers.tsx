@@ -8,6 +8,7 @@ import type {
   StaffInterviewers,
 } from "@grasp-os/shared/onboarding-staff";
 import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -95,7 +96,7 @@ const Rating = ({ numbers }: { numbers: StaffInterviewer }) => {
       {average === null ? null : (
         <div className="grid items-center gap-x-8 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)]">
           <div className="flex flex-col gap-1.5">
-            <span className="type-figure">{t`${score} of 5`}</span>
+            <Stat>{t`${score} of 5`}</Stat>
             <span aria-hidden className="flex gap-1">
               {[1, 2, 3, 4, 5].map((rating) => (
                 <span

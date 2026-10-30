@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   createRootRoute,
   HeadContent,
@@ -47,7 +48,7 @@ const Frame = () => {
 /** A page there isn't, in the admin's frame. */
 const NotFound = () => (
   <main className="flex flex-col gap-4 p-6">
-    <h1 className="type-title">Not found</h1>
+    <PageHeaderTitle>Not found</PageHeaderTitle>
     <p className="text-sm">There&apos;s no such page.</p>
     <Link className="text-sm underline underline-offset-4" to="/">
       Back to the admin
