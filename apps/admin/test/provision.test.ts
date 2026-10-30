@@ -6,12 +6,15 @@ import {
   auditEvents,
   clientProvisions,
   clients,
+  hostingDestinations,
   releases,
 } from "../src/db/schema.ts";
 import { placeAndProvisionFn } from "../src/hosting/functions.ts";
+import { notStartedWords } from "../src/hosting/words.ts";
 import { createClient } from "../src/provision/control.ts";
 import type { ProvisionInput } from "../src/provision/control.ts";
 import { startClient } from "../src/provision/functions.ts";
+import { getProvisioning } from "../src/provision/queries.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -102,6 +105,85 @@ const importedRelease = async (): Promise<string> => {
 };
 
 describe("adding a client", () => {
+  it("starts provisioning by itself as it's added once a destination and a release are there, and says which is missing until then", async () => {
+    // First, before any test imports a release.
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
+    const add = async () => {
+      const input = inputOf();
+      await callServerFn(startClient, input, { email: staff.email });
+      return input.clientId;
+    };
+    const setupOf = async (clientId: string) => {
+      const view = await getProvisioning(env, clientId);
+      const operation = await db
+        .select({ releaseId: clientProvisions.releaseId })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      return {
+        phase: view?.phase,
+        notStarted: view?.notStarted,
+        operation: operation?.releaseId ?? null,
+        audited: await actions(clientId),
+      };
+    };
+
+    try {
+      // Each read as it's added: what keeps it is what's missing now.
+      const noDestination = await setupOf(await add());
+      await destination();
+      const noRelease = await setupOf(await add());
+      await importedRelease();
+      const releaseId = await importedRelease();
+      const started = await setupOf(await add());
+
+      expect({
+        noDestination,
+        noRelease,
+        started: {
+          operation: started.operation,
+          audited: started.audited.slice(0, 4),
+        },
+        attempts: runs.started.length,
+        words: [
+          notStartedWords("no_destination"),
+          notStartedWords("no_release"),
+        ],
+      }).toStrictEqual({
+        noDestination: {
+          phase: "placing",
+          notStarted: "no_destination",
+          operation: null,
+          audited: ["client.create"],
+        },
+        noRelease: {
+          phase: "placing",
+          notStarted: "no_release",
+          operation: null,
+          audited: ["client.create"],
+        },
+        // The newest release, in the one destination that meets its policy.
+        started: {
+          operation: releaseId,
+          audited: [
+            "client.create",
+            "client.place",
+            "client.provision_placed",
+            "provision.start",
+          ],
+        },
+        attempts: 1,
+        words: [
+          "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.",
+          "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.",
+        ],
+      });
+    } finally {
+      // The tests after choose among their own destinations alone.
+      await db.update(hostingDestinations).set({ accountId: null });
+    }
+  });
+
   it("records it being provisioned with no account of its own, audited, as staff add it", async () => {
     const companyId = crypto.randomUUID();
     const input = inputOf({ attioCompanyId: companyId.toUpperCase() });
@@ -149,7 +231,6 @@ describe("adding a client", () => {
       {
         clientId: input.clientId,
         releaseId,
-        policyId: "eu-storage",
         destinationId: null,
       },
       { email: staff.email }

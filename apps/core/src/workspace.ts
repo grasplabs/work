@@ -2662,6 +2662,41 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * What chat `chatId` has read: each source of its code runs, once. What a
+   * run its agent had started copies (GRA-1093, workflow-starts.ts), as
+   * whatever its input carries came from those. Withheld ones too
+   * (`#withheldRuns`): a concurrent turn may withhold one after the agent's
+   * call already carried it, and one withheld is unreadable now, so the
+   * run is refused at once. Fail closed: a chat with a source it can't read
+   * starts runs that release nothing until it can read it again.
+   *
+   * `null` for a chat this object doesn't hold, or holds no more, or is
+   * deleting (`deleteChat`): its sources are gone with it, so no start of
+   * its agent's can be held to them, and the caller refuses the start.
+   */
+  heldSourcesOf(chatId: unknown): string[] | null {
+    const parsed = chatIdSchema.safeParse(chatId);
+    if (!parsed.success || this.#deleting.has(parsed.data)) {
+      return null;
+    }
+    const id = parsed.data;
+    const held = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(eq(chats.id, id))
+      .get();
+    if (held === undefined) {
+      return null;
+    }
+    return this.#db
+      .selectDistinct({ sourceId: chatRunSources.sourceId })
+      .from(chatRunSources)
+      .where(eq(chatRunSources.chatId, id))
+      .all()
+      .map(({ sourceId }) => sourceId);
+  }
+
+  /**
    * Records with the run alone what an API call of it read (an App's
    * answer or files, the Knowledge catalog), before the call hands it
    * over: what the run's result rests on (`#withheldRuns`), never the
