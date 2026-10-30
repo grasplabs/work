@@ -286,11 +286,11 @@ describe("a session on the on-prem sandbox", () => {
     }
   );
 
-  // Its own stand-in core starts here, as in the test above: on a busy
-  // runner that alone takes longer than the default 5 s.
   it(
     "refuses to run on a sandbox that doesn't say it bounds the call's CPU time",
-    { timeout: 30_000 },
+    // It serves a stand-in of its own behind the proxy, as the tests above
+    // do, which a busy test runner takes longer than the default to start.
+    { timeout: 20_000 },
     async () => {
       // A proxy in front of the supervisor that drops what it says.
       const proxy = path.join(tempDir(), "proxy.sock");
