@@ -8,7 +8,7 @@ import {
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { resolverOf } from "../src/agent-thinking.ts";
+import { resolverOf, showThinking } from "../src/agent-thinking.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { personalChatsOf, says, transcript } from "./agent-chat.ts";
 import type { Answer } from "./ai-gateway.ts";
@@ -191,6 +191,50 @@ describe("a step of thinking, checked", () => {
           "Not in the brain as the person may read it: Weekly report. Name a team by its id or its name, and what a team said by its statement id.",
       },
       key: "handing-a-complete-file-to-mortgage-advice",
+    });
+  });
+
+  it("reads the brain again for the next step when a read failed, and once a read worked, no more", async () => {
+    let reads = 0;
+    const tool = showThinking(async () => {
+      reads += 1;
+      if (reads === 1) {
+        throw new Error("The brain could not be read.");
+      }
+      return await Promise.resolve(brain);
+    });
+    const shown = async (): Promise<unknown> => {
+      try {
+        const { details } = await tool.execute("call", {
+          step: "Reading the teams.",
+          shape: "same-pain",
+          move: "teams",
+          notes: ["team-1"],
+        });
+        return details;
+      } catch (error) {
+        return error instanceof Error ? error.message : error;
+      }
+    };
+    const outcomes = [await shown(), await shown(), await shown()];
+
+    expect({ outcomes, reads }).toStrictEqual({
+      outcomes: [
+        "The brain could not be read.",
+        {
+          text: "Reading the teams.",
+          notes: ["team-1"],
+          shape: "same-pain",
+          move: "teams",
+        },
+        {
+          text: "Reading the teams.",
+          notes: ["team-1"],
+          shape: "same-pain",
+          move: "teams",
+        },
+      ],
+      reads: 2,
     });
   });
 

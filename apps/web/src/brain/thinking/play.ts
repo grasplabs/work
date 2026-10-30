@@ -15,6 +15,24 @@ export interface ThinkingOf {
   calls: string[];
 }
 
+/** An answer's thinking as the address names it: its chat and its question. */
+export const thinkAddress = (chatId: string, questionId: number): string =>
+  `${chatId}:${questionId}`;
+
+/** The chat and question `think` names (`thinkAddress`), if it names one. */
+export const parseThink = (
+  think: string | undefined
+): { chatId: string; questionId: number } | undefined => {
+  if (think === undefined) {
+    return undefined;
+  }
+  const at = think.lastIndexOf(":");
+  const questionId = Number(think.slice(at + 1));
+  return at <= 0 || !Number.isInteger(questionId)
+    ? undefined
+    : { chatId: think.slice(0, at), questionId };
+};
+
 /** The thinking for each question of a chat that showed some, oldest first. */
 export const thinkingIn = (messages: readonly ChatMessage[]): ThinkingOf[] => {
   const found: ThinkingOf[] = [];

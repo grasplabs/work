@@ -10,20 +10,19 @@ import { BrainIcon, ClockIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { useLessMotion } from "../brain/less-motion.ts";
-import { thinkAddress } from "../brain/thinking/brain-thinking.ts";
 import { useSteppedLine } from "../brain/thinking/line.ts";
-import { thinkingIn } from "../brain/thinking/play.ts";
+import { noteArrivals, useThinkingLog } from "../brain/thinking/log.ts";
+import { thinkAddress, thinkingIn } from "../brain/thinking/play.ts";
 import type { ThinkingOf } from "../brain/thinking/play.ts";
-import {
-  noteArrivals,
-  useThinkingLog,
-} from "../brain/thinking/use-thinking.ts";
 
 // An answer that showed Grasp's thinking in the brain (`show_thinking`,
 // brain/thinking/*), in the thread: while Grasp works, the line over the
 // answer says the step it is at, each up as long as it takes to read; once
 // done, the answer's trace has "See it in the brain", which plays it again
-// there (grasplabs/prototype `components/chat/chat-message.tsx`).
+// there (grasplabs/prototype `components/chat/chat-message.tsx`). The
+// thread is on every page, in the chat dock: this reads only what the tab
+// saw of the thinking (log.ts, play.ts, line.ts), never how the brain draws
+// it (shapes.ts and what it imports), which loads with the brain.
 
 /** Each question's thinking, by the ID of the first answer to it. */
 export const useAnswerThinking = (

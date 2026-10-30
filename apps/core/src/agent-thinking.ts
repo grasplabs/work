@@ -41,13 +41,10 @@ const parameters = Type.Object(
       description:
         "What you do in this step, or at the last one what you found, in one short plain sentence in the person's language.",
     }),
-    shape: Type.Union(
-      thinkingShapes.map((shape) => Type.Literal(shape)),
-      {
-        description:
-          'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
-      }
-    ),
+    shape: Type.Enum(thinkingShapes, {
+      description:
+        'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
+    }),
     move: Type.String({
       description:
         'Which step of the shape this is. For "same-pain": "teams", then "said", then "together". For "hours": "work", then "hours", then "most".',
@@ -137,7 +134,14 @@ export const showThinking = (
     executionMode: "sequential",
     execute: async (_toolCallId, input) => {
       brain ??= readBrain();
-      const read = await brain;
+      let read: ThinkingBrain;
+      try {
+        read = await brain;
+      } catch (error) {
+        // Only a read that worked is kept: the next step reads again.
+        brain = undefined;
+        throw error;
+      }
       const checked = checkThinkingStep(input, resolverOf(read));
       if ("refused" in checked) {
         throw new Error(checked.refused);
