@@ -1261,6 +1261,7 @@ msgstr "{percent} % connu à ce jour"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "{percent}% of the project’s room used"
 msgstr "{percent} % de l’espace du projet utilisé"
+
 #: src/workflows/activity-bar.tsx
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} a approuvé {alias} pour la version {version}"
@@ -2792,10 +2793,6 @@ msgstr "Tous les appels ensemble"
 #: src/chat/chat-switcher.tsx
 msgid "All chats"
 msgstr "Tous les chats"
-
-#: src/brain/brain-atlas.ts
-msgid "All interviewed"
-msgstr "Toutes interviewées"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "All interviews"
@@ -6114,10 +6111,6 @@ msgstr "Chaque chat de ce projet le lit."
 msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
 msgstr "Chaque chat de ce projet les lit. Markdown, texte, CSV ou JSON, jusqu’à {projectDocumentMaxKb} Ko chacun."
 
-#: src/chat/chat-list.tsx
-msgid "Every chat is in a project."
-msgstr "Chaque chat est dans un projet."
-
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
 msgstr "Chaque question ou réclamation d’un client, du premier message jusqu’à sa résolution."
@@ -7102,12 +7095,13 @@ msgstr "Grasp ouvre"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp ouvre bientôt à tout le monde, dès que Stephen aura parlé avec les équipes. Si vous avez un lien d’entretien, il se trouve dans votre e-mail."
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Grasp reads these in every chat of the project."
-msgstr "Grasp les lit dans chaque chat du projet."
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp proposes"
 msgstr "Grasp propose"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Grasp reads these in every chat of the project."
+msgstr "Grasp les lit dans chaque chat du projet."
 
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -12419,11 +12413,6 @@ msgstr "Raisonnement"
 msgid "Receipt"
 msgstr "Reçu"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
-msgid "Recent chats"
-msgstr "Discussions récentes"
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Record-to-Report"
@@ -16357,12 +16346,11 @@ msgstr "À ces équipes"
 msgid "To use them again, someone who approves packages reviews them again."
 msgstr "Pour les utiliser à nouveau, une personne qui approuve les paquets les examine de nouveau."
 
-#: src/chat/chat-switcher.tsx
 #: src/brain/brain-log.tsx
 msgid "Today"
 msgstr "Aujourd’hui"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Aujourd’hui"
@@ -17694,9 +17682,6 @@ msgstr "Ce qu’il faut retenir"
 msgid "What to remove"
 msgstr "Ce qu’il faut supprimer"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "Qu’est-ce qui m’attend aujourd’hui ?"
 #: src/routes/_shell.workflows.index.tsx
 msgid "What to show of the runs"
 msgstr "Ce qu’il faut montrer des exécutions"
@@ -17704,6 +17689,10 @@ msgstr "Ce qu’il faut montrer des exécutions"
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Ce qu’il faut montrer des traces"
+
+#: src/chat/suggestions.tsx
+msgid "What waits on me today?"
+msgstr "Qu’est-ce qui m’attend aujourd’hui ?"
 
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
@@ -17855,13 +17844,14 @@ msgstr "Quand l’utiliser"
 msgid "Where"
 msgstr "Où"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "Où passe encore le plus de temps ?"
 #: src/workflows/requests/request-detail.tsx
 msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Où"
+
+#: src/chat/suggestions.tsx
+msgid "Where does the most time still go?"
+msgstr "Où passe encore le plus de temps ?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"

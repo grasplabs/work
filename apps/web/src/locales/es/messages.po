@@ -1261,6 +1261,7 @@ msgstr "Ahora, {percent} % conocido"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "{percent}% of the project’s room used"
 msgstr "{percent} % del espacio del proyecto en uso"
+
 #: src/workflows/activity-bar.tsx
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} aprobó {alias} para la versión {version}"
@@ -2792,10 +2793,6 @@ msgstr "Todas las llamadas juntas"
 #: src/chat/chat-switcher.tsx
 msgid "All chats"
 msgstr "Todos los chats"
-
-#: src/brain/brain-atlas.ts
-msgid "All interviewed"
-msgstr "Todos entrevistados"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "All interviews"
@@ -6114,10 +6111,6 @@ msgstr "Todos los chats de este proyecto lo leen."
 msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
 msgstr "Todos los chats de este proyecto los leen. Markdown, texto, CSV o JSON, de hasta {projectDocumentMaxKb} KB cada uno."
 
-#: src/chat/chat-list.tsx
-msgid "Every chat is in a project."
-msgstr "Todos los chats están en un proyecto."
-
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
 msgstr "Cada pregunta o queja de un cliente, desde el primer mensaje hasta que se resuelve."
@@ -7102,12 +7095,13 @@ msgstr "Grasp abre"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp abre pronto para todos, en cuanto Stephen haya hablado con los equipos. Si tienes un enlace de entrevista, está en tu correo."
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Grasp reads these in every chat of the project."
-msgstr "Grasp las lee en cada chat del proyecto."
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp proposes"
 msgstr "Grasp propone"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Grasp reads these in every chat of the project."
+msgstr "Grasp las lee en cada chat del proyecto."
 
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -12419,11 +12413,6 @@ msgstr "Razonamiento"
 msgid "Receipt"
 msgstr "Comprobante"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
-msgid "Recent chats"
-msgstr "Chats recientes"
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Record-to-Report"
@@ -16357,12 +16346,11 @@ msgstr "A estos equipos"
 msgid "To use them again, someone who approves packages reviews them again."
 msgstr "Para volver a usarlos, alguien que aprueba paquetes los revisa de nuevo."
 
-#: src/chat/chat-switcher.tsx
 #: src/brain/brain-log.tsx
 msgid "Today"
 msgstr "Hoy"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Hoy"
@@ -17694,9 +17682,6 @@ msgstr "Qué recordar"
 msgid "What to remove"
 msgstr "Qué eliminar"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "¿Qué me espera hoy?"
 #: src/routes/_shell.workflows.index.tsx
 msgid "What to show of the runs"
 msgstr "Qué mostrar de las ejecuciones"
@@ -17704,6 +17689,10 @@ msgstr "Qué mostrar de las ejecuciones"
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Qué mostrar de las trazas"
+
+#: src/chat/suggestions.tsx
+msgid "What waits on me today?"
+msgstr "¿Qué me espera hoy?"
 
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
@@ -17855,13 +17844,14 @@ msgstr "Cuándo usarla"
 msgid "Where"
 msgstr "Dónde"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "¿Dónde se va todavía más tiempo?"
 #: src/workflows/requests/request-detail.tsx
 msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Dónde"
+
+#: src/chat/suggestions.tsx
+msgid "Where does the most time still go?"
+msgstr "¿Dónde se va todavía más tiempo?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
