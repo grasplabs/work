@@ -47,8 +47,8 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 // its own that starts one exact workflow version on its own. This is their
 // registry: listing, creating one, moving it to another version of its
 // workflow, disabling and deleting it, each served to a signed-in person
-// over `/rpc` (workflow-triggers-rpc.ts). What it may start is decided as for any other
-// subject, by a permission of its own (`start` on the workflow), granted
+// over `/rpc` (workflow-triggers-rpc.ts). What it may start is decided as
+// for any other subject, by a permission of its own (`start` on the workflow), granted
 // by an admin, and checked at every start (workflow-starts.ts).
 //
 // Threat model, and how each is closed:
@@ -622,8 +622,15 @@ export const setTriggerEnabled = async (
   env: Env,
   by: Acting,
   id: unknown,
-  enabled: boolean
+  wanted: unknown
 ): Promise<void> => {
+  // Over `/rpc` anything may arrive: only a boolean says which way, and
+  // which of the two checks applies.
+  const enabled = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    z.boolean(),
+    wanted
+  );
   const trigger = await requireTriggerManager(
     env,
     by,
