@@ -147,6 +147,7 @@
     "./state-registry": "./src/state-registry.ts",
     "./statistics": "./src/statistics.ts",
     "./stephen-reach": "./src/stephen-reach.ts",
+    "./stephen-requests": "./src/stephen-requests.ts",
     "./store-limits": "./src/store-limits.ts",
     "./store-queries": "./src/store-queries.ts",
     "./store-reads": "./src/store-reads.ts",

@@ -120,7 +120,7 @@ const shown = async (admin: boolean, refusal?: string) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <MemoryPage admin={admin} />,
+    component: () => <MemoryPage admin={admin} teams={[]} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
