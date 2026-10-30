@@ -31,7 +31,7 @@ export const SignInOptions = ({
           void signIn(providerId, returnTo);
         }}
         size="xl"
-        variant={index === 0 ? "default" : "outline"}
+        variant={index === 0 ? "highlight" : "outline"}
       >
         <Trans>Sign in with {label}</Trans>
       </Button>
