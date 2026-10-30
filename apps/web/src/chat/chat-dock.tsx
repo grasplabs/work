@@ -497,7 +497,8 @@ const Dock = ({
 
 /**
  * The dock where it belongs: on every page in the frame but Chat's own,
- * which is the chat at full size. In the brain (its atlas, a region of
+ * which is the chat at full size, and a project's, whose box starts a
+ * chat in the project. In the brain (its atlas, a region of
  * it, a note or a part's page) it is the brain's own chat, kept as the
  * person moves about the brain, as in the prototype
  * (`knowledge/brain-chat.tsx`): its own conversation, apart from the one
@@ -518,8 +519,10 @@ export const ChatDock = () => {
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
   // Read here, once for every page, not by each dock: the brain's dock, each
   // App's and the chat's take each other's place between pages, and each
-  // read them again when it did. Not on Chat's own page, which shows no dock.
-  const shown = pathname !== "/";
+  // read them again when it did. Chat is the chat at full size, and a
+  // project's page has its own box, which starts a chat in the project:
+  // neither shows a dock, nor reads its models.
+  const shown = !(pathname === "/" || pathname.startsWith("/projects/"));
   const { value: models, readAgain } = useFrameRead(readModels, shown);
   if (!shown) {
     return null;
