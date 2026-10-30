@@ -288,6 +288,10 @@ msgstr "{conversations, plural, one {# conversación} other {# conversaciones}}"
 msgid "{count, plural, one {{date}: # entry} other {{date}: # entries}}"
 msgstr "{count, plural, one {{date}: # entrada} other {{date}: # entradas}}"
 
+#: src/brain/brain-log.tsx
+msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
+msgstr "{count, plural, one {{label}: # elemento} other {{label}: # elementos}}"
+
 #: src/dashboard/to-do.tsx
 #: src/inbox/items.ts
 msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
@@ -381,10 +385,6 @@ msgstr "{count, plural, one {# regla} other {# reglas}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# equipo, con sus roles} other {# equipos, con sus roles}}"
-
-#: src/brain/brain-log.tsx
-msgid "{count, plural, one {# thing} other {# things}}"
-msgstr "{count, plural, one {# cosa} other {# cosas}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
@@ -659,10 +659,6 @@ msgstr "{label}, a petición de {name} (personal de Grasp)"
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
 msgstr "{label}:"
-
-#: src/brain/brain-log.tsx
-msgid "{label}: {things}"
-msgstr "{label}: {things}"
 
 #: src/landscape/overview-tab.tsx
 msgid "{label}: open in {tabLabel}"
@@ -2034,6 +2030,10 @@ msgstr "Añade un dominio de una segunda marca o uno antiguo."
 msgid "Add a goal"
 msgstr "Añadir un objetivo"
 
+#: src/routes/_shell.settings.brain.tsx
+msgid "Add a group"
+msgstr "Añadir un grupo"
+
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
 #: src/routes/_shell.onboarding.organization.index.tsx
@@ -3294,6 +3294,7 @@ msgstr "Vinculado a"
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Brain"
 msgstr "Cerebro"
 
@@ -4136,6 +4137,10 @@ msgstr "Confirmar"
 #: src/chat/held-writes.tsx
 msgid "Confirm {what}"
 msgstr "Confirmar {what}"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Confirm groups"
+msgstr "Confirmar grupos"
 
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
@@ -6334,10 +6339,26 @@ msgstr "Ahora mismo no se pueden leer los presupuestos de Grasp, así que no se 
 msgid "Grasp's go was taken back: only the admins and Grasp's staff come in until it is given again."
 msgstr "Se retiró el visto bueno de Grasp: hasta que se vuelva a dar, solo entran los administradores y el equipo de Grasp."
 
+#: src/routes/_shell.settings.brain.tsx
+msgid "Grasp’s proposal counts once you confirm it."
+msgstr "La propuesta de Grasp cuenta en cuanto la confirmes."
+
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
 msgid "Grasp's staff"
 msgstr "Personal de Grasp"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Group name"
+msgstr "Nombre del grupo"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Group of {name}"
+msgstr "Grupo de {name}"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Groups of teams"
+msgstr "Grupos de equipos"
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -8338,6 +8359,10 @@ msgstr "Nuevo chat en este proyecto"
 msgid "new facts in the last interviews"
 msgstr "hechos nuevos en las últimas entrevistas"
 
+#: src/routes/_shell.settings.brain.tsx
+msgid "New group"
+msgstr "Nuevo grupo"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "Nota nueva"
@@ -8572,6 +8597,10 @@ msgstr "Todavía no hay archivos."
 #: src/dashboard/standard-widgets.tsx
 msgid "No goals yet."
 msgstr "Aún no hay objetivos."
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "No group"
+msgstr "Sin grupo"
 
 #: src/workflows/independent-workflows.tsx
 msgid "No independent workflow is shared with you yet."
@@ -10532,6 +10561,14 @@ msgstr "Proyectos"
 msgctxt "kind of app"
 msgid "Projects and tasks"
 msgstr "Proyectos y tareas"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Propose groups"
+msgstr "Proponer grupos"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Proposed"
+msgstr "Propuesto"
 
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
@@ -12882,6 +12919,7 @@ msgstr "Equipo: {name}"
 
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
+#: src/routes/_shell.settings.brain.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/person-limits.tsx
 msgid "Teams"
@@ -13160,6 +13198,14 @@ msgstr "La dirección aún no ha confirmado la visión."
 #: src/brain/brain-nav.tsx
 msgid "The brain"
 msgstr "El Brain"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "The brain has no teams to group yet."
+msgstr "El Brain aún no tiene equipos que agrupar."
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
+msgstr "Las regiones del Brain: tus equipos, agrupados como lo está tu empresa. Grasp puede proponer grupos; cuentan en cuanto los confirmes."
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"

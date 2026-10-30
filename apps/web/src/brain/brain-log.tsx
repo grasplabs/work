@@ -80,7 +80,8 @@ const DayColumns = ({ days, today }: { days: LogDay[]; today: string }) => {
         {columns.map(({ day, dots }) => {
           const label = day === today ? t`Today` : formatDay(day);
           const count = dots.length;
-          const things = plural(count, { one: "# thing", other: "# things" });
+          // One sentence: the day, and how many things came in on it.
+          const summary = t`${plural(count, { one: `${label}: # thing`, other: `${label}: # things` })}`;
           return (
             <li className="flex h-full min-w-0 flex-1" key={day}>
               {count === 0 ? (
@@ -90,7 +91,7 @@ const DayColumns = ({ days, today }: { days: LogDay[]; today: string }) => {
                   <TooltipTrigger
                     render={
                       <button
-                        aria-label={t`${label}: ${things}`}
+                        aria-label={summary}
                         className="hover:bg-muted focus-visible:bg-muted flex size-full flex-col-reverse items-center gap-0.5 overflow-hidden rounded-sm outline-none"
                         onClick={() => {
                           document
@@ -108,7 +109,7 @@ const DayColumns = ({ days, today }: { days: LogDay[]; today: string }) => {
                       <ColumnDot dot={dot} key={index} />
                     ))}
                   </TooltipTrigger>
-                  <TooltipContent>{t`${label}: ${things}`}</TooltipContent>
+                  <TooltipContent>{summary}</TooltipContent>
                 </Tooltip>
               )}
             </li>
