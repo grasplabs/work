@@ -12,6 +12,7 @@ import {
   releases,
   settings,
 } from "../src/db/schema.ts";
+import { DiscardError, discardClient } from "../src/hosting/discard.ts";
 import {
   deletePlacedClientFn,
   discardClientFn,
@@ -467,6 +468,62 @@ describe("placing a client and provisioning it, through the admin's entry", () =
       said: html.includes("run_gone"),
       words: html.includes("Its attempt is gone, or never started"),
     }).toStrictEqual({ run: "gone", going: false, said: true, words: true });
+  });
+
+  it("discards nothing of a client that went live between the check and the discard, and audits no discard", async () => {
+    const clientId = await client();
+    await db.insert(settings).values({
+      clientId,
+      key: "AUDIT_RETENTION_DAYS",
+      value: "90",
+      updatedBy: caller,
+      updatedAt: new Date(),
+    });
+    // The client goes live just before the discard's batch runs.
+    const racing = new Proxy(env.DB, {
+      get: (target, name): unknown => {
+        if (name === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            await target
+              .prepare("UPDATE clients SET status = 'active' WHERE id = ?")
+              .bind(clientId)
+              .run();
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, name, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const refusal = await discardClient(
+      { ...env, DB: racing },
+      staff,
+      clientId
+    ).then(
+      () => null,
+      (error: unknown) =>
+        error instanceof DiscardError ? error.code : "thrown"
+    );
+
+    expect({
+      refusal,
+      client: await db
+        .select({ status: clients.status })
+        .from(clients)
+        .where(eq(clients.id, clientId))
+        .get(),
+      settings: await db
+        .select({ key: settings.key })
+        .from(settings)
+        .where(eq(settings.clientId, clientId)),
+      audited: await actorsOf(clientId, "client.discard"),
+    }).toStrictEqual({
+      refusal: "not_provisioning",
+      client: { status: "active" },
+      settings: [{ key: "AUDIT_RETENTION_DAYS" }],
+      audited: [],
+    });
   });
 
   it("discards a client never placed, audited, freeing its id, and refuses one placed, unknown or being worked on", async () => {

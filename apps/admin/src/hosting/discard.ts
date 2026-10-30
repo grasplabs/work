@@ -16,10 +16,11 @@
  *   discard included, by its id. Nothing was ever released for it, so
  *   nothing else needs keeping.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 
 import type { Staff } from "../access.ts";
-import { act, adminDatabase } from "../db/act.ts";
+import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   clientAdminReads,
@@ -120,6 +121,14 @@ const assertDiscardable = async (
 };
 
 /**
+ * That client `clientId` is still discardable, as SQL: being provisioned,
+ * never placed, no operation, resource or Worker recorded. What every
+ * statement of a discard holds by, in the same batch as the check.
+ */
+const stillDiscardable = (clientId: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${clients} WHERE ${clients.id} = ${clientId} AND ${clients.status} = 'provisioning') AND NOT EXISTS (SELECT 1 FROM ${clientPlacements} WHERE ${clientPlacements.clientId} = ${clientId}) AND NOT EXISTS (SELECT 1 FROM ${clientProvisions} WHERE ${clientProvisions.clientId} = ${clientId}) AND NOT EXISTS (SELECT 1 FROM ${clientResources} WHERE ${clientResources.clientId} = ${clientId}) AND NOT EXISTS (SELECT 1 FROM ${clientWorkers} WHERE ${clientWorkers.clientId} = ${clientId})`;
+
+/**
  * Discards client `clientId`, as `staff`, audited (`client.discard`):
  * its record and what only the admin keeps of it (settings, sealed
  * secrets, reads, its watch, alerts and an ended runner's claim), in one
@@ -133,29 +142,41 @@ export const discardClient = async (
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
   await assertDiscardable(env, db, clientId);
-  await act(
-    db,
-    staff,
-    [
-      db.delete(settings).where(eq(settings.clientId, clientId)),
-      db
-        .delete(clientSealedSecrets)
-        .where(eq(clientSealedSecrets.clientId, clientId)),
-      db
-        .delete(clientAdminReads)
-        .where(eq(clientAdminReads.clientId, clientId)),
-      db.delete(clientWatch).where(eq(clientWatch.clientId, clientId)),
-      db.delete(rolloutTargets).where(eq(rolloutTargets.clientId, clientId)),
-      db.delete(staffAlerts).where(eq(staffAlerts.clientId, clientId)),
-      db.delete(clientRuns).where(eq(clientRuns.clientId, clientId)),
-      // Its placement, operation, resources and Workers reference it: one
-      // written since the check fails this, and the batch with it.
-      db
-        .delete(clients)
-        .where(
-          and(eq(clients.id, clientId), eq(clients.status, "provisioning"))
-        ),
-    ],
-    { action: "client.discard", clientId }
-  );
+  // Every delete holds only while the client is still discardable, read in
+  // the same batch: a client that went live, or was placed or given an
+  // operation since the check, loses nothing, and no discard is audited.
+  const still = stillDiscardable(clientId);
+  const results = await db.batch([
+    db.delete(settings).where(and(eq(settings.clientId, clientId), still)),
+    db
+      .delete(clientSealedSecrets)
+      .where(and(eq(clientSealedSecrets.clientId, clientId), still)),
+    db
+      .delete(clientAdminReads)
+      .where(and(eq(clientAdminReads.clientId, clientId), still)),
+    db
+      .delete(clientWatch)
+      .where(and(eq(clientWatch.clientId, clientId), still)),
+    db
+      .delete(rolloutTargets)
+      .where(and(eq(rolloutTargets.clientId, clientId), still)),
+    db
+      .delete(staffAlerts)
+      .where(and(eq(staffAlerts.clientId, clientId), still)),
+    db.delete(clientRuns).where(and(eq(clientRuns.clientId, clientId), still)),
+    // Last, as its placement, operation, resources and Workers reference
+    // it too: one written between the guard and this fails the batch.
+    db.delete(clients).where(and(eq(clients.id, clientId), still)),
+    // Recorded only if the client's row went.
+    auditIfChanged(db, staff, { action: "client.discard", clientId }),
+  ]);
+  const discarded = results.at(-1);
+  if (!Array.isArray(discarded) || discarded.length === 0) {
+    // Changed since the check: say how, as the check would now.
+    await assertDiscardable(env, db, clientId);
+    throw new DiscardError(
+      "client_busy",
+      `${clientId} changed while it was being discarded`
+    );
+  }
 };

@@ -31,7 +31,7 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "@grasp-os/ui/components/radio-group";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { rootRouteId, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatTime } from "../releases/format.ts";
@@ -521,6 +521,7 @@ const MailNotice = ({ view }: { view: ClientHostingView }) =>
  */
 const Discard = ({ view }: { view: ClientHostingView }) => {
   const navigate = useNavigate();
+  const router = useRouter();
   const { busy, failure, run } = useAction(discardRefusals);
   const [understood, setUnderstood] = useState(false);
   const discard = () => {
@@ -529,6 +530,12 @@ const Discard = ({ view }: { view: ClientHostingView }) => {
         data: { clientId: view.clientId },
       });
       if (result.refused === null) {
+        // The organizations stand a while (src/routes/__root.tsx): read
+        // them again, so it leaves the list and the sidebar at once.
+        await router.invalidate({
+          filter: (match) => match.routeId === rootRouteId,
+          sync: true,
+        });
         await navigate({ to: "/" });
       }
       return result;
