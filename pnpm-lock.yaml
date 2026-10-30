@@ -217,6 +217,9 @@ catalogs:
     jq-wasm:
       specifier: 3.0.0-jq-1.8.2
       version: 3.0.0-jq-1.8.2
+    lightningcss:
+      specifier: 1.33.0
+      version: 1.33.0
     lucide-react:
       specifier: 1.47.0
       version: 1.47.0
@@ -359,6 +362,12 @@ importers:
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
+      eslint:
+        specifier: 'catalog:'
+        version: 10.11.0(jiti@2.7.0)(supports-color@10.2.2)
+      lightningcss:
+        specifier: 'catalog:'
+        version: 1.33.0
       secretlint:
         specifier: 'catalog:'
         version: 13.0.5(supports-color@10.2.2)

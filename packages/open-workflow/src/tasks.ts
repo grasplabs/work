@@ -194,6 +194,27 @@ const metadataUses: Readonly<Record<string, readonly string[]>> = {
   concurrency: ["for", "fork"],
 };
 
+// A part begins at a task of the workflow's own list, and runs to the
+// next one that names one: inside another task, or in a function, a part
+// would be drawn nowhere, so it is refused rather than dropped.
+
+/** Whether a task at `site` may begin a part: one of the workflow's own list. */
+const beginsParts = (site: Site): boolean =>
+  site.scope.length === 1 && site.inFunction === undefined;
+
+/** `section`, where a task at `site` may name a part. */
+const partKeysOf = (site: Site): string[] =>
+  beginsParts(site) ? ["section"] : [];
+
+/** Why a part named at `site` is refused, where it is. */
+const nestedPartHint = (site: Site): Record<string, string> =>
+  beginsParts(site)
+    ? {}
+    : {
+        section:
+          "Name a part on a task of the workflow's own task list: a part never begins inside another task or a function.",
+      };
+
 /**
  * A named part the task begins (`metadata.grasp.section`): its name, and
  * what it is for and its summary as display text. Nothing in it runs.
@@ -204,6 +225,10 @@ const checkSection = (
   pointer: string,
   site: Site
 ): void => {
+  // Refused already where no part begins (`nestedPartHint`).
+  if (!beginsParts(site)) {
+    return;
+  }
   const section = objectAt(checker, value, pointer, site, "section");
   if (section === undefined) {
     return;
@@ -293,13 +318,20 @@ const checkMetadata = (
   if (grasp === undefined) {
     return metadata;
   }
-  const applicable = ["label", "position", "section"];
+  const applicable = ["label", "position", ...partKeysOf(site)];
   for (const [key, uses] of Object.entries(metadataUses)) {
     if (uses.includes(kind)) {
       applicable.push(key);
     }
   }
-  allowKeys(checker, grasp, applicable, graspPointer, site);
+  allowKeys(
+    checker,
+    grasp,
+    applicable,
+    graspPointer,
+    site,
+    nestedPartHint(site)
+  );
   if (Object.hasOwn(grasp, "label")) {
     textAt(
       checker,
