@@ -341,6 +341,14 @@ const ActivityList = ({
   );
 };
 
+/** How many there are, beside a part's name, once read; nothing before any. */
+const Count = ({ loaded }: { loaded: Loaded<unknown[]> }) =>
+  loaded.state === "ready" && loaded.data.length > 0 ? (
+    <span className="text-muted-foreground tabular-nums">
+      {loaded.data.length}
+    </span>
+  ) : null;
+
 export const Traces = ({
   workflow,
   runs,
@@ -377,13 +385,15 @@ export const Traces = ({
           }
         }}
         value={[part]}
-        variant="outline"
       >
+        {/* Quiet, each with how many, as the prototype has them. */}
         <ToggleGroupItem value="runs">
           {t({ message: "Runs", context: "activity of a workflow: what ran" })}
+          <Count loaded={runs} />
         </ToggleGroupItem>
         <ToggleGroupItem value="activity">
           {t({ message: "Activity", context: "what a workflow did lately" })}
+          <Count loaded={activity} />
         </ToggleGroupItem>
       </ToggleGroup>
       {/* Kept while Activity shows: a test going on stays followed, and

@@ -700,19 +700,19 @@ const WorkflowView = ({
         </TabsList>
       </div>
       <TabsContent value="steps">
-        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+        <div className="pb-chat px-6 pt-6">
           <Steps steps={steps} />
         </div>
       </TabsContent>
       <TabsContent value="triggers">
-        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+        <div className="pb-chat px-6 pt-6">
           <WorkflowTriggers triggers={triggers} />
         </div>
       </TabsContent>
       {/* Kept while another tab shows: what was saved or typed stays. */}
       {params === null ? null : (
         <TabsContent keepMounted value="parameters">
-          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+          <div className="pb-chat px-6 pt-6">
             <Parameters
               app={summary.app}
               editable={setsParams}
@@ -723,7 +723,7 @@ const WorkflowView = ({
         </TabsContent>
       )}
       <TabsContent value="runs">
-        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6">
+        <div className="pb-chat flex flex-col gap-6 px-6 pt-6">
           <Figures activity={activity} summary={summary} />
           {runs.state === "ready" ? (
             <RunsLog
@@ -740,7 +740,7 @@ const WorkflowView = ({
       </TabsContent>
       {versions === undefined ? null : (
         <TabsContent value="versions">
-          <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+          <div className="pb-chat px-6 pt-6">
             <Versions versions={versions} />
           </div>
         </TabsContent>
