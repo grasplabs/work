@@ -17,8 +17,8 @@ import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import { targetNames } from "../dashboard/dependency-requests.tsx";
 import type { NotificationsPage } from "../dashboard/failed-workflows.tsx";
-import { decidesRequests } from "../dashboard/to-do.tsx";
-import type { Viewer, Waiting } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/waiting.ts";
+import type { Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 
