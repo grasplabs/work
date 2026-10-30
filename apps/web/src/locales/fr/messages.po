@@ -9199,12 +9199,13 @@ msgstr "Personne n'approuve encore de paquets : chaque demande de paquets attend
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Personne ne sait pourquoi. Cela attend que quelqu’un l’explique."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Personne de Grasp ne peut se connecter à cet espace de travail pour le moment."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14339,6 +14340,7 @@ msgstr "Le CSE n’a pas été consulté"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Leur accès prend alors fin de lui-même."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Leur lien a échoué le {on} : {reason}. Corrigez ce qui l’a bloqué, puis renvoyez-le."

@@ -9199,12 +9199,13 @@ msgstr "Noch niemand gibt Pakete frei, daher wartet jede Paketanfrage."
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kann sagen, warum. Es wartet, bis jemand es erklärt."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Niemand sonst zum Hinzufügen."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Niemand von Grasp kann sich jetzt bei diesem Workspace anmelden."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14339,6 +14340,7 @@ msgstr "Der Betriebsrat wurde nicht angehört"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Dann endet ihr Zugriff von selbst."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Ihr Link ist am {on} fehlgeschlagen: {reason}. Beheben Sie, was ihn aufgehalten hat, und senden Sie ihn dann erneut."

@@ -9199,12 +9199,13 @@ msgstr "Nobody approves packages yet, so every package request waits."
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Nobody can say why. It waits until someone explains it."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Nobody from Grasp can sign in to this workspace now."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Nobody else to add."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Nobody from Grasp can sign in to this workspace now."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -14339,6 +14340,7 @@ msgstr "The works council hasn't been heard"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Their access ends on its own then."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
