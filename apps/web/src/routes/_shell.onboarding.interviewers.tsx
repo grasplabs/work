@@ -95,9 +95,7 @@ const Rating = ({ numbers }: { numbers: StaffInterviewer }) => {
       {average === null ? null : (
         <div className="grid items-center gap-x-8 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)]">
           <div className="flex flex-col gap-1.5">
-            <span className="text-2xl leading-tight font-medium tabular-nums">
-              {t`${score} of 5`}
-            </span>
+            <span className="type-figure">{t`${score} of 5`}</span>
             <span aria-hidden className="flex gap-1">
               {[1, 2, 3, 4, 5].map((rating) => (
                 <span
