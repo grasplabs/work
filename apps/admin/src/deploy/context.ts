@@ -202,9 +202,9 @@ const isPlatformKey = (name: SharedSecret): name is PlatformKeySecret =>
  * A shared secret's value, its stand-in while the store has none, or
  * undefined for one of Grasp's AI provider keys the store doesn't have:
  * connect then goes without it, and a platform feature whose provider has
- * no key fails with its own code, never on another provider. Whether the
- * features staff chose have their keys is checked before a deploy
- * (src/deploy/core-vars.ts).
+ * no key says it isn't configured yet, never served by another provider.
+ * A deploy never waits on one; Platform's Readiness names a key the
+ * features staff chose still lack (src/admin/readiness.ts).
  */
 const sharedSecret = async (
   env: Env,

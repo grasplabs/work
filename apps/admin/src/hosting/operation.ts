@@ -146,11 +146,7 @@ import {
   derivedCoreConfig,
 } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
-import {
-  configuredCoreVars,
-  keyedProviders,
-  mailSenderOf,
-} from "../deploy/core-vars.ts";
+import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
 import { DeployError, errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
@@ -1539,8 +1535,7 @@ const coreVarsOf = async (
       // When the operation started: the same however often it's resumed.
       at: loaded.operation.createdAt.toISOString(),
     },
-    mailSenderOf(context, loaded.held.clientId),
-    keyedProviders(context.secrets.shared.connect)
+    mailSenderOf(context, loaded.held.clientId)
   );
 };
 

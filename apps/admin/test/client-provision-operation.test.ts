@@ -1981,7 +1981,7 @@ describe("provisioning a placed client", () => {
         .map(({ name }) => name),
       // No AI Gateway is made or read, and core is given no model allowlist.
       gatewayCalls: cloudflare.calls.filter(({ path }) =>
-        path.includes("/gateways")
+        path.includes("/ai-gateway")
       ).length,
       modelGateway: coreBindings.some(({ name }) => name === "MODEL_GATEWAY"),
       // Grasp's AI features as the platform chose them: the defaults, none chosen.
@@ -2005,6 +2005,56 @@ describe("provisioning a placed client", () => {
       keys: { core: [], connect: ["OPENAI_API_KEY"] },
       mail: [],
       zones: 0,
+      routed: true,
+    });
+  });
+
+  it("takes the real release live with no AI provider key of Grasp's at all, its connect given none", async () => {
+    const real = await importRealRelease();
+    const { account, clientId, held } = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+
+    // Secrets Store holds no provider key: the platform AI's defaults name
+    // OpenAI all the same, and only those features wait for the key.
+    await runClientProvision(
+      {
+        ...context,
+        secrets: {
+          ...secrets,
+          shared: { connect: { COMPOSIO_API_KEY: "composio" } },
+        },
+        router: {
+          ...context.router,
+          namespace: clientDispatchNamespace,
+          dispatcher: cloudflare.dispatcher(
+            account.id,
+            clientDispatchNamespace
+          ),
+        },
+      },
+      held
+    );
+
+    const { core, connect } = await scriptsOf(clientId);
+    const scripts = account.namespaces.get(clientDispatchNamespace);
+    const aiKeys = (script: string) =>
+      [...(scripts?.get(script)?.versions.at(-1)?.secrets.keys() ?? [])].filter(
+        (name) => name.endsWith("_API_KEY") && name !== "COMPOSIO_API_KEY"
+      );
+    expect({
+      operation: await operationOf(clientId),
+      gatewayCalls: cloudflare.calls.filter(({ path }) =>
+        path.includes("/ai-gateway")
+      ).length,
+      keys: { core: aiKeys(core), connect: aiKeys(connect) },
+      routed: await routed(clientId),
+    }).toMatchObject({
+      operation: { status: "done" },
+      gatewayCalls: 0,
+      keys: { core: [], connect: [] },
       routed: true,
     });
   });

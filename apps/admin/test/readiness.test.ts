@@ -186,7 +186,7 @@ describe("Platform's Readiness", () => {
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
   });
 
-  it("blocks onboarding while Grasp's AI is on a provider whose key Secrets Store doesn't have, naming it", async () => {
+  it("says Grasp's AI isn't configured while Secrets Store lacks the chosen provider's key, naming it, without blocking onboarding", async () => {
     const keyed = await withVars(production, readiness);
     await emptyStoreSecret(env.OPENAI_API_KEY, "OPENAI_API_KEY");
     const unkeyed = await withVars(production, readiness);
@@ -195,11 +195,14 @@ describe("Platform's Readiness", () => {
       keyed: statuses(keyed).platform_ai,
       unkeyed: statuses(unkeyed).platform_ai,
       words: wordsOf(unkeyed, "platform_ai"),
+      // Provisioning and deploys go on without it.
+      blocking: unkeyed.blocking - keyed.blocking,
     }).toStrictEqual({
       keyed: "ready",
-      unkeyed: "blocked",
+      unkeyed: "not_configured",
       words:
-        "Platform → AI chose a provider whose key Secrets Store doesn't have (OPENAI_API_KEY), so every deploy stops. Add OPENAI_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
+        "Secrets Store has no OPENAI_API_KEY, so document conversion, transcription and speech aren't configured yet in any organization; everything else works. Add OPENAI_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
+      blocking: 0,
     });
   });
 
