@@ -192,6 +192,8 @@ export interface BrainPorts<C> {
       reader: C,
       suiteId: string
     ) => Promise<readonly EvalCapability[]>;
+    /** Security gates every suite's decision policy must hold. */
+    mandatedGates?: readonly string[];
   };
   memories: {
     /**

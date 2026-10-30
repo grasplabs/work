@@ -388,6 +388,11 @@ export const brainEvalSuiteVersions = sqliteTable(
     graderDigest: text("grader_digest").notNull(),
     /** Baseline, model, environment and policy versions, as JSON. */
     pins: text().notNull(),
+    /**
+     * What a candidate must show to be published (../eval-decision.ts),
+     * as JSON, set by the owner and frozen with the version.
+     */
+    decision: text().notNull().default("{}"),
     /** User ID of whoever proposed it. */
     proposedBy: text("proposed_by").notNull(),
     acceptedBy: text("accepted_by"),
