@@ -5,6 +5,10 @@ import type {
   TraceStep,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
+import {
+  workflowResourceErrors,
+  workflowRunTraceOptionsSchema,
+} from "@grasp-os/shared/workflow-resources";
 import type { ReadableHistoryRecord } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -170,8 +174,14 @@ export const resourceRunTrace = async (
   env: Env,
   by: Acting,
   id: unknown,
-  runId: unknown
+  runId: unknown,
+  options?: unknown
 ): Promise<WorkflowRunTrace> => {
+  const { doors } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    workflowRunTraceOptionsSchema,
+    options
+  );
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const run = await resourceRunFor(env, by, workflow.id, runId);
   const definition = await workflowDefinition(
@@ -181,7 +191,9 @@ export const resourceRunTrace = async (
     run.version
   );
   const parsed = z.json().parse(JSON.parse(definition));
-  const diagram = await withDoors(env, by, workflowDiagram(parsed), parsed);
+  // Its doors once per trace view: a trace followed again draws none.
+  const drawn = workflowDiagram(parsed);
+  const diagram = doors ? await withDoors(env, by, drawn, parsed) : drawn;
   // Past its retention as the deployment has it now, or once swept, no
   // more of it is shown than of its result (resource-runs.ts): the engine
   // may still hold its journal for the retention it was admitted with.
