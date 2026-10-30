@@ -3633,6 +3633,7 @@ msgstr "No se puede leer"
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
 #: src/settings/invitations.tsx
+#: src/settings/staff-access.tsx
 msgid "Cancel"
 msgstr "Cancelar"
 
@@ -5480,6 +5481,18 @@ msgstr "Dominios de correo de los empleados"
 msgid "Employee interviews"
 msgstr "Entrevistas con empleados"
 
+#: src/settings/staff-access.tsx
+msgid "End access"
+msgstr "Terminar acceso"
+
+#: src/settings/staff-access.tsx
+msgid "End Grasp staff access now?"
+msgstr "¿Terminar ahora el acceso del personal de Grasp?"
+
+#: src/settings/staff-access.tsx
+msgid "End staff access now"
+msgstr "Terminar ahora el acceso del personal"
+
 #: src/tour/tour-layer.tsx
 msgid "End the tour"
 msgstr "Terminar el recorrido"
@@ -5656,6 +5669,10 @@ msgstr "Todos los demás del equipo esperan esta entrevista, unos pocos días la
 #: src/dashboard/report.ts
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
 msgstr "Todos los demás, en los equipos cuyas cifras se pueden mostrar: {talked} de {asked}"
+
+#: src/settings/staff-access.tsx
+msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
+msgstr "Todas las personas de Grasp cierran sesión de inmediato, y nadie de Grasp puede volver a iniciar sesión hasta que se abra un nuevo periodo."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Everyone has a link of their own: whoever has it is them, so send each only to its owner. Links that are not out yet open on their day, or once their lead has talked."
@@ -6221,6 +6238,10 @@ msgstr "De tus dominios"
 msgid "From your HR or payroll system. Microsoft 365 or Google can be connected later, with us."
 msgstr "De tu sistema de RR. HH. o de nóminas. Microsoft 365 o Google se pueden conectar más adelante, con nosotros."
 
+#: src/settings/staff-access.tsx
+msgid "Full access"
+msgstr "Acceso completo"
+
 #: src/brain/brain.ts
 msgid "Gap"
 msgstr "Laguna"
@@ -6507,9 +6528,18 @@ msgstr "Grasp envió esto, pero su respuesta se perdió: nadie sabe si surtió e
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
 msgstr "Grasp los configura para tu organización, según lo acordado contigo. Para cambiarlos, contacta con Grasp."
 
+#: src/routes/_shell.settings.workspace.tsx
+#: src/settings/staff-access.tsx
+msgid "Grasp staff access"
+msgstr "Acceso del personal de Grasp"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Grasp staff can read parameters, not change them."
 msgstr "El personal de Grasp puede leer los parámetros, no cambiarlos."
+
+#: src/settings/staff-access.tsx
+msgid "Grasp staff can sign in"
+msgstr "El personal de Grasp puede iniciar sesión"
 
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -9169,6 +9199,9 @@ msgstr "Nadie aprueba paquetes todavía, así que cada solicitud de paquetes esp
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Nadie sabe por qué. Espera hasta que alguien lo explique."
 
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Nadie de Grasp puede iniciar sesión en este espacio de trabajo ahora."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "No hay nadie más que añadir."
@@ -9934,6 +9967,10 @@ msgstr "En esta página conectas las herramientas con las que trabaja tu organiz
 #: src/routes/_shell.settings.tsx
 msgid "Onboarding"
 msgstr "Onboarding"
+
+#: src/settings/staff-access.tsx
+msgid "Onboarding only"
+msgstr "Solo onboarding"
 
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding sections"
@@ -14299,6 +14336,9 @@ msgstr "La ejecución del flujo de trabajo que lo preguntó ha terminado, así q
 msgid "The works council hasn't been heard"
 msgstr "El comité de empresa no ha sido consultado"
 
+#: src/settings/staff-access.tsx
+msgid "Their access ends on its own then."
+msgstr "Entonces su acceso termina por sí solo."
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Su enlace falló el {on}: {reason}. Corrige lo que lo impidió y luego vuelve a enviarlo."
@@ -14428,6 +14468,14 @@ msgstr "Recibe un enlace propio cuando tocan los enlaces de su equipo."
 #: src/settings/invitations.tsx
 msgid "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
 msgstr "Recibe este rol la primera vez que inicie sesión con la cuenta de tu organización. Grasp no envía ningún correo electrónico, así que avísale."
+
+#: src/settings/staff-access.tsx
+msgid "They reach everything their role allows."
+msgstr "Acceden a todo lo que su rol permite."
+
+#: src/settings/staff-access.tsx
+msgid "They reach the onboarding alone."
+msgstr "Solo acceden al onboarding."
 
 #: src/landscape/data-tab.tsx
 msgid "They show here once Grasp reads your identity provider's grants."
@@ -15181,6 +15229,7 @@ msgid "Unsaved changes"
 msgstr "Cambios sin guardar"
 
 #: src/policies/policy-editing.tsx
+#: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Hasta"
 
@@ -16253,6 +16302,10 @@ msgstr "Dónde se guardan tus datos y la zona horaria que usa Grasp."
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
 msgstr "Dónde, por ejemplo Dropbox"
+
+#: src/settings/staff-access.tsx
+msgid "Whether people from Grasp can sign in to help with this workspace. They come in only while a window your organization opened lasts."
+msgstr "Si las personas de Grasp pueden iniciar sesión para ayudar con este espacio de trabajo. Solo entran mientras dure un periodo que tu organización abrió."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
