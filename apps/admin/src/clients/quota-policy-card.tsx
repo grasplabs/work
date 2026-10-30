@@ -71,7 +71,7 @@ export const summaryOf = ({
 export const QuotaPolicyCard = ({ policy }: { policy: ClientQuotaPolicy }) => (
   <SetupSection
     action={
-      <Badge variant={policy.state === "drifted" ? "destructive" : "secondary"}>
+      <Badge variant={policy.state === "drifted" ? "attention" : "secondary"}>
         {stateLabels[policy.state]}
       </Badge>
     }

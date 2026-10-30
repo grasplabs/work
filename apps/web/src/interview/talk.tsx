@@ -65,7 +65,7 @@ export const Talk = ({
             className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500"
             key={loop.saying}
           >
-            <p className="text-2xl font-medium tracking-tight text-balance">
+            <p className="type-display">
               <SpokenText said={said} text={title} />
             </p>
             {rest === "" ? null : (
@@ -96,7 +96,7 @@ export const Marked = ({
         <span key={piece.at}>{piece.text}</span>
       ) : (
         <mark
-          className="bg-brain-heat/15 -mx-0.5 rounded-sm box-decoration-clone px-0.5 text-inherit"
+          className="line-under text-inherit"
           key={piece.at}
           title={names[piece.tag]}
         >
