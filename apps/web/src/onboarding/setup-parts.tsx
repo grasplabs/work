@@ -1,6 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { CheckIcon } from "lucide-react";
@@ -582,7 +583,7 @@ export const useSayFollowing = (
 /** A number with what it counts. */
 export const Figure = ({ value, label }: { value: string; label: string }) => (
   <div className="flex flex-col rounded-xl border p-4">
-    <span className="type-figure">{value}</span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );

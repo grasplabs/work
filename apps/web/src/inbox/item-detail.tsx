@@ -132,7 +132,7 @@ const Section = ({
   children: ReactNode;
 }) => (
   <section aria-label={title}>
-    <h2 className="bg-row-group flex h-14 items-center border-b px-5 font-medium">
+    <h2 className="bg-row-group text-row-group-foreground flex h-14 items-center border-b px-5 font-medium">
       {title}
     </h2>
     {children}

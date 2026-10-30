@@ -10,7 +10,7 @@ const badgeVariants = cva(
     variants: {
       variant: {
         // A plain value, in grey: a badge is never black.
-        default: "bg-muted text-foreground [a]:hover:bg-muted-hover",
+        default: "bg-muted text-foreground [a]:hover:bg-muted/80",
         // Done, approved, tested: green on a tint of itself, as destructive is red.
         passed:
           "bg-status-agreed/10 text-status-agreed dark:bg-status-agreed/20",

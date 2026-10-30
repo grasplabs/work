@@ -190,7 +190,8 @@ export const token = (element: Element, name: string): string =>
 
 /** Every colour a dot can have, in bucket order: warmth × ALPHAS + ink. */
 export const palette = (element: HTMLElement): string[] => {
-  const ink = rgb(token(element, "--brain-ink"));
+  // A dot at rest is the text's own colour where it stands: the ink on a page, the canvas on the sidebar.
+  const ink = rgb(getComputedStyle(element).color);
   const heat = rgb(token(element, "--brain-heat"));
   const glow = rgb(token(element, "--brain-glow"));
   const styles: string[] = [];

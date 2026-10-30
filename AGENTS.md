@@ -86,11 +86,11 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 
 ## Design
 
-One design, from `@grasp-os/ui`, in `apps/web`, `apps/admin` and App screens. The theme (`packages/ui/src/styles.css`) is shadcn's: each value stands once, in `:root` and `.dark`, under shadcn's names, mapped to utilities in `@theme inline`. Add a token only for a meaning shadcn has no name for, as a `--x` / `--x-foreground` pair. Code that draws outside CSS (a canvas) reads the resolved token with `getComputedStyle`, never a copy of the palette.
+One design, from `@grasp-os/ui`, in `apps/web`, `apps/admin` and App screens. The theme (`packages/ui/src/styles.css`) is shadcn's: each value stands once, in `:root` and `.dark`, under shadcn's names, mapped to utilities in `@theme inline`. Add a token only for a meaning shadcn has no name for; a surface comes as an `x` / `x-foreground` pair, a signal (a status colour, a chart hue) as one token. Hovers are shadcn's (`hover:bg-x/80`), never a token of their own. Code that draws outside CSS (a canvas) reads the resolved token with `getComputedStyle`, never a copy of the palette.
 
 - **Colour**: tokens only. Lime (`highlight`, `Button variant="highlight"`) once a page, for the one action it is for. Amber (`status-attention`, `Badge variant="attention"`) for what needs someone; green (`status-agreed`, `variant="passed"`) for what is done. Red (`destructive`) for errors, a form's error or something that failed, and for actions that can't be undone.
-- **Type**: Geist (`font-sans`) for the product; Newsreader (`font-serif`) for page titles (`PageHeaderTitle`), the titles of dialogs, sheets and drawers, what Grasp says (`type-display`) and key figures (`type-figure`).
-- **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/ui`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page and App screen to layout classes on a component; only `packages/ui/src/components` is exempt.
+- **Type**: Geist (`font-sans`) for the product; Newsreader (`font-serif`) for page titles (`PageHeaderTitle`), the titles of dialogs, sheets and drawers, key figures (`Stat`) and what Grasp says (`type-display`).
+- **Components own their look.** A new look is a cva variant in the component's file in `@grasp-os/ui`. `@shadcn/lint` (`no-restyle`, `no-arbitrary-values`, `no-raw-colors`, `require-static-classes`) holds every page and App screen to layout classes on a component. Inside `packages/ui/src/components` only `no-restyle`, `no-arbitrary-values` and `require-static-classes` are off; `no-raw-colors`, `no-inline-styles` and `no-unknown-classes` hold there too.
 - **Motion**: on the house curve (`ease-house`, the default), each answer over within 300 ms. Under reduced motion nothing slides, grows or glides.
 
 ## Translations
