@@ -125,8 +125,15 @@ export interface PlatformAi {
   };
 }
 
+/** Grasp's own AI features, as the settings name them and the ledger records them. */
+export const platformAiFeatures = [
+  "conversion",
+  "transcription",
+  "speech",
+] as const satisfies readonly (keyof PlatformAi)[];
+
 /** One of Grasp's own AI features. */
-export type PlatformAiFeature = keyof PlatformAi;
+export type PlatformAiFeature = (typeof platformAiFeatures)[number];
 
 /**
  * `value` as each feature's settings, the defaults for what it leaves out

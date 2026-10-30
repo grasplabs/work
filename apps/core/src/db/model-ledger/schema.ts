@@ -123,6 +123,12 @@ export const requests = sqliteTable(
     region: text(),
     /** Whose key it went with: `organization` or `platform`; null without one. */
     credential: text(),
+    /**
+     * Which of Grasp's own AI features it was for, on Grasp's key
+     * (@grasp-os/shared/platform-ai): `conversion`, `transcription` or
+     * `speech`; null for any other request.
+     */
+    feature: text(),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),

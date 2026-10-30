@@ -116,6 +116,22 @@ export const money = (amount: number, currency: string): string => {
   }
 };
 
+const dollarCents = new Intl.NumberFormat("en", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** The least amount said to the cent. */
+const cent = 0.01;
+
+/** An amount in US dollars, to the cent: "under $0.01" for less than a cent but not nothing. */
+export const dollars = (amount: number): string =>
+  amount > 0 && amount < cent
+    ? `under ${dollarCents.format(cent)}`
+    : dollarCents.format(amount);
+
 /** Hours and the like, as whole numbers. */
 export const whole = (value: number): string => wholeNumber.format(value);
 

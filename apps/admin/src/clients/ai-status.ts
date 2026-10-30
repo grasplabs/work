@@ -3,7 +3,8 @@
  * the providers its organization connected and how their real calls last
  * fared, read live at `aiStatusReportPath`, signed as the quota policy is
  * (src/clients/quota-policy.ts), and said in one line
- * (src/admin/ai-status-words.ts).
+ * (src/admin/ai-status-words.ts); with what Grasp's own AI features cost
+ * on its keys (src/clients/platform-spend.ts).
  * Read only: staff see it, the organization's admins change it in their
  * own Settings. Never a key or its mask: core doesn't send one.
  */
@@ -19,6 +20,23 @@ import { adminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { askClientCore, signedCoreReport } from "./quota-policy.ts";
 
+/** Client `clientId`'s AI, as its core reports it now; null when it doesn't answer. */
+export const readAiStatus = async (
+  env: Env,
+  clientId: string
+): Promise<AiStatusReport | null> =>
+  await askClientCore(
+    env,
+    clientId,
+    "ai_status",
+    async (request) =>
+      await signedCoreReport(request, {
+        path: aiStatusReportPath,
+        purpose: aiStatusReportPurpose,
+        schema: aiStatusReportSchema,
+      })
+  );
+
 /** Active client `clientId`'s AI, as its core reports it; null when unknown or it isn't active. */
 export const clientAiStatus = async (
   env: Env,
@@ -32,15 +50,5 @@ export const clientAiStatus = async (
   if (client?.status !== "active") {
     return null;
   }
-  return await askClientCore(
-    env,
-    clientId,
-    "ai_status",
-    async (request) =>
-      await signedCoreReport(request, {
-        path: aiStatusReportPath,
-        purpose: aiStatusReportPurpose,
-        schema: aiStatusReportSchema,
-      })
-  );
+  return await readAiStatus(env, clientId);
 };
