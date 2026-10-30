@@ -38,6 +38,9 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
     name: "Where you are in the brain",
   });
   await expect(trail).toContainText("Board");
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).not.toContainText("Board");
 
   // The note opens on its own page, its dots building the page.
   await main.getByRole("button", { name: "Vision page" }).click();
