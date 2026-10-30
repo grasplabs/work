@@ -20,9 +20,7 @@ import type { ReactNode } from "react";
 /** One number and what it counts. */
 export const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
@@ -242,7 +240,7 @@ export const Figure = ({
         value={ring.value}
       />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance wrap-break-word hyphens-auto tabular-nums">
+    <span className="type-figure col-span-2 row-start-2 wrap-break-word hyphens-auto">
       {value}
     </span>
     {sub === undefined ? null : (

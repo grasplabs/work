@@ -310,3 +310,40 @@ describe("a workflow its owner didn't open to asking", setUpTime, () => {
     });
   });
 });
+
+describe(
+  "the workflows open to asking, as Settings › Stephen lists them",
+  setUpTime,
+  () => {
+    it("are those live and open to asking that the reader sees, in one read", async () => {
+      const by = await owner();
+      const ann = await signedInApi(idp, "user");
+      const open = await sharedWorkflow(by, ann.userId, true);
+      const closed = await sharedWorkflow(by, ann.userId, false);
+      // Open to asking, but never published, and published but not shared.
+      const unpublished = await createWorkflowResource(
+        env,
+        by,
+        `ask-${unique()}`
+      );
+      await setWorkflowAskable(env, by, unpublished.id, true);
+      const notShared = await createWorkflowResource(
+        env,
+        by,
+        `ask-${unique()}`
+      );
+      await publishWorkflowVersion(env, by, notShared.id, {
+        definition: greeting(notShared.name),
+        basedOn: null,
+      });
+      await setWorkflowAskable(env, by, notShared.id, true);
+
+      const listed = await ann.api.workflowResources.askableWorkflows();
+
+      const ours = new Set([open.id, closed.id, unpublished.id, notShared.id]);
+      expect(listed.filter(({ id }) => ours.has(id))).toStrictEqual([
+        { id: open.id, name: open.name },
+      ]);
+    });
+  }
+);

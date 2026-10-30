@@ -9,13 +9,6 @@ import type {
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
 import {
   Table,
   TableBody,
@@ -40,16 +33,19 @@ import { useCore } from "../use-core.ts";
 import { ActivityLine, activityKey } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
-import { runDotOf, runStatusLabels } from "./resource-runs.tsx";
+import { OpenRun } from "./resource-runs.tsx";
+import { RunSheet } from "./run-detail.tsx";
+import { runDotOf, runStatusLabels } from "./run-status.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
 // one thing at a time behind a switch. Runs: a test of the draft on recent
 // real items, then every run, a row each; a row opens beside the page with
-// what the run did laid over its own version's diagram, and each step its
-// journal recorded with its state, attempts, loop item and error code
-// (`workflowResources.runTrace`). Activity: everything that happened to
-// the workflow, in full.
+// when it ran, how it ended and what it returned or why it failed
+// (run-detail.tsx), then what the run did laid over its own version's
+// diagram, and each step its journal recorded with its state, attempts,
+// loop item and error code (`workflowResources.runTrace`). Activity:
+// everything that happened to the workflow, in full.
 
 /** Which part of Traces shows. */
 export type TracesPart = "runs" | "activity";
@@ -174,16 +170,10 @@ const RunTraceDetail = ({
   const attempts = new Map(
     trace.tasks.map(({ task, attempts: made }) => [task, made])
   );
+  // How it stands is said over it, with its result (run-detail.tsx).
   return (
     <div className="flex flex-col gap-6">
       <ErrorText>{failure}</ErrorText>
-      <output className="inline-flex items-center gap-2">
-        <span
-          aria-hidden="true"
-          className={`${runDotOf(trace.status)} size-1.75 flex-none rounded-full`}
-        />
-        {t(runStatusLabels[trace.status])}
-      </output>
       {trace.detailsRemoved ? (
         <p className="text-muted-foreground">
           <Trans>
@@ -231,7 +221,7 @@ const RunTraceDetail = ({
   );
 };
 
-/** Every run, a row each; a press on one opens what it did. */
+/** Every run, a row each; a press on one opens it, with what it did. */
 const RunsTable = ({
   runs,
   names,
@@ -261,7 +251,12 @@ const RunsTable = ({
               <TableHead variant="card">{t`Version`}</TableHead>
               <TableHead variant="card">{t`Started by`}</TableHead>
               <TableHead variant="card">
-                <span className="sr-only">{t`Its steps`}</span>
+                <span className="sr-only">
+                  {t({
+                    message: "Open",
+                    context: "column: a button that opens a run",
+                  })}
+                </span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -287,16 +282,12 @@ const RunsTable = ({
                       : (names.people.get(run.principal) ?? t`Someone else`)}
                   </TableCell>
                   <TableCell variant="roomy">
-                    <Button
-                      aria-label={t`Steps of the run started ${started}`}
-                      onClick={() => {
+                    <OpenRun
+                      onOpen={() => {
                         onOpen(run);
                       }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <Trans>Steps</Trans>
-                    </Button>
+                      started={started}
+                    />
                   </TableCell>
                 </TableRow>
               );
@@ -343,11 +334,14 @@ export const Traces = ({
   runs,
   activity,
   names,
+  admin,
   checkpoint,
   part,
   onPartChange,
 }: {
   workflow: string;
+  /** Whether the reader is one of the organization's admins. */
+  admin: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
@@ -358,7 +352,6 @@ export const Traces = ({
 }) => {
   const { t } = useLingui();
   const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
-  const openedAt = opened === null ? "" : formatDateTime(opened.createdAt);
   return (
     <div className="flex flex-col gap-6">
       <ToggleGroup
@@ -394,34 +387,25 @@ export const Traces = ({
       {part === "activity" ? (
         <ActivityList activity={activity} names={names} />
       ) : null}
-      <Sheet
-        onOpenChange={(open) => {
-          if (!open) {
-            setOpened(null);
-          }
+      <RunSheet
+        admin={admin}
+        names={names}
+        onClose={() => {
+          setOpened(null);
         }}
-        open={opened !== null}
-      >
-        <SheetContent>
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex flex-col gap-1 border-b px-6 py-5 pr-14">
-              <SheetTitle>
-                <Trans>The run started {openedAt}</Trans>
-              </SheetTitle>
-              <SheetDescription>
-                <Trans context="what a side panel shows: one run of a workflow">
-                  A run of this workflow
-                </Trans>
-              </SheetDescription>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-5">
-              {opened === null ? null : (
-                <RunTraceDetail runId={opened.id} workflow={workflow} />
-              )}
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
+        opened={opened}
+        steps={
+          opened === null ? null : (
+            <section className="flex flex-col gap-3">
+              <h3 className="text-muted-foreground">
+                <Trans>What it did</Trans>
+              </h3>
+              <RunTraceDetail runId={opened.id} workflow={workflow} />
+            </section>
+          )
+        }
+        workflow={workflow}
+      />
     </div>
   );
 };
