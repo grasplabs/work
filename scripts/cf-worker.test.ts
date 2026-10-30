@@ -45,7 +45,6 @@ const adminSecrets = [
   "STRIPE_RESTRICTED_KEY",
   "ROOMS_READ_TOKEN",
   "DISCORD_DIGEST_WEBHOOK",
-  "STAFF_ALERTS_WEBHOOK",
   "ATTIO_READ_KEY",
 ];
 /** Each stage's names for them in the store. */
@@ -124,7 +123,7 @@ describe("the admin's Worker for cf", () => {
           },
         ],
       ],
-      crons: 4,
+      crons: 3,
       redacted: true,
     });
   });

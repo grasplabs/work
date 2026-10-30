@@ -67,7 +67,7 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { FollowedRuns, LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 // Rolling a release out to placed clients (GRA-388): ring 0 first, one
 // staff approval, then the fleet ring by ring, each client's operation
@@ -1128,6 +1128,35 @@ describe("rolling a release out to placed clients", () => {
       status: "complete",
       uploadedAgain: true,
       releases: on(release),
+      runner: null,
+    });
+  });
+
+  it("records on its operation why applying stopped before it could run, a secret missing from Secrets Store by name, and gives the client back", async () => {
+    const release = await placedRelease("feat(core): runs");
+    const client = await live(0, release);
+    await emptyStoreSecret(env.ROUTER_KEY, "ROUTER_KEY");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runId = await applySettings(env, staff, client.clientId);
+    const ended = await runEnded(adminWorkflows.applyClient, runId);
+    errors.mockRestore();
+    expect({
+      status: ended.status,
+      operation: await db
+        .select({
+          status: clientProvisions.status,
+          error: clientProvisions.error,
+        })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, client.clientId))
+        .get(),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      status: "errored",
+      operation: {
+        status: "failed",
+        error: "store_secret_missing: ROUTER_KEY",
+      },
       runner: null,
     });
   });
@@ -2838,7 +2867,6 @@ describe("rolling out a release that raises a platform limit", () => {
           clientId: id,
           deploymentId: id.replace("fleet-", "d"),
           destinationId,
-          policyId: "eu-storage",
           placedBy: staff.email,
           placedAt: now,
         }),

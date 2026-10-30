@@ -154,16 +154,24 @@ export const busyBudgetMessage = (because: unknown): string =>
     ? busyBudgetMessages[because]
     : modelErrors.create("model.budget_busy").message;
 
+/**
+ * A workflow that spent: an App's own, by its ID in its App, or an
+ * independent workflow (`appId` null), by its ID.
+ */
+export interface SpendingWorkflow {
+  /** Null for an independent workflow. */
+  appId: string | null;
+  /** Null for an independent workflow, or once the App is gone. */
+  appName: string | null;
+  workflowId: string;
+  /** An App's workflow's is its ID; an independent one's, null once it is gone. */
+  name: string | null;
+}
+
 /** What spent part of a budget this month, with its name where core has one. */
 export type ModelSpender =
   | { type: "deployment" }
-  | {
-      type: "workflow";
-      appId: string;
-      /** Null once the App is gone. */
-      appName: string | null;
-      workflowId: string;
-    }
+  | ({ type: "workflow" } & SpendingWorkflow)
   | {
       type: "user";
       userId: string;
@@ -180,11 +188,14 @@ export type ModelSpender =
       runId: string;
       /** The lineage's root run, for an account; null when `runId` is the root. */
       rootRunId: string | null;
-      /** Null once the run's record is gone. */
+      /** Its App; null for an independent workflow's run, or once the run's record is gone. */
       appId: string | null;
-      /** Null once the App, or the run's record, is gone. */
+      /** Null for no App, or once the App, or the run's record, is gone. */
       appName: string | null;
+      /** Null once the run's record is gone. */
       workflowId: string | null;
+      /** Its workflow's name; null once the workflow, or the run's record, is gone. */
+      workflowName: string | null;
       /** When the root run started, ISO 8601; null once its record is gone. */
       startedAt: string | null;
     };
@@ -349,11 +360,7 @@ export type HeldDecision =
 export const heldListed = 100;
 
 /** A workflow's model spend this month, and its runs. */
-export interface WorkflowMonthSpend {
-  appId: string;
-  /** Null once the App is gone. */
-  appName: string | null;
-  workflowId: string;
+export interface WorkflowMonthSpend extends SpendingWorkflow {
   /** US dollars charged this month. */
   amount: number;
   /** Its runs started this month, of any version. */
