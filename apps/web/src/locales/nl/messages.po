@@ -349,6 +349,10 @@ msgstr "{count, plural, one {# overdracht} other {# overdrachten}}"
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# uitgenodigd team nog niet geïnterviewd: {teams}.} other {# uitgenodigde teams nog niet geïnterviewd: {teams}.}}"
 
+#: src/settings/teams.tsx
+msgid "{count, plural, one {# member} other {# members}}"
+msgstr "{count, plural, one {# lid} other {# leden}}"
+
 #: src/dashboard/widget-board.tsx
 msgid "{count, plural, one {# more domain with no workflows to show} other {# more domains with no workflows to show}}"
 msgstr "{count, plural, one {Nog # domein zonder workflows om te tonen} other {Nog # domeinen zonder workflows om te tonen}}"
@@ -877,6 +881,14 @@ msgstr "{name} gewijzigd"
 #: src/chat/builds-state.ts
 msgid "{name} changed: it {does}"
 msgstr "{name} gewijzigd: {does}"
+
+#: src/settings/teams.tsx
+msgid "{name} couldn't be deleted. Try again."
+msgstr "{name} kon niet worden verwijderd. Probeer het opnieuw."
+
+#: src/settings/teams.tsx
+msgid "{name} couldn't be renamed. Try again."
+msgstr "{name} kon niet worden hernoemd. Probeer het opnieuw."
 
 #: src/onboarding/hr-leads.tsx
 msgid "{name} didn’t take this service user. Check its ID and token, and that it may read people’s work details."
@@ -1622,6 +1634,10 @@ msgstr "{who} kan later niet meer worden toegekend: er moet opnieuw om worden ge
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 
+#: src/settings/team-members-dialog.tsx
+msgid "{who} couldn't be taken off {name}. Try again."
+msgstr "{who} kon niet uit {name} worden gehaald. Probeer het opnieuw."
+
 #: src/interview/before.tsx
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
@@ -2104,6 +2120,10 @@ msgstr "Acties"
 msgid "Actions for {appName}"
 msgstr "Acties voor {appName}"
 
+#: src/settings/teams.tsx
+msgid "Actions for {name}"
+msgstr "Acties voor {name}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
 msgstr "Acties voor {who}"
@@ -2143,6 +2163,7 @@ msgstr "Actor-ID"
 
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.settings.pulse.tsx
+#: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Toevoegen"
 
@@ -2161,6 +2182,10 @@ msgstr "Voeg een domein toe voor een tweede merk of een oud domein."
 #: src/brain/goals-editor.tsx
 msgid "Add a goal"
 msgstr "Doel toevoegen"
+
+#: src/settings/team-members-dialog.tsx
+msgid "Add a member"
+msgstr "Lid toevoegen"
 
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -2337,12 +2362,13 @@ msgstr "Agent {agent}"
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} voor {person}"
 
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Agents lezen dit voordat ze erin kijken."
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} voor {person}, in {app}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Agents lezen dit voordat ze erin kijken."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -3647,6 +3673,7 @@ msgstr "Niet leesbaar"
 #: src/policies/policy-editing.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
+#: src/settings/teams.tsx
 msgid "Cancel"
 msgstr "Annuleren"
 
@@ -4044,6 +4071,10 @@ msgstr "Kiezen uit Google Drive"
 #: src/onboarding/setup-steps.tsx
 msgid "Choose from SharePoint or OneDrive"
 msgstr "Kiezen uit SharePoint of OneDrive"
+
+#: src/settings/team-members-dialog.tsx
+msgid "Choose someone"
+msgstr "Kies iemand"
 
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
@@ -4681,6 +4712,10 @@ msgstr "Document maken"
 msgid "Create project"
 msgstr "Project maken"
 
+#: src/settings/teams.tsx
+msgid "Create team"
+msgstr "Team maken"
+
 #: src/activity/audit-words.ts
 msgid "Created a collection"
 msgstr "Een collectie aangemaakt"
@@ -4881,6 +4916,7 @@ msgstr "Versie van de definitie"
 #: src/chat/chat-more.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/policies/policy-editing.tsx
+#: src/settings/teams.tsx
 msgid "Delete"
 msgstr "Verwijderen"
 
@@ -4898,6 +4934,7 @@ msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Het interview van {first} voorgoed verwijderen, met alles wat is gezegd?"
 
 #: src/policies/policy-editing.tsx
+#: src/settings/teams.tsx
 msgid "Delete {name}?"
 msgstr "{name} verwijderen?"
 
@@ -5689,9 +5726,14 @@ msgstr "Iedereen heeft een eigen link: wie hem heeft, is die persoon, dus stuur 
 msgid "Everyone has talked"
 msgstr "Iedereen heeft gepraat"
 
+#: src/settings/team-members-dialog.tsx
+msgid "Everyone in the organization is in this team."
+msgstr "Iedereen in de organisatie zit in dit team."
+
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Iedereen in de organisatie, en hun agents."
+
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Iedereen met wie het gedeeld wordt, en hun agents, lezen het als geaccepteerd. Het jouwe blijft zoals het is."
@@ -8198,12 +8240,19 @@ msgstr "Gemiddelde betrouwbaarheid"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/members-tabs.tsx
+#: src/settings/teams.tsx
 msgid "Members"
 msgstr "Leden"
 
 #: src/routes/_shell.settings.tsx
 msgid "Members and roles"
 msgstr "Leden en rollen"
+
+#: src/settings/team-members-dialog.tsx
+#: src/settings/teams.tsx
+msgid "Members of {name}"
+msgstr "Leden van {name}"
 
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
@@ -8428,6 +8477,7 @@ msgstr "Gedempt"
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/package-approvers.tsx
+#: src/settings/teams.tsx
 #: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Naam"
@@ -8626,6 +8676,10 @@ msgstr "Nieuw sinds de laatste goedkeuring: {added}"
 #: src/onboarding/interview-actions.tsx
 msgid "New start"
 msgstr "Opnieuw beginnen"
+
+#: src/settings/teams.tsx
+msgid "New team"
+msgstr "Nieuw team"
 
 #: src/workflows/independent-workflows.tsx
 msgid "New workflow"
@@ -9067,6 +9121,7 @@ msgid "No teams"
 msgstr "Geen teams"
 
 #: src/dashboard/standard-widgets.tsx
+#: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "Nog geen teams."
 
@@ -9163,12 +9218,13 @@ msgstr "Nog niemand keurt pakketten goed, dus elk pakketverzoek wacht."
 msgid "Nobody can say why. It waits until someone explains it."
 msgstr "Niemand kan zeggen waarom. Het wacht tot iemand het uitlegt."
 
-#: src/settings/staff-access.tsx
-msgid "Nobody from Grasp can sign in to this workspace now."
-msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 #: src/settings/package-approvers.tsx
 msgid "Nobody else to add."
 msgstr "Er is niemand anders om toe te voegen."
+
+#: src/settings/staff-access.tsx
+msgid "Nobody from Grasp can sign in to this workspace now."
+msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
@@ -9195,6 +9251,7 @@ msgid "Nobody is asked about it"
 msgstr "Niemand krijgt er vragen over"
 
 #: src/routes/_shell.onboarding.organization.$team.tsx
+#: src/settings/team-members-dialog.tsx
 msgid "Nobody is in this team yet."
 msgstr "Er zit nog niemand in dit team."
 
@@ -9978,6 +10035,10 @@ msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the tenant {tenantId}."
 msgstr "Alleen accounts van de tenant {tenantId}."
+
+#: src/settings/use-team-change.ts
+msgid "Only admins can change teams."
+msgstr "Alleen beheerders kunnen teams wijzigen."
 
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Only admins can read the audit trail"
@@ -11429,8 +11490,13 @@ msgstr "Verwijderd: deze code handelde namens iedereen die het domein gebruikt, 
 
 #: src/chat/chat-list.tsx
 #: src/chat/chat-more.tsx
+#: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Hernoemen"
+
+#: src/settings/teams.tsx
+msgid "Rename {name}"
+msgstr "{name} hernoemen"
 
 #: src/chat/chat-more.tsx
 msgid "Rename chat"
@@ -13105,6 +13171,10 @@ msgstr "Systeem"
 msgid "Table"
 msgstr "Tabel"
 
+#: src/settings/team-members-dialog.tsx
+msgid "Take {who} off {name}"
+msgstr "{who} uit {name} halen"
+
 #: src/engines/screen-approval.tsx
 msgid "Take back"
 msgstr "Intrekken"
@@ -13313,8 +13383,10 @@ msgstr "Team: {name}"
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/members-tabs.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
+#: src/settings/teams.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -13344,6 +13416,10 @@ msgstr "Teams-chats en vergaderingen waarin ze zaten: wat anderen daar schreven 
 #: src/settings/stephen-settings.tsx
 msgid "Teams for {label}"
 msgstr "Teams voor {label}"
+
+#: src/settings/teams.tsx
+msgid "Teams group the people who work together, so apps, Knowledge and workflows can be shared with a whole team at once."
+msgstr "Teams brengen de mensen samen die samenwerken, zodat apps, Kennis en workflows in één keer met een heel team gedeeld kunnen worden."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
@@ -14173,6 +14249,10 @@ msgstr "De stappen kunnen niet uit de code van deze workflow worden gelezen: {me
 msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this domain or any other domain using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
 msgstr "De opslag houdt zijn tabellen zoals ze zijn en neemt weer wijzigingen aan. De release die deze wijziging nodig had, kan nooit actueel worden gemaakt, in dit domein noch in een ander domein dat de opslag gebruikt: die moet opnieuw worden gebouwd. De nieuwe velden blijven gereserveerd met de betekenis die deze wijziging ze gaf: een latere versie kan ze alleen precies zo opnieuw toevoegen. De al ingevulde waarden blijven onzichtbaar in de records staan. Dit kan niet ongedaan worden gemaakt."
 
+#: src/settings/teams.tsx
+msgid "The team couldn't be created. Try again."
+msgstr "Het team kon niet worden gemaakt. Probeer het opnieuw."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
 msgstr "Het team is ingelicht, dus dit blijft zoals het is afgesproken. Pauzeer de interviews om ze te stoppen."
@@ -14268,6 +14348,7 @@ msgstr "De ondernemingsraad is niet gehoord"
 #: src/settings/staff-access.tsx
 msgid "Their access ends on its own then."
 msgstr "Dan stopt hun toegang vanzelf."
+
 #: src/onboarding/interview-actions.tsx
 msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
 msgstr "Hun link is op {on} mislukt: {reason}. Los op wat hem tegenhield en verstuur hem dan opnieuw."
@@ -14354,6 +14435,10 @@ msgstr "Er zijn nog geen domeinen die je kunt openen. Domeinen maak je in de cha
 msgid "There are no workflows to link yet."
 msgstr "Er zijn nog geen workflows om te koppelen."
 
+#: src/settings/teams.tsx
+msgid "There is a team with this name already."
+msgstr "Er is al een team met deze naam."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Er is geen gegevensregel: elk toegestaan model mag gevoelige gegevens krijgen."
@@ -14389,6 +14474,10 @@ msgstr "Ze horen niet meer bij je organisatie."
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Ze worden overal uitgelogd, hun persoonlijke koppelingen worden ontkoppeld en ze kunnen niet meer inloggen."
+
+#: src/settings/team-members-dialog.tsx
+msgid "They couldn't be added to {name}. Try again."
+msgstr "Deze persoon kon niet aan {name} worden toegevoegd. Probeer het opnieuw."
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "They get a link of their own when their team's links are due."
@@ -15822,6 +15911,14 @@ msgstr "Wat in gebruik wordt gezien"
 msgctxt "kickoff field"
 msgid "What is sensitive now"
 msgstr "Wat nu gevoelig ligt"
+
+#: src/settings/team-members-dialog.tsx
+msgid "What is shared with {name} is shared with each of them."
+msgstr "Wat met {name} gedeeld is, is met ieder van hen gedeeld."
+
+#: src/settings/teams.tsx
+msgid "What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization."
+msgstr "Wat met dit team gedeeld is, wordt niet meer via het team met de leden gedeeld, en de workflows van dit team hebben geen team meer. De leden blijven in de organisatie."
 
 #: src/onboarding/work-record.tsx
 msgid "What is still missing"
