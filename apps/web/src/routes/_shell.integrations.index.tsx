@@ -1,5 +1,5 @@
-import { catalogGroups } from "@grasp-os/shared/connect";
-import type { CatalogGroup } from "@grasp-os/shared/connect";
+import { catalogGroups } from "@grasp-os/shared/connect-names";
+import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import {

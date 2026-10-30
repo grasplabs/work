@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { logSearchOf } from "../activity/audit-log.tsx";
+import { logSearchOf } from "../activity/log-search.ts";
 
 // Activity moved into Settings: its log is the audit trail, and its
 // pending approvals are on the dashboard. An old link still leads there.

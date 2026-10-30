@@ -9,7 +9,8 @@ import { createFileRoute, notFound, useParams } from "@tanstack/react-router";
 // Only the component reads `demos`, so the code splitter keeps them, and
 // every package they pull in, in this route's lazy chunk. `beforeLoad`
 // stays in the eager one and checks the name against the inventory, which
-// is plain data.
+// it imports when it runs: a production build answers not found first, and
+// never loads it.
 
 const ComponentDemo = () => {
   const { name } = useParams({ from: "/kit_/components/$name" });
@@ -28,8 +29,13 @@ const ComponentDemo = () => {
 };
 
 export const Route = createFileRoute("/kit_/components/$name")({
-  beforeLoad: ({ params }) => {
-    if (import.meta.env.MODE === "production" || !isKitComponent(params.name)) {
+  beforeLoad: async ({ params }) => {
+    if (import.meta.env.MODE === "production") {
+      throw notFound();
+    }
+    const { isKitComponent: isComponent } =
+      await import("@grasp-os/ui/catalog");
+    if (!isComponent(params.name)) {
       throw notFound();
     }
   },

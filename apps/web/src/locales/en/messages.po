@@ -1982,6 +1982,7 @@ msgid "Account"
 msgstr "Account"
 
 #: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Action"
 msgstr "Action"
 
@@ -4135,7 +4136,7 @@ msgstr "Computations"
 msgid "Condition {position}"
 msgstr "Condition {position}"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Configuration"
 msgstr "Configuration"
 
@@ -4654,7 +4655,7 @@ msgstr "Decide"
 msgid "Decided on a held action"
 msgstr "Decided on a held action"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -6991,7 +6992,7 @@ msgstr "It happened"
 msgid "It happened: {who}"
 msgstr "It happened: {who}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 
@@ -7515,7 +7516,7 @@ msgstr "Leads get their link {when}. Everyone else right after their lead has ta
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads talked: {count} of {of}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Leave"
 
@@ -7540,7 +7541,7 @@ msgstr "Leave out"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Leave out personnel files and anything about one person."
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave this app?"
 msgstr "Leave this app?"
 
@@ -7767,6 +7768,7 @@ msgid "Loading"
 msgstr "Loading"
 
 #: src/activity/audit-log.tsx
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -8007,7 +8009,7 @@ msgstr "Missing"
 msgid "Model"
 msgstr "Model"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Model call"
 
@@ -10311,7 +10313,7 @@ msgstr "Per request"
 msgid "Per request, in US dollars"
 msgstr "Per request, in US dollars"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Permission"
 
@@ -10397,7 +10399,7 @@ msgstr "Platform measures"
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 msgstr "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Platform update"
 msgstr "Platform update"
 
@@ -10702,7 +10704,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "read"
 msgstr "read"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Read"
 
@@ -12403,7 +12405,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Stay"
 

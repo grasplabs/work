@@ -1,5 +1,6 @@
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   Link,
@@ -16,7 +17,7 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -32,8 +33,14 @@ import { Composer } from "./composer.tsx";
 import { setDockMode, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { HeldWrites } from "./held-writes.tsx";
-import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
+
+// The conversation, with its Markdown and code highlighting, loads once a
+// chat is open: most pages show the dock folded or empty.
+const ChatThread = lazy(async () => {
+  const { ChatThread: thread } = await import("./thread.tsx");
+  return { default: thread };
+});
 
 // Grasp's chat on every page but Chat's own, bottom right, as in the
 // prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
@@ -228,28 +235,37 @@ const DockThread = ({
   failure: string | undefined;
   onRetry: () => void;
 }) => {
+  const { t } = useLingui();
   if (chatId === undefined) {
     return <p className="text-muted-foreground flex-1 p-4">{empty}</p>;
   }
   return (
-    <ChatThread
-      chatId={chatId}
-      loaded={view.loaded || failure !== undefined}
-      messages={view.messages}
-      onRetry={onRetry}
-      output={view.output}
-      partial={view.partial}
-      running={view.running}
-      tools={view.tools}
-    >
-      {failure === undefined && view.stopped === null ? null : (
-        <div className="flex flex-col gap-2">
-          <ErrorText>{failure}</ErrorText>
-          <ErrorText>{view.stopped ?? undefined}</ErrorText>
+    <Suspense
+      fallback={
+        <div className="flex flex-1 justify-center py-8">
+          <Spinner aria-label={t`Loading…`} />
         </div>
-      )}
-      <HeldWrites chatId={chatId} version={view.held} />
-    </ChatThread>
+      }
+    >
+      <ChatThread
+        chatId={chatId}
+        loaded={view.loaded || failure !== undefined}
+        messages={view.messages}
+        onRetry={onRetry}
+        output={view.output}
+        partial={view.partial}
+        running={view.running}
+        tools={view.tools}
+      >
+        {failure === undefined && view.stopped === null ? null : (
+          <div className="flex flex-col gap-2">
+            <ErrorText>{failure}</ErrorText>
+            <ErrorText>{view.stopped ?? undefined}</ErrorText>
+          </div>
+        )}
+        <HeldWrites chatId={chatId} version={view.held} />
+      </ChatThread>
+    </Suspense>
   );
 };
 

@@ -21,7 +21,6 @@ import {
 import type { Spot, TrailStep } from "../brain/atlas-overlays.tsx";
 import {
   atlasOf,
-  isRegion,
   REGION_IDS,
   REGIONS,
   signalPaths,
@@ -32,6 +31,7 @@ import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
+import { isRegion } from "../brain/region-id.ts";
 import { dockDrawerWidth, useDockMode } from "../chat/dock-mode.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype

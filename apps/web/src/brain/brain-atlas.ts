@@ -63,9 +63,6 @@ export const REGIONS: Region[] = [
 
 export const REGION_IDS: RegionId[] = REGIONS.map((region) => region.id);
 
-export const isRegion = (value: unknown): value is RegionId =>
-  typeof value === "string" && REGION_IDS.some((id) => id === value);
-
 /** Something still open that someone can answer, and where it shows. */
 export interface OpenItem {
   id: string;

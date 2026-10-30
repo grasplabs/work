@@ -6,10 +6,10 @@ import {
   LogExport,
   LogFilters,
   LogRecords,
-  logSearchOf,
   readLog,
 } from "../activity/audit-log.tsx";
-import type { LogSearch } from "../activity/audit-log.tsx";
+import { logSearchOf } from "../activity/log-search.ts";
+import type { LogSearch } from "../activity/log-search.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {

@@ -1,4 +1,4 @@
-import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
@@ -24,7 +24,7 @@ import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
-import { useReveal } from "../onboarding/platform-reveal.tsx";
+import { useReveal } from "../onboarding/reveal-state.ts";
 import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
