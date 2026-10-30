@@ -276,6 +276,12 @@ export type AppFunctionCall = (
     /** The calling invocation's cancellation (`BindingCaller.cancelled`). */
     readonly cancelled?: AbortSignal;
     /**
+     * That the calling work is a Grasp staff member's (its authority's
+     * server-set mark, GRA-1088): the called App's authority carries it
+     * too, so its events say "(Grasp staff)". Core sets it, never a call.
+     */
+    readonly byStaff?: boolean;
+    /**
      * The calling invocation's sources (`BindingCaller.sources`), which
      * the called function reads into and its model and connector requests
      * are judged by: what the caller read, an EU-only or sensitive

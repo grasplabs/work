@@ -7,8 +7,17 @@ import { z } from "zod";
 import { auditedBatch, outboxedIfChanged } from "./audit.ts";
 import { allowedFor } from "./authorize.ts";
 import type { Brain } from "./brain.ts";
-import { brainErrors } from "./contract.ts";
-import type { BrainSourceRef } from "./contract.ts";
+import {
+  brainErrors,
+  delegateCitesMax,
+  entitiesListInputSchema,
+  entitySourcesInputSchema,
+} from "./contract.ts";
+import type {
+  BrainSourceRef,
+  EntitySourcesAnswer,
+  EntitySummary,
+} from "./contract.ts";
 import { inList, insertChunks } from "./db/d1.ts";
 import {
   brainAssertions,
@@ -29,6 +38,7 @@ import { knowledgeErrors } from "./knowledge.ts";
 import { log } from "./log.ts";
 import { citesReadable } from "./memory-cites.ts";
 import { readPayload } from "./payloads.ts";
+import type { VersionRef } from "./recall-store.ts";
 
 // Entity linking (GRA-305; the Brain design's "internal network of
 // neurons" and "Automatic relationship indexing"): every document version
@@ -1602,41 +1612,109 @@ const noteRead = async <C>(
   );
 };
 
-/** An entity as a reader sees it, from what they may read only. */
-export interface EntitySummary {
-  id: string;
-  kind: string;
-  /** The name its readable mentions give it most. */
-  label: string;
-  /** Every name its readable mentions give it. */
-  names: string[];
-  /** How many readable sources mention it. */
-  sources: number;
-}
+export type { EntitySummary } from "./contract.ts";
 
-const entitiesInputSchema = z.strictObject({
-  /** The start of a name: suggestions as someone types. */
-  query: z.string().min(1).max(nameMaxLength).optional(),
-  limit: z.int().min(1).max(100).optional(),
-});
+/** The fewest characters of a name a caller that isn't a person lists by. */
+const listQueryMin = 2;
 
 /**
- * The entities `reader`'s readable sources mention, most mentioned first,
- * or those with a name starting with `query`: their counts, labels and
- * names from those sources only.
+ * Refuses, as `brain.denied`, a reader the host doesn't let read the Brain
+ * (its `recall.require` port: an App or agent without the `brain` grant),
+ * before anything is read: the gate every entity and relation read
+ * passes, as a recall does.
  */
-export const entitiesFor = async <C>(
+export const requireBrainRead = async <C>(
+  brain: Brain<C>,
+  reader: C
+): Promise<void> => {
+  try {
+    await brain.ports.recall.require(reader);
+  } catch (error) {
+    if (brain.ports.recall.isRefusal(error)) {
+      throw brainErrors.create("brain.denied");
+    }
+    throw error;
+  }
+};
+
+/** Whether `reader` is a person, as the host's `ownerOf` port says. */
+const isPerson = <C>(brain: Brain<C>, reader: C): boolean => {
+  try {
+    brain.ports.ownerOf(reader);
+    return true;
+  } catch (error) {
+    if (brainErrors.codeOf(error) === "brain.denied") {
+      return false;
+    }
+    throw error;
+  }
+};
+
+/**
+ * Of `rows`, newest first, those of their newest `max` source versions,
+ * and whether that left any out: what a caller that isn't a person is
+ * answered from, so it cites no more than it pins (`delegateCitesMax`).
+ */
+export const withinCites = <Row>(
+  rows: readonly Row[],
+  max: number,
+  citesOf: (row: Row) => readonly string[]
+): { within: Row[]; truncated: boolean } => {
+  const kept = new Set<string>();
+  const within: Row[] = [];
+  let truncated = false;
+  for (const row of rows) {
+    const added = citesOf(row).filter((key) => !kept.has(key));
+    if (kept.size + new Set(added).size > max) {
+      truncated = true;
+    } else {
+      for (const key of added) {
+        kept.add(key);
+      }
+      within.push(row);
+    }
+  }
+  return { within, truncated };
+};
+
+/** The source version a mention cites, as `withinCites` keys it. */
+const mentionCites = ({
+  source,
+  version,
+}: {
+  source: string;
+  version: number;
+}): string[] => [`${source}:${version}`];
+
+/**
+ * `entitiesFor`, with the collections and documents whose mentions it
+ * listed: so a caller that labels what it was handed (a chat) labels the
+ * names, and can withhold them once that source goes.
+ */
+export const entitiesWithSources = async <C>(
   brain: Brain<C>,
   reader: C,
   input: unknown = {}
-): Promise<EntitySummary[]> => {
+): Promise<{
+  entities: EntitySummary[];
+  sources: { collections: string[]; documents: VersionRef[] };
+  truncated: boolean;
+}> => {
   const { query, limit = 20 } = brainErrors.parse(
     "brain.invalid",
-    entitiesInputSchema,
+    entitiesListInputSchema,
     input
   );
+  await requireBrainRead(brain, reader);
   const folded = query === undefined ? undefined : fold(query);
-  const rows = await readableMentions(
+  // An App or agent lists by a name's start, never the whole list.
+  if (
+    (folded === undefined || folded.length < listQueryMin) &&
+    !isPerson(brain, reader)
+  ) {
+    throw brainErrors.create("brain.invalid");
+  }
+  const read = await readableMentions(
     brain,
     reader,
     and(
@@ -1646,6 +1724,13 @@ export const entitiesFor = async <C>(
         : sql`substr(${brainMentions.alias}, 1, ${folded.length}) = ${folded}`
     )
   );
+  // A caller that isn't a person is answered from the newest sources it
+  // can pin, its names and counts from those alone.
+  const { within: rows, truncated } = isPerson(brain, reader)
+    ? { within: read, truncated: false }
+    : withinCites(read, delegateCitesMax, mentionCites);
+  // The scan's own cap may have left some out too.
+  const cut = truncated || read.length >= readRowsMax;
   const byEntity = new Map<
     string,
     { kind: string; names: Map<string, number>; sources: Set<string> }
@@ -1677,13 +1762,49 @@ export const entitiesFor = async <C>(
   const page = found
     .toSorted((a, b) => b.sources - a.sources || a.label.localeCompare(b.label))
     .slice(0, limit);
-  await noteRead(
-    brain,
-    reader,
-    "entities",
-    rows.filter(({ entityId }) => page.some(({ id }) => id === entityId))
+  const listed = rows.filter(({ entityId }) =>
+    page.some(({ id }) => id === entityId)
   );
-  return page;
+  await noteRead(brain, reader, "entities", listed);
+  return {
+    entities: page,
+    sources: {
+      collections: [
+        ...new Set(listed.flatMap(({ collectionId }) => collectionId ?? [])),
+      ],
+      // Each document version whose mentions named them, once: what a
+      // caller pins (recall-store.ts, `pinsOf`).
+      documents: [
+        ...new Map(
+          listed.flatMap(({ documentId, collectionId, version }) =>
+            documentId === null || collectionId === null
+              ? []
+              : [
+                  [
+                    `${documentId}:${version}`,
+                    { documentId, collectionId, version },
+                  ] as const,
+                ]
+          )
+        ).values(),
+      ],
+    },
+    truncated: cut,
+  };
+};
+
+/**
+ * The entities `reader`'s readable sources mention, most mentioned first,
+ * or those with a name starting with `query`: their counts, labels and
+ * names from those sources only.
+ */
+export const entitiesFor = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown = {}
+): Promise<EntitySummary[]> => {
+  const { entities } = await entitiesWithSources(brain, reader, input);
+  return entities;
 };
 
 /** A row as the source reference the contract has. */
@@ -1701,20 +1822,47 @@ const refOf = (row: ReadableMention): BrainSourceRef =>
         revision: row.version,
       };
 
-/** The sources `reader` may read that mention `entityId`. */
-export const entitySources = async <C>(
+/**
+ * `entitySources`, and whether it left any out: a caller that isn't a
+ * person is answered the newest `delegateCitesMax` sources, as many as it
+ * pins.
+ */
+export const entitySourcesRead = async <C>(
   brain: Brain<C>,
   reader: C,
-  entityId: string
-): Promise<BrainSourceRef[]> => {
+  input: unknown
+): Promise<EntitySourcesAnswer> => {
+  const { entityId } = brainErrors.parse(
+    "brain.invalid",
+    entitySourcesInputSchema,
+    input
+  );
+  await requireBrainRead(brain, reader);
   const rows = await readableMentions(
     brain,
     reader,
     eq(brainMentions.entityId, entityId)
   );
   const unique = [...new Map(rows.map((row) => [row.source, row])).values()];
-  await noteRead(brain, reader, "entity_sources", unique);
-  return unique.map(refOf);
+  const { within, truncated } = isPerson(brain, reader)
+    ? { within: unique, truncated: false }
+    : withinCites(unique, delegateCitesMax, mentionCites);
+  await noteRead(brain, reader, "entity_sources", within);
+  return {
+    sources: within.map(refOf),
+    // The scan's own cap counts its rows, not their sources.
+    truncated: truncated || rows.length >= readRowsMax,
+  };
+};
+
+/** The sources `reader` may read that mention `entityId`. */
+export const entitySources = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  input: unknown
+): Promise<BrainSourceRef[]> => {
+  const { sources } = await entitySourcesRead(brain, reader, input);
+  return sources;
 };
 
 /** An ambiguous mention: who it may be, never linked until decided. */

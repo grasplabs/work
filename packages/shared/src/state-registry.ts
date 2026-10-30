@@ -311,7 +311,15 @@ const coreDb: D1State = {
     ),
     run_brain_evidence: transient(
       `${core}workflows/host.ts`,
-      "What each run's latest recall cites, checked before its next calls."
+      "What each run's recalls and reads cite, checked before its next calls."
+    ),
+    run_chat_sources: transient(
+      `${core}workflow-starts.ts`,
+      "What the chat that had a run started had read, checked before its next calls."
+    ),
+    run_evidence_holds: transient(
+      `${core}workflows/resource-reads.ts`,
+      "The runs whose evidence a run holds, its children's whose output it took: checked with its own."
     ),
     run_lineages: exported(`${core}workflows/quotas.ts`),
     run_lineage_attempts: exported(`${core}workflows/quotas.ts`),
@@ -506,6 +514,14 @@ const knowledgeDb: D1State = {
     brain_capture_cursors: exported(
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
+    ),
+    brain_eval_suite_versions: exported(
+      `${brain}eval-suites.ts`,
+      "Each learning suite version, frozen by its digests, and who accepted it."
+    ),
+    brain_eval_cases: exported(
+      `${brain}eval-suites.ts`,
+      "The cases of each learning suite version, by split, with their answer keys."
     ),
     brain_erased_evidence: exported(
       `${brain}outcomes.ts`,
@@ -1042,9 +1058,9 @@ export const clientStateRegistry: ClientStateRegistry = {
   },
   notClientState: {
     "apps/admin/wrangler.jsonc":
-      "Grasp's admin runs once, in grasp-os-ops: its state is Grasp's, about clients.",
+      "Grasp's admin runs once per stage, in Grasp's account: its state is Grasp's, about clients.",
     "apps/router/wrangler.jsonc":
-      "The router runs once, in grasp-os-ops, and holds only hostnames the admin writes.",
+      "The router runs once per stage, in Grasp's account, and holds only hostnames the admin writes.",
     "apps/gateway/wrangler.jsonc":
       "The connect gateway runs once, in Grasp's account, and holds nothing: it forwards each placed core's calls to its own connect.",
   },

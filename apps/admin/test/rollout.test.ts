@@ -1,3 +1,4 @@
+import { clientsNamespace } from "@grasp-os/shared/names";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -66,7 +67,7 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { FollowedRuns, LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 // Rolling a release out to placed clients (GRA-388): ring 0 first, one
 // staff approval, then the fleet ring by ring, each client's operation
@@ -510,7 +511,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -539,7 +540,7 @@ describe("rolling a release out to placed clients", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // The release's core answers the probe as another client; the
     // rollback's connect upload finds it answering as it should again.
     internal.account.coreProbe = { asClient: "someone-else" };
@@ -582,7 +583,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -1131,6 +1132,35 @@ describe("rolling a release out to placed clients", () => {
     });
   });
 
+  it("records on its operation why applying stopped before it could run, a secret missing from Secrets Store by name, and gives the client back", async () => {
+    const release = await placedRelease("feat(core): runs");
+    const client = await live(0, release);
+    await emptyStoreSecret(env.ROUTER_KEY, "ROUTER_KEY");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runId = await applySettings(env, staff, client.clientId);
+    const ended = await runEnded(adminWorkflows.applyClient, runId);
+    errors.mockRestore();
+    expect({
+      status: ended.status,
+      operation: await db
+        .select({
+          status: clientProvisions.status,
+          error: clientProvisions.error,
+        })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, client.clientId))
+        .get(),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      status: "errored",
+      operation: {
+        status: "failed",
+        error: "store_secret_missing: ROUTER_KEY",
+      },
+      runner: null,
+    });
+  });
+
   it("applies a client's settings once when its operation's attempt times out and its retry runs, the attempt that timed out acting no more", async () => {
     const release = await placedRelease("feat(core): applied on a retry");
     const client = await live(0, release);
@@ -1611,7 +1641,7 @@ const crashedRollout = async (
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${client.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await runClientProvision(await deployContext(env), holder).catch(() => {
@@ -1691,7 +1721,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // Its first try's core answers the probe as another client; the
     // rollback's upload finds it answering as it should again.
     acme.account.coreProbe = { asClient: "someone-else" };
@@ -1735,7 +1765,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await using run = await followRollouts();
@@ -2120,7 +2150,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -2231,7 +2261,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     await using run = await followRollouts();
     await using rollbacks = await followRollbacks();
     // The rollout's change fails on its first upload.
@@ -2279,7 +2309,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await rollbackClient(env, staff, rolloutId, internal.clientId);
@@ -2352,7 +2382,10 @@ describe("a client's changes, counted", () => {
         .get();
       await db
         .update(hostingDestinations)
-        .set({ kind: "workers_for_platforms", namespace: "production" })
+        .set({
+          kind: "workers_for_platforms",
+          namespace: clientsNamespace("production"),
+        })
         .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
       // A secrets rollout that rotated connect's Composio key: its operation
       // delivered the store's value, as on record.
@@ -2748,7 +2781,7 @@ describe("rolling out a release that raises a platform limit", () => {
     const later = await placedRelease("feat(core): keeps a raise", {
       platformLimits: raised,
       previousRelease: {
-        releaseId: "r999999999-abcdef0",
+        releaseId: "26.01.999999999",
         platformLimits: raised,
       },
     });
@@ -2834,7 +2867,6 @@ describe("rolling out a release that raises a platform limit", () => {
           clientId: id,
           deploymentId: id.replace("fleet-", "d"),
           destinationId,
-          policyId: "eu-storage",
           placedBy: staff.email,
           placedAt: now,
         }),

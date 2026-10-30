@@ -534,7 +534,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   async send(chatId: string, question: ChatQuestion): Promise<void> {
-    await withPerson(this.#check, async ({ userId }) => {
+    await withPerson(this.#check, async ({ userId, staff }) => {
       const id = chatIdOf(chatId);
       // Its strings and effort only: whatever else the page passed goes no
       // further.
@@ -542,7 +542,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_question");
       }
-      await this.#chatsOf(userId).send(id, userId, parsed.data);
+      // A Grasp staff member's turn is marked as theirs from their own
+      // session, never from what the page sends (GRA-1088).
+      await this.#chatsOf(userId).send(id, userId, parsed.data, staff);
     });
   }
 
@@ -576,10 +578,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         appId: chat.appId,
       };
       try {
-        await chats.send(chat.id, userId, {
-          text: fixQuestion(fix.report),
-          model,
-        });
+        await chats.send(
+          chat.id,
+          userId,
+          { text: fixQuestion(fix.report), model },
+          person.staff
+        );
       } catch (error) {
         return {
           chat: { ...summary, running: false },

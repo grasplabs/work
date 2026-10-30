@@ -10,6 +10,7 @@ import type {
 } from "@grasp-os/shared/capability";
 import type { ChatPlatform } from "@grasp-os/shared/chat";
 import {
+  appDropRequestSchema,
   bindingDropRequestSchema,
   connectCallSchema,
   connectErrors,
@@ -1180,6 +1181,29 @@ export const dropForBinding = async (
     sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${appId} AND json_extract(${pendingActions.binding}, '$.id') = ${bindingId}`,
     "binding.revoked",
     null
+  );
+};
+
+/**
+ * Declines every held action of App `appId`, which core removed: nobody
+ * can confirm them, as nobody can one whose day ended, so they go the way
+ * an expired one goes, each as `connection.action.expired` by core itself,
+ * with reason `app.removed`, keeping none of their inputs.
+ */
+export const dropForRemovedApp = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = appDropRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${parsed.data.appId}`,
+    "app.removed",
+    null,
+    "connection.action.expired"
   );
 };
 

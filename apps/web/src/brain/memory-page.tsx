@@ -105,7 +105,15 @@ const RecordLine = ({
 }) => {
   const body = (
     <>
-      <span className="min-w-0 text-sm">{record.statement}</span>
+      <span className="min-w-0 text-sm">
+        {record.withheld === true ? (
+          <span className="text-muted-foreground italic">
+            <Trans>Cites a source you no longer have access to</Trans>
+          </span>
+        ) : (
+          record.statement
+        )}
+      </span>
       <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
         <ScopeBadge scope={record.scope} />
         <StateBadge state={record.state} />
@@ -312,6 +320,7 @@ const LineagePanel = ({
   onPick: (memoryId: string) => void;
   onChanged: (memoryId: string | undefined) => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
   // Keyed by the record: another record is another panel, read afresh.
   const [answered, setAnswered] = useState<Read<Lineage>>({
@@ -342,13 +351,20 @@ const LineagePanel = ({
   const lineage = answered.data;
   const { record } = lineage;
   const own = record.by === null;
+  const withheld = record.withheld === true;
   const correctable =
-    own && record.scope === "person" && record.state !== "retired";
+    own && !withheld && record.scope === "person" && record.state !== "retired";
+  // One's own, any scope, by them; a shared one by an admin too. One they
+  // may no longer read, withheld, only so.
   const retirable =
-    record.scope !== "person" && record.state !== "retired" && (own || admin);
+    record.state !== "retired" && (own || (admin && record.scope !== "person"));
   return (
     <section
-      aria-label={record.statement}
+      aria-label={
+        withheld
+          ? t`Cites a source you no longer have access to`
+          : record.statement
+      }
       className="flex flex-col gap-5 rounded-lg border p-4"
     >
       <RecordLine by={record.by} record={record} />
