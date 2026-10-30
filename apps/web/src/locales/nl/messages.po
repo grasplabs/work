@@ -356,6 +356,10 @@ msgstr "{count, plural, one {{names} werken hier, aan # stuk werk dat naar voren
 msgid "{count, plural, one {# application} other {# applications}}"
 msgstr "{count, plural, one {# applicatie} other {# applicaties}}"
 
+#: src/inbox/items.ts
+msgid "{count, plural, one {# binding} other {# bindings}}"
+msgstr "{count, plural, one {# koppeling} other {# koppelingen}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# blocker} other {# blockers}}"
 msgstr "{count, plural, one {# blokkade} other {# blokkades}}"
@@ -770,6 +774,10 @@ msgstr "{kept} van {written}"
 #: src/dashboard/dependency-requests.tsx
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
+
+#: src/inbox/item-detail.tsx
+msgid "{kind}: {contractId}"
+msgstr "{kind}: {contractId}"
 
 #: src/onboarding/work-list.tsx
 msgid "{known} of {workflows} workflows known"
@@ -3209,6 +3217,10 @@ msgctxt "let a waiting item go ahead"
 msgid "Approve"
 msgstr "Goedkeuren"
 
+#: src/inbox/item-detail.tsx
+msgid "Approve {alias}"
+msgstr "{alias} goedkeuren"
+
 #: src/inbox/items.ts
 msgid "Approve {name}?"
 msgstr "{name} goedkeuren?"
@@ -3239,6 +3251,10 @@ msgstr "De pakketten voor {domain} goedkeuren"
 msgid "Approve the packages for {domain}?"
 msgstr "De pakketten voor {domain} goedkeuren?"
 
+#: src/inbox/items.ts
+msgid "Approve what {name} reaches"
+msgstr "Goedkeuren wat {name} bereikt"
+
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
@@ -3266,6 +3282,10 @@ msgstr "Goedgekeurd over {left} s"
 #: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Pakketten goedgekeurd"
+
+#: src/inbox/item-detail.tsx
+msgid "Approved: {alias} of {name}."
+msgstr "Goedgekeurd: {alias} van {name}."
 
 #: src/dashboard/report.ts
 msgid "Approved: {approved}"
@@ -3794,6 +3814,11 @@ msgstr "{alias} koppelen"
 #: src/inbox/items.ts
 msgid "Binding"
 msgstr "Koppeling"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
+msgid "Bindings"
+msgstr "Koppelingen"
 
 #: src/policies/policy.ts
 msgctxt "what a policy rule does"
@@ -8138,6 +8163,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: domeinen en agents houden hun toestemmingen ervoor."
 
+#: src/inbox/item-detail.tsx
+msgid "Its bindings"
+msgstr "Zijn koppelingen"
+
 #: src/engines/resource-bindings.tsx
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van zonder budget te draaien. Koppel hem opnieuw om het budget opnieuw in te stellen."
@@ -8265,6 +8294,10 @@ msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan all
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the domain's bindings."
 msgstr "De stappen kunnen niet uit de code worden gelezen, dus elke stap kan alles doen wat de code doet, zonder een koppeling van het domein aan te roepen."
+
+#: src/inbox/item-detail.tsx
+msgid "Its target needs choices the inbox doesn't offer yet: approve it on the workflow's page."
+msgstr "Het doel vraagt keuzes die de inbox nog niet biedt: keur het goed op de pagina van de workflow."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
@@ -15242,6 +15275,10 @@ msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
 msgid "the EU"
 msgstr "de EU"
 
+#: src/inbox/item-detail.tsx
+msgid "The events its contract admits"
+msgstr "De gebeurtenissen die zijn contract toelaat"
+
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
@@ -15608,6 +15645,10 @@ msgstr "De run gestart op {openedAt}"
 #: src/workflows/test-run.tsx
 msgid "The run was stopped."
 msgstr "De run is gestopt."
+
+#: src/inbox/item-detail.tsx
+msgid "The run's own files"
+msgstr "De eigen bestanden van de run"
 
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
@@ -16974,6 +17015,14 @@ msgstr "Versie {version}"
 msgid "Version {version} has no build that runs, so nothing ran: one of its tasks uses something Grasp can't run yet."
 msgstr "Versie {version} heeft geen build die draait, dus er draaide niets: een van de taken gebruikt iets wat Grasp nog niet kan uitvoeren."
 
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "Versie {version} van {name} is gevraagd om live te gaan. Zodra dat zo is, start niets haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
+
+#: src/inbox/items.ts
+msgid "Version {version} of {name} is live, but nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
+msgstr "Versie {version} van {name} is live, maar niets start haar totdat een admin goedkeurt wat ze bereikt: elk model, elke verbinding, elke opslag of verzameling die ze aanroept."
+
 #: src/screens/screen-frame.tsx
 msgid "Version {version}: read-only preview"
 msgstr "Versie {version}: voorbeeld, alleen lezen"
@@ -17049,6 +17098,7 @@ msgstr "Volume"
 msgid "wait for a decision now"
 msgstr "wachten nu op een beslissing"
 
+#: src/inbox/items.ts
 #: src/interview/words.ts
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -17298,6 +17348,10 @@ msgstr "ging naar mensen"
 msgctxt "log filter"
 msgid "What"
 msgstr "Wat"
+
+#: src/inbox/item-detail.tsx
+msgid "What {alias} reaches"
+msgstr "Wat {alias} bereikt"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "What {name} is told changes only through the Stephen Lab, a version at a time. Each version has a mark, the same here and in the lab."

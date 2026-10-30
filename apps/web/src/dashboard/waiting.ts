@@ -5,6 +5,7 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import type {
+  BindingApprovalItem,
   GoLiveItem,
   SignInAgainItem,
   WorkflowGoLiveItem,
@@ -41,6 +42,8 @@ export interface Waiting {
   decisions: Loaded<DecisionView[]>;
   /** Versions of workflows asked to go live that the person may approve or send back. */
   workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
+  /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */
+  bindings?: Loaded<BindingApprovalItem[]>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */
