@@ -26,12 +26,13 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon, PauseIcon, PlayIcon, SendIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useGrace } from "../use-grace.ts";
 
 // Whether an independent workflow runs, and the one place to pause it
 // (prototype `components/workflow-status.tsx`): beside its name, "Live
@@ -43,13 +44,10 @@ import { useCore } from "../use-core.ts";
 // refuses new starts while it is paused, and runs already going carry on.
 // After the yes it waits `graceSeconds` in the same place with Undo; only
 // then is core asked. Leaving the page in those seconds pauses it at once:
-// the yes was given.
+// the yes was given (`useGrace`, the rule an answer in Today follows too).
 
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
-
-/** One second, in milliseconds. */
-const secondMs = 1000;
 
 /** The words for a stage before a version went live. */
 const stageWords: Readonly<Record<WorkflowStage, MessageDescriptor>> = {
@@ -284,10 +282,6 @@ export const WorkflowStatus = ({
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState(false);
-  // Seconds left to take the pause back; null when none is on its way.
-  const [left, setLeft] = useState<number | null>(null);
-  // The revision a pause on its way names, for leaving the page too.
-  const pending = useRef<number | null>(null);
 
   const change = async (
     write: "pause" | "resume" | "requestGoLive",
@@ -302,42 +296,15 @@ export const WorkflowStatus = ({
     }
   };
 
-  // The pause is real: core is asked, with the revision the yes was given at.
-  const pauseNow = useEffectEvent((revision: number) => {
-    void change("pause", { revision });
-  });
-
-  useEffect(() => {
-    // A second at a time; after the last one core is asked.
-    const timer =
-      left === null
-        ? undefined
-        : setTimeout(() => {
-            if (left > 1) {
-              setLeft(left - 1);
-              return;
-            }
-            const revision = pending.current;
-            pending.current = null;
-            setLeft(null);
-            if (revision !== null) {
-              pauseNow(revision);
-            }
-          }, secondMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [left]);
-
-  // The page goes while a pause is on its way: it happens now, as nothing
-  // on this page is left to show it.
-  useEffect(
-    () => () => {
-      const revision = pending.current;
-      if (revision === null) {
-        return;
-      }
-      pending.current = null;
+  // The pause is real: core is asked, with the revision the yes was given
+  // at; once the page is gone, with nobody left on it to tell. The
+  // workflow's page says how it stands when it is opened again.
+  const { held, hold, undo } = useGrace<number>({
+    seconds: graceSeconds,
+    go: (revision) => {
+      void change("pause", { revision });
+    },
+    goOnLeave: (revision) => {
       void (async () => {
         try {
           await core.withSession(
@@ -347,24 +314,14 @@ export const WorkflowStatus = ({
               })
           );
         } catch {
-          // Nobody is left on the page to tell; the workflow's page says
-          // how it stands when it is opened again.
+          // Nobody is left on the page to tell.
         }
       })();
     },
-    [core, workflow]
-  );
+  });
 
-  if (left !== null) {
-    return (
-      <PauseCountdown
-        left={left}
-        onUndo={() => {
-          pending.current = null;
-          setLeft(null);
-        }}
-      />
-    );
+  if (held !== null) {
+    return <PauseCountdown left={held.left} onUndo={undo} />;
   }
 
   const view = statusOf(lifecycle);
@@ -408,8 +365,7 @@ export const WorkflowStatus = ({
         onOpenChange={setAsking}
         onPause={() => {
           setAsking(false);
-          pending.current = lifecycle.revision;
-          setLeft(graceSeconds);
+          hold(lifecycle.revision);
         }}
         open={asking}
       />
