@@ -76,6 +76,16 @@ msgstr "{0, plural, one {# package in all, to run in: {targets}} other {# packag
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# person} other {# people}}"
 
+#. placeholder {0}: effect.statements
+#: src/brain/forget.tsx
+msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
+msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
+
+#. placeholder {0}: effect.workflows.length
+#: src/brain/forget.tsx
+msgid "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
+msgstr "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
+
 #. placeholder {0}: cited.length
 #: src/chat/sources.tsx
 msgid "{0, plural, one {Based on # source} other {Based on # sources}}"
@@ -161,10 +171,6 @@ msgstr "{amount} in all"
 msgid "{amount} of {limitShown}"
 msgstr "{amount} of {limitShown}"
 
-#: src/brain/brain-atlas.ts
-msgid "{answered} answered"
-msgstr "{answered} answered"
-
 #: src/settings/stephen-card.tsx
 msgid "{answered} of {questions} questions"
 msgstr "{answered} of {questions} questions"
@@ -216,10 +222,6 @@ msgstr "{artifacts, plural, one {# build already made ({targets}) keeps working.
 #: src/engines/package-approvals.tsx
 msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
 msgstr "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
-msgstr "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
 
 #: src/settings/stephen-card.tsx
 msgid "{asked} asked"
@@ -594,20 +596,10 @@ msgstr "{domainName}, version {version}"
 #: src/brain/brain-atlas.ts
 msgid "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
 msgstr "{done, plural, one {# of them is drawn.} other {# of them are drawn.}}"
-msgid "{done, plural, one {# of them is drawn in the builder.} other {# of them are drawn in the builder.}}"
-msgstr "{done, plural, one {# of them is drawn in the builder.} other {# of them are drawn in the builder.}}"
-
-#: src/brain/brain-atlas.ts
-msgid "{done, plural, one {# question is answered, by the person who knew.} other {# questions are answered, by the people who knew.}}"
-msgstr "{done, plural, one {# question is answered, by the person who knew.} other {# questions are answered, by the people who knew.}}"
 
 #: src/settings/stephen-settings.tsx
 msgid "{done} done · {failed} failed · 30 days"
 msgstr "{done} done · {failed} failed · 30 days"
-
-#: src/brain/brain-atlas.ts
-msgid "{drawn} drawn in the builder"
-msgstr "{drawn} drawn in the builder"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "{each, plural, one {# hour a week} other {# hours a week}}"
@@ -1269,6 +1261,7 @@ msgstr "{percent}% known now"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "{percent}% of the project’s room used"
 msgstr "{percent}% of the project’s room used"
+
 #: src/workflows/activity-bar.tsx
 msgid "{person} approved {alias} for version {version}"
 msgstr "{person} approved {alias} for version {version}"
@@ -1850,12 +1843,13 @@ msgstr "{who}: “{answer}”"
 msgid "{who}'s text:"
 msgstr "{who}'s text:"
 
-#: src/brain/brain-atlas.ts
-msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
-msgstr "{work, plural, one {# piece of work} other {# pieces of work}}"
 #: src/workflows/workflow-status.tsx
 msgid "{word}. Change whether {name} runs"
 msgstr "{word}. Change whether {name} runs"
+
+#: src/brain/brain-atlas.ts
+msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
+msgstr "{work, plural, one {# piece of work} other {# pieces of work}}"
 
 #: src/inbox/items.ts
 msgid "{workflow} in {appName} failed"
@@ -2445,6 +2439,7 @@ msgstr "Add a goal"
 #: src/routes/_shell.settings.brain.tsx
 msgid "Add a group"
 msgstr "Add a group"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Add a member"
 msgstr "Add a member"
@@ -2798,10 +2793,6 @@ msgstr "All calls together"
 #: src/chat/chat-switcher.tsx
 msgid "All chats"
 msgstr "All chats"
-
-#: src/brain/brain-atlas.ts
-msgid "All interviewed"
-msgstr "All interviewed"
 
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "All interviews"
@@ -4510,6 +4501,7 @@ msgstr "Clear search and filters"
 msgid "Click to open Usage"
 msgstr "Click to open Usage"
 
+#: src/brain/forget.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
 #: src/connections/connect-dialog.tsx
@@ -6119,10 +6111,6 @@ msgstr "Every chat in this project reads it."
 msgid "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
 msgstr "Every chat in this project reads them. Markdown, text, CSV or JSON, up to {projectDocumentMaxKb} KB each."
 
-#: src/chat/chat-list.tsx
-msgid "Every chat is in a project."
-msgstr "Every chat is in a project."
-
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
 msgstr "Every client question or complaint, from the first message until it is solved."
@@ -7107,12 +7095,13 @@ msgstr "Grasp opens"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 
-#: src/routes/_shell.projects.$projectId.tsx
-msgid "Grasp reads these in every chat of the project."
-msgstr "Grasp reads these in every chat of the project."
 #: src/workflows/requests/request-needs.tsx
 msgid "Grasp proposes"
 msgstr "Grasp proposes"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Grasp reads these in every chat of the project."
+msgstr "Grasp reads these in every chat of the project."
 
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
@@ -7973,6 +7962,10 @@ msgstr "It has no steps."
 msgid "It has recorded no step yet."
 msgstr "It has recorded no step yet."
 
+#: src/brain/forget.tsx
+msgid "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
+msgstr "It is gone for good and cannot be brought back. The audit trail keeps that it was removed and by whom, never what it was."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It is no longer held."
 msgstr "It is no longer held."
@@ -8273,9 +8266,6 @@ msgstr "Its steps can't be read from its code, so any step may do anything its c
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 
-#: src/brain/brain-article/team-work.tsx
-msgid "Its work"
-msgstr "Its work"
 #: src/workflows/item-test.tsx
 msgid "Its version"
 msgstr "Its version"
@@ -8283,6 +8273,10 @@ msgstr "Its version"
 #: src/workflows/files-and-apps.tsx
 msgid "Its versions call it {aliases}"
 msgstr "Its versions call it {aliases}"
+
+#: src/brain/brain-article/team-work.tsx
+msgid "Its work"
+msgstr "Its work"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "Its work is mapped; nothing is redesigned with AI yet."
@@ -8335,6 +8329,7 @@ msgstr "Keep both"
 msgid "Keep holding"
 msgstr "Keep holding"
 
+#: src/brain/forget.tsx
 #: src/onboarding/interview-people.tsx
 msgid "Keep it"
 msgstr "Keep it"
@@ -9180,12 +9175,13 @@ msgstr "More of what you told me about AI."
 msgid "More of when it goes differently."
 msgstr "More of when it goes differently."
 
-#: src/brain/brain-atlas.ts
-msgid "More teams"
-msgstr "More teams"
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
 msgstr "More people are asked about it in the next interviews."
+
+#: src/brain/brain-atlas.ts
+msgid "More teams"
+msgstr "More teams"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
@@ -10668,12 +10664,13 @@ msgstr "Nothing missing"
 msgid "Nothing needs Grasp right now."
 msgstr "Nothing needs Grasp right now."
 
-#: src/brain/brain-log.tsx
-msgid "Nothing of this kind yet."
-msgstr "Nothing of this kind yet."
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
 msgstr "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
+
+#: src/brain/brain-log.tsx
+msgid "Nothing of this kind yet."
+msgstr "Nothing of this kind yet."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the domain's first current version."
@@ -12416,11 +12413,6 @@ msgstr "Reasoning"
 msgid "Receipt"
 msgstr "Receipt"
 
-#: src/chat/chat-list.tsx
-#: src/routes/_shell.index.tsx
-msgid "Recent chats"
-msgstr "Recent chats"
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Record-to-Report"
@@ -12573,17 +12565,40 @@ msgstr "Remove {name}?"
 msgid "Remove {named} as an approver"
 msgstr "Remove {named} as an approver"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Remove {title} from the brain"
+msgstr "Remove {title} from the brain"
+
 #: src/policies/policy-editing.tsx
 msgid "Remove {title}?"
 msgstr "Remove {title}?"
+
+#: src/brain/forget.tsx
+msgid "Remove {what} from the brain?"
+msgstr "Remove {what} from the brain?"
 
 #: src/policies/policy-editing.tsx
 msgid "Remove condition {position}"
 msgstr "Remove condition {position}"
 
+#: src/brain/brain-article/kern.tsx
+#: src/brain/brain-transcript.tsx
+#: src/brain/forget.tsx
+msgid "Remove from the brain"
+msgstr "Remove from the brain"
+
+#: src/brain/forget.tsx
+msgid "Remove it"
+msgstr "Remove it"
+
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
 msgstr "Remove the exception for {name}"
+
+#: src/brain/brain-article/kern.tsx
+#: src/brain/brain-transcript.tsx
+msgid "Remove this from the brain"
+msgstr "Remove this from the brain"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
@@ -12601,6 +12616,11 @@ msgstr "Removed a member"
 #: src/workflows/item-test.tsx
 msgid "Removed after a week"
 msgstr "Removed after a week"
+
+#: src/brain/brain.ts
+#: src/brain/forget.tsx
+msgid "Removed from the brain"
+msgstr "Removed from the brain"
 
 #: src/chat/builds.tsx
 msgid "Removed parameter {name}"
@@ -13721,12 +13741,13 @@ msgstr "Show fewer"
 msgid "Show in the brain"
 msgstr "Show in the brain"
 
-#: src/brain/brain-log.tsx
-msgid "Show in the log"
-msgstr "Show in the log"
 #: src/workflows/diagram-overview.tsx
 msgid "Show in the drawing"
 msgstr "Show in the drawing"
+
+#: src/brain/brain-log.tsx
+msgid "Show in the log"
+msgstr "Show in the log"
 
 #: src/chat/held-writes.tsx
 msgid "Show less"
@@ -15835,6 +15856,14 @@ msgstr "These are your domains. Each one is a part of your business, with its wo
 msgid "These fields stay reserved with their current meaning: {reserved}."
 msgstr "These fields stay reserved with their current meaning: {reserved}."
 
+#: src/brain/forget.tsx
+msgid "These notes rest on nothing else and go too: {named} and {more} more."
+msgstr "These notes rest on nothing else and go too: {named} and {more} more."
+
+#: src/brain/forget.tsx
+msgid "These notes rest on nothing else and go too: {named}."
+msgstr "These notes rest on nothing else and go too: {named}."
+
 #: src/engines/store-changes.tsx
 msgid "These releases can never be made current: {releases}."
 msgstr "These releases can never be made current: {releases}."
@@ -16224,6 +16253,10 @@ msgstr "Through Grasp's own connector, which keeps the access in your deployment
 msgid "Time (UTC)"
 msgstr "Time (UTC)"
 
+#: src/brain/forget.tsx
+msgid "Time left to undo"
+msgstr "Time left to undo"
+
 #: src/workflows/requests/request-plan.tsx
 msgid "Time saved"
 msgstr "Time saved"
@@ -16313,12 +16346,11 @@ msgstr "To these teams"
 msgid "To use them again, someone who approves packages reviews them again."
 msgstr "To use them again, someone who approves packages reviews them again."
 
-#: src/chat/chat-switcher.tsx
 #: src/brain/brain-log.tsx
 msgid "Today"
 msgstr "Today"
 
-#: src/chat/chat-list.tsx
+#: src/chat/chat-switcher.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"
@@ -16560,6 +16592,11 @@ msgstr "Under way"
 
 #: src/workflows/workflow-status.tsx
 msgctxt "take a pause back before it happens"
+msgid "Undo"
+msgstr "Undo"
+
+#: src/brain/forget.tsx
+msgctxt "take a removal back before it happens"
 msgid "Undo"
 msgstr "Undo"
 
@@ -17572,6 +17609,7 @@ msgstr "What the board wants from the sprint: its goals and the rules of the roa
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "What the brain kept of it"
+
 #: src/workflows/item-test.tsx
 msgid "What the calls answer isn't JSON."
 msgstr "What the calls answer isn't JSON."
@@ -17644,9 +17682,6 @@ msgstr "What to remember"
 msgid "What to remove"
 msgstr "What to remove"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "What waits on me today?"
 #: src/routes/_shell.workflows.index.tsx
 msgid "What to show of the runs"
 msgstr "What to show of the runs"
@@ -17654,6 +17689,10 @@ msgstr "What to show of the runs"
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "What to show of the traces"
+
+#: src/chat/suggestions.tsx
+msgid "What waits on me today?"
+msgstr "What waits on me today?"
 
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
@@ -17666,6 +17705,10 @@ msgstr "What waits on you, each with its next step, and what could be better."
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
 msgstr "What was heard, written and connected"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "what was said"
+msgstr "what was said"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
@@ -17801,13 +17844,14 @@ msgstr "When to use it"
 msgid "Where"
 msgstr "Where"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "Where does the most time still go?"
 #: src/workflows/requests/request-detail.tsx
 msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Where"
+
+#: src/chat/suggestions.tsx
+msgid "Where does the most time still go?"
+msgstr "Where does the most time still go?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
