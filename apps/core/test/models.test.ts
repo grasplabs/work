@@ -614,13 +614,14 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it.each([
-    [anthropic, 401, "authentication_error", 1, "model.failed"],
-    [openai, 402, "insufficient_quota", 1, "model.failed"],
+    // Worded by what was seen: the key refused, requests limited.
+    [anthropic, 401, "authentication_error", 1, "model.provider_key_failed"],
+    [openai, 402, "insufficient_quota", 1, "model.rate_limited"],
     // Refused for a moment: tried twice more, after the wait it asks for,
     // before it is told it is rate-limited, not that it failed.
     [mistral, 429, "rate_limit_error", 3, "model.rate_limited"],
     // Never asked again: the provider may have taken it on, and billed it.
-    [anthropic, 503, "overloaded_error", 1, "model.failed"],
+    [anthropic, 503, "overloaded_error", 1, "model.provider_unavailable"],
   ])(
     "audits a call to %s the provider refuses with %i, with the status and error type only",
     async (model, status, errorType, requests, told) => {
@@ -687,7 +688,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     });
   });
 
-  it("tells a call whose last request was lost that it failed, not that it was rate-limited before", async () => {
+  it("tells a call whose last request was lost that its provider isn't answering, not that it was rate-limited before", async () => {
     const { providerEnv } = await withProvider(
       [
         {
@@ -711,10 +712,10 @@ describe("model gateway", { timeout: 30_000 }, () => {
           work: work(),
         })
       )
-    ).resolves.toBe("model.failed");
+    ).resolves.toBe("model.provider_unavailable");
   });
 
-  it("fails a call that takes longer than its timeout, and audits it", async () => {
+  it("fails a call that takes longer than its timeout, saying its provider isn't answering, and audits it", async () => {
     const trigger = newPerson();
     const { providerEnv } = await withProvider([{ hang: true }]);
 
@@ -729,7 +730,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
           work: work(),
         })
       )
-    ).resolves.toBe("model.failed");
+    ).resolves.toBe("model.provider_unavailable");
     const [event] = await auditedFor(trigger.userId, 1);
     expect(event?.detail).toMatchObject({
       outcome: "failed",
@@ -1192,7 +1193,8 @@ describe("model gateway for agents", () => {
 
     expect(final).toMatchObject({
       stopReason: "error",
-      errorMessage: "The model call failed (401 authentication_error).",
+      errorMessage:
+        "Your AI provider is refusing your key (model.provider_key_failed).",
     });
     const [event] = await auditedFor(trigger.userId, 1);
     expect(event?.detail).toMatchObject({

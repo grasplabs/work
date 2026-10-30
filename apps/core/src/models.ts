@@ -17,7 +17,10 @@ import {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderRoutes } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderRoutes,
+  ProviderTrouble,
+} from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -932,7 +935,46 @@ interface ProviderRefusal {
   name: string | undefined;
   type: string | undefined;
   code: string | number | undefined;
+  /**
+   * Whether it says the key's account has no credit or quota left
+   * (`outOfCreditOf`): read off its type, its code or its message, and
+   * kept as this flag alone, never the message.
+   */
+  outOfCredit: boolean;
 }
+
+/**
+ * The types and codes providers name a refusal for an account with no
+ * credit or quota left by: OpenAI's (and OpenAI-compatible endpoints')
+ * `insufficient_quota` and `billing_hard_limit_reached`, Anthropic's
+ * `billing_error`, and OpenRouter's and Mistral's payment refusals.
+ */
+const outOfCreditCodes: ReadonlySet<string> = new Set([
+  "insufficient_quota",
+  "billing_hard_limit_reached",
+  "billing_not_active",
+  "billing_error",
+  "payment_required",
+  "insufficient_credits",
+]);
+
+/**
+ * What a refusal's message says when the account ran out, where its type
+ * doesn't: Anthropic answers a 400 `invalid_request_error` saying "Your
+ * credit balance is too low". Matched, never kept.
+ */
+const outOfCreditMessage =
+  /\b(?:credit balance is too low|insufficient (?:credits?|funds|balance|quota)|exceeded your current quota)\b/iu;
+
+/**
+ * Whether a refusal's body says its account has no credit or quota left:
+ * by one of its types or codes (`names`), or by its message.
+ */
+const outOfCreditOf = (names: readonly unknown[], message: unknown): boolean =>
+  names.some(
+    (name) => typeof name === "string" && outOfCreditCodes.has(name)
+  ) ||
+  (typeof message === "string" && outOfCreditMessage.test(message));
 
 /** An identifier or a number, as a provider names its errors. */
 const errorCodeSchema = z.union([
@@ -970,12 +1012,19 @@ const refusalOf = (text: string): ProviderRefusal => {
   } catch {
     // Not JSON: nothing of it is kept.
   }
+  const type =
+    identifierOf(parsed?.type) ?? identifierOf(nestedOf(parsed?.error, "type"));
+  const code = codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code"));
+  const { error } = parsed ?? {};
   return {
     name: identifierOf(parsed?.name),
-    type:
-      identifierOf(parsed?.type) ??
-      identifierOf(nestedOf(parsed?.error, "type")),
-    code: codeOf(parsed?.code) ?? codeOf(nestedOf(parsed?.error, "code")),
+    type,
+    code,
+    // Anthropic nests its own type under a top-level `error` type.
+    outOfCredit: outOfCreditOf(
+      [type, code, nestedOf(error, "type"), nestedOf(error, "code")],
+      isRecord(error) ? error.message : parsed?.message
+    ),
   };
 };
 
@@ -1727,25 +1776,31 @@ const open = async (
         status: undefined,
       };
       response.failure = signal.aborted ? undefined : failure;
+      // Its deadline passed with no answer: the provider isn't answering,
+      // as its status says. Not one its caller cancelled.
+      const unanswered = !signal.aborted || Date.now() >= endsAt;
       response.settled.push(
         await settleAdmitted(route, admitted, {
           by: "unknown",
-          ...(signal.aborted ? {} : { failure: { kind: failure.kind } }),
+          ...(unanswered ? { failure: { kind: failure.kind } } : {}),
         })
       );
       throw error;
     }
     response.refusal = undefined;
-    response.rateLimited =
-      answered.status === 429
-        ? rateLimitedSeconds(answered.headers)
-        : undefined;
+    response.rateLimited = undefined;
     if (!answered.ok) {
+      const refusal = refusalOf(await answered.clone().text());
       const failure = failureOfResponse(
         answered.status,
-        response.rateLimited ?? 0
+        answered.status === 429 ? rateLimitedSeconds(answered.headers) : 0,
+        refusal.outOfCredit
       );
       response.failure = failure;
+      // Only a rate limit is waited out: an account out of credit (a 429
+      // too, at OpenAI) fails the same way however long it waits.
+      response.rateLimited =
+        failure.kind === "rate_limited" ? failure.retryAfterSeconds : undefined;
       const noted = notedFailure(failure);
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
@@ -1755,7 +1810,7 @@ const open = async (
           ...(noted === undefined ? {} : { failure: noted }),
         })
       );
-      response.refusal = refusalOf(await answered.clone().text());
+      response.refusal = refusal;
       return answered;
     }
     response.failure = undefined;
@@ -2838,7 +2893,8 @@ const mayHaveBilled = ({ pending, settled }: GatewayResponse): boolean =>
  * The route of the organization's next model for a call the provider
  * refused (`Route.fallbacks`), admitted afresh by the rules, or none:
  * only once the provider refused it before anything could be billed (its
- * credentials, or a rate limit its retries didn't outlast), never after a
+ * credentials, an account out of credit, or a rate limit its retries
+ * didn't outlast), never after a
  * server error, no answer or an answer begun, never past its deadline or
  * once its caller cancelled it, never once a request of the call may have
  * been billed, never for a call that allows one provider request only
@@ -2866,7 +2922,9 @@ const fallbackOf = async (
     stopped !== undefined ||
     response.held !== undefined ||
     response.pending !== undefined ||
-    (failure.kind !== "auth" && failure.kind !== "rate_limited")
+    (failure.kind !== "auth" &&
+      failure.kind !== "quota" &&
+      failure.kind !== "rate_limited")
   ) {
     return undefined;
   }
@@ -2885,6 +2943,122 @@ const fallbackOf = async (
   // The same call, on another model: it keeps what its requests already
   // hold under its binding's cap per request, never a fresh count.
   return { ...route, ...admitted, perRequest: route.perRequest };
+};
+
+/** What each way a request fails shows of its provider; none for the request's own fault. */
+const failureTroubles: Readonly<
+  Record<TransportFailure["kind"], ProviderTrouble | undefined>
+> = {
+  auth: "refused",
+  quota: "limiting",
+  rate_limited: "limiting",
+  provider_down: "not_answering",
+  refused: undefined,
+  budget: undefined,
+};
+
+/**
+ * What a failed request on the organization's own key showed of its
+ * provider, by the HTTP class seen, never a guess at why
+ * (`ProviderTrouble`): it refused the key (401, 403); it limited the
+ * request (429, an account's rate or spending limit); or it didn't answer
+ * (5xx, no answer, an answer that broke off, or the call's deadline
+ * passed with a request out).
+ * None for a call its caller cancelled, a refusal of the request itself,
+ * or one on Grasp's key, whose features say so in their own words.
+ */
+const troubleOf = (
+  route: Route,
+  { failure, settled, pending }: GatewayResponse,
+  stopped: Stopped | undefined
+): ProviderTrouble | undefined => {
+  if (route.way.credential !== "organization" || stopped === "cancelled") {
+    return undefined;
+  }
+  if (stopped === "timeout") {
+    // Only once a request went out: a call held back by the ledger till
+    // its deadline never reached the provider.
+    return settled.length > 0 || pending !== undefined
+      ? "not_answering"
+      : undefined;
+  }
+  if (failure === undefined) {
+    // An answer begun that broke off: the provider stopped answering.
+    return pending === undefined ? undefined : "not_answering";
+  }
+  return failureTroubles[failure.kind];
+};
+
+/** The code a call fails with for what its provider showed. */
+const troubleCodes = {
+  refused: "model.provider_key_failed",
+  not_answering: "model.provider_unavailable",
+  limiting: "model.rate_limited",
+} as const satisfies Record<ProviderTrouble, ModelErrorCode>;
+
+/**
+ * Whether the call failed provably before anything of it could be billed,
+ * from what the gateway saw of its requests, never a guess: the provider
+ * answered its last request with an error and no part of an answer (a
+ * refusal: the key, a rate or spending limit; or a 5xx, which streams
+ * nothing), and every request before it was refused or never sent. Not a
+ * request that got no answer at all (connect couldn't reach the provider,
+ * or the deadline passed with it out: it may have been taken on), not an
+ * answer begun, and not a call cut off here or with a request of it
+ * already billed. The ledger still holds a 5xx's reservation charged
+ * (`settleAdmitted`, "unknown"), as a bound on spend; whether running the
+ * call again is safe is this rule's, which an exactly-once caller keeps to
+ * (workflows/resource-host.ts).
+ */
+const provablyUnbilled = (
+  route: Route,
+  response: GatewayResponse,
+  stopped: Stopped | undefined
+): boolean => {
+  const { failure, pending, settled } = response;
+  if (
+    stopped !== undefined ||
+    route.billed === true ||
+    pending !== undefined ||
+    failure === undefined
+  ) {
+    return false;
+  }
+  const answeredAnError =
+    failure.kind !== "provider_down" || failure.status !== undefined;
+  return (
+    answeredAnError &&
+    !mayHaveBilled({ ...response, settled: settled.slice(0, -1) })
+  );
+};
+
+/**
+ * The failure of a call whose provider showed `trouble`, naming it and
+ * the provider, so a workflow run can wait for it (workflows/host.ts),
+ * with the wait a rate limit asked for, where it did, and whether it
+ * provably billed nothing (`provablyUnbilled`), so a call tried once may
+ * be run again.
+ */
+const troubleError = (
+  route: Route,
+  trouble: ProviderTrouble,
+  waitSeconds: number | undefined,
+  unbilled: boolean
+) =>
+  modelErrors.create(troubleCodes[trouble], {
+    model: route.call.model,
+    provider: route.way.provider,
+    trouble,
+    ...(waitSeconds === undefined ? {} : { retryAfterSeconds: waitSeconds }),
+    ...(unbilled ? { unbilled: true } : {}),
+  });
+
+/** What a stream ends with for what its provider showed. */
+const troubleMessages: Readonly<Record<ProviderTrouble, string>> = {
+  refused: "Your AI provider is refusing your key (model.provider_key_failed).",
+  not_answering:
+    "Your AI provider isn't answering (model.provider_unavailable).",
+  limiting: "Your AI provider is limiting requests (model.rate_limited).",
 };
 
 /** Records that `from` fell back to `to`'s model, and why. Metadata only. */
@@ -3006,7 +3180,17 @@ const answerCall = async <Output>(
       // took nothing on, and asking again after the wait may get through.
       // Not one cut off meanwhile, by its deadline or its caller: that is
       // what it failed of then.
-      if (sent.rateLimited !== undefined && limit.stopped() === undefined) {
+      const stopped = limit.stopped();
+      const trouble = troubleOf(request, sent, stopped);
+      if (trouble !== undefined) {
+        throw troubleError(
+          request,
+          trouble,
+          stopped === undefined ? sent.rateLimited : undefined,
+          provablyUnbilled(request, sent, stopped)
+        );
+      }
+      if (sent.rateLimited !== undefined && stopped === undefined) {
         throw modelErrors.create("model.rate_limited", {
           model: call.model,
           retryAfterSeconds: sent.rateLimited,
@@ -3256,16 +3440,17 @@ const relayEvents = async (
         await auditFallback(env, route, next, response.failure);
         return next;
       }
-      const rateLimited =
-        response.rateLimited === undefined || stopped !== undefined
-          ? undefined
-          : `The model's provider is taking no more requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
+      const trouble = troubleOf(route, response, stopped);
+      let errorMessage =
+        trouble === undefined
+          ? failureMessage(failure)
+          : troubleMessages[trouble];
+      if (response.rateLimited !== undefined && stopped === undefined) {
+        errorMessage = `The model's provider is limiting requests for now (model.rate_limited). Try again in ${response.rateLimited} seconds.`;
+      }
       out.push({
         ...event,
-        error: {
-          ...chargedAnswer(route, sent),
-          errorMessage: rateLimited ?? failureMessage(failure),
-        },
+        error: { ...chargedAnswer(route, sent), errorMessage },
       });
       return undefined;
     }

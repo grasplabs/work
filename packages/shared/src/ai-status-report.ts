@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { aiProviderIdSchema } from "./ai-providers.ts";
+import { aiProviderIdSchema, providerTroubles } from "./ai-providers.ts";
 import { platformAiFeatures } from "./platform-ai.ts";
 
 // What the admin reads of a client's AI (core's ai-status-report.ts), for
@@ -47,6 +47,14 @@ export const aiProviderStatusSchema = z.strictObject({
   lastFailedAt: at,
   /** How it last failed (the transport's failure kind), if it did. */
   lastFailure: z.string().max(64).nullable(),
+  /**
+   * What its calls show now, by the HTTP class seen (`ProviderTrouble`),
+   * and since when: the first failure of that kind after the last call
+   * that worked. Null while the last call worked, or once the key was
+   * replaced.
+   */
+  failingClass: z.enum(providerTroubles).nullable(),
+  failingSince: at,
 });
 export type AiProviderStatus = z.infer<typeof aiProviderStatusSchema>;
 

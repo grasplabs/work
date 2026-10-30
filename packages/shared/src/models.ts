@@ -10,6 +10,10 @@ export const modelErrors = defineErrorFamily({
   "model.unconfigured": "Models aren't set up for this deployment yet.",
   "model.no_provider":
     "No AI provider is connected yet. Connect an AI provider to use models.",
+  "model.provider_key_failed":
+    "Your AI provider is refusing your key. An admin can check or replace it in Settings › AI providers.",
+  "model.provider_unavailable":
+    "The AI provider isn't answering, so this call wasn't answered. This is usually an outage on their side; try again in a while.",
   "model.not_allowed": "This deployment doesn't allow that model.",
   "model.eu_only":
     "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
@@ -24,7 +28,7 @@ export const modelErrors = defineErrorFamily({
   "model.queued":
     "Other model calls running now fill this share of the model requests that may run at once, so this one waits its turn. Try again after the wait it names: it isn't a fault, and it goes on once a share comes free.",
   "model.rate_limited":
-    "The model's provider is taking no more requests from this deployment for now, so this call wasn't answered. Try again after the wait it names.",
+    "Your AI provider is limiting requests (a rate or spending limit at the provider), so this call wasn't answered. Try again after a while.",
   "model.unpriced":
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.answer_too_long":

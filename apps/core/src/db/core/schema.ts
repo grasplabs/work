@@ -2140,6 +2140,31 @@ export const buildAdmissionQueue = sqliteTable(
 );
 
 /**
+ * The steps of workflow runs, App runs and independent ones, held because
+ * the organization's AI provider refused its key, isn't answering, or is
+ * limiting requests
+ * (src/workflows/ai-waits.ts): one row per step from its first failed call
+ * until it runs again, so the run's summary says what it waits for, and
+ * replacing a key wakes it.
+ */
+export const workflowAiWaits = sqliteTable(
+  "workflow_ai_waits",
+  {
+    runId: text("run_id").notNull(),
+    /** An App's run (`workflow_runs`) or an independent one's (`workflow_resource_runs`). */
+    runKind: text("run_kind", { enum: ["app", "resource"] }).notNull(),
+    stepHash: text("step_hash").notNull(),
+    /** The provider its call went to (`AiProviderId`). */
+    provider: text().notNull(),
+    /** What its last call showed (`ProviderTrouble`). */
+    trouble: text().notNull(),
+    /** When its step's call first failed so. */
+    since: timestamp("since").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.stepHash] })]
+);
+
+/**
  * The steps of workflow runs whose model call waits in the model ledger's
  * queue for a share of the model requests in flight (model-admission.ts),
  * so the run's summary shows it queued (src/workflows/model-waits.ts): one

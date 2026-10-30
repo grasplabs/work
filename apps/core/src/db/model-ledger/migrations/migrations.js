@@ -8,6 +8,7 @@ import m0005 from './0005_model_admission.sql';
 import m0006 from './0006_person_limits.sql';
 import m0007 from './0007_provider_routes.sql';
 import m0008 from './0008_platform_feature.sql';
+import m0009 from './0009_provider_failing_since.sql';
 
   export default {
     journal,
@@ -20,7 +21,8 @@ m0004,
 m0005,
 m0006,
 m0007,
-m0008
+m0008,
+m0009
     }
   }
   

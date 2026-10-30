@@ -58,6 +58,7 @@ import { requireNotStaff } from "../sharing.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { runDequeued } from "./admission.ts";
+import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
 import { loadRunIsolate } from "./code.ts";
@@ -1427,17 +1428,26 @@ export const listResourceRuns = async (
     )
     .orderBy(desc(runs.createdAt), desc(runs.id))
     .limit(runsListed);
-  return rows.map((row) => ({
-    id: row.id,
-    workflowId: row.workflowResourceId,
-    version: row.version,
-    manifestHash: row.manifestHash,
-    buildHash: row.buildHash,
-    principal: row.principalId,
-    status: row.status,
-    createdAt: row.createdAt.toISOString(),
-    endedAt: row.endedAt?.toISOString() ?? null,
-  }));
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    rows.flatMap(({ id: run, status }) => (status === "running" ? [run] : []))
+  );
+  return rows.map((row) => {
+    const aiProvider = waits.get(row.id);
+    return {
+      id: row.id,
+      workflowId: row.workflowResourceId,
+      version: row.version,
+      manifestHash: row.manifestHash,
+      buildHash: row.buildHash,
+      principal: row.principalId,
+      status: row.status,
+      ...(aiProvider === undefined ? {} : { aiProvider }),
+      createdAt: row.createdAt.toISOString(),
+      endedAt: row.endedAt?.toISOString() ?? null,
+    };
+  });
 };
 
 /**
@@ -1468,6 +1478,12 @@ export const resourceRunFor = async (
       throw workflowResourceErrors.create("workflow.run_unavailable");
     }
   }
+  // A running run may wait for its AI provider (ai-waits.ts).
+  const waits = await aiWaitsOf(
+    drizzle(env.DB),
+    row.status === "running" ? [row.id] : []
+  );
+  const aiProvider = waits.get(row.id);
   const run: WorkflowResourceRun = {
     id: row.id,
     workflowId: row.workflowResourceId,
@@ -1476,6 +1492,7 @@ export const resourceRunFor = async (
     buildHash: row.buildHash,
     principal: row.principalId,
     status: row.status,
+    ...(aiProvider === undefined ? {} : { aiProvider }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };

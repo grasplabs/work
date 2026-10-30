@@ -1,6 +1,7 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
+import type { ModelErrorCode } from "@grasp-os/shared/models";
 import {
   ruleConditionSchema,
   ruleEffectSchema,
@@ -149,40 +150,34 @@ export const readingOf = (
   return { ok: true, summary: answer.summary, proposals, unchecked };
 };
 
-/** Why reading failed, from the gateway's refusal. */
+/** Why reading failed, for each of the gateway's refusals. */
+const problems: Readonly<Record<ModelErrorCode, PolicyReadingProblem>> = {
+  "model.unconfigured": "notSetUp",
+  "model.no_provider": "notSetUp",
+  "model.provider_key_failed": "notSetUp",
+  "model.provider_unavailable": "offline",
+  "model.not_allowed": "notSetUp",
+  "model.eu_only": "notSetUp",
+  "model.sensitive_data": "notSetUp",
+  "model.over_budget": "busy",
+  "model.budget_busy": "busy",
+  "model.queued": "busy",
+  "model.rate_limited": "busy",
+  "model.ledger_unavailable": "busy",
+  "model.quota_policy_unavailable": "busy",
+  "model.quota_policy_behind": "busy",
+  "model.run_limit": "busy",
+  "model.invalid_output": "unreadable",
+  "model.answer_too_long": "unreadable",
+  "model.unpriced": "unreadable",
+  "model.invalid_call": "unreadable",
+  "model.failed": "offline",
+};
+
+/** Why reading failed, from the gateway's refusal: offline for anything else. */
 const problemOf = (error: unknown): PolicyReadingProblem => {
-  switch (modelErrors.codeOf(error)) {
-    case "model.unconfigured":
-    case "model.no_provider":
-    case "model.not_allowed":
-    case "model.eu_only":
-    case "model.sensitive_data": {
-      return "notSetUp";
-    }
-    case "model.over_budget":
-    case "model.budget_busy":
-    case "model.queued":
-    case "model.rate_limited":
-    case "model.ledger_unavailable":
-    case "model.quota_policy_unavailable":
-    case "model.quota_policy_behind":
-    case "model.run_limit": {
-      return "busy";
-    }
-    case "model.invalid_output":
-    case "model.answer_too_long":
-    case "model.unpriced":
-    case "model.invalid_call": {
-      return "unreadable";
-    }
-    case "model.failed":
-    case undefined: {
-      return "offline";
-    }
-    default: {
-      return "offline";
-    }
-  }
+  const code = modelErrors.codeOf(error);
+  return code === undefined ? "offline" : problems[code];
 };
 
 /**

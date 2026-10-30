@@ -784,6 +784,18 @@ msgctxt "filter: \"Place is All\""
 msgid "{label} is"
 msgstr "{label} is"
 
+#: src/frame/ai-key-banner.tsx
+msgid "{label} is limiting requests since {since} (rate or spending limit at {label})."
+msgstr "{label} beperkt verzoeken sinds {since} (een limiet op snelheid of uitgaven bij {label})."
+
+#: src/frame/ai-key-banner.tsx
+msgid "{label} is refusing your key since {since}."
+msgstr "{label} weigert je sleutel sinds {since}."
+
+#: src/frame/ai-key-banner.tsx
+msgid "{label} isn't answering since {since}."
+msgstr "{label} antwoordt niet sinds {since}."
+
 #: src/onboarding/setup-parts.tsx
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, op de supportsite van Grasp, in een nieuw tabblad"
@@ -4390,6 +4402,14 @@ msgstr "Workflow controleren"
 msgid "Check and save"
 msgstr "Controleren en opslaan"
 
+#: src/chat/thread.tsx
+msgid "Check or replace it in Settings › AI providers"
+msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders"
+
+#: src/frame/ai-key-banner.tsx
+msgid "Check or replace it in Settings › AI providers."
+msgstr "Controleer of vervang hem in Instellingen › AI-aanbieders."
+
 #: src/interview/before.tsx
 msgid "Check sound and microphone"
 msgstr "Geluid en microfoon testen"
@@ -7681,6 +7701,14 @@ msgstr "Als {condition}:"
 #: src/workflows/workflow-diagram.tsx
 msgid "If it fails"
 msgstr "Als het mislukt"
+
+#: src/frame/ai-key-banner.tsx
+msgid "If it lasts, check <0>{page}</0> or switch provider."
+msgstr "Als het aanhoudt, kijk op <0>{page}</0> of stap over op een andere aanbieder."
+
+#: src/frame/ai-key-banner.tsx
+msgid "If it lasts, switch provider."
+msgstr "Als het aanhoudt, stap over op een andere aanbieder."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
@@ -15421,10 +15449,6 @@ msgstr "Het model kon geen antwoord geven. Probeer het opnieuw."
 msgid "The model gateway treats what agents read from it as sensitive."
 msgstr "De modelgateway behandelt wat agents eruit lezen als gevoelig."
 
-#: src/chat/failure.ts
-msgid "The model is busy. Try again in a minute."
-msgstr "Het model is bezet. Probeer het over een minuut opnieuw."
-
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The model key does not work. Check it in Settings, under Models."
 msgstr "De modelsleutel werkt niet. Controleer hem in Instellingen, onder Modellen."
@@ -16094,6 +16118,10 @@ msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaar
 #: src/tour/tour-script.ts
 msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
 msgstr "Dit is het werk zelf, één workflow per stuk werk. Je ziet waar de tijd heen gaat, en wat ik van je kan overnemen."
+
+#: src/frame/ai-key-banner.tsx
+msgid "This is usually an outage on their side; Grasp keeps retrying."
+msgstr "Meestal is dat een storing aan hun kant; Grasp blijft het proberen."
 
 #: src/interview/words.ts
 msgid "This is what I wrote down."
@@ -17074,6 +17102,18 @@ msgstr "Wacht elders"
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "Wachten op {app}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
+msgstr "Wacht sinds {since} op {label}, dat verzoeken beperkt. Gaat vanzelf verder zodra aanroepen werken."
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which is refusing the key, since {since}. It goes on by itself once calls work."
+msgstr "Wacht sinds {since} op {label}, dat de sleutel weigert. Gaat vanzelf verder zodra aanroepen werken."
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which isn't answering, since {since}. It goes on by itself once calls work."
+msgstr "Wacht sinds {since} op {label}, dat niet antwoordt. Gaat vanzelf verder zodra aanroepen werken."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
@@ -18643,6 +18683,22 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Je account"
+
+#: src/chat/failure.ts
+msgid "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
+msgstr "Je AI-aanbieder beperkt verzoeken (een limiet op snelheid of uitgaven bij de aanbieder). Probeer het over een tijdje opnieuw."
+
+#: src/chat/thread.tsx
+msgid "Your AI provider is refusing your key."
+msgstr "Je AI-aanbieder weigert je sleutel."
+
+#: src/chat/failure.ts
+msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
+msgstr "Je AI-aanbieder weigert je sleutel. Vraag je beheerder hem te controleren of te vervangen in Instellingen › AI-aanbieders."
+
+#: src/chat/failure.ts
+msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
+msgstr "Je AI-aanbieder antwoordt niet. Meestal is dat een storing aan hun kant; probeer het over een tijdje opnieuw."
 
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx

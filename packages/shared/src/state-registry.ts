@@ -344,6 +344,10 @@ const coreDb: D1State = {
     build_commit_fences: transient(`${core}build-admission.ts`),
     build_admission_queue: transient(`${core}build-admission.ts`),
     workflow_model_waits: cache(`${core}workflows/model-waits.ts`),
+    workflow_ai_waits: cache(
+      `${core}workflows/ai-waits.ts`,
+      "Which steps of running workflow runs wait for their AI provider (refusing the key, not answering, limiting requests), for their summaries and to wake them: lost, a held run still tries again on its own timer."
+    ),
     run_mail_stamps: exported(`${core}workflows/mail-stamps.ts`),
     run_mail_calls: exported(`${core}workflows/mail-stamps.ts`),
     resource_run_mail_calls: exported(
@@ -856,7 +860,7 @@ const modelLedger: DurableObjectState = {
     person_limits: exported(`${core}model-ledger.ts`),
     provider_health: cache(
       `${core}model-ledger.ts`,
-      "Each provider's last success and failure, by whose key: the next calls write it again."
+      "Each provider's last success and failure, and what its failing calls show since when, by whose key: the next calls write it again."
     ),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },

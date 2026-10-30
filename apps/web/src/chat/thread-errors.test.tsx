@@ -2,12 +2,15 @@
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
@@ -30,6 +33,8 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.invalid_call": true,
   "model.unconfigured": true,
   "model.no_provider": true,
+  "model.provider_key_failed": true,
+  "model.provider_unavailable": true,
   "model.not_allowed": true,
   "model.eu_only": true,
   "model.sensitive_data": true,
@@ -76,25 +81,43 @@ const failedWith = (failures: readonly unknown[]): ChatMessage[] =>
 
 let root: Root | undefined;
 
-/** What the thread says about each failed answer in `messages`, in order. */
-const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
+/**
+ * What the thread says about each failed answer in `messages`, in order,
+ * and where its links go: for the signed-in `identity`, in the shell, or
+ * outside it.
+ */
+const shownFor = async (
+  messages: ChatMessage[],
+  identity?: Pick<Identity, "role" | "staff">
+): Promise<{ said: string[]; links: string[] }> => {
+  const thread = () => (
+    <ChatThread
+      chatId="chat-1"
+      loaded
+      messages={messages}
+      onRetry={() => {
+        // The test reads what the thread says, not a retry.
+      }}
+      output={null}
+      partial={null}
+      running={false}
+    />
+  );
   const rootRoute = createRootRoute({
-    component: () => (
-      <ChatThread
-        chatId="chat-1"
-        loaded
-        messages={messages}
-        onRetry={() => {
-          // The test reads what the thread says, not a retry.
-        }}
-        output={null}
-        partial={null}
-        running={false}
-      />
-    ),
+    component: identity === undefined ? thread : Outlet,
   });
+  const shell = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "_shell",
+    beforeLoad: () => ({ identity }),
+    component: thread,
+  });
+  const page = createRoute({ getParentRoute: () => shell, path: "/" });
   const router = createRouter({
-    routeTree: rootRoute,
+    routeTree:
+      identity === undefined
+        ? rootRoute
+        : rootRoute.addChildren([shell.addChildren([page])]),
     history: createMemoryHistory(),
     context: { core: {} },
   });
@@ -109,14 +132,24 @@ const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
     );
     await router.load();
   });
-  const said = [...document.querySelectorAll('[role="alert"]')].map(
-    (alert) => alert.textContent ?? ""
+  const alerts = [...document.querySelectorAll('[role="alert"]')];
+  const said = alerts.map((alert) => alert.textContent ?? "");
+  const links = alerts.flatMap((alert) =>
+    [...alert.querySelectorAll("a")].map(
+      (link) => link.getAttribute("href") ?? ""
+    )
   );
   act(() => {
     root?.unmount();
   });
   root = undefined;
   document.body.replaceChildren();
+  return { said, links };
+};
+
+/** What the thread says about each failed answer in `messages`, in order. */
+const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
+  const { said } = await shownFor(messages);
   return said;
 };
 
@@ -150,6 +183,33 @@ describe("a failed answer", () => {
           gatewayWords.has(words)
       )
     ).toStrictEqual([]);
+  });
+
+  it("says the AI provider is refusing the key, with the way to check or replace it for the organization's own admins and who to ask for anyone else", async () => {
+    const failed = failedWith(["model.provider_key_failed"]);
+
+    const shown = {
+      admin: await shownFor(failed, { role: "admin", staff: false }),
+      member: await shownFor(failed, { role: "user", staff: false }),
+      staff: await shownFor(failed, { role: "admin", staff: true }),
+    };
+
+    const askAdmin = {
+      said: [
+        "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+      ],
+      links: [],
+    };
+    expect(shown).toStrictEqual({
+      admin: {
+        said: [
+          "Your AI provider is refusing your key. Check or replace it in Settings › AI providers",
+        ],
+        links: ["/settings/ai-providers"],
+      },
+      member: askAdmin,
+      staff: askAdmin,
+    });
   });
 
   it("says Grasp could not be reached for a code it doesn't know, or none", async () => {

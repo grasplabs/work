@@ -17,7 +17,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunFailure,
-  RunQueue,
   RunStatus,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
@@ -64,6 +63,7 @@ import {
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { queuedRuns, runDequeued } from "./admission.ts";
+import type { RunWait } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
@@ -927,16 +927,16 @@ const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
 /**
  * A run as it reads with its place in the queue (admission.ts,
  * `queuedRuns`): `queued`, with the share it waits for and when it asks
- * again, while it would otherwise read as running, or as waiting the way
+ * again, or since when it waits for its AI provider, while it would otherwise read as running, or as waiting the way
  * the engine has a step that sleeps between asks. A run that is paused or
  * has ended waits for no share, whatever place may still lapse.
  */
 export const queuedRun = <Run extends WorkflowRun>(
   run: Run,
-  queue: RunQueue | undefined
+  wait: RunWait | undefined
 ): Run =>
-  queue !== undefined && (run.status === "running" || run.status === "waiting")
-    ? { ...run, status: "queued", queued: queue }
+  wait !== undefined && (run.status === "running" || run.status === "waiting")
+    ? { ...run, status: "queued", ...wait }
     : run;
 
 const foundRun = async (env: Env, run: unknown): Promise<RunRow> => {

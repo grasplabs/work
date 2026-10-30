@@ -1137,7 +1137,7 @@ describe("chats", () => {
     const last = follower.messages().at(-1);
     expect(
       last?.role === "assistant" ? [last.end, last.failure] : last
-    ).toStrictEqual(["failed", "model.failed"]);
+    ).toStrictEqual(["failed", "model.provider_unavailable"]);
     expect(follower.now()?.stopped).toBeNull();
   });
 

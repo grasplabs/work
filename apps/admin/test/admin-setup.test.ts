@@ -1,4 +1,5 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { ProviderTrouble } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
@@ -232,19 +233,26 @@ describe("an organization's Setup", () => {
     });
   });
 
-  it("says its AI in one line from what its core reports: connected and working, not answering since it failed, or not connected", async () => {
+  it("says its AI in one line from what its core reports: working, what its failing calls show since the first such failure, or not connected", async () => {
     const now = Date.now();
     const status = (
       lastOkAt: number | null,
-      lastFailedAt: number | null
+      failure: {
+        since: number;
+        last: number;
+        kind: string;
+        shows: ProviderTrouble;
+      } | null
     ): AiStatusReport =>
       aiStatusOf([
         {
           provider: "openai",
           kind: "organization",
           lastOkAt,
-          lastFailedAt,
-          lastFailure: lastFailedAt === null ? null : "server",
+          lastFailedAt: failure?.last ?? null,
+          lastFailure: failure?.kind ?? null,
+          failingClass: failure?.shows ?? null,
+          failingSince: failure?.since ?? null,
         },
         // Grasp's own key's calls say nothing of the company's AI.
         {
@@ -253,40 +261,58 @@ describe("an organization's Setup", () => {
           lastOkAt: now,
           lastFailedAt: null,
           lastFailure: null,
+          failingClass: null,
+          failingSince: null,
         },
       ]);
-    const failedAt = now - 1000;
+    // Since its first such failure after the call that last worked, not
+    // since its latest.
+    const failingSince = now - 2 * 60 * 1000;
+    const since = `${new Date(failingSince).toISOString().slice(11, 16)} UTC`;
+    const failingAs = async (kind: string, shows: ProviderTrouble) => {
+      const client = await liveClient(emptyAdminSnapshot("Acme"));
+      client.account.ai = status(now - 60 * 60 * 1000, {
+        since: failingSince,
+        last: now - 1000,
+        kind,
+        shows,
+      });
+      return client;
+    };
     const working = await liveClient(emptyAdminSnapshot("Acme"));
     working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
-    const failing = await liveClient(emptyAdminSnapshot("Acme"));
-    failing.account.ai = status(now - 60 * 60 * 1000, failedAt);
-    const unconnected = await liveClient(emptyAdminSnapshot("Acme"));
+    const shown = [
+      working,
+      await failingAs("auth", "refused"),
+      await failingAs("provider_down", "not_answering"),
+      await failingAs("quota", "limiting"),
+      await liveClient(emptyAdminSnapshot("Acme")),
+    ];
 
     const sectionFor = async (clientId: string): Promise<string> => {
       const { html } = await page(`/organizations/${clientId}/setup`);
       return sectionOf(html, "AI");
     };
-    const sections = [
-      await sectionFor(working.clientId),
-      await sectionFor(failing.clientId),
-      await sectionFor(unconnected.clientId),
+    const sections: string[] = [];
+    for (const { clientId } of shown) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      sections.push(await sectionFor(clientId));
+    }
+    const lines = sections.map(textOf);
+    const expected = [
+      "AI: OpenAI connected · working · last used 5 min ago",
+      `AI: OpenAI connected · refusing the key since ${since}`,
+      `AI: OpenAI connected · not answering since ${since}`,
+      `AI: OpenAI connected · limiting requests since ${since}`,
+      "AI: not connected yet",
     ];
-    const [workingLine, failingLine, unconnectedLine] = sections.map(textOf);
 
     expect({
-      working: workingLine?.includes(
-        "AI: OpenAI connected · working · last used 5 min ago"
-      ),
-      failing: failingLine?.includes(
-        `AI: OpenAI connected · not answering since ${new Date(failedAt).toISOString().slice(11, 16)} UTC`
-      ),
-      unconnected: unconnectedLine?.includes("AI: not connected yet"),
+      lines: lines.map((line, at) => line?.includes(expected[at] ?? "")),
       // Read only: nothing to press.
       buttons: sections.some((html) => html.includes("<button")),
     }).toStrictEqual({
-      working: true,
-      failing: true,
-      unconnected: true,
+      lines: [true, true, true, true, true],
       buttons: false,
     });
   });

@@ -1,3 +1,4 @@
+import { providerTroubles } from "@grasp-os/shared/ai-providers";
 import { appErrors } from "@grasp-os/shared/apps";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -35,7 +36,9 @@ import { detailsRemoved, removedText } from "./retention.ts";
 // lapses, a minute and a half on, before anything writes its row: the next
 // admission that drops the place moves its revision on. A run whose step's
 // model call waits for a share of the model requests in flight shows the
-// same way (model-waits.ts).
+// same way (model-waits.ts), and so does one whose step's model call
+// failed on the organization's own AI provider key
+// (`aiProvider`: the provider, what it showed and since when, ai-waits.ts).
 
 /** What the one read of a run's summary returns. */
 const rowSchema = z.object({
@@ -63,6 +66,7 @@ const rowSchema = z.object({
   workflow_calls: z.string().nullable(),
   pending: z.enum(["pause", "resume", "cancel"]).nullable(),
   queued: z.string().nullable(),
+  ai_wait: z.string().nullable(),
 });
 
 /** A step of the run waiting in the client's queue (admission.ts). */
@@ -70,6 +74,31 @@ const queuedSchema = z.object({
   waitingFor: z.enum(["client", "person", "app"]),
   retryAt: z.number(),
 });
+
+/** What a `queued` run waits for: its AI provider since, or a share. */
+const queuedFor = (
+  queued: RunSummary["queued"],
+  aiWait: RunSummary["aiProvider"]
+): Pick<RunSummary, "queued" | "aiProvider"> => {
+  if (aiWait !== undefined) {
+    return { aiProvider: aiWait };
+  }
+  return queued === undefined ? {} : { queued };
+};
+
+/** What a held step of the run waits for, from the row's text; none for none. */
+const aiWaitSchema = z.object({
+  since: z.number(),
+  provider: z.string(),
+  trouble: z.enum(providerTroubles),
+});
+
+const aiWaitOf = (text: string | null): RunSummary["aiProvider"] =>
+  text === null ? undefined : aiWaitSchema.safeParse(JSON.parse(text)).data;
+
+/** The share a step of the run waits for, from the row's text; none for none. */
+const sharedQueueOf = (text: string | null): RunSummary["queued"] =>
+  text === null ? undefined : queuedSchema.safeParse(JSON.parse(text)).data;
 
 const waitsSchema = z.array(
   z.object({ name: z.string(), expiresAt: z.number() })
@@ -246,7 +275,10 @@ export const runSummary = async (
                 AND m.waiting_for IS NOT NULL
           ) q
           ORDER BY q.retry_at
-          LIMIT 1) AS queued
+          LIMIT 1) AS queued,
+       (SELECT json_object('since', w.since, 'provider', w.provider, 'trouble', w.trouble)
+          FROM workflow_ai_waits w WHERE w.run_id = r.id
+          ORDER BY w.since LIMIT 1) AS ai_wait
      FROM workflow_runs r
      WHERE r.id = ?2 AND r.app_id = ?3`
   )
@@ -259,14 +291,14 @@ export const runSummary = async (
     throw workflowErrors.create("workflow.run_not_found");
   }
   const row = rowSchema.parse(read);
-  const queued =
-    row.queued === null
-      ? undefined
-      : queuedSchema.safeParse(JSON.parse(row.queued)).data;
+  // Held for its AI provider key first: that waits for someone, a share
+  // only for its turn.
+  const aiWait = aiWaitOf(row.ai_wait);
+  const queued = sharedQueueOf(aiWait === undefined ? row.queued : null);
   const status = statusOf(
     row.status,
     engineStatusSchema.safeParse(row.engine_status).data,
-    queued !== undefined
+    queued !== undefined || aiWait !== undefined
   );
   const live = !ended.has(status);
   // What it failed with can hold what the run read for its person: only
@@ -319,7 +351,7 @@ export const runSummary = async (
           expiresAt,
         }))
       : [],
-    ...(status === "queued" && queued !== undefined ? { queued } : {}),
+    ...(status === "queued" ? queuedFor(queued, aiWait) : {}),
     control: controlOf(role, status, row),
   };
 };

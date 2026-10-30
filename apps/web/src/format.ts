@@ -14,6 +14,22 @@ export const formatDateTime = (value: string | number | Date): string =>
     timeStyle: "short",
   }).format(new Date(value));
 
+/**
+ * Since when something has been so, as the page's language writes it: the
+ * time alone today ("10:42"), the date and time before ("3 Oct 2026, 10:42").
+ */
+export const formatSince = (
+  value: string | number | Date,
+  now: Date = new Date()
+): string => {
+  const at = new Date(value);
+  const today = at.toDateString() === now.toDateString();
+  return new Intl.DateTimeFormat(
+    i18n.locale,
+    today ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" }
+  ).format(at);
+};
+
 /** A date as the page's language writes it, such as "3 Oct 2026". */
 export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(

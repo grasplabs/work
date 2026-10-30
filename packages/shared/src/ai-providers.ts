@@ -84,6 +84,11 @@ export interface AiProviderSpec {
    * catalog; none for an OpenAI-compatible endpoint, which names its own.
    */
   testModel: string | undefined;
+  /**
+   * Where the provider says how its service is doing, to look at while it
+   * isn't answering; none for an endpoint of the organization's own.
+   */
+  statusPage: string | undefined;
 }
 
 /**
@@ -103,6 +108,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     region: "us",
     platformSecret: "ANTHROPIC_API_KEY",
     testModel: "anthropic/claude-haiku-4-5",
+    statusPage: "https://status.anthropic.com",
   },
   openai: {
     id: "openai",
@@ -125,6 +131,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     region: "us",
     platformSecret: "OPENAI_API_KEY",
     testModel: "openai/gpt-5-mini",
+    statusPage: "https://status.openai.com",
   },
   mistral: {
     id: "mistral",
@@ -137,6 +144,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     region: "eu",
     platformSecret: "MISTRAL_API_KEY",
     testModel: "mistral/mistral-small-latest",
+    statusPage: "https://status.mistral.ai",
   },
   openrouter: {
     id: "openrouter",
@@ -153,6 +161,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     region: "us",
     platformSecret: "OPENROUTER_API_KEY",
     testModel: "openrouter/openai/gpt-5-mini",
+    statusPage: "https://status.openrouter.ai",
   },
   "openai-compatible": {
     id: "openai-compatible",
@@ -165,6 +174,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     region: "custom",
     platformSecret: undefined,
     testModel: undefined,
+    statusPage: undefined,
   },
 };
 
@@ -279,10 +289,33 @@ export interface AiProviderStatus {
   /** When a call last worked, and last failed, in ms since the epoch. */
   lastOkAt: number | null;
   lastFailedAt: number | null;
-  /** How it last failed: `auth`, `rate_limited`, `refused`, `provider_down`. */
+  /** How it last failed: `auth`, `quota`, `rate_limited`, `refused`, `provider_down`. */
   lastFailure: string | null;
   lastStatus: number | null;
+  /**
+   * What its calls show now, by what was seen (`ProviderTrouble`); null
+   * while the last call worked, or once its key was replaced.
+   */
+  failingClass: ProviderTrouble | null;
+  /**
+   * Since when they show it: the first failure of that kind after the
+   * last call that worked.
+   */
+  failingSince: number | null;
 }
+
+/**
+ * What a provider's failing calls show, by the HTTP class seen, never a
+ * guess at why: it refuses the key (401, 403), it isn't answering (5xx,
+ * a timeout, no answer at all), or it is limiting requests (429, or an
+ * account's rate or spending limit).
+ */
+export const providerTroubles = [
+  "refused",
+  "not_answering",
+  "limiting",
+] as const;
+export type ProviderTrouble = (typeof providerTroubles)[number];
 
 /** One of the organization's providers, as its admins see it. */
 export interface AiProviderListed extends AiProviderKey {

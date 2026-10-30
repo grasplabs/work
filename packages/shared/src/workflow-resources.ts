@@ -16,6 +16,7 @@ import type {
 import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
+import type { RunAiProviderWait } from "./workflows.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -666,6 +667,12 @@ export interface WorkflowResourceRun {
   buildHash: string;
   principal: string;
   status: WorkflowRunStatus;
+  /**
+   * While it runs, a step of it waiting for its AI provider: which, what it
+   * showed (refusing the key, not answering, limiting requests), and since
+   * when. It goes on by itself once calls work.
+   */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */

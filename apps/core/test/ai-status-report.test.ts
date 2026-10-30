@@ -201,6 +201,8 @@ describe("the organization's AI, for the admin", () => {
       lastOkAt: null,
       lastFailedAt: null,
       lastFailure: null,
+      failingClass: null,
+      failingSince: null,
     };
 
     expect({
@@ -216,6 +218,8 @@ describe("the organization's AI, for the admin", () => {
           (failed?.lastFailedAt ?? 0) >=
           (worked?.lastOkAt ?? Number.POSITIVE_INFINITY),
         how: typeof failed?.lastFailure,
+        // Failing since that failure, the first after the call that worked.
+        since: failed?.failingSince === failed?.lastFailedAt,
       },
       // Neither the key nor any part of its mask.
       keyShown: text.includes(key.slice(-4)) || text.includes("…"),
@@ -226,7 +230,7 @@ describe("the organization's AI, for the admin", () => {
         { provider: "anthropic", ...unread },
       ],
       worked: { since: true, failed: null },
-      failed: { provider: "mistral", after: true, how: "string" },
+      failed: { provider: "mistral", after: true, how: "string", since: true },
       keyShown: false,
     });
   });

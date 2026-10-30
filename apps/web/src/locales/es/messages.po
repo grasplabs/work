@@ -784,6 +784,18 @@ msgctxt "filter: \"Place is All\""
 msgid "{label} is"
 msgstr "{label} es"
 
+#: src/frame/ai-key-banner.tsx
+msgid "{label} is limiting requests since {since} (rate or spending limit at {label})."
+msgstr "{label} está limitando las solicitudes desde {since} (límite de frecuencia o de gasto en {label})."
+
+#: src/frame/ai-key-banner.tsx
+msgid "{label} is refusing your key since {since}."
+msgstr "{label} rechaza tu clave desde {since}."
+
+#: src/frame/ai-key-banner.tsx
+msgid "{label} isn't answering since {since}."
+msgstr "{label} no responde desde {since}."
+
 #: src/onboarding/setup-parts.tsx
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, en el sitio de soporte de Grasp, en una pestaña nueva"
@@ -4390,6 +4402,14 @@ msgstr "Revisar un flujo"
 msgid "Check and save"
 msgstr "Comprobar y guardar"
 
+#: src/chat/thread.tsx
+msgid "Check or replace it in Settings › AI providers"
+msgstr "Revísala o sustitúyela en Ajustes › Proveedores de IA"
+
+#: src/frame/ai-key-banner.tsx
+msgid "Check or replace it in Settings › AI providers."
+msgstr "Revísala o sustitúyela en Ajustes › Proveedores de IA."
+
 #: src/interview/before.tsx
 msgid "Check sound and microphone"
 msgstr "Probar sonido y micrófono"
@@ -7681,6 +7701,14 @@ msgstr "Si {condition}:"
 #: src/workflows/workflow-diagram.tsx
 msgid "If it fails"
 msgstr "Si falla"
+
+#: src/frame/ai-key-banner.tsx
+msgid "If it lasts, check <0>{page}</0> or switch provider."
+msgstr "Si continúa, consulta <0>{page}</0> o cambia de proveedor."
+
+#: src/frame/ai-key-banner.tsx
+msgid "If it lasts, switch provider."
+msgstr "Si continúa, cambia de proveedor."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
@@ -15421,10 +15449,6 @@ msgstr "El modelo no pudo responder. Vuelve a intentarlo."
 msgid "The model gateway treats what agents read from it as sensitive."
 msgstr "La pasarela de modelos trata como sensible lo que los agentes leen de ella."
 
-#: src/chat/failure.ts
-msgid "The model is busy. Try again in a minute."
-msgstr "El modelo está ocupado. Vuelve a intentarlo en un minuto."
-
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "The model key does not work. Check it in Settings, under Models."
 msgstr "La clave del modelo no funciona. Revísala en Configuración, en Modelos."
@@ -16094,6 +16118,10 @@ msgstr "Este es el consentimiento tal como lo redacta Grasp ahora. El registro d
 #: src/tour/tour-script.ts
 msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
 msgstr "Este es el trabajo en sí, un flujo de trabajo por cada tarea. Ves adónde se va el tiempo y qué puedo quitarte de encima."
+
+#: src/frame/ai-key-banner.tsx
+msgid "This is usually an outage on their side; Grasp keeps retrying."
+msgstr "Suele ser una caída por su parte; Grasp sigue reintentando."
 
 #: src/interview/words.ts
 msgid "This is what I wrote down."
@@ -17074,6 +17102,18 @@ msgstr "Pendiente en otro lugar"
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "Esperando a {app}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
+msgstr "Esperando a {label}, que está limitando las solicitudes, desde {since}. Continúa por sí sola cuando las llamadas funcionen."
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which is refusing the key, since {since}. It goes on by itself once calls work."
+msgstr "Esperando a {label}, que rechaza la clave, desde {since}. Continúa por sí sola cuando las llamadas funcionen."
+
+#: src/workflows/runs.tsx
+msgid "Waiting for {label}, which isn't answering, since {since}. It goes on by itself once calls work."
+msgstr "Esperando a {label}, que no responde, desde {since}. Continúa por sí sola cuando las llamadas funcionen."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Waiting for {signIn}"
@@ -18643,6 +18683,22 @@ msgstr "Sigues con la sesión iniciada. Vuelve a intentarlo en un momento."
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Tu cuenta"
+
+#: src/chat/failure.ts
+msgid "Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while."
+msgstr "Tu proveedor de IA está limitando las solicitudes (un límite de frecuencia o de gasto en el proveedor). Inténtalo de nuevo más tarde."
+
+#: src/chat/thread.tsx
+msgid "Your AI provider is refusing your key."
+msgstr "Tu proveedor de IA rechaza tu clave."
+
+#: src/chat/failure.ts
+msgid "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers."
+msgstr "Tu proveedor de IA rechaza tu clave. Pide a tu administrador que la revise o la sustituya en Ajustes › Proveedores de IA."
+
+#: src/chat/failure.ts
+msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
+msgstr "Tu proveedor de IA no responde. Suele ser una caída por su parte; inténtalo de nuevo más tarde."
 
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx

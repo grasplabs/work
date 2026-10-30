@@ -48,7 +48,11 @@ const RunPage = () => {
         <div className="flex flex-col gap-2">
           <h1 className="type-title">{t`Run of ${workflow}`}</h1>
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
-            <RunResult queued={summary.queued} status={summary.status} />
+            <RunResult
+              aiProvider={summary.aiProvider}
+              queued={summary.queued}
+              status={summary.status}
+            />
             <span className="tabular-nums">
               {formatDateTime(summary.createdAt)}
             </span>

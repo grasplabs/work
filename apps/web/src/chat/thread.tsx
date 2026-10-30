@@ -45,6 +45,7 @@ import {
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
+import { aiProvidersPath, useCanReplaceKey } from "../frame/ai-key-banner.tsx";
 import {
   SeeInBrain,
   ThinkingLine,
@@ -503,6 +504,26 @@ const ReplySteps = ({
   );
 };
 
+/**
+ * An answer that failed because the organization's AI provider refuses
+ * its key: its admins get the way to check or replace it, everyone else
+ * who to ask.
+ */
+const KeyFailed = () => {
+  const { i18n } = useLingui();
+  if (!useCanReplaceKey()) {
+    return failureMessage("model.provider_key_failed", i18n);
+  }
+  return (
+    <>
+      <Trans>Your AI provider is refusing your key.</Trans>{" "}
+      <a className="underline underline-offset-4" href={aiProvidersPath}>
+        <Trans>Check or replace it in Settings › AI providers</Trans>
+      </a>
+    </>
+  );
+};
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -578,7 +599,11 @@ const Reply = ({
             <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
               <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
               <p className="flex-1" role="alert">
-                {failureMessage(reply.failure, i18n)}
+                {reply.failure === "model.provider_key_failed" ? (
+                  <KeyFailed />
+                ) : (
+                  failureMessage(reply.failure, i18n)
+                )}
               </p>
               {onRetry === undefined ? null : (
                 <Button onClick={onRetry} size="sm" variant="outline">

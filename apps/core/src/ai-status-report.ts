@@ -1,4 +1,7 @@
-import { aiProviderIdSchema } from "@grasp-os/shared/ai-providers";
+import {
+  aiProviderIdSchema,
+  providerTroubles,
+} from "@grasp-os/shared/ai-providers";
 import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import {
   aiStatusReportMaxBytes,
@@ -14,6 +17,7 @@ import type {
 import { requestErrors } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
 import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
+import { z } from "zod";
 
 import { readModelChoice } from "./ai-model-choice.ts";
 import { consoleSigned } from "./console-signed.ts";
@@ -51,6 +55,9 @@ const statusOf = (
     lastOkAt: found?.lastOkAt ?? null,
     lastFailedAt: found?.lastFailedAt ?? null,
     lastFailure: found?.lastFailure?.slice(0, 64) ?? null,
+    failingClass:
+      z.enum(providerTroubles).safeParse(found?.failingClass).data ?? null,
+    failingSince: found?.failingSince ?? null,
   };
 };
 

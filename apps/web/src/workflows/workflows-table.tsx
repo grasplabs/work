@@ -104,6 +104,7 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
         <span className="text-muted-foreground">–</span>
       ) : (
         <RunResult
+          aiProvider={workflow.lastRun.aiProvider}
           queued={workflow.lastRun.queued}
           status={workflow.lastRun.status}
         />
