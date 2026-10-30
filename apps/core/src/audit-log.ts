@@ -736,6 +736,18 @@ export class AuditLog extends DurableObject<Env> {
   }
 
   /**
+   * How many archived stretches archive retention purged: what an export
+   * that takes the archive in passes over, as it begins.
+   */
+  purgedStretches(): number {
+    return this.#db
+      .select({ firstSeq: archives.firstSeq })
+      .from(archives)
+      .where(isNotNull(archives.purgedAt))
+      .all().length;
+  }
+
+  /**
    * The archived events that match the filter, oldest first, after
    * position `after` and up to `through`: an export's reading of the
    * archive, as `searchArchive` reads it newest first. Reads one archived

@@ -651,6 +651,7 @@ describe("audit log access", () => {
   it("records an export that takes the archive in as such, over RPC and as a download, and refuses an unknown option", async () => {
     const { api, session, userId } = await signedInApi(idp, "admin");
     const targetId = `archive-export-${unique()}`;
+    const purgedBefore = await auditLog(env).purgedStretches();
 
     const events = await auditedDuring(async () => {
       await new Response(
@@ -670,11 +671,21 @@ describe("audit log access", () => {
     ).toStrictEqual([
       [
         { type: "person", userId },
-        { "filter.targetId": targetId, format: "json", archive: true },
+        {
+          "filter.targetId": targetId,
+          format: "json",
+          archive: true,
+          purged: purgedBefore,
+        },
       ],
       [
         { type: "person", userId },
-        { "filter.targetId": targetId, format: "csv", archive: true },
+        {
+          "filter.targetId": targetId,
+          format: "csv",
+          archive: true,
+          purged: purgedBefore,
+        },
       ],
     ]);
     await expect(

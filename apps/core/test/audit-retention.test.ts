@@ -298,12 +298,16 @@ describe("audit log retention", () => {
         { archive: true }
       )
     );
+    const all = await allEvents();
+    const recorded = all.findLast(({ action }) => action === "audit.exported");
     expect({
       exported: exportedOf(exported, [event]),
       named: exported.archive?.purged.some(
         ({ from, through }) => from <= seq && seq <= through
       ),
-    }).toStrictEqual({ exported: [], named: true });
+      // The record says it can't be whole: it passed purged stretches over.
+      recorded: Number(recorded?.detail.purged) >= 1,
+    }).toStrictEqual({ exported: [], named: true, recorded: true });
   });
 
   it("purges archived events once seven years have passed since the log received them", async () => {

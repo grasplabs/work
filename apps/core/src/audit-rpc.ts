@@ -413,7 +413,12 @@ const startExport = async (
   await recordRead(env, person, "audit.exported", {
     ...filterDetail(parsed),
     format: parsedFormat,
-    ...(archive ? { archive } : {}),
+    // With the archive: how many purged stretches it passes over as it
+    // begins, so the record says the export can't be whole. Any purged
+    // while it runs are named in its JSON.
+    ...(archive
+      ? { archive, purged: await auditLog(env).purgedStretches() }
+      : {}),
   });
   return {
     stream: exportStream(
