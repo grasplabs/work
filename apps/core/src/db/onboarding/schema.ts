@@ -315,6 +315,8 @@ export const events = sqliteTable("events", {
   by: text().notNull(),
   what: text().notNull(),
   about: text(),
+  /** Whom it names besides: the colleague someone named for work that isn't theirs. */
+  named: text(),
 });
 
 /**
@@ -485,6 +487,16 @@ export const brainSent = sqliteTable(
  * Drawings that failed and wait to be tried again: what (`team:<id>` or
  * `work:<id>`), how often it failed, and when it may be tried again (ISO 8601).
  */
+/**
+ * Someone who said the work they were asked about isn't theirs and agreed
+ * to it at the read-back (GRA-1285): who does what is put right from what
+ * they agreed to (referral.ts), before work is drawn, then the row goes.
+ */
+export const referrals = sqliteTable("referrals", {
+  person: text().primaryKey(),
+  at: text().notNull(),
+});
+
 export const drawFailures = sqliteTable("draw_failures", {
   item: text().primaryKey(),
   tries: integer().notNull(),
