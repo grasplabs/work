@@ -349,6 +349,15 @@ describe("Grasp's Discord bot", () => {
     }).toStrictEqual({ status: 413, heldWhole: false, audited: [] });
   });
 
+  it("takes a request signed with the application's public key however its setting is spaced", async () => {
+    const { status } = await ask(await signed(ping), {
+      ...env,
+      DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""}\n`,
+    });
+
+    expect(status).toBe(200);
+  });
+
   it("refuses everything without the application's public key", async () => {
     const { status } = await ask(await signed(ping), {
       ...env,

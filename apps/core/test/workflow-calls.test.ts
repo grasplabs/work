@@ -105,9 +105,11 @@ import {
   woken,
 } from "./runs.ts";
 import {
+  openRpc,
   outcome as resultOf,
   refusal,
   signedInApi,
+  signedInWithRole,
   unique,
 } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -1554,6 +1556,161 @@ describe("a JSON workflow's model call limit, when the quota policy can't be rea
     expect({ failed, limit: value }).toStrictEqual({
       failed: true,
       limit: platformLimits.lineageModelRequests,
+    });
+  });
+});
+
+let budgetMonths = 0;
+
+/** A month no other file counts budgets in: from 3300, clear of the others. */
+const newBudgetMonth = (): string => {
+  budgetMonths += 1;
+  return `${3300 + Math.floor(budgetMonths / 12)}-${String((budgetMonths % 12) + 1).padStart(2, "0")}`;
+};
+
+/**
+ * What `run` returns, with `budgets` in the deployment's gateway config,
+ * counting in `month`: by default, one no other file counts in.
+ */
+const withBudgets = async <Result>(
+  budgets: Record<string, unknown>,
+  run: () => Promise<Result>,
+  month = newBudgetMonth()
+): Promise<Result> => {
+  const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: was } = env;
+  try {
+    env.MODEL_GATEWAY = {
+      gateway: "grasp-os-test",
+      models: [allowedModel],
+      budgets,
+    };
+    env.MODEL_BUDGET_MONTH = month;
+    return await run();
+  } finally {
+    env.MODEL_GATEWAY = before;
+    env.MODEL_BUDGET_MONTH = was;
+  }
+};
+
+/** An answer of some $0.03: a $0.02 budget's room for a request, and no more. */
+const dearGreeting = {
+  text: '{"line":"Hello Ada"}',
+  inputTokens: 100_000,
+  outputTokens: 20,
+};
+
+describe("an independent workflow's model spend", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts against its workflow's budget, every run of it, as admins read it with its name and runs", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    gatewayAnswering(
+      answer('{"line":"Hello Ada"}'),
+      answer('{"line":"Hello again"}')
+    );
+    // This month: what admins read counts the runs started in it.
+    const read = await withBudgets(
+      { workflow: { limit: 5 } },
+      async () => {
+        for (const _ of [1, 2]) {
+          // oxlint-disable-next-line no-await-in-loop -- one after another
+          await ended(ada, workflow.id, await started(ada, workflow.id));
+        }
+        const { session } = await signedInWithRole(idp, "admin");
+        const { core } = await openRpc(session, { coreEnv: env });
+        const { models } = core.authenticate();
+        const [settings, spend] = await Promise.all([
+          models.settings(),
+          models.spend(),
+        ]);
+        const budgets =
+          settings.rules.state === "on" ? settings.rules.budgets : [];
+        return {
+          budget: budgets
+            .filter(({ scope }) => scope === "workflow")
+            .flatMap(({ spent }) => spent)
+            .filter(
+              ({ of }) =>
+                of.type === "workflow" && of.workflowId === workflow.id
+            ),
+          spend: spend.workflows.filter(
+            ({ workflowId }) => workflowId === workflow.id
+          ),
+        };
+      },
+      new Date().toISOString().slice(0, "yyyy-mm".length)
+    );
+    const named = {
+      appId: null,
+      appName: null,
+      workflowId: workflow.id,
+      name: workflow.name,
+    };
+    const amount = read.budget[0]?.amount ?? 0;
+    expect(amount).toBeGreaterThan(0);
+    expect(read).toStrictEqual({
+      budget: [{ of: { type: "workflow", ...named }, amount }],
+      spend: [{ ...named, amount, runs: 2 }],
+    });
+  });
+
+  it("keeps a deleted workflow's spend for admins, by its ID, with no name to link it by", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const read = await withBudgets(
+      { workflow: { limit: 5 } },
+      async () => {
+        await ended(ada, workflow.id, await started(ada, workflow.id));
+        // Deleted since: its row stays, marked.
+        await env.DB.prepare(
+          "UPDATE workflow_resources SET deleted_at = ? WHERE id = ?"
+        )
+          .bind(Date.now(), workflow.id)
+          .run();
+        const { session } = await signedInWithRole(idp, "admin");
+        const { core } = await openRpc(session, { coreEnv: env });
+        const { models } = core.authenticate();
+        const spend = await models.spend();
+        return spend.workflows.filter(
+          ({ workflowId }) => workflowId === workflow.id
+        );
+      },
+      new Date().toISOString().slice(0, "yyyy-mm".length)
+    );
+
+    expect(
+      read.map(({ name, amount, runs }) => ({
+        name,
+        spent: amount > 0,
+        runs,
+      }))
+    ).toStrictEqual([{ name: null, spent: true, runs: 1 }]);
+  });
+
+  it("is refused once its workflow's budget is spent, sending nothing, while another workflow's runs go on", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const spent = await greetingWorkflow(ada, admin);
+    const other = await greetingWorkflow(ada, admin);
+    const gateway = gatewayAnswering(dearGreeting, dearGreeting, dearGreeting);
+    const ends = await withBudgets({ workflow: { limit: 0.02 } }, async () => {
+      const runOf = async (id: string) =>
+        endOf(await ended(ada, id, await started(ada, id)));
+      const first = await runOf(spent.workflow.id);
+      const second = await runOf(spent.workflow.id);
+      return { first, second, other: await runOf(other.workflow.id) };
+    });
+    expect({ ...ends, sent: gateway.requests.length }).toStrictEqual({
+      first: { status: "completed", output: { status: "Hello Ada" } },
+      second: { status: "failed", code: "model.over_budget" },
+      other: { status: "completed", output: { status: "Hello Ada" } },
+      sent: 2,
     });
   });
 });

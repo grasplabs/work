@@ -22,6 +22,13 @@ import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -39,8 +46,10 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import {
   Link,
   Outlet,
-  useMatchRoute,
+  useChildMatches,
   useNavigate,
+  useRouter,
+  rootRouteId,
 } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { createContext, Fragment, use, useState } from "react";
@@ -89,20 +98,33 @@ export const useOrganization = (): AnsweredOrganization => {
 /** How many dots say how much is known, in the column. */
 const knowledgeDots = 20;
 
-/** The section the page is on: the overview unless another's path is. */
-const useSection = (clientId: string): OrgSection => {
-  const matchRoute = useMatchRoute();
-  return (
-    orgSections.find(
-      (section) =>
-        section !== "overview" &&
-        matchRoute({
-          to: sectionTo[section],
-          params: { clientId },
-          fuzzy: true,
-        }) !== false
-    ) ?? "overview"
-  );
+/** The organization's section a path is, if it is one. */
+const sectionAt = (fullPath: string): OrgSection | undefined => {
+  const path = fullPath.endsWith("/") ? fullPath.slice(0, -1) : fullPath;
+  return orgSections.find((section) => sectionTo[section] === path);
+};
+
+/**
+ * The section the page shows, and whether it shows without what its core
+ * answers: read off the section route the page renders under it, never
+ * off the address, which moves on before the page does. Read off the
+ * address, a section about to show could be taken for the Setup while
+ * its core isn't read, and shown without its organization.
+ */
+const useShownSection = (): { section: OrgSection; withoutCore: boolean } => {
+  const shown = useChildMatches({
+    select: (matches) => {
+      const [child] = matches;
+      return {
+        fullPath: child?.fullPath ?? "",
+        withoutCore: child?.staticData.withoutCore === true,
+      };
+    },
+  });
+  return {
+    section: sectionAt(shown.fullPath) ?? "overview",
+    withoutCore: shown.withoutCore,
+  };
 };
 
 /**
@@ -464,16 +486,93 @@ const aboutOf = (view: AdminView): string => {
     .join(" · ");
 };
 
-/** The page of an organization whose core answered, on `section`. */
-const AnsweredPage = ({
+/**
+ * Where a section would be, for an organization whose core didn't
+ * answer: why, and what to do. Not set up yet, its Setup shows how far
+ * that is; not answering, it can be asked again, and its Setup shows why.
+ */
+const UnreadSection = ({
+  admin,
+  section,
+}: {
+  admin: Extract<ClientAdmin, { state: "unreachable" }>;
+  section: OrgSection;
+}) => {
+  const router = useRouter();
+  const { id: clientId, name } = admin.client;
+  const unset = admin.error === "not_deployed";
+  return (
+    <Empty data-unread={admin.error}>
+      <EmptyHeader>
+        <EmptyTitle>
+          {unset ? `${name} isn’t set up yet` : `${name}’s Grasp didn’t answer`}
+        </EmptyTitle>
+        <EmptyDescription>
+          {section === "overview"
+            ? "Everything here comes from its own Grasp, which the admin can’t read now. Its Setup shows what the admin itself knows, and what to do."
+            : unreadWhy(admin)}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent className="flex-row justify-center">
+        {unset ? null : (
+          <Button
+            onClick={() => {
+              void router.invalidate({
+                filter: (match) => match.routeId === rootRouteId,
+              });
+            }}
+            size="sm"
+          >
+            Try again
+          </Button>
+        )}
+        {/* A link that looks like a button: it is announced as the link it is. */}
+        <Link
+          className={buttonVariants({ size: "sm", variant: "outline" })}
+          params={{ clientId }}
+          to={sectionTo.setup}
+        >
+          {unset ? "See its Setup progress" : "Its Setup"}
+        </Link>
+      </EmptyContent>
+    </Empty>
+  );
+};
+
+/** The section an organization whose core answered is on, under it. */
+const AnsweredSection = ({
   organization,
 }: {
   organization: AnsweredOrganization;
-}) => {
-  const { admin, view } = organization;
+}) => (
+  <OrganizationContext value={organization}>
+    <Outlet />
+  </OrganizationContext>
+);
+
+/**
+ * One organization's page: its column of sections and the section it is
+ * on. A section is shown only once its core answered, under it; until
+ * then, only one that shows without it (its Setup) is, and in every
+ * other's place the page says why it isn't read and what to do.
+ */
+export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
+  const { view } = organizationOf(admin);
   const { id: clientId, name } = admin.client;
-  const section = useSection(clientId);
+  const { section, withoutCore } = useShownSection();
   const { title, about } = sectionWords[section];
+  const unread = admin.state === "answered" ? null : admin;
+  let description = about;
+  if (section === "overview") {
+    description = unread === null ? "" : unreadWhy(unread);
+    description = view === null ? description : aboutOf(view);
+  }
+  let shown = <Outlet />;
+  if (admin.state === "answered" && view !== null) {
+    shown = <AnsweredSection organization={{ admin, view }} />;
+  } else if (!withoutCore && unread !== null) {
+    shown = <UnreadSection admin={unread} section={section} />;
+  }
   return (
     <>
       <AdminHeader page={name} />
@@ -483,91 +582,28 @@ const AnsweredPage = ({
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
             <SectionSelect clientId={clientId} section={section} />
             <PageHeading
-              description={section === "overview" ? aboutOf(view) : about}
+              description={description}
               title={section === "overview" ? name : title}
             >
-              <SourceNote
-                origins={
-                  originsOf(
-                    admin.snapshot,
-                    admin.billing.state === "read",
-                    admin.proposal.state === "read",
-                    admin.crm.state === "read"
-                  )[section]
-                }
-              />
+              {admin.state === "answered" ? (
+                <SourceNote
+                  origins={
+                    originsOf(
+                      admin.snapshot,
+                      admin.billing.state === "read",
+                      admin.proposal.state === "read",
+                      admin.crm.state === "read"
+                    )[section]
+                  }
+                />
+              ) : null}
             </PageHeading>
-            <OrganizationContext value={organization}>
-              <Outlet />
-            </OrganizationContext>
+            {shown}
           </div>
         </div>
       </div>
     </>
   );
-};
-
-/**
- * The page of an organization whose core didn't answer, laid out as one
- * that did: its column, and the section it is on. Its Setup shows, from
- * what the admin itself recorded: setting it up, or seeing why its core
- * doesn't answer, is done there. Every other section needs what its core
- * answers, so it says why that isn't read now.
- */
-const UnreadPage = ({ admin }: { admin: ClientAdmin }) => {
-  const { id: clientId, name } = admin.client;
-  const section = useSection(clientId);
-  const { title, about } = sectionWords[section];
-  const why = admin.state === "answered" ? "" : unreadWhy(admin);
-  return (
-    <>
-      <AdminHeader page={name} />
-      <div className="flex min-h-0 flex-1 text-sm">
-        <OrgColumn clientId={clientId} name={name} view={null} />
-        <div className="relative min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 pt-7 pb-6 md:px-9">
-            <SectionSelect clientId={clientId} section={section} />
-            <PageHeading
-              description={section === "overview" ? why : about}
-              title={section === "overview" ? name : title}
-            />
-            {section === "setup" ? (
-              <Outlet />
-            ) : (
-              <div className="border-border flex flex-col items-center gap-3 rounded-xl border border-dashed px-5 py-8 text-center">
-                <p className="text-muted-foreground max-w-xl text-pretty">
-                  {section === "overview"
-                    ? "Everything else about it comes from its own Grasp, which the admin can’t read now. Its Setup shows what the admin itself knows, and what to do."
-                    : why}
-                </p>
-                <Button
-                  nativeButton={false}
-                  render={<Link params={{ clientId }} to={sectionTo.setup} />}
-                  size="sm"
-                  variant="outline"
-                >
-                  Its platform
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-};
-
-/**
- * One organization's page: its column of sections and the section it is
- * on; or, when its core didn't answer, its name and why nothing of it is
- * read now.
- */
-export const OrganizationPage = ({ admin }: { admin: ClientAdmin }) => {
-  const { view } = organizationOf(admin);
-  if (admin.state !== "answered" || view === null) {
-    return <UnreadPage admin={admin} />;
-  }
-  return <AnsweredPage organization={{ admin, view }} />;
 };
 
 /** What a section shows until its content is ported: a line saying so. */

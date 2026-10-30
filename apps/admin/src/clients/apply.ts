@@ -19,11 +19,13 @@ import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
+import type { DeployContext } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   ProvisionOperationError,
   provisionOf,
+  recordUnstarted,
   runClientProvision,
   startClientRelease,
 } from "../hosting/operation.ts";
@@ -192,24 +194,31 @@ export const applyClient = (env: Env): WorkflowDefinition => ({
             attempt,
             attemptKey: idempotencyKey,
           };
+          // An earlier try finished the operation, and gave the client
+          // back, but its result was lost before the engine kept it:
+          // done already, so this try succeeds at once.
+          const operation = await provisionOf(db, clientId);
+          if (operation?.status === "done" && operation.runId === held.runId) {
+            return;
+          }
+          // Taken before anything else is read: from here only this
+          // attempt writes, its failure to read its context included.
+          if (!(await takeAttempt(db, held))) {
+            throw stop(
+              "runner_replaced",
+              `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
+            );
+          }
+          let context: DeployContext;
           try {
-            const context = await deployContext(env);
-            // An earlier try finished the operation, and gave the client
-            // back, but its result was lost before the engine kept it:
-            // done already, so this try succeeds at once.
-            const operation = await provisionOf(context.db, clientId);
-            if (
-              operation?.status === "done" &&
-              operation.runId === held.runId
-            ) {
-              return;
-            }
-            if (!(await takeAttempt(context.db, held))) {
-              throw stop(
-                "runner_replaced",
-                `${held.runId} no longer holds ${clientId} for attempt ${attempt}`
-              );
-            }
+            context = await deployContext(env);
+          } catch (error) {
+            // Recorded on the operation, for staff to read on its Setup, as
+            // this attempt alone: never over a retry that took it over.
+            await recordUnstarted(db, held, errorCode(error));
+            throw error;
+          }
+          try {
             // The release it runs, again: going back a release wouldn't
             // undo a setting that broke it.
             await runClientProvision(context, held, {
