@@ -1348,6 +1348,10 @@ msgstr "{redesign} en refonte"
 msgid "{request} a request"
 msgstr "{request} par requête"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "{responsible} · Made on {made}"
+msgstr "{responsible} · Créée le {made}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -2752,6 +2756,11 @@ msgctxt "activity filter: everyone"
 msgid "All"
 msgstr "Tous"
 
+#: src/routes/_shell.apps.index.tsx
+msgctxt "filter: every app"
+msgid "All"
+msgstr "Toutes"
+
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: every integration"
 msgid "All"
@@ -3281,7 +3290,11 @@ msgstr "Approuvé : {who}."
 msgid "Approver for new tools named"
 msgstr "Responsable des nouveaux outils désigné"
 
+#: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -5698,8 +5711,6 @@ msgstr "Raccourcis des domaines"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -9414,6 +9425,7 @@ msgctxt "asked for the first time this span"
 msgid "New"
 msgstr "Nouveau"
 
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "New app"
@@ -9580,6 +9592,10 @@ msgstr "Aucune application du paysage applicatif n’enfreint cette règle."
 msgid "No app is allowed to break this rule."
 msgstr "Aucune application n’est autorisée à enfreindre cette règle."
 
+#: src/routes/_shell.apps.index.tsx
+msgid "No app is called “{asked}”"
+msgstr "Aucune application ne s’appelle « {asked} »"
+
 #: src/policies/policy.ts
 msgid "No apps"
 msgstr "Aucune application"
@@ -9658,6 +9674,10 @@ msgstr "Pas encore de connecteur"
 msgid "No data"
 msgstr "Aucune donnée"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "No design yet"
+msgstr "Pas encore de maquette"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "No domain has a model bound to it."
 msgstr "Aucun domaine n'a de modèle lié."
@@ -9679,6 +9699,7 @@ msgstr "Aucun domaine pour l’instant"
 msgid "No domains yet. Domains are made in chat."
 msgstr "Aucun domaine pour l’instant. Les domaines se créent dans le chat."
 
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No drafts."
 msgstr "Aucun brouillon."
@@ -9882,6 +9903,10 @@ msgstr "Aucune autorisation."
 #: src/policies/policies-table.tsx
 msgid "No policies yet. Upload one to have Grasp propose its rules."
 msgstr "Aucune politique pour l’instant. Importez-en une pour que Grasp propose ses règles."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "No published apps yet"
+msgstr "Aucune application publiée pour l’instant"
 
 #: src/settings/pulse.ts
 msgctxt "Pulse status"
@@ -10572,6 +10597,7 @@ msgctxt "onboarding area section"
 msgid "Notes"
 msgstr "Notes"
 
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Nothing archived."
 msgstr "Rien d’archivé."
@@ -12072,6 +12098,10 @@ msgstr "Publier une version de {contract}"
 msgid "Publish as"
 msgstr "Publier comme"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Publish one from its page, and the people it is shared with can open it."
+msgstr "Publiez-en une depuis sa page, et les personnes avec qui elle est partagée pourront l’ouvrir."
+
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
 msgid "Publish revision {0}"
@@ -13364,6 +13394,11 @@ msgstr "Planification arrêtée"
 msgid "Screens"
 msgstr "Écrans"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Screens made for a team or one person, standing on your workflows."
+msgstr "Des écrans faits pour une équipe ou une personne, appuyés sur vos workflows."
+
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Rechercher"
@@ -13395,6 +13430,10 @@ msgstr "Rechercher dans les chats et les projets"
 #: src/landscape/audit-trail.tsx
 msgid "Search events"
 msgstr "Rechercher des événements"
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Search for another name, or look under another tab."
+msgstr "Cherchez un autre nom, ou regardez sous un autre onglet."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
@@ -13429,6 +13468,10 @@ msgstr "Rechercher des personnes et des équipes"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Search the apps"
+msgstr "Rechercher dans les applications"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -15033,6 +15076,10 @@ msgstr "L’approbation du code de cette application a été retirée, et l’ap
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "Les apps citées par les équipes, et celles utilisées que personne n’a mentionnées."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "The apps your colleagues are making show here."
+msgstr "Les applications que vos collègues créent apparaissent ici."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
@@ -17578,6 +17625,7 @@ msgid "What should Grasp do there?"
 msgstr "Que doit faire Grasp là-bas ?"
 
 #: src/engines/new-app.tsx
+#: src/routes/_shell.apps.index.tsx
 msgid "What should the app show, and for whom?"
 msgstr "Que doit montrer l’application, et pour qui ?"
 

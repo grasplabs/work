@@ -162,6 +162,17 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
+  // On the Apps page it is a tile, which opens the App's own page.
+  await nav.getByRole("link", { name: "Apps" }).click();
+  const tile = page
+    .getByRole("list", { name: "Apps" })
+    .getByRole("listitem")
+    .filter({ hasText: name });
+  await expect(tile).toContainText("Counts clicks");
+  await tile.getByRole("link", { name }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+
   await nav.getByRole("link", { name: "Domains" }).click();
 
   // Its card says what its version holds, as core counts it.
@@ -243,7 +254,14 @@ test("a builder finds an engine in the list, opens it and uses its app with live
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   pageOf,
 }) => {
-  const everyone = ["Chat", "Brain", "Domains", "Workflows", "Integrations"];
+  const everyone = [
+    "Chat",
+    "Brain",
+    "Domains",
+    "Apps",
+    "Workflows",
+    "Integrations",
+  ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
@@ -361,9 +379,13 @@ test("someone with the user role finds no engine to open", async ({
   // that Domain.
   await page.goto("/engines/some-engine");
   await expect(page).toHaveURL(/\/domains\/some-engine$/u);
-  // An old link to the list leads to the Domains.
+  // The Apps page has none for them either, and no way to make one.
   await page.goto("/apps");
-  await expect(page).toHaveURL(/\/domains$/u);
+  await expect(
+    page.getByText("The apps your colleagues are making show here.")
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "New app" })).toHaveCount(0);
+  await page.goto("/domains");
   await expect(
     page.getByText("There are no domains you can open yet.", { exact: false })
   ).toBeVisible();
