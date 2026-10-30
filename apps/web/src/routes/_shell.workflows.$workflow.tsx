@@ -360,9 +360,6 @@ const WorkflowResourceView = ({
   const start: WorkflowTab = draft === undefined ? "versions" : "definition";
   const [tab, setTab] = useState<WorkflowTab>(start);
   const [part, setPart] = useState<TracesPart>("runs");
-  // Files and apps reads what no other tab needs: only once it is opened,
-  // then kept while another tab shows.
-  const [filesOpened, setFilesOpened] = useState(false);
   const { checkpoint, parts } = checkpointOf(draft);
   // Its parts gone (a new checkpoint drawn in none), Overview goes too:
   // the tab it was on shows where the page starts instead.
@@ -372,9 +369,6 @@ const WorkflowResourceView = ({
       <Tabs
         onValueChange={(value: WorkflowTab) => {
           setTab(value);
-          if (value === "files") {
-            setFilesOpened(true);
-          }
         }}
         spacing="none"
         value={shown}
@@ -463,15 +457,15 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
-        <TabsContent keepMounted value="files">
+        {/* Files and apps reads what no other tab needs: only while it
+            shows, afresh each time it is opened. */}
+        <TabsContent value="files">
           <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
-            {filesOpened ? (
-              <FilesAndApps
-                currentVersion={currentVersion}
-                versions={versions}
-                workflow={resource.id}
-              />
-            ) : null}
+            <FilesAndApps
+              currentVersion={currentVersion}
+              versions={versions}
+              workflow={resource.id}
+            />
           </div>
         </TabsContent>
         {/* Kept while another tab shows: what was typed stays. */}
