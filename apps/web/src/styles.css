@@ -530,6 +530,19 @@
   padding-bottom: calc(var(--spacing) * 24);
 }
 
+/* The spine the brain's log hangs its days on (brain/brain-log.tsx): a quiet column of dots, as
+   the prototype draws it. */
+@utility log-spine {
+  background-image: radial-gradient(
+    circle,
+    var(--muted-foreground) 0.8px,
+    transparent 1.3px
+  );
+  background-size: 4px 6px;
+  background-repeat: repeat-y;
+  opacity: 0.4;
+}
+
 /* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)
    and whether its workflow is live (`data-live`), and every line in it follows (`WireLine` in
    `inside-flow.tsx`: `wire-base` is the line, `wire-grain` every third dot again a little larger,
