@@ -14,7 +14,6 @@ import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { sendStaffAlert } from "../alerts.ts";
 import { adminDatabase } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
 import type { DeployContext } from "../deploy/context.ts";
@@ -112,15 +111,7 @@ export const provisionPlacedClientRun = (env: Env): WorkflowDefinition => ({
           throw asOperationStepError(error);
         }
         try {
-          await runClientProvision(
-            {
-              ...context,
-              alert: async (alert) => {
-                await sendStaffAlert(env, alert);
-              },
-            },
-            held
-          );
+          await runClientProvision(context, held);
         } catch (error) {
           throw asOperationStepError(error);
         }

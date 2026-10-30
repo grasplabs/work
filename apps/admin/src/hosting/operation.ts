@@ -119,7 +119,6 @@ import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
-import type { StaffAlert } from "../alerts.ts";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
@@ -361,8 +360,6 @@ export interface ProvisionContext {
   observe?: { retryDelayMs?: number };
   /** How long a call that changes a client's Workers may wait (`sendHolding`). */
   sendTimeoutMs?: number;
-  /** Tells staff when a release was rolled back on its own (src/alerts.ts). */
-  alert?: (alert: StaffAlert) => Promise<void>;
 }
 
 /**
@@ -2896,25 +2893,6 @@ interface Stopped {
 }
 
 /**
- * Sends `alert` to staff, a failure logged and not thrown: an alert that
- * can't be sent never hides what the operation did, or why it stopped.
- */
-const tellStaff = async (
-  context: ProvisionContext,
-  alert: StaffAlert
-): Promise<void> => {
-  try {
-    await context.alert?.(alert);
-  } catch (error) {
-    log.error("provision.alert_unsent", {
-      clientId: alert.clientId,
-      kind: alert.kind,
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
-};
-
-/**
  * Runs client `held.clientId`'s operation once from its first step, as
  * runner `held`, and records it done; one done already is left as it is.
  * A failure is recorded (its step and code, audited) and answered.
@@ -2995,6 +2973,9 @@ const runOperation = async (
     await complete(db, loaded);
     return undefined;
   } catch (error) {
+    // Any failure, a resource outside the organization's jurisdiction
+    // (src/hosting/provision.ts) included, stops the run here: recorded on
+    // the operation with its step and code, audited, for its Setup to show.
     const code = operationErrorCode(error);
     log.error("provision.failed", {
       operation: operation.id,
@@ -3041,8 +3022,9 @@ const rollsBack = async (
 /**
  * Rolls client `held.clientId` back to the release it ran before
  * `failed`, which failed its probe with `code`: through its operation,
- * as runner `held`, audited as the system's rollback with the cause, and
- * staff told either way. Throws when the rollback doesn't finish.
+ * as runner `held`, audited as the system's rollback with the cause.
+ * Throws when the rollback doesn't finish, its failure recorded on the
+ * operation as any is.
  */
 const rollBackAfterProbe = async (
   context: ProvisionContext,
@@ -3050,7 +3032,6 @@ const rollBackAfterProbe = async (
   failed: Operation,
   code: string
 ): Promise<void> => {
-  const subject = failed.releaseId;
   try {
     await startClientRelease(context.db, "system", held, {
       rollback: true,
@@ -3066,18 +3047,8 @@ const rollBackAfterProbe = async (
       clientId: held.clientId,
       error: operationErrorCode(error),
     });
-    await tellStaff(context, {
-      clientId: held.clientId,
-      kind: "release_rollback_failed",
-      subject,
-    });
     throw error;
   }
-  await tellStaff(context, {
-    clientId: held.clientId,
-    kind: "release_rolled_back",
-    subject,
-  });
 };
 
 /**
@@ -3087,7 +3058,7 @@ const rollBackAfterProbe = async (
  * to resume one that failed. On a failure it records the step and the
  * error's code, audited, and throws the error; except that a live
  * client's release that fails its probe is rolled back to the release
- * before on its own (`rollsBack`), and staff are told. Only for a release
+ * before on its own (`rollsBack`), audited. Only for a release
  * to another release: a run of the release it runs again (settings,
  * rotation, a secrets rollout) or a rollback passes `rollBackOnProbe`
  * false, as going back a release wouldn't undo what failed.
