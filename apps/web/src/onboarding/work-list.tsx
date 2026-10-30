@@ -11,6 +11,7 @@ import {
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
 import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -128,7 +129,7 @@ const KnownRing = ({ known, of }: { known: number; of: number }) => {
         ) : null}
       </svg>
       <span className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="type-figure">{known}</span>
+        <Stat>{known}</Stat>
         <span className="text-muted-foreground text-xs">{t`of ${of}`}</span>
       </span>
     </div>
@@ -168,7 +169,7 @@ const Summary = ({ cards }: { cards: Card[] }) => {
           ))}
         </ul>
         <div className="flex flex-col gap-0.5 @2xl:items-end @2xl:text-right">
-          <span className="type-figure">{missing}</span>
+          <Stat>{missing}</Stat>
           <span className="text-muted-foreground">
             {plural(missing, {
               one: "thing still missing",

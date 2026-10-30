@@ -579,13 +579,15 @@ test("the chat dock on every other page carries on the open chat, which is the s
   // The page stayed where it was.
   expect(new URL(page.url()).pathname).toBe("/domains");
 
-  // Folded away, it is the bar again, and opens again on the same chat,
-  // the cursor in the box all along, and what was typed still there.
+  // Folded away, it is the bar again, and a click into the box opens it
+  // again on the same chat, the cursor in the box all along, and what was
+  // typed still there.
   await dock.getByRole("button", { name: "Fold the chat away" }).click();
   await expect(dock).toHaveCount(0);
   await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(dock).toHaveCount(0);
+  await box.click();
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await expect(box).toBeFocused();
   await expect(box).toHaveValue(`Half a thought ${tag}`);
@@ -598,7 +600,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
 
   // A new chat from the dock starts afresh.
   await page.goto("/knowledge");
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await box.click();
   await dock.getByRole("button", { name: "New chat" }).click();
   await expect(dock.getByRole("list", { name: "Messages" })).toHaveCount(0);
   await expect(dock).toContainText("Ask anything, or describe a process");

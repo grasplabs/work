@@ -1,4 +1,5 @@
 import { runActivityDefaultDays } from "@grasp-os/shared/workflows";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Plural, Trans } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
@@ -23,13 +24,13 @@ const Figure = ({
 }: {
   value: string | null;
   label: ReactNode;
-  tone: string;
+  tone: "default" | "done" | "attention";
 }) => (
   <div className="flex min-w-0 flex-col-reverse gap-0.5">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className={value === null ? "type-figure" : `type-figure ${tone}`}>
+    <Stat render={<dd />} variant={value === null ? "default" : tone}>
       {value ?? "–"}
-    </dd>
+    </Stat>
   </div>
 );
 
@@ -53,7 +54,7 @@ export const RunFiguresView = ({
               value={days}
             />
           }
-          tone=""
+          tone="default"
           value={formatNumber(runs)}
         />
         <Figure
@@ -64,7 +65,7 @@ export const RunFiguresView = ({
               <Trans>completed without a person</Trans>
             )
           }
-          tone="text-status-agreed"
+          tone="done"
           value={alone === null ? null : formatPercent(alone)}
         />
         <Figure
@@ -75,7 +76,7 @@ export const RunFiguresView = ({
               <Trans>wait for a decision now</Trans>
             )
           }
-          tone={waiting > 0 ? "text-status-attention" : ""}
+          tone={waiting > 0 ? "attention" : "default"}
           value={formatNumber(waiting)}
         />
       </dl>
