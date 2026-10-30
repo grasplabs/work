@@ -613,6 +613,11 @@ export const brainErasedDocuments = sqliteTable(
     /** SHA-256 of its collection and path (../erasures.ts `placeHash`). */
     place: text().notNull(),
     erasedAt: timestamp("erased_at").notNull(),
+    /**
+     * When the purge had forgotten the host's copies and rewritten what it
+     * names, or stopped trying: null while it runs (../erasures.ts).
+     */
+    doneAt: timestamp("done_at"),
   },
   (table) => [
     primaryKey({ columns: [table.purgeId, table.documentId] }),

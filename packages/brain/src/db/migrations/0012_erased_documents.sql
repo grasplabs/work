@@ -3,6 +3,7 @@ CREATE TABLE `brain_erased_documents` (
 	`document_id` text NOT NULL,
 	`place` text NOT NULL,
 	`erased_at` integer NOT NULL,
+	`done_at` integer,
 	PRIMARY KEY(`purge_id`, `document_id`)
 );
 --> statement-breakpoint
