@@ -5,7 +5,6 @@ import type {
 } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +32,7 @@ import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { Mark } from "../brain/region-marks.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { AppLogo } from "../connections/app-logo.tsx";
 import type { Session } from "../core.ts";
@@ -115,16 +115,22 @@ const Row = ({
   </li>
 );
 
-/** A row that opens its panel: a logo, a name, one fact, and the chevron. */
+/**
+ * A row that opens its panel: a logo, a name, one fact, and the chevron.
+ * A place's fact has the brain's mark before it, as the prototype's
+ * places: filled where he is on there, hollow where he is off.
+ */
 const OpenRow = ({
   logo,
   name,
   line,
+  mark,
   onOpen,
 }: {
   logo: ReactNode;
   name: string;
   line: string;
+  mark?: "known" | "waiting";
   onOpen?: () => void;
 }) => {
   const body = (
@@ -132,7 +138,10 @@ const OpenRow = ({
       {logo}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium">{name}</span>
-        <span className="text-muted-foreground truncate">{line}</span>
+        <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
+          {mark === undefined ? null : <Mark state={mark} />}
+          <span className="truncate">{line}</span>
+        </span>
       </span>
     </>
   );
@@ -365,37 +374,6 @@ export const StephenSettings = ({
       />
       <ErrorText>{failure}</ErrorText>
       <SettingsSection
-        action={
-          editable && toAdd.length > 0 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button disabled={!can} size="sm" variant="outline" />}
-              >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Add a place</Trans>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {toAdd.map((place) => (
-                  <DropdownMenuItem
-                    key={place}
-                    onClick={() => {
-                      void change(async (session) => {
-                        await session.connections.setStephenPlace(
-                          place,
-                          { who: "asStephen" },
-                          true
-                        );
-                      });
-                    }}
-                  >
-                    <PlaceLogo place={place} />
-                    {placeName(place)}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : undefined
-        }
         description={t`Each place only narrows who reaches him there, and whether he does things for people there or only answers.`}
         title={t`Where people reach him`}
       >
@@ -403,19 +381,61 @@ export const StephenSettings = ({
           <OpenRow
             line={t`On · for everyone with Grasp`}
             logo={<AppLogo logo="/favicon.svg" name="Grasp" />}
+            mark="known"
             name={t`Grasp's chat`}
           />
           {reach.places.map((place) => (
             <OpenRow
               key={place.place}
               line={place.audience.who === "nobody" ? t`Off` : t`On`}
-              logo={<PlaceLogo place={place.place} size="sm" />}
+              logo={<PlaceLogo place={place.place} size="default" />}
+              mark={place.audience.who === "nobody" ? "waiting" : "known"}
               name={placeName(place.place)}
               onOpen={() => {
                 setOpened({ kind: "place", id: place.place });
               }}
             />
           ))}
+          {editable && toAdd.length > 0 ? (
+            <li className="border-t">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={!can}
+                  render={
+                    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the trigger gives it its words, "Add a place", as children
+                    <button
+                      className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent flex w-full items-center gap-3 px-5 py-3 text-left outline-none disabled:opacity-50"
+                      type="button"
+                    />
+                  }
+                >
+                  <span className="flex size-9 flex-none items-center justify-center rounded-md border border-dashed">
+                    <PlusIcon aria-hidden="true" className="size-4" />
+                  </span>
+                  <Trans>Add a place</Trans>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {toAdd.map((place) => (
+                    <DropdownMenuItem
+                      key={place}
+                      onClick={() => {
+                        void change(async (session) => {
+                          await session.connections.setStephenPlace(
+                            place,
+                            { who: "asStephen" },
+                            true
+                          );
+                        });
+                      }}
+                    >
+                      <PlaceLogo place={place} />
+                      {placeName(place)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </li>
+          ) : null}
         </ul>
       </SettingsSection>
       <SettingsSection

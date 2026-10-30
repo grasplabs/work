@@ -33,9 +33,11 @@ const placeNames: Readonly<Record<string, string>> = {
 
 /** Logos the deployment serves, by the platform or provider they are of. */
 const logos: Readonly<Record<string, string>> = {
-  teams: "/logos/microsoft.svg",
+  teams: "/logos/microsoft-teams.svg",
+  slack: "/logos/slack.svg",
+  whatsapp: "/logos/whatsapp.svg",
   microsoft: "/logos/microsoft.svg",
-  gmail: "/logos/google.svg",
+  gmail: "/logos/gmail.svg",
   google: "/logos/google.svg",
 };
 
@@ -48,7 +50,7 @@ export const PlaceLogo = ({
   size = "xs",
 }: {
   place: string;
-  size?: "xs" | "inline" | "sm";
+  size?: "xs" | "inline" | "sm" | "default";
 }) => (
   <AppLogo logo={logos[place] ?? null} name={placeName(place)} size={size} />
 );
