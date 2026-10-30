@@ -1349,6 +1349,10 @@ msgstr "{team} · nieuw"
 msgid "{team} · not out yet"
 msgstr "{team} · nog niet beschikbaar"
 
+#: src/onboarding/interviews-progress.tsx
+msgid "{team} · our email didn’t reach them"
+msgstr "{team} · onze e-mail kwam niet aan"
+
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (team)"
@@ -3500,6 +3504,7 @@ msgstr "Niet leesbaar"
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/link-confirmation.tsx
+#: src/onboarding/interview-actions.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
@@ -4723,6 +4728,10 @@ msgstr "Het interview van {first} voorgoed verwijderen, met alles wat is gezegd?
 #: src/policies/policy-editing.tsx
 msgid "Delete {name}?"
 msgstr "{name} verwijderen?"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Delete and start over"
+msgstr "Verwijderen en opnieuw beginnen"
 
 #: src/interview/closed.tsx
 msgid "Delete it"
@@ -5965,6 +5974,10 @@ msgstr "Voor de mensen met wie hij gedeeld is"
 msgid "For this organization only. Every organization starts with the same values, and Grasp tunes them as its interviews come in."
 msgstr "Alleen voor deze organisatie. Elke organisatie begint met dezelfde waarden, en Grasp stemt ze af naarmate de interviews binnenkomen."
 
+#: src/onboarding/interview-actions.tsx
+msgid "For when their link doesn't reach them, or no longer opens for them."
+msgstr "Voor als hun link hen niet bereikt, of niet meer voor hen opent."
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Forms and surveys"
@@ -6056,6 +6069,10 @@ msgstr "Krijgt de links zodra het team is ingelicht"
 msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In voorbereiding"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Give {name} a new start?"
+msgstr "{name} opnieuw laten beginnen?"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Give the go"
@@ -6430,6 +6447,10 @@ msgstr "Hallo"
 msgctxt "part of an interview"
 msgid "Hello"
 msgstr "Hallo"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Help them in"
+msgstr "Helpen met toegang"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -7838,6 +7859,10 @@ msgstr "Gemaakt met Grasp op {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Mail"
+msgstr "E-mail"
+
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
@@ -8354,6 +8379,10 @@ msgstr "Nieuwe regel"
 msgid "New since the last approval: {added}"
 msgstr "Nieuw sinds de laatste goedkeuring: {added}"
 
+#: src/onboarding/interview-actions.tsx
+msgid "New start"
+msgstr "Opnieuw beginnen"
+
 #: src/workflows/independent-workflows.tsx
 msgid "New workflow"
 msgstr "Nieuwe workflow"
@@ -8638,6 +8667,10 @@ msgstr "Niet meer gebruikt: {removed}"
 msgid "No longer where it was"
 msgstr "Staat niet meer waar het stond"
 
+#: src/onboarding/interview-actions.tsx
+msgid "No mail to them failed."
+msgstr "Geen e-mail aan hen is mislukt."
+
 #: src/onboarding/organization-words.ts
 msgid "No map of its work came of the lead's interview"
 msgstr "Uit het interview van de teamleider kwam geen kaart van het werk"
@@ -8721,6 +8754,10 @@ msgstr "Nog geen beleidsdocumenten. Upload er een om Grasp de regels te laten vo
 msgctxt "Pulse status"
 msgid "No Pulse"
 msgstr "Geen Pulse"
+
+#: src/onboarding/interview-actions.tsx
+msgid "no reason given"
+msgstr "geen reden opgegeven"
 
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
@@ -9983,6 +10020,10 @@ msgstr "Anders:"
 #: src/workflows/workflow-diagram.tsx
 msgid "Otherwise: {name}"
 msgstr "Anders: {name}"
+
+#: src/onboarding/failed-mail.tsx
+msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
+msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om te versturen, of vraag Grasp hun adres te controleren."
 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
@@ -11775,6 +11816,10 @@ msgctxt "send the question"
 msgid "Send"
 msgstr "Versturen"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Send again"
+msgstr "Opnieuw versturen"
+
 #: src/chat/brain-questions.tsx
 msgid "Send answer"
 msgstr "Antwoord versturen"
@@ -12290,6 +12335,10 @@ msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Typend beginnen"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Start over on a new device"
+msgstr "Opnieuw beginnen op een nieuw apparaat"
 
 #: src/tour/tour-script.ts
 msgid "Start the tour"
@@ -13763,6 +13812,10 @@ msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is geslo
 msgid "The works council hasn't been heard"
 msgstr "De ondernemingsraad is niet gehoord"
 
+#: src/onboarding/interview-actions.tsx
+msgid "Their link failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Hun link is op {on} mislukt: {reason}. Los op wat hem tegenhield en verstuur hem dan opnieuw."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "Their link stops working, and what they said goes with them."
 msgstr "Hun link werkt niet meer, en wat ze zeiden, gaat mee."
@@ -13786,6 +13839,10 @@ msgstr "Eigen opgave: {minutes}"
 #: src/onboarding/interview-people.tsx
 msgid "Their rating"
 msgstr "Hun beoordeling"
+
+#: src/onboarding/interview-actions.tsx
+msgid "Their reminder failed on {on}: {reason}. Put right what stopped it, then send it again."
+msgstr "Hun herinnering is op {on} mislukt: {reason}. Los op wat haar tegenhield en verstuur haar dan opnieuw."
 
 #: src/settings/person-limits.tsx
 msgid "Their team's limit"
@@ -15442,6 +15499,10 @@ msgstr "Wat de leverancier over zijn certificaten publiceert."
 msgid "What the workspace pays for Grasp."
 msgstr "Wat de werkruimte voor Grasp betaalt."
 
+#: src/onboarding/interview-actions.tsx
+msgid "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked."
+msgstr "Wat ze tot nu toe zeiden wordt verwijderd, en hun link opent op het volgende apparaat dat hem opent. Doe dit alleen als zij erom vroegen."
+
 #: src/brain/brain-article/statements-by-kind.tsx
 msgid "What they told us"
 msgstr "Wat ze ons vertelden"
@@ -15573,6 +15634,10 @@ msgstr "Als iets op jou wacht"
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
 msgstr "Wanneer de gebeurtenis {event} plaatsvindt"
+
+#: src/onboarding/interview-actions.tsx
+msgid "When they lost the device their interview was on. Only on their request."
+msgstr "Als ze het apparaat kwijt zijn waarop hun interview stond. Alleen op hun verzoek."
 
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"

@@ -9,6 +9,7 @@ import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
 import type {
   Agreements,
+  FailedMail,
   InterviewKind,
   InterviewLocale,
   Interviewer,
@@ -165,6 +166,8 @@ export interface StaffInterview {
   /** When they agreed to take part, and when they withdrew; null when they didn't. */
   participatedAt: string | null;
   withdrawnAt: string | null;
+  /** Their latest mail, when it failed: to send again. */
+  failedMail: FailedMail | null;
 }
 
 /** The longest note. */
