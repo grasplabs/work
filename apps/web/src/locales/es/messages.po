@@ -2563,6 +2563,18 @@ msgstr "Una aplicación solo se ejecuta cuando un administrador ha aprobado su c
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Un dominio archivado se conserva tal como está y queda fuera de línea: nadie abre sus apps, sus disparadores se detienen y sus ejecuciones sin terminar se cancelan. Un creador puede restaurarlo más tarde, como borrador."
 
+#: src/settings/audit-chain.tsx
+msgid "An entry doesn't link to the one before it."
+msgstr "Una entrada no enlaza con la anterior."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry is missing."
+msgstr "Falta una entrada."
+
+#: src/settings/audit-chain.tsx
+msgid "An entry was changed after it was written."
+msgstr "Una entrada se modificó después de escribirse."
+
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un formato antiguo: guárdalo como PDF o en un archivo más reciente"
@@ -3639,6 +3651,10 @@ msgstr "Categoría"
 msgid "Certifications"
 msgstr "Certificaciones"
 
+#: src/settings/audit-chain.tsx
+msgid "Chain check"
+msgstr "Comprobación de la cadena"
+
 #: src/policies/policy.ts
 msgctxt "what a permission lets an app do with company data"
 msgid "change"
@@ -3906,9 +3922,17 @@ msgstr "Comprobar y guardar"
 msgid "Check sound and microphone"
 msgstr "Probar sonido y micrófono"
 
+#: src/settings/audit-chain.tsx
+msgid "Check that no entry of the audit trail was removed or changed since it was written, from the first to the latest."
+msgstr "Comprueba que ninguna entrada del registro de auditoría se ha eliminado ni modificado desde que se escribió, de la primera a la más reciente."
+
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Comprobó la cadena del registro de auditoría"
+
+#: src/settings/audit-chain.tsx
+msgid "Checked through entry {through}…"
+msgstr "Comprobado hasta la entrada {through}…"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Checking it against your numbers…"
@@ -5429,6 +5453,10 @@ msgstr "Introduce un importe, por ejemplo 12.50."
 #: src/activity/audit-log.tsx
 msgid "Entries"
 msgstr "Entradas"
+
+#: src/settings/audit-chain.tsx
+msgid "Entries through {purged} were removed when their retention ended: they still link up, but could not be checked."
+msgstr "Las entradas hasta la {purged} se eliminaron al terminar su plazo de conservación: siguen enlazadas, pero no se pudieron comprobar."
 
 #: src/workflows/history-view.tsx
 msgid "Entry {sequence} can't be read."
@@ -9665,6 +9693,10 @@ msgstr "Más antiguos primero"
 msgid "on {date} at {hour}"
 msgstr "el {date} a las {hour}"
 
+#: src/settings/audit-chain.tsx
+msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified."
+msgstr "El {time}, la cadena se rompió en la entrada {entry}: nada desde ahí está comprobado."
+
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
 msgid "On {where}"
@@ -13301,6 +13333,10 @@ msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp
 msgid "The assistant people chat with in Microsoft Teams and the other chat apps. What is set here is all he may do: a place or an app only narrows it."
 msgstr "El asistente con el que la gente chatea en Microsoft Teams y las demás apps de chat. Lo que se fija aquí es todo lo que puede hacer: un lugar o una app solo lo restringe."
 
+#: src/settings/audit-chain.tsx
+msgid "The audit trail has no entries yet: there is nothing to verify."
+msgstr "El registro de auditoría aún no tiene entradas: no hay nada que comprobar."
+
 #: src/brain/brain-atlas.ts
 msgid "The board"
 msgstr "La dirección"
@@ -13912,6 +13948,14 @@ msgstr "Como lo contó la mayoría"
 #: src/onboarding/review-parts.tsx
 msgid "The way some told it"
 msgstr "Como lo contaron algunos"
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain has not been verified yet."
+msgstr "Toda la cadena aún no se ha comprobado."
+
+#: src/settings/audit-chain.tsx
+msgid "The whole chain verified, through entry {entries}, on {time}."
+msgstr "Toda la cadena está comprobada, hasta la entrada {entries}, el {time}."
 
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
@@ -15016,6 +15060,14 @@ msgstr "Proveedores, separados por comas"
 #: src/activity/audit-log.tsx
 msgid "Verified"
 msgstr "Verificado"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify now"
+msgstr "Comprobar ahora"
+
+#: src/settings/audit-chain.tsx
+msgid "Verify the chain"
+msgstr "Comprobar la cadena"
 
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
