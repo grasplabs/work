@@ -26,8 +26,8 @@ import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
 // A press on a card of held writes (cards.tsx `heldWritesCard`), on a chat
-// platform: D2, "a verified Teams press confirms exactly the held writes
-// on its card, once". The press is the person's yes, for exactly what the
+// platform (Teams, and Slack the same way): D2, "a verified Teams press
+// confirms exactly the held writes on its card, once". The press is the person's yes, for exactly what the
 // card showed and nothing else; Cancel is their no.
 //
 // What could go wrong, and what stops each. Each names the threat model's
@@ -72,7 +72,7 @@ const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
 
 /** A press on a card, as the door hands it on, from a verified member. */
 export interface CardPress {
-  platform: "teams";
+  platform: "teams" | "slack";
   /** The member who pressed, as the door verified them. */
   userId: string;
   event: ActionEvent;
