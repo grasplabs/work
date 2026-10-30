@@ -60,6 +60,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { RemovedPeople } from "../settings/erasures.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
 import {
   SettingsError,
@@ -69,7 +70,8 @@ import {
 import { useCoreAction } from "../use-core-action.ts";
 
 // Offboarding, for admins: the organization's members, each with their
-// role, a way to end their sessions, and a way to remove them for good.
+// role, a way to end their sessions, and a way to remove them for good;
+// then the people removed, and a way to erase them (settings/erasures.tsx).
 // Core checks the role on every call; anyone else sees why they can't.
 // The admin's own row has no actions: core refuses removing yourself or
 // ending your own sessions, and demoting yourself (which core allows while
@@ -502,11 +504,14 @@ const Members = () => {
     <>
       <Roles />
       {page.state === "ready" ? (
-        <MembersList
-          invitations={page.data.invitations}
-          me={identity.userId}
-          members={page.data.members}
-        />
+        <>
+          <MembersList
+            invitations={page.data.invitations}
+            me={identity.userId}
+            members={page.data.members}
+          />
+          <RemovedPeople page={page.data.removed} />
+        </>
       ) : (
         <SettingsSection title={t`Members`}>
           <NotLoadedState heading="h3" page={page} />
@@ -522,10 +527,11 @@ export const Route = createFileRoute("/_shell/settings/members")({
   component: Members,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => {
-      const [members, invitations] = await Promise.all([
+      const [members, invitations, removed] = await Promise.all([
         session.members.list(),
         session.members.invitations(),
+        session.members.removed(),
       ]);
-      return { members, invitations };
+      return { members, invitations, removed };
     }),
 });

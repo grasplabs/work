@@ -25,6 +25,7 @@ import {
   CircleHelpIcon,
   CoinsIcon,
   CreditCardIcon,
+  EraserIcon,
   HistoryIcon,
   KeyRoundIcon,
   MessageCircleIcon,
@@ -41,7 +42,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
 // The workspace's sections are for admins (Members and roles, and calls of
-// unknown outcome, never for Grasp staff); Packages for all but Grasp staff
+// unknown outcome, never for Grasp staff, who see Erasures instead, read
+// only); Packages for all but Grasp staff
 // (its list is for who may approve packages); the account's for everyone.
 // Core checks the role on every call whatever is listed. Onboarding is the
 // company admin's own view of the interviews, as their onboarding shows
@@ -50,6 +52,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 type SettingsPath =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/erasures"
   | "/settings/models"
   | "/settings/spend"
   | "/settings/stephen"
@@ -97,7 +100,14 @@ const groupsFor = ({
           icon: BuildingIcon,
         },
         ...(staff
-          ? []
+          ? [
+              // Staff see where erasures stand, and change nothing.
+              {
+                label: msg`Erasures`,
+                to: "/settings/erasures" as const,
+                icon: EraserIcon,
+              },
+            ]
           : [
               {
                 label: msg`Members and roles`,

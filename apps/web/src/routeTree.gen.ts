@@ -56,6 +56,7 @@ import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings
 import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.settings.approvals'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
+import { Route as ShellSettingsErasuresRouteImport } from './routes/_shell.settings.erasures'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
 import { Route as ShellSettingsNotificationsRouteImport } from './routes/_shell.settings.notifications'
@@ -338,6 +339,11 @@ const ShellSettingsBillingRoute = ShellSettingsBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsErasuresRoute = ShellSettingsErasuresRouteImport.update({
+  id: '/erasures',
+  path: '/erasures',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
   id: '/members',
   path: '/members',
@@ -615,6 +621,7 @@ export interface FileRoutesByFullPath {
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
+  '/settings/erasures': typeof ShellSettingsErasuresRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -702,6 +709,7 @@ export interface FileRoutesByTo {
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
+  '/settings/erasures': typeof ShellSettingsErasuresRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -795,6 +803,7 @@ export interface FileRoutesById {
   '/_shell/settings/approvals': typeof ShellSettingsApprovalsRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
+  '/_shell/settings/erasures': typeof ShellSettingsErasuresRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
   '/_shell/settings/notifications': typeof ShellSettingsNotificationsRoute
@@ -888,6 +897,7 @@ export interface FileRouteTypes {
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
+    | '/settings/erasures'
     | '/settings/members'
     | '/settings/models'
     | '/settings/notifications'
@@ -975,6 +985,7 @@ export interface FileRouteTypes {
     | '/settings/approvals'
     | '/settings/audit'
     | '/settings/billing'
+    | '/settings/erasures'
     | '/settings/members'
     | '/settings/models'
     | '/settings/notifications'
@@ -1067,6 +1078,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/approvals'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
+    | '/_shell/settings/erasures'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
     | '/_shell/settings/notifications'
@@ -1469,6 +1481,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsBillingRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/erasures': {
+      id: '/_shell/settings/erasures'
+      path: '/erasures'
+      fullPath: '/settings/erasures'
+      preLoaderRoute: typeof ShellSettingsErasuresRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/members': {
       id: '/_shell/settings/members'
       path: '/members'
@@ -1833,6 +1852,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsApprovalsRoute: typeof ShellSettingsApprovalsRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
+  ShellSettingsErasuresRoute: typeof ShellSettingsErasuresRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
   ShellSettingsNotificationsRoute: typeof ShellSettingsNotificationsRoute
@@ -1853,6 +1873,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsApprovalsRoute: ShellSettingsApprovalsRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
+  ShellSettingsErasuresRoute: ShellSettingsErasuresRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
   ShellSettingsNotificationsRoute: ShellSettingsNotificationsRoute,

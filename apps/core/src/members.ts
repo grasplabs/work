@@ -11,9 +11,11 @@ import { memberErrors } from "@grasp-os/shared/members";
 import type {
   Erasure,
   ErasurePreview,
+  ErasureRecordsPage,
   Invitation,
   Member,
   MembersApi,
+  RemovedPeoplePage,
 } from "@grasp-os/shared/members";
 import {
   canBuild,
@@ -64,7 +66,9 @@ import { isErasedEmail } from "./erased-people.ts";
 import {
   erasePerson,
   erasurePreview,
+  erasureRecords,
   releaseAddress,
+  removedPeople,
 } from "./person-erasure.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -886,6 +890,20 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await erasePerson(this.#env, person, userId, name)
+    );
+  }
+
+  async removed(before?: unknown): Promise<RemovedPeoplePage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await removedPeople(this.#env, person, before)
+    );
+  }
+
+  async erasures(before?: unknown): Promise<ErasureRecordsPage> {
+    return await withPerson(
+      this.#check,
+      async (person) => await erasureRecords(this.#env, person, before)
     );
   }
 }

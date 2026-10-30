@@ -63,6 +63,11 @@ export interface ErasurePreview {
   removed: boolean;
   erasure: Erasure | null;
   /**
+   * The areas erasing them takes, in the order they run: exactly what
+   * this deployment's erasure does, so nothing more is promised.
+   */
+  areas: string[];
+  /**
    * Whether the address that was theirs is kept out once they're erased:
    * signing in or being invited under it is refused, until an admin
    * releases it (`releaseAddress`) because the company gave it to someone
@@ -72,8 +77,62 @@ export interface ErasurePreview {
 }
 
 /**
+ * Someone an admin removed, as admins see them, for erasing them
+ * (GRA-903): their email until their erasure erases it, and where that
+ * stands.
+ */
+export interface RemovedPerson {
+  userId: string;
+  name: string;
+  /** Their email, or null once their erasure erased it. */
+  email: string | null;
+  /** When they were removed (ISO 8601). */
+  removedAt: string;
+  erasure: Erasure | null;
+  /** As `ErasurePreview.addressKeptOut`. */
+  addressKeptOut: boolean;
+}
+
+/**
+ * Where a page of removed people or erasures goes on from: the last one
+ * shown, by its time (`at`, ISO 8601) and the person's ID. The next page
+ * lists those before it.
+ */
+export interface ErasureCursor {
+  at: string;
+  userId: string;
+}
+
+/** A page of the people admins removed, most recently removed first. */
+export interface RemovedPeoplePage {
+  people: RemovedPerson[];
+  /** Whether more follow: list again from the last one's cursor. */
+  more: boolean;
+}
+
+/**
+ * A person's erasure as Grasp's staff see it (GRA-903, Nick's D4: staff
+ * view, never act): by IDs and the name frozen when it was asked for,
+ * never an address or anything of what was erased.
+ */
+export interface ErasureRecord extends Erasure {
+  userId: string;
+  /** Their name as the admin confirmed it. */
+  name: string;
+  /** The admin who asked for it. */
+  requestedBy: { userId: string; name: string };
+}
+
+/** A page of erasures, newest first. */
+export interface ErasureRecordsPage {
+  records: ErasureRecord[];
+  /** Whether more follow: list again from the last one's cursor. */
+  more: boolean;
+}
+
+/**
  * The organization's members, over `/rpc`, for admins only (never Grasp
- * staff): offboarding. Removing someone is for good: every session they
+ * staff, but for `erasures`): offboarding. Removing someone is for good: every session they
  * have ends, their open connections close on their next call, their
  * personal connections are disconnected, and signing in again doesn't
  * bring them back.
@@ -109,9 +168,9 @@ export interface MembersApi {
    */
   erasure: (userId: string) => Promise<ErasurePreview>;
   /**
-   * Erases the removed person with `userId` (GRA-903): their email, their
-   * sign-ins and their personal content go; their name and ID stay on the
-   * company's records, so what they did stays traceable. `name` must be
+   * Erases the removed person with `userId` (GRA-903): each area the
+   * preview names (`ErasurePreview.areas`) goes; their name and ID stay on
+   * the company's records, so what they did stays traceable. `name` must be
    * their name exactly as the preview showed it. Asking again while it
    * runs, or after, answers where it stands.
    */
@@ -124,6 +183,18 @@ export interface MembersApi {
    * person's address it was.
    */
   releaseAddress: (email: string) => Promise<{ released: boolean }>;
+  /**
+   * The people admins removed, most recently removed first, with where
+   * each one's erasure stands: who an admin may erase, and who they did.
+   * The latest page, or the page before `before`.
+   */
+  removed: (before?: ErasureCursor) => Promise<RemovedPeoplePage>;
+  /**
+   * Every erasure, newest first, for Grasp's staff alone: read-only, and
+   * each read on the audit log as theirs before anything is answered. The
+   * latest page, or the page before `before`.
+   */
+  erasures: (before?: ErasureCursor) => Promise<ErasureRecordsPage>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */
@@ -148,6 +219,7 @@ export const memberErrors = defineErrorFamily({
     "There's no such invitation: it was taken up or withdrawn.",
   "member.erase_not_removed":
     "Remove them from the organization first: only someone removed can be erased.",
+  "member.invalid": "That isn't a page of this list as it was shown.",
   "member.erase_name_mismatch":
     "That isn't their name as it stands now. Check who you're erasing, and type their name exactly.",
 });
