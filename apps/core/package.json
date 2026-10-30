@@ -8,6 +8,10 @@
     "#blueprints": {
       "types": "./src/blueprints.d.ts",
       "default": "./dist/blueprints.js"
+    },
+    "#blueprints-digest": {
+      "types": "./src/blueprints-digest.d.ts",
+      "default": "./dist/blueprints-digest.js"
     }
   },
   "scripts": {

@@ -1,9 +1,8 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 
-// Apart from the agent loop (agent.ts), which a chat loads at its first
-// turn: a chat reads its stored messages before then, and the loop brings
-// Pi and TypeBox, which core would otherwise load as it starts.
+// Kept out of agent.ts so reading stored messages doesn't load the agent
+// loop (Pi and TypeBox), which a chat loads at its first turn.
 
 const messageRoles = new Set<unknown>([
   "system",
