@@ -84,7 +84,8 @@ import { readStephenReach } from "./stephen-reach.ts";
 // - A filter that narrows the whole report to a few people (a small team,
 //   a place two people use): the report comes back empty, saying so
 //   (`tooFew`), rather than split for them. A team fewer than five can
-//   reach is refused that way whatever its requests.
+//   reach is refused that way whatever its requests. The span before is
+//   held to the same floor on its own: no comparison when it had few.
 // - People one by one: only for the organization's own admins (owners),
 //   never Grasp staff, and only after an owner turned `requestsPerPerson`
 //   on: it is off until then (in the Netherlands the works council may
@@ -425,17 +426,20 @@ const pageOf = async (
     span.to,
     filter
   );
-  const people = new Set(
-    requests
-      .filter(({ day }) => day >= span.from && day <= span.to)
-      .map(({ personId }) => personId)
-  );
-  const tooFew = pointsAtFew(filter, people.size, reach);
+  const peopleIn = ({ from, to }: RequestSpan): number =>
+    new Set(
+      requests
+        .filter(({ day }) => day >= from && day <= to)
+        .map(({ personId }) => personId)
+    ).size;
+  const tooFew = pointsAtFew(filter, peopleIn(span), reach);
   const report = tooFew
     ? emptyReport(span, perPerson)
     : requestsReport(requests, span, { perPerson, reach: reach.byTeam });
+  // The span before is held to the same floor: a filter five or more
+  // asked about now may have pointed at one or two then.
   const beforeReport =
-    before === null || tooFew
+    before === null || tooFew || pointsAtFew(filter, peopleIn(before), reach)
       ? null
       : requestsReport(requests, before, {
           perPerson: false,
