@@ -1,3 +1,11 @@
+import { PHASES } from "@grasp-os/shared/admin/interviews";
+import type { Phase } from "@grasp-os/shared/admin/interviews";
+import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
+import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
+import type { StephenStats } from "@grasp-os/shared/admin/onboarding-admin-record";
+import { RATINGS } from "@grasp-os/shared/admin/org-record";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Progress } from "@grasp-os/ui/components/progress";
 /**
  * Stephen and Claire at one organization, ported from the prototype
  * (grasplabs/prototype `components/admin/org-stephen.tsx`): two of the
@@ -11,14 +19,7 @@
  * found (core runs no such review, so the model says none is `reviewed`),
  * and changing the setup, which only core could keep.
  */
-import { PHASES } from "@grasp-os/shared/admin/interviews";
-import type { Phase } from "@grasp-os/shared/admin/interviews";
-import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
-import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
-import type { StephenStats } from "@grasp-os/shared/admin/onboarding-admin-record";
-import { RATINGS } from "@grasp-os/shared/admin/org-record";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 
 import { BarList, Empty, Figure, Panel } from "./interview-parts.tsx";
@@ -60,9 +61,7 @@ const Rating = ({ stats }: { stats: StephenStats }) => {
       {count > 0 ? (
         <div className="grid items-center gap-x-8 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)]">
           <div className="flex flex-col gap-1.5">
-            <span className="text-2xl leading-tight font-medium tabular-nums">
-              {`${decimal(average)} of 5`}
-            </span>
+            <Stat>{`${decimal(average)} of 5`}</Stat>
             <span aria-hidden className="flex gap-1">
               {RATINGS.map((rating) => (
                 <span

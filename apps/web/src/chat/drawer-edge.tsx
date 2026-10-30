@@ -19,9 +19,6 @@ import {
 // drawer follows (`onPreview`, its CSS variable); the width is kept, and
 // the pages that make room for the drawer move, when it is let go.
 
-/** How far the drawer's right edge is in from the window's, in pixels (its `right-2`). */
-const margin = 8;
-
 const onResize = (listener: () => void): (() => void) => {
   addEventListener("resize", listener);
   return () => {
@@ -83,7 +80,7 @@ export const DrawerEdge = ({
           return;
         }
         const next = draggedDrawerWidth(
-          innerWidth - margin - event.clientX,
+          innerWidth - dockDrawer.inset - event.clientX,
           widest
         );
         if (next === "closed") {

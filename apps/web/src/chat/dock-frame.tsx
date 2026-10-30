@@ -33,6 +33,13 @@ export const useDockWidth = (
   useLayoutEffect(() => {
     dock.current?.style.setProperty("--dock-width", `${width}px`);
   }, [dock, width]);
+  // The room the pages that make room for the drawer leave it (dockDrawerRoom).
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty(
+      "--dock-room",
+      `${drawerWidth + dockDrawer.inset}px`
+    );
+  }, [drawerWidth]);
   useEffect(() => {
     const fit = (): void => {
       setDockDrawerWidth(

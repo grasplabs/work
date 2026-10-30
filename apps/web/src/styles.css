@@ -257,7 +257,7 @@
 }
 @utility animate-upload-fill {
   transform-origin: left;
-  animation: upload-fill 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  animation: upload-fill 300ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
 }
 
 /* A document Grasp is reading: a soft light sweeps across it until the answer starts. */
@@ -281,21 +281,6 @@
   );
 }
 
-/*
- * From the prototype (packages/grasp/src/index.css): the light behind the
- * Integrations banner (connections/integrations-banner.tsx), brightest
- * where the brain sits.
- */
-@utility banner-light {
-  background-image:
-    radial-gradient(
-      38% 120% at 50% 50%,
-      color-mix(in oklch, var(--card) 90%, transparent),
-      transparent 75%
-    ),
-    linear-gradient(110deg, var(--muted), var(--accent) 50%, var(--muted));
-}
-
 /**
  * The page an export prints as a PDF (export/export-file.tsx): A4 with the
  * prototype's margins, its colours printed as they are.
@@ -305,39 +290,25 @@
   margin: 16mm 16mm 18mm;
 }
 
+/*
+ * In every Markdown export, its first two levels of heading are in
+ * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts),
+ * so a printed page reads as Grasp's. A Markdown h1 is in the serif
+ * already (knowledge/markdown.tsx); on paper its h2 is too.
+ */
 @utility page-export {
   page: export;
   print-color-adjust: exact;
+
+  & h2 {
+    @apply font-serif font-normal tracking-tight;
+  }
 }
 
 /*
  * From the prototype (packages/grasp/src/index.css), the dashboard's pile
  * of what waits on the person (dashboard/todo-pile.tsx).
  */
-/* The brand book's Columns pattern, in the app's own ink: six columns, each its own faint brightness, a hairline between two, fading out before the foot. A card is never an empty white field. */
-@utility field-columns {
-  --line: color-mix(in oklab, var(--foreground) 9%, transparent);
-  --lit: color-mix(in oklab, var(--foreground) 4.5%, transparent);
-  --dim: color-mix(in oklab, var(--foreground) 2%, transparent);
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 calc(100% / 6 - 1px),
-      var(--line) calc(100% / 6 - 1px) calc(100% / 6)
-    ),
-    linear-gradient(
-      90deg,
-      var(--lit) 0 16.66%,
-      var(--dim) 16.66% 33.33%,
-      var(--lit) 33.33% 50%,
-      transparent 50% 66.66%,
-      var(--lit) 66.66% 83.33%,
-      var(--dim) 83.33%
-    );
-  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
-  mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
-}
-
 /* The next card comes up out of the pile. */
 @keyframes pile-up {
   from {
@@ -346,7 +317,7 @@
   }
 }
 @utility animate-pile-up {
-  animation: pile-up 340ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+  animation: pile-up 280ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
 }
 
 /* The first time in a session, a ring goes twice around the card on top and is gone. */
@@ -381,7 +352,7 @@
   display: grid;
   grid-template-rows: 1fr;
   transition-property: grid-template-rows, opacity, margin-bottom;
-  transition-duration: 350ms;
+  transition-duration: 300ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 @utility pile-room-closed {
@@ -505,7 +476,7 @@
 @utility agent-spark-once {
   & circle {
     animation-name: agent-dot;
-    animation-duration: 0.7s;
+    animation-duration: 0.3s;
     animation-timing-function: ease-out;
     animation-fill-mode: both;
     @media (prefers-reduced-motion: reduce) {
@@ -612,7 +583,7 @@
   stroke-width: 18;
   stroke-dasharray: var(--total, 2000px);
   stroke-dashoffset: var(--total, 2000px);
-  animation: wire-grow 0.6s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
+  animation: wire-grow 0.3s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
     forwards;
 }
 
@@ -623,7 +594,7 @@
   stroke-linecap: round;
   stroke-dasharray: 0.01px calc(var(--total, 2000px) * 2);
   opacity: 0;
-  animation: wire-tip 0.6s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
+  animation: wire-tip 0.3s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
     both;
 }
 

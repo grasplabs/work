@@ -20,7 +20,16 @@ export const dockDrawer = {
   most: 640,
   give: 70,
   step: 24,
+  /** How far the drawer keeps off the window's right edge (its `right-2`). */
+  inset: 8,
 } as const;
+
+/**
+ * The room a page leaves the drawer on a wide window: as wide as the
+ * drawer and its inset, through `--dock-room`, which the dock sets on the
+ * document as the drawer's width is kept (dock-frame.tsx).
+ */
+export const dockDrawerRoom = "lg:pr-(--dock-room)";
 
 /** How much of the pull past its least width the drawer still follows: it resists. */
 const resistance = 0.3;

@@ -25,6 +25,7 @@ import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
+import { NewCollection } from "../knowledge/new-collection.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
 // Knowledge's home, a page to go on from, in the prototype's look
@@ -263,6 +264,7 @@ const Knowledge = () => {
   const { t } = useLingui();
   const { nav, results, firstPages } = Route.useLoaderData();
   const { q } = Route.useSearch();
+  const { identity } = Route.useRouteContext();
   const { collections, memory } = nav;
   const names = new Map(
     collections.state === "ready"
@@ -318,9 +320,12 @@ const Knowledge = () => {
             aria-labelledby="collections"
             className="flex flex-col gap-3"
           >
-            <h2 className="text-sm font-medium" id="collections">
-              <Trans>Collections</Trans>
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-medium" id="collections">
+                <Trans>Collections</Trans>
+              </h2>
+              <NewCollection identity={identity} />
+            </div>
             <NotLoaded page={collections} />
             {collections.state === "ready" ? (
               <CollectionBlocks

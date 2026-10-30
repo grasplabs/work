@@ -37,9 +37,9 @@ interface Said {
  */
 const refusals: Readonly<Record<AskRefusal, string>> = {
   grasp_client_unset:
-    "Ask Grasp isn’t set up: the admin doesn’t know which organization is Grasp’s own. Set GRASP_CLIENT_ID to its id in the admin’s vars for this stage (apps/admin/wrangler.jsonc), then run Deploy platform.",
+    "Ask Grasp isn’t set up: the admin doesn’t know which organization is Grasp’s own. Choose it under Grasp’s own organization on Platform.",
   grasp_client_unknown:
-    "Ask Grasp isn’t set up: GRASP_CLIENT_ID names an organization the admin doesn’t have. Correct it to Grasp’s own organization’s id in the admin’s vars for this stage (apps/admin/wrangler.jsonc), then run Deploy platform.",
+    "Ask Grasp isn’t set up: the organization chosen as Grasp’s own is gone or offboarded. Choose Grasp’s own organization again on Platform.",
   grasp_client_not_active:
     "Ask Grasp can’t ask yet: Grasp’s own organization isn’t live. Open its Setup and finish setting it up, or resume it there.",
   secret_missing:
@@ -251,7 +251,7 @@ export const AskChat = ({
     return (
       <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-          <h2 className="text-center text-2xl font-medium tracking-tight text-balance">
+          <h2 className="type-display text-center">
             Ask about every organization
           </h2>
           <div className="flex flex-col gap-3">

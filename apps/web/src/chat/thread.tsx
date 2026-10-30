@@ -7,19 +7,26 @@ import type {
   ChatReasoning,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/ui/components/trace";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
   BrainIcon,
   CheckCircleIcon,
   CheckIcon,
-  ChevronDownIcon,
   CircleIcon,
   ClockIcon,
-  CodeIcon,
   CopyIcon,
   LayoutDashboardIcon,
   RefreshCcwIcon,
@@ -29,6 +36,12 @@ import {
 import { createContext, Fragment, use, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { ThinkingOf } from "../brain/thinking/play.ts";
+import {
+  SeeInBrain,
+  ThinkingLine,
+  useAnswerThinking,
+} from "./answer-thinking.tsx";
 import {
   Conversation,
   ConversationContent,
@@ -52,11 +65,13 @@ import { widgetLinesOf } from "./widget-lines.ts";
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
 // `chat-message.tsx`): their questions in a grey bubble on the right,
-// Grasp's answers under a quiet line, each code step folded with its
-// status. While Grasp works on a question, the line says what it does and
-// Grasp's sign stands under its newest answer; once it is done, the line
-// says how long it worked, and the answer has its actions in a quiet row
-// under it. It follows the answer as it streams, unless the person scrolls
+// Grasp's answers with the steps it took as one trace over their words
+// (`Trace`): what it does, or how long it worked, as its first line, then
+// its thinking and each code step, a step at work turning and one done
+// folded, to open for more. While Grasp works on a question, Grasp's sign
+// stands under its newest answer and each new word fades in where it
+// lands; once it is done, the answer has its actions in a quiet row under
+// it. It follows the answer as it streams, unless the person scrolls
 // up to read (`Conversation`); each message is the prototype's AI Elements
 // message (`Message`).
 
@@ -65,11 +80,23 @@ type Answer = Extract<ChatMessage, { role: "assistant" }>;
 type StepStatus = "writing" | "running" | "done" | "failed" | "stopped";
 
 const statusIcon: Record<StepStatus, ReactNode> = {
-  writing: <CircleIcon className="size-3.5" />,
-  running: <ClockIcon className="size-3.5 animate-pulse" />,
-  done: <CheckCircleIcon className="text-status-agreed size-3.5" />,
-  failed: <XCircleIcon className="text-destructive size-3.5" />,
-  stopped: <XCircleIcon className="text-status-attention size-3.5" />,
+  writing: <CircleIcon />,
+  running: <ClockIcon />,
+  done: <CheckCircleIcon className="text-status-agreed" />,
+  failed: <XCircleIcon />,
+  stopped: <XCircleIcon />,
+};
+
+/** How a step's line stands in the trace: turning while at work. */
+const lineStatus: Record<
+  StepStatus,
+  "running" | "error" | "attention" | undefined
+> = {
+  writing: "running",
+  running: "running",
+  done: undefined,
+  failed: "error",
+  stopped: "attention",
 };
 
 /** Where a code step stands: written, running, done, failed or stopped. */
@@ -115,57 +142,55 @@ const CodeStep = ({
     stopped: t`Stopped`,
   }[status];
   return (
-    <details className="group w-full rounded-md border">
-      <summary className="flex w-full cursor-pointer list-none items-center justify-between gap-4 p-3 [&::-webkit-details-marker]:hidden">
-        <span className="flex items-center gap-2">
-          <CodeIcon className="text-muted-foreground size-4" />
-          <span className="text-sm font-medium">
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>
+        <TraceLine status={lineStatus[status]}>
+          <TraceIcon>{statusIcon[status]}</TraceIcon>
+          <TraceTitle>
             <Trans>Code step</Trans>
-          </span>
-          <Badge variant="secondary">
-            {statusIcon[status]}
-            {label}
-          </Badge>
-        </span>
-        <ChevronDownIcon className="text-muted-foreground size-4 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="flex flex-col gap-4 px-4 pb-4">
-        <section className="flex flex-col gap-2">
-          <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            <Trans>Code</Trans>
-          </h4>
-          <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 text-xs">
-            <code className="font-mono">{code.code}</code>
-          </pre>
-        </section>
-        {result !== undefined || output === undefined ? null : (
+          </TraceTitle>
+          <TraceDescription>{label}</TraceDescription>
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <div className="flex flex-col gap-4 py-1">
           <section className="flex flex-col gap-2">
-            <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              <Trans>Output</Trans>
+            <h4 className="text-xs font-medium tracking-wide uppercase">
+              <Trans>Code</Trans>
             </h4>
-            <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 text-xs">
-              <code className="font-mono">{output}</code>
+            <pre className="bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs">
+              <code className="font-mono">{code.code}</code>
             </pre>
           </section>
-        )}
-        {result === undefined ? null : (
-          <section className="flex flex-col gap-2">
-            <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              {result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>}
-            </h4>
-            <pre
-              className={
-                result.failed
-                  ? "bg-destructive/10 text-destructive overflow-x-auto rounded-md p-3 text-xs"
-                  : "bg-muted/50 overflow-x-auto rounded-md p-3 text-xs"
-              }
-            >
-              <code className="font-mono">{result.text}</code>
-            </pre>
-          </section>
-        )}
-      </div>
-    </details>
+          {result !== undefined || output === undefined ? null : (
+            <section className="flex flex-col gap-2">
+              <h4 className="text-xs font-medium tracking-wide uppercase">
+                <Trans>Output</Trans>
+              </h4>
+              <pre className="bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs">
+                <code className="font-mono">{output}</code>
+              </pre>
+            </section>
+          )}
+          {result === undefined ? null : (
+            <section className="flex flex-col gap-2">
+              <h4 className="text-xs font-medium tracking-wide uppercase">
+                {result.failed ? <Trans>Error</Trans> : <Trans>Result</Trans>}
+              </h4>
+              <pre
+                className={
+                  result.failed
+                    ? "bg-destructive/10 text-destructive overflow-x-auto rounded-md p-3 text-xs"
+                    : "bg-muted/50 text-foreground overflow-x-auto rounded-md p-3 text-xs"
+                }
+              >
+                <code className="font-mono">{result.text}</code>
+              </pre>
+            </section>
+          )}
+        </div>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 };
 
@@ -204,16 +229,23 @@ const CopyAnswer = ({ text }: { text: string }) => {
   );
 };
 
-/** The line over an answer: a few quiet words, then a hairline to the end of the thread. */
-const AnswerTop = ({ children }: { children: ReactNode }) => (
-  <div className="text-muted-foreground flex items-center gap-3 text-xs">
-    <span className="flex-none">{children}</span>
-    <span aria-hidden="true" className="bg-border h-px min-w-0 flex-1" />
-  </div>
-);
+/** No step of thinking has arrived. */
+const noArrivals: readonly (number | undefined)[] = [];
 
-/** Over an answer Grasp works on: what it does now, as a light runs through the words. */
-const Working = ({ doing }: { doing: WorkState }) => {
+/**
+ * The trace's first line, over an answer Grasp works on: what it does now,
+ * as a light runs through the words; the step of its thinking it is at,
+ * while it shows that in the brain.
+ */
+const Working = ({
+  doing,
+  thinking,
+  arrivals = noArrivals,
+}: {
+  doing: WorkState;
+  thinking?: ThinkingOf;
+  arrivals?: readonly (number | undefined)[];
+}) => {
   const { t } = useLingui();
   const label = {
     reading: t`Reading the workspace`,
@@ -221,11 +253,21 @@ const Working = ({ doing }: { doing: WorkState }) => {
     writing: t`Writing`,
     working: t`Working on it`,
   }[doing];
+  if (thinking !== undefined) {
+    return (
+      <ThinkingLine arrivals={arrivals} fallback={label} thinking={thinking} />
+    );
+  }
   return (
-    <AnswerTop>
-      {/* A live status, so a screen reader hears that Grasp is working. */}
-      <output className="shimmer-text">{label}</output>
-    </AnswerTop>
+    <TraceLine>
+      <TraceIcon>
+        <ClockIcon />
+      </TraceIcon>
+      <TraceTitle>
+        {/* A live status, so a screen reader hears that Grasp is working. */}
+        <output className="shimmer-text">{label}</output>
+      </TraceTitle>
+    </TraceLine>
   );
 };
 
@@ -246,18 +288,47 @@ const useSaidShort = (): ((seconds: number) => string) => {
   };
 };
 
-/** Over a finished answer: how long Grasp worked on the question, said short. */
+/** The trace's first line, over a finished answer: how long Grasp worked on the question, said short. */
 const WorkedFor = ({ seconds }: { seconds: number }) => {
   const { t } = useLingui();
   const time = useSaidShort()(seconds);
-  return <AnswerTop>{t`Worked for ${time}`}</AnswerTop>;
+  return (
+    <TraceLine>
+      <TraceIcon>
+        <CheckCircleIcon />
+      </TraceIcon>
+      <TraceTitle>{t`Worked for ${time}`}</TraceTitle>
+    </TraceLine>
+  );
 };
 
 /**
- * What the model thought before a response, folded under a quiet line:
- * "Thinking" while it still thinks, open so its words stream in, then
- * closed. Once kept, the line says how long it thought, at least a
- * second; a response kept before that was timed says only that it
+ * The trace's first lines over a finished answer: how long Grasp worked,
+ * and, when it showed its thinking in the brain, the way to see it there
+ * again.
+ */
+const FinishedTop = ({
+  chatId,
+  seconds,
+  thinking,
+}: {
+  chatId: string;
+  seconds: number | undefined;
+  thinking: ThinkingOf | undefined;
+}) => (
+  <>
+    {seconds === undefined ? null : <WorkedFor seconds={seconds} />}
+    {thinking === undefined ? null : (
+      <SeeInBrain chatId={chatId} thinking={thinking} />
+    )}
+  </>
+);
+
+/**
+ * What the model thought before a response, a step of the trace: open
+ * under "Thinking" while it still thinks, so its words stream in, then
+ * folded, to open again. Once kept, the line says how long it thought, at
+ * least a second; a response kept before that was timed says only that it
  * reasoned. A provider that showed none of its words leaves only the line.
  */
 const Reasoning = ({
@@ -270,6 +341,8 @@ const Reasoning = ({
 }) => {
   const { t } = useLingui();
   const saidShort = useSaidShort();
+  // Opened or folded by the person; until then, open while it thinks.
+  const [opened, setOpened] = useState<boolean>();
   const { text, ms } = reasoning;
   let label = t`Reasoning`;
   if (thinking) {
@@ -279,22 +352,23 @@ const Reasoning = ({
     label = t`Thought for ${time}`;
   }
   const line = (
-    <span className="flex items-center gap-2">
-      <BrainIcon className="size-3.5" />
-      {label}
-    </span>
+    <TraceLine status={thinking ? "running" : undefined}>
+      <TraceIcon>
+        <BrainIcon />
+      </TraceIcon>
+      <TraceTitle>{label}</TraceTitle>
+    </TraceLine>
   );
   if (text.trim() === "") {
-    return <p className="text-muted-foreground text-xs">{line}</p>;
+    return line;
   }
   return (
-    <details className="group/reasoning text-muted-foreground" open={thinking}>
-      <summary className="hover:text-foreground flex w-fit cursor-pointer list-none items-center gap-1 text-xs [&::-webkit-details-marker]:hidden">
-        {line}
-        <ChevronDownIcon className="size-3.5 transition-transform group-open/reasoning:rotate-180" />
-      </summary>
-      <p className="mt-2 border-l pl-3 text-xs whitespace-pre-wrap">{text}</p>
-    </details>
+    <TraceCollapsible onOpenChange={setOpened} open={opened ?? thinking}>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        <p className="text-xs whitespace-pre-wrap">{text}</p>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 };
 
@@ -318,14 +392,18 @@ const ReplyActions = ({
 const ReplyText = ({
   text,
   citations,
+  written,
 }: {
   text: string;
   citations?: ChatCitation[];
+  /** Still being written: each new word fades in. */
+  written: boolean;
 }) => (
   <MessageResponse
     cited={citations?.map(({ documentId }) => documentId)}
     sources={useCitedDocuments()}
     text={text}
+    written={written}
   />
 );
 
@@ -336,9 +414,11 @@ const ChatTools = createContext<readonly ChatToolEvent[]>([]);
 const WidgetLines = ({ callId }: { callId: string }) => {
   const lines = widgetLinesOf(use(ChatTools), callId);
   return lines.map(({ id, done }) => (
-    <p className="text-muted-foreground flex items-center gap-2" key={id}>
-      <LayoutDashboardIcon aria-hidden="true" className="size-4 flex-none" />
-      <span>
+    <TraceLine key={id} wrap>
+      <TraceIcon>
+        <LayoutDashboardIcon />
+      </TraceIcon>
+      <TraceTitle>
         {done === "made" ? (
           <Trans>Grasp added a widget to your dashboard.</Trans>
         ) : (
@@ -347,9 +427,61 @@ const WidgetLines = ({ callId }: { callId: string }) => {
         <Link className="text-foreground underline" to="/dashboard">
           <Trans>Open the dashboard</Trans>
         </Link>
-      </span>
-    </p>
+      </TraceTitle>
+    </TraceLine>
   ));
+};
+
+/**
+ * A response's steps as one trace: what Grasp does or how long it worked,
+ * what the model thought, and each code step with what it did; none for a
+ * response that took none.
+ */
+const ReplySteps = ({
+  reply,
+  results,
+  output,
+  writing,
+  running,
+  thinking,
+  top,
+}: {
+  reply: Pick<ChatPartial, "code"> & { reasoning?: ChatReasoning };
+  results: ReadonlyMap<string, Result>;
+  output: ChatOutput | null;
+  writing: boolean;
+  running: boolean;
+  /** The model is thinking now: the response has no words or code yet. */
+  thinking: boolean;
+  top: ReactNode;
+}) => {
+  if (
+    top === undefined &&
+    reply.reasoning === undefined &&
+    reply.code.length === 0
+  ) {
+    return null;
+  }
+  return (
+    <Trace>
+      {top}
+      {reply.reasoning === undefined ? null : (
+        <Reasoning reasoning={reply.reasoning} thinking={thinking} />
+      )}
+      {reply.code.map((code) => (
+        <Fragment key={code.callId}>
+          <CodeStep
+            code={code}
+            output={output?.callId === code.callId ? output.text : undefined}
+            result={results.get(code.callId)}
+            running={running}
+            writing={writing}
+          />
+          <WidgetLines callId={code.callId} />
+        </Fragment>
+      ))}
+    </Trace>
+  );
 };
 
 /** One response of the agent's, stored or being written. */
@@ -377,7 +509,7 @@ const Reply = ({
   output: ChatOutput | null;
   writing: boolean;
   running: boolean;
-  /** The line over it, over the first answer to a question. */
+  /** The trace's first line, in the first answer to a question. */
   top?: ReactNode;
   /** What Grasp does, under the newest answer while it works on it: its sign stands there, and no actions. */
   sign?: WorkState;
@@ -391,32 +523,24 @@ const Reply = ({
   const quiet = writing || sign !== undefined;
   const shown = (
     <div className="flex w-full min-w-0 flex-col gap-3">
-      {top}
       <Message from="assistant">
         <MessageContent>
-          {reply.reasoning === undefined ? null : (
-            <Reasoning
-              reasoning={reply.reasoning}
-              thinking={writing && answer === "" && reply.code.length === 0}
+          <ReplySteps
+            output={output}
+            reply={reply}
+            results={results}
+            running={running}
+            thinking={writing && answer === "" && reply.code.length === 0}
+            top={top}
+            writing={writing}
+          />
+          {answer === "" ? null : (
+            <ReplyText
+              citations={reply.citations}
+              text={reply.text}
+              written={writing}
             />
           )}
-          {answer === "" ? null : (
-            <ReplyText citations={reply.citations} text={reply.text} />
-          )}
-          {reply.code.map((code) => (
-            <Fragment key={code.callId}>
-              <CodeStep
-                code={code}
-                output={
-                  output?.callId === code.callId ? output.text : undefined
-                }
-                result={results.get(code.callId)}
-                running={running}
-                writing={writing}
-              />
-              <WidgetLines callId={code.callId} />
-            </Fragment>
-          ))}
           {reply.end === "cancelled" ? (
             <p className="text-muted-foreground">
               <Trans>Stopped.</Trans>
@@ -469,7 +593,9 @@ const Reply = ({
 /** Grasp, reading before its answer starts: its line, and its sign under it, where the answer will stand. */
 const Reading = () => (
   <div className="flex w-full flex-col gap-3">
-    <Working doing="reading" />
+    <Trace>
+      <Working doing="reading" />
+    </Trace>
     <GraspSign state="reading" />
   </div>
 );
@@ -566,12 +692,23 @@ export const ChatThread = ({
     running,
     results
   );
+  const answerThinking = useAnswerThinking(messages, running);
   const topOf = (id: number): ReactNode => {
+    const thinking = answerThinking.byReply.get(id);
     if (doing !== undefined && replies[0]?.id === id) {
-      return <Working doing={doing} />;
+      return (
+        <Working
+          doing={doing}
+          {...(thinking === undefined
+            ? {}
+            : { thinking, arrivals: answerThinking.arrivals(thinking) })}
+        />
+      );
     }
     const seconds = worked.get(id);
-    return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
+    return seconds === undefined && thinking === undefined ? undefined : (
+      <FinishedTop chatId={chatId} seconds={seconds} thinking={thinking} />
+    );
   };
   return (
     <ChatTools value={tools}>

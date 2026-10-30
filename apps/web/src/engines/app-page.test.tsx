@@ -15,14 +15,16 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
 import { setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { AppPage } from "./app-page.tsx";
 
 // An App's page against core's chats as the page reaches them over RPC,
-// faked: Edit, and "Design it in the chat" on an App with no screen yet,
-// open the person's own chat for the App (`chats.forApp`) beside the
-// page; what core refuses is said there, and no chat opens.
+// faked: it has no Edit button, as the App's own chat is in the dock;
+// "Design it in the chat" on an App with no screen yet opens the person's
+// own chat for the App (`chats.forApp`) there, in the App's slot, leaving
+// their other open chat alone; what core refuses is said there, and no
+// chat opens.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -132,25 +134,26 @@ describe(AppPage, () => {
     root = undefined;
     document.body.replaceChildren();
     setActiveChat(undefined);
+    setActiveChat(undefined, appSlot(app.id));
     setDockMode("bar");
   });
 
-  it("opens the App's own chat beside the page from Edit", async () => {
+  it("has no Edit button: the App's own chat is in the dock", async () => {
     const { asked } = await shown(["home"], async () => {
       await Promise.resolve();
       return appChat;
     });
 
-    await press("Edit");
-
-    expect({ asked, chat: activeChat(), dock: dock() }).toStrictEqual({
-      asked: [app.id],
-      chat: appChat.id,
-      dock: "frame",
-    });
+    expect({
+      edit: [...document.querySelectorAll("button")].some(
+        (button) => button.textContent === "Edit"
+      ),
+      asked,
+    }).toStrictEqual({ edit: false, asked: [] });
   });
 
-  it("designs an App with no screen yet in its own chat", async () => {
+  it("designs an App with no screen yet in its own chat, leaving the person's other chat open", async () => {
+    setActiveChat("chat-about-holidays");
     const { asked } = await shown([], async () => {
       await Promise.resolve();
       return appChat;
@@ -158,25 +161,31 @@ describe(AppPage, () => {
 
     await press("Design it in the chat");
 
-    expect({ asked, chat: activeChat(), dock: dock() }).toStrictEqual({
+    expect({
+      asked,
+      appChat: activeChat(appSlot(app.id)),
+      chat: activeChat(),
+      dock: dock(),
+    }).toStrictEqual({
       asked: [app.id],
-      chat: appChat.id,
+      appChat: appChat.id,
+      chat: "chat-about-holidays",
       dock: "frame",
     });
   });
 
   it("says why when core gives no chat, and opens none", async () => {
-    await shown(["home"], async () => {
+    await shown([], async () => {
       await Promise.resolve();
       throw Object.assign(new Error("There's no such App."), {
         code: "app.not_found",
       });
     });
 
-    await press("Edit");
+    await press("Design it in the chat");
 
     expect({
-      chat: activeChat(),
+      chat: activeChat(appSlot(app.id)),
       dock: dock(),
       said: document.body.textContent.includes("There's no such App."),
     }).toStrictEqual({ chat: undefined, dock: "bar", said: true });

@@ -1,6 +1,7 @@
 import type { AppVersion } from "@grasp-os/shared/apps";
 import { maxFailedStarts } from "@grasp-os/shared/workflows";
 import type {
+  RunActivity,
   RunsPage,
   OutlineNode,
   ParamValue,
@@ -61,6 +62,9 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ChosenAtRunTime } from "../workflows/chosen-at-run-time.tsx";
+import { RunFiguresView } from "../workflows/figures.tsx";
+import { readActivity } from "../workflows/reads.ts";
+import { workflowFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowTeamPicker } from "../workflows/team-picker.tsx";
 import { WorkflowTriggers } from "../workflows/triggers.tsx";
@@ -68,8 +72,9 @@ import { WorkflowTriggers } from "../workflows/triggers.tsx";
 // One workflow: its steps in plain words, read from its code; what starts
 // it on its own, as its current version registered it; its parameters as
 // a form, for the App's builders; a Test that dry-runs it with the values
-// set now; and its history, the runs (each with its own page) and, for
-// builders, the App's versions. Core checks every call; the page offers
+// set now; and its history, the runs (each with its own page) under the
+// figures core counted of them lately, and, for builders, the App's
+// versions. Core checks every call; the page offers
 // only what core says the person may do.
 
 /**
@@ -586,14 +591,31 @@ const Versions = ({ versions }: { versions: Loaded<AppVersion[]> }) => {
   );
 };
 
+/** The figures over one workflow's runs, where core counted them for the person. */
+const Figures = ({
+  activity,
+  summary,
+}: {
+  activity: Loaded<RunActivity | null>;
+  summary: WorkflowDetail["summary"];
+}) =>
+  activity.state === "ready" && activity.data !== null ? (
+    <RunFiguresView
+      figures={workflowFiguresOf(activity.data, summary, summary.waiting)}
+      scope="workflow"
+    />
+  ) : null;
+
 const WorkflowView = ({
   detail,
   runs,
+  activity,
   versions,
   model,
 }: {
   detail: WorkflowDetail;
   runs: Loaded<RunsPage>;
+  activity: Loaded<RunActivity | null>;
   versions: Loaded<AppVersion[]> | undefined;
   model: string | undefined;
 }) => {
@@ -701,7 +723,8 @@ const WorkflowView = ({
         </TabsContent>
       )}
       <TabsContent value="runs">
-        <div className="pb-chat mx-auto w-full max-w-5xl px-6 pt-6">
+        <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-6">
+          <Figures activity={activity} summary={summary} />
           {runs.state === "ready" ? (
             <RunsLog
               me={identity.userId}
@@ -727,7 +750,7 @@ const WorkflowView = ({
 };
 
 const WorkflowPage = () => {
-  const { detail, runs, versions, model } = Route.useLoaderData();
+  const { detail, runs, activity, versions, model } = Route.useLoaderData();
   const { app, workflow } = Route.useParams();
   const { t } = useLingui();
   const crumbs = [
@@ -751,6 +774,7 @@ const WorkflowPage = () => {
         <WorkflowView
           // Another workflow starts with its own forms and test.
           key={`${app}/${workflow}`}
+          activity={activity}
           detail={detail.data}
           model={model}
           runs={runs}
@@ -767,7 +791,7 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
   // versions only for those who build it: each says on its own why it
   // failed.
   loader: async ({ context: { core }, params: { app, workflow } }) => {
-    const [detail, runs, models] = await Promise.all([
+    const [detail, runs, models, activity] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflows.get(app, workflow)
@@ -778,6 +802,8 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
       ),
       // The model a fix in chat asks with; without one, none is offered.
       loadFromCore(core, async (session) => await session.chats.models()),
+      // Every App workflow's, of which the figures take this one's.
+      loadFromCore(core, readActivity),
     ]);
     const builds = detail.state === "ready" && detail.data.params !== null;
     const versions = builds
@@ -789,6 +815,7 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
     return {
       detail,
       runs,
+      activity,
       versions,
       model: models.state === "ready" ? models.data[0] : undefined,
     };

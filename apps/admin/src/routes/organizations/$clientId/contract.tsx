@@ -1,3 +1,13 @@
+import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
+import { present } from "@grasp-os/shared/admin/present";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@grasp-os/ui/components/collapsible";
 /**
  * An organization's Contract, ported from the prototype (grasplabs/prototype
  * `components/admin/org-contract.tsx`): where the contract stands and the
@@ -19,16 +29,7 @@
  * it in and who signed it, once someone at Grasp linked the company to
  * its room there; until then, or without Rooms' token, it says so.
  */
-import type { AgreementView } from "@grasp-os/shared/admin/admin-account";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import type { Agreed } from "@grasp-os/shared/admin/onboarding-admin";
-import { present } from "@grasp-os/shared/admin/present";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 import { CheckIcon, ChevronDownIcon, FileTextIcon } from "lucide-react";
@@ -107,9 +108,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-4 py-4 sm:px-5">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <Stat>{value}</Stat>
     <span
       className={cn(
         "text-xs",

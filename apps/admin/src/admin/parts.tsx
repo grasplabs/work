@@ -1,7 +1,3 @@
-/**
- * Small marks the admin's pages draw what the model counts with, ported
- * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
- */
 import { STAGES } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   LinkState,
@@ -12,6 +8,11 @@ import type {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Progress } from "@grasp-os/ui/components/progress";
+/**
+ * Small marks the admin's pages draw what the model counts with, ported
+ * from the prototype (grasplabs/prototype `components/admin/admin-parts.tsx`).
+ */
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { Fragment } from "react";
@@ -20,9 +21,7 @@ import type { ReactNode } from "react";
 /** One number and what it counts. */
 export const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
@@ -242,8 +241,8 @@ export const Figure = ({
         value={ring.value}
       />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium text-balance wrap-break-word hyphens-auto tabular-nums">
-      {value}
+    <span className="col-span-2 row-start-2 wrap-break-word hyphens-auto">
+      <Stat>{value}</Stat>
     </span>
     {sub === undefined ? null : (
       <span

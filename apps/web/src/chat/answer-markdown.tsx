@@ -32,6 +32,7 @@ import { plainComponents, plainUrl } from "../knowledge/markdown.tsx";
 import {
   cellsOf,
   codeOf,
+  landWords,
   languageOf,
   tableAs,
   textOf,
@@ -346,24 +347,36 @@ const rehypePlugins: Options["rehypePlugins"] = [
 const remarkPlugins: Options["remarkPlugins"] = [remarkGfm];
 
 /**
+ * While the answer is written: each word fades in where it lands
+ * (`landWords`), the code it holds as it is.
+ */
+const writingPlugins: Options["rehypePlugins"] = [
+  ...rehypePlugins,
+  () => landWords,
+];
+
+/**
  * An answer's Markdown; its links to the notes `cited` names open them,
  * each an inline citation where `sources` holds a span at its place.
+ * While it is being `written`, each new word fades in where it lands.
  */
 export const AnswerMarkdown = ({
   text,
   cited = noneCited,
   sources = noSources,
+  written = false,
 }: {
   text: string;
   cited?: readonly string[];
   sources?: readonly ChatCitedDocument[];
+  written?: boolean;
 }) => (
   <CitedSources value={sources}>
     <CitedNotes value={cited}>
       <div className="flex min-w-0 flex-col gap-3">
         <Markdown
           components={answerComponents}
-          rehypePlugins={rehypePlugins}
+          rehypePlugins={written ? writingPlugins : rehypePlugins}
           remarkPlugins={remarkPlugins}
           skipHtml
           urlTransform={plainUrl}

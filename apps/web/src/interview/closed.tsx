@@ -19,6 +19,7 @@ import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
 import { SpokenText, useSaid } from "./spoken.tsx";
+import { usePromise } from "./words.ts";
 
 // The end of an interview (prototype `interview-view.tsx`, `Closed`,
 // `Rating` and `DeleteInterview`): his thanks, and how long the link still
@@ -112,6 +113,7 @@ export const Closed = ({
   const { t } = useLingui();
   const interviewer = useInterviewer();
   const who = interviewerNames[interviewer];
+  const promise = usePromise();
   const title = t`Thank you, ${name}.`;
   const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
   const line = `${title} ${message}`;
@@ -155,6 +157,7 @@ export const Closed = ({
           {t`Add something`}
         </Button>
         <Rating onRate={onRate} value={rating} />
+        <p className="text-muted-foreground text-xs text-balance">{promise}</p>
       </div>
     </div>
   );
