@@ -139,6 +139,7 @@ import {
   partialOf,
 } from "./chat-messages.ts";
 import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
+import type { ToolCall } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -247,6 +248,12 @@ interface LiveTurn {
   notices: Set<string>;
   /** What the turn read through connections, for its check line. */
   reads: TurnCheck[];
+  /**
+   * The calls its code made, as the chat shows them: for a chat app's
+   * request record (channels/stephen-requests.ts), which keeps the tools
+   * and how each ended, never what they read. Only when its asker wants them.
+   */
+  calls?: ToolCall[];
 }
 
 /** A build job, with the chat's agent and person it acts for. */
@@ -1387,7 +1394,7 @@ export class Workspace extends DurableObject<Env> {
     text: string,
     onText?: (text: string) => unknown,
     shared?: SharedChat
-  ): Promise<{ chatId: string; answer: Answer }> {
+  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
     const platform = chatPlatformSchema.parse(via);
     const where = sharedChatSchema.optional().parse(shared);
     const [found] = this.#db
@@ -1434,9 +1441,18 @@ export class Workspace extends DurableObject<Env> {
         where.audience
       );
     }
+    const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, undefined, onText),
+      answer: await this.#turn(
+        chat,
+        { text, model },
+        undefined,
+        onText,
+        false,
+        calls
+      ),
+      calls,
     };
   }
 
@@ -1454,14 +1470,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * One turn of `chat`'s agent (`ask`). `started` is called once the turn
-   * is under way: the model admitted, and nothing kept yet.
+   * is under way: the model admitted, and nothing kept yet. `staff` when
+   * a Grasp staff member asks; `calls` gets each call its code makes, as
+   * it ends.
    */
   async #turn(
     chat: Chat,
     question: Question,
     started?: () => void,
     onText?: (text: string) => unknown,
-    staff = false
+    staff = false,
+    calls?: ToolCall[]
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1486,6 +1505,7 @@ export class Workspace extends DurableObject<Env> {
       events: [],
       notices: new Set(),
       reads: [],
+      calls,
     };
     this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
@@ -2139,6 +2159,7 @@ export class Workspace extends DurableObject<Env> {
     if (!(parsed.success && this.#codeRuns.has(`${chatId}/${runId}`))) {
       return;
     }
+    this.#turns.get(chatId)?.calls?.push(parsed.data);
     const event = this.ctx.storage.transactionSync(() => {
       const run = this.#db
         .select({ callId: chatCodeRuns.toolCallId })
@@ -2911,6 +2932,20 @@ export class Workspace extends DurableObject<Env> {
           projectId: chat.projectId,
           appId: chat.appId,
         };
+  }
+
+  /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
+  chatSummary(chatId: unknown, personId: string): ChatSummary {
+    const chat = this.#ownChat(chatId, personId);
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: this.#turns.has(chat.id),
+      projectId: chat.projectId,
+      appId: chat.appId,
+    };
   }
 
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */

@@ -27,6 +27,9 @@ import {
   personErasureAreas,
   personErasures,
   sessions,
+  stephenRequests,
+  stephenSummaries,
+  stephenSummaryReaders,
   teamMembers,
   users,
 } from "./db/core/schema.ts";
@@ -183,6 +186,9 @@ const identity: ErasureStep = {
  * the workflow offers it made them, the invitations made to the address
  * that was theirs, found by its keyed hash (`person_erasures`), so
  * whichever area runs first, their notifications, and their teams.
+ * And what Stephen kept of what they asked him outside Grasp (labels, no
+ * words: channels/stephen-requests.ts), with where their weekly summary
+ * of it went.
  * Removing them took out their chat accounts, notifications and teams
  * already; this takes them out again, in case any came back since.
  * Guest chats they opened for an App are the company's, naming them.
@@ -250,6 +256,11 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      db.delete(stephenRequests).where(eq(stephenRequests.personId, userId)),
+      db
+        .delete(stephenSummaryReaders)
+        .where(eq(stephenSummaryReaders.personId, userId)),
+      db.delete(stephenSummaries).where(eq(stephenSummaries.personId, userId)),
       completed(db, userId, "channels"),
     ]);
   },

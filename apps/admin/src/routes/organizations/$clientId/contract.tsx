@@ -107,9 +107,7 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-0.5 px-4 py-4 sm:px-5">
     <span className="text-muted-foreground text-xs">{label}</span>
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span
       className={cn(
         "text-xs",
