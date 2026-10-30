@@ -1,7 +1,14 @@
 import type { Brain } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
+import type { BrainSourceRef } from "@grasp-os/brain/contract";
+import {
+  entitiesWithSources,
+  entitySourcesRead,
+} from "@grasp-os/brain/entities";
 import { recall } from "@grasp-os/brain/recall";
 import { d1BrainStore } from "@grasp-os/brain/recall-store";
+import type { VersionRef } from "@grasp-os/brain/recall-store";
+import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { readSkill, selectSkill } from "@grasp-os/brain/skills";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
@@ -721,22 +728,102 @@ const checked = <Schema extends z.ZodType>(
 };
 
 /** The Brain operations a run's Brain binding calls (`#callBrain`). */
-const brainCallSchema = z.enum(["recall", "skillsSelect", "skillsRead"]);
+const brainCallSchema = z.enum([
+  "recall",
+  "skillsSelect",
+  "skillsRead",
+  "entitiesList",
+  "entitySources",
+  "relationsGet",
+  "relationsExplain",
+]);
+
+/** The document versions of `refs`, once each, as `pinsOf` takes them. */
+const documentVersionsOf = (refs: readonly BrainSourceRef[]): VersionRef[] => [
+  ...new Map(
+    refs.flatMap((ref) =>
+      ref.kind === "document"
+        ? [
+            [
+              `${ref.documentId}:${ref.version}`,
+              {
+                documentId: ref.documentId,
+                collectionId: ref.collectionId,
+                version: ref.version,
+              },
+            ] as const,
+          ]
+        : []
+    )
+  ).values(),
+];
 
 /**
  * Each, as the Brain serves every caller: a recall, a skill's selection,
- * a pinned skill's read; the same service and checks.
+ * a pinned skill's read, an entity listing, an entity's sources, an
+ * entity's relations or the paths out from it; the same service and checks. With what each hands
+ * over cites (`cited`): the document versions the run's evidence pins
+ * (`#callBrain`), so every way out of the run stays gated by them.
  */
 const brainCalls: Record<
   z.infer<typeof brainCallSchema>,
-  (brain: Brain<Reader>, reader: Reader, request: unknown) => Promise<unknown>
+  (
+    brain: Brain<Reader>,
+    reader: Reader,
+    request: unknown
+  ) => Promise<{ value: unknown; cited: readonly VersionRef[] }>
 > = {
-  recall: async (brain, reader, request) =>
-    await recall(brain, reader, request),
-  skillsSelect: async (brain, reader, request) =>
-    await selectSkill(brain, reader, request),
-  skillsRead: async (brain, reader, request) =>
-    await readSkill(brain, reader, request),
+  recall: async (brain, reader, request) => {
+    const pack = await recall(brain, reader, request);
+    return { value: pack, cited: citedVersions(pack) };
+  },
+  skillsSelect: async (brain, reader, request) => ({
+    value: await selectSkill(brain, reader, request),
+    cited: [],
+  }),
+  skillsRead: async (brain, reader, request) => ({
+    value: await readSkill(brain, reader, request),
+    cited: [],
+  }),
+  entitiesList: async (brain, reader, request) => {
+    const { entities, sources, truncated } = await entitiesWithSources(
+      brain,
+      reader,
+      request
+    );
+    return { value: { entities, truncated }, cited: sources.documents };
+  },
+  entitySources: async (brain, reader, request) => {
+    const answer = await entitySourcesRead(brain, reader, request);
+    return { value: answer, cited: documentVersionsOf(answer.sources) };
+  },
+  // Each relation's passage is handed over: its source version is pinned.
+  // Only the answered relations' are: a claim weighed for `conflicting`
+  // alone isn't (up to 5000, past the run's evidence cap), so a revoke of
+  // its collection may leave a recorded answer's `conflicting` as it was.
+  // One bit, no content: a chat labels those collections too.
+  relationsGet: async (brain, reader, request) => {
+    const answer = await relationsFor(brain, reader, request);
+    return {
+      value: answer,
+      cited: documentVersionsOf(
+        answer.relations.map(({ sourceRef }) => sourceRef)
+      ),
+    };
+  },
+  // Each path's relations, each with its passage: their source versions
+  // are pinned.
+  relationsExplain: async (brain, reader, request) => {
+    const explanation = await relationsExplain(brain, reader, request);
+    return {
+      value: explanation,
+      cited: documentVersionsOf(
+        explanation.paths.flatMap(({ relations }) =>
+          relations.map(({ sourceRef }) => sourceRef)
+        )
+      ),
+    };
+  },
 };
 
 /**
@@ -2784,8 +2871,11 @@ export class RunHost extends RpcTarget {
 
   /**
    * Calls the Brain through the run's Brain binding (`binding`): a recall
-   * (`brain(env.BRAIN).recall(request)`), or a skill's selection or pinned
-   * read (`.skills.select`, `.skills.read`, GRA-310), only inside a step whose code its
+   * (`brain(env.BRAIN).recall(request)`), a skill's selection or pinned
+   * read (`.skills.select`, `.skills.read`, GRA-310), or an entity
+   * listing, an entity's sources, its relations or the paths out from it
+   * (`.entities.list`, `.entities.sources`, `.relations.get`,
+   * `.relations.explain`), only inside a step whose code its
    * review shows calling it (`#requireReviewed`), as the run: its App on
    * behalf of its person, under the App's collection grants and `brain`
    * permission as they are now (GRA-1067; the threat model is on the
@@ -2836,40 +2926,29 @@ export class RunHost extends RpcTarget {
         }
         throw error;
       }
-      if (call !== "recall") {
-        return await readAsDelegate(
-          this.#env,
-          authority,
-          context,
-          undefined,
-          async (reader) =>
-            await brainCalls[call](brainOf(this.#env), reader, request)
-        );
-      }
-      const { pack, pins } = await readAsDelegate(
+      const { value, pins } = await readAsDelegate(
         this.#env,
         authority,
         context,
         undefined,
         async (reader) => {
           const brain = brainOf(this.#env);
-          const recalled = await recall(brain, reader, request);
+          const read = await brainCalls[call](brain, reader, request);
           return {
-            pack: recalled,
-            pins: await d1BrainStore(brain).pinsOf(
-              reader,
-              citedVersions(recalled)
-            ),
+            value: read.value,
+            pins: await d1BrainStore(brain).pinsOf(reader, read.cited),
           };
         }
       );
       // What it cites, pinned as it was, added to the run's evidence
       // (run-evidence.ts): checked before anything leaves the run from now
-      // on. A step replayed returns its recorded pack and records nothing.
+      // on. Each of these reads needs the Brain's admission, so the run
+      // stays held to it too (`recalled`). A step replayed returns its
+      // recorded answer and records nothing.
       await recordRunEvidence(this.#env, this.#run, permissionId, pins, {
         recalled: true,
       });
-      return pack;
+      return value;
     });
   }
 

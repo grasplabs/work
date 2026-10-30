@@ -450,7 +450,7 @@ describe("an organization's billing, without Stripe's key", () => {
 
     expect({
       line: contract.includes(
-        "Once Stripe is connected, this fills in by itself."
+        "Once Stripe is connected, this fills in by itself. Add STRIPE_RESTRICTED_KEY to the stage’s 1Password Environment, then run Deploy platform."
       ),
       linkedTo: contract.includes(`value="${customerId}"`),
       overdue: overview.includes("overdue"),
