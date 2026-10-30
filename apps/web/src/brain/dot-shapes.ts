@@ -363,8 +363,8 @@ const PORTRAITS = {
     cells: PORTRAIT_CELLS,
     size: PORTRAIT_SIZE,
     crop: CROP,
-    mouth: [-0.03, -0.13, 0.36],
-    ear: [0.42, 0.09, 0.12],
+    mouth: [-0.06, -0.13, 0.36],
+    ear: [0.36, 0.09, 0.2],
   },
   // Claire has no photo of her own yet: until she has, she is drawn from a stand-in portrait (`claire-portrait.ts`), printed a little darker so her face reads as large as an interviewer is shown.
   claire: {
