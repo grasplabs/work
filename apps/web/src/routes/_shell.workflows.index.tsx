@@ -7,7 +7,9 @@ import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import { runFilterStatuses } from "@grasp-os/shared/workflows";
 import type {
   RunActivity,
+  RunFilter,
   RunFilterStatus,
+  RunsPage,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
 import {
@@ -20,6 +22,7 @@ import {
 import {
   Tabs,
   TabsContent,
+  TabsCount,
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
@@ -34,7 +37,7 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -43,6 +46,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone, readPeople } from "../directory.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { EmptyCard } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -302,9 +306,9 @@ const AppWorkflows = ({
   // Filtered to nothing: no invitation to make a first one.
   if (process !== undefined && shown.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+      <EmptyCard>
         <Trans>No workflow of a domain serves this process.</Trans>
-      </p>
+      </EmptyCard>
     );
   }
   return <WorkflowsOverview processes={processes} rows={shown} />;
@@ -359,12 +363,12 @@ const NeedsAttention = ({
   return (
     <div className="mt-6 flex flex-col gap-8">
       {nothing ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+        <EmptyCard>
           <Trans>
             No workflow needs attention: nothing waits for a decision or to go
             live, nothing failed lately.
           </Trans>
-        </p>
+        </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
       {rows.length === 0 ? null : (
@@ -469,24 +473,160 @@ const ProcessFilter = ({ offered }: { offered: BusinessProcess[] }) => {
   );
 };
 
-/** How many there are in a tab, beside its name, once they are read. */
-const TabCount = ({ count }: { count: number | undefined }) =>
-  count === undefined ? null : (
-    <span className="text-muted-foreground tabular-nums">{count}</span>
+/** How many workflows a tab holds, beside its name, once they are read. */
+const WorkflowCount = ({ count }: { count: number | undefined }) => {
+  const { t } = useLingui();
+  return count === undefined ? null : (
+    <TabsCount
+      label={t`${plural(count, { one: "# workflow", other: "# workflows" })}`}
+    >
+      {count}
+    </TabsCount>
   );
+};
 
-/** Every workflow the lists show: the domains' and the independent ones. */
-const countAll = (lists: Lists): number | undefined =>
+/**
+ * Every workflow the lists show under `process`: the domains' and the
+ * independent ones.
+ */
+const countAll = (
+  lists: Lists,
+  process: BusinessProcess | undefined
+): number | undefined =>
   lists.workflows.state === "ready" && lists.independent.state === "ready"
-    ? lists.workflows.data.length + lists.independent.data.length
+    ? lists.workflows.data.filter((row) =>
+        showsUnder(process, lists.processes.get(row.app) ?? null)
+      ).length +
+      lists.independent.data.filter((workflow) =>
+        showsUnder(process, workflow.process)
+      ).length
     : undefined;
 
-/** What needs a person: the domains' workflows that do, and the go-lives waiting. */
-const countNeeds = (lists: Lists): number | undefined =>
-  lists.workflows.state === "ready" && lists.goLives.state === "ready"
-    ? lists.workflows.data.filter((row) => needsAttention(row)).length +
-      lists.goLives.data.length
-    : undefined;
+/**
+ * What needs a person under `process`: the domains' workflows that do,
+ * and the go-lives waiting.
+ */
+const countNeeds = (
+  lists: Lists,
+  process: BusinessProcess | undefined
+): number | undefined => {
+  if (lists.workflows.state !== "ready" || lists.goLives.state !== "ready") {
+    return undefined;
+  }
+  const served = new Map(
+    lists.independent.state === "ready"
+      ? lists.independent.data.map((workflow) => [
+          workflow.id,
+          workflow.process,
+        ])
+      : []
+  );
+  return (
+    lists.workflows.data.filter(
+      (row) =>
+        needsAttention(row) &&
+        showsUnder(process, lists.processes.get(row.app) ?? null)
+    ).length +
+    lists.goLives.data.filter((each) =>
+      showsUnder(process, served.get(each.workflowId) ?? null)
+    ).length
+  );
+};
+
+/** What the Runs tab's log shows: its runs, its filters' options, and the model a fix asks with. */
+interface RunsRead {
+  runs: Loaded<RunsPage>;
+  filters: Loaded<FilterOptions>;
+  model: string | undefined;
+}
+
+/** Reads the runs `filter` lets through, with what the filters offer. */
+const readRuns = async (
+  core: CoreConnection,
+  filter: RunFilter,
+  left: AbortSignal
+): Promise<RunsRead> => {
+  const [runs, filters, models] = await Promise.all([
+    loadFromCore(
+      core,
+      async (session) => await listRuns(session, filter),
+      left
+    ),
+    loadFromCore(
+      core,
+      async (session) => await filterOptions(session, filter.app),
+      left
+    ),
+    // The model a fix in chat asks with; without one, none is offered.
+    loadFromCore(core, async (session) => await session.chats.models(), left),
+  ]);
+  return {
+    runs,
+    filters,
+    model: models.state === "ready" ? models.data[0] : undefined,
+  };
+};
+
+/**
+ * The log of runs under its filters, read here rather than by the page:
+ * changing a filter reads the runs again, never the lists, today's lanes
+ * or the figures. What was read stays while the next read comes.
+ */
+const RunsLogRead = () => {
+  const core = useCore();
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  const { app, workflow, status } = Route.useSearch();
+  const [read, setRead] = useState<RunsRead>();
+  useEffect(() => {
+    const left = new AbortController();
+    const load = async (): Promise<void> => {
+      const loaded = await readRuns(
+        core,
+        {
+          ...(app === undefined ? {} : { app }),
+          ...(workflow === undefined ? {} : { workflow }),
+          ...(status === undefined ? {} : { status }),
+        },
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setRead(loaded);
+      }
+    };
+    void load();
+    return () => {
+      left.abort();
+    };
+  }, [core, app, workflow, status]);
+  if (read === undefined) {
+    return null;
+  }
+  const filtered =
+    app !== undefined || workflow !== undefined || status !== undefined;
+  return (
+    <div className="flex flex-col gap-4">
+      <RunFilters
+        options={
+          read.filters.state === "ready"
+            ? read.filters.data
+            : { apps: [], workflows: [] }
+        }
+      />
+      {read.runs.state === "ready" ? (
+        <RunsLog
+          empty={filtered ? t`No runs match these filters.` : undefined}
+          me={identity.userId}
+          model={read.model}
+          more={read.runs.data.more}
+          runs={read.runs.data.runs}
+        />
+      ) : (
+        <NotLoadedState page={read.runs} />
+      )}
+    </div>
+  );
+};
 
 const Workflows = () => {
   const { t } = useLingui();
@@ -494,10 +634,6 @@ const Workflows = () => {
   const search = Route.useSearch();
   const { identity } = Route.useRouteContext();
   const navigate = useNavigate({ from: "/workflows/" });
-  const filtered =
-    search.app !== undefined ||
-    search.workflow !== undefined ||
-    search.status !== undefined;
   const { process } = search;
   const { lists } = page;
   return (
@@ -525,13 +661,13 @@ const Workflows = () => {
             <TabsList aria-label={t`Show workflows`} variant="line">
               <TabsTrigger value="workflows">
                 <Trans context="tab listing every workflow">All</Trans>
-                <TabCount count={countAll(lists)} />
+                <WorkflowCount count={countAll(lists, process)} />
               </TabsTrigger>
               <TabsTrigger value="needs">
                 <Trans context="tab listing the workflows that need a person">
                   Needs you
                 </Trans>
-                <TabCount count={countNeeds(lists)} />
+                <WorkflowCount count={countNeeds(lists, process)} />
               </TabsTrigger>
               <TabsTrigger value="runs">
                 <Trans context="tab listing the runs of workflows">Runs</Trans>
@@ -578,7 +714,8 @@ const Workflows = () => {
           </TabsContent>
           <TabsContent value="runs">
             {/* Today's runs in time, over the figures and the log of
-                them, as the prototype has it. */}
+                them, as the prototype has it. Only while the tab shows:
+                the lanes read again every so often only then. */}
             {page.tab === "runs" ? (
               <div className="mt-6 flex flex-col gap-8">
                 {page.today.state === "ready" ? (
@@ -587,28 +724,7 @@ const Workflows = () => {
                   <NotLoadedState page={page.today} />
                 )}
                 <Figures />
-                <div className="flex flex-col gap-4">
-                  <RunFilters
-                    options={
-                      page.filters.state === "ready"
-                        ? page.filters.data
-                        : { apps: [], workflows: [] }
-                    }
-                  />
-                  {page.runs.state === "ready" ? (
-                    <RunsLog
-                      empty={
-                        filtered ? t`No runs match these filters.` : undefined
-                      }
-                      me={identity.userId}
-                      model={page.model}
-                      more={page.runs.data.more}
-                      runs={page.runs.data.runs}
-                    />
-                  ) : (
-                    <NotLoadedState page={page.runs} />
-                  )}
-                </div>
+                <RunsLogRead />
               </div>
             ) : null}
           </TabsContent>
@@ -673,19 +789,13 @@ export const Route = createFileRoute("/_shell/workflows/")({
       : {}),
     ...(isStatus(search.status) ? { status: search.status } : {}),
   }),
-  // The process filters what was read: choosing one reads nothing again.
-  loaderDeps: ({ search: { tab, app, workflow, status } }) => ({
-    tab,
-    app,
-    workflow,
-    status,
-  }),
+  // The tab alone: the process filters what was read, and the Runs tab's
+  // filters read its log on their own (RunsLogRead), so choosing either
+  // reads neither the lists nor today's lanes again.
+  loaderDeps: ({ search: { tab } }) => ({ tab }),
   // Every tab reads the lists, as the tabs count them; besides, each tab
   // reads only what it shows, and each read says on its own why it failed.
-  loader: async ({
-    context: { core },
-    deps: { tab, app, workflow, status },
-  }) => {
+  loader: async ({ context: { core }, deps: { tab } }) => {
     if (tab !== "runs") {
       const [lists, people] = await Promise.all([
         readLists(core),
@@ -700,30 +810,11 @@ export const Route = createFileRoute("/_shell/workflows/")({
           people?.state === "ready" ? people.data : new Map<string, string>(),
       };
     }
-    const [lists, today, runs, filters, models] = await Promise.all([
+    const [lists, today] = await Promise.all([
       readLists(core),
       loadFromCore(core, async (session) => await session.workflows.today()),
-      loadFromCore(
-        core,
-        async (session) =>
-          await listRuns(session, {
-            ...(app === undefined ? {} : { app }),
-            ...(workflow === undefined ? {} : { workflow }),
-            ...(status === undefined ? {} : { status }),
-          })
-      ),
-      loadFromCore(core, async (session) => await filterOptions(session, app)),
-      // The model a fix in chat asks with; without one, none is offered.
-      loadFromCore(core, async (session) => await session.chats.models()),
     ]);
-    return {
-      tab: "runs" as const,
-      lists,
-      today,
-      runs,
-      filters,
-      model: models.state === "ready" ? models.data[0] : undefined,
-    };
+    return { tab: "runs" as const, lists, today };
   },
   component: Workflows,
 });

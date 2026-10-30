@@ -1,3 +1,9 @@
+import { Card } from "@grasp-os/ui/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
 import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import type { ReactNode } from "react";
 
@@ -53,6 +59,17 @@ export const PageHeading = ({
       <div className="ml-auto flex items-center gap-2">{action}</div>
     )}
   </div>
+);
+
+/** A list with nothing in it: one quiet line in a card, where the list would be. */
+export const EmptyCard = ({ children }: { children: ReactNode }) => (
+  <Card>
+    <Empty size="xs">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  </Card>
 );
 
 /** A section title inside a page. */

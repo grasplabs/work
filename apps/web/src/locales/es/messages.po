@@ -465,6 +465,10 @@ msgstr "{count, plural, one {# deseo} other {# deseos}}"
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# flujo de trabajo lo sirve} other {# flujos de trabajo lo sirven}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{count, plural, one {# workflow} other {# workflows}}"
+msgstr "{count, plural, one {# workflow} other {# workflows}}"
+
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {Añadir # documento} other {Añadir # documentos}}"

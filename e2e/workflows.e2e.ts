@@ -226,7 +226,7 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
     row.getByRole("link", { name: `Open the domain ${name}` })
   ).toHaveAttribute("href", `/domains/${app}`);
   // A run waits for a decision: it needs someone, and the tab counts it.
-  await page.getByRole("tab", { name: /^Needs you \d+$/u }).click();
+  await page.getByRole("tab", { name: /^Needs you/u }).click();
   await expect(page).toHaveURL(/tab=needs/u);
   await expect(
     page

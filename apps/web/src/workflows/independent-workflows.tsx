@@ -30,6 +30,7 @@ import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { EmptyCard } from "../frame/page.tsx";
 import { useCore } from "../use-core.ts";
 import {
   ProcessGlyph,
@@ -48,7 +49,6 @@ import {
 const NewWorkflowForm = () => {
   const core = useCore();
   const navigate = useNavigate();
-  const { t } = useLingui();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -70,7 +70,6 @@ const NewWorkflowForm = () => {
   };
   return (
     <form
-      aria-label={t`New workflow`}
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault();
@@ -157,47 +156,45 @@ export const IndependentWorkflows = ({
         <Trans>Independent workflows</Trans>
       </h2>
       {workflows.length === 0 ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+        <EmptyCard>
           {filtered ? (
             <Trans>No independent workflow of yours serves this process.</Trans>
           ) : (
             <Trans>No independent workflow is shared with you yet.</Trans>
           )}
-        </p>
+        </EmptyCard>
       ) : (
-        <div className="bg-card overflow-hidden rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">{t`Workflow`}</TableHead>
-                <TableHead variant="card">{t`Current version`}</TableHead>
+        <Table variant="card">
+          <TableHeader>
+            <TableRow>
+              <TableHead variant="card">{t`Workflow`}</TableHead>
+              <TableHead variant="card">{t`Current version`}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {workflows.map((workflow) => (
+              <TableRow key={workflow.id}>
+                <TableCell variant="roomy">
+                  <span className="flex items-center gap-2">
+                    {workflow.process === null ? null : (
+                      <ProcessMark process={workflow.process} />
+                    )}
+                    <Link
+                      className="font-medium hover:underline"
+                      params={{ workflow: workflow.id }}
+                      to="/workflows/$workflow"
+                    >
+                      {workflow.name}
+                    </Link>
+                  </span>
+                </TableCell>
+                <TableCell variant="roomy">
+                  {workflow.currentVersion ?? t`Not published`}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {workflows.map((workflow) => (
-                <TableRow key={workflow.id}>
-                  <TableCell variant="roomy">
-                    <span className="flex items-center gap-2">
-                      {workflow.process === null ? null : (
-                        <ProcessMark process={workflow.process} />
-                      )}
-                      <Link
-                        className="font-medium hover:underline"
-                        params={{ workflow: workflow.id }}
-                        to="/workflows/$workflow"
-                      >
-                        {workflow.name}
-                      </Link>
-                    </span>
-                  </TableCell>
-                  <TableCell variant="roomy">
-                    {workflow.currentVersion ?? t`Not published`}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </section>
   );
