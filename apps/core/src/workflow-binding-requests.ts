@@ -2,7 +2,16 @@ import { collections } from "@grasp-os/brain/schema";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { PendingWorkflowBindings } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -192,7 +201,7 @@ export const pendingWorkflowBindings = async (
         )
       )
     )
-    .orderBy(asc(workflowResources.createdAt), asc(workflowResources.id))
+    .orderBy(desc(workflowResources.createdAt), desc(workflowResources.id))
     .limit(pendingWorkflowsMax);
   const pending: PendingWorkflowBindings[] = [];
   for (const row of rows) {
