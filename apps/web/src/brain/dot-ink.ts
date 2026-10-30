@@ -1,6 +1,8 @@
+import { BRAND } from "@grasp-os/ui/lib/brand";
+
 /**
  * The ink the dot brain prints with, shared with the buddy on Home: how its dots look and move,
- * and every colour a dot can have, by warmth and ink, from the brain tokens in styles.css. Ported
+ * and every colour a dot can have, by warmth and ink, from the brain tokens in the kit's styles.css. Ported
  * from the prototype (grasplabs/prototype, packages/grasp: components/onboarding/dot-ink.ts).
  */
 
@@ -132,7 +134,8 @@ export const rgba = (color: string): [number, number, number, number] => {
       .getContext("2d", { willReadFrequently: true });
   }
   if (!probe) {
-    return [26, 26, 25, 1];
+    // The brand's ink (BRAND.ink), where there is no canvas to paint with.
+    return [6, 45, 34, 1];
   }
   probe.clearRect(0, 0, 1, 1);
   probe.fillStyle = "#000";
@@ -183,9 +186,9 @@ const mix = (
 export const palette = (element: HTMLElement): string[] => {
   const read = (name: string, fallback: string) =>
     rgb(getComputedStyle(element).getPropertyValue(name).trim() || fallback);
-  const ink = read("--brain-ink", "#1a1a19");
-  const heat = read("--brain-heat", "#e5572b");
-  const glow = read("--brain-glow", "#f6c35a");
+  const ink = read("--brain-ink", BRAND.ink);
+  const heat = read("--brain-heat", BRAND.voice);
+  const glow = read("--brain-glow", BRAND.glow);
   const styles: string[] = [];
   for (let h = 0; h < HEATS; h += 1) {
     const w = h / (HEATS - 1);

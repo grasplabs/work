@@ -341,11 +341,7 @@ export const Heading = ({
   return (
     <div className="flex flex-col gap-2">
       {/* A title that takes two lines breaks them evenly, never leaving one word alone on the second. */}
-      <h1
-        className="text-2xl font-medium tracking-tight text-balance outline-none"
-        ref={heading}
-        tabIndex={-1}
-      >
+      <h1 className="type-title outline-none" ref={heading} tabIndex={-1}>
         {title}
       </h1>
       {sentence === undefined ? null : (
@@ -425,6 +421,7 @@ export const Primary = ({
         disabled={disabled || busy}
         onClick={onClick}
         size="xl"
+        variant="highlight"
       >
         {icon}
         {children}
@@ -584,9 +581,7 @@ export const useSayFollowing = (
 /** A number with what it counts. */
 export const Figure = ({ value, label }: { value: string; label: string }) => (
   <div className="flex flex-col rounded-xl border p-4">
-    <span className="text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <span className="type-figure">{value}</span>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
