@@ -5009,10 +5009,50 @@ export const brainRecords = sqliteTable(
      * the brain. Kept, never deleted, and left out of `brain.read`.
      */
     retiredAt: timestamp("retired_at"),
+    /**
+     * When an admin took the record out of the brain (brain-forget.ts):
+     * its body is then a tombstone holding no words, only what a removed
+     * source still shows (its kind and day). Kept, never deleted, so its
+     * id stays taken and the same record sent again is left as removed.
+     */
+    forgottenAt: timestamp("forgotten_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
 );
+
+/**
+ * The company's groups of teams (brain-team-groups.ts): the brain's
+ * regions. One row per group, in the company's order. A group Grasp
+ * proposed has no `confirmedAt` until an admin confirms it, or changes it.
+ */
+export const brainTeamGroups = sqliteTable("brain_team_groups", {
+  id: text().primaryKey(),
+  /** The company's own name for it. */
+  name: text().notNull(),
+  /** The brain's team ids in it, as JSON: each team in one group at most. */
+  teamIds: text("team_ids").notNull(),
+  /** Its place in the company's order. */
+  position: integer().notNull(),
+  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  confirmedAt: timestamp("confirmed_at"),
+  savedAt: timestamp("saved_at").notNull(),
+});
+
+/**
+ * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
+ * the groups whole, as they were before and as confirmed, so an earlier
+ * set can be put back. Never changed or deleted; the audit event of the
+ * save names its id, and who saved it.
+ */
+export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
+  id: text().primaryKey(),
+  savedAt: timestamp("saved_at").notNull(),
+  /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
+  before: text().notNull(),
+  /** The groups as confirmed, as JSON, the same way. */
+  after: text().notNull(),
+});
 
 /**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
