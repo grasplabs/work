@@ -14,7 +14,6 @@
  */
 import { Badge } from "@grasp-os/ui/components/badge";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 
 import {
   AskedOfGraspRows,
@@ -22,32 +21,8 @@ import {
   StillToConnectRows,
 } from "../../../admin/connections.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { sourceNames } from "../../../admin/sections.ts";
-
-/** One part of the section: its title, what it is, perhaps a mark beside them, and its lines. */
-const Panel = ({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex items-start justify-between gap-4 px-5 py-4">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        <p className="text-muted-foreground">{description}</p>
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
 /**
  * What the company connected: nothing before it has signed in, in its own
  * onboarding; after that, whatever core reports.
@@ -57,7 +32,7 @@ const Connected = () => {
   const { integrations } = admin.snapshot;
   if (view.org.made || view.state.client === "none") {
     return (
-      <Panel
+      <Section
         description="The company starts with its sign-in, in its own onboarding. Everything else follows once it has named its team leads."
         title="Nothing connected yet"
       >
@@ -66,11 +41,11 @@ const Connected = () => {
             ? "An organization made here has nothing to connect."
             : "Grasp waits on the company’s own admin."}
         </p>
-      </Panel>
+      </Section>
     );
   }
   return (
-    <Panel
+    <Section
       description="Where its people sign in, its HR platform, where its documents live, Pulse on its laptops, and the apps its work runs in."
       title="What the company connected"
     >
@@ -83,7 +58,7 @@ const Connected = () => {
       ) : (
         <ConnectedRows integrations={integrations} />
       )}
-    </Panel>
+    </Section>
   );
 };
 
@@ -95,7 +70,7 @@ const Connected = () => {
 const StillToConnect = () => {
   const { integrations, asked } = useOrganization().admin.snapshot;
   return (
-    <Panel
+    <Section
       action={<Badge variant="outline">{sourceNames.composio}</Badge>}
       description="What the workflows need that the company has not connected: worth reaching out about."
       title="Still to connect"
@@ -109,7 +84,7 @@ const StillToConnect = () => {
         <StillToConnectRows integrations={integrations} />
       )}
       {asked.length > 0 ? <AskedOfGraspRows asked={asked} /> : null}
-    </Panel>
+    </Section>
   );
 };
 

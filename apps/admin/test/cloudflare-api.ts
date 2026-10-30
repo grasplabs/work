@@ -88,6 +88,7 @@ import type {
 } from "./cloudflare-api-kit.ts";
 import {
   dispatchRoutes,
+  forgetDatabase,
   forgetDatabases,
   workerRoutes,
 } from "./cloudflare-api-workers.ts";
@@ -777,6 +778,8 @@ const accountRoutes: Route[] = [
         return notFound();
       }
       account.d1.splice(index, 1);
+      // Its real database is free for the next one the fake makes.
+      forgetDatabase(params.uuid ?? "");
       return envelope(null);
     },
   },

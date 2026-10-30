@@ -23,9 +23,13 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
+  CardRow,
+  CardRowControl,
+  CardRowLabel,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
@@ -61,8 +65,10 @@ import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Kbd, KbdGroup } from "@grasp-os/ui/components/kbd";
@@ -101,7 +107,12 @@ import {
   TileSheetBar,
   TileTitle,
 } from "@grasp-os/ui/components/tile";
-import { CogIcon, InfoIcon, LayoutGridIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CogIcon,
+  InfoIcon,
+  LayoutGridIcon,
+} from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -154,15 +165,38 @@ const BadgeDemo = () => (
 );
 
 const CardDemo = () => (
-  <Card>
-    <CardHeader>
-      <CardTitle>Revenue</CardTitle>
-      <CardDescription>This month so far.</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <p className="text-2xl font-semibold tabular-nums">€12,400</p>
-    </CardContent>
-  </Card>
+  <div className="flex flex-col gap-6">
+    <Card>
+      <CardHeader>
+        <CardTitle>Revenue</CardTitle>
+        <CardDescription>This month so far.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-semibold tabular-nums">€12,400</p>
+      </CardContent>
+    </Card>
+    <Card variant="panel">
+      <CardHeader>
+        <CardTitle>Sign-in</CardTitle>
+        <CardDescription>How people at Acme sign in.</CardDescription>
+        <CardAction>
+          <Button size="sm" variant="outline">
+            Save
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardRow>
+        <CardRowLabel>
+          <span>Provider</span>
+          <p className="text-muted-foreground">Where accounts live.</p>
+        </CardRowLabel>
+        <CardRowControl>Microsoft 365</CardRowControl>
+      </CardRow>
+      <CardContent>
+        <p>Everyone signs in with their work account.</p>
+      </CardContent>
+    </Card>
+  </div>
 );
 
 const slides = ["First", "Second", "Third"];
@@ -258,12 +292,53 @@ const EmptyDemo = () => (
 );
 
 const ItemDemo = () => (
-  <Item variant="outline">
-    <ItemContent>
-      <ItemTitle>Weekly report</ItemTitle>
-      <ItemDescription>Every Monday at 9:00.</ItemDescription>
-    </ItemContent>
-  </Item>
+  <div className="flex flex-col gap-6">
+    <Item variant="outline">
+      <ItemContent>
+        <ItemTitle>Weekly report</ItemTitle>
+        <ItemDescription>Every Monday at 9:00.</ItemDescription>
+      </ItemContent>
+    </Item>
+    {/* Questions to start from: buttons in a named list. */}
+    <ItemGroup
+      aria-label="Questions to start with"
+      render={<ul />}
+      spacing="tight"
+    >
+      <li>
+        <Item
+          render={
+            <button
+              aria-label="Where does the most time still go?"
+              type="button"
+            />
+          }
+          size="sm"
+          variant="quiet"
+        >
+          Where does the most time still go?
+        </Item>
+      </li>
+    </ItemGroup>
+    <ItemGroup
+      aria-label="Questions to start from"
+      render={<ul />}
+      variant="card"
+    >
+      <li>
+        <Item
+          render={<button aria-label="Who needs Grasp today?" type="button" />}
+          size="sm"
+          variant="row"
+        >
+          <ItemContent>Who needs Grasp today?</ItemContent>
+          <ItemActions>
+            <ChevronRightIcon aria-hidden="true" />
+          </ItemActions>
+        </Item>
+      </li>
+    </ItemGroup>
+  </div>
 );
 
 const TileDemo = () => (

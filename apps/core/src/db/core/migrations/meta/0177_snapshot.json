@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0a4b5c2a-1de7-49f6-842e-83c0b704c57c",
+  "id": "98b53b74-ca8f-4310-9633-0f97dd4ca884",
   "prevId": "5e3d9f0d-feaa-4242-a258-69d2e3e1ad99",
   "tables": {
     "access_revocations": {
@@ -1686,14 +1686,6 @@
         },
         "workflows": {
           "name": "workflows",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "screens": {
-          "name": "screens",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -8979,6 +8971,37 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "stephen_request_cards": {
+      "name": "stephen_request_cards",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "stephen_request_needs": {
       "name": "stephen_request_needs",
       "columns": {
@@ -9322,6 +9345,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "claimed_until": {
+          "name": "claimed_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "settled_at": {

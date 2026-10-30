@@ -12,6 +12,7 @@ import { TriangleAlertIcon } from "lucide-react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { frameChanged } from "../frame/frame-read.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { AskToFix } from "../workflows/fix-in-chat.tsx";
 import { ItemMark } from "./dashboard-card.tsx";
@@ -33,7 +34,8 @@ export interface NotificationsPage {
 
 /**
  * Marks read the unread ones of the notifications a page shows, only as
- * they were when listed: one failed again since stays unread.
+ * they were when listed: one failed again since stays unread. The nav's
+ * count is read again once they are.
  */
 export const markShownRead = async (
   session: Session,
@@ -46,6 +48,7 @@ export const markShownRead = async (
       unread.map(({ id }) => id),
       newest.at
     );
+    frameChanged();
   }
 };
 

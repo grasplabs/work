@@ -184,10 +184,14 @@ export const shadcnComponents = {
       "CardDescription",
       "CardFooter",
       "CardHeader",
+      "CardRow",
+      "CardRowControl",
+      "CardRowLabel",
       "CardTitle",
+      "cardVariants",
     ],
     changes:
-      "Rests on the page with the brand's long soft shadow (`shadow-block`).",
+      'Rests on the page with the brand\'s long soft shadow (`shadow-block`). `variant="panel"` is a part of a page on a card of its own: a hairline round it, its header, then rows (`CardRow`) or a body, each under a line.',
   },
   carousel: {
     status: "supported",
@@ -873,12 +877,13 @@ export const graspComponents = {
   "page-header": {
     status: "supported",
     summary:
-      "A page's title, in the serif, its description and actions. The title's `render` makes it another heading.",
+      "A page's title, in the serif, its description, small marks under it (`PageHeaderMeta`) and actions. The title's `render` makes it another heading; the description's `lines` option keeps it to two lines.",
     exports: [
       "PageHeader",
       "PageHeaderActions",
       "PageHeaderContent",
       "PageHeaderDescription",
+      "PageHeaderMeta",
       "PageHeaderTitle",
     ],
   },
@@ -964,6 +969,25 @@ export const graspComponents = {
     status: "supported",
     summary: "Children in a column with an even gap.",
     exports: ["Stack", "stackVariants"],
+  },
+  "site-header": {
+    status: "supported",
+    summary:
+      "The bar above a page in a frame with a sidebar: the sidebar's trigger, where the page is as a breadcrumb that keeps to one line, and the page's actions.",
+    exports: ["SiteHeader"],
+  },
+  "page-sidebar": {
+    status: "supported",
+    summary:
+      "The column beside a page's content: open with its top row and the fold beside it, or folded to a rail of icons, its width easing between the two. `landmark` makes it the page's navigation.",
+    exports: [
+      "PageSidebar",
+      "PageSidebarBody",
+      "PageSidebarTop",
+      "PageSidebarRailButton",
+      "PageSidebarRailDivider",
+      "PageSidebarRailExpand",
+    ],
   },
 } as const satisfies Record<string, SupportedEntry>;
 
