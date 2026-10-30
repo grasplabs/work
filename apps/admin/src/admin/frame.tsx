@@ -11,8 +11,8 @@
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
  * need a look and a rollout waiting for approval, as the admin recorded
  * them (`platformCounts`), and under it its releases and rollouts.
- * Beside Integrations to build, how many apps
- * the companies asked for wait on Grasp (`askedApps`).
+ * Beside Apps asked for, how many apps the companies asked for
+ * (`askedApps`).
  */
 import {
   Sidebar,
@@ -78,7 +78,7 @@ const places: readonly Place[] = [
   { to: "/", label: "Overview", icon: LayoutDashboardIcon },
   {
     to: "/integrations",
-    label: "Integrations to build",
+    label: "Apps asked for",
     icon: WrenchIcon,
   },
   {
@@ -151,13 +151,13 @@ const platformBadge = ({
   return { count, words: [...look, ...waits].join("; ") };
 };
 
-/** Integrations to build's badge: the apps asked for, each waiting on Grasp to start its build. */
+/** Apps asked for's badge: how many apps the companies asked for. */
 const integrationsBadge = (asked: number): PlaceBadge | null =>
   asked === 0
     ? null
     : {
         count: asked,
-        words: `${asked} ${asked === 1 ? "app waits" : "apps wait"} on Grasp`,
+        words: `${asked} ${asked === 1 ? "app" : "apps"} asked for`,
       };
 
 /** What a place says beside its name, if anything. */
