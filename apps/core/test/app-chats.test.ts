@@ -81,6 +81,21 @@ describe("a chat for an App", () => {
     }).toStrictEqual({ apart: true, theirsListed: [theirs.id] });
   });
 
+  it("says whose App it is for when read on its own, as a chat past the list's end is, and only to its own person", async () => {
+    const { builder, other, app } = await anApp();
+    const chat = await builder.api.chats.forApp(app.id);
+
+    expect({
+      own: await builder.api.chats.summary(chat.id),
+      another: await outcome(other.api.chats.summary(chat.id)),
+      none: await outcome(builder.api.chats.summary(crypto.randomUUID())),
+    }).toStrictEqual({
+      own: { ...chat, running: false },
+      another: "agent.chat_not_found",
+      none: "agent.chat_not_found",
+    });
+  });
+
   it("is refused to someone who doesn't build the App, for an archived App, and for one that isn't there, making no chat", async () => {
     const { builder, other, user, app } = await anApp();
     await builder.api.apps.members.add(app.id, {

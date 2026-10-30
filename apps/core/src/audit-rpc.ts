@@ -14,6 +14,7 @@ import type {
   AuditPage,
   AuditRecord,
   ChainVerification,
+  FullVerification,
   ParsedAuditFilter,
 } from "@grasp-os/shared/audit-log";
 import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
@@ -551,6 +552,13 @@ export class AuditRpc extends CoreRpcTarget implements AuditApi {
         });
       }
       return result;
+    });
+  }
+
+  async lastVerification(): Promise<FullVerification | null> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await auditLog(this.#env).lastFullVerification();
     });
   }
 }

@@ -1174,6 +1174,11 @@ export interface WorkflowResourcesApi {
    */
   askable: (id: string) => Promise<boolean>;
   /**
+   * The live workflows, of those the person sees, that people may ask
+   * Stephen to start, in one read: for Settings › Stephen.
+   */
+  askableWorkflows: () => Promise<{ id: string; name: string }[]>;
+  /**
    * Lets people ask Stephen to start it in a chat app, as themselves, or
    * stops that; for its owner.
    */
