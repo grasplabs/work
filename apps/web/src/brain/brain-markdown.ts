@@ -3,7 +3,14 @@ import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 
 import { formatDay } from "../format.ts";
-import { folderName, given, kindLabel, quoted } from "./brain.ts";
+import {
+  folderName,
+  given,
+  isTeamClaim,
+  kindLabel,
+  statementWords,
+  teamClaimBasis,
+} from "./brain.ts";
 import type { Note, NoteEvent, NoteRef } from "./brain.ts";
 import { chapterOfTurns, placeLabel } from "./transcript.ts";
 
@@ -129,7 +136,7 @@ export const noteMarkdown = (
   };
   /** A link to where something was said in a source. */
   const quoteLink = (text: string, sourceId: string, statementId: string) =>
-    `[${inline(quoted(text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})`;
+    `[${inline(statementWords(statementId, text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})${isTeamClaim(statementId) ? ` (${inline(teamClaimBasis())})` : ""}`;
   const eventLine = (entry: NoteEvent) => [
     `- **${formatDay(entry.date)}** · ${link({ label: entry.title, to: entry.to, workflowId: entry.workflowId })}${given(entry.detail) ? ` · ${inline(entry.detail)}` : ""}`,
     ...entry.quotes.map(
@@ -146,8 +153,12 @@ export const noteMarkdown = (
     `exported: ${exportedOn}`,
     "---",
     "",
-    `# ${inline(note.kind === "statement" ? quoted(note.title) : note.title)}`,
+    `# ${inline(note.kind === "statement" ? statementWords(note.id, note.title) : note.title)}`,
     "",
+    // A team's claim says what it rests on, as the page does.
+    ...(note.kind === "statement" && isTeamClaim(note.id)
+      ? [`*${inline(teamClaimBasis())}*`, ""]
+      : []),
     escapeMarkdown(note.summary),
     "",
     ...note.points.map(

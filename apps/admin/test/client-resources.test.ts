@@ -1,15 +1,13 @@
-import { connectGatewayScript } from "@grasp-os/shared/connect-gateway";
+import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
+import { clientsNamespace, platformWorkerName } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
 import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type { ReleaseManifest } from "@grasp-os/shared/release";
-import { env } from "cloudflare:workers";
-import { and, desc, eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
-import { auditEvents } from "../src/db/schema.ts";
 import {
   allocateClientResources,
-  capabilityEvidence,
   clientInventory,
   InventoryError,
   placeClient,
@@ -20,52 +18,32 @@ import {
 import type {
   ClientPlacement,
   ClientResource,
-  DestinationInput,
 } from "../src/hosting/inventory.ts";
-import type { Evidence } from "../src/hosting/policy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import {
   client,
   db,
   destination,
-  evidence,
   placedClient,
   release,
   staff,
-  verified,
 } from "./hosting.ts";
-import { publishRelease } from "./releases.ts";
 
-/** A release CI published and the admin imported: one evidence can name. */
-const importedRelease = async () => {
-  const { manifest } = await publishRelease({ notes: "feat(core): verify" });
-  await importReleases(env.RELEASES, db);
-  return manifest;
-};
-
-/**
- * Saves a new destination of `kind` whose evidence names `subject`: the
- * code it's refused with, if it is, and whether its evidence was kept.
- */
-const save = async (
-  subject: Evidence["subject"],
-  kind: DestinationInput["kind"] = "workers_for_platforms"
-) => {
-  const id = `eu-subject-${crypto.randomUUID().slice(0, 8)}`;
-  const refused = await saveDestination(db, staff, {
-    id,
-    kind,
-    accountId: null,
-    namespace: null,
-    policies: ["eu-storage"],
-    capabilities: verified({}, { ...evidence, subject }),
-  }).then(
-    () => null,
+/** Whether a Workers for Platforms destination in `namespace` saves, by an admin of `stage`. */
+const saving = async (stage: Stage, namespace: string | null) =>
+  await saveDestination(
+    db,
+    staff,
+    {
+      id: `eu-stage-${crypto.randomUUID().slice(0, 8)}`,
+      kind: "workers_for_platforms",
+      accountId: null,
+      namespace,
+    },
+    stage
+  ).then(
+    () => "saved",
     (error: unknown) => (error instanceof InventoryError ? error.code : error)
   );
-  const kept = await capabilityEvidence(db, id);
-  return { error: refused, kept: kept.length > 0 };
-};
 
 /**
  * The manifest the release build makes of the real wrangler.jsonc of core
@@ -169,164 +147,27 @@ const codeOf = (render: () => unknown): string | null => {
 };
 
 describe("placing a client", () => {
-  it("is refused unless the destination verified every requirement of the policy", async () => {
-    const unknown = await destination({
-      capabilities: verified({ "logs.payload_free": "unknown" }),
-    });
-    const unsupported = await destination({
-      capabilities: verified({ "d1.eu_jurisdiction": "unsupported" }),
-    });
-    const otherPolicies = await destination({ policies: [] });
-    const clientId = await client();
-    const place = async (destinationId: string) =>
-      await placeClient(db, staff, {
-        clientId,
-        destinationId,
-        policyId: "eu-storage",
-      }).catch((error: unknown) => error);
-
-    await expect(place(unknown)).resolves.toMatchObject({
-      code: "placement_refused",
-      problems: [
-        { kind: "capability_unknown", capability: "logs.payload_free" },
+  it("records a Workers for Platforms destination only in its admin's own stage's namespace, in either direction", async () => {
+    expect({
+      stagingIntoProduction: await saving(
+        "staging",
+        clientsNamespace("production")
+      ),
+      productionIntoStaging: await saving(
+        "production",
+        clientsNamespace("staging")
+      ),
+      none: await saving("production", null),
+      own: [
+        await saving("production", clientsNamespace("production")),
+        await saving("staging", clientsNamespace("staging")),
       ],
+    }).toStrictEqual({
+      stagingIntoProduction: "destination_other_stage",
+      productionIntoStaging: "destination_other_stage",
+      none: "destination_other_stage",
+      own: ["saved", "saved"],
     });
-    await expect(place(unsupported)).resolves.toMatchObject({
-      code: "placement_refused",
-      problems: [
-        { kind: "capability_unsupported", capability: "d1.eu_jurisdiction" },
-      ],
-    });
-    await expect(place(otherPolicies)).resolves.toMatchObject({
-      code: "placement_refused",
-      problems: [{ kind: "policy_not_allowed" }],
-    });
-    await expect(place("nowhere")).resolves.toMatchObject({
-      code: "destination_unknown",
-    });
-    await expect(clientInventory(db, clientId)).resolves.toStrictEqual([]);
-  });
-
-  it("doesn't take a verification without what it was observed against", async () => {
-    const { subject: _, ...unanchored } = evidence;
-    await expect(
-      destination({
-        capabilities: {
-          "d1.eu_jurisdiction": {
-            status: "verified",
-            // @ts-expect-error -- evidence that names nothing it was observed on
-            evidence: unanchored,
-          },
-        },
-      })
-    ).rejects.toThrow("evidence");
-  });
-
-  it("doesn't take evidence about anything the admin can't check", async () => {
-    const imported = await importedRelease();
-    await expect(
-      Promise.all([
-        save({ kind: "release", id: imported.releaseId }),
-        save({ kind: "source", id: imported.commit }),
-        save({ kind: "profile", id: "cloudflare" }),
-        save({ kind: "profile", id: "workerd" }, "workerd"),
-      ])
-    ).resolves.toStrictEqual(
-      Array.from({ length: 4 }, () => ({ error: null, kept: true }))
-    );
-    await expect(
-      Promise.all([
-        save({ kind: "release", id: "r000000001-abcdef0" }),
-        save({ kind: "source", id: "0".repeat(40) }),
-        save({ kind: "candidate", id: imported.releaseId }),
-        save({ kind: "profile", id: "workerd" }),
-        save({ kind: "profile", id: "cloudflare" }, "workerd"),
-      ])
-    ).resolves.toStrictEqual(
-      Array.from({ length: 5 }, () => ({
-        error: "evidence_subject_unknown",
-        kept: false,
-      }))
-    );
-  });
-
-  it("keeps the evidence of every save, and audits what each names", async () => {
-    const { releaseId } = await importedRelease();
-    const destinationId = await destination();
-    const observed: Evidence = {
-      ...evidence,
-      subject: { kind: "release", id: releaseId },
-      observedAt: "2026-10-21T09:00:00.000Z",
-      record: "https://ci.grasp.test/runs/42?token=not-for-the-log#step-3",
-    };
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified({ "logs.payload_free": "unknown" }, observed),
-    });
-
-    const history = await capabilityEvidence(db, destinationId);
-    const declared = history.filter(
-      ({ capability }) => capability === "logs.payload_free"
-    );
-    expect(
-      declared.map(
-        ({ status, subjectKind, subjectId, record, declaredBy }) => ({
-          status,
-          subject: subjectKind === null ? null : `${subjectKind}:${subjectId}`,
-          record,
-          declaredBy,
-        })
-      )
-    ).toStrictEqual([
-      {
-        status: "verified",
-        subject: "profile:cloudflare",
-        record: evidence.record,
-        declaredBy: staff.email,
-      },
-      {
-        status: "unknown",
-        subject: null,
-        record: null,
-        declaredBy: staff.email,
-      },
-    ]);
-    expect(
-      history.findLast(({ capability }) => capability === "d1.eu_jurisdiction")
-    ).toMatchObject({
-      status: "verified",
-      subjectKind: "release",
-      subjectId: releaseId,
-      record: observed.record,
-      observedAt: new Date(observed.observedAt),
-      recordedBy: observed.recordedBy,
-    });
-
-    const [saved] = await db
-      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.action, "destination.save"),
-          eq(auditEvents.target, destinationId)
-        )
-      )
-      .orderBy(desc(auditEvents.at))
-      .limit(1);
-    const detail: unknown = JSON.parse(saved?.detail ?? "{}");
-    expect({ actor: saved?.actor, detail }).toMatchObject({
-      actor: staff.email,
-      detail: {
-        "evidence.d1.eu_jurisdiction": `verified release:${releaseId} https://ci.grasp.test/runs/42`,
-      },
-    });
-    // The unknown capability has no evidence, and the record's token stays out.
-    expect(detail).not.toHaveProperty(["evidence.logs.payload_free"]);
-    expect(saved?.detail).not.toContain("not-for-the-log");
   });
 
   it("happens once, however often it's asked at the same time, and moving is a migration", async () => {
@@ -340,7 +181,6 @@ describe("placing a client", () => {
           await placeClient(db, staff, {
             clientId,
             destinationId,
-            policyId: "eu-storage",
           })
       )
     );
@@ -353,7 +193,6 @@ describe("placing a client", () => {
       placeClient(db, staff, {
         clientId,
         destinationId: elsewhere,
-        policyId: "eu-storage",
       })
     ).rejects.toMatchObject({ code: "placement_changed" });
   });
@@ -384,17 +223,25 @@ describe("a client's resources", () => {
     expect(inventoryA.map(({ role }) => role)).toStrictEqual(
       inventoryB.map(({ role }) => role)
     );
-    expect(inventoryA.map(({ role }) => role)).toStrictEqual([
-      "d1:grasp-os-connect",
-      "d1:grasp-os-core",
-      "d1:grasp-os-knowledge",
-      "do:grasp-os-core:AuditLog",
-      "do:grasp-os-core:Workspace",
-      "r2:grasp-os-audit-archive",
-      "r2:grasp-os-files",
-      "worker:grasp-os-connect",
-      "worker:grasp-os-core",
-    ]);
+    // Every role the release names, each named by the scheme
+    // (@grasp-os/shared/names): grasp-<deployment id>-<component and
+    // purpose>, a class within its script.
+    const id = a.placement.deploymentId;
+    expect(
+      Object.fromEntries(
+        inventoryA.map(({ role, physicalName }) => [role, physicalName])
+      )
+    ).toStrictEqual({
+      "d1:grasp-os-connect": `grasp-${id}-connect-db`,
+      "d1:grasp-os-core": `grasp-${id}-core-db`,
+      "d1:grasp-os-knowledge": `grasp-${id}-core-knowledge`,
+      "do:grasp-os-core:AuditLog": `grasp-${id}-core:AuditLog`,
+      "do:grasp-os-core:Workspace": `grasp-${id}-core:Workspace`,
+      "r2:grasp-os-audit-archive": `grasp-${id}-core-audit`,
+      "r2:grasp-os-files": `grasp-${id}-core-files`,
+      "worker:grasp-os-connect": `grasp-${id}-connect`,
+      "worker:grasp-os-core": `grasp-${id}-core`,
+    });
     // ...and not one physical resource in common.
     const shared = physical(inventoryA).filter((name) =>
       physical(inventoryB).includes(name)
@@ -617,65 +464,7 @@ describe("a client's resources", () => {
     expect(second).toStrictEqual(first);
   });
 
-  it("stop being allocated once the destination withdraws a capability the policy needs", async () => {
-    const destinationId = await destination();
-    const { clientId } = await placedClient(destinationId);
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified({ "r2.eu_jurisdiction": "unsupported" }),
-    });
-    await expect(
-      allocateClientResources(db, staff, {
-        clientId,
-        manifest: await release(),
-        operationId: "op",
-      })
-    ).rejects.toMatchObject({ code: "placement_refused" });
-    await expect(clientInventory(db, clientId)).resolves.toStrictEqual([]);
-
-    // Verified again, on the release it was observed against: the latest
-    // evidence is what allocation reads, and what the history ends with.
-    const { releaseId } = await importedRelease();
-    await saveDestination(db, staff, {
-      id: destinationId,
-      kind: "workers_for_platforms",
-      accountId: null,
-      namespace: "production",
-      policies: ["eu-storage"],
-      capabilities: verified(
-        {},
-        { ...evidence, subject: { kind: "release", id: releaseId } }
-      ),
-    });
-    await expect(
-      allocateClientResources(db, staff, {
-        clientId,
-        manifest: await release(),
-        operationId: "op",
-      })
-    ).resolves.not.toStrictEqual([]);
-    const history = await capabilityEvidence(db, destinationId);
-    const latest = new Map(
-      history.map((row) => [
-        row.capability,
-        { status: row.status, subjectId: row.subjectId },
-      ])
-    );
-    expect(latest.get("r2.eu_jurisdiction")).toStrictEqual({
-      status: "verified",
-      subjectId: releaseId,
-    });
-    expect(latest.get("execution.eu_ingress")).toStrictEqual({
-      status: "unknown",
-      subjectId: null,
-    });
-  });
-
-  it("are refused for a bucket outside the policy's jurisdiction or a class moved by a rename", async () => {
+  it("are refused for a bucket binding naming no bucket, one the naming scheme doesn't name, or a class moved by a rename", async () => {
     const destinationId = await destination();
     const { clientId } = await placedClient(destinationId);
     const manifest = await release();
@@ -702,14 +491,20 @@ describe("a client's resources", () => {
     await expect(
       allocate([
         ...core.bindings,
+        { type: "r2_bucket", name: "BACKUPS", jurisdiction: "eu" },
+      ])
+    ).resolves.toMatchObject({ code: "bucket_jurisdiction" });
+    await expect(
+      allocate([
+        ...core.bindings,
         {
           type: "r2_bucket",
           name: "BACKUPS",
           bucket_name: "grasp-os-backups",
-          jurisdiction: "fedramp",
+          jurisdiction: "eu",
         },
       ])
-    ).resolves.toMatchObject({ code: "bucket_jurisdiction" });
+    ).resolves.toMatchObject({ code: "resource_unnamed" });
     await expect(
       allocate(core.bindings, [
         ...core.durableObjectMigrations,
@@ -825,21 +620,27 @@ describe("rendering a client's Worker", () => {
     ).toThrow(expect.objectContaining({ code: "resource_missing" }));
   });
 
-  it("binds a service through the connect gateway in a namespace, with props naming only the client's own script", async () => {
+  it("binds a service through the connect gateway in a namespace, with props naming only the client's own script, which the gateway accepts", async () => {
     const { core, a, b } = await setUp();
     const connectBinding = (inventory: typeof a.inventory) =>
       renderClientWorker(core, a.placement, inventory, {
-        connectGateway: true,
+        connectGateway: platformWorkerName("connect-gateway", "production"),
       }).bindings.find(({ name }) => name === "CONNECT");
     const ownConnect = a.inventory.find(
       ({ role }) => role === "worker:grasp-os-connect"
     )?.physicalName;
 
-    expect(connectBinding(a.inventory)).toStrictEqual({
-      type: "service",
-      name: "CONNECT",
-      service: connectGatewayScript,
-      props: { script: ownConnect },
+    const bound = connectBinding(a.inventory);
+    // The connect script the admin generated for a's new placement is one
+    // the gateway reaches (@grasp-os/shared/connect-gateway).
+    expect({ bound, accepted: gatewayScriptOf(bound?.props) }).toStrictEqual({
+      bound: {
+        type: "service",
+        name: "CONNECT",
+        service: platformWorkerName("connect-gateway", "production"),
+        props: { script: ownConnect },
+      },
+      accepted: ownConnect,
     });
     // Another client's inventory never names a script for a's core.
     expect(() => connectBinding(b.inventory)).toThrow(
@@ -858,7 +659,7 @@ describe("rendering a client's Worker", () => {
         },
         a.placement,
         a.inventory,
-        { connectGateway: true }
+        { connectGateway: platformWorkerName("connect-gateway", "production") }
       )
     ).toThrow(expect.objectContaining({ code: "unsupported_binding" }));
   });

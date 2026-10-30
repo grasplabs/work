@@ -59,7 +59,7 @@
     "authoringFiles": 200,
     "workflowSteps": 1000
   },
-  "releaseId": "r000001-0000000",
+  "releaseId": "26.01.1",
   "workers": {
     "connect": {
       "bindings": [

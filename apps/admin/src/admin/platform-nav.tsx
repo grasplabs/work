@@ -1,6 +1,7 @@
 /**
  * Platform's own places, as its pages link them: its overview (the
- * Platform page), every release the admin imported, and every rollout,
+ * Platform page), every release the admin imported, every rollout, the
+ * offboarded clients and the hosting destinations,
  * each a page of its own under Platform, as the admin's Releases and
  * Rollouts pages were before the admin took them in.
  */

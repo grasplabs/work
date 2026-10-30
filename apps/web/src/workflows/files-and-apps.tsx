@@ -1,6 +1,7 @@
 import type {
   WorkflowFile,
   WorkflowKnowledge,
+  WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
@@ -13,21 +14,29 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
-import { stateOf } from "../connections/integrations.ts";
+import { integrationsOf, stateOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
+import type { Session } from "../core.ts";
 import { formatBytes, formatDateTime, formatList } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
+import { workflowAppsOf } from "./workflow-apps.ts";
 import type { WorkflowApps } from "./workflow-apps.ts";
 
 // A workflow's Files and apps (prototype `inside-files.tsx`,
 // `inside-connectors.tsx`): the apps it works in, each with whether it is
 // connected; the Knowledge it reads, with the names its bindings give it;
 // and the files its runs wrote, what they are and never what they hold.
-// Each part is read on its own and says on its own why it failed.
+// Each part is read on its own, once the tab is first opened, and says on
+// its own why it failed: the apps read the catalog and connections from
+// connect (a cold catalog can take seconds), which no other tab needs, so
+// the page never waits for them.
 
 const Section = ({
   id,
@@ -186,36 +195,143 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
   );
 };
 
-export const FilesAndApps = ({
-  apps,
-  knowledge,
-  files,
+/** A part of the tab: loading until read, then its content or why not. */
+const Part = <T,>({
+  loaded,
+  children,
 }: {
-  apps: Loaded<WorkflowApps>;
-  knowledge: Loaded<WorkflowKnowledge[]>;
-  files: Loaded<WorkflowFile[]>;
-}) => (
-  <div className="flex flex-col gap-8">
-    <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
-      {apps.state === "ready" ? (
-        <Apps apps={apps.data} />
-      ) : (
-        <NotLoadedState page={apps} />
-      )}
-    </Section>
-    <Section id="workflow-knowledge" title={<Trans>Knowledge it reads</Trans>}>
-      {knowledge.state === "ready" ? (
-        <Knowledge knowledge={knowledge.data} />
-      ) : (
-        <NotLoadedState page={knowledge} />
-      )}
-    </Section>
-    <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
-      {files.state === "ready" ? (
-        <Files files={files.data} />
-      ) : (
-        <NotLoadedState page={files} />
-      )}
-    </Section>
-  </div>
-);
+  loaded: Loaded<T> | undefined;
+  children: (data: T) => ReactNode;
+}): ReactNode => {
+  if (loaded === undefined) {
+    return <LoadingLines />;
+  }
+  return loaded.state === "ready" ? (
+    children(loaded.data)
+  ) : (
+    <NotLoadedState page={loaded} />
+  );
+};
+
+/**
+ * The apps workflow `workflow` works in: the catalog and the connections
+ * Integrations reads, which of them serve it, and the connector bindings
+ * of `current`, the version the page already read, that nothing serves yet.
+ */
+const readApps = async (
+  session: Session,
+  workflow: string,
+  currentVersion: number | null,
+  current: WorkflowResourceVersion | undefined
+): Promise<WorkflowApps> => {
+  const [catalog, connections, uses, approvals] = await Promise.all([
+    session.connections.catalog(),
+    session.connections.list(),
+    session.workflows.byConnection(),
+    session.workflowResources.bindings(workflow),
+  ]);
+  return workflowAppsOf({
+    workflow,
+    integrations: integrationsOf(catalog.entries, connections),
+    uses,
+    currentVersion,
+    bindings: current?.bindings ?? [],
+    approvals,
+  });
+};
+
+/**
+ * Files and apps of workflow `workflow`, read when it is first shown;
+ * `versions` and `currentVersion` as the page read them.
+ */
+export const FilesAndApps = ({
+  workflow,
+  currentVersion,
+  versions,
+}: {
+  workflow: string;
+  currentVersion: number | null;
+  versions: Loaded<WorkflowResourceVersion[]>;
+}) => {
+  const core = useCore();
+  const [apps, setApps] = useState<Loaded<WorkflowApps>>();
+  const [knowledge, setKnowledge] = useState<Loaded<WorkflowKnowledge[]>>();
+  const [files, setFiles] = useState<Loaded<WorkflowFile[]>>();
+  // Without the versions, which bindings it declares isn't known.
+  const versionsRead = versions.state === "ready";
+  const current = versionsRead
+    ? versions.data.find(({ version }) => version === currentVersion)
+    : undefined;
+  const appsOf: Loaded<WorkflowApps> | undefined = versionsRead
+    ? apps
+    : versions;
+
+  useEffect(() => {
+    const left = new AbortController();
+    const readKnowledge = async (): Promise<void> => {
+      const read = await loadFromCore(
+        core,
+        async (session) => await session.workflowResources.knowledge(workflow),
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setKnowledge(read);
+      }
+    };
+    const readFiles = async (): Promise<void> => {
+      const read = await loadFromCore(
+        core,
+        async (session) => await session.workflowResources.files(workflow),
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setFiles(read);
+      }
+    };
+    void readKnowledge();
+    void readFiles();
+    return () => {
+      left.abort();
+    };
+  }, [core, workflow]);
+
+  useEffect(() => {
+    const left = new AbortController();
+    const read = async (): Promise<void> => {
+      const loaded = await loadFromCore(
+        core,
+        async (session) =>
+          await readApps(session, workflow, currentVersion, current),
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setApps(loaded);
+      }
+    };
+    if (versionsRead) {
+      void read();
+    }
+    return () => {
+      left.abort();
+    };
+  }, [core, workflow, currentVersion, current, versionsRead]);
+
+  return (
+    <div className="flex flex-col gap-8">
+      <Section id="workflow-apps" title={<Trans>Apps it works in</Trans>}>
+        <Part loaded={appsOf}>{(data) => <Apps apps={data} />}</Part>
+      </Section>
+      <Section
+        id="workflow-knowledge"
+        title={<Trans>Knowledge it reads</Trans>}
+      >
+        <Part loaded={knowledge}>
+          {(data) => <Knowledge knowledge={data} />}
+        </Part>
+      </Section>
+      <Section id="workflow-files" title={<Trans>Files its runs wrote</Trans>}>
+        <Part loaded={files}>{(data) => <Files files={data} />}</Part>
+      </Section>
+    </div>
+  );
+};

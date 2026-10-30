@@ -37,7 +37,17 @@ export const profileLimits = {
   maxBindings: 64,
   maxFunctions: 64,
   maxReusable: 64,
+  /** Stores a workflow declares (stores.ts), and operations on each. */
+  maxStores: 8,
+  maxStoreOperations: 32,
   maxSwitchCases: 64,
+  /** Correlations of one listen filter (`correlate`). */
+  maxCorrelations: 16,
+  /**
+   * Characters of a correlation's name: the build seals it as written, so
+   * the host's sealed listen schema holds it to the same bound.
+   */
+  maxCorrelationNameLength: 64,
   maxForkBranches: 64,
   /** Items of an inline `for.in` array. */
   maxInlineItems: 1000,

@@ -688,6 +688,10 @@ msgstr "{label} · {count}"
 msgid "{label}, on Grasp’s support site, in a new tab"
 msgstr "{label}, op de supportsite van Grasp, in een nieuw tabblad"
 
+#: src/activity/audit-log.tsx
+msgid "{label}, started by {name} (Grasp staff)"
+msgstr "{label}, gestart door {name} (Grasp-medewerker)"
+
 #. A label before its value, as in "Owner: Finance". Keep the colon where your language puts it.
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
@@ -1644,8 +1648,8 @@ msgid "{workflow} in {appName} failed"
 msgstr "{workflow} in {appName} is mislukt"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {domain}"
-msgstr "{workflowId} in {domain}"
+msgid "{workflow} in {domain}"
+msgstr "{workflow} in {domain}"
 
 #: src/dashboard/widget-board.tsx
 msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
@@ -4015,6 +4019,10 @@ msgstr "Gekozen teams"
 msgid "Cited at revision {0}; it is at revision {1} now."
 msgstr "Geciteerd bij revisie {0}; nu is het revisie {1}."
 
+#: src/brain/memory-page.tsx
+msgid "Cites a source you no longer have access to"
+msgstr "Verwijst naar een bron waar je geen toegang meer toe hebt"
+
 #: src/activity/audit-log.tsx
 msgid "Clear"
 msgstr "Wissen"
@@ -6288,6 +6296,10 @@ msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 msgid "Grasp can't count model spend right now. Try again later."
 msgstr "Grasp kan de modelkosten nu niet bijhouden. Probeer het later opnieuw."
 
+#: src/onboarding/review-parts.tsx
+msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
+msgstr "Grasp kan je mensen hun interviewlinks voorlopig niet mailen. Stuur iedereen zelf zijn link, vanuit Interviews."
+
 #: src/chat/failure.ts
 msgid "Grasp can't read your organization's model limits right now. Try again later."
 msgstr "Grasp kan de modellimieten van je organisatie nu niet lezen. Probeer het later opnieuw."
@@ -8045,6 +8057,10 @@ msgstr "Madrid"
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
+
+#: src/onboarding/review-parts.tsx
+msgid "Mail isn’t available on this hosting yet"
+msgstr "Mail is op deze hosting nog niet beschikbaar"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -11711,12 +11727,20 @@ msgid "Run {runId}"
 msgstr "Run {runId}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
-msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}"
+msgstr "Run {shortId} van {workflow} in {domain}, gestart {started}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the run chain started by run {rootId}"
-msgstr "Run {shortId} van {workflowId} in {domain}, gestart {started}, in de keten van runs die run {rootId} startte"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}, in the run chain started by run {rootId}"
+msgstr "Run {shortId} van {workflow} in {domain}, gestart {started}, in de keten van runs die run {rootId} startte"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}"
+msgstr "Run {shortId} van {workflow}, gestart {started}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}, in the run chain started by run {rootId}"
+msgstr "Run {shortId} van {workflow}, gestart {started}, in de keten van runs die run {rootId} startte"
 
 #: src/workflows/history-view.tsx
 msgid "Run history"
@@ -11859,7 +11883,9 @@ msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
 #. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
+#: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Gezegd door vijf of meer mensen"
 

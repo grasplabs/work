@@ -32,10 +32,14 @@ import { eventTypeSchema } from "./workflows.ts";
  * version, with the range below moved to say which cores work with
  * which connects; a release declares both (scripts/release).
  */
-export const connectInterfaceVersion = 1;
+export const connectInterfaceVersion = 2;
 
-/** The versions of connect's interface this core calls correctly. */
-export const connectInterfacesCoreCalls = { min: 1, max: 1 } as const;
+/**
+ * The versions of connect's interface this core calls correctly. 2: a
+ * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
+ * strict schema refuses.
+ */
+export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -217,6 +221,15 @@ export const startConnectionSchema = z.strictObject({
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
   origin: z.url(),
+  /**
+   * Relay mode: the OAuth relay's origin, from the deployment's sign-in
+   * config (`callbackOrigin`, @grasp-os/shared/oauth-relay). The provider
+   * then returns to the relay's connections path instead of `origin`, and
+   * the code is exchanged with that same redirect URI; core puts the
+   * state through the relay on the URL it gets back. Connect takes only a
+   * stage's relay origin.
+   */
+  callbackOrigin: z.url().optional(),
   /**
    * The organization at the provider, from the deployment's sign-in config:
    * its Entra tenant ID, or its Google Workspace domain. Only accounts in
@@ -1985,6 +1998,12 @@ export const bindingDropRequestSchema = z.strictObject({
   bindingId: identifierSchema,
 });
 export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
+
+/** Which removed App's held actions to drop, as expired (app-removal.ts). */
+export const appDropRequestSchema = z.strictObject({
+  appId: identifierSchema,
+});
+export type AppDropRequest = z.input<typeof appDropRequestSchema>;
 
 // Generated connector contracts (spec 12): what an App's connector
 // resource is bound to. A native connector's actions of one family (its

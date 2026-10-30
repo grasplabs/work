@@ -779,6 +779,9 @@ const checkFork = (
     );
     return;
   }
+  // Branches run side by side: what "earlier" listens took depends on
+  // scheduling there, so events.ts refuses a correlation inside one.
+  checker.forkDepth += 1;
   walkList(
     checker,
     branches,
@@ -786,6 +789,7 @@ const checkFork = (
     site,
     false
   );
+  checker.forkDepth -= 1;
 };
 
 const checkTry = (
