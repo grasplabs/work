@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f83342d8-f299-4c1e-9121-792915245d6f",
+  "id": "806bb0cc-1b6b-4b97-ba5a-4110b2dc37a2",
   "prevId": "fc4c7c13-ff39-47d6-85c6-4a4a047b4774",
   "tables": {
     "audit_outbox": {
@@ -718,6 +718,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "done_at": {
+          "name": "done_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
