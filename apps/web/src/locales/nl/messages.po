@@ -1806,6 +1806,11 @@ msgstr "Een document beschrijft hem ook."
 msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
 msgstr "Een concept: alleen de bouwers openen het, en de triggers gaan niet af, tot het gepubliceerd is."
 
+#: src/brain/memory-parts.tsx
+msgctxt "memory record kind"
+msgid "A fact"
+msgstr "Een feit"
+
 #: src/screens/screen-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Een bestand wordt alleen gedownload als je erom vraagt, met een klik."
@@ -1845,6 +1850,11 @@ msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {Ã
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "A lead's team"
 msgstr "Het team van een teamleider"
+
+#: src/brain/memory-parts.tsx
+msgctxt "memory record kind"
+msgid "A lesson"
+msgstr "Een les"
 
 #: src/activity/audit-words.ts
 msgid "A model budget reached its alert or ran out"
@@ -1890,6 +1900,11 @@ msgstr "Een gewone duurt {normal} minuten. De snelste duurde {least}, de langste
 #: src/chat/project-dialog.tsx
 msgid "A picked file couldn't be read. Pick it again."
 msgstr "Een gekozen bestand kon niet worden gelezen. Kies het opnieuw."
+
+#: src/brain/memory-parts.tsx
+msgctxt "memory record kind"
+msgid "A preference"
+msgstr "Een voorkeur"
 
 #: src/screens/screen-files.ts
 msgid "A preview keeps no files."
@@ -2604,6 +2619,11 @@ msgstr "Er ontbreekt een item."
 #: src/settings/audit-chain.tsx
 msgid "An entry was changed after it was written."
 msgstr "Een item is gewijzigd nadat het was geschreven."
+
+#: src/brain/memory-parts.tsx
+msgctxt "memory record kind"
+msgid "An experience"
+msgstr "Een ervaring"
 
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
@@ -3591,6 +3611,8 @@ msgid "Canâ€™t be read"
 msgstr "Niet leesbaar"
 
 #: src/brain/goals-editor.tsx
+#: src/brain/remember-dialog.tsx
+#: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/project-dialog.tsx
@@ -4054,6 +4076,8 @@ msgstr "Zoekopdracht en filters wissen"
 msgid "Click to open Usage"
 msgstr "Klik om Gebruik te openen"
 
+#: src/brain/remember-dialog.tsx
+#: src/brain/share-record.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5618,6 +5642,10 @@ msgstr "Iedereen heeft een eigen link: wie hem heeft, is die persoon, dus stuur 
 #: src/onboarding/interview-words.ts
 msgid "Everyone has talked"
 msgstr "Iedereen heeft gepraat"
+
+#: src/brain/share-record.tsx
+msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
+msgstr "Iedereen met wie het gedeeld wordt, en hun agents, lezen het als geaccepteerd. Het jouwe blijft zoals het is."
 
 #: src/onboarding/organization-words.ts
 msgid "Everyone taking part has their link."
@@ -7225,6 +7253,10 @@ msgstr "Het berust op beurten waar je niet bij was."
 #: src/landscape/overview-tab.tsx
 msgid "It shows once the desktop agent or single sign-on sees someone use the app."
 msgstr "Dit verschijnt zodra de desktopagent of single sign-on ziet dat iemand de app gebruikt."
+
+#: src/brain/remember-dialog.tsx
+msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
+msgstr "Het begint als voorgesteld: Grasp gebruikt het, en je kunt het hier corrigeren of intrekken."
 
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "It starts when Stephen reads the kickoff, and grows with every interview."
@@ -9916,6 +9948,10 @@ msgstr "Alleen de ondernemingsraad kan hiermee instemmen, niet de sponsor. Dat d
 msgid "Only when a condition holds:"
 msgstr "Alleen als aan een voorwaarde is voldaan:"
 
+#: src/brain/remember-dialog.tsx
+msgid "Only you and your agents read it, until you share it."
+msgstr "Alleen jij en je agents lezen het, tot je het deelt."
+
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
@@ -11207,6 +11243,14 @@ msgstr "Vrijgeven"
 msgid "Release the {amount} held for this model call?"
 msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
 
+#: src/brain/remember-dialog.tsx
+msgid "Remember it"
+msgstr "Onthouden"
+
+#: src/brain/remember-dialog.tsx
+msgid "Remember something"
+msgstr "Iets onthouden"
+
 #: src/onboarding/interview-words.ts
 msgid "Reminded on {date}"
 msgstr "Herinnerd op {date}"
@@ -11537,6 +11581,10 @@ msgstr "Herformuleren"
 #: src/brain/goals-editor.tsx
 msgid "Reword {title}"
 msgstr "{title} herformuleren"
+
+#: src/brain/share-record.tsx
+msgid "Reword it for them if you like. It can't rest on documents they may not read."
+msgstr "Herformuleer het voor hen als je wilt. Het kan niet steunen op documenten die zij niet mogen lezen."
 
 #: src/brain/goals-editor.tsx
 msgid "Reword the goal"
@@ -12157,6 +12205,18 @@ msgstr "Geregeld: {choice}"
 #: src/dashboard/standard-widgets.tsx
 msgid "Several workflows run with AI, across most of its work by hand."
 msgstr "Meerdere workflows draaien met AI, over het grootste deel van het handwerk."
+
+#: src/brain/share-record.tsx
+msgid "Share it"
+msgstr "Delen"
+
+#: src/brain/share-record.tsx
+msgid "Share this record"
+msgstr "Deze herinnering delen"
+
+#: src/brain/share-record.tsx
+msgid "Share with"
+msgstr "Delen met"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
@@ -14055,6 +14115,10 @@ msgstr "De hele keten is nog niet gecontroleerd."
 msgid "The whole chain verified, through entry {entries}, on {time}."
 msgstr "De hele keten is gecontroleerd, tot en met item {entries}, op {time}."
 
+#: src/brain/share-record.tsx
+msgid "The whole company"
+msgstr "Het hele bedrijf"
+
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
 msgstr "de hele koppeling"
@@ -15647,6 +15711,7 @@ msgid "What it does, in a few words"
 msgstr "Wat het doet, in een paar woorden"
 
 #: src/brain/brain.ts
+#: src/brain/remember-dialog.tsx
 msgid "What it is"
 msgstr "Wat het is"
 
@@ -15665,6 +15730,10 @@ msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Waar het op berust"
+
+#: src/brain/share-record.tsx
+msgid "What it says"
+msgstr "Wat het zegt"
 
 #: src/brain/memory-page.tsx
 msgid "What it should say"
@@ -15794,6 +15863,10 @@ msgstr "Wat ze ons vertelden"
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "Wat er te verbeteren is"
+
+#: src/brain/remember-dialog.tsx
+msgid "What to remember"
+msgstr "Wat te onthouden"
 
 #: src/knowledge/purge.tsx
 msgid "What to remove"
