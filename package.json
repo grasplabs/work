@@ -19,6 +19,8 @@
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
     "check:state-registry": "node scripts/check-state-registry.ts",
     "check:playwright-image": "node scripts/check-playwright-image.ts",
+    "check:connector-pr": "node scripts/check-connector-pr.ts static",
+    "check:connector-manifest": "node scripts/check-connector-pr.ts manifest",
     "github:setup": "node scripts/github-setup.ts",
     "check:branch": "node scripts/check-branch-name.ts",
     "stephen:report": "node scripts/stephen-eval.ts report",
@@ -41,6 +43,7 @@
   "devDependencies": {
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
+    "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
