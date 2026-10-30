@@ -1364,6 +1364,18 @@ msgstr "{request} a request"
 msgid "{rest}s"
 msgstr "{rest}s"
 
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · {role}, {team} · week {week}"
+msgstr "{rests} · {role}, {team} · week {week}"
+
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · {team} · week {week}"
+msgstr "{rests} · {team} · week {week}"
+
+#: src/brain/work-knowledge.tsx
+msgid "{rests} · week {week}"
+msgstr "{rests} · week {week}"
+
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
 msgstr "{role} (unknown)"
@@ -3431,6 +3443,10 @@ msgstr "Ask Grasp to build one. While it works, the domain stands beside the cha
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Ask it in"
 msgstr "Ask it in"
+
+#: src/brain/work-knowledge.tsx
+msgid "Ask more people"
+msgstr "Ask more people"
 
 #: src/brain/brain.ts
 #: src/settings/stephen-card.tsx
@@ -5696,6 +5712,11 @@ msgctxt "tour"
 msgid "Done"
 msgstr "Done"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: it happened in a run"
+msgid "Done"
+msgstr "Done"
+
 #: src/routes/_shell.onboarding.organization.$team.tsx
 msgid "Done by {doers}"
 msgstr "Done by {doers}"
@@ -5704,6 +5725,10 @@ msgstr "Done by {doers}"
 msgctxt "a run that ran alone"
 msgid "done by itself"
 msgstr "done by itself"
+
+#: src/brain/work-knowledge.tsx
+msgid "Done in a run"
+msgstr "Done in a run"
 
 #: src/interview/words.ts
 msgid "Done right"
@@ -7009,6 +7034,10 @@ msgctxt "who did it, in the log"
 msgid "Grasp itself"
 msgstr "Grasp itself"
 
+#: src/brain/work-knowledge.tsx
+msgid "Grasp knows nothing about this work in its own words yet."
+msgstr "Grasp knows nothing about this work in its own words yet."
+
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
 msgid "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
@@ -7219,6 +7248,10 @@ msgstr "Hear both again"
 #: src/onboarding/work-record.tsx
 msgid "Heard from"
 msgstr "Heard from"
+
+#: src/brain/work-knowledge.tsx
+msgid "Heard from enough people"
+msgstr "Heard from enough people"
 
 #: src/onboarding/interview-people.tsx
 msgid "Held by"
@@ -7432,9 +7465,17 @@ msgstr "How often it comes in wrong"
 msgid "How Stephen is set up here"
 msgstr "How Stephen is set up here"
 
+#: src/brain/work-knowledge.tsx
+msgid "How sure"
+msgstr "How sure"
+
 #: src/workflows/workflow-diagram.tsx
 msgid "How the parts stand"
 msgstr "How the parts stand"
+
+#: src/brain/work-knowledge.tsx
+msgid "How the work goes today"
+msgstr "How the work goes today"
 
 #: src/brain/brain.ts
 msgid "How they would notice: {notice}."
@@ -8288,6 +8329,11 @@ msgstr "Kind of statement"
 msgid "Knowledge"
 msgstr "Knowledge"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: what Grasp knows about a piece of work"
+msgid "Knowledge"
+msgstr "Knowledge"
+
 #: src/workflows/files-and-apps.tsx
 msgid "Knowledge it reads"
 msgstr "Knowledge it reads"
@@ -9058,6 +9104,10 @@ msgstr "More of what you told me about AI."
 #: src/interview/words.ts
 msgid "More of when it goes differently."
 msgstr "More of when it goes differently."
+
+#: src/brain/work-knowledge.tsx
+msgid "More people are asked about it in the next interviews."
+msgstr "More people are asked about it in the next interviews."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
@@ -10377,6 +10427,11 @@ msgstr "Not yet"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
+msgid "Note"
+msgstr "Note"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: a piece of work's note in the brain"
 msgid "Note"
 msgstr "Note"
 
@@ -12544,6 +12599,11 @@ msgstr "Restored version {restoredFrom}"
 msgid "Restricted"
 msgstr "Restricted"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what a piece of work's knowledge rests on: said, written, seen or done"
+msgid "Rests on"
+msgstr "Rests on"
+
 #: src/chat/thread.tsx
 msgid "Result"
 msgstr "Result"
@@ -13018,12 +13078,21 @@ msgstr "Runs this week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: people said it"
+msgid "Said"
+msgstr "Said"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
 #: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Said by five or more people"
+
+#: src/brain/work-knowledge.tsx
+msgid "Said in an interview"
+msgstr "Said in an interview"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/item-detail.tsx
@@ -13261,6 +13330,15 @@ msgstr "See usage"
 #: src/onboarding/setup-steps.tsx
 msgid "See what needs you"
 msgstr "See what needs you"
+
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: Grasp saw it in use"
+msgid "Seen"
+msgstr "Seen"
+
+#: src/brain/work-knowledge.tsx
+msgid "Seen in use"
+msgstr "Seen in use"
 
 #: src/brain/brain.ts
 msgid "Seen in use: not observed through sign-in or Pulse yet"
@@ -16827,6 +16905,10 @@ msgstr "Waiting for a share of this person's runs; tries again by {time}"
 msgid "Waiting for an event"
 msgstr "Waiting for an event"
 
+#: src/brain/work-knowledge.tsx
+msgid "Waiting for more voices"
+msgstr "Waiting for more voices"
+
 #: src/policies/policy.ts
 msgctxt "state of a data processing agreement"
 msgid "Waiting for signature"
@@ -17063,6 +17145,10 @@ msgstr "What each workflow's model calls cost this month, most first, and how of
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "What every agent has in its context, all the time."
+
+#: src/brain/work-knowledge.tsx
+msgid "What gets in the way"
+msgstr "What gets in the way"
 
 #: src/onboarding/interview-words.ts
 msgctxt "part of an interview"
@@ -17359,6 +17445,10 @@ msgstr "What they said so far is deleted, and their link opens on the next devic
 msgid "What they told us"
 msgstr "What they told us"
 
+#: src/brain/work-knowledge.tsx
+msgid "What they want instead"
+msgstr "What they want instead"
+
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
 msgstr "What to fix"
@@ -17582,6 +17672,10 @@ msgstr "Where the onboarding stands, stage by stage."
 #: src/workflows/requests/request-summary.tsx
 msgid "Where the summary goes"
 msgstr "Where the summary goes"
+
+#: src/brain/work-knowledge.tsx
+msgid "Where the time goes"
+msgstr "Where the time goes"
 
 #: src/landscape/data-tab.tsx
 msgid "Where the vendor says data is stored and processed, and any transfers to other countries."
@@ -18141,6 +18235,11 @@ msgstr "Writing the widget…"
 msgid "Written"
 msgstr "Written"
 
+#: src/brain/work-knowledge.tsx
+msgctxt "what something known rests on: a document says it"
+msgid "Written"
+msgstr "Written"
+
 #. placeholder {0}: version.wording
 #: src/brain/lessons-view.tsx
 msgid "Written by a model: {0}"
@@ -18149,6 +18248,10 @@ msgstr "Written by a model: {0}"
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Written down"
 msgstr "Written down"
+
+#: src/brain/work-knowledge.tsx
+msgid "Written in a document"
+msgstr "Written in a document"
 
 #: src/onboarding/work-record.tsx
 msgid "Wrong"
