@@ -6811,6 +6811,10 @@ msgstr "Dans Workflows"
 msgid "In your documents I saw {tools}."
 msgstr "Dans vos documents, j’ai vu {tools}."
 
+#: src/dashboard/in-inbox.tsx
+msgid "In your inbox"
+msgstr "Dans votre boîte de réception"
+
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
 msgstr "Boîte de réception"
@@ -9721,6 +9725,7 @@ msgid "Only your organization's admins can abandon a change to a store."
 msgstr "Seuls les admins de votre organisation peuvent abandonner une modification d’un magasin."
 
 #: src/connections/request-app-dialog.tsx
+#: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
 msgid "Open"
 msgstr "Ouvrir"
@@ -9810,6 +9815,10 @@ msgstr "Ouvrir dans le chat"
 msgid "Open in full"
 msgstr "Ouvrir en entier"
 
+#: src/dashboard/in-inbox.tsx
+msgid "Open in the inbox: {title}"
+msgstr "Ouvrir dans la boîte de réception : {title}"
+
 #: src/policies/findings-table.tsx
 msgid "Open in the landscape"
 msgstr "Ouvrir dans le paysage applicatif"
@@ -9860,6 +9869,10 @@ msgstr "Ouvrir le tableau de bord"
 #: src/workflows/workflows-table.tsx
 msgid "Open the domain {name}"
 msgstr "Ouvrir le domaine {name}"
+
+#: src/dashboard/to-do.tsx
+msgid "Open the inbox"
+msgstr "Ouvrir la boîte de réception"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
