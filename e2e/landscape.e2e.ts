@@ -216,6 +216,12 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
       page.getByRole("button", { name: "Upload a policy" })
     ).toHaveCount(0);
     await expect(page.getByRole("link", { name: "New rule" })).toHaveCount(0);
+    // Its page, opened by its address, sends them back.
+    await page.goto("/policies/rules/new");
+    await expect(page).toHaveURL(/\/policies$/u);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Policies" })
+    ).toBeVisible();
     await page.goto(ruleUrl);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByText(reason)).toBeVisible();

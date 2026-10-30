@@ -10969,6 +10969,10 @@ msgstr "Onboardingstappen"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Zodra ik ongeveer {threshold}% van het plaatje heb, kan je team beginnen. De rest vul ik onderweg aan."
 
+#: src/policies/policy-editing.tsx
+msgid "Once it is active, every app that breaks this rule is marked as blocked, and its access should be removed."
+msgstr "Zodra hij actief is, wordt elke app die deze regel overtreedt als geblokkeerd gemarkeerd, en zou de toegang ervan verwijderd moeten worden."
+
 #: src/knowledge/purge.tsx
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "Eén per regel, tot {most}: een naam, elke andere vorm ervan, een e-mailadres. Een term wordt als heel woord verwijderd, ongeacht hoofdletters, dus zet samengestelde vormen als eigen termen."
@@ -14178,6 +14182,14 @@ msgstr "Testrun starten"
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
+
+#: src/policies/policy-editing.tsx
+msgid "Start blocking"
+msgstr "Beginnen met blokkeren"
+
+#: src/policies/policy-editing.tsx
+msgid "Start blocking?"
+msgstr "Beginnen met blokkeren?"
 
 #: src/interview/sound-check.tsx
 msgid "Start by typing"

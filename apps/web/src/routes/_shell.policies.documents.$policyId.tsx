@@ -154,7 +154,7 @@ const PolicyDetail = ({
           action={edits ? <PolicyActions policy={policy} /> : undefined}
           description={policy.summary}
           meta={
-            <span className="text-muted-foreground text-base">
+            <span className="text-muted-foreground">
               {uploadedBy === undefined ? (
                 <Trans>
                   {fileName} · uploaded on {uploadedOn}

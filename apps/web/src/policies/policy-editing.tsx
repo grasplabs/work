@@ -49,6 +49,12 @@ import {
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
@@ -160,9 +166,13 @@ const fields: readonly RuleField[] = [
  * would when the rule is saved.
  */
 export interface DraftCondition {
+  /** Who it is while the rule is written, whatever is added or removed around it. */
+  key: string;
   field: RuleField;
   op?: string;
   values: string[];
+  /** The vendors as typed, commas and all; `values` is what they name. */
+  typed?: string;
   moreThan: number;
 }
 
@@ -186,6 +196,7 @@ const opsOf: Partial<
 
 /** A condition of `field` as it starts: nothing picked yet. */
 export const freshCondition = (field: RuleField): DraftCondition => ({
+  key: crypto.randomUUID(),
   field,
   op: opsOf[field]?.[0]?.value,
   values: [],
@@ -213,6 +224,7 @@ export const conditionOf = (
 
 /** A rule's condition as a row. */
 const draftConditionOf = (condition: RuleCondition): DraftCondition => ({
+  key: crypto.randomUUID(),
   field: condition.field,
   op: "op" in condition ? condition.op : undefined,
   values: "values" in condition ? [...condition.values] : [],
@@ -264,11 +276,9 @@ const ConditionCard = ({
   const ops = opsOf[condition.field] ?? [];
   const choices = choicesOf[condition.field] ?? [];
   return (
-    <div className="bg-card flex items-start gap-3 rounded-lg border p-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <span className="font-medium" id={`${ids}-field`}>
-          {field}
-        </span>
+    <Item size="sm" variant="outline">
+      <ItemContent className="min-w-0">
+        <ItemTitle id={`${ids}-field`}>{field}</ItemTitle>
         {ops.length === 0 ? null : (
           <NativeSelect
             aria-label={t`How ${field} reads`}
@@ -292,16 +302,17 @@ const ConditionCard = ({
               <Trans>Vendors, separated by commas</Trans>
             </FieldLabel>
             <Input
-              defaultValue={condition.values.join(", ")}
               disabled={disabled}
               id={`${ids}-vendors`}
               onChange={(event) => {
                 onChange({
                   ...condition,
+                  typed: event.target.value,
                   values: vendorsOf(event.target.value),
                 });
               }}
               placeholder="OpenAI, DeepSeek"
+              value={condition.typed ?? condition.values.join(", ")}
             />
           </Field>
         ) : null}
@@ -348,18 +359,20 @@ const ConditionCard = ({
             ))}
           </ToggleGroup>
         )}
-      </div>
-      <Button
-        aria-label={t`Remove ${field}`}
-        disabled={disabled}
-        onClick={onRemove}
-        size="icon-sm"
-        type="button"
-        variant="ghost"
-      >
-        <XIcon />
-      </Button>
-    </div>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          aria-label={t`Remove ${field}`}
+          disabled={disabled}
+          onClick={onRemove}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <XIcon />
+        </Button>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -367,7 +380,7 @@ const ConditionCard = ({
  * A rule's conditions, each a card, "and" between them; a new one is
  * picked by what it checks, as in the prototype's editor.
  */
-const ConditionEditor = ({
+export const ConditionEditor = ({
   conditions,
   disabled,
   onChange,
@@ -380,8 +393,7 @@ const ConditionEditor = ({
   return (
     <div className="flex flex-col gap-2">
       {conditions.map((condition, index) => (
-        // A card's place is its identity while the rule is written.
-        <div className="flex flex-col gap-2" key={index}>
+        <div className="flex flex-col gap-2" key={condition.key}>
           {index > 0 ? (
             <span className="text-muted-foreground text-xs">
               <Trans context="between two conditions of a rule: both must hold">
@@ -623,10 +635,11 @@ const RuleForm = ({
         />
       </FieldSet>
       <FieldSet>
-        <FieldLegend variant="label">
+        <FieldLegend id={`${ids}-effect`} variant="label">
           <Trans>What it does</Trans>
         </FieldLegend>
         <RadioGroup
+          aria-labelledby={`${ids}-effect`}
           disabled={disabled}
           onValueChange={(value) => {
             const effect = ruleEffectSchema.safeParse(value);
@@ -649,12 +662,13 @@ const RuleForm = ({
       </FieldSet>
       {fresh ? (
         <FieldSet>
-          <FieldLegend variant="label">
+          <FieldLegend id={`${ids}-start`} variant="label">
             <Trans context="how a new rule starts: watching or active">
               Start
             </Trans>
           </FieldLegend>
           <RadioGroup
+            aria-labelledby={`${ids}-start`}
             disabled={disabled}
             onValueChange={(value) => {
               const status = ruleStatusSchema.safeParse(value);
@@ -771,16 +785,14 @@ export const NewRule = ({
         title={t`New rule`}
       />
       <ErrorText>{failure}</ErrorText>
-      {/* The prototype's form column, without the preview beside it: core works out what a rule catches once it is saved. */}
-      <div className="max-w-3xl">
-        <RuleForm
-          disabled={busy}
-          draft={draft}
-          fresh
-          onChange={setDraft}
-          policies={policies}
-        />
-      </div>
+      {/* Without the prototype's preview beside it: core works out what a rule catches once it is saved. */}
+      <RuleForm
+        disabled={busy}
+        draft={draft}
+        fresh
+        onChange={setDraft}
+        policies={policies}
+      />
     </>
   );
 };
@@ -848,20 +860,20 @@ const EditRuleDialog = ({
 
 /**
  * Whether a rule watches, acts or is paused, turned on its page as in the
- * prototype; it keeps everything else the rule says.
+ * prototype. Core turns the status alone (`setRuleStatus`), so whatever
+ * else the rule says stays as core has it, even when another admin
+ * changed it since this page was read. Turning a rule that blocks on asks
+ * first: from then on it marks apps as blocked.
  */
 export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
   const { t, i18n } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
+  const [confirming, setConfirming] = useState(false);
   const turn = async (status: RuleStatus): Promise<void> => {
-    const input = ruleInputOf({ ...draftOf(rule, rule.policyId), status });
-    if (input === undefined) {
-      return;
-    }
     await run(async (session) => {
       await changeThenRefresh(
-        async () => await session.policies.updateRule(rule.id, input),
+        async () => await session.policies.setRuleStatus(rule.id, status),
         async () => {
           await router.invalidate();
         }
@@ -875,7 +887,12 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
         disabled={busy}
         onValueChange={(value) => {
           const next = ruleStatusSchema.safeParse(value[0]);
-          if (next.success && next.data !== rule.status) {
+          if (!next.success || next.data === rule.status) {
+            return;
+          }
+          if (next.data === "active" && rule.effect === "block") {
+            setConfirming(true);
+          } else {
             void turn(next.data);
           }
         }}
@@ -890,6 +907,34 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
         ))}
       </ToggleGroup>
       <ErrorText>{failure}</ErrorText>
+      <AlertDialog onOpenChange={setConfirming} open={confirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              <Trans>Start blocking?</Trans>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <Trans>
+                Once it is active, every app that breaks this rule is marked as
+                blocked, and its access should be removed.
+              </Trans>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              <Trans>Cancel</Trans>
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirming(false);
+                void turn("active");
+              }}
+            >
+              <Trans>Start blocking</Trans>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

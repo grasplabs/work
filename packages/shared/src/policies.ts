@@ -375,6 +375,11 @@ export interface PoliciesApi {
   createRule: (rule: RuleInput) => Promise<PolicyRule>;
   /** Replaces a rule's name, conditions, effect or status. The organization's own admins only; audited. */
   updateRule: (ruleId: string, rule: RuleInput) => Promise<PolicyRule>;
+  /**
+   * Turns a rule to watching, active or paused, leaving everything else it
+   * says as core has it now. The organization's own admins only; audited.
+   */
+  setRuleStatus: (ruleId: string, status: RuleStatus) => Promise<PolicyRule>;
   /** Removes a rule and its exceptions. The organization's own admins only; audited. */
   removeRule: (ruleId: string) => Promise<void>;
   /**

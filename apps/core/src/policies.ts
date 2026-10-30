@@ -5,6 +5,7 @@ import {
   policyErrors,
   policyUploadSchema,
   ruleInputSchema,
+  ruleStatusSchema,
 } from "@grasp-os/shared/policies";
 import type {
   ExceptionInput,
@@ -17,10 +18,11 @@ import type {
   PolicyUpload,
   RuleInput,
   RuleProposal,
+  RuleStatus,
 } from "@grasp-os/shared/policies";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -453,6 +455,49 @@ const sameFieldsOf = (
   rule.excerpt ?? null,
 ];
 
+/**
+ * Turns a rule on, off or to watching, and nothing else: whatever else
+ * the rule says stays as it is now, however long ago the admin's page
+ * read it, so a status turned there never undoes another admin's edit.
+ */
+const setRuleStatus = async (
+  env: Env,
+  by: Identity,
+  id: string,
+  input: unknown
+): Promise<PolicyRule> => {
+  requireOwnAdmin(by, "setRuleStatus");
+  const status = parsed(ruleStatusSchema, input);
+  const before = (await readRule(env, id)) ?? notFound();
+  const db = drizzle(env.DB);
+  const [written] = await auditedBatch(env, db, [
+    db
+      .update(policyRules)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(policyRules.id, id),
+          // Only when it differs: the same turn twice records one change.
+          ne(policyRules.status, status),
+          stillAdmin(by)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "policy.rule.updated",
+      target: target("policy_rule", id),
+      detail: { effect: before.effect, status },
+    }),
+  ]);
+  const found = (await readRule(env, id)) ?? notFound();
+  if (written.meta.changes === 0 && found.status !== status) {
+    return await unwritten(env, by, () => {
+      throw policyErrors.create("policy.conflict");
+    });
+  }
+  return found;
+};
+
 const updateRule = async (
   env: Env,
   by: Identity,
@@ -880,6 +925,13 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
     return await withPerson(
       this.#check,
       async (by) => await updateRule(this.#env, by, idOf(ruleId), rule)
+    );
+  }
+
+  async setRuleStatus(ruleId: string, status: RuleStatus): Promise<PolicyRule> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setRuleStatus(this.#env, by, idOf(ruleId), status)
     );
   }
 

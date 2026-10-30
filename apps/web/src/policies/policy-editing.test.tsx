@@ -2,6 +2,7 @@
 import {
   exceptionInputSchema,
   ruleInputSchema,
+  ruleStatusSchema,
 } from "@grasp-os/shared/policies";
 import type {
   ExceptionInput,
@@ -18,13 +19,14 @@ import {
   RouterProvider,
   useRouterState,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import {
+  ConditionEditor,
   draftOf,
   editsPolicies,
   freshCondition,
@@ -33,6 +35,7 @@ import {
   ruleInputOf,
   RuleStatusControl,
 } from "./policy-editing.tsx";
+import type { DraftCondition } from "./policy-editing.tsx";
 
 // Changing the policies from their pages: who may, what the rule dialog
 // hands core, and a rule's controls against core's `policies` as the page
@@ -79,8 +82,13 @@ const chatGpt: LandscapeApp = {
 
 /** Core's `policies` over one book, refusing what core's schemas refuse. */
 const fakePolicies = () => {
-  const sent: { updated: RuleInput[]; granted: ExceptionInput[] } = {
+  const sent: {
+    updated: RuleInput[];
+    turned: [string, string][];
+    granted: ExceptionInput[];
+  } = {
     updated: [],
+    turned: [],
     granted: [],
   };
   let book: PolicyBook = { policies: [], rules: [outsideEu], exceptions: [] };
@@ -93,6 +101,16 @@ const fakePolicies = () => {
       const parsed = ruleInputSchema.parse(input);
       sent.updated.push(input);
       const rule = { ...outsideEu, ...parsed, id: ruleId };
+      book = { ...book, rules: [rule] };
+      return await Promise.resolve(rule);
+    },
+    setRuleStatus: async (
+      ruleId: string,
+      status: string
+    ): Promise<PolicyRule> => {
+      const parsed = ruleStatusSchema.parse(status);
+      sent.turned.push([ruleId, parsed]);
+      const rule = { ...(book.rules[0] ?? outsideEu), status: parsed };
       book = { ...book, rules: [rule] };
       return await Promise.resolve(rule);
     },
@@ -255,6 +273,25 @@ const shown = () => ({
   ),
 });
 
+/** Two vendor conditions, as a rule being written holds them. */
+const Editor = () => {
+  const [conditions, setConditions] = useState<DraftCondition[]>(() => [
+    { ...freshCondition("vendor"), typed: "OpenAI", values: ["OpenAI"] },
+    {
+      ...freshCondition("vendor"),
+      typed: "DeepSeek, Moonshot",
+      values: ["DeepSeek", "Moonshot"],
+    },
+  ]);
+  return (
+    <ConditionEditor
+      conditions={conditions}
+      disabled={false}
+      onChange={setConditions}
+    />
+  );
+};
+
 describe("changing the policies", () => {
   afterEach(() => {
     act(() => {
@@ -317,24 +354,63 @@ describe("changing the policies", () => {
     });
   });
 
-  it("turns a rule on from its page, keeping what it checks, and the page reads it again", async () => {
+  it("turns a rule that blocks on from its page once it is confirmed, sending core its status alone", async () => {
     const { sent, policies } = fakePolicies();
     await opened(policies);
 
     await click("Active");
+    const asked = {
+      shown: shown().status,
+      dialog: document.querySelector('[role="alertdialog"]')?.textContent,
+    };
+    await click("Start blocking");
 
-    expect({ shown: shown().status, sent: sent.updated }).toStrictEqual({
+    expect({
+      asked: {
+        shown: asked.shown,
+        confirms: asked.dialog?.includes("blocked"),
+      },
+      shown: shown().status,
+      updated: sent.updated,
+      turned: sent.turned,
+    }).toStrictEqual({
+      asked: { shown: "watching", confirms: true },
       shown: "active",
-      sent: [
-        {
-          name: outsideEu.name,
-          description: "",
-          conditions: outsideEu.conditions,
-          effect: "block",
-          status: "active",
-          policyId: null,
-        },
-      ],
+      updated: [],
+      turned: [[outsideEu.id, "active"]],
+    });
+  });
+
+  it("keeps each condition's own vendors when the one before it is removed", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <Editor />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+    });
+    const before = [...document.querySelectorAll("input")].map(
+      (each) => each.value
+    );
+    // The first of the two: the other must keep its own vendors.
+    const first = document.querySelector<HTMLButtonElement>(
+      '[aria-label="Remove Vendor"]'
+    );
+    await act(async () => {
+      first?.click();
+      await Promise.resolve();
+    });
+
+    expect({
+      before,
+      after: [...document.querySelectorAll("input")].map((each) => each.value),
+    }).toStrictEqual({
+      before: ["OpenAI", "DeepSeek, Moonshot"],
+      after: ["DeepSeek, Moonshot"],
     });
   });
 

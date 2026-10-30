@@ -104,7 +104,7 @@ const RuleDetail = ({
             </SectionTitle>
             {edits ? <RuleStatusControl rule={rule} /> : null}
           </div>
-          <p className="text-muted-foreground text-base">
+          <p className="text-muted-foreground">
             {i18n._(ruleStatusDescription[rule.status])}
           </p>
         </section>

@@ -28,7 +28,7 @@ const NewRulePage = () => {
           { label: t`New rule` },
         ]}
       />
-      <Page wide>
+      <Page>
         <NotLoaded page={book} />
         <NewRule policies={policies} policyId={from ?? null} />
       </Page>

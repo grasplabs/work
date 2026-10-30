@@ -299,6 +299,35 @@ describe("the company's policies", () => {
     });
   });
 
+  it("turn a rule's status alone, keeping an edit another admin made since the page read it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const rule = await admin.api.policies.createRule(outsideEu);
+    // Another admin renames it meanwhile; the first turns it on from a
+    // page that still has the old name.
+    await admin.api.policies.updateRule(rule.id, {
+      ...outsideEu,
+      name: "Renamed meanwhile",
+    });
+    const turned = await admin.api.policies.setRuleStatus(rule.id, "active");
+    const again = await admin.api.policies.setRuleStatus(rule.id, "active");
+
+    expect({
+      turned: { name: turned.name, status: turned.status },
+      again: again.status,
+      refused: await Promise.all([
+        // SAFETY: invalid on purpose: anything a client can send, as
+        // Cap'n Web checks no types, so core must.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        outcome(admin.api.policies.setRuleStatus(rule.id, "on" as never)),
+        outcome(admin.api.policies.setRuleStatus("no-such-rule", "paused")),
+      ]),
+    }).toStrictEqual({
+      turned: { name: "Renamed meanwhile", status: "active" },
+      again: "active",
+      refused: ["policy.invalid", "policy.not_found"],
+    });
+  });
+
   it("are changed by the organization's own admins alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
@@ -314,6 +343,7 @@ describe("the company's policies", () => {
         outcome(
           api.policies.updateRule(rule.id, { ...outsideEu, status: "paused" })
         ),
+        outcome(api.policies.setRuleStatus(rule.id, "active")),
         outcome(api.policies.removeRule(rule.id)),
         outcome(
           api.policies.grantException({
@@ -331,8 +361,8 @@ describe("the company's policies", () => {
       staffReads: await outcome(staffApi.policies.book()),
       unchanged: statusesOf(await builder.api.policies.book()),
     }).toStrictEqual({
-      builder: Array.from({ length: 5 }, () => "role.forbidden"),
-      staff: Array.from({ length: 5 }, () => "role.forbidden"),
+      builder: Array.from({ length: 6 }, () => "role.forbidden"),
+      staff: Array.from({ length: 6 }, () => "role.forbidden"),
       staffReads: "ok",
       unchanged: ["watching"],
     });
