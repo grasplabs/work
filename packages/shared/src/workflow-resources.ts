@@ -1263,6 +1263,11 @@ export interface WorkflowResourcesApi {
   bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
   /** Removes an App's binding; for the App's builders. */
   unbindFromApp: (binding: string) => Promise<void>;
+  /**
+   * The workflow versions App `app` binds, by alias: for the App's
+   * builders, archived or not, never Grasp staff.
+   */
+  appBindings: (app: string) => Promise<AppWorkflowBinding[]>;
   /** The host catalog's contracts, for builders. */
   catalog: () => Promise<CatalogContractEntry[]>;
   /** Publishes a catalog contract; for the organization's admins. */

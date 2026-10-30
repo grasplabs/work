@@ -44,6 +44,7 @@ import {
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
+import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
@@ -639,6 +640,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   />
                 )}
               </Later>
+              <div className="pt-6">
+                <AppWorkflows app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}

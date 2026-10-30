@@ -2056,6 +2056,10 @@ msgctxt "memory record kind"
 msgid "A lesson"
 msgstr "Een les"
 
+#: src/engines/app-workflows.tsx
+msgid "A letter, then letters, digits or underscores, such as summary."
+msgstr "Een letter, dan letters, cijfers of underscores, zoals summary."
+
 #: src/workflows/requests/request-plan.tsx
 msgid "A look-up"
 msgstr "Een opzoeking"
@@ -2340,6 +2344,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Actie"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -3787,9 +3792,17 @@ msgstr "Problemen met facturatie"
 msgid "Billing runs through Stripe. You see it here and change it there."
 msgstr "De facturatie loopt via Stripe. Je ziet het hier en wijzigt het daar."
 
+#: src/engines/app-workflows.tsx
+msgid "Bind"
+msgstr "Koppelen"
+
 #: src/engines/resource-bindings.tsx
 msgid "Bind {alias}"
 msgstr "{alias} koppelen"
+
+#: src/engines/app-workflows.tsx
+msgid "Bind a workflow"
+msgstr "Workflow koppelen"
 
 #: src/inbox/items.ts
 msgid "Binding"
@@ -3830,6 +3843,7 @@ msgctxt "dashboard widget"
 msgid "Board goals"
 msgstr "Doelen van de directie"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Bound"
 msgstr "Gekoppeld"
@@ -4036,6 +4050,7 @@ msgstr "Niet leesbaar"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4203,6 +4218,14 @@ msgstr "Hun eigen wijzigen"
 #: src/onboarding/organization-dialogs.tsx
 msgid "Change this team"
 msgstr "Dit team wijzigen"
+
+#: src/engines/app-workflows.tsx
+msgid "Change version"
+msgstr "Versie wijzigen"
+
+#: src/engines/app-workflows.tsx
+msgid "Change what {alias} starts"
+msgstr "Wijzigen wat {alias} start"
 
 #: src/dashboard/widget-ask.tsx
 msgid "Change with Grasp"
@@ -4439,6 +4462,14 @@ msgstr "Kies een persoon of een team"
 msgid "Choose a person or a team."
 msgstr "Kies een persoon of een team."
 
+#: src/engines/app-workflows.tsx
+msgid "Choose a version"
+msgstr "Kies een versie"
+
+#: src/engines/app-workflows.tsx
+msgid "Choose a workflow"
+msgstr "Kies een workflow"
+
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Documenten kiezen"
@@ -4514,6 +4545,7 @@ msgstr "Klik om Gebruik te openen"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/app-workflows.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -9278,6 +9310,10 @@ msgstr "Naam"
 msgctxt "the name of a policy rule"
 msgid "Name"
 msgstr "Naam"
+
+#: src/engines/app-workflows.tsx
+msgid "Name in the app's code"
+msgstr "Naam in de code van de app"
 
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
@@ -14148,6 +14184,10 @@ msgstr "Opnieuw beginnen op een nieuw apparaat"
 msgid "Start the tour"
 msgstr "Rondleiding starten"
 
+#: src/engines/app-workflows.tsx
+msgid "Start with a letter, then use only letters, digits or underscores."
+msgstr "Begin met een letter en gebruik daarna alleen letters, cijfers of underscores."
+
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.interviewers.tsx
 #: src/workflows/resource-runs.tsx
@@ -15014,6 +15054,10 @@ msgstr "De afspraak tussen het bedrijf en Grasp over de omgang met gegevens, get
 msgid "The answer was cut off at the model's limit."
 msgstr "Het antwoord is afgekapt op de limiet van het model."
 
+#: src/engines/app-workflows.tsx
+msgid "The app can no longer start a workflow by this name, until a builder binds it again. Runs already started go on."
+msgstr "De app kan onder deze naam geen workflow meer starten, tot een bouwer hem opnieuw koppelt. Runs die al gestart zijn gaan door."
+
 #: src/screens/screen-frame.tsx
 msgid "The app couldn't be loaded."
 msgstr "De app kon niet worden geladen."
@@ -15025,6 +15069,14 @@ msgstr "De app is gemarkeerd als geblokkeerd; de toegang moet worden ingetrokken
 #: src/policies/policy.ts
 msgid "The app is marked in the landscape, so its owner can act on it."
 msgstr "De app wordt gemarkeerd in het applicatielandschap, zodat de eigenaar er actie op kan ondernemen."
+
+#: src/engines/app-workflows.tsx
+msgid "The app starts no workflow of its own."
+msgstr "De app start geen eigen workflow."
+
+#: src/engines/app-workflows.tsx
+msgid "The app starts this exact version by its name, until a builder binds another. Starting it still takes the app's own permission on the workflow, which an admin grants."
+msgstr "De app start precies deze versie onder haar naam, tot een bouwer een andere koppelt. Starten vraagt nog steeds de eigen toestemming van de app voor de workflow, die een beheerder geeft."
 
 #: src/screens/screen-frame.tsx
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
@@ -16581,6 +16633,14 @@ msgstr "Getypt, begonnen op {started}, nog niet akkoord."
 msgid "Unanswered question"
 msgstr "Onbeantwoorde vraag"
 
+#: src/engines/app-workflows.tsx
+msgid "Unbind"
+msgstr "Ontkoppelen"
+
+#: src/engines/app-workflows.tsx
+msgid "Unbind {alias}?"
+msgstr "{alias} ontkoppelen?"
+
 #: src/landscape/landscape.ts
 msgid "Uncategorized"
 msgstr "Zonder categorie"
@@ -16918,6 +16978,7 @@ msgstr "Nu controleren"
 msgid "Verify the chain"
 msgstr "Keten controleren"
 
+#: src/engines/app-workflows.tsx
 #: src/engines/screen-approval.tsx
 #: src/inbox/items.ts
 #: src/knowledge/document.tsx
@@ -16963,6 +17024,7 @@ msgid "Version {number}, current"
 msgstr "Versie {number}, huidig"
 
 #: src/brain/brain.ts
+#: src/engines/app-workflows.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -18273,6 +18335,7 @@ msgstr "Bepaald wat er beter kan"
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/standard-widgets.tsx
+#: src/engines/app-workflows.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -18393,6 +18456,10 @@ msgstr "Workflows die {title} dienen"
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
 msgstr "Workflows die het meest uitgaven"
+
+#: src/engines/app-workflows.tsx
+msgid "Workflows the app starts"
+msgstr "Workflows die de app start"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
