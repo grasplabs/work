@@ -3,6 +3,7 @@ import type {
   ChannelLinkPreview,
   ChannelLinkRefusal,
 } from "@grasp-os/shared/channel-accounts";
+import { chatPlatformName } from "@grasp-os/shared/chat";
 import {
   Alert,
   AlertAction,
@@ -15,7 +16,6 @@ import { useRouter } from "@tanstack/react-router";
 import { MessageSquareIcon } from "lucide-react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { platformName } from "../chat-platforms.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -102,7 +102,7 @@ const OpenLink = ({
 }) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const app = platformName(platform);
+  const app = chatPlatformName(platform);
   const account = name ?? platformUserId;
   const link = async (): Promise<void> => {
     await run(async ({ channelAccounts }) => {
@@ -167,7 +167,7 @@ const AccountRow = ({ account }: { account: ChannelAccount }) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const app = platformName(account.platform);
+  const app = chatPlatformName(account.platform);
   const time = formatDateTime(account.linkedAt);
   const shown = account.name ?? account.platformUserId;
   const unlink = async (): Promise<void> => {

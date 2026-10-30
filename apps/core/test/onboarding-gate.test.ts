@@ -182,6 +182,7 @@ describe("Grasp's go", () => {
       context: noContext,
       waiting: 0,
       mailSends: true,
+      mailDomain: null,
       progress: {
         teams: [],
         // Both leads talked; half of the others did.
