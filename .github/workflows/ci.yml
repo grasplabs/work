@@ -257,13 +257,13 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       # The runner's own user, which owns the checkout, the caches and
       # $HOME, as Playwright's CI guide has it: Firefox won't start as root
-      # in a home it doesn't own. A host IPC namespace, so Chromium's shared
-      # memory isn't held to Docker's 64 MB /dev/shm.
-      options: --user 1001 --ipc=host
-    # On GitHub's runners for now: the container runs as uid 1001, the
-    # GitHub runner's user, and boat's runner user differs, so the job
-    # can't write the runner's files there.
-    runs-on: ubuntu-latest
+      # in a home it doesn't own. On boat.dev that is `user`, uid 1000
+      # (GitHub's runners use 1001): the runner's files under /__w,
+      # $GITHUB_ENV and the step state among them, are its own. A host IPC
+      # namespace, so Chromium's shared memory isn't held to Docker's 64 MB
+      # /dev/shm.
+      options: --user 1000 --ipc=host
+    runs-on: boat
     # About 1 minute of setup and 2 for the stack to build and start, then
     # each part's tests.
     timeout-minutes: 20
@@ -374,9 +374,9 @@ jobs:
     if: github.event_name != 'push'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
-      options: --user 1001 --ipc=host
-    # On GitHub's runners, as e2e above.
-    runs-on: ubuntu-latest
+      # boat.dev's runner user, as e2e above.
+      options: --user 1000 --ipc=host
+    runs-on: boat
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
