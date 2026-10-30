@@ -30,7 +30,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 bg-veil fixed inset-0 isolate z-50 duration-100 supports-backdrop-filter:backdrop-blur-xs",
+        "data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 bg-scrim fixed inset-0 isolate z-50 duration-100 supports-backdrop-filter:backdrop-blur-xs",
         className
       )}
       {...props}
@@ -135,7 +135,10 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("type-heading", className)}
+      className={cn(
+        "font-serif text-xl leading-snug tracking-tight",
+        className
+      )}
       {...props}
     />
   );

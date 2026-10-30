@@ -1,3 +1,4 @@
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { lazy, Suspense, useState } from "react";
@@ -51,9 +52,9 @@ const DashboardPage = () => {
       <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <h1 className="type-title">
+            <PageHeaderTitle>
               <Trans>Dashboard</Trans>
-            </h1>
+            </PageHeaderTitle>
             <p className="text-muted-foreground text-sm">
               {line ?? (
                 <Trans>

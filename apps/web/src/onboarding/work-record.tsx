@@ -8,6 +8,8 @@ import type {
 import type { DrawnWork, Told } from "@grasp-os/shared/admin/org-record";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -75,7 +77,7 @@ const Done = ({ children }: { children: ReactNode }) => (
 /** One number and what it counts. */
 const Tile = ({ value, label }: { value: ReactNode; label: string }) => (
   <div className="bg-card flex flex-col gap-0.5 px-5 py-4">
-    <span className="type-figure">{value}</span>
+    <Stat>{value}</Stat>
     <span className="text-muted-foreground">{label}</span>
   </div>
 );
@@ -966,7 +968,7 @@ const Header = ({
   return (
     <section className="bg-card overflow-hidden rounded-xl border text-sm">
       <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="type-title">{work.name}</h2>
+        <PageHeaderTitle render={<h2>{work.name}</h2>} />
         <p className="text-muted-foreground">{team}</p>
         <p aria-live="polite">
           <StandsLine record={record} />

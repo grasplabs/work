@@ -51,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -427,9 +428,7 @@ const Middle = ({
   }
   return (
     <text dominantBaseline="middle" textAnchor="middle" x={cx} y={cy}>
-      <tspan className="fill-foreground type-figure" x={cx} y={cy - 6}>
-        {amount}
-      </tspan>
+      <Stat render={<tspan x={cx} y={cy - 6} />}>{amount}</Stat>
       <tspan className="fill-muted-foreground text-xs" x={cx} y={cy + 14}>
         in all
       </tspan>
@@ -840,7 +839,7 @@ export const AiUse = () => {
             />
           ))}
         </ul>
-        <div className="bg-row-group grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 border-t px-5 py-2.5">
+        <div className="bg-row-group text-row-group-foreground grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 border-t px-5 py-2.5">
           <span>In all</span>
           <span className="tabular-nums">{euro(now.total.spend)}</span>
         </div>
