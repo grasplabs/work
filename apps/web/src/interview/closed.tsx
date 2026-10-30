@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { PlusIcon, Trash2Icon } from "lucide-react";
@@ -137,9 +138,9 @@ export const Closed = ({
       />
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <div className="flex flex-col gap-2">
-          <h1 className="type-title">
+          <PageHeaderTitle>
             <SpokenText said={said} text={title} />
-          </h1>
+          </PageHeaderTitle>
           <p aria-live="polite" className="text-muted-foreground text-balance">
             <SpokenText from={title.length + 1} said={said} text={message} />
           </p>

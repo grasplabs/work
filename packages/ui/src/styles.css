@@ -18,429 +18,105 @@
 }
 
 /*
- * Grasp's look is the brand book's: deep green ink on a cool white page,
- * lime where it counts, a light serif for what Grasp says and a plain sans
- * for the product. It is kept in three layers, and components only ever
- * see the last one:
- *   1. The brand (`--brand-*`, in :root): the brand book's own values, as
- *      its Tokens chapter lists them. Nothing reads them but the themes
- *      (brand.test.ts holds that, and keeps them equal to lib/brand.ts).
- *   2. The themes (:root and .dark): every semantic name, given its value
- *      in light and in dark. Dark is not in the brand book; it is built on
- *      the bases of its dark paintings.
- *   3. Tailwind (@theme inline): those names as utilities, `bg-card`,
- *      `text-muted-foreground`.
- * Colour is signal only: `highlight` (lime) for the one action of a page,
- * `status-attention` (amber) for what needs someone, `status-agreed`
- * (green) for what is settled, and `destructive` (red) for a form's error
- * and nothing else.
+ * Grasp's theme is shadcn's: every value stands once, in :root (light) and
+ * .dark, under shadcn's own names, and @theme inline maps each to its
+ * Tailwind utility. Components only ever use those utilities.
+ *
+ * The values are the brand book's: deep green ink on a cool white page,
+ * Newsreader (`font-serif`) for what Grasp says and Geist (`font-sans`)
+ * for the product. Dark is not in the brand book; it is built on the base
+ * of its Ink painting.
+ *
+ * Beside shadcn's names, only what a component or a page needs and
+ * shadcn has no name for:
+ *   - `highlight` / `highlight-foreground`: lime, the one action a page is
+ *     for (Button variant="highlight"). Rare, so it keeps its meaning.
+ *   - `status-agreed` (green) for what is done, `status-attention` (amber)
+ *     for what needs someone; as a badge, on a tint of themselves
+ *     (Badge variant="passed" and "attention"), as shadcn's destructive is.
+ *   - `destructive` (red) is for errors, a form's error or something that
+ *     failed, and for actions that can't be undone. Nothing else is red.
+ *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
+ *     a dialog; `tile`, the light ground of a brand's logo; the hovers of
+ *     secondary and muted; `tinted`, a light tint of the primary.
+ *   - The dashboard's, the brain's and the charts' own colours, and three
+ *     shadows: a block resting on the page, what floats above it, and the
+ *     highlight's soft light.
  */
-
-/*
- * Type and motion are the same in light and dark. Geist and Newsreader
- * where the page loads them (the frontend and the admin bundle both); the
- * system's own faces elsewhere, such as in App screens, whose frame loads
- * no fonts.
- */
-@theme {
+:root {
+  --radius: 0.625rem;
   --font-sans:
     "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
-  /* Card titles and the like are the brand book's h4: the sans at 500. */
-  --font-heading: var(--font-sans);
   /*
-   * What Grasp says, page titles and key figures, only ever through the
-   * type-* utilities below. Never for running text.
+   * Where the page loads Newsreader (the frontend and the admin bundle it).
+   * An App screen's frame loads no fonts, so there the serif falls back to
+   * the sans, as the sans falls back to the system's: a system serif such
+   * as Georgia has no light weight to set a title in.
    */
-  --font-display: "Newsreader Variable", Georgia, "Times New Roman", serif;
-  /*
-   * The house curve: away at once, then a long, soft landing. Every
-   * transition uses it unless it says otherwise; each is over within 300ms.
-   */
-  --ease-house: cubic-bezier(0.22, 1, 0.36, 1);
-  /* The drawing curve: a line being drawn, such as a statement's underline. */
-  --ease-draw: cubic-bezier(0.65, 0, 0.35, 1);
-  --default-transition-timing-function: var(--ease-house);
-  /*
-   * How a sidebar opens and folds: quick out of the gate, settling softly,
-   * as Grasp's own sidebar does. The app's sidebar and every page sidebar
-   * move on it, in 200ms both ways.
-   */
-  --ease-sidebar: cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-/* Everything that points at a variable of the themes, so it follows light and dark. */
-@theme inline {
-  /*
-   * Corners, in the brand book's steps: 8 for buttons and screens, 10 for
-   * blocks and fields, 14 for cards, 16 for a bar that floats, a pill for
-   * badges.
-   */
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 6px);
-  --radius-3xl: calc(var(--radius) + 10px);
-  --radius-4xl: calc(var(--radius) + 16px);
-  /*
-   * Depth: a block resting on the page, something that floats above it,
-   * the one action's lime ring with a soft light under it, and a screen
-   * lying on a painted field. Named apart from every colour, as
-   * `shadow-<colour>` would tint a shadow instead.
-   */
-  --shadow-block: var(--block-shadow);
-  --shadow-lifted: var(--lifted-shadow);
-  --shadow-glow: var(--glow-shadow);
-  --shadow-on-field: var(--on-field-shadow);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary-hover: var(--primary-hover);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-faint: var(--faint);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-hairline: var(--hairline);
-  --color-veil: var(--veil);
-  --color-highlight: var(--highlight);
-  --color-highlight-foreground: var(--highlight-foreground);
-  --color-highlight-hover: var(--highlight-hover);
-  --color-highlight-edge: var(--highlight-edge);
-  --color-signal: var(--signal);
-  --color-unlit: var(--unlit);
-  --color-logo: var(--logo);
-  --color-icon-tile: var(--icon-tile);
-  --color-icon-tile-foreground: var(--icon-tile-foreground);
-  --color-secondary-hover: var(--secondary-hover);
-  --color-muted-hover: var(--muted-hover);
-  --color-tinted: var(--tinted);
-  --color-tinted-hover: var(--tinted-hover);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-tile: var(--tile);
-  --color-tile-foreground: var(--tile-foreground);
-  --color-status-agreed: var(--status-agreed);
-  --color-status-agreed-soft: var(--status-agreed-soft);
-  --color-status-agreed-strong: var(--status-agreed-strong);
-  --color-status-attention: var(--status-attention);
-  --color-status-attention-soft: var(--status-attention-soft);
-  --color-bar-manual: var(--bar-manual);
-  --color-bar-saved: var(--bar-saved);
-  --color-bar-expected: var(--bar-expected);
-  --color-bar-expected-border: var(--bar-expected-border);
-  --color-return-expected: var(--return-expected);
-  --color-canvas-today: var(--canvas-today);
-  --color-canvas-proposed: var(--canvas-proposed);
-  --color-canvas-dot: var(--canvas-dot);
-  --color-connector: var(--connector);
-  --color-row-group: var(--row-group);
-  --color-brain-heat: var(--brain-heat);
-  --color-brain-open: var(--brain-open);
-  --color-brain-glow: var(--brain-glow);
-  --color-graph-vision: var(--graph-vision);
-  --color-graph-teams: var(--graph-teams);
-  --color-graph-tools: var(--graph-tools);
-  --color-graph-statements: var(--graph-statements);
-  --color-graph-candidates: var(--graph-candidates);
-  --color-graph-sources: var(--graph-sources);
-  --color-graph-gaps: var(--graph-gaps);
-  --color-hue-blue: var(--hue-blue);
-  --color-hue-purple: var(--hue-purple);
-  --color-hue-pink: var(--hue-pink);
-  --color-hue-red: var(--hue-red);
-  --color-hue-amber: var(--hue-amber);
-  --color-hue-teal: var(--hue-teal);
-}
-
-/*
- * The type scale. The sans sets the product at 14 and 12px (16 for a
- * card's title); these four are the brand book's display sizes, in
- * Newsreader, each one whole in one class. Newsreader appears through
- * them only, never through a `font-*` class.
- */
-@utility type-display {
-  /* What Grasp asks or says out loud, as on Home: the brand book's h2. */
-  font-family: var(--font-display);
-  font-size: clamp(1.75rem, 2.6vw, 2.5rem);
-  font-weight: 300;
-  line-height: 1.1;
-  letter-spacing: -0.022em;
-  text-wrap: balance;
-}
-
-@utility type-title {
-  /* A page's own title. */
-  font-family: var(--font-display);
-  font-size: 1.75rem;
-  font-weight: 300;
-  line-height: 1.15;
-  letter-spacing: -0.022em;
-  text-wrap: balance;
-}
-
-@utility type-heading {
-  /* A dialog's title, a heading inside a page: the brand book's h3. */
-  font-family: var(--font-display);
-  font-size: 1.25rem;
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: -0.016em;
-}
-
-@utility type-figure {
-  /* A key figure: one number that says the result. Figures line up. */
-  font-family: var(--font-display);
-  font-size: 1.75rem;
-  font-weight: 300;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-
-/*
- * The brand's one highlight of words: a line under them, from lime to
- * green and 0.09em thick, never a marker behind them (brand book, chapter
- * 04). For what Grasp heard or marked in what someone said.
- */
-@utility line-under {
-  padding-bottom: 0.06em;
-  background-color: transparent;
-  background-image: linear-gradient(
-    90deg,
-    var(--underline-from),
-    var(--underline-to)
-  );
-  background-repeat: no-repeat;
-  background-position: 0 100%;
-  background-size: 100% 0.09em;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-/*
- * A pattern of the brand book's (chapter 05) on a ground that is already
- * dark and plain: the app's sidebar, which is the brand's ink. Its lines
- * are a dark field's, white at 10%. Which pattern is a data attribute, so
- * no inline style is needed under the strict CSP: `data-pattern="rings"`,
- * and `data-from="bottom"` has the rings rise from the foot.
- */
-@utility patterned {
-  isolation: isolate;
-  --field-lines: 0.1;
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    border-radius: inherit;
-    pointer-events: none;
-    --line: rgb(255 255 255 / var(--field-lines));
-  }
-}
-
-/* Soft rings from the top right, 64px apart. */
-.patterned[data-pattern="rings"]::before {
-  background: repeating-radial-gradient(
-    circle at var(--rings-at),
-    transparent 0 63px,
-    var(--line) 63px 64px
-  );
-  mask-image: radial-gradient(
-    circle at var(--rings-at),
-    #000 30%,
-    transparent 85%
-  );
-}
-
-[data-pattern="rings"] {
-  --rings-at: 88% 0;
-}
-
-[data-pattern="rings"][data-from="bottom"] {
-  --rings-at: 88% 100%;
-}
-
-:root {
-  /* 1. The brand, word for word from the brand book. */
-  --brand-ink: #062d22; /* headings, the main button, the dots */
-  --brand-text: #34503f; /* body copy */
-  --brand-muted: #5f7769; /* meta lines, captions */
-  --brand-quiet: #8a9d92; /* a form field's placeholder, never body copy */
-  --brand-unlit: #c3cec8; /* the words of a statement, before they light up */
-  --brand-canvas: #fbfdff; /* the page */
-  --brand-soft: #f3f6f4; /* icon tiles, inputs */
-  --brand-line: #e0e7e2; /* rules between rows */
-  --brand-hairline: #062d2212; /* half a pixel round every block */
-  --brand-white: #ffffff; /* cards on the canvas */
-  --brand-lime: #d9f9ad; /* the one action, what was heard, hours handed back */
-  --brand-lime-pressed: #cdf394;
-  --brand-lime-edge: #bfe58c; /* the ring inside the main button, the Now bar */
-  --brand-lime-shade: #6fae2e; /* the soft light under the main button */
-  --brand-forest: #10402f; /* ink buttons under the pointer */
-  --brand-signal: #3fae6a; /* the live dot, the end of an underline */
-  --brand-passed: #1f8a5b; /* done, approved, tested */
-  --brand-passed-text: #1c7148; /* the same green as small type */
-  --brand-amber: #82560f; /* needs a look */
-  --brand-amber-soft: #f9efd9;
-  --brand-red: #b04a35; /* a form error, nothing else */
-  --brand-focus: #3f7a57; /* the keyboard ring */
-  --brand-logo: #04251b; /* the logo only */
-  --brand-icon-tile: #e7f6d9; /* the ground of the app icon */
-  --brand-underline: #b7e67a; /* where a statement's underline starts */
-  /* The colours a dot can take: ink at rest, warm where a voice passes, green when kept. */
-  --brand-voice: #e0542c;
-  --brand-glow: #f6c35a;
-  --brand-kept: #269658;
-  --brand-kept-light: #aae870;
-  /*
-   * The paintings' base colours (chapter 05): the tone a field has before
-   * its painting comes. The three dark ones are what dark mode is built
-   * on; Night is the brand book's Ink painting.
-   */
-  --brand-dawn: #b9c8c8;
-  --brand-mist: #b4c6cc;
-  --brand-sand: #cdc8b2;
-  --brand-sage: #b8ccb2;
-  --brand-blush: #d6c4c4;
-  --brand-stone: #c8c8c6;
-  --brand-grove: #173f2d;
-  --brand-tide: #12282e;
-  --brand-night: #0d1714;
-
-  /* 2. Light. */
-  --radius: 0.625rem;
-  --background: var(--brand-canvas);
-  --foreground: var(--brand-ink);
-  --card: var(--brand-white);
-  --card-foreground: var(--brand-ink);
-  --popover: var(--brand-white);
-  --popover-foreground: var(--brand-ink);
-  --primary: var(--brand-ink);
-  --primary-foreground: var(--brand-canvas);
-  --primary-hover: var(--brand-forest);
-  --secondary: var(--brand-soft);
-  --secondary-foreground: var(--brand-ink);
-  --muted: var(--brand-soft);
-  --muted-foreground: var(--brand-muted);
-  /* Quieter than muted: hints, placeholders, what is not there yet. */
-  --faint: var(--brand-quiet);
-  --accent: color-mix(in oklab, var(--brand-soft) 60%, var(--brand-white));
-  --accent-foreground: var(--brand-ink);
-  --destructive: var(--brand-red);
-  --border: var(--brand-line);
-  --input: color-mix(in oklab, var(--brand-line) 85%, var(--brand-muted));
-  --ring: var(--brand-focus);
-  /* Half a pixel round every block: ink, barely there. */
-  --hairline: var(--brand-hairline);
-  /* What lies over the page behind a dialog or a sheet: a wash of the ink. */
-  --veil: color-mix(in oklab, var(--brand-ink) 16%, transparent);
-  /* Lime marks the one thing on a screen that matters: rare, so it keeps its meaning. */
-  --highlight: var(--brand-lime);
-  --highlight-foreground: var(--brand-ink);
-  --highlight-hover: var(--brand-lime-pressed);
-  --highlight-edge: var(--brand-lime-edge);
-  --signal: var(--brand-signal);
-  --unlit: var(--brand-unlit);
-  --underline-from: var(--brand-underline);
-  --underline-to: var(--brand-signal);
-  /* The logo is its own deep green, or the canvas on dark; as the app icon it lies on a pale lime tile. */
-  --logo: var(--brand-logo);
-  --icon-tile: var(--brand-icon-tile);
-  --icon-tile-foreground: var(--brand-logo);
+  --font-serif:
+    "Newsreader Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --background: #fbfdff;
+  --foreground: #062d22;
+  --card: #ffffff;
+  --card-foreground: #062d22;
+  --popover: #ffffff;
+  --popover-foreground: #062d22;
+  --primary: #062d22;
+  --primary-foreground: #fbfdff;
+  --secondary: #f3f6f4;
+  --secondary-foreground: #062d22;
+  --muted: #f3f6f4;
+  /* The brand book's #5f7769, a step darker: 4.5:1 on muted too. */
+  --muted-foreground: #5a7264;
+  --faint: #8a9d92;
+  --accent: #f8faf8;
+  --accent-foreground: #062d22;
+  --destructive: #b04a35;
+  --border: #e0e7e2;
+  --input: #ccd5cf;
+  --ring: #3f7a57;
+  --scrim: #062d2229;
+  --highlight: #d9f9ad;
+  --highlight-foreground: #062d22;
   /* Charts rank in the greens of the ink: the biggest part is the darkest. */
-  --chart-1: var(--brand-ink);
-  --chart-2: color-mix(in oklab, var(--brand-quiet) 55%, var(--brand-line));
-  --chart-3: var(--brand-muted);
-  --chart-4: var(--brand-quiet);
-  --chart-5: var(--brand-text);
+  --chart-1: #062d22;
+  --chart-2: #b0beb5;
+  --chart-3: #5f7769;
+  --chart-4: #8a9d92;
+  --chart-5: #34503f;
   /*
-   * The frame: the sidebar and the edge round the page in the brand's ink,
-   * the page lying on it as a white sheet. On it text is the canvas, and
-   * the place you are is a wash of the canvas.
+   * The frame: the sidebar is the brand's ink, the page lying on it as a
+   * white sheet. On it text is the canvas, and the place you are is a wash
+   * of the canvas.
    */
-  --sidebar: var(--brand-ink);
-  --sidebar-foreground: var(--brand-canvas);
-  --sidebar-primary: var(--brand-canvas);
-  --sidebar-primary-foreground: var(--brand-ink);
-  --sidebar-accent: color-mix(in oklab, var(--brand-canvas) 11%, transparent);
-  --sidebar-accent-foreground: var(--brand-canvas);
-  --sidebar-border: color-mix(in oklab, var(--brand-canvas) 10%, transparent);
+  --sidebar: #062d22;
+  --sidebar-foreground: #fbfdff;
+  --sidebar-primary: #fbfdff;
+  --sidebar-primary-foreground: #062d22;
+  --sidebar-accent: oklch(1 0 0 / 11%);
+  --sidebar-accent-foreground: #fbfdff;
+  --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: #6fb48a;
   /* Brand logos are drawn for light backgrounds, so their tile stays light in dark mode too. */
-  --tile: var(--brand-white);
-  --tile-foreground: var(--brand-ink);
-  /* Signals are small: a badge, a dot, a ring. Green for done, amber for a look. */
-  --status-agreed: var(--brand-passed);
-  --status-agreed-soft: color-mix(
-    in oklab,
-    var(--brand-passed) 10%,
-    var(--brand-white)
-  );
-  --status-agreed-strong: var(--brand-passed-text);
-  --status-attention: var(--brand-amber);
-  --status-attention-soft: var(--brand-amber-soft);
-  /*
-   * Time bars: what is still by hand, what was won back (lime, as the
-   * brand book's Now bar), and what is expected but not yet measured.
-   */
-  --bar-manual: var(--brand-line);
-  --bar-saved: var(--brand-lime-edge);
-  --bar-expected: var(--brand-soft);
-  --bar-expected-border: var(--brand-quiet);
+  --tile: #ffffff;
+  --tile-foreground: #062d22;
+  --status-agreed: #1c7148;
+  --status-attention: #82560f;
+  /* Time bars: what is still by hand. */
+  --bar-manual: #e0e7e2;
   /* The dashboard's return: measured is the agreed green; expected a light tint of it, still to come. */
-  --return-expected: color-mix(
-    in oklab,
-    var(--brand-passed) 22%,
-    var(--brand-white)
-  );
-  /* The workflow canvas: Today and Proposed each have their own ground and a 20px dot grid. */
-  --canvas-today: color-mix(
-    in oklab,
-    var(--brand-soft) 45%,
-    var(--brand-canvas)
-  );
-  --canvas-proposed: var(--brand-soft);
-  --canvas-dot: color-mix(in oklab, var(--brand-line) 75%, var(--brand-quiet));
-  --connector: var(--brand-unlit);
-  --row-group: color-mix(in oklab, var(--brand-soft) 50%, var(--brand-white));
-  --block-shadow:
-    0 1px 2px -1px var(--hairline),
-    0 30px 70px -50px color-mix(in oklab, var(--brand-ink) 25%, transparent);
-  --lifted-shadow:
+  --return-expected: #d1e5d9;
+  --row-group: #f9faf9;
+  --shadow-block: 0 1px 2px -1px #062d2212, 0 30px 70px -50px #062d2240;
+  --shadow-lifted:
     0 0 0 1px #0f3a2a14, 0 30px 70px -30px #0b2c2059,
     0 10px 24px -14px #0b2c2030;
-  --on-field-shadow:
-    0 0 0 1px #00000014, 0 36px 80px -28px #000000a6,
-    0 12px 28px -14px #00000059;
-  --glow-shadow:
-    inset 0 0 0 1px var(--brand-lime-edge),
-    0 12px 24px -14px
-      color-mix(in oklab, var(--brand-lime-shade) 80%, transparent);
+  --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 24px -14px #6fae2ecc;
   /*
    * The brain's notes are the one place with colour: one soft hue per
    * group, as a dot per note in its file tree, note pages and the atlas's
@@ -455,15 +131,14 @@
   --graph-sources: oklch(0.82 0.01 286);
   --graph-gaps: oklch(0.7 0.1 195);
   /*
-   * The dots of Grasp's figures (the brain, the buddy, Stephen's head):
-   * ink at rest, the voice's warmth where there is activity, its glow on
-   * the hottest dots. A question the brain still has open is warm, as a
-   * dot can be: never the interface's amber.
+   * The dots of Grasp's figures (the brain, the buddy, Stephen's head),
+   * which a canvas draws with the values it reads from here: the ink at
+   * rest, the voice's warmth where there is activity, its glow on the
+   * hottest dots.
    */
-  --brain-ink: var(--brand-ink);
-  --brain-heat: var(--brand-voice);
-  --brain-glow: var(--brand-glow);
-  --brain-open: var(--brand-voice);
+  --brain-ink: var(--foreground);
+  --brain-heat: #e0542c;
+  --brain-glow: #f6c35a;
   /*
    * A chart someone asked to have in colour: six hues of one weight,
    * beside the agreed green and the attention amber. A chart nobody asked
@@ -491,22 +166,17 @@
   --tinted-hover: oklch(from var(--primary) 0.88 calc(c * 0.5) h);
 }
 
-/*
- * 2. Dark: the page is the base of the Ink painting, text is the canvas,
- * buttons are canvas on ink, and lime still leads. On screen only: paper
- * keeps the light theme.
- */
+/* On screen only: paper keeps the light theme. */
 @media screen {
   .dark {
-    --background: var(--brand-night);
+    --background: #0d1714;
     --foreground: #eef4f0;
     --card: #14211c;
     --card-foreground: #eef4f0;
     --popover: #172520;
     --popover-foreground: #eef4f0;
     --primary: #eef4f0;
-    --primary-foreground: var(--brand-ink);
-    --primary-hover: #d6e2db;
+    --primary-foreground: #062d22;
     --secondary: #1b2a24;
     --secondary-foreground: #eef4f0;
     --muted: #1b2a24;
@@ -515,22 +185,10 @@
     --accent: #1a2822;
     --accent-foreground: #eef4f0;
     --destructive: #e4826b;
-    --border: color-mix(in oklab, var(--brand-canvas) 10%, transparent);
-    --input: color-mix(in oklab, var(--brand-canvas) 15%, transparent);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
     --ring: #6fb48a;
-    --hairline: color-mix(in oklab, var(--brand-canvas) 9%, transparent);
-    --veil: color-mix(in oklab, #000000 55%, transparent);
-    --highlight: var(--brand-lime);
-    --highlight-foreground: var(--brand-ink);
-    --highlight-hover: var(--brand-lime-pressed);
-    --highlight-edge: var(--brand-lime-edge);
-    --signal: var(--brand-signal);
-    --unlit: #3c4f46;
-    --underline-from: var(--brand-underline);
-    --underline-to: var(--brand-signal);
-    --logo: var(--brand-canvas);
-    --icon-tile: var(--brand-icon-tile);
-    --icon-tile-foreground: var(--brand-logo);
+    --scrim: #0000008c;
     --chart-1: #eef4f0;
     --chart-2: #2f423a;
     --chart-3: #94a89c;
@@ -539,40 +197,19 @@
     --sidebar: #0a1311;
     --sidebar-foreground: #eef4f0;
     --sidebar-primary: #eef4f0;
-    --sidebar-primary-foreground: var(--brand-ink);
     --sidebar-accent: #1b2b25;
     --sidebar-accent-foreground: #eef4f0;
-    --sidebar-border: color-mix(in oklab, var(--brand-canvas) 10%, transparent);
-    --sidebar-ring: #6fb48a;
-    --tile: var(--brand-soft);
-    --tile-foreground: var(--brand-ink);
-    --status-agreed: var(--brand-signal);
-    --status-agreed-soft: color-mix(in oklab, var(--brand-signal) 16%, #14211c);
-    --status-agreed-strong: #6fd39a;
+    --tile: #f3f6f4;
+    --status-agreed: #3fae6a;
     --status-attention: #e2b360;
-    --status-attention-soft: #2e2615;
     --bar-manual: #24342d;
-    --bar-saved: var(--brand-lime-edge);
-    --bar-expected: #1b2a24;
-    --bar-expected-border: #6c8277;
     --return-expected: #1f4434;
-    --canvas-today: #0f1b17;
-    --canvas-proposed: #13211c;
-    --canvas-dot: #2a3a33;
-    --connector: #3c4f46;
     --row-group: #111d18;
-    --block-shadow: 0 0 0 1px var(--hairline), 0 24px 60px -40px #000000b3;
-    /* The brand's shadow on a field, its edge in the canvas so a panel's edge shows on dark. */
-    --lifted-shadow:
-      0 0 0 1px var(--hairline), 0 36px 80px -28px #000000a6,
+    --shadow-block: 0 0 0 1px oklch(1 0 0 / 9%), 0 24px 60px -40px #000000b3;
+    --shadow-lifted:
+      0 0 0 1px oklch(1 0 0 / 9%), 0 36px 80px -28px #000000a6,
       0 12px 28px -14px #00000059;
-    --on-field-shadow:
-      0 0 0 1px #00000014, 0 36px 80px -28px #000000a6,
-      0 12px 28px -14px #00000059;
-    --glow-shadow:
-      inset 0 0 0 1px var(--brand-lime-edge),
-      0 12px 28px -14px
-        color-mix(in oklab, var(--brand-lime-shade) 45%, transparent);
+    --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 28px -14px #6fae2e73;
     --graph-vision: oklch(0.72 0.13 70);
     --graph-teams: oklch(0.68 0.12 150);
     --graph-tools: oklch(0.68 0.12 250);
@@ -582,8 +219,6 @@
     --graph-gaps: oklch(0.68 0.1 195);
     --brain-ink: var(--foreground);
     --brain-heat: oklch(0.68 0.19 38);
-    --brain-glow: var(--brand-glow);
-    --brain-open: oklch(0.68 0.19 38);
     --hue-blue: oklch(0.68 0.14 255);
     --hue-purple: oklch(0.68 0.15 300);
     --hue-pink: oklch(0.74 0.13 355);
@@ -604,6 +239,172 @@
 /* On the sidebar, which is the brand's ink, Grasp's dots print in the sidebar's own light ink. */
 [data-slot="sidebar"] {
   --brain-ink: var(--sidebar-foreground);
+}
+
+/* Motion is the same in light and dark. */
+@theme {
+  /*
+   * The house curve: away at once, then a long, soft landing. Every
+   * transition uses it unless it says otherwise; each is over within 300ms.
+   */
+  --ease-house: cubic-bezier(0.22, 1, 0.36, 1);
+  --default-transition-timing-function: var(--ease-house);
+  /*
+   * How a sidebar opens and folds: quick out of the gate, settling softly,
+   * as Grasp's own sidebar does. The app's sidebar and every page sidebar
+   * move on it, in 200ms both ways.
+   */
+  --ease-sidebar: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  /* Card titles and the like are the brand book's h4: the sans at 500. */
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-block: var(--shadow-block);
+  --shadow-lifted: var(--shadow-lifted);
+  --shadow-glow: var(--shadow-glow);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-muted-hover: var(--muted-hover);
+  --color-tinted: var(--tinted);
+  --color-tinted-hover: var(--tinted-hover);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-tile: var(--tile);
+  --color-tile-foreground: var(--tile-foreground);
+  --color-status-agreed: var(--status-agreed);
+  --color-status-attention: var(--status-attention);
+  --color-bar-manual: var(--bar-manual);
+  --color-return-expected: var(--return-expected);
+  --color-row-group: var(--row-group);
+  --color-brain-heat: var(--brain-heat);
+  --color-graph-vision: var(--graph-vision);
+  --color-graph-teams: var(--graph-teams);
+  --color-graph-tools: var(--graph-tools);
+  --color-graph-statements: var(--graph-statements);
+  --color-graph-candidates: var(--graph-candidates);
+  --color-graph-sources: var(--graph-sources);
+  --color-graph-gaps: var(--graph-gaps);
+  --color-hue-blue: var(--hue-blue);
+  --color-hue-purple: var(--hue-purple);
+  --color-hue-pink: var(--hue-pink);
+  --color-hue-red: var(--hue-red);
+  --color-hue-amber: var(--hue-amber);
+  --color-hue-teal: var(--hue-teal);
+}
+
+/*
+ * The serif's two looks that no kit component owns. Titles are the kit's
+ * (PageHeaderTitle, and the titles of dialogs, sheets and drawers); these
+ * two stand on plain elements across pages, in the middle of a sentence or
+ * a list, so they are utilities.
+ */
+@utility type-display {
+  /* What Grasp asks or says out loud, as in the interview: the brand book's h2. */
+  font-family: var(--font-serif);
+  font-size: clamp(1.75rem, 2.6vw, 2.5rem);
+  font-weight: 300;
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+@utility type-figure {
+  /* A key figure: one number that says the result. Figures line up. */
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/*
+ * The brand's one highlight of words: a line under them, from lime to
+ * green and 0.09em thick, never a marker behind them (brand book, chapter
+ * 04). For what Grasp heard or marked in what someone said, inside running
+ * text, so a utility and not a component.
+ */
+@utility line-under {
+  padding-bottom: 0.06em;
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--highlight), var(--status-agreed) 35%),
+    var(--status-agreed)
+  );
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 0.09em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/*
+ * The brand book's Rings (chapter 05) on the sidebar, which is the brand's
+ * ink: soft white rings, 64px apart, rising faintly from the foot. A
+ * pseudo-element of layered gradients, which classes can't draw, shared by
+ * the sidebar's container and its phone sheet (components/sidebar.tsx).
+ */
+@utility patterned {
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: repeating-radial-gradient(
+      circle at 88% 100%,
+      transparent 0 63px,
+      oklch(1 0 0 / 10%) 63px 64px
+    );
+    mask-image: radial-gradient(circle at 88% 100%, #000 30%, transparent 85%);
+  }
 }
 
 @layer base {
