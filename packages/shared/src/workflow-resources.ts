@@ -8,6 +8,7 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
+import type { RunFileListing } from "./run-files.ts";
 import type {
   WorkflowCandidateTrace,
   WorkflowDiagram,
@@ -1218,6 +1219,13 @@ export interface WorkflowResourcesApi {
   activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
+  /**
+   * Run `runId`'s finished files, oldest first, to download: for the run's
+   * person and, unless the run is restricted, the organization's admins;
+   * null for anyone else who may see the run, and once its details are
+   * gone.
+   */
+  runFiles: (id: string, runId: string) => Promise<RunFileListing[] | null>;
   /** What run `runId` did, over its version's diagram, for builders. */
   runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /**

@@ -2,6 +2,7 @@ import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { isPackageArtifactPath } from "@grasp-os/shared/packages";
+import { runFilesPath } from "@grasp-os/shared/run-files";
 import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
 
 const policy = (directives: Record<string, string>): string =>
@@ -220,9 +221,11 @@ export const catalogLogoPolicy = `${policy({
  * paths of code we didn't write vary on `Sec-Fetch-Site`, as core refuses
  * them to the product page (`isRefusedToProductPage`).
  */
-/** Whether `pathname` is where an App file's bytes are sent. */
+/** Whether `pathname` is where an App file's or a run file's bytes are sent. */
 const isFileContentPath = (pathname: string): boolean =>
-  pathname.startsWith(`${appFilesPath}/`) && pathname.endsWith("/content");
+  (pathname.startsWith(`${appFilesPath}/`) ||
+    pathname.startsWith(`${runFilesPath}/`)) &&
+  pathname.endsWith("/content");
 
 export const setSecurityHeaders = (
   headers: Headers,
@@ -236,7 +239,8 @@ export const setSecurityHeaders = (
   } else if (url.pathname.startsWith(`${catalogLogoPath}/`)) {
     headers.set("content-security-policy", catalogLogoPolicy);
   } else if (isFileContentPath(url.pathname)) {
-    // An App file's bytes (app-file-route.ts): always an attachment, and
+    // An App file's or a run file's bytes (app-file-route.ts,
+    // workflows/run-file-downloads.ts): always an attachment, and
     // should a browser open one anyway, a sandbox that runs nothing,
     // loads nothing and isn't read by another site.
     headers.set("content-security-policy", "default-src 'none'; sandbox");
