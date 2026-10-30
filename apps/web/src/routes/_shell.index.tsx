@@ -339,6 +339,7 @@ const Chat = () => {
           running: false,
           projectId: null,
           appId: null,
+          via: "web",
         });
   // The open chat: the chat dock carries it on on every other page. An
   // App's own chat stays the App's, in the dock on its page, and leaves
