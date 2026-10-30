@@ -51,7 +51,7 @@ export const ringName = (ring: number): string => {
 export type WorkerName = "core" | "connect";
 
 export interface Release {
-  /** As CI names it: `r<run>-<commit>`. */
+  /** As CI's publish names it: `YY.MM.N`. */
   id: string;
   commit: string;
   /** The day it was imported into the admin. */

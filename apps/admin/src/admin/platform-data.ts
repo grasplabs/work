@@ -35,6 +35,7 @@ export const staffActions = [
   "rollout.cancel",
   "rollout.rollback",
   "client.create",
+  "client.discard",
   "client.ring",
   "client.model_spend_ceiling",
   "client.pin",
@@ -44,6 +45,7 @@ export const staffActions = [
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "platform.grasp_client",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

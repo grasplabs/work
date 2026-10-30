@@ -6,8 +6,6 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { z } from "zod";
 
-import type { AlertKindName, AlertNumbers } from "../alerts.ts";
-
 /** What the watch reads of a client's Stephen, as its Setup shows it. */
 export const watchedSignalsSchema = z.object({
   /** How many hours the chat counts cover. */
@@ -34,68 +32,71 @@ const fewestTurns = 5;
 /** How many answers it takes before their p90 means anything. */
 const fewestAnswers = 10;
 
+/** A signal the watch holds to a bar. */
+export type SignalKind =
+  | "stephen_refused"
+  | "stephen_failing"
+  | "stephen_slow"
+  | "stephen_over_budget"
+  | "stephen_busy"
+  | "stephen_sends_failing"
+  | "stephen_uninstalled"
+  | "stephen_connections_again";
+
 /**
- * Each signal's bar, as the alert it raises and its numbers once over it;
- * null while it's under. From the plan's release bars (p90 of 12 s with
- * an app) and what a person at Grasp should look at the same day.
+ * Each signal's bar: whether it's over. From the plan's release bars (p90
+ * of 12 s with an app) and what a person at Grasp should look at the same
+ * day.
  */
-export const bars: readonly {
-  kind: AlertKindName;
-  over: (signals: WatchedSignals) => AlertNumbers | null;
+const bars: readonly {
+  kind: SignalKind;
+  over: (signals: WatchedSignals) => boolean;
 }[] = [
   {
     // A handful are the internet trying; more are Teams' own messages
     // refused, as a bot id or tenant that isn't the client's would.
     kind: "stephen_refused",
-    over: ({ refused }) => (refused > 20 ? { refused } : null),
+    over: ({ refused }) => refused > 20,
   },
   {
     kind: "stephen_failing",
     over: ({ answered, failed }) => {
       const turns = answered + failed;
-      return turns >= fewestTurns && failed / turns > 0.1
-        ? { failed, turns }
-        : null;
+      return turns >= fewestTurns && failed / turns > 0.1;
     },
   },
   {
     kind: "stephen_slow",
     over: ({ answered, p90Ms }) =>
-      answered >= fewestAnswers && p90Ms !== null && p90Ms > 12_000
-        ? { p90Ms }
-        : null,
+      answered >= fewestAnswers && p90Ms !== null && p90Ms > 12_000,
   },
   {
     kind: "stephen_over_budget",
-    over: ({ overBudget }) => (overBudget > 0 ? { overBudget } : null),
+    over: ({ overBudget }) => overBudget > 0,
   },
   {
     kind: "stephen_busy",
-    over: ({ busy }) => (busy > 10 ? { busy } : null),
+    over: ({ busy }) => busy > 10,
   },
   {
     kind: "stephen_sends_failing",
-    over: ({ sendFailed }) => (sendFailed > 0 ? { failed: sendFailed } : null),
+    over: ({ sendFailed }) => sendFailed > 0,
   },
   {
     // One person removing the app is theirs to do; several, the company's.
     kind: "stephen_uninstalled",
-    over: ({ uninstalled }) => (uninstalled >= 3 ? { uninstalled } : null),
+    over: ({ uninstalled }) => uninstalled >= 3,
   },
   {
     kind: "stephen_connections_again",
     over: ({ companyAgain, personalAgain }) =>
-      companyAgain > 0 || personalAgain >= 5
-        ? { company: companyAgain, personal: personalAgain }
-        : null,
+      companyAgain > 0 || personalAgain >= 5,
   },
 ];
 
-/** Which of `signals` are over their bar, by the alert each raises. */
-export const overBars = (signals: WatchedSignals): Set<AlertKindName> =>
-  new Set(
-    bars.flatMap(({ kind, over }) => (over(signals) === null ? [] : [kind]))
-  );
+/** Which of `signals` are over their bar. */
+export const overBars = (signals: WatchedSignals): Set<SignalKind> =>
+  new Set(bars.flatMap(({ kind, over }) => (over(signals) ? [kind] : [])));
 
 /**
  * What the watch reads of `snapshot`; null from a core that doesn't count
