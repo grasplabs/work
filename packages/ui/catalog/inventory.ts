@@ -890,7 +890,7 @@ export const graspComponents = {
     status: "supported",
     summary:
       "One of the brand book's paintings with a grain and a pattern over it, behind the one or two things on a screen that matter most.",
-    exports: ["PaintedField"],
+    exports: ["PaintedField", "paintedFieldVariants"],
   },
   "prompt-input": {
     status: "supported",

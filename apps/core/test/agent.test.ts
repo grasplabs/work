@@ -1631,10 +1631,15 @@ describe("chat agent after a restart", () => {
     await ask("What is 6 * 7?");
     // The object died while the step ran: the step's call was kept, as the
     // loop keeps each message it finishes, but its result and the answer
-    // weren't.
+    // weren't. A message is kept with what it said for searches, so
+    // neither row of the last two exists.
     await runInDurableObject(stub, (_instance, state) => {
+      const lastTwo = "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2";
       state.storage.sql.exec(
-        "DELETE FROM chat_messages WHERE id IN (SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2)"
+        `DELETE FROM chat_search_text WHERE message_id IN (${lastTwo})`
+      );
+      state.storage.sql.exec(
+        `DELETE FROM chat_messages WHERE id IN (${lastTwo})`
       );
     });
 
