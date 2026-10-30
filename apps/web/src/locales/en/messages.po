@@ -525,6 +525,10 @@ msgstr "{count} requests last week, {by} fewer than the week before"
 msgid "{count} requests last week, {by} more than the week before"
 msgstr "{count} requests last week, {by} more than the week before"
 
+#: src/workflows/today-lanes.tsx
+msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
+msgstr "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{daily} a day"
 msgstr "{daily} a day"
@@ -3026,6 +3030,10 @@ msgstr "Answer by"
 msgid "Answer in the brain"
 msgstr "Answer in the brain"
 
+#: src/workflows/today-lanes.tsx
+msgid "Answer with a comment"
+msgstr "Answer with a comment"
+
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
 msgid "Answered"
@@ -4054,6 +4062,11 @@ msgstr "Can’t be read"
 #: src/settings/teams.tsx
 msgid "Cancel"
 msgstr "Cancel"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run someone stopped before its end"
+msgid "cancelled"
+msgstr "cancelled"
 
 #: src/workflows/runs.tsx
 msgid "Cancelled"
@@ -6383,6 +6396,11 @@ msgstr "Extracting"
 #: src/onboarding/interview-list.tsx
 msgid "Facts agreed"
 msgstr "Facts agreed"
+
+#: src/workflows/today-lanes.tsx
+msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "failed"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
@@ -11438,10 +11456,17 @@ msgstr "Overview"
 msgid "Own list or tool"
 msgstr "Own list or tool"
 
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by {name}"
+msgstr "Owned by {name}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Owned by {owner}"
 msgstr "Owned by {owner}"
+
+#: src/routes/_shell.workflows.$workflow.tsx
+msgid "Owned by someone else"
+msgstr "Owned by someone else"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx

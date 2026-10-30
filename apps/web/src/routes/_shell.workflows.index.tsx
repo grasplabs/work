@@ -34,6 +34,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 import type { Session } from "../core.ts";
 import { listedOrNone, readPeople } from "../directory.ts";
@@ -41,6 +42,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import {
   ProcessGlyph,
   ProcessHint,
@@ -376,11 +378,31 @@ const NeedsAttention = ({
   );
 };
 
-/** The figures over the runs, where core counted them for the person. */
-const Figures = ({ activity }: { activity: Loaded<RunActivity | null> }) =>
-  activity.state === "ready" && activity.data !== null ? (
+/**
+ * The figures over the runs, where core counted them for the person: read
+ * once while the Runs tab shows, as they count a window of days whatever
+ * the log's filters or the view, which never read them again.
+ */
+const Figures = () => {
+  const core = useCore();
+  const [activity, setActivity] = useState<Loaded<RunActivity | null>>();
+  useEffect(() => {
+    const left = new AbortController();
+    const read = async (): Promise<void> => {
+      const loaded = await loadFromCore(core, readActivity, left.signal);
+      if (!left.signal.aborted) {
+        setActivity(loaded);
+      }
+    };
+    void read();
+    return () => {
+      left.abort();
+    };
+  }, [core]);
+  return activity?.state === "ready" && activity.data !== null ? (
     <RunFiguresView figures={runFiguresOf(activity.data)} scope="all" />
   ) : null;
+};
 
 /** Today's lanes, or the log of every run, on the Runs tab. */
 const RunsView = () => {
@@ -570,7 +592,7 @@ const Workflows = () => {
           <TabsContent value="runs">
             {page.tab === "today" || page.tab === "runs" ? (
               <div className="mt-4">
-                <Figures activity={page.activity} />
+                <Figures />
               </div>
             ) : null}
             <div className="mt-6">
@@ -656,11 +678,11 @@ export const Route = createFileRoute("/_shell/workflows/")({
     deps: { tab, app, workflow, status, view },
   }) => {
     if (tab === "runs" && view === "today") {
-      const [today, activity] = await Promise.all([
-        loadFromCore(core, async (session) => await session.workflows.today()),
-        loadFromCore(core, readActivity),
-      ]);
-      return { tab: "today" as const, today, activity };
+      const today = await loadFromCore(
+        core,
+        async (session) => await session.workflows.today()
+      );
+      return { tab: "today" as const, today };
     }
     if (tab !== "runs") {
       const needs = tab === "needs";
@@ -706,7 +728,7 @@ export const Route = createFileRoute("/_shell/workflows/")({
       }
       return { tab: "workflows" as const, ...lists };
     }
-    const [runs, filters, models, activity] = await Promise.all([
+    const [runs, filters, models] = await Promise.all([
       loadFromCore(
         core,
         async (session) =>
@@ -719,13 +741,11 @@ export const Route = createFileRoute("/_shell/workflows/")({
       loadFromCore(core, async (session) => await filterOptions(session, app)),
       // The model a fix in chat asks with; without one, none is offered.
       loadFromCore(core, async (session) => await session.chats.models()),
-      loadFromCore(core, readActivity),
     ]);
     return {
       tab: "runs" as const,
       runs,
       filters,
-      activity,
       model: models.state === "ready" ? models.data[0] : undefined,
     };
   },
