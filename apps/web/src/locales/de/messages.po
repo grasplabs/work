@@ -3491,6 +3491,7 @@ msgstr "Nicht lesbar"
 #: src/brain/goals-editor.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4857,6 +4858,18 @@ msgstr "Ist das geschehen? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Verzeichnis"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Verwerfen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Entwurf verwerfen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Diesen Entwurf verwerfen?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -11099,6 +11112,10 @@ msgstr "Ressourcen"
 msgid "Restore"
 msgstr "Wiederherstellen"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Diese Version wiederherstellen"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Version {number} wiederherstellen"
@@ -13295,6 +13312,10 @@ msgstr "Die Domänen und Workflows, die genehmigte npm-Pakete nutzen dürfen. Ö
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "Die Domänen, die dieser Chat erstellt, wurden nicht geladen."
+
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "Die Änderungen des Entwurfs gehen verloren, und die nächste Änderung des Agenten beginnt wieder bei der App, wie sie ist. Seine Versionen bleiben erhalten, sodass du eine wiederherstellen kannst."
 
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
