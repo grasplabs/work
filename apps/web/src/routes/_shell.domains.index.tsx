@@ -1,5 +1,6 @@
 import type { App, AppContents, AppStatus } from "@grasp-os/shared/apps";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { canBuild } from "@grasp-os/shared/roles";
+import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -8,26 +9,42 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderContent,
+  PageHeaderDescription,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { CogIcon, LayoutGridIcon, TagIcon, WorkflowIcon } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  CogIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  TagIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { statusLabel } from "../engines/app-status.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { NewDomainDialog } from "../engines/new-domain-dialog.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { processNames } from "../workflows/business-process.tsx";
 import { openableApps } from "../workflows/reads.ts";
 
-// Engines, as in the prototype (`routes/engines/index.tsx`): the engines
+// Domains, as in the prototype (`routes/domains/index.tsx`): the domains
 // (core's Apps) the person can open, as core lists them, each a card with
-// what its current version holds, counted by core. No process bars, hours
-// or "New engine": engines are made in chat. Its builders also see the
+// the business process it serves, if any, and what its current version
+// holds, counted by core. No hours or process bars: core counts no hours
+// for a domain. Who builds makes one with New domain, as in the
+// prototype; Grasp also makes them in chat. Its builders also see the
 // drafts and the archived ones: then, as the prototype's Apps page
 // (`components/apps/apps-overview.tsx`), a tab for each status, with how
 // many each holds.
@@ -104,29 +121,40 @@ const Counts = ({ contents }: { contents: AppContents | undefined }) => {
   );
 };
 
-/** One engine, as the prototype's card: its icon, name and what it is for, then what it holds. */
-const EngineCard = ({ app, contents }: ListedApp) => (
-  <li className="bg-card hover:border-ring/40 relative flex flex-col gap-4 rounded-xl border p-4 transition-colors">
-    <div className="flex items-start gap-3">
-      <EngineIcon />
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <Link
-          className="font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-          params={{ engine: app.id }}
-          to="/domains/$engine"
-        >
-          {app.name}
-        </Link>
-        {app.description === "" ? null : (
-          <p className="text-muted-foreground line-clamp-2">
-            {app.description}
-          </p>
-        )}
+/**
+ * One domain, as the prototype's card: its icon, the standard name of the
+ * process it serves over its own name, what it is for, then what it holds.
+ */
+const EngineCard = ({ app, contents }: ListedApp) => {
+  const { i18n } = useLingui();
+  return (
+    <li className="bg-card hover:border-faint relative flex flex-col gap-4 rounded-xl border p-4 transition-colors">
+      <div className="flex items-start gap-3">
+        <EngineIcon process={app.process} />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          {app.process === null ? null : (
+            <span className="text-muted-foreground text-xs">
+              {i18n._(processNames[app.process])}
+            </span>
+          )}
+          <Link
+            className="font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
+            params={{ engine: app.id }}
+            to="/domains/$engine"
+          >
+            {app.name}
+          </Link>
+          {app.description === "" ? null : (
+            <p className="text-muted-foreground line-clamp-2">
+              {app.description}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
-    <Counts contents={contents} />
-  </li>
-);
+      <Counts contents={contents} />
+    </li>
+  );
+};
 
 /** No engine yet: engines are made in chat. */
 const NoEngines = () => (
@@ -203,7 +231,7 @@ const ByStatus = ({ listed }: { listed: ListedApp[] }) => {
         }}
         value={status}
       >
-        <TabsList>
+        <TabsList variant="line">
           {statuses.map((each) => (
             <TabsTrigger key={each} value={each}>
               {statusLabel(each)}
@@ -235,6 +263,9 @@ const ByStatus = ({ listed }: { listed: ListedApp[] }) => {
 const Engines = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  const navigate = useNavigate();
+  const [making, setMaking] = useState(false);
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Domains` }]} page={page} />;
   }
@@ -242,23 +273,44 @@ const Engines = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Domains` }]} />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
-        <div className="flex flex-col gap-1">
-          <PageHeaderTitle>
-            <Trans>Domains</Trans>
-          </PageHeaderTitle>
-          <p className="text-muted-foreground">
-            <Trans>
-              Each domain runs one part of the business: its workflows, apps and
-              connections.
-            </Trans>
-          </p>
-        </div>
+        <PageHeader>
+          <PageHeaderContent>
+            <PageHeaderTitle>
+              <Trans>Domains</Trans>
+            </PageHeaderTitle>
+            <PageHeaderDescription>
+              <Trans>
+                Each domain is one part of the business: its workflows, apps and
+                connections.
+              </Trans>
+            </PageHeaderDescription>
+          </PageHeaderContent>
+          {canBuild(identity.role) ? (
+            <PageHeaderActions>
+              <Button
+                onClick={() => {
+                  setMaking(true);
+                }}
+              >
+                <PlusIcon data-icon="inline-start" />
+                <Trans>New domain</Trans>
+              </Button>
+            </PageHeaderActions>
+          ) : null}
+        </PageHeader>
         {page.data.length === 0 ? (
           <NoEngines />
         ) : (
           <ByStatus listed={page.data} />
         )}
       </div>
+      <NewDomainDialog
+        onMade={(engine) => {
+          void navigate({ to: "/domains/$engine", params: { engine } });
+        }}
+        onOpenChange={setMaking}
+        open={making}
+      />
     </>
   );
 };

@@ -4036,6 +4036,7 @@ msgstr "No se puede leer"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5893,8 +5894,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Cada documento puede tener hasta {maxKb} KB."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Cada dominio gestiona una parte del negocio: sus flujos de trabajo, aplicaciones y conexiones."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Cada dominio es una parte del negocio: sus flujos de trabajo, aplicaciones y conexiones."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6698,6 +6699,10 @@ msgstr "Para {0}, a quien ya se preguntó"
 msgid "For {person}"
 msgstr "Para {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Para una parte del negocio, como una línea de productos o una oficina. Empieza vacío: lo que Grasp construye en él trae sus flujos de trabajo, aplicaciones e integraciones."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Para un administrador"
@@ -6719,6 +6724,10 @@ msgstr "por todas las llamadas a modelos este mes"
 msgid "For everyone"
 msgstr "Para todos"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Por ejemplo, Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Por ejemplo Personio o Twinfield"
@@ -6726,6 +6735,10 @@ msgstr "Por ejemplo Personio o Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Por ejemplo: responde a las preguntas de los clientes"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Por ejemplo: todo lo relacionado con los contratos de leasing, desde la solicitud hasta la renovación"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -8918,6 +8931,10 @@ msgstr "Convertirlo en un flujo de trabajo"
 msgid "Make admin"
 msgstr "Hacer administrador"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Crear dominio"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Hacer actual la versión {version}"
@@ -9251,6 +9268,7 @@ msgid "Muted"
 msgstr "En silencio"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9444,6 +9462,11 @@ msgstr "Nueva colección"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "Nuevo documento"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Nuevo dominio"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -17346,6 +17369,10 @@ msgstr "Qué podría ir mejor"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Qué cuenta como éxito"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "¿Qué gestiona?"
 
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
