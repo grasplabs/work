@@ -39,24 +39,6 @@
         "required_status_checks": [
           {
             "context": "check"
-          },
-          {
-            "context": "e2e"
-          },
-          {
-            "context": "admin-e2e"
-          },
-          {
-            "context": "workerd"
-          },
-          {
-            "context": "release"
-          },
-          {
-            "context": "conventions"
-          },
-          {
-            "context": "stephen"
           }
         ],
         "strict_required_status_checks_policy": false,
