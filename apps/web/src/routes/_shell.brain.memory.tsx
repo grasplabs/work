@@ -8,7 +8,7 @@ import { MemoryPage } from "../brain/memory-page.tsx";
 
 const Memory = () => {
   const { identity } = Route.useRouteContext();
-  return <MemoryPage admin={isMemberAdmin(identity)} />;
+  return <MemoryPage admin={isMemberAdmin(identity)} teams={identity.teams} />;
 };
 
 export const Route = createFileRoute("/_shell/brain/memory")({

@@ -45,6 +45,11 @@ export type Crumb =
   | { label: string; to: "/domains/$engine"; params: { engine: string } }
   | {
       label: string;
+      to: "/projects/$projectId";
+      params: { projectId: string };
+    }
+  | {
+      label: string;
       to: "/landscape/$appId/overview";
       params: { appId: string };
     }
@@ -81,6 +86,9 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   }
   if (crumb.to === "/brain/sections/$sectionId") {
     return <Link params={crumb.params} to="/brain/sections/$sectionId" />;
+  }
+  if (crumb.to === "/projects/$projectId") {
+    return <Link params={crumb.params} to="/projects/$projectId" />;
   }
   if (crumb.to === "/landscape/$appId/overview") {
     return <Link params={crumb.params} to="/landscape/$appId/overview" />;

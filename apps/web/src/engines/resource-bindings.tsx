@@ -879,7 +879,7 @@ const ResourceCard = ({
           {alias}
         </h3>
         <Badge variant="outline">{i18n._(kindLabels[kind])}</Badge>
-        <Badge variant={state === "served" ? "secondary" : "destructive"}>
+        <Badge variant={state === "served" ? "secondary" : "attention"}>
           {i18n._(stateLabels[state])}
         </Badge>
       </div>

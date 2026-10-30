@@ -548,7 +548,7 @@ describe("erasing a person", () => {
     });
   });
 
-  it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications and teams", async () => {
+  it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications, teams, and what they asked Stephen", async () => {
     const { admin, person } = await removedPerson();
     const { userId } = person;
     const email = String(person.person.email);
@@ -586,6 +586,12 @@ describe("erasing a person", () => {
       env.DB.prepare(
         "INSERT INTO notifications (id, person_id, type, created_at, updated_at) VALUES (?, ?, 'run_failed', ?, ?)"
       ).bind(crypto.randomUUID(), userId, now, now),
+      env.DB.prepare(
+        "INSERT INTO stephen_requests (id, day, place, person_id, kind, outcome, tools, missing) VALUES (?, '2026-10-01', 'teams', ?, 'answered', 'done', '[]', '[]')"
+      ).bind(`teams:${crypto.randomUUID()}`, userId),
+      env.DB.prepare(
+        "INSERT INTO stephen_summary_readers (person_id, via, updated_at) VALUES (?, 'email', ?)"
+      ).bind(userId, now),
     ]);
     // A team of theirs that came back.
     const team = crypto.randomUUID();
@@ -616,6 +622,8 @@ describe("erasing a person", () => {
       offers: await rowsOf("chat_workflow_offers", "user_id", userId),
       notifications: await rowsOf("notifications", "person_id", userId),
       teams: await rowsOf("team_members", "user_id", userId),
+      requests: await rowsOf("stephen_requests", "person_id", userId),
+      summaries: await rowsOf("stephen_summary_readers", "person_id", userId),
       invitedThem: await invitedOf(email),
       invitedOther: await invitedOf(other),
     }).toStrictEqual({
@@ -626,6 +634,8 @@ describe("erasing a person", () => {
       offers: 0,
       notifications: 0,
       teams: 0,
+      requests: 0,
+      summaries: 0,
       invitedThem: 0,
       invitedOther: 1,
     });

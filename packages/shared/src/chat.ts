@@ -7,6 +7,7 @@ import type {
   ScreenBundle,
   ScreenProblem,
 } from "./screens.ts";
+import type { ThinkingStep } from "./thinking.ts";
 import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -58,6 +59,27 @@ export interface ChatSummary {
   projectId: string | null;
   /** The App it is for (`ChatsApi.forApp`), or null for none. */
   appId: string | null;
+}
+
+/**
+ * Where a search was found in what was said in a chat: the words just
+ * before it, what matched as it was said, and the words after it; cut
+ * ends carry an ellipsis.
+ */
+export interface ChatSearchSnippet {
+  before: string;
+  found: string;
+  after: string;
+}
+
+/** A chat a search found (`ChatsApi.search`). */
+export interface ChatSearchHit {
+  chat: ChatSummary;
+  /**
+   * Where it was said, for a chat whose title and project's name don't
+   * hold every word searched for; null for one they do.
+   */
+  said: ChatSearchSnippet | null;
 }
 
 // Projects: a person groups their chats, and tells each chat's agent what
@@ -382,6 +404,12 @@ export type ChatMessage =
       text: string;
       failed: boolean;
       at: string;
+      /**
+       * A step of thinking the brain showed (`show_thinking`, see
+       * `ThinkingStep`), for the result of a call that showed one; none
+       * for any other.
+       */
+      thinking?: ThinkingStep;
     };
 
 /**
@@ -649,6 +677,22 @@ export interface ChatsApi {
   efforts: () => Promise<Record<string, ModelEfforts>>;
   /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
+  /**
+   * The person's own chats, in project `projectId` when one is named, that
+   * hold every word of `query` in their title, their project's name or
+   * what was said in them, the most recently active first: at most a
+   * page's worth. Never anyone else's.
+   */
+  search: (
+    query: string,
+    projectId?: string | null
+  ) => Promise<ChatSearchHit[]>;
+  /**
+   * One of the person's chats, as `list` gives it, however long ago it was
+   * active: for a chat past the end of the list. Not theirs, or not there,
+   * is `agent.chat_not_found`.
+   */
+  summary: (chatId: string) => Promise<ChatSummary>;
   /** Makes a chat, in project `projectId` when one is named. */
   create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
   /**

@@ -1,5 +1,6 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 
 import { readActivity, readWaiting } from "../dashboard/read-dashboard.ts";
 import { readDirectory } from "../directory.ts";
@@ -11,7 +12,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
 // waits on the person, read as the dashboard reads it, each item with
 // its actions; and, for admins, the latest of the audit trail. Like the
-// prototype's, the sidebar doesn't list it: the dashboard holds what waits.
+// prototype's, the sidebar doesn't list it: the dashboard holds what waits,
+// and leads here to an item (`?item=`) only the inbox settles.
 
 /** How many of the trail's latest events the activity tab shows at most. */
 const activityShown = 100;
@@ -19,9 +21,11 @@ const activityShown = 100;
 const Inbox = () => {
   const { waiting, readAt, activity } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  const { item } = Route.useSearch();
   return (
     <InboxPage
       activity={activity}
+      chosen={item}
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
       olderFailures={
@@ -32,6 +36,7 @@ const Inbox = () => {
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
+  validateSearch: z.object({ item: z.string().optional() }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
     // Not awaited: the activity tab waits for it.

@@ -8,6 +8,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import { PaintedField } from "@grasp-os/ui/components/painted-field";
 import {
   Tooltip,
   TooltipContent,
@@ -90,7 +91,7 @@ const AnswerButton = ({
   busy: boolean;
   pile: Pile;
   first?: boolean;
-  variant: "default" | "outline";
+  variant: "highlight" | "outline";
 }) => {
   const [confirming, setConfirming] = useState(false);
   const press = async (keys?: boolean): Promise<void> => {
@@ -184,15 +185,14 @@ export const PileCard = ({
 }) => {
   const nameId = useId();
   return (
-    <article
-      aria-labelledby={nameId}
-      className="bg-card relative flex min-w-0 flex-col items-center gap-5 overflow-hidden rounded-xl border px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9"
+    // The one thing on the dashboard that waits on someone, so it stands on
+    // a painted field.
+    <PaintedField
+      className="flex min-w-0 flex-col items-center gap-5 rounded-xl px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9"
+      painting="dawn"
+      pattern="columns"
+      render={<article aria-labelledby={nameId} />}
     >
-      {/* The brand's Columns pattern, in the app's greys: the card is never an empty white field. */}
-      <span
-        aria-hidden="true"
-        className="field-columns pointer-events-none absolute inset-0"
-      />
       <div className="relative flex flex-col items-center gap-2">
         <p className="text-muted-foreground flex items-center gap-2">
           {/* The mark of what needs someone beats, as something that waits does; still for whoever asks for less motion. */}
@@ -202,10 +202,7 @@ export const PileCard = ({
           </span>
           <Trans>Waiting on you</Trans>
         </p>
-        <h2
-          className="max-w-3xl text-2xl font-medium tracking-tight text-balance break-words"
-          id={nameId}
-        >
+        <h2 className="type-title max-w-3xl break-words" id={nameId}>
           {name}
         </h2>
       </div>
@@ -222,7 +219,7 @@ export const PileCard = ({
             busy={busy || pile.deciding}
             first
             pile={pile}
-            variant="default"
+            variant="highlight"
           />
           <AnswerButton
             answer={no}
@@ -233,6 +230,6 @@ export const PileCard = ({
         </div>
         <ErrorText>{failure}</ErrorText>
       </div>
-    </article>
+    </PaintedField>
   );
 };

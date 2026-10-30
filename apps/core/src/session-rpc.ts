@@ -36,6 +36,7 @@ import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
+import { StephenRequestsRpc } from "./stephen-requests.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
@@ -77,6 +78,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #members: MembersRpc;
   readonly #organization: OrganizationRpc;
   readonly #orgSettings: OrgSettingsRpc;
+  readonly #stephenRequests: StephenRequestsRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
   readonly #stores: StoresRpc;
@@ -125,6 +127,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#members = new MembersRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
     this.#orgSettings = new OrgSettingsRpc(env, full);
+    this.#stephenRequests = new StephenRequestsRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
     this.#stores = new StoresRpc(env, full);
@@ -286,6 +289,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get orgSettings(): OrgSettingsRpc {
     return this.#orgSettings;
+  }
+
+  get stephenRequests(): StephenRequestsRpc {
+    return this.#stephenRequests;
   }
 
   get audit(): AuditRpc {

@@ -102,8 +102,18 @@ export const MessageResponse = ({
   text,
   cited,
   sources,
+  written = false,
 }: {
   text: string;
   cited?: readonly string[];
   sources?: readonly ChatCitedDocument[];
-}) => <AnswerMarkdown cited={cited} sources={sources} text={text} />;
+  /** Still being written: each new word fades in. */
+  written?: boolean;
+}) => (
+  <AnswerMarkdown
+    cited={cited}
+    sources={sources}
+    text={text}
+    written={written}
+  />
+);
