@@ -17,12 +17,14 @@ import { useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFile, ExportFormat } from "../export/export-file.tsx";
+import { FigureTiles } from "../export/figure-tiles.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { PlainMarkdown } from "../knowledge/markdown.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
   readsOf,
   reportBody,
+  reportFigures,
   reportFileName,
   reportMarkdown,
   reportTitle,
@@ -34,7 +36,8 @@ import {
 // export in Grasp offers (export/export-file.tsx). It is made from core's
 // read of it (`dashboard.report()`), as it stands when the dialog opens. The prototype's
 // printer and sheet of paper aren't here: the report shows as the page it
-// prints from.
+// prints from, its key figures in tiles over its text, as the PDF has them.
+// The prototype's hours bars aren't either: core keeps no hours.
 
 /** The report, once its reads came: what it says, and the two ways to take it. */
 const ReportSheet = ({
@@ -53,11 +56,14 @@ const ReportSheet = ({
   onTaken: () => void;
 }) => {
   const { i18n, t } = useLingui();
-  const body = reportBody(readsOf(reads), { line, today }, i18n);
+  const parts = readsOf(reads);
+  const body = reportBody(parts, { line, today }, i18n);
+  const figures = reportFigures(parts.runs, i18n);
   const file: ExportFile = {
     name: reportFileName(week, today),
     title,
     markdown: () => reportMarkdown(title, body),
+    figures,
   };
   // While the page to print is being made, and whether an export failed.
   const [busy, setBusy] = useState(false);
@@ -77,8 +83,9 @@ const ReportSheet = ({
     <>
       <article
         aria-label={t`Report`}
-        className="bg-card rounded-lg border px-5 py-4"
+        className="bg-card flex flex-col gap-4 rounded-lg border px-5 py-4"
       >
+        <FigureTiles figures={figures} />
         <PlainMarkdown text={body} />
       </article>
       <ErrorText>

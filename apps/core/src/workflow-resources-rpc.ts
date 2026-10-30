@@ -26,6 +26,7 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
+import { askableFor } from "./channels/workflow-offers.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -212,6 +213,13 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) => await workflowAskable(this.#env, person, id)
     );
+  }
+
+  async askableWorkflows(): Promise<{ id: string; name: string }[]> {
+    return await withPerson(this.#check, async (person) => {
+      const listed = await askableFor(this.#env, person);
+      return listed.map(({ id, name }) => ({ id, name }));
+    });
   }
 
   async setAskable(id: string, askable: unknown): Promise<void> {
