@@ -111,11 +111,20 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await page.getByRole("menuitem", { name: /^Publish/u }).click();
   await expect(page.getByRole("button", { name: "Published" })).toBeVisible();
 
-  // Edit opens the chat beside the page, where Grasp changes the App.
-  await page.getByRole("button", { name: "Edit" }).click();
-  await expect(
-    page.getByRole("button", { name: "Fold the chat away" })
-  ).toBeVisible();
+  // No Edit button: the chat bottom right is the App's own, where Grasp
+  // changes it, named after it, in place of Ask Grasp.
+  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name })).toHaveAttribute(
+    "placeholder",
+    "Say what should change"
+  );
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  const appChat = page.getByRole("region", { name });
+  await expect(appChat).toContainText(
+    `Say what should change in ${name}. Every change is a new version of it.`
+  );
+  await appChat.getByRole("button", { name: "Fold the chat away" }).click();
 
   // Its settings are its domain's page.
   await page.getByRole("link", { name: `Settings of ${name}` }).click();
@@ -137,7 +146,9 @@ test("an App with no screen yet is only described, and its builder designs it in
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
   await page.getByRole("button", { name: "Design it in the chat" }).click();
   await expect(
-    page.getByRole("button", { name: "Fold the chat away" })
+    page
+      .getByRole("region", { name })
+      .getByRole("button", { name: "Fold the chat away" })
   ).toBeVisible();
 
   // A draft is its builders' alone: anyone else finds no App.
@@ -169,8 +180,8 @@ test("an archived App says so under its bar, opens no screen, and its builder re
     )
   ).toBeVisible();
   await expect(page.locator("iframe")).toHaveCount(0);
-  // Archived, it is neither edited nor published.
-  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+  // Archived, it is neither changed nor published: the chat is Ask Grasp.
+  await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
 
   await page.getByRole("button", { name: "Restore" }).click();
   await expect(page.getByText("Draft", { exact: true })).toBeVisible();

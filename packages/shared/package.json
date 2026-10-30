@@ -50,6 +50,7 @@
     "./audit-log": "./src/audit-log.ts",
     "./business-processes": "./src/business-processes.ts",
     "./brain": "./src/brain.ts",
+    "./thinking": "./src/thinking.ts",
     "./brain-records": "./src/brain-records.ts",
     "./capability": "./src/capability.ts",
     "./channel-accounts": "./src/channel-accounts.ts",
@@ -146,6 +147,7 @@
     "./state-registry": "./src/state-registry.ts",
     "./statistics": "./src/statistics.ts",
     "./stephen-reach": "./src/stephen-reach.ts",
+    "./stephen-requests": "./src/stephen-requests.ts",
     "./store-limits": "./src/store-limits.ts",
     "./store-queries": "./src/store-queries.ts",
     "./store-reads": "./src/store-reads.ts",
@@ -162,6 +164,7 @@
     "./workflow-lifecycle": "./src/workflow-lifecycle.ts",
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
+    "./work-knowledge": "./src/work-knowledge.ts",
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {

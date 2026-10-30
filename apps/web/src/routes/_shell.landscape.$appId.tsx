@@ -121,9 +121,7 @@ const AppHeader = ({
     <div className="flex items-center gap-4">
       <AppLogo name={app.name} />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h1 className="truncate text-2xl font-medium tracking-tight">
-          {app.name}
-        </h1>
+        <h1 className="type-title truncate">{app.name}</h1>
         <span className="text-muted-foreground truncate">{about}</span>
       </div>
       <div className="ml-auto flex items-center gap-2">
