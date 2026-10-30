@@ -553,6 +553,68 @@ describe("erasing a person", () => {
     });
   });
 
+  it("keeps their address out of an invitation even when the erasure finishes as it is made", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    // Core's database as the invitation reaches it: just before its insert
+    // runs, after every check before it, the erasure runs to its end.
+    const inserts = new WeakSet<D1PreparedStatement>();
+    let erasing: Promise<unknown> | undefined;
+    const real = env.DB;
+    // The statement, and every binding of it, known as the insert.
+    const tagged = (statement: D1PreparedStatement): D1PreparedStatement => {
+      inserts.add(statement);
+      const bind = statement.bind.bind(statement);
+      statement.bind = (...values) => tagged(bind(...values));
+      return statement;
+    };
+    const interleaved: D1Database = {
+      prepare: (query) => {
+        const statement = real.prepare(query);
+        return /^insert into "invitations"/iu.test(query)
+          ? tagged(statement)
+          : statement;
+      },
+      batch: async <T>(statements: D1PreparedStatement[]) => {
+        if (statements.some((statement) => inserts.has(statement))) {
+          erasing ??= admin.api.members.erase(
+            person.userId,
+            String(person.person.name)
+          );
+          await erasing;
+        }
+        return await real.batch<T>(statements);
+      },
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, DB: interleaved },
+    });
+
+    const invited = await outcome(
+      core.authenticate().members.invite(email, "user")
+    );
+
+    const after = await admin.api.members.erasure(person.userId);
+    const invitations = await env.DB.prepare(
+      "SELECT count(*) AS count FROM invitations WHERE lower(email) = lower(?)"
+    )
+      .bind(email)
+      .first<{ count: number }>();
+    expect({
+      erased: typeof after.erasure?.completedAt,
+      invited,
+      invitations: invitations?.count,
+    }).toStrictEqual({
+      erased: "string",
+      invited: "member.invite_removed",
+      invitations: 0,
+    });
+  });
+
   it("answers where it stands when asked again, and is recorded once, by IDs only", async () => {
     const { admin, person } = await removedPerson();
     const name = String(person.person.name);
