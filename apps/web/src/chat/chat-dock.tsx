@@ -54,7 +54,7 @@ interface Offered {
 /** The models a question may name, as core lists them, with their efforts. */
 const readModels = async (
   core: CoreConnection,
-  signal?: AbortSignal
+  signal: AbortSignal
 ): Promise<Loaded<Offered>> =>
   await loadFromCore(
     core,
@@ -425,9 +425,10 @@ export const ChatDock = () => {
   const { pathname } = useLocation();
   // Read here, once for every page, not by each dock: the brain's dock and
   // the chat's take each other's place between pages, and each read them
-  // again when it did.
-  const { value: models, readAgain } = useFrameRead(readModels);
-  if (pathname === "/") {
+  // again when it did. Not on Chat's own page, which shows no dock.
+  const shown = pathname !== "/";
+  const { value: models, readAgain } = useFrameRead(readModels, shown);
+  if (!shown) {
     return null;
   }
   if (pathname === "/brain" || pathname.startsWith("/brain/")) {

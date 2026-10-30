@@ -6,6 +6,7 @@ import {
   createRouter,
   Outlet,
   RouterProvider,
+  useLocation,
 } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -37,18 +38,41 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The frame at `/a`, with pages `/a` and `/b`, showing what it read. */
-const opened = async () => {
+/**
+ * The frame at `/a`, with pages `/a` and `/b`, showing what it read: each
+ * read answers its number, at once or, `held`, once let through; shown
+ * on every page, or only on `shownOn`.
+ */
+const opened = async ({
+  held = false,
+  shownOn,
+}: { held?: boolean; shownOn?: string } = {}) => {
   let reads = 0;
+  const holding: (() => void)[] = [];
   const read = async (): Promise<number> => {
     reads += 1;
-    return await Promise.resolve(reads);
+    const mine = reads;
+    if (held) {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      holding.push(() => {
+        resolve(true);
+      });
+      await promise;
+    }
+    return mine;
   };
   const Frame = () => {
-    const { value } = useFrameRead(read);
+    const { pathname } = useLocation();
+    const { value, readAgain } = useFrameRead(
+      read,
+      shownOn === undefined || pathname === shownOn
+    );
     return (
       <>
         <output>{value}</output>
+        <button onClick={readAgain} type="button">
+          Read again
+        </button>
         <Outlet />
       </>
     );
@@ -86,6 +110,17 @@ const opened = async () => {
     go: async (href: string): Promise<void> => {
       act(() => {
         router.history.push(href);
+      });
+      await settled();
+    },
+    /** Lets read number `number` answer. */
+    answer: async (number: number): Promise<void> => {
+      holding[number - 1]?.();
+      await settled();
+    },
+    readAgain: async (): Promise<void> => {
+      act(() => {
+        document.querySelector("button")?.click();
       });
       await settled();
     },
@@ -151,5 +186,32 @@ describe("what the frame reads beside every page", () => {
       afterSearch: 1,
       reads: 2,
     });
+  });
+
+  it("keeps only the newest answer when read again before an older one came back", async () => {
+    const frame = await opened({ held: true });
+    await frame.readAgain();
+
+    await frame.answer(2);
+    await frame.answer(1);
+
+    expect({ reads: frame.reads(), shown: frame.shown() }).toStrictEqual({
+      reads: 2,
+      shown: "2",
+    });
+  });
+
+  it("reads nothing on a page that shows none, and reads once shown", async () => {
+    const frame = await opened({ shownOn: "/b" });
+    await settled();
+    const hidden = frame.reads();
+
+    await frame.go("/b");
+
+    expect({
+      hidden,
+      reads: frame.reads(),
+      shown: frame.shown(),
+    }).toStrictEqual({ hidden: 0, reads: 1, shown: "1" });
   });
 });
