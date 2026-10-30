@@ -136,6 +136,9 @@ export const removeApp = async (
         // Retention reaps its releases, but what a live run still pins.
         currentVersion: null,
         pendingVersion: null,
+        // Its link (app-own-links.ts) is free for another App: a tombstone
+        // opens nothing.
+        link: null,
       })
       .where(
         and(

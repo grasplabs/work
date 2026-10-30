@@ -40,6 +40,7 @@ const appAt = (status: AppStatus): App & { pendingVersion: number } => ({
   currentVersion: 1,
   pendingVersion: 2,
   status,
+  link: null,
   createdAt: "2026-10-20T08:00:00.000Z",
 });
 

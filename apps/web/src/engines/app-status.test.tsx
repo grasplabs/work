@@ -55,6 +55,7 @@ const fakeApps = (
     currentVersion,
     pendingVersion: null,
     status,
+    link: null,
     createdAt: "2026-10-20T08:00:00.000Z",
   };
   const move = async (transition: Transition): Promise<App> => {

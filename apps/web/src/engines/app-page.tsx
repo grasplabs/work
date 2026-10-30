@@ -15,15 +15,18 @@ import {
   ChevronDownIcon,
   GlobeIcon,
   LayoutGridIcon,
+  LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
 } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { appSlot, setActiveChat } from "../chat/active-chat.ts";
 import { dockDrawerRoom, setDockMode, useDockMode } from "../chat/dock-mode.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { buildsApp } from "./app-role.ts";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 
@@ -38,9 +41,9 @@ import { StatusBadge, useStatusMove } from "./app-status.tsx";
 // the chat bottom right is the App's own (the shell's dock, chat-dock.tsx),
 // the one core keeps for the person and the App (`chats.forApp`), where
 // Grasp changes the App with them, as the prototype's does. The page makes
-// room for it as a drawer. What the prototype's Publish
-// menu adds, a link to publish at and saving as a blueprint, waits on
-// core (a published screen's address) and the blueprints page.
+// room for it as a drawer. The Publish menu also gives the App its own
+// link (app-own-link.tsx); saving it as a blueprint, as the prototype's
+// does, waits on the blueprints page.
 
 /**
  * Opens the App's own chat in the dock, to change the App there: the
@@ -70,10 +73,11 @@ const useAppChat = (app: string) => {
 /**
  * Publish, for a builder: a draft is published for the people it is shared
  * with, a published App goes back to a draft. Off while it has no version
- * to publish, as core refuses that.
+ * to publish, as core refuses that. Its link is set from here too.
  */
 const PublishMenu = ({ app }: { app: App }) => {
   const { busy, failure, move } = useStatusMove(app.id);
+  const [linking, setLinking] = useState(false);
   const published = app.status === "published";
   return (
     <div className="flex flex-col items-end gap-1">
@@ -116,9 +120,27 @@ const PublishMenu = ({ app }: { app: App }) => {
               </span>
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem
+            onClick={() => {
+              setLinking(true);
+            }}
+          >
+            <LinkIcon />
+            <span className="flex min-w-0 flex-col">
+              <Trans>Link</Trans>
+              <span className="text-muted-foreground truncate text-xs">
+                {app.link === null ? (
+                  <Trans>None yet</Trans>
+                ) : (
+                  linkAddress(app.link)
+                )}
+              </span>
+            </span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <ErrorText>{failure}</ErrorText>
+      <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
     </div>
   );
 };
