@@ -1,7 +1,7 @@
 @import "@grasp-os/ui/styles.css";
 /* The theme's sans, bundled so it is served from this origin. */
 @import "@fontsource-variable/geist";
-/* Newsreader, for page titles and key figures (the kit's type-* utilities). */
+/* Newsreader, the theme's serif (`font-serif`), for titles and key figures. */
 @import "@fontsource-variable/newsreader/opsz.css";
 
 @source "../";

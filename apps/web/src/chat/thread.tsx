@@ -20,7 +20,7 @@ import {
   TraceTitle,
 } from "@grasp-os/ui/components/trace";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import {
   BrainIcon,
   CheckCircleIcon,
@@ -33,8 +33,16 @@ import {
   TriangleAlertIcon,
   XCircleIcon,
 } from "lucide-react";
-import { createContext, Fragment, use, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  createContext,
+  Fragment,
+  lazy,
+  Suspense,
+  use,
+  useEffect,
+  useState,
+} from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
 import {
@@ -62,6 +70,16 @@ import type { WorkState } from "./sign.ts";
 import { AnswerCited, AnswerSources, useCitedDocuments } from "./sources.tsx";
 import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 import { widgetLinesOf } from "./widget-lines.ts";
+
+/**
+ * An answer's thinking as a card (thinking-card.tsx), loaded once an
+ * answer shows one: it draws the brain's shapes, which the thread, in the
+ * dock on every page, never loads before.
+ */
+const ThinkingCard = lazy(async () => {
+  const { ThinkingCard: card } = await import("./thinking-card.tsx");
+  return { default: card };
+});
 
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
@@ -326,6 +344,7 @@ const FinishedTop = ({
 }: {
   chatId: string;
   seconds: number | undefined;
+  /** Its thinking, to see again in the brain; none where the answer carries its card instead. */
   thinking: ThinkingOf | undefined;
 }) => (
   <>
@@ -504,6 +523,7 @@ const Reply = ({
   writing,
   running,
   top,
+  card,
   sign,
   onRetry,
   cited,
@@ -523,6 +543,8 @@ const Reply = ({
   running: boolean;
   /** The trace's first line, in the first answer to a question. */
   top?: ReactNode;
+  /** Its thinking as a small picture, in the first answer to a question that showed it, on any page but the brain. */
+  card?: ReactNode;
   /** What Grasp does, under the newest answer while it works on it: its sign stands there, and no actions. */
   sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
@@ -546,6 +568,7 @@ const Reply = ({
             top={top}
             writing={writing}
           />
+          {card}
           {answer === "" ? null : (
             <ReplyText
               citations={reply.citations}
@@ -665,6 +688,7 @@ export const ChatThread = ({
   running,
   tools = noTools,
   onRetry,
+  compact = false,
   children,
 }: {
   /** The chat, whose answers' sources core is asked for. */
@@ -684,6 +708,8 @@ export const ChatThread = ({
   tools?: readonly ChatToolEvent[];
   /** Asks the last question again. */
   onRetry: () => void;
+  /** In the chat dock: closer together, 20 pixels from every edge. */
+  compact?: boolean;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -709,6 +735,33 @@ export const ChatThread = ({
   );
   const file = readingFileOf({ doing, step, tools, messages });
   const answerThinking = useAnswerThinking(messages, running);
+  // On the brain's atlas the dive plays an answer's thinking; anywhere else,
+  // a note's page in the brain too, the answer carries it as a card.
+  const inBrain = useLocation({
+    select: ({ pathname }) => pathname === "/brain" || pathname === "/brain/",
+  });
+  const cardOf = (id: number): ReactNode => {
+    const thinking = answerThinking.byReply.get(id);
+    if (inBrain || thinking === undefined) {
+      return undefined;
+    }
+    const live = doing !== undefined && replies[0]?.id === id;
+    // Until the card is there, and where it can't be drawn: the way to see
+    // it in the brain, once the answer is done.
+    const instead: ReactElement | null = live ? null : (
+      <SeeInBrain chatId={chatId} thinking={thinking} />
+    );
+    return (
+      <Suspense fallback={instead}>
+        <ThinkingCard
+          chatId={chatId}
+          instead={instead}
+          live={live}
+          thinking={thinking}
+        />
+      </Suspense>
+    );
+  };
   const topOf = (id: number): ReactNode => {
     const thinking = answerThinking.byReply.get(id);
     if (doing !== undefined && replies[0]?.id === id) {
@@ -723,8 +776,9 @@ export const ChatThread = ({
       );
     }
     const seconds = worked.get(id);
-    return seconds === undefined && thinking === undefined ? undefined : (
-      <FinishedTop chatId={chatId} seconds={seconds} thinking={thinking} />
+    const again = inBrain ? thinking : undefined;
+    return seconds === undefined && again === undefined ? undefined : (
+      <FinishedTop chatId={chatId} seconds={seconds} thinking={again} />
     );
   };
   return (
@@ -733,7 +787,11 @@ export const ChatThread = ({
         <ConversationContent label={t`Messages`}>
           <ol
             aria-label={t`Messages`}
-            className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+            className={
+              compact
+                ? "flex w-full flex-col gap-7 p-5"
+                : "mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-8 md:px-6"
+            }
           >
             {loaded ? null : (
               <li className="flex justify-center py-8">
@@ -777,6 +835,7 @@ export const ChatThread = ({
                           ? undefined
                           : { chatId, messageId: message.id }
                       }
+                      card={cardOf(message.id)}
                       top={topOf(message.id)}
                       writing={false}
                     />

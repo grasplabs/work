@@ -36,11 +36,14 @@ import type {
   ChatProject,
   ChatOutput,
   ChatProvenance,
+  ChatSearchHit,
+  ChatSearchSnippet,
   ChatSummary,
   ChatToolEvent,
   ProjectDocument,
   ProjectDocumentInput,
 } from "@grasp-os/shared/chat";
+import { foldOf, hasEvery, searchWordsOf } from "@grasp-os/shared/chat-search";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import {
   dashboardErrors,
@@ -153,7 +156,14 @@ import {
   coreMessageProvider,
   partialOf,
 } from "./chat-messages.ts";
+import {
+  saidOf,
+  searchTermsOf,
+  snippetOf,
+  snippetReach,
+} from "./chat-search.ts";
 import { toolCallSchema, toolEventOf } from "./chat-tool-events.ts";
+import type { ToolCall } from "./chat-tool-events.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import {
@@ -184,6 +194,7 @@ import {
   chatProjectDocuments,
   chatProjects,
   chatRunSources,
+  chatSearchText,
   chatSources,
   chatToolEvents,
   chats,
@@ -263,6 +274,12 @@ interface LiveTurn {
   notices: Set<string>;
   /** What the turn read through connections, for its check line. */
   reads: TurnCheck[];
+  /**
+   * The calls its code made, as the chat shows them: for a chat app's
+   * request record (channels/stephen-requests.ts), which keeps the tools
+   * and how each ended, never what they read. Only when its asker wants them.
+   */
+  calls?: ToolCall[];
 }
 
 /** A build job, with the chat's agent and person it acts for. */
@@ -648,6 +665,9 @@ const previewPollMs = 100;
 /** Most chats a person keeps: delete one to make another. */
 export const maxChatsPerPerson = 500;
 
+/** Most chats one search finds: the most recently active first. */
+export const searchHitsMax = 50;
+
 /**
  * Why a turn under way stopped short of an answer, as its person reads
  * it: an unplanned error is logged, and shown as one, with the log line's
@@ -1012,7 +1032,157 @@ export class Workspace extends DurableObject<Env> {
       .set({ lastAt: stored.createdAt })
       .where(eq(chats.id, chatId))
       .run();
+    this.#keepSaid(chatId, stored.id, message);
     return stored;
+  }
+
+  /**
+   * Keeps what message `messageId` of the chat said, for searches to look
+   * through: a row of its own, empty when it said nothing, so a search
+   * knows it was read.
+   */
+  #keepSaid(chatId: ChatId, messageId: number, message: Message): void {
+    const said = saidOf(message);
+    this.#db
+      .insert(chatSearchText)
+      .values({ messageId, chatId, said, folded: foldOf(said) })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /**
+   * Keeps what was said in `personId`'s messages stored before searches
+   * were, which have no row yet: each once, the first time a search needs
+   * it.
+   */
+  #keepUnsaid(personId: string): void {
+    const unread = this.#db
+      .select({
+        id: chatMessages.id,
+        chatId: chatMessages.chatId,
+        message: chatMessages.message,
+      })
+      .from(chatMessages)
+      .innerJoin(chats, eq(chats.id, chatMessages.chatId))
+      .leftJoin(chatSearchText, eq(chatSearchText.messageId, chatMessages.id))
+      .where(
+        and(eq(chats.personId, personId), isNull(chatSearchText.messageId))
+      )
+      .all();
+    for (const { id, chatId, message } of unread) {
+      this.#keepSaid(
+        chatId,
+        id,
+        storedMessageSchema.parse(JSON.parse(message))
+      );
+    }
+  }
+
+  /**
+   * Where a search was said in chat `chatId`: around its first term said
+   * anywhere in it (the whole search, else each word in turn), in the
+   * first message that holds it, as a stretch SQLite cuts
+   * {@link snippetReach} on each side; null when none was. What was said
+   * is folded keeping each character in place, so where a term is in the
+   * folded text is where it is in what was said.
+   */
+  #saidAround(chatId: ChatId, query: string): ChatSearchSnippet | null {
+    for (const term of searchTermsOf(query)) {
+      const [row] = this.ctx.storage.sql
+        .exec<{ text: string; cutBefore: number; cutAfter: number }>(
+          `SELECT substr(said, max(1, at - ?2), length(?1) + 2 * ?2) AS text,
+                  at - ?2 > 1 AS cutBefore,
+                  max(1, at - ?2) + length(?1) + 2 * ?2 <= length(said) AS cutAfter
+             FROM (SELECT said, instr(folded, ?1) AS at
+                     FROM chat_search_text
+                    WHERE chat_id = ?3 AND instr(folded, ?1) > 0
+                    ORDER BY message_id
+                    LIMIT 1)`,
+          term,
+          snippetReach,
+          chatId
+        )
+        .toArray();
+      if (row !== undefined) {
+        return snippetOf(row.text, query, {
+          before: row.cutBefore === 1,
+          after: row.cutAfter === 1,
+        });
+      }
+    }
+    return null;
+  }
+
+  /**
+   * `personId`'s own chats, in project `projectId` when one is named, that
+   * hold every word of `query` in their title, their project's name or
+   * what was said in them, the most recently active first: at most
+   * {@link searchHitsMax}. One found only with what was said carries where
+   * it was said. What was said is folded as it is kept, so SQLite looks
+   * through it as it is, in any script; the few titles and project names
+   * are compared here.
+   */
+  searchChats(
+    personId: string,
+    query: string,
+    projectId: string | null = null
+  ): ChatSearchHit[] {
+    const words = searchWordsOf(query);
+    if (words.length === 0) {
+      return [];
+    }
+    this.#keepUnsaid(personId);
+    // Which words were said in each chat: "1" or "0" for each, in order.
+    const saidWords = sql.join(
+      words.map(
+        (word) =>
+          sql`exists (select 1 from ${chatSearchText} where ${chatSearchText.chatId} = ${chats.id} and instr(${chatSearchText.folded}, ${word}) > 0)`
+      ),
+      sql` || `
+    );
+    const rows = this.#db
+      .select({
+        id: chats.id,
+        title: chats.title,
+        createdAt: chats.createdAt,
+        lastAt: chats.lastAt,
+        projectId: chats.projectId,
+        appId: chats.appId,
+        projectName: chatProjects.name,
+        said: sql<string>`'' || ${saidWords}`,
+      })
+      .from(chats)
+      .leftJoin(chatProjects, eq(chatProjects.id, chats.projectId))
+      .where(
+        and(
+          eq(chats.personId, personId),
+          projectId === null ? undefined : eq(chats.projectId, projectId)
+        )
+      )
+      .orderBy(desc(chats.lastAt))
+      .all();
+    const found = rows
+      .filter((row) => {
+        const named = foldOf(`${row.title} ${row.projectName ?? ""}`);
+        return words.every(
+          (word, index) => row.said[index] === "1" || named.includes(word)
+        );
+      })
+      .slice(0, searchHitsMax);
+    return found.map((row) => ({
+      chat: {
+        id: row.id,
+        title: row.title,
+        createdAt: row.createdAt.toISOString(),
+        lastAt: row.lastAt.toISOString(),
+        running: this.#turns.has(row.id),
+        projectId: row.projectId,
+        appId: row.appId,
+      },
+      said: hasEvery(query, row.title, row.projectName ?? "")
+        ? null
+        : this.#saidAround(row.id, query),
+    }));
   }
 
   /**
@@ -1607,7 +1777,7 @@ export class Workspace extends DurableObject<Env> {
     text: string,
     onText?: (text: string) => unknown,
     shared?: SharedChat
-  ): Promise<{ chatId: string; answer: Answer }> {
+  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
     const platform = chatPlatformSchema.parse(via);
     const where = sharedChatSchema.optional().parse(shared);
     const [found] = this.#db
@@ -1654,9 +1824,18 @@ export class Workspace extends DurableObject<Env> {
         where.audience
       );
     }
+    const calls: ToolCall[] = [];
     return {
       chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, undefined, onText),
+      answer: await this.#turn(
+        chat,
+        { text, model },
+        undefined,
+        onText,
+        false,
+        calls
+      ),
+      calls,
     };
   }
 
@@ -1693,14 +1872,17 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * One turn of `chat`'s agent (`ask`). `started` is called once the turn
-   * is under way: the model admitted, and nothing kept yet.
+   * is under way: the model admitted, and nothing kept yet. `staff` when
+   * a Grasp staff member asks; `calls` gets each call its code makes, as
+   * it ends.
    */
   async #turn(
     chat: Chat,
     question: Question,
     started?: () => void,
     onText?: (text: string) => unknown,
-    staff = false
+    staff = false,
+    calls?: ToolCall[]
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
     if (!parsed.success) {
@@ -1725,6 +1907,7 @@ export class Workspace extends DurableObject<Env> {
       events: [],
       notices: new Set(),
       reads: [],
+      calls,
     };
     this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
@@ -2380,6 +2563,7 @@ export class Workspace extends DurableObject<Env> {
     if (!(parsed.success && this.#codeRuns.has(`${chatId}/${runId}`))) {
       return;
     }
+    this.#turns.get(chatId)?.calls?.push(parsed.data);
     const event = this.ctx.storage.transactionSync(() => {
       const run = this.#db
         .select({ callId: chatCodeRuns.toolCallId })
@@ -3154,6 +3338,20 @@ export class Workspace extends DurableObject<Env> {
         };
   }
 
+  /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
+  chatSummary(chatId: unknown, personId: string): ChatSummary {
+    const chat = this.#ownChat(chatId, personId);
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: this.#turns.has(chat.id),
+      projectId: chat.projectId,
+      appId: chat.appId,
+    };
+  }
+
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
   chatApp(chatId: ChatId): string | null {
     return (
@@ -3876,6 +4074,10 @@ export class Workspace extends DurableObject<Env> {
           .run();
         // Before its messages: a file names the question that carried it.
         this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
+        this.#db
+          .delete(chatSearchText)
+          .where(eq(chatSearchText.chatId, id))
+          .run();
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db

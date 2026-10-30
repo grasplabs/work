@@ -1,19 +1,3 @@
-/**
- * One organization's onboarding, step by step, ported from the prototype
- * (grasplabs/prototype `components/admin/org-steps.tsx` and the
- * `stage-*.tsx` it opens): the steps from the first conversation until
- * Grasp opens, each with where it stands, and the step that is chosen
- * opened underneath. It opens on the step the organization is at.
- *
- * Read only, as the admin is: what the prototype does at each step
- * (bringing in the first conversation, starting the research, keeping
- * what was agreed, reminding people, giving Grasp's go) writes to the
- * company's Grasp, which the admin has no way to yet, so each step says
- * so where its buttons were. Nor is the company's own link here, as the
- * prototype had it under the steps: a link is a credential, and core
- * never sends one. And nothing anyone said is shown: not the first
- * conversation, not what the research found, only what the model counts.
- */
 import { VISION_FIELDS } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
@@ -31,6 +15,23 @@ import type {
 } from "@grasp-os/shared/admin/onboarding-admin";
 import { Button } from "@grasp-os/ui/components/button";
 import { Progress } from "@grasp-os/ui/components/progress";
+/**
+ * One organization's onboarding, step by step, ported from the prototype
+ * (grasplabs/prototype `components/admin/org-steps.tsx` and the
+ * `stage-*.tsx` it opens): the steps from the first conversation until
+ * Grasp opens, each with where it stands, and the step that is chosen
+ * opened underneath. It opens on the step the organization is at.
+ *
+ * Read only, as the admin is: what the prototype does at each step
+ * (bringing in the first conversation, starting the research, keeping
+ * what was agreed, reminding people, giving Grasp's go) writes to the
+ * company's Grasp, which the admin has no way to yet, so each step says
+ * so where its buttons were. Nor is the company's own link here, as the
+ * prototype had it under the steps: a link is a credential, and core
+ * never sends one. And nothing anyone said is shown: not the first
+ * conversation, not what the research found, only what the model counts.
+ */
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import {
@@ -818,7 +819,7 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
       <div className="flex flex-col gap-5 border-t px-5 py-5">
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="type-figure">{knowledge.percent}%</span>
+            <Stat>{knowledge.percent}%</Stat>
             <KnowledgeDots count={40} knowledge={knowledge} label={known} />
           </div>
           <span className="text-muted-foreground">

@@ -1,5 +1,4 @@
 import type { Gap, Workspace } from "@grasp-os/shared/brain";
-import type { I18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -24,7 +23,6 @@ import {
   atlasOf,
   isRegion,
   REGION_IDS,
-  REGIONS,
   signalPaths,
 } from "../brain/brain-atlas.ts";
 import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
@@ -35,7 +33,11 @@ import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
 import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
 import { ThinkingDive } from "../brain/thinking/dive.tsx";
-import { dockDrawerWidth, useDockMode } from "../chat/dock-mode.ts";
+import {
+  dockDrawer,
+  useDockDrawerWidth,
+  useDockMode,
+} from "../chat/dock-mode.ts";
 import type { DockMode } from "../chat/dock-mode.ts";
 
 // The brain's own address: the brain as an atlas, as in the prototype
@@ -166,19 +168,23 @@ const atlasWith = (
   readAtlas: Atlas
 ): Atlas => (brain === read ? readAtlas : atlasOf(ws, brain));
 
-/** While Grasp thinks, its shape keeps clear of the chat: its drawer, or its frame (as wide), where the answer is written beside it. */
-const diveClearOf = (dock: DockMode): number =>
-  dock === "bar" ? 0 : dockDrawerWidth;
+/** While Grasp thinks, its shape keeps clear of the chat: its drawer (as wide as it is), or its frame, where the answer is written beside it. */
+const diveClearOf = (dock: DockMode, drawerWidth: number): number => {
+  if (dock === "drawer") {
+    return drawerWidth;
+  }
+  return dock === "frame" ? dockDrawer.normal : 0;
+};
 
 /** The part of the brain a thinking is about, as the way back names it. */
 const aboutOf = (
   region: RegionId | undefined,
-  i18n: I18n
+  atlas: Atlas
 ): { label: string; region: RegionId } | undefined => {
-  const label = REGIONS.find((each) => each.id === region)?.label;
+  const label = atlas.regions.find((each) => each.id === region)?.name;
   return label === undefined || region === undefined
     ? undefined
-    : { label: i18n._(label), region };
+    : { label, region };
 };
 
 /** Back from a thinking: to the part it is about, or the whole brain. */
@@ -249,7 +255,8 @@ const keyOnControl = (event: KeyboardEvent): boolean =>
 const AtlasPage = () => {
   // The brain's chat, open as a drawer, takes the right of the canvas.
   const dock = useDockMode();
-  const { t, i18n } = useLingui();
+  const drawerWidth = useDockDrawerWidth();
+  const { t } = useLingui();
   const { workspace: ws, brain: read } = useBrainData();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/brain/" });
@@ -302,16 +309,16 @@ const AtlasPage = () => {
   const [spot, setSpot] = useState<Spot>();
   const { gap, neuron } = inHandOf(ws, neurons, view.note);
 
-  const regionLabel = REGIONS.find((each) => each.id === region)?.label;
+  const regionName = atlas.regions.find((each) => each.id === region)?.name;
   const trail =
     thinking.title === undefined
       ? trailOf(view, {
           brain: t`Brain`,
-          region: regionLabel === undefined ? undefined : i18n._(regionLabel),
+          region: regionName,
           group: groups.find((each) => each.key === group)?.label,
           inHand: gap?.question ?? neuron?.title ?? neuron?.label,
         })
-      : thinkingTrail(t`Brain`, thinking.title, aboutOf(thinking.about, i18n));
+      : thinkingTrail(t`Brain`, thinking.title, aboutOf(thinking.about, atlas));
 
   // Going anywhere in the brain puts the picture of an answer's thinking away.
   const go = (next: AtlasView) => {
@@ -398,7 +405,7 @@ const AtlasPage = () => {
       clear={{
         ...CLEAR,
         corner: legendCorner(groups.length),
-        right: dock === "drawer" ? dockDrawerWidth : 0,
+        right: dock === "drawer" ? drawerWidth : 0,
       }}
       controls={controls}
       dive={dive}
@@ -422,7 +429,7 @@ const AtlasPage = () => {
     >
       {/* Grasp's thinking: a dive into the brain over the atlas, which rests under it. */}
       <ThinkingDive
-        clear={{ ...CLEAR, right: diveClearOf(dock) }}
+        clear={{ ...CLEAR, right: diveClearOf(dock, drawerWidth) }}
         onOpen={open}
         still={reduce}
         thought={thinking.thought}
