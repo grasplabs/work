@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepAudience } from "../src/knowledge/access.ts";
+import { sharedChatsOf } from "../src/knowledge/memory-publish.ts";
 import { forContext } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { actingFor, newChat } from "./contexts.ts";
@@ -174,7 +175,7 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
     });
   });
 
-  it("lists only the shared chats a person is in and could publish into, each by the others in it", async () => {
+  it("lists only the shared chats a person is in and could publish into, each by the others in it, and refuses Grasp's staff", async () => {
     const ada = await signedInApi(idp, "user");
     const ben = await signedInApi(idp, "user");
     const cy = await signedInApi(idp, "user");
@@ -219,6 +220,21 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
       ben: await listed(ben),
       cy: await listed(cy),
     };
+    // Grasp's staff, even under the id of someone in the chat, are refused.
+    const byStaff = await codeOf(
+      sharedChatsOf(env, {
+        type: "person",
+        person: {
+          userId: ada.userId,
+          email: `${ada.userId}@grasp.test`,
+          name: "Staff",
+          role: "admin",
+          teams: [],
+          staff: true,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        },
+      })
+    );
     // What a chat lists is one a record can be published into.
     const published = await codeOf(
       ada.api.knowledge.memoriesPublish(
@@ -232,7 +248,7 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
       )
     );
 
-    expect({ lists, published }).toStrictEqual({
+    expect({ lists, byStaff, published }).toStrictEqual({
       lists: {
         ada: [{ chatId: withBen.chatId, others: [names.ben] }],
         ben: [
@@ -241,6 +257,7 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
         ].toSorted((a, b) => a.chatId.localeCompare(b.chatId)),
         cy: [],
       },
+      byStaff: "brain.denied",
       published: "ok",
     });
   });
