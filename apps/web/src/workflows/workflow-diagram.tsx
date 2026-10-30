@@ -303,14 +303,18 @@ const PartsFrames = ({
   );
 };
 
-/** Marks the tasks that lead through `door`, and brings the first into view. */
-const showDoor = (door: DoorPlace): void => {
+/**
+ * Brings the first task that leads through `door` into view, in `drawing`
+ * alone: another drawing on the page (a test run's beside the draft's, a
+ * hidden tab's) has tasks at the same pointers.
+ */
+const showDoor = (drawing: HTMLElement | null, door: DoorPlace): void => {
   const [first] = door.tasks;
   if (first === undefined) {
     return;
   }
-  document
-    .querySelector(`[data-pointer="${CSS.escape(first)}"]`)
+  drawing
+    ?.querySelector(`[data-pointer="${CSS.escape(first)}"]`)
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 
@@ -333,6 +337,7 @@ export const WorkflowDiagramView = ({
   const { t } = useLingui();
   const [layout, setLayout] = useState<Layout>("stacked");
   const [door, setDoor] = useState<DoorPlace | null>(null);
+  const drawing = useRef<HTMLElement>(null);
   const parts = partsOf(diagram);
   const doors = doorsOf(diagram);
   const marks: Marks = {
@@ -341,7 +346,7 @@ export const WorkflowDiagramView = ({
     shown: new Set(door?.tasks),
   };
   return (
-    <section aria-label={label} className="flex flex-col gap-2">
+    <section aria-label={label} className="flex flex-col gap-2" ref={drawing}>
       {parts.length > 0 || doors.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           {parts.length > 0 ? (
@@ -372,7 +377,7 @@ export const WorkflowDiagramView = ({
             doors={doors}
             onGo={(chosen) => {
               setDoor(chosen);
-              showDoor(chosen);
+              showDoor(drawing.current, chosen);
             }}
           />
         </div>
