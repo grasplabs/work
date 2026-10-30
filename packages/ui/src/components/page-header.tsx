@@ -47,7 +47,8 @@ function PageHeaderTitle({
     props: mergeProps<"h1">(
       {
         className: cn(
-          "font-serif text-3xl leading-tight font-light tracking-tight text-balance outline-none",
+          // The prototype's `type-title`: 28px on a 1.15 line, set tight.
+          "font-serif text-[1.75rem] leading-[1.15] font-light tracking-[-0.022em] text-balance outline-none",
           className
         ),
       },
