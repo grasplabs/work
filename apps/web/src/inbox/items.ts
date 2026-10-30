@@ -60,7 +60,7 @@ export type InboxKind =
 /** Where an item can be opened: the page of what it is about. */
 export type Target =
   | { kind: "workflow"; app: string; workflow: string }
-  | { kind: "independentWorkflow"; workflow: string }
+  | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   | { kind: "engine"; engine: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -489,9 +489,15 @@ const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         title: t`The schedule of ${workflowName} stopped`,
         context: workflowName,
         body: [
-          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then enable the trigger again: it goes on from its next time.`,
+          t`Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time.`,
         ],
         facts: [{ label: t`Stopped`, value: formatDateTime(at) }],
+        // Its Triggers tab, where its owner turns it on again.
+        about: {
+          kind: "independentWorkflow",
+          workflow: notification.workflow,
+          tab: "triggers",
+        },
         forWhom: { person: me },
         date: at,
         urgent: false,
