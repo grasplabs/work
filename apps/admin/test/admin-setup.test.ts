@@ -11,7 +11,7 @@ import { rotateClientSecrets } from "../src/deploy/rotation.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
+import { aiStatusOf, emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { page } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { publishRelease } from "./releases.ts";
@@ -243,8 +243,8 @@ describe("an organization's Setup", () => {
     const status = (
       lastOkAt: number | null,
       lastFailedAt: number | null
-    ): AiStatusReport => ({
-      providers: [
+    ): AiStatusReport =>
+      aiStatusOf([
         {
           provider: "openai",
           kind: "organization",
@@ -260,8 +260,7 @@ describe("an organization's Setup", () => {
           lastFailedAt: null,
           lastFailure: null,
         },
-      ],
-    });
+      ]);
     const failedAt = now - 1000;
     const working = await liveClient(emptyAdminSnapshot("Acme"));
     working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);

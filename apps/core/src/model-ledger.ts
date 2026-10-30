@@ -13,6 +13,7 @@ import type {
   PersonLimitFrom,
   PersonLimitSubject,
 } from "@grasp-os/shared/models";
+import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -415,6 +416,8 @@ const routeSchema = z.strictObject({
   provider: z.string().min(1).max(32),
   region: z.string().min(1).max(32),
   credential: z.enum(["organization", "platform"]).optional(),
+  /** Which of Grasp's own features a request on its key is for. */
+  feature: z.enum(platformAiFeatures).optional(),
 });
 
 /** The way a request goes, as recorded with it. */
@@ -428,11 +431,13 @@ const routeColumns = (
   provider: string | null;
   region: string | null;
   credential: string | null;
+  feature: string | null;
 } => ({
   transport: route?.transport ?? null,
   provider: route?.provider ?? null,
   region: route?.region ?? null,
   credential: route?.credential ?? null,
+  feature: route?.feature ?? null,
 });
 
 /** How a provider's requests fared last, by whose key: times in ms since the epoch. */
@@ -443,6 +448,15 @@ export interface ProviderHealth {
   lastFailedAt: number | null;
   lastFailure: string | null;
   lastStatus: number | null;
+}
+
+/** What one model was charged for one feature on Grasp's keys in one month. */
+export interface PlatformSpendByPeriod {
+  period: string;
+  /** The feature as recorded; null for a request without one. */
+  feature: string | null;
+  model: string;
+  micros: number;
 }
 
 /** What an admin's limit came to: set, or refused as above Grasp's budget. */
@@ -1480,6 +1494,38 @@ export class ModelLedger extends DurableObject<Env> {
         set: noted,
       })
       .run();
+  }
+
+  /**
+   * What Grasp's own features were charged on its keys in each of
+   * `periods`, by feature and model: settled requests only, at what the
+   * ledger charged them (list prices), none that came to nothing. Settled
+   * requests are kept 90 days, past the month before this one.
+   */
+  async platformSpend(
+    periods: readonly string[]
+  ): Promise<PlatformSpendByPeriod[]> {
+    await Promise.resolve();
+    const charged = sql<number>`sum(${requests.chargedMicros})`;
+    return this.#db
+      .select({
+        period: requests.period,
+        feature: requests.feature,
+        model: requests.model,
+        micros: charged,
+      })
+      .from(requests)
+      .where(
+        and(
+          eq(requests.credential, "platform"),
+          eq(requests.state, "settled"),
+          gt(requests.chargedMicros, 0),
+          inArray(requests.period, [...periods])
+        )
+      )
+      .groupBy(requests.period, requests.feature, requests.model)
+      .orderBy(desc(charged))
+      .all();
   }
 
   /** How each provider's requests fared last, by whose key (`providerHealth`). */

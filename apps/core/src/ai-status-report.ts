@@ -9,27 +9,32 @@ import {
 import type {
   AiProviderStatus,
   AiStatusReport,
+  PlatformMonthSpend,
 } from "@grasp-os/shared/ai-status-report";
 import { requestErrors } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
+import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
 
 import { readModelChoice } from "./ai-model-choice.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
-import type { ProviderHealth } from "./model-ledger.ts";
+import type { PlatformSpendByPeriod, ProviderHealth } from "./model-ledger.ts";
 
 // The organization's AI, for the admin alone: which providers it
 // connected, its default model's first, and how each one's calls last
 // fared, as the model ledger noted them from real calls
 // (`providerHealth`), with how Grasp's own keys fared for its platform
-// features. Staff read it as one line on the organization's Setup; it
-// changes nothing. Signed with a key derived for this purpose only
+// features, and what those features cost on Grasp's keys this month and
+// last (`platformSpend`, the ledger's charges). Staff read it as one line
+// on the organization's Setup and as its spend on its AI use; it changes
+// nothing. Signed with a key derived for this purpose only
 // (console-signed.ts), as the quota policy report is; nothing an App, a
-// screen or a run reaches serves it. Provider ids and times only: never a
-// key, its mask or an endpoint's address, which only connect and the
-// organization's admins see.
+// screen or a run reaches serves it. Provider ids, models, times and
+// amounts only: never a key, its mask or an endpoint's address, which only
+// connect and the organization's admins see, and nothing of what a call
+// carried.
 
 /** How `provider`'s calls fared by `kind`'s key, from the ledger's health. */
 const statusOf = (
@@ -49,12 +54,42 @@ const statusOf = (
   };
 };
 
+/** The most rows a month's spend carries, the dearest first. */
+const monthSpendRows = 64;
+
+/** The UTC month `monthsBack` months before `now`'s, such as `2026-09`. */
+const periodOf = (now: Date, monthsBack: number): string =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1))
+    .toISOString()
+    .slice(0, 7);
+
+/** `period`'s rows of what the ledger charged, the dearest first. */
+const monthSpend = (
+  rows: readonly PlatformSpendByPeriod[],
+  period: string
+): PlatformMonthSpend => ({
+  period,
+  rows: rows
+    .filter((row) => row.period === period)
+    .slice(0, monthSpendRows)
+    .map(({ feature, model, micros }) => ({
+      // A feature this core doesn't know reads as unrecorded, never as another.
+      feature: platformAiFeatures.find((known) => known === feature) ?? null,
+      model,
+      micros,
+    })),
+});
+
 /** The organization's providers and Grasp's, as the admin reads them. */
 const aiStatus = async (env: Env): Promise<AiStatusReport> => {
-  const [keys, health, choice] = await Promise.all([
+  const now = new Date();
+  const thisMonth = periodOf(now, 0);
+  const lastMonth = periodOf(now, 1);
+  const [keys, health, choice, spend] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
     modelLedger(env).providerHealth(),
     readModelChoice(env),
+    modelLedger(env).platformSpend([thisMonth, lastMonth]),
   ]);
   const chosen =
     choice?.defaultModel === null || choice === null
@@ -77,6 +112,10 @@ const aiStatus = async (env: Env): Promise<AiStatusReport> => {
       ),
       ...platform.map((provider) => statusOf(health, provider, "platform")),
     ],
+    platformSpend: {
+      thisMonth: monthSpend(spend, thisMonth),
+      lastMonth: monthSpend(spend, lastMonth),
+    },
   };
 };
 

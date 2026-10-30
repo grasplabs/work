@@ -59,6 +59,7 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
+import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
@@ -2114,6 +2115,20 @@ const workflowRunOf = ({
 const platformOf = ({ work }: Session): { platform: string } | object =>
   work !== undefined && "platform" in work ? { platform: work.platform } : {};
 
+/**
+ * Which of Grasp's own features a text call on Grasp's key is for, as the
+ * ledger records it, so what each costs Grasp is told apart: converting a
+ * document is the only one today.
+ */
+const platformFeatureOf = ({
+  work,
+}: Session): { feature: PlatformAiFeature } | object =>
+  work !== undefined &&
+  "platform" in work &&
+  work.platform === "document_conversion"
+    ? { feature: "conversion" }
+    : {};
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -2602,6 +2617,7 @@ const connectRouting = async (
       provider: target.provider,
       region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
+      ...(target.credential === "platform" ? platformFeatureOf(call) : {}),
     },
     fallbacks,
   };
@@ -3468,12 +3484,14 @@ interface SpeechRecord {
 /** The way a platform voice feature goes, as the ledger and the audit log record it. */
 const platformWay = (
   provider: ConnectTarget["provider"],
-  platform: PlatformRoute
+  platform: PlatformRoute,
+  feature: PlatformAiFeature
 ): LedgerRoute => ({
   transport: "connect",
   provider,
   region: platform.region,
   credential: "platform",
+  feature,
 });
 
 /** A line's audit entry: a `model.call`, as any model call's. */
@@ -3639,7 +3657,7 @@ const admitSpeech = async (
     ref,
     judged: verdict.judged,
     price,
-    way: platformWay(ref.provider, target.platform),
+    way: platformWay(ref.provider, target.platform, "speech"),
     send: async (id, limit) =>
       await connectRequest(
         env,
@@ -4087,7 +4105,7 @@ const listenThrough = async (
     env,
     call,
     price,
-    way: platformWay(ref.provider, target.platform),
+    way: platformWay(ref.provider, target.platform, "transcription"),
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
