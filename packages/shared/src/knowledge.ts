@@ -213,6 +213,23 @@ export interface SkillCollections {
   client: CollectionId | null;
 }
 
+/** Most shared chats `sharedChats` lists, the most recently active first. */
+export const sharedChatsMax = 50;
+
+/**
+ * A chat others share that the person is in, which a memory record can be
+ * published into (`memoriesPublish`, scope `session`): Grasp knows
+ * everyone in it. Named by who else is in it, as platforms give Grasp no
+ * name for a channel.
+ */
+export interface SharedChat {
+  chatId: string;
+  /** The names of the others in it, as the organization knows them. */
+  others: string[];
+  /** When Grasp last saw who is in it (ISO 8601). */
+  updatedAt: string;
+}
+
 /** A collection, as the catalog lists it. */
 export interface CatalogCollection {
   id: CollectionId;
@@ -386,6 +403,12 @@ export interface KnowledgeApi {
     input: MemoriesPublishInput,
     options: CommandOptions
   ) => Promise<CommandReceipt>;
+  /**
+   * The chats others share that the person is in now and that a record
+   * can be published into: only those Grasp knows everyone in, most
+   * recently active first, at most `sharedChatsMax`.
+   */
+  sharedChats: () => Promise<SharedChat[]>;
   /**
    * Corrects one of the person's own records against the revision read,
    * keeping its history (GRA-298).

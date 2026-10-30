@@ -2187,6 +2187,14 @@ msgctxt "lesson scope"
 msgid "A shared chat"
 msgstr "Ein geteilter Chat"
 
+#: src/brain/share-record.tsx
+msgid "A shared chat with {people}"
+msgstr "Ein geteilter Chat mit {people}"
+
+#: src/brain/share-record.tsx
+msgid "A shared chat with only you in it"
+msgstr "Ein geteilter Chat, in dem nur du bist"
+
 #: src/onboarding/setup-steps.tsx
 msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 msgstr "Eine Mitarbeiterliste ist der schnellste Weg: Namen, E-Mail-Adressen, Teams und Funktionen, als CSV- oder Excel-Datei. Ich nutze sie nur, um zu wissen, mit wem ich sprechen soll."
@@ -15855,6 +15863,10 @@ msgstr "Hier gibt es keinen Workflow mit diesem Namen mehr. Die Karte eines Team
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "In dieser Liste steht niemand."
+
+#: src/brain/share-record.tsx
+msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
+msgstr "Du kannst es noch nirgends teilen: Du bist in keinem Team und in keinem Chat, den andere teilen."
 
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
