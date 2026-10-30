@@ -26,8 +26,9 @@
  * reads the durations of motion only: a class list's `duration-*`, a
  * Motion `transition` (in seconds, as a `transition` prop or option, or
  * the options of Motion's `animate()`), and the Web Animations API's
- * `element.animate()` (in milliseconds). It refuses one over 300 ms,
- * unless it repeats for ever (work still going on). Any other `duration`,
+ * `element.animate()` (in milliseconds, as an option or bare). It refuses
+ * one over 300 ms, unless it repeats for ever (work still going on:
+ * `repeat: Infinity` or `Number.POSITIVE_INFINITY`). Any other `duration`,
  * such as how long a toast stays, is not motion and passes. What is rare
  * or seen once is turned off for its files in vite.config.ts, each with
  * its reason; a stylesheet's own animations are for review.
@@ -491,13 +492,20 @@ const noUnboundedRpcTarget = {
   },
 };
 
+/** Whether `node` is infinity: `Infinity`, or `Number.POSITIVE_INFINITY`. */
+const isInfinity = (node: Node): boolean =>
+  node.type === "MemberExpression"
+    ? nameOf(node.object) === "Number" &&
+      nameOf(node.property) === "POSITIVE_INFINITY"
+    : nameOf(node) === "Infinity";
+
 /** Whether an options object repeats for ever, as work still going on does. */
 const repeatsForever = (object: Node): boolean =>
   (object.properties ?? []).some(
     (each) =>
       nameOf(each.key) === "repeat" &&
       isNode(each.value) &&
-      nameOf(each.value) === "Infinity"
+      isInfinity(each.value)
   );
 
 /** The name of what a call calls: `animate` for `animate(...)` and `el.animate(...)`. */
@@ -505,6 +513,10 @@ const calleeName = (call: Node): unknown =>
   call.callee?.type === "MemberExpression"
     ? nameOf(call.callee.property)
     : nameOf(call.callee);
+
+/** Whether `call` is the Web Animations API's `element.animate(keyframes, …)`. */
+const isElementAnimate = (call: Node): boolean =>
+  call.callee?.type === "MemberExpression" && calleeName(call) === "animate";
 
 /**
  * The unit of the motion an options object sets, or undefined when it
@@ -531,7 +543,7 @@ const motionUnit = (object: Node): MotionUnit | undefined => {
       if (calleeName(parent) !== "animate") {
         return undefined;
       }
-      if (parent.callee?.type === "MemberExpression" && args[1] === node) {
+      if (isElementAnimate(parent) && args[1] === node) {
         return "ms";
       }
       return args[2] === node ? "s" : undefined;
@@ -585,6 +597,19 @@ const noSlowMotion = {
       TemplateLiteral: (node: Node): void => {
         for (const quasi of node.quasis ?? []) {
           check(node, quasi.value.raw);
+        }
+      },
+      // The Web Animations API also takes its duration bare, in ms:
+      // `element.animate(keyframes, 600)`.
+      CallExpression: (node: Node): void => {
+        const [, timing] = node.arguments ?? [];
+        if (
+          isElementAnimate(node) &&
+          timing?.type === "Literal" &&
+          typeof timing.value === "number" &&
+          timing.value > LIMIT_MS
+        ) {
+          report(timing, timing.value);
         }
       },
       ObjectExpression: (node: Node): void => {
