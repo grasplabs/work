@@ -2,8 +2,7 @@
 // Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
-// everything. Deploy-platform passes them from the stage's 1Password Environment
-// with `--var`, and stops if either is missing.
+// everything, so a deploy of a stage missing either stops (cf-worker.ts).
 // The token it reaches client accounts with lives in Secrets Store, never in
 // the database.
 {
@@ -15,16 +14,52 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  // The Access vars come from each deploy's `--var`, not from here
-  // (src/env.d.ts); this keeps them too on a deploy that passes none, such
-  // as `wrangler deploy` by hand.
-  "keep_vars": true,
+  // The admin's own hostname, as a route: more specific than the router's
+  // for every host below the stage's client domain, so it wins over it,
+  // where a Custom Domain wouldn't, as routes run first
+  // (@grasp-os/shared/names, `platformRoutes`, which check:wrangler-configs
+  // holds this to). Deployed by cf as a fetch trigger (cf-worker.ts).
+  "routes": [{ "pattern": "admin.ongrasp.app/*", "zone_name": "ongrasp.app" }],
+  // Every setting of the admin's, none of them secret (src/env.d.ts says
+  // what each does): production here, staging in `env.staging`, which
+  // repeats every binding under its staging name, as wrangler inherits none
+  // of them. STAGE is the stage this Worker serves (@grasp-os/shared/names);
+  // CF_ACCESS_ISS is Grasp Work's Access team, and CF_ACCESS_AUD its
+  // application's tag; ENTRA_CLIENT_ID and GOOGLE_CLIENT_ID are Grasp's
+  // Entra and Google OAuth apps, which each client's core and connect sign
+  // in with; CLIENT_DOMAIN is where
+  // clients are served, and ADMIN_HOST the admin's own hostname, both as the
+  // names module gives them (check:wrangler-configs holds them to it);
+  // OAUTH_RELAY "on" sends every client's sign-in and connections back
+  // through the stage's OAuth relay, as every client this admin deploys is
+  // Grasp-hosted (src/deploy/context.ts, `oauthRelayOf`), and "off" to
+  // each client's own origin. ROOMS_ORIGIN is Grasp's Rooms' team origin
+  // (e.g. https://rooms.grasp.example), which the proposal under Contract
+  // is read from (src/proposal/rooms.ts); DISCORD_PUBLIC_KEY is Grasp's
+  // Discord application's public key, hex (General Information), which
+  // every interaction Discord posts to the bot is signed with, and
+  // DISCORD_STAFF_IDS the Discord user ids of Grasp's staff, comma-separated:
+  // the only people the bot answers (src/admin/discord.ts). An empty one is
+  // a setting not configured yet; the admin works without it (Rooms isn't
+  // read, the bot refuses everything), except the Access pair, without
+  // which nothing is deployed. Which organization is Grasp's own is chosen
+  // on Platform (the admin's database), and secrets live in the stage's
+  // 1Password Environment.
+  "vars": {
+    "STAGE": "production",
+    "CF_ACCESS_AUD": "add0b0ab1499430cad8a9bd2fa5f83da725684c0df9487cf057880c7bc4e2a8d",
+    "CF_ACCESS_ISS": "https://grasp-work.cloudflareaccess.com",
+    "ENTRA_CLIENT_ID": "01228906-bd5b-488e-b7c1-720f4dc12dc2",
+    "GOOGLE_CLIENT_ID": "740037143590-b2d0cpupcj0t800rth3ekr6g310unatv.apps.googleusercontent.com",
+    "CLIENT_DOMAIN": "ongrasp.app",
+    "ADMIN_HOST": "admin.ongrasp.app",
+    "OAUTH_RELAY": "on",
+    "ROOMS_ORIGIN": "",
+    "DISCORD_PUBLIC_KEY": "",
+    "DISCORD_STAFF_IDS": "",
+  },
   // No platform line per invocation, and query strings stay out of logs and
   // traces, as on every Worker (threat model R17).
-  // Which stage this Worker serves (@grasp-os/shared/names): production
-  // here, staging in `env.staging`, which repeats every binding under its
-  // staging name, as wrangler inherits none of them.
-  "vars": { "STAGE": "production" },
   "observability": {
     "enabled": true,
     "redact_query_string": true,
@@ -83,12 +118,10 @@
   ],
   // Imports newly published releases (src/releases/import.ts) every 5
   // minutes; on weekday mornings, posts the admin's digest to Discord
-  // (src/admin/discord-digest.ts, `digestCron`); every morning, warns
-  // staff of Teams bot secrets about to expire
-  // (src/clients/teams-bot-expiry.ts, `expiryCron`); every hour, watches
+  // (src/admin/discord-digest.ts, `digestCron`); every hour, watches
   // Stephen at every client (src/clients/watch.ts, `watchCron`).
   "triggers": {
-    "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "15 7 * * *", "45 * * * *"],
+    "crons": ["*/5 * * * *", "0 6,7 * * 1-5", "45 * * * *"],
   },
   // The router's hostname map, which a deploy writes (src/deploy/router.ts).
   // scripts/cloudflare-account-setup.ts creates it as grasp-router-hosts
@@ -111,8 +144,9 @@
   // them: provisioning makes each client's gateway; and Zone and Email
   // Sending edit: provisioning makes the client's sending domain,
   // src/cloudflare/email-sending.ts); the keys each client's own secrets
-  // are derived from; and the secrets every client shares, which
-  // deploy-platform copies in from 1Password. The store id is the account's own: `deploy` fills it in
+  // are derived from; and the secrets every client shares. Deploy platform
+  // copies every one of them in from the stage's 1Password Environment
+  // (scripts/store-secrets.ts). The store id is the account's own: `deploy` fills it in
   // (scripts/wrangler-deploy.ts), so this placeholder only reaches local
   // runs and tests.
   "secrets_store_secrets": [
@@ -159,8 +193,9 @@
     // A restricted Stripe key that can only read customers, subscriptions
     // and invoices, for the admin's Billing under Contract
     // (src/billing/stripe.ts). The admin's alone: never copied to a
-    // client, never sent to the browser. Put in the store by hand; until
-    // it is, Billing says Stripe isn't connected.
+    // client, never sent to the browser. Optional: added to the stage's
+    // 1Password Environment, it's bound at the next Deploy platform; until
+    // then, Billing says Stripe isn't connected.
     {
       "binding": "STRIPE_RESTRICTED_KEY",
       "store_id": "account-secrets-store",
@@ -169,8 +204,9 @@
     // Grasp's Rooms' read-only service token (grasplabs/rooms,
     // worker/service-read.ts), for the proposal under Contract
     // (src/proposal/rooms.ts): it reads rooms and their signature requests
-    // and nothing else. The admin's alone, never sent to the browser. Put
-    // in the store by hand; until it is, the proposal says Rooms isn't
+    // and nothing else. The admin's alone, never sent to the browser.
+    // Optional: added to the stage's 1Password Environment, it's bound at
+    // the next Deploy platform; until then, the proposal says Rooms isn't
     // connected.
     {
       "binding": "ROOMS_READ_TOKEN",
@@ -179,26 +215,21 @@
     },
     // The Discord webhook the admin's morning digest is posted to, which
     // names the channel (src/admin/discord-digest.ts). The admin's alone.
-    // Put in the store by hand; until it is, no digest is sent.
+    // Optional: added to the stage's 1Password Environment, it's bound at
+    // the next Deploy platform; until then, no digest is sent.
     {
       "binding": "DISCORD_DIGEST_WEBHOOK",
       "store_id": "account-secrets-store",
       "secret_name": "DISCORD_DIGEST_WEBHOOK",
     },
-    // The webhook staff alerts are posted to, which names the channel
-    // (src/alerts.ts). The admin's alone. Put in the store by hand; until
-    // it is, alerts are only logged.
-    {
-      "binding": "STAFF_ALERTS_WEBHOOK",
-      "store_id": "account-secrets-store",
-      "secret_name": "STAFF_ALERTS_WEBHOOK",
-    },
     // A read-only Attio API key (records, object configuration, notes and
     // meetings read; user management read to name deal owners), for the
     // company, its people, deals and calls under Details and the won deals
     // a new organization starts from (src/crm/attio.ts). The admin's
-    // alone: never copied to a client, never sent to the browser. Put in
-    // the store by hand; until it is, Details says Attio isn't connected.
+    // alone: never copied to a client, never sent to the browser.
+    // Optional: added to the stage's 1Password Environment, it's bound at
+    // the next Deploy platform; until then, Details says Attio isn't
+    // connected.
     {
       "binding": "ATTIO_READ_KEY",
       "store_id": "account-secrets-store",
@@ -214,8 +245,24 @@
   "env": {
     "staging": {
       "name": "grasp-admin-staging",
+      "routes": [
+        {
+          "pattern": "admin.staging.ongrasp.app/*",
+          "zone_name": "ongrasp.app",
+        },
+      ],
       "vars": {
         "STAGE": "staging",
+        "CF_ACCESS_AUD": "d9c971fada72b860273c91d805c70f07a73ccf1596aa81ff986ff3141d36619d",
+        "CF_ACCESS_ISS": "https://grasp-work.cloudflareaccess.com",
+        "ENTRA_CLIENT_ID": "01228906-bd5b-488e-b7c1-720f4dc12dc2",
+        "GOOGLE_CLIENT_ID": "740037143590-9sb4tsn4di5lqvq5vc1ldtr2kgmm16p2.apps.googleusercontent.com",
+        "CLIENT_DOMAIN": "staging.ongrasp.app",
+        "ADMIN_HOST": "admin.staging.ongrasp.app",
+        "OAUTH_RELAY": "on",
+        "ROOMS_ORIGIN": "",
+        "DISCORD_PUBLIC_KEY": "",
+        "DISCORD_STAFF_IDS": "",
       },
       "d1_databases": [
         {
@@ -328,11 +375,6 @@
           "binding": "DISCORD_DIGEST_WEBHOOK",
           "store_id": "account-secrets-store",
           "secret_name": "DISCORD_DIGEST_WEBHOOK_STAGING",
-        },
-        {
-          "binding": "STAFF_ALERTS_WEBHOOK",
-          "store_id": "account-secrets-store",
-          "secret_name": "STAFF_ALERTS_WEBHOOK_STAGING",
         },
         {
           "binding": "ATTIO_READ_KEY",

@@ -54,22 +54,28 @@
  * fencing: a call already in flight can still land, and the runner that
  * holds the client next finds and reconciles what it left (spec 39.1).
  *
+ * Model spend (GRA-141): core reaches models through an AI Gateway in the
+ * destination's account (`modelGatewayOf`): the client's own in a
+ * dedicated account, the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), ensured with the client's resources.
+ * Its core's model gateway holds every client to its monthly ceiling, the
+ * deployment budget its vars carry (src/deploy/core-vars.ts
+ * `withSpendCeiling`), so no client has unbounded spend on the account.
+ *
  * Not here, on purpose:
  * - A probe of an owned workflow's run: core's probe asks its identity,
  *   every private binding of core and connect (databases, buckets,
  *   Durable Object namespaces, the sandbox with a fresh isolate's answer,
  *   connect) and both clocks, but starts no workflow.
- * - The model-spend admission ceiling (40.5) waits for a product decision
- *   (GRA-141), and the shared AI Gateway reference for a destination (37.5)
- *   isn't recorded yet. Until both exist, a release whose Worker binds
- *   Workers AI is refused (`model_spend_undecided`) rather than given
- *   unbounded spend on the destination's account.
  * - A Workers for Platforms destination: its documented upload, secrets
  *   and script details calls are used, and any binding its documentation
  *   doesn't list for user Workers is refused before an upload
- *   (`wfp_binding_unqualified`): a release that sends mail among them, as
- *   whether a user Worker can send through a `send_email` binding at all
- *   is a spike of its own. The admin probes a user Worker in the
+ *   (`wfp_binding_unqualified`). Mail is the exception: whether a user
+ *   Worker can send through a `send_email` binding at all is a spike of
+ *   its own (GRA-965), so there a release's `send_email` bindings are left
+ *   out (`withoutMail`) rather than refused. Its core then sends no mail,
+ *   and says so (core's src/mail.ts), and no sending domain is set up. The
+ *   admin probes a user Worker in the
  *   namespace it and the router bind (`router.namespace`) through
  *   that binding, as the router then reaches it (GRA-283); one in any
  *   other namespace stops at the probe (`probe_unqualified`), its
@@ -80,12 +86,16 @@
  * fingerprints.
  */
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { log } from "@grasp-os/shared/log";
 import {
   deploymentPrefix,
+  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
+import type { Stage } from "@grasp-os/shared/names";
+import { releaseManifestSchema } from "@grasp-os/shared/release";
 import type {
   LimitRaise,
   ReleaseManifest,
@@ -101,17 +111,18 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
+  or,
   sql,
 } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
-import type { StaffAlert } from "../alerts.ts";
 import { coreAddressOf } from "../clients/core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { teamsBotOf, teamsBotVars } from "../clients/teams-bot.ts";
-import { findD1Database } from "../cloudflare/accounts.ts";
+import { ensureAiGateway, findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { ensureSendingDomain } from "../cloudflare/email-sending.ts";
@@ -140,6 +151,7 @@ import {
   incompatibility,
 } from "../deploy/compatibility.ts";
 import {
+  clientGatewayId,
   clientMailDomain,
   clientRuntimeProfile,
   derivedCoreConfig,
@@ -224,11 +236,6 @@ export const provisionOperationErrorCodes = [
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
   "unknown_worker",
-  /**
-   * A Worker binds Workers AI: no model spend until a ceiling is configured
-   * (GRA-141) and the destination's shared gateway is recorded (spec 37.5).
-   */
-  "model_spend_undecided",
   /** A binding kind Workers for Platforms doesn't document for user Workers. */
   "wfp_binding_unqualified",
   /** A Workers for Platforms destination in another stage's namespace than the admin's own. */
@@ -346,13 +353,13 @@ export interface ProvisionContext {
      * stage's, no operation runs (`stage_unset`).
      */
     namespace?: string;
+    /** Relay mode for its core's sign-in (src/deploy/context.ts, `oauthRelayOf`). */
+    oauthRelay?: Stage;
   };
   /** Reading back what a step wrote (`observed`); tests pass a wait of 0. */
   observe?: { retryDelayMs?: number };
   /** How long a call that changes a client's Workers may wait (`sendHolding`). */
   sendTimeoutMs?: number;
-  /** Tells staff when a release was rolled back on its own (src/alerts.ts). */
-  alert?: (alert: StaffAlert) => Promise<void>;
 }
 
 /**
@@ -450,16 +457,18 @@ const appSchema = z.enum(apps);
 
 /**
  * Binding kinds Cloudflare documents for Workers for Platforms user
- * Workers: D1, R2 and Durable Objects (configuration/bindings), and
- * static assets (configuration/static-assets), and what the GRA-430 run
+ * Workers: D1, R2, Durable Objects and Workers AI
+ * (configuration/bindings), and static assets
+ * (configuration/static-assets), and what the GRA-430 run
  * on a real namespace (28 Oct) qualified: the Worker Loader, version
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
  * `send_email` binding uploads, but whether it delivers is GRA-965's
- * spike, still open. The vars and secrets the admin adds go in the
+ * spike, still open: it's left out there (`withoutMail`). The vars and secrets the admin adds go in the
  * upload's own metadata and secrets calls.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
+  "ai",
   "d1",
   "r2_bucket",
   "durable_object_namespace",
@@ -470,16 +479,40 @@ const wfpBindings: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * `manifest` as a Workers for Platforms namespace runs it: every Worker
+ * without its `send_email` bindings, as whether a user Worker can send
+ * mail at all is GRA-965's spike, still open. Its core then has no `EMAIL`
+ * and sends nothing, saying why (core's src/mail.ts), and the operation
+ * sets up no sending domain (`setUpMail`). A dedicated destination keeps
+ * its mail.
+ */
+const withoutMail = (manifest: ReleaseManifest): ReleaseManifest => ({
+  ...manifest,
+  workers: Object.fromEntries(
+    Object.entries(manifest.workers).map(([name, worker]) => [
+      name,
+      {
+        ...worker,
+        bindings: worker.bindings.filter(({ type }) => type !== "send_email"),
+      },
+    ])
+  ),
+});
+
+/**
  * How `loaded`'s destination takes a Worker's bindings: in a Workers for
  * Platforms namespace, a service binding binds the connect gateway, with
  * props naming the client's own script (GRA-1217).
  */
 const renderOptionsOf = (loaded: Loaded): RenderOptions => {
   const stage = stageOfNamespace(loaded.ownNamespace);
-  return loaded.destination.kind === "workers_for_platforms" &&
+  return {
+    ...(loaded.destination.kind === "workers_for_platforms" &&
     stage !== undefined
-    ? { connectGateway: platformWorkerName("connect-gateway", stage) }
-    : {};
+      ? { connectGateway: platformWorkerName("connect-gateway", stage) }
+      : {}),
+    durableObjects: loaded.client.jurisdiction,
+  };
 };
 
 /** Throws `runner_replaced` unless `held` still holds its client. */
@@ -518,52 +551,6 @@ export const provisionOf = async (db: AdminDatabase, clientId: string) =>
     .from(clientProvisions)
     .where(eq(clientProvisions.clientId, clientId))
     .get();
-
-/**
- * Records the operation that provisions client `held.clientId` with
- * release `releaseId`, as `actor`, and returns its id: the one it has
- * already when it has one, so starting again resumes it (spec 40.1). An
- * operation of another release is refused (`operation_release_changed`):
- * it isn't replaced. Only while runner `held` holds the client, in the
- * same statement: a start that lost the client writes nothing.
- */
-export const startClientProvision = async (
-  db: AdminDatabase,
-  actor: Actor,
-  held: HeldClient,
-  releaseId: string
-): Promise<string> => {
-  const { clientId } = held;
-  const now = new Date();
-  const id = crypto.randomUUID();
-  await actIfChanged(
-    db,
-    actor,
-    db
-      .insert(clientProvisions)
-      .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
-      )
-      .onConflictDoNothing(),
-    {
-      action: "provision.start",
-      clientId,
-      target: releaseId,
-      detail: { operation: id },
-    }
-  );
-  const operation = await provisionOf(db, clientId);
-  if (operation === undefined) {
-    throw new Error(`${clientId} has no operation after starting one`);
-  }
-  if (operation.releaseId !== releaseId) {
-    throw new ProvisionOperationError(
-      "operation_release_changed",
-      `${clientId} is being provisioned with ${operation.releaseId}`
-    );
-  }
-  return operation.id;
-};
 
 /**
  * The first Worker whose last Durable Object migration (`ran`, by Worker)
@@ -638,6 +625,147 @@ const assertCanGo = async (
       `${behind} ran a Durable Object migration ${target} doesn't have`
     );
   }
+};
+
+/** When release `id` was built; null when it isn't imported. */
+const builtAtOf = async (
+  db: AdminDatabase,
+  id: string
+): Promise<Date | null> => {
+  const row = await db
+    .select({ builtAt: releases.builtAt })
+    .from(releases)
+    .where(eq(releases.id, id))
+    .get();
+  return row?.builtAt ?? null;
+};
+
+/**
+ * Switches client `held.clientId`'s provisioning `operation` to the newer
+ * release `releaseId`, as `actor`, audited (`provision.switch_release`):
+ * only while the client is still being provisioned and its operation
+ * isn't done, so nothing of it is live, and only to a release that has
+ * every Durable Object migration its scripts ran (`assertCanGo`). Its
+ * next run starts again from its first step on the new release: every
+ * step finds what an earlier one did. An older release, or a client
+ * that's live, is refused (`operation_release_changed`).
+ */
+const switchProvisionRelease = async (
+  db: AdminDatabase,
+  actor: Actor,
+  held: HeldClient,
+  operation: Operation,
+  releaseId: string
+): Promise<void> => {
+  const { clientId } = held;
+  const changed = new ProvisionOperationError(
+    "operation_release_changed",
+    `${clientId} is being provisioned with ${operation.releaseId}, and can't take ${releaseId}`
+  );
+  const client = await db
+    .select({ status: clients.status })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .get();
+  if (client?.status !== "provisioning" || operation.status === "done") {
+    throw changed;
+  }
+  const [from, to] = await Promise.all([
+    builtAtOf(db, operation.releaseId),
+    builtAtOf(db, releaseId),
+  ]);
+  if (to === null) {
+    throw new ProvisionOperationError(
+      "release_not_imported",
+      `Release ${releaseId} isn't imported`
+    );
+  }
+  // Newer as the releases list them: by when built, then by id.
+  const newer =
+    from === null ||
+    to > from ||
+    (to.getTime() === from.getTime() && releaseId > operation.releaseId);
+  if (!newer) {
+    throw changed;
+  }
+  await assertCanGo(db, operation, releaseId, false);
+  await actIfChanged(
+    db,
+    actor,
+    db
+      .update(clientProvisions)
+      .set({
+        releaseId,
+        status: "running",
+        error: null,
+        startedBy: actorName(actor),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(clientProvisions.id, operation.id),
+          eq(clientProvisions.releaseId, operation.releaseId),
+          stillHolds(held)
+        )
+      ),
+    {
+      action: "provision.switch_release",
+      clientId,
+      target: releaseId,
+      detail: { operation: operation.id, from: operation.releaseId },
+    }
+  );
+  // A start that lost the client, or another switch first, changed nothing.
+  const after = await provisionOf(db, clientId);
+  if (after?.releaseId !== releaseId) {
+    throw changed;
+  }
+};
+
+/**
+ * Records the operation that provisions client `held.clientId` with
+ * release `releaseId`, as `actor`, and returns its id: the one it has
+ * already when it has one, so starting again resumes it (spec 40.1). One
+ * of an older release is switched to `releaseId` while nothing of the
+ * client is live (`switchProvisionRelease`), so a client started on a
+ * release that can't finish takes a fixed one; anything else is refused
+ * (`operation_release_changed`). Only while runner `held` holds the
+ * client, in the same statement: a start that lost the client writes
+ * nothing.
+ */
+export const startClientProvision = async (
+  db: AdminDatabase,
+  actor: Actor,
+  held: HeldClient,
+  releaseId: string
+): Promise<string> => {
+  const { clientId } = held;
+  const now = new Date();
+  const id = crypto.randomUUID();
+  await actIfChanged(
+    db,
+    actor,
+    db
+      .insert(clientProvisions)
+      .select(
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+      )
+      .onConflictDoNothing(),
+    {
+      action: "provision.start",
+      clientId,
+      target: releaseId,
+      detail: { operation: id },
+    }
+  );
+  const operation = await provisionOf(db, clientId);
+  if (operation === undefined) {
+    throw new Error(`${clientId} has no operation after starting one`);
+  }
+  if (operation.releaseId !== releaseId) {
+    await switchProvisionRelease(db, actor, held, operation, releaseId);
+  }
+  return operation.id;
 };
 
 /** How a release start is audited: a rollback, a run again of what runs, or a release. */
@@ -922,6 +1050,8 @@ interface Loaded {
     rotationLiveAt: Date | null;
     signIn: string | null;
     teamsBot: string | null;
+    /** Where its data is kept: what its Durable Objects are made in. */
+    jurisdiction: "eu" | "none";
   };
   /**
    * When `client` and the settings were about to be read: what core runs
@@ -1354,17 +1484,10 @@ const targetOf = (
 
 /**
  * Throws unless the destination can run `worker` as the release declares
- * it: no Workers AI anywhere (`model_spend_undecided`), and in a Workers
- * for Platforms namespace only documented bindings and no cron triggers.
+ * it: in a Workers for Platforms namespace only documented bindings and
+ * no cron triggers.
  */
 const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
-  const ai = worker.bindings.find(({ type }) => type === "ai");
-  if (ai !== undefined) {
-    throw new ProvisionOperationError(
-      "model_spend_undecided",
-      `${worker.name}'s ${ai.name} binds Workers AI, but no spend ceiling or shared gateway is configured for placed clients`
-    );
-  }
   if (loaded.destination.kind !== "workers_for_platforms") {
     return;
   }
@@ -1395,26 +1518,58 @@ const assertRunnable = (loaded: Loaded, worker: WorkerEntry): void => {
 };
 
 /**
- * Core's vars: its derived sign-in and runtime profile, the client's
- * settings, and the change core records. No `MODEL_GATEWAY`: a placed
- * client's gateway is the destination's shared one (spec 37.5), which
- * isn't recorded yet, and no Worker of a placed client binds Workers AI
- * (`assertRunnable`).
+ * The AI Gateway `loaded`'s core reaches models through, in its
+ * destination's account: the destination's shared one in a Workers for
+ * Platforms namespace (spec 37.5), the client's own in a dedicated one.
+ */
+const modelGatewayOf = (loaded: Loaded): string => {
+  if (loaded.destination.kind !== "workers_for_platforms") {
+    return clientGatewayId;
+  }
+  const stage = stageOfNamespace(loaded.ownNamespace);
+  if (stage === undefined) {
+    throw new ProvisionOperationError(
+      "stage_unset",
+      "This admin's STAGE is neither staging nor production: it runs no operation"
+    );
+  }
+  return placedModelGateway(stage);
+};
+
+/** Whether any of the release's Workers binds Workers AI. */
+const bindsModels = (manifest: ReleaseManifest): boolean =>
+  Object.values(manifest.workers).some((worker) =>
+    worker.bindings.some(({ type }) => type === "ai")
+  );
+
+/**
+ * Core's vars: its derived sign-in, runtime profile and model gateway
+ * (`modelGatewayOf`), the client's settings, its monthly model spend
+ * ceiling as the gateway's budget, and the change core records.
  */
 const coreVarsOf = async (
   context: ProvisionContext,
   loaded: Loaded
 ): Promise<Record<string, unknown>> => {
-  const { MODEL_GATEWAY: _gateway, ...derived } = derivedCoreConfig({
+  const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
+    ...(context.router.oauthRelay === undefined
+      ? {}
+      : { oauthRelay: context.router.oauthRelay }),
   });
   return await configuredCoreVars(
     context.db,
     loaded.held.clientId,
-    derived,
+    {
+      ...derived,
+      MODEL_GATEWAY: {
+        gateway: modelGatewayOf(loaded),
+        models: defaultGatewayModels,
+      },
+    },
     {
       by: loaded.operation.startedBy,
       // What started it: a release, or new settings or secrets on the
@@ -1482,6 +1637,7 @@ const load = async (
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
       teamsBot: clients.teamsBot,
+      jurisdiction: clients.jurisdiction,
     })
     .from(clients)
     .where(eq(clients.id, held.clientId))
@@ -1527,7 +1683,10 @@ const load = async (
   return {
     operation,
     held,
-    manifest,
+    manifest:
+      destination.kind === "workers_for_platforms"
+        ? withoutMail(manifest)
+        : manifest,
     placement,
     destination,
     accountId: destination.accountId,
@@ -1537,21 +1696,24 @@ const load = async (
 };
 
 /**
- * Step 1: everything checked before the client's destination is changed,
- * then its resources allocated in its inventory.
+ * Throws unless client `clientId` may run `manifest` as far as the
+ * admin's records tell, before anything of its destination is read:
+ * the release works with what the client runs and with itself
+ * (`incompatibility`), on the schema its databases have, and any
+ * platform limit it raises has evidence for the client's profile. What
+ * the first step checks first (`validate`), and what picks the release a
+ * provisioning offers (`newestFittingRelease`).
  */
-const validate = async (
-  context: ProvisionContext,
-  loaded: Loaded
+const assertReleaseFits = async (
+  db: AdminDatabase,
+  clientId: string,
+  manifest: ReleaseManifest
 ): Promise<void> => {
-  const { db } = context;
-  const { manifest, held } = loaded;
-  const order = appsOf(manifest);
   const refused = incompatibility(
-    await currentReleases(db, held.clientId),
+    await currentReleases(db, clientId),
     manifest,
-    order,
-    await appliedSchema(db, held.clientId)
+    appsOf(manifest),
+    await appliedSchema(db, clientId)
   );
   if (refused !== null) {
     throw new ProvisionOperationError(refused.code, refused.message);
@@ -1562,7 +1724,7 @@ const validate = async (
   try {
     raise = await uncoveredLimitRaise(
       db,
-      held.clientId,
+      clientId,
       manifest.releaseId,
       clientRuntimeProfile
     );
@@ -1585,6 +1747,95 @@ const validate = async (
       `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
     );
   }
+};
+
+/** How many imported releases are read at a time while looking for one that fits. */
+const fittingReleasesPage = 20;
+
+/** Releases listed after `row`, newest first: built before it, or at once with a lower id. */
+const olderThan = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    lt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), lt(releases.id, row.id))
+  );
+
+/** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
+const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
+  or(
+    gt(releases.builtAt, row.builtAt),
+    and(eq(releases.builtAt, row.builtAt), gt(releases.id, row.id))
+  );
+
+/**
+ * The newest imported release client `clientId` may be provisioned with
+ * (`assertReleaseFits`), looking through every imported release, newest
+ * first, a page at a time, never only a window of the newest; with
+ * `newerThan`, only releases built after that one (by when built, then
+ * id). Null when none fits. What a client is provisioned with when staff
+ * don't pick one, and what a retry moves a stopped one forward to.
+ */
+export const newestFittingRelease = async (
+  db: AdminDatabase,
+  clientId: string,
+  newerThan?: { id: string; builtAt: Date }
+): Promise<string | null> => {
+  let after: { id: string; builtAt: Date } | undefined;
+  for (;;) {
+    const page: { id: string; builtAt: Date; manifest: string }[] =
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time, newest first
+      await db
+        .select({
+          id: releases.id,
+          builtAt: releases.builtAt,
+          manifest: releases.manifest,
+        })
+        .from(releases)
+        .where(
+          and(
+            after === undefined ? undefined : olderThan(after),
+            newerThan === undefined ? undefined : newerThanRow(newerThan)
+          )
+        )
+        .orderBy(desc(releases.builtAt), desc(releases.id))
+        .limit(fittingReleasesPage);
+    for (const row of page) {
+      const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
+      if (!parsed.success) {
+        continue;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
+        await assertReleaseFits(db, clientId, parsed.data);
+        return row.id;
+      } catch (error) {
+        if (
+          !(error instanceof ProvisionOperationError) &&
+          !(error instanceof DeployError)
+        ) {
+          throw error;
+        }
+      }
+    }
+    const last = page.at(-1);
+    if (last === undefined || page.length < fittingReleasesPage) {
+      return null;
+    }
+    after = last;
+  }
+};
+
+/**
+ * Step 1: everything checked before the client's destination is changed,
+ * then its resources allocated in its inventory.
+ */
+const validate = async (
+  context: ProvisionContext,
+  loaded: Loaded
+): Promise<void> => {
+  const { db } = context;
+  const { manifest, held } = loaded;
+  const order = appsOf(manifest);
+  await assertReleaseFits(db, held.clientId, manifest);
   const vars = await coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);
@@ -2605,6 +2856,34 @@ const recordFailure = async (
   }
 };
 
+/**
+ * Records client `held.clientId`'s operation failed with `code` at its
+ * first step, audited, when runner `held` stopped before it could run it:
+ * what it works with couldn't be read (a secret missing from Secrets
+ * Store, no client domain). Only while that attempt of the runner
+ * (`held.attempt`, taken first) still holds the client and the operation
+ * is running: never over another runner's, nor a retry's that took the
+ * client over, nor what a run recorded. Staff then read why on its Setup, rather than an
+ * operation left running by a run that's gone.
+ */
+export const recordUnstarted = async (
+  db: AdminDatabase,
+  held: HeldClient,
+  code: string
+): Promise<void> => {
+  const operation = await provisionOf(db, held.clientId);
+  if (operation?.status !== "running") {
+    return;
+  }
+  log.error("provision.failed", {
+    operation: operation.id,
+    clientId: held.clientId,
+    step: "validated",
+    error: code,
+  });
+  await recordFailure(db, { operation, held }, "validated", code);
+};
+
 /** Where a run of the operation stopped, recorded, and what stopped it. */
 interface Stopped {
   operation: Operation;
@@ -2636,10 +2915,9 @@ const runOperation = async (
     // STAGE names no stage has no namespace of its own to hold a client
     // to, and never takes itself for production.
     const ownNamespace = context.router.namespace;
-    if (
-      ownNamespace === undefined ||
-      stageOfNamespace(ownNamespace) === undefined
-    ) {
+    const ownStage =
+      ownNamespace === undefined ? undefined : stageOfNamespace(ownNamespace);
+    if (ownNamespace === undefined || ownStage === undefined) {
       throw new ProvisionOperationError(
         "stage_unset",
         "This admin's STAGE is neither staging nor production: it runs no operation"
@@ -2654,6 +2932,11 @@ const runOperation = async (
 
     step = "resources";
     const inventory = await ensureClientResources(api, db, "system", held);
+    // Before core goes live naming it: the gateway its model calls take.
+    if (bindsModels(loaded.manifest)) {
+      await assertHolds(db, held);
+      await ensureAiGateway(api, loaded.accountId, modelGatewayOf(loaded));
+    }
     await recordStep(db, loaded, "resources", { resources: inventory.length });
 
     step = "migrations";
@@ -2690,6 +2973,9 @@ const runOperation = async (
     await complete(db, loaded);
     return undefined;
   } catch (error) {
+    // Any failure, a resource outside the organization's jurisdiction
+    // (src/hosting/provision.ts) included, stops the run here: recorded on
+    // the operation with its step and code, audited, for its Setup to show.
     const code = operationErrorCode(error);
     log.error("provision.failed", {
       operation: operation.id,
@@ -2734,29 +3020,11 @@ const rollsBack = async (
 };
 
 /**
- * Sends `alert` to staff, a failure logged and not thrown: an alert that
- * can't be sent never hides what the operation did, or why it stopped.
- */
-const tellStaff = async (
-  context: ProvisionContext,
-  alert: StaffAlert
-): Promise<void> => {
-  try {
-    await context.alert?.(alert);
-  } catch (error) {
-    log.error("provision.alert_unsent", {
-      clientId: alert.clientId,
-      kind: alert.kind,
-      error: error instanceof Error ? error.name : "unknown",
-    });
-  }
-};
-
-/**
  * Rolls client `held.clientId` back to the release it ran before
  * `failed`, which failed its probe with `code`: through its operation,
- * as runner `held`, audited as the system's rollback with the cause, and
- * staff told either way. Throws when the rollback doesn't finish.
+ * as runner `held`, audited as the system's rollback with the cause.
+ * Throws when the rollback doesn't finish, its failure recorded on the
+ * operation as any is.
  */
 const rollBackAfterProbe = async (
   context: ProvisionContext,
@@ -2764,7 +3032,6 @@ const rollBackAfterProbe = async (
   failed: Operation,
   code: string
 ): Promise<void> => {
-  const subject = failed.releaseId;
   try {
     await startClientRelease(context.db, "system", held, {
       rollback: true,
@@ -2780,18 +3047,8 @@ const rollBackAfterProbe = async (
       clientId: held.clientId,
       error: operationErrorCode(error),
     });
-    await tellStaff(context, {
-      clientId: held.clientId,
-      kind: "release_rollback_failed",
-      subject,
-    });
     throw error;
   }
-  await tellStaff(context, {
-    clientId: held.clientId,
-    kind: "release_rolled_back",
-    subject,
-  });
 };
 
 /**
@@ -2801,7 +3058,7 @@ const rollBackAfterProbe = async (
  * to resume one that failed. On a failure it records the step and the
  * error's code, audited, and throws the error; except that a live
  * client's release that fails its probe is rolled back to the release
- * before on its own (`rollsBack`), and staff are told. Only for a release
+ * before on its own (`rollsBack`), audited. Only for a release
  * to another release: a run of the release it runs again (settings,
  * rotation, a secrets rollout) or a rollback passes `rollBackOnProbe`
  * false, as going back a release wouldn't undo what failed.

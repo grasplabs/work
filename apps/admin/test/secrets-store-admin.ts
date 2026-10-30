@@ -1,6 +1,6 @@
 /**
- * The admin's local Secrets Store (Miniflare's), filled as deploy-platform
- * fills it (wrangler.jsonc): for each test (test/secrets-store.ts), and for
+ * The admin's local Secrets Store (Miniflare's), filled with every secret
+ * it binds (wrangler.jsonc): for each test (test/secrets-store.ts), and for
  * the browser journeys' admin (test/e2e-seed.ts).
  */
 import { env } from "cloudflare:workers";
@@ -50,8 +50,6 @@ export const adminSecrets = (tokens: {
   [env.ROOMS_READ_TOKEN, ""],
   // Empty too: the digest's tests set it (test/discord-digest.test.ts).
   [env.DISCORD_DIGEST_WEBHOOK, ""],
-  // The alerts' too (test/alerts.test.ts).
-  [env.STAFF_ALERTS_WEBHOOK, ""],
   // Attio's key likewise (test/admin-crm.test.ts).
   [env.ATTIO_READ_KEY, ""],
 ];

@@ -8,9 +8,12 @@
  * - turns off preview URLs, which would serve every uploaded version,
  *   older ones included, at an address of its own;
  * - is wrangler.jsonc, never TOML;
+ * - declares its routes under `routes` alone, never wrangler's singular
+ *   `route`, which the admin's deploy wouldn't read;
  * - for a platform Worker (the admin, the router, the connect gateway), names every Cloudflare
- *   resource as @grasp-os/shared/names does, at the top level for
- *   production and in `env.staging` for staging.
+ *   resource, and declares the routes it answers on, as the shared names
+ *   module (@grasp-os/shared/names) does, at the top level for production
+ *   and in `env.staging` for staging.
  * `check-wrangler-configs.ts` runs it on every wrangler config in the repo.
  */
 import {
@@ -19,6 +22,9 @@ import {
   platformWorkerName,
   releasesBucketName,
   storeSecretName,
+  adminHost,
+  clientDomain,
+  platformRoutes,
 } from "@grasp-os/shared/names";
 import type { PlatformWorker, Stage } from "@grasp-os/shared/names";
 
@@ -48,6 +54,15 @@ const observabilityErrors = (
 const previewUrlErrors = (where: string, previewUrls: unknown): string[] =>
   previewUrls === false ? [] : [`${where}: set preview_urls to false.`];
 
+/**
+ * Wrangler's singular `route`, refused: one form only, `routes`, which
+ * every deploy reads, the admin's cf one included (apps/admin/cf-worker.ts).
+ */
+const routeErrors = (where: string, config: unknown): string[] =>
+  field(config, "route") === undefined
+    ? []
+    : [`${where}: declare routes under "routes", not "route".`];
+
 /** What `file`'s config, whose text is `text`, breaks of the rules above. */
 export const wranglerConfigErrors = (file: string, text: string): string[] => {
   if (file.endsWith(".toml")) {
@@ -57,6 +72,7 @@ export const wranglerConfigErrors = (file: string, text: string): string[] => {
   const errors = [
     ...observabilityErrors(file, field(config, "observability")),
     ...previewUrlErrors(file, field(config, "preview_urls")),
+    ...routeErrors(file, config),
   ];
   // An environment that sets its own observability or preview_urls replaces
   // the top level's.
@@ -72,6 +88,7 @@ export const wranglerConfigErrors = (file: string, text: string): string[] => {
     if (previewUrls !== undefined) {
       errors.push(...previewUrlErrors(where, previewUrls));
     }
+    errors.push(...routeErrors(where, env));
   }
   return errors;
 };
@@ -84,6 +101,26 @@ const platformConfigs: Readonly<Record<string, PlatformWorker>> = {
 };
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/**
+ * Every route `config` declares under `routes` (wrangler's singular
+ * `route` is refused on its own, `routeErrors`), as one line to compare
+ * and show: each pattern, its zone, and whether it's a Custom Domain. A
+ * route given as a string is its pattern.
+ */
+const routesText = (config: unknown): string =>
+  list(field(config, "routes"))
+    .map((route) => (typeof route === "string" ? { pattern: route } : route))
+    .map((route) =>
+      [
+        String(field(route, "pattern")),
+        ...(field(route, "zone_name") === undefined
+          ? []
+          : [`zone ${String(field(route, "zone_name"))}`]),
+        ...(field(route, "custom_domain") === true ? ["custom domain"] : []),
+      ].join(" ")
+    )
+    .join(", ") || "none";
 
 /** `config`'s names that aren't what @grasp-os/shared/names gives `worker` in `stage`. */
 const stageNameErrors = (
@@ -100,6 +137,13 @@ const stageNameErrors = (
   };
   expect("name", field(config, "name"), platformWorkerName(worker, stage));
   expect("vars.STAGE", field(field(config, "vars"), "STAGE"), stage);
+  // Where it answers: without routes a deploy uploads it and serves it
+  // nowhere; with another stage's, it takes that stage's traffic.
+  expect(
+    "routes",
+    routesText(config),
+    routesText({ routes: platformRoutes(worker, stage) })
+  );
   for (const binding of list(field(config, "dispatch_namespaces"))) {
     expect(
       "the dispatch namespace",
@@ -118,6 +162,13 @@ const stageNameErrors = (
     );
   }
   if (worker === "admin") {
+    const vars = field(config, "vars");
+    expect(
+      "vars.CLIENT_DOMAIN",
+      field(vars, "CLIENT_DOMAIN"),
+      clientDomain(stage)
+    );
+    expect("vars.ADMIN_HOST", field(vars, "ADMIN_HOST"), adminHost(stage));
     for (const database of list(field(config, "d1_databases"))) {
       expect(
         "the D1 database",

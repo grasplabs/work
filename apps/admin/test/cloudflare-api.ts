@@ -830,6 +830,10 @@ const accountRoutes: Route[] = [
     path: /^\/ai-gateway\/gateways$/u,
     answer: ({ account, json }) => {
       const gateway = { authentication: false, ...json };
+      // One id per account: a second create of it is refused, as the API does.
+      if (account.gateways.some((each) => each.id === json?.id)) {
+        return refusal(400, 7001, "A gateway with this id already exists");
+      }
       account.gateways.push(gateway);
       return envelope(gateway);
     },
@@ -1015,10 +1019,12 @@ export const fakeCloudflareApi = (token: string) => {
   /** Adds an account `member` is a member of, and returns what it holds. */
   const addAccount = (
     name = "Client",
-    member = deployerEmail
+    member = deployerEmail,
+    /** Its id, for an account the admin knows by its own, such as Grasp's. */
+    id = crypto.randomUUID().replaceAll("-", "")
   ): AccountState => {
     const account: AccountState = {
-      id: crypto.randomUUID().replaceAll("-", ""),
+      id,
       name,
       members: new Map([[member, "accepted"]]),
       d1: [],

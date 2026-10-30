@@ -46,7 +46,6 @@ import {
   limitRaises,
   manifestKey,
   platformLimitsSchema,
-  releaseIdSchema,
   releaseManifestSchema,
   sha256OfBytes,
   verifyLimitEvidence,
@@ -58,6 +57,10 @@ import type {
   PlatformLimits,
   ReleaseManifest,
 } from "@grasp-os/shared/release";
+import {
+  compareReleaseIds,
+  releaseIdSchema,
+} from "@grasp-os/shared/release-id";
 import { eq, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
@@ -147,15 +150,8 @@ const publishedIds = async (store: ReleaseStore): Promise<string[]> => {
   return ids;
 };
 
-const ciRelease = /^r(?<run>\d+)-(?<sha>[0-9a-f]{7})$/u;
-
-/** A CI release's run number; -1 for a local build (`dev-`). */
-const runOf = (id: string): number =>
-  Number(ciRelease.exec(id)?.groups?.run ?? -1);
-
-/** CI releases by run number, newest first, then local builds. */
-const newestFirst = (a: string, b: string): number =>
-  runOf(b) - runOf(a) || b.localeCompare(a);
+/** Newest first, by id (`compareReleaseIds`): local builds last. */
+const newestFirst = (a: string, b: string): number => compareReleaseIds(b, a);
 
 /** Reads from `store`, counting the reads. */
 class Reader {
@@ -233,12 +229,6 @@ const parseManifest = (
   if (manifest.releaseId !== id) {
     throw new Error(
       `The manifest at ${manifestKey(id)} names release ${manifest.releaseId}`
-    );
-  }
-  const sha = ciRelease.exec(id)?.groups?.sha;
-  if (sha !== undefined && !manifest.commit.startsWith(sha)) {
-    throw new Error(
-      `Release ${id} names commit ${manifest.commit}, not one starting ${sha}`
     );
   }
   return { manifest, text };

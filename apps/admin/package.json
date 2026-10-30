@@ -8,7 +8,7 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
-    "typegen": "wrangler types --include-runtime=false",
+    "typegen": "wrangler types --include-runtime=false --strict-vars=false",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply DB --remote"
   },

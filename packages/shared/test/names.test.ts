@@ -7,18 +7,31 @@ import {
   deploymentIdAlphabet,
   deploymentIdLength,
   adminDatabaseName,
+  adminHost,
+  authRelayHost,
+  clientDomain,
   clientsNamespace,
   isResourceName,
+  platformRoutes,
   platformWorkerName,
   platformWorkers,
   releasesBucketName,
   routerHostsName,
   stageNamed,
+  stageOfHost,
   stages,
 } from "../src/names.ts";
 
 // The platform's Cloudflare names, as the scheme's table gives them, and
 // every one a name Cloudflare takes for each kind of resource.
+
+/** Hosts of `stage`: a client's, cased and dotted as a request may, the admin's and the relay's. */
+const hostsOf = (stage: (typeof stages)[number]): string[] => [
+  `acme.${clientDomain(stage)}`,
+  `ACME.${clientDomain(stage)}.`,
+  adminHost(stage),
+  authRelayHost(stage),
+];
 
 describe("the platform's names", () => {
   it("are grasp-<what> in production and grasp-<what>-staging in staging", () => {
@@ -102,6 +115,52 @@ describe("the platform's names", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("serve staging below production's domain, and give every host to exactly one stage", () => {
+    expect({
+      domains: stages.map((stage) => clientDomain(stage)),
+      relays: stages.map((stage) => authRelayHost(stage)),
+      production: hostsOf("production").map((host) => stageOfHost(host)),
+      staging: hostsOf("staging").map((host) => stageOfHost(host)),
+      stagingDomainItself: stageOfHost(clientDomain("staging")),
+      lookalike: stageOfHost("acme.notstaging.ongrasp.app"),
+    }).toStrictEqual({
+      domains: ["ongrasp.app", "staging.ongrasp.app"],
+      // What Grasp's Google and Entra apps name as their redirect URIs' host.
+      relays: ["auth.ongrasp.app", "auth.staging.ongrasp.app"],
+      production: ["production", "production", "production", "production"],
+      staging: ["staging", "staging", "staging", "staging"],
+      stagingDomainItself: "staging",
+      lookalike: "production",
+    });
+  });
+
+  it("put the admin on a route for its own host, the router on every host below the stage's domain, and the gateway nowhere", () => {
+    expect(
+      Object.fromEntries(
+        stages.map((stage) => [
+          stage,
+          platformWorkers.map((worker) => platformRoutes(worker, stage)),
+        ])
+      )
+    ).toStrictEqual({
+      production: [
+        [{ pattern: "admin.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [{ pattern: "*.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [],
+      ],
+      staging: [
+        [
+          {
+            pattern: "admin.staging.ongrasp.app/*",
+            zone_name: "ongrasp.app",
+          },
+        ],
+        [{ pattern: "*.staging.ongrasp.app/*", zone_name: "ongrasp.app" }],
+        [],
+      ],
+    });
   });
 });
 

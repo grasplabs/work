@@ -27,6 +27,7 @@ import { intervieweeOf, kernOf } from "../brain/article-kern.ts";
 import type { StatementRow } from "../brain/article-kern.ts";
 import { BackButton } from "../brain/back-button.tsx";
 import { BannerHeader, Interviewed } from "../brain/brain-article/kern.tsx";
+import { MentionLinks } from "../brain/brain-article/mention-links.tsx";
 import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
@@ -46,17 +47,19 @@ import {
   given,
   kindLabel,
   mentionParts,
-  quoted,
+  statementWords,
   sourceContents,
   splitTimeline,
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
+import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
 // prototype links out of the brain, to a workflow on its Workflows page, a
@@ -459,8 +462,8 @@ const DetailRows = ({
             [
               ref.to ?? "",
               more > 0
-                ? `${quoted(first.text)} ${t`and ${more} more`}`
-                : quoted(first.text),
+                ? `${statementWords(first.id, first.text)} ${t`and ${more} more`}`
+                : statementWords(first.id, first.text),
             ],
           ];
         }
@@ -645,19 +648,7 @@ const Mentions = ({ note }: { note: Note }) => {
   }
   return (
     <Fold count={note.mentions.length} title={t`Named, not linked`}>
-      <div className="flex flex-col gap-1 pt-2 pb-4">
-        {note.mentions.map((mention) => (
-          <Link
-            className="text-muted-foreground hover:text-foreground text-sm leading-snug"
-            hash={mention.statementId}
-            key={mention.statementId}
-            params={{ noteId: mention.sourceId }}
-            to="/brain/$noteId"
-          >
-            {quoted(mention.text)}
-          </Link>
-        ))}
-      </div>
+      <MentionLinks mentions={note.mentions} />
     </Fold>
   );
 };
@@ -889,7 +880,9 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
 const NotePage = () => {
   const { t } = useLingui();
   const { noteId } = Route.useParams();
-  const { brain, workspace } = useBrainData();
+  const { brain, workspace: read } = useBrainData();
+  const { transcript } = Route.useLoaderData();
+  const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
   const note = brain.notes.find((candidate) => candidate.id === noteId);
@@ -910,13 +903,18 @@ const NotePage = () => {
     );
   }
   const content = (
-    <NoteContent
-      byId={new Map(brain.notes.map((candidate) => [candidate.id, candidate]))}
-      hash={hash}
-      key={note.id}
-      note={note}
-      workspace={workspace}
-    />
+    <>
+      {transcript === undefined ? null : <NotLoaded page={transcript} />}
+      <NoteContent
+        byId={
+          new Map(brain.notes.map((candidate) => [candidate.id, candidate]))
+        }
+        hash={hash}
+        key={note.id}
+        note={note}
+        workspace={workspace}
+      />
+    </>
   );
   // A piece of work has what Grasp knows about it beside its note.
   return note.kind === "candidate" ? (
@@ -932,5 +930,25 @@ export const Route = createFileRoute("/_shell/brain/$noteId")({
     search.knowledge === true || search.knowledge === "true"
       ? { knowledge: true }
       : {},
+  // The note's transcript, when its source has one: `brain.read`, which the
+  // layout read, says only how many turns it has.
+  loader: async ({
+    abortController,
+    context: { core },
+    params: { noteId },
+    parentMatchPromise,
+  }) => {
+    const { loaderData } = await parentMatchPromise;
+    const workspace =
+      loaderData?.state === "ready" ? loaderData.data.workspace : undefined;
+    return {
+      transcript: await loadTranscript(
+        core,
+        workspace,
+        noteId,
+        abortController.signal
+      ),
+    };
+  },
   component: NotePage,
 });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bdb7d772-db83-437a-b7ac-73933e5b85e6",
+  "id": "f4d752eb-3b69-4fdf-9182-3a8fb86d01e3",
   "prevId": "9735d107-a355-4563-b820-977b44bbd986",
   "tables": {
     "answer_waits": {
@@ -505,6 +505,13 @@
         },
         "about": {
           "name": "about",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "named": {
+          "name": "named",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1013,30 +1020,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "more_voices": {
-      "name": "more_voices",
-      "columns": {
-        "work": {
-          "name": "work",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "notes": {
       "name": "notes",
       "columns": {
@@ -1300,6 +1283,30 @@
           "name": "readbacks_person_receipt_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "referrals": {
+      "name": "referrals",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

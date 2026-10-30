@@ -106,11 +106,13 @@ export const isCoreOrigin = (origin: string): boolean =>
 
 /**
  * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
- * is the admin's own host (`ADMIN_HOST`); `console` stays reserved from
- * when the admin was called that.
+ * is the admin's own host (`ADMIN_HOST`), `auth` the auth relay's, and
+ * `staging` staging's domain below production's (@grasp-os/shared/names);
+ * `console` stays reserved from when the admin was called that.
  */
 export const reservedClientIds: ReadonlySet<string> = new Set([
   "admin",
+  "auth",
   "console",
   "internal",
   "staging",

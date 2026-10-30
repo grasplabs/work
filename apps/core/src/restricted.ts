@@ -223,6 +223,7 @@ const restrictedEntry = (
             app: context.appId,
             workflow,
             rootRunId,
+            authority,
           })
         : delegateActorOf(authority),
     action: "context.restricted",

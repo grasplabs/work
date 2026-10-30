@@ -42,6 +42,7 @@ import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 
+import { platformName } from "../chat-platforms.ts";
 import type { Session } from "../core.ts";
 import { appName, personName, readDirectory } from "../directory.ts";
 import type { Directory } from "../directory.ts";
@@ -331,12 +332,17 @@ export const LogExport = ({ search }: { search: LogSearch }) => {
 };
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
-export const actorOf = (
+const doerOf = (
   actor: AuditActor,
   directory: Directory
 ): { label: string; id?: string } => {
   if (actor.type === "person") {
-    return { label: personName(directory, actor.userId), id: actor.userId };
+    const name = personName(directory, actor.userId);
+    if (actor.via !== undefined) {
+      const app = platformName(actor.via);
+      return { label: i18n._(msg`${name}, in ${app}`), id: actor.userId };
+    }
+    return { label: name, id: actor.userId };
   }
   if (actor.type === "staff") {
     const name = personName(directory, actor.userId);
@@ -345,6 +351,13 @@ export const actorOf = (
   if (actor.type === "agent") {
     const { agentId } = actor;
     const person = personName(directory, actor.onBehalfOf);
+    if (actor.via !== undefined) {
+      const app = platformName(actor.via);
+      return {
+        label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
+        id: actor.agentId,
+      };
+    }
     return {
       label: i18n._(msg`Agent ${agentId} for ${person}`),
       id: actor.agentId,
@@ -376,6 +389,26 @@ export const actorOf = (
   }
   // The platform itself: a name, the same in every language.
   return { label: "Grasp" };
+};
+
+/**
+ * Who did it, and, for work a Grasp staff member started (an agent's turn, an
+ * App's or a workflow's step), the staff member it was for.
+ */
+export const actorOf = (
+  actor: AuditActor,
+  directory: Directory
+): { label: string; id?: string } => {
+  const doer = doerOf(actor, directory);
+  if (!("staff" in actor) || actor.staff === undefined) {
+    return doer;
+  }
+  const { label } = doer;
+  const name = personName(directory, actor.staff);
+  return {
+    ...doer,
+    label: i18n._(msg`${label}, started by ${name} (Grasp staff)`),
+  };
 };
 
 /** The event as stored, laid out to read; the stored text if it isn't JSON. */

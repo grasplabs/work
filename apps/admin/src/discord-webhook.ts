@@ -1,7 +1,6 @@
 /**
  * Posting to a channel of Grasp's own Discord through a webhook, as the
- * morning digest (src/admin/discord-digest.ts) and staff alerts
- * (src/alerts.ts) do. The webhook's URL names the channel and is its
+ * morning digest (src/admin/discord-digest.ts) does. The webhook's URL names the channel and is its
  * credential, so it's kept in Secrets Store; a URL that isn't a Discord
  * webhook is never posted to, since what's posted names clients.
  */

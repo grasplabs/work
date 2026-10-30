@@ -21,6 +21,7 @@ import type {
   WorkflowStatus,
   Workspace,
 } from "@grasp-os/shared/brain";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, select, t } from "@lingui/core/macro";
@@ -885,14 +886,23 @@ const everyStep = (steps: Step[]): Step[] =>
     ...(step.split?.paths.flatMap((path) => everyStep(path.steps)) ?? []),
   ]);
 
-/** Workflows whose steps use any of these tool names, today or in the target design. */
+/**
+ * Workflows whose steps use any of these tool names, today or in the target
+ * design. A name counts as a whole word, as the Integrations page counts it:
+ * a step in "Gmail" doesn't use Mail.
+ */
 const workflowsUsing = (ws: Workspace, names: string[]): Workflow[] => {
-  const wanted = names.map((name) => name.toLowerCase());
+  const wanted = names.map(
+    (name) =>
+      new RegExp(
+        String.raw`(?<![\p{L}\p{N}])${escape(name)}(?![\p{L}\p{N}])`,
+        "iu"
+      )
+  );
   const uses = (step: Step) =>
     (step.tool ?? "")
       .split(",")
-      .map((name) => name.trim().toLowerCase())
-      .some((name) => wanted.some((want) => name.includes(want)));
+      .some((name) => wanted.some((want) => want.test(name.trim())));
   return ws.workflows.filter((workflow) =>
     [
       ...everyStep(workflow.baseline.steps),
@@ -1054,10 +1064,34 @@ const points = (...list: (NotePoint | undefined)[]): NotePoint[] =>
   list.filter((entry): entry is NotePoint => Boolean(entry));
 
 /** A statement in the reader's quotation marks: “…” in English, „…“ in German. */
-export const quoted = (text: string): string =>
+const quoted = (text: string): string =>
   t({
     message: `“${text}”`,
     comment: "A statement, quoted. Use the quotation marks of your language.",
+  });
+
+/**
+ * Whether a statement is one of the onboarding's claims (GRA-1084): what
+ * five or more of a team's people said, put together (core's
+ * onboarding/team-claims.ts), never one person's words.
+ */
+export const isTeamClaim = (statementId: string): boolean =>
+  statementId.startsWith(onboardingIdPrefix);
+
+/**
+ * Statement `statementId`'s words as the brain shows them: in quotation
+ * marks, as someone said them, except a team's claim, which no one person
+ * said and is never quoted (GRA-1199). Where it stands on its own, the
+ * claim says what it rests on (`ClaimBasis`, `teamClaimBasis`).
+ */
+export const statementWords = (statementId: string, text: string): string =>
+  isTeamClaim(statementId) ? text : quoted(text);
+
+/** What a team's claim rests on, in words: for where `ClaimBasis` can't go, such as the Markdown export. */
+export const teamClaimBasis = (): string =>
+  t({
+    message: "Said by five or more people",
+    comment: "Under a statement put together from the interviews",
   });
 
 type Draft = Omit<
@@ -2115,7 +2149,7 @@ const gapPoints = (cx: Context, gap: Gap): NotePoint[] =>
         );
         return statement
           ? {
-              label: quoted(statement.text),
+              label: statementWords(statement.id, statement.text),
               to: statement.sourceId,
               statement: id,
             }
