@@ -1,7 +1,9 @@
 import type {
   DiagramNext,
   DiagramScope,
+  DiagramSection,
   DiagramTask,
+  DoorFlow,
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
 
@@ -245,6 +247,20 @@ const scopesOf = (
   }
 };
 
+/** The named part a task begins (`metadata.grasp.section`), if it names one. */
+const sectionOf = (task: JsonObject): DiagramSection | undefined => {
+  const section = objectOf(objectOf(objectOf(task.metadata)?.grasp)?.section);
+  const name = literal(section?.name);
+  if (section === undefined || name === null) {
+    return undefined;
+  }
+  return {
+    name,
+    purpose: literal(section.purpose),
+    summary: literal(section.summary),
+  };
+};
+
 const taskOf = (
   id: string,
   value: JsonValue | undefined,
@@ -255,6 +271,7 @@ const taskOf = (
   if (task === undefined || kind === undefined) {
     return undefined;
   }
+  const section = sectionOf(task);
   return {
     id,
     pointer,
@@ -264,6 +281,8 @@ const taskOf = (
     guarded: Object.hasOwn(task, "if"),
     next: nextOf(task.then),
     scopes: scopesOf(kind, task, pointer),
+    // Only where it begins a part: a diagram with none is one without parts.
+    ...(section === undefined ? {} : { section }),
   };
 };
 
@@ -271,3 +290,119 @@ const taskOf = (
 export const workflowDiagram = (definition: JsonValue): WorkflowDiagram => ({
   tasks: tasksOf(objectOf(definition)?.do, "/do"),
 });
+
+/**
+ * Where a task leads to another workflow, as its literal source names it:
+ * the child workflow a `run` task runs, which the workflow waits for; or
+ * the event an `emit` task sends through its event binding, whose type
+ * starts whichever workflows a trigger starts on it. Core resolves each
+ * to the workflows behind it, for the reader (workflow-doors.ts).
+ */
+export type DoorSource =
+  | {
+      pointer: string;
+      flow: DoorFlow;
+      target: { kind: "workflow"; namespace: string | null; name: string };
+    }
+  | {
+      pointer: string;
+      flow: DoorFlow;
+      target: { kind: "event"; binding: string; type: string | null };
+    };
+
+/**
+ * An emit hands the item over when the workflow ends with it: it is the
+ * last task of the workflow's own list, or goes to `end`. Anywhere else
+ * the workflow goes on after it, so the event starts the other one.
+ */
+const emitFlow = (task: JsonObject, last: boolean): DoorFlow =>
+  task.then === "end" || (last && task.then === undefined) ? "hands" : "starts";
+
+/** The door task `task`, at `at`, leads through, if it leads through one; `last` when it ends the workflow's own list. */
+const doorSourceOf = (
+  task: JsonObject,
+  at: string,
+  last: boolean
+): DoorSource | undefined => {
+  const kind = kindOf(task);
+  if (kind === "run") {
+    const workflow = objectOf(objectOf(task.run)?.workflow);
+    const name = literal(workflow?.name);
+    return name === null
+      ? undefined
+      : {
+          pointer: at,
+          flow: "waits",
+          target: {
+            kind: "workflow",
+            namespace: literal(workflow?.namespace),
+            name,
+          },
+        };
+  }
+  if (kind !== "emit") {
+    return undefined;
+  }
+  const binding = bindingOf(task);
+  const event = objectOf(objectOf(objectOf(task.emit)?.event)?.with);
+  return binding === null
+    ? undefined
+    : {
+        pointer: at,
+        flow: emitFlow(task, last),
+        target: { kind: "event", binding, type: literal(event?.type) },
+      };
+};
+
+/** The lists task `task`, at `at`, holds, each with its pointer. */
+const listsOf = (
+  task: JsonObject,
+  at: string
+): { tasks: JsonValue | undefined; pointer: string }[] => [
+  { tasks: task.do, pointer: pointerJoin(at, "do") },
+  { tasks: task.try, pointer: pointerJoin(at, "try") },
+  {
+    tasks: objectOf(task.catch)?.do,
+    pointer: pointerJoin(pointerJoin(at, "catch"), "do"),
+  },
+  {
+    tasks: objectOf(task.fork)?.branches,
+    pointer: pointerJoin(pointerJoin(at, "fork"), "branches"),
+  },
+];
+
+/** The doors of the tasks of the list at `pointer`; `top` for the workflow's own. */
+const doorSourcesIn = (
+  value: JsonValue | undefined,
+  pointer: string,
+  top: boolean,
+  found: DoorSource[]
+): void => {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  for (const [index, item] of value.entries()) {
+    const entry = objectOf(item);
+    const [id] = entry === undefined ? [] : Object.keys(entry);
+    const task = id === undefined ? undefined : objectOf(entry?.[id]);
+    if (id !== undefined && task !== undefined) {
+      const at = pointerJoin(pointerJoin(pointer, index), id);
+      const door = doorSourceOf(task, at, top && index === value.length - 1);
+      if (door !== undefined) {
+        found.push(door);
+      }
+      // The lists it holds: none of them is the workflow's own, so an
+      // emit there is followed by the rest.
+      for (const list of listsOf(task, at)) {
+        doorSourcesIn(list.tasks, list.pointer, false, found);
+      }
+    }
+  }
+};
+
+/** Each task of `definition` that leads to another workflow, in order. */
+export const doorSourcesOf = (definition: JsonValue): DoorSource[] => {
+  const found: DoorSource[] = [];
+  doorSourcesIn(objectOf(definition)?.do, "/do", true, found);
+  return found;
+};

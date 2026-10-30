@@ -34,6 +34,7 @@ const notFoundCodes = new Set([
   "workflow.run_not_found",
   "workflow.resource_unavailable",
   "knowledge.not_found",
+  "brain.work_not_found",
   "decision.not_found",
   "screen.not_found",
 ]);
@@ -76,6 +77,18 @@ export const loadFromCore = async <T,>(
         : { state: "missing", requestId };
     }
     return { state: "refused", message: failureText(error) };
+  }
+};
+
+/**
+ * What `read` reads, or null when core refuses it or can't be reached: a
+ * read that may fail on its own without failing the page it is part of.
+ */
+export const orNull = async <T,>(read: () => Promise<T>): Promise<T | null> => {
+  try {
+    return await read();
+  } catch {
+    return null;
   }
 };
 

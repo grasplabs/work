@@ -121,6 +121,7 @@ import migrations from "../db/onboarding/migrations/migrations.js";
 import {
   approvals,
   askedAbout,
+  moreVoices,
   answerWaits,
   auditOutbox,
   brainSent,
@@ -1208,6 +1209,7 @@ export class Onboarding extends DurableObject<Env> {
     for (const [id, team] of workTeam) {
       if (!teamIds.has(team)) {
         this.#db.delete(works).where(eq(works.id, id)).run();
+        this.#db.delete(moreVoices).where(eq(moreVoices.work, id)).run();
       }
     }
     this.#dropOrphanDrawings();
@@ -1317,7 +1319,12 @@ export class Onboarding extends DurableObject<Env> {
           wasIn.get(person.id) !== team.id &&
           !asked.has(person.id)
       );
-      const heard = new Map(mine.map(({ id, asked: of }) => [id, of.length]));
+      const wanted = this.#moreVoicesWanted();
+      // A piece of work the company asked to hear more people about is
+      // asked about first, ahead of any other.
+      const heard = new Map(
+        mine.map(({ id, asked: of }) => [id, wanted.has(id) ? -1 : of.length])
+      );
       for (const [person, work] of assignWork(
         newcomers,
         mine,
@@ -2714,6 +2721,63 @@ export class Onboarding extends DurableObject<Env> {
    * each, each as drawn from what its people agreed to, and how far it is
    * known: for staff, and for the drawing of each piece.
    */
+  /** The pieces of work asked for more voices, by their onboarding ids. */
+  #moreVoicesWanted(): Set<string> {
+    return new Set(
+      this.#db
+        .select({ work: moreVoices.work })
+        .from(moreVoices)
+        .all()
+        .map(({ work }) => work)
+    );
+  }
+
+  /** The brain's id (`intakeIds.workflow`) of each piece of work, by its own id. */
+  async #brainIdsOfWorks(): Promise<Map<string, string>> {
+    const rows = this.#db
+      .select({ id: works.id, team: works.team })
+      .from(works)
+      .all();
+    return new Map(
+      await Promise.all(
+        rows.map(
+          async ({ id, team }) =>
+            [id, await intakeIds.workflow(team, id)] as const
+        )
+      )
+    );
+  }
+
+  /**
+   * Asks to hear more people about the piece of work the brain knows as
+   * `brainWork`: whoever is asked about one of its team's work next is
+   * asked about it first (`#askNewcomers`, a team's map drawn again).
+   * The piece of work's own id, or null for one the onboarding has no
+   * longer. Asking twice changes nothing.
+   */
+  async askMoreVoices(brainWork: string): Promise<string | null> {
+    const ids = await this.#brainIdsOfWorks();
+    const work = [...ids].find(([, brainId]) => brainId === brainWork)?.[0];
+    if (work === undefined) {
+      return null;
+    }
+    this.#db
+      .insert(moreVoices)
+      .values({ work, at: new Date().toISOString() })
+      .onConflictDoNothing()
+      .run();
+    return work;
+  }
+
+  /** The brain's ids of the pieces of work asked for more voices. */
+  async moreVoicesAsked(): Promise<string[]> {
+    const wanted = this.#moreVoicesWanted();
+    const ids = await this.#brainIdsOfWorks();
+    return [...ids].flatMap(([work, brainId]) =>
+      wanted.has(work) ? [brainId] : []
+    );
+  }
+
   teamWorks(team: string): TeamWork[] {
     const asked = this.#db.select().from(askedAbout).all();
     const rules = this.#rules();
@@ -6597,7 +6661,14 @@ export class Onboarding extends DurableObject<Env> {
           !away &&
           !drawn.some((work) => work.id === asked.get(id))
       );
-      const assigned = assignWork(open, drawn, members);
+      const wanted = this.#moreVoicesWanted();
+      const assigned = assignWork(
+        open,
+        drawn,
+        members,
+        // Asked for more voices: asked about first.
+        new Map(drawn.map(({ id }) => [id, wanted.has(id) ? -1 : 0]))
+      );
       // Whoever is asked about a piece of work also does it, as far as the record goes.
       for (const work of drawn) {
         for (const { id } of members) {

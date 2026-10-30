@@ -1,3 +1,4 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Sidebar,
@@ -129,7 +130,12 @@ export const AppSidebar = ({
                       }
                       // With how many workflows need the person.
                       if (section.to === "/workflows") {
-                        return <WorkflowsItem key={section.to} />;
+                        return (
+                          <WorkflowsItem
+                            key={section.to}
+                            requests={isAdmin(identity.role)}
+                          />
+                        );
                       }
                       return <SectionItem key={section.to} section={section} />;
                     })}
