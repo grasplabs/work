@@ -5865,6 +5865,10 @@ msgstr "Drawn as a workflow"
 msgid "Drawn as a workflow: {workflow}"
 msgstr "Drawn as a workflow: {workflow}"
 
+#: src/inbox/items.ts
+msgid "Drive"
+msgstr "Drive"
+
 #: src/knowledge/uploads.tsx
 #: src/onboarding/document-drop.tsx
 msgid "Drop files here"
@@ -6474,6 +6478,7 @@ msgid "File"
 msgstr "File"
 
 #: src/chat/builds.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Files"
@@ -8886,6 +8891,7 @@ msgstr "Made with Grasp on {date}"
 msgid "Madrid"
 msgstr "Madrid"
 
+#: src/inbox/items.ts
 #: src/onboarding/interview-actions.tsx
 msgid "Mail"
 msgstr "Mail"
@@ -8897,6 +8903,10 @@ msgstr "Mail and messages to other people, after they press a card with every re
 #: src/onboarding/review-parts.tsx
 msgid "Mail isn’t available on this hosting yet"
 msgstr "Mail isn’t available on this hosting yet"
+
+#: src/inbox/items.ts
+msgid "Mailbox"
+msgstr "Mailbox"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -10385,6 +10395,11 @@ msgctxt "lowest end of a rating of the interview"
 msgid "Not good"
 msgstr "Not good"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
+msgid "Not hearing"
+msgstr "Not hearing"
+
 #: src/landscape/landscape.ts
 msgid "Not in a domain yet"
 msgstr "Not in a domain yet"
@@ -11226,6 +11241,10 @@ msgstr "Open since Grasp's go on {since}."
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Open the chat"
+
+#: src/inbox/item-detail.tsx
+msgid "Open the connection"
+msgstr "Open the connection"
 
 #: src/chat/thread.tsx
 msgid "Open the dashboard"
@@ -12350,6 +12369,10 @@ msgstr "Reading it back"
 msgctxt "part of an interview"
 msgid "Reading it back"
 msgstr "Reading it back"
+
+#: src/inbox/items.ts
+msgid "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
+msgstr "Reading it kept failing, so your triggers there start nothing new for now. Grasp keeps trying; if it doesn't come back, check the connection."
 
 #: src/settings/package-approvers.tsx
 msgid "Reading people and teams…"
@@ -15524,6 +15547,10 @@ msgstr "The platform is open to everyone at the company: it was never closed for
 #: src/policies/policy-editing.tsx
 msgid "The policy's text"
 msgstr "The policy's text"
+
+#: src/inbox/items.ts
+msgid "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
+msgstr "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
 
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
@@ -18781,6 +18808,22 @@ msgstr "Your story"
 #: src/onboarding/knowledge-bar.tsx
 msgid "Your team can start at {threshold}%"
 msgstr "Your team can start at {threshold}%"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files"
+msgstr "Your triggers stopped hearing new files"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new files at {name}"
+msgstr "Your triggers stopped hearing new files at {name}"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail"
+msgstr "Your triggers stopped hearing new mail"
+
+#: src/inbox/items.ts
+msgid "Your triggers stopped hearing new mail at {name}"
+msgstr "Your triggers stopped hearing new mail at {name}"
 
 #: src/interview/before.tsx
 msgid "Your words"

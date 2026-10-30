@@ -10,7 +10,8 @@ import type { Viewer, Waiting } from "./waiting.ts";
 
 // What waits on the person that only the inbox settles: versions of Apps
 // and workflows asked to go live, decisions runs wait on, questions of the
-// brain asked of them, and schedules that stopped. The nav's count holds
+// brain asked of them, schedules that stopped, and mailboxes or drives
+// connect stopped hearing for their triggers. The nav's count holds
 // them, so the dashboard lists them too, each a way to its item in the
 // inbox, where it is decided.
 
@@ -21,6 +22,7 @@ const settledInInbox = new Set<InboxSource["type"]>([
   "decision",
   "asked",
   "stopped",
+  "stoppedEvents",
 ]);
 
 /** The items of what was read that wait in the inbox, in its order. */
