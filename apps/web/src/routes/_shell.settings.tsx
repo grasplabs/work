@@ -186,7 +186,7 @@ const SettingsLayout = () => {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 pb-24">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <h1 className="text-2xl font-medium tracking-tight">
+            <h1 className="type-title">
               <Trans>Settings</Trans>
             </h1>
             <p className="text-muted-foreground text-sm">

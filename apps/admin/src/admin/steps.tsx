@@ -818,9 +818,7 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
       <div className="flex flex-col gap-5 border-t px-5 py-5">
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex min-w-0 flex-col gap-3">
-            <span className="text-2xl leading-none font-medium tabular-nums">
-              {knowledge.percent}%
-            </span>
+            <span className="type-figure">{knowledge.percent}%</span>
             <KnowledgeDots count={40} knowledge={knowledge} label={known} />
           </div>
           <span className="text-muted-foreground">
