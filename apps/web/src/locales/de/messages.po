@@ -4048,6 +4048,7 @@ msgstr "Nicht lesbar"
 #: src/engines/app-status.tsx
 #: src/engines/app-versions.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 #: src/knowledge/new-collection.tsx
@@ -4526,6 +4527,7 @@ msgstr "Klicken, um die Nutzung zu öffnen"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
@@ -8091,6 +8093,10 @@ msgstr "Es bleibt hier, damit Sie es lesen können. Sie können es weiterhin lö
 msgid "It still does not work. You can stop for now and come back later. Your place is kept."
 msgstr "Es funktioniert immer noch nicht. Sie können jetzt aufhören und später wiederkommen. Ihr Stand bleibt erhalten."
 
+#: src/engines/release-controls.tsx
+msgid "It stops running at once, calls already running included, and can never run again. It is kept, and its revocation is recorded with your reason."
+msgstr "Sie läuft sofort nicht mehr, auch laufende Aufrufe nicht, und kann nie wieder laufen. Sie bleibt erhalten, und ihr Widerruf wird mit Ihrer Begründung festgehalten."
+
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "Es nimmt von Anfang an teil. Füge als Nächstes die Personen hinzu und wähle die Teamleitung: Sie spricht zuerst."
@@ -8649,6 +8655,10 @@ msgstr "Rechtliche Dokumente und Richtlinien, die der Anbieter veröffentlicht."
 msgid "Legal data"
 msgstr "Rechtsdaten"
 
+#: src/engines/release-controls.tsx
+msgid "Legal hold: {hold}"
+msgstr "Rechtliche Aufbewahrung: {hold}"
+
 #: src/brain/memory-page.tsx
 msgctxt "the Brain's lessons from repeated failures"
 msgid "Lessons"
@@ -8708,6 +8718,18 @@ msgstr "Lizenz"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Lizenz"
+
+#: src/engines/release-controls.tsx
+msgid "Lift hold"
+msgstr "Aufbewahrung aufheben"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold}"
+msgstr "Rechtliche Aufbewahrung {hold} aufheben"
+
+#: src/engines/release-controls.tsx
+msgid "Lift the legal hold {hold} from version {version}?"
+msgstr "Rechtliche Aufbewahrung {hold} von Version {version} aufheben?"
 
 #: src/frame/person-menu.tsx
 msgid "Light"
@@ -9327,6 +9349,10 @@ msgstr "Name"
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Name eines neuen Workflows"
+
+#: src/engines/release-controls.tsx
+msgid "Name of the hold, such as a case reference"
+msgstr "Name der Aufbewahrung, etwa ein Aktenzeichen"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Name of your HR platform"
@@ -11908,6 +11934,18 @@ msgctxt "filter: where people reach Stephen"
 msgid "Place"
 msgstr "Ort"
 
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold"
+msgstr "Rechtliche Aufbewahrung anordnen"
+
+#: src/engines/release-controls.tsx
+msgid "Place a legal hold on version {version}?"
+msgstr "Rechtliche Aufbewahrung für Version {version} anordnen?"
+
+#: src/engines/release-controls.tsx
+msgid "Place hold"
+msgstr "Aufbewahrung anordnen"
+
 #: src/onboarding/place-picker.tsx
 msgid "Places"
 msgstr "Orte"
@@ -12938,6 +12976,7 @@ msgstr "Revision {revision} besteht die Prüfung des Profils und kann veröffent
 
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
 #: src/policies/policy-editing.tsx
 msgid "Revoke"
@@ -12966,6 +13005,18 @@ msgstr "Pakete für {domain} widerrufen"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakete für {domain} widerrufen?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke this version"
+msgstr "Diese Version widerrufen"
+
+#: src/engines/release-controls.tsx
+msgid "Revoke version {version}?"
+msgstr "Version {version} widerrufen?"
+
+#: src/engines/release-controls.tsx
+msgid "Revoked"
+msgstr "Widerrufen"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"
@@ -15754,6 +15805,14 @@ msgstr "den Vereinigten Staaten"
 msgid "The upload was cancelled."
 msgstr "Der Upload wurde abgebrochen."
 
+#: src/engines/release-controls.tsx
+msgid "The version is kept only as long as the retention rules and its other holds keep it. Lifting the hold is recorded."
+msgstr "Die Version bleibt nur so lange erhalten, wie die Aufbewahrungsregeln und ihre anderen Aufbewahrungen sie halten. Das Aufheben wird festgehalten."
+
+#: src/engines/release-controls.tsx
+msgid "The version is kept, however old, until an admin lifts the hold. The hold is recorded with your reason."
+msgstr "Die Version bleibt erhalten, egal wie alt, bis ein Admin die Aufbewahrung aufhebt. Die Aufbewahrung wird mit Ihrer Begründung festgehalten."
+
 #: src/brain/brain.ts
 msgid "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
 msgstr "Das Visionsgespräch, die Interviews mit Stakeholdern und Mitarbeitenden per Sprache oder Chat und Chats mit einem Grasp-Agenten. Ergänzt, wie jedes Team arbeitet, in eigenen Worten."
@@ -18212,6 +18271,7 @@ msgid "Whose numbers to show"
 msgstr "Wessen Zahlen gezeigt werden"
 
 #: src/engines/package-approvals.tsx
+#: src/engines/release-controls.tsx
 #: src/knowledge/purge.tsx
 #: src/policies/policy-editing.tsx
 #: src/workflows/requests/request-table.tsx
