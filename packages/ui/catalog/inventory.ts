@@ -148,14 +148,14 @@ export const shadcnComponents = {
     summary: "A chat message's bubble, with reactions.",
     exports: ["Bubble", "BubbleContent", "BubbleGroup", "BubbleReactions"],
     changes:
-      "The hovered `secondary` and `muted` bubbles and the `tinted` bubble use the theme's `secondary-hover`, `muted-hover`, `tinted` and `tinted-hover` tokens instead of colours mixed in their classes.",
+      "Adds the `tinted` variant, on the theme's `tinted` and `tinted-foreground`. Hovers are shadcn's `/80`.",
   },
   button: {
     status: "supported",
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class.",
+      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use.",
   },
   "button-group": {
     status: "supported",
@@ -863,6 +863,12 @@ export const graspComponents = {
     status: "supported",
     summary: "Children in a row that wraps, such as actions or tags.",
     exports: ["Inline", "inlineVariants"],
+  },
+  stat: {
+    status: "supported",
+    summary:
+      'A key figure, one number that says the result, in the serif: over or under what it counts, or inside a sentence. `variant="attention"` for one that needs someone.',
+    exports: ["Stat", "statVariants"],
   },
   "page-header": {
     status: "supported",

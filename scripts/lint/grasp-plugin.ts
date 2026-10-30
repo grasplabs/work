@@ -23,15 +23,19 @@
  * With `reexportsOnly` (packages), only the exports are checked.
  *
  * no-slow-motion: Grasp answers within 300 ms (AGENTS.md, Design). It
- * reads the durations a class list (`duration-*`) or a Motion option
- * (`duration`) sets, and refuses one over that, unless it loops (work
- * still going on). What is rare or seen once is turned off for its files
- * in vite.config.ts, each with its reason; a stylesheet's own animations
- * are for review.
+ * reads the durations of motion only: a class list's `duration-*`, a
+ * Motion `transition` (in seconds, as a `transition` prop or option, or
+ * the options of Motion's `animate()`), and the Web Animations API's
+ * `element.animate()` (in milliseconds). It refuses one over 300 ms,
+ * unless it repeats for ever (work still going on). Any other `duration`,
+ * such as how long a toast stays, is not motion and passes. What is rare
+ * or seen once is turned off for its files in vite.config.ts, each with
+ * its reason; a stylesheet's own animations are for review.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
-import { findSlowClass, LIMIT_MS, motionMs } from "./slow-motion.ts";
+import { durationMs, findSlowClass, LIMIT_MS } from "./slow-motion.ts";
+import type { MotionUnit } from "./slow-motion.ts";
 
 interface Node {
   type: string;
@@ -51,6 +55,9 @@ interface Node {
   object?: Node;
   properties?: Node[];
   key?: Node;
+  parent?: Node;
+  callee?: Node;
+  property?: Node;
   argument?: Node;
   elements?: (Node | null)[];
   consequent?: Node;
@@ -493,6 +500,57 @@ const repeatsForever = (object: Node): boolean =>
       nameOf(each.value) === "Infinity"
   );
 
+/** The name of what a call calls: `animate` for `animate(...)` and `el.animate(...)`. */
+const calleeName = (call: Node): unknown =>
+  call.callee?.type === "MemberExpression"
+    ? nameOf(call.callee.property)
+    : nameOf(call.callee);
+
+/**
+ * The unit of the motion an options object sets, or undefined when it
+ * sets no motion: Motion's `transition` (a prop, a key, or the options of
+ * its `animate(target, keyframes, options)`) in seconds; the Web
+ * Animations API's `element.animate(keyframes, options)` in milliseconds.
+ * A `transition` nests (`transition={{ scale: { duration } }}`), so the
+ * object's parents up to it count.
+ */
+const motionUnit = (object: Node): MotionUnit | undefined => {
+  let node: Node = object;
+  while (node.parent !== undefined) {
+    const { parent } = node;
+    if (parent.type === "JSXExpressionContainer") {
+      const attribute = parent.parent;
+      return attribute?.type === "JSXAttribute" &&
+        typeof attribute.name === "object" &&
+        nameOf(attribute.name) === "transition"
+        ? "s"
+        : undefined;
+    }
+    if (parent.type === "CallExpression") {
+      const args = parent.arguments ?? [];
+      if (calleeName(parent) !== "animate") {
+        return undefined;
+      }
+      if (parent.callee?.type === "MemberExpression" && args[1] === node) {
+        return "ms";
+      }
+      return args[2] === node ? "s" : undefined;
+    }
+    if (parent.type === "Property" && nameOf(parent.key) === "transition") {
+      return "s";
+    }
+    if (
+      parent.type !== "Property" &&
+      parent.type !== "ObjectExpression" &&
+      parent.type !== "ConditionalExpression"
+    ) {
+      return undefined;
+    }
+    node = parent;
+  }
+  return undefined;
+};
+
 const noSlowMotion = {
   meta: {
     type: "problem",
@@ -530,7 +588,8 @@ const noSlowMotion = {
         }
       },
       ObjectExpression: (node: Node): void => {
-        if (repeatsForever(node)) {
+        const unit = motionUnit(node);
+        if (unit === undefined || repeatsForever(node)) {
           return;
         }
         for (const each of node.properties ?? []) {
@@ -540,9 +599,9 @@ const noSlowMotion = {
             isNode(value) &&
             value.type === "Literal" &&
             typeof value.value === "number" &&
-            motionMs(value.value) > LIMIT_MS
+            durationMs(value.value, unit) > LIMIT_MS
           ) {
-            report(each, motionMs(value.value));
+            report(each, durationMs(value.value, unit));
           }
         }
       },
