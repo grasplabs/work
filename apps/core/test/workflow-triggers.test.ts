@@ -5,7 +5,15 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // An independent workflow's triggers over the session's `/rpc`
 // (`workflowResources.triggers`), from trigger-resources.ts's threat model:
@@ -321,5 +329,103 @@ describe("an independent workflow's triggers over /rpc", () => {
       },
       listed: [trigger],
     });
+  });
+
+  it("stay listed, and can be disabled and deleted, but not enabled or moved, by an owner who no longer builds the workflow", async () => {
+    const owner = await personApi("builder");
+    const workflow = await reporting(owner);
+    const coBuilder = await personApi("builder");
+    await owner.api.workflowResources.share(workflow, {
+      type: "person",
+      id: coBuilder.userId,
+      role: "builder",
+    });
+    const ownersTrigger = await nightlyTrigger(owner, workflow);
+    const theirs = await nightlyTrigger(coBuilder, workflow);
+    await owner.api.workflowResources.unshare(workflow, {
+      type: "person",
+      id: coBuilder.userId,
+    });
+    const { triggers } = coBuilder.api.workflowResources;
+
+    const listed = await triggers.list(workflow);
+    const move = await outcome(triggers.setVersion(theirs.id, 2));
+    const disabled = await triggers.setEnabled(theirs.id, false);
+    const enable = await outcome(triggers.setEnabled(theirs.id, true));
+    const othersDelete = await outcome(triggers.delete(ownersTrigger.id));
+    await triggers.delete(theirs.id);
+
+    expect({
+      listed,
+      move,
+      disabled: disabled.enabled,
+      enable,
+      othersDelete,
+      left: await owner.api.workflowResources.triggers.list(workflow),
+    }).toStrictEqual({
+      listed: [theirs],
+      move: "workflow.resource_unavailable",
+      disabled: false,
+      enable: "workflow.resource_unavailable",
+      othersDelete: "workflow.trigger_unavailable",
+      left: [ownersTrigger],
+    });
+  });
+
+  it("are neither listed, created nor deleted by Grasp staff", async () => {
+    const { workflow, trigger } = await ownerWithTrigger();
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+    const { core } = await openRpc(session);
+    const { triggers } = core.authenticate().workflowResources;
+
+    expect({
+      list: await outcome(triggers.list(workflow)),
+      create: await outcome(
+        triggers.create({
+          kind: "schedule",
+          workflowId: workflow,
+          version: 1,
+          config: nightly,
+        })
+      ),
+      disable: await outcome(triggers.setEnabled(trigger.id, false)),
+      delete: await outcome(triggers.delete(trigger.id)),
+    }).toStrictEqual({
+      list: "role.forbidden",
+      create: "role.forbidden",
+      disable: "role.forbidden",
+      delete: "role.forbidden",
+    });
+  });
+
+  it("show a connector trigger's connection, event and mapping as created", async () => {
+    const owner = await personApi("builder");
+    const workflow = await reporting(owner);
+    const connectionId = `connection-${unique()}`;
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, account_name, account_email, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', '[]', ?, ?, ?, ?)"
+      )
+      .bind(connectionId, owner.userId, "Mail", "mail@acme.test", now, now)
+      .run();
+    const config = {
+      connection: { connectionId, resource: "reports@acme.test" },
+      event: "m365.mail.received",
+      input: { fields: { report: "/payload/subject" }, defaults: {} },
+    };
+
+    const trigger = await owner.api.workflowResources.triggers.create({
+      kind: "connector",
+      workflowId: workflow,
+      version: 1,
+      config,
+    });
+
+    expect({
+      config: trigger.config,
+      nextAt: trigger.nextAt,
+      listed: await owner.api.workflowResources.triggers.list(workflow),
+    }).toStrictEqual({ config, nextAt: null, listed: [trigger] });
   });
 });
