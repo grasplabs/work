@@ -3,6 +3,7 @@ import type {
   WorkflowStage,
 } from "@grasp-os/shared/workflow-lifecycle";
 import { liveStages } from "@grasp-os/shared/workflow-lifecycle";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,19 +20,19 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon, PauseIcon, PlayIcon, SendIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useGrace } from "../use-grace.ts";
 
 // Whether an independent workflow runs, and the one place to pause it
 // (prototype `components/workflow-status.tsx`): beside its name, "Live
@@ -43,7 +44,7 @@ import { useCore } from "../use-core.ts";
 // refuses new starts while it is paused, and runs already going carry on.
 // After the yes it waits `graceSeconds` in the same place with Undo; only
 // then is core asked. Leaving the page in those seconds pauses it at once:
-// the yes was given.
+// the yes was given (`useGrace`, the rule an answer in Today follows too).
 //
 // The version waiting to go live is approved or sent back on the page too
 // (`GoLiveDecision`), by whoever core lets decide it (`canDecide`), as in
@@ -51,9 +52,6 @@ import { useCore } from "../use-core.ts";
 
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
-
-/** One second, in milliseconds. */
-const secondMs = 1000;
 
 /** The words for a stage before a version went live. */
 const stageWords: Readonly<Record<WorkflowStage, MessageDescriptor>> = {
@@ -212,7 +210,7 @@ const StatusMenu = ({
   onAskToGoLive: (version: number) => void;
 }) => {
   const { t } = useLingui();
-  const { askable, canPause, canResume, liveVersion } = view;
+  const { askable, canPause, canResume } = view;
   if (!canPause && !canResume && askable === null) {
     return (
       <span className="flex items-center gap-2 font-medium">
@@ -221,7 +219,6 @@ const StatusMenu = ({
       </span>
     );
   }
-  const since = view.liveSince === null ? null : formatDate(view.liveSince);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -240,11 +237,6 @@ const StatusMenu = ({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuGroup>
-          {since === null ? null : (
-            <DropdownMenuLabel>
-              {t`Version ${liveVersion} went live on ${since}`}
-            </DropdownMenuLabel>
-          )}
           {canPause ? (
             <DropdownMenuItem onClick={onPause}>
               <PauseIcon />
@@ -288,60 +280,55 @@ export const WorkflowStatus = ({
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState(false);
-  // Seconds left to take the pause back; null when none is on its way.
-  const [left, setLeft] = useState<number | null>(null);
-  // The revision a pause on its way names, for leaving the page too.
-  const pending = useRef<number | null>(null);
 
   const change = async (
     write: "pause" | "resume" | "requestGoLive",
     input: { revision: number; version?: number }
   ): Promise<void> => {
-    const changed = await run(
-      async (session) =>
-        await session.workflowResources.lifecycle[write](workflow, input)
-    );
+    let conflict = false;
+    const changed = await run(async (session) => {
+      try {
+        return await session.workflowResources.lifecycle[write](
+          workflow,
+          input
+        );
+      } catch (error) {
+        conflict =
+          workflowResourceErrors.codeOf(error) ===
+          "workflow.lifecycle_conflict";
+        throw error;
+      }
+    });
     if (changed !== undefined) {
       onChange(changed);
+      return;
+    }
+    if (conflict) {
+      // Changed by someone else first: how it stands now is read, so the
+      // next change names the revision core has, and why this one failed
+      // still shows.
+      try {
+        onChange(
+          await core.withSession(
+            async (session) =>
+              await session.workflowResources.lifecycle.get(workflow)
+          )
+        );
+      } catch {
+        // The page's own read says how it stands when it is loaded again.
+      }
     }
   };
 
-  // The pause is real: core is asked, with the revision the yes was given at.
-  const pauseNow = useEffectEvent((revision: number) => {
-    void change("pause", { revision });
-  });
-
-  useEffect(() => {
-    // A second at a time; after the last one core is asked.
-    const timer =
-      left === null
-        ? undefined
-        : setTimeout(() => {
-            if (left > 1) {
-              setLeft(left - 1);
-              return;
-            }
-            const revision = pending.current;
-            pending.current = null;
-            setLeft(null);
-            if (revision !== null) {
-              pauseNow(revision);
-            }
-          }, secondMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [left]);
-
-  // The page goes while a pause is on its way: it happens now, as nothing
-  // on this page is left to show it.
-  useEffect(
-    () => () => {
-      const revision = pending.current;
-      if (revision === null) {
-        return;
-      }
-      pending.current = null;
+  // The pause is real: core is asked, with the revision the yes was given
+  // at; once the page is gone, with nobody left on it to tell. The
+  // workflow's page says how it stands when it is opened again.
+  const { held, hold, undo } = useGrace<number>({
+    seconds: graceSeconds,
+    go: (revision) => {
+      void change("pause", { revision });
+    },
+    goOnLeave: (revision) => {
       void (async () => {
         try {
           await core.withSession(
@@ -351,24 +338,14 @@ export const WorkflowStatus = ({
               })
           );
         } catch {
-          // Nobody is left on the page to tell; the workflow's page says
-          // how it stands when it is opened again.
+          // Nobody is left on the page to tell.
         }
       })();
     },
-    [core, workflow]
-  );
+  });
 
-  if (left !== null) {
-    return (
-      <PauseCountdown
-        left={left}
-        onUndo={() => {
-          pending.current = null;
-          setLeft(null);
-        }}
-      />
-    );
+  if (held !== null) {
+    return <PauseCountdown left={held.left} onUndo={undo} />;
   }
 
   const view = statusOf(lifecycle);
@@ -378,7 +355,7 @@ export const WorkflowStatus = ({
     live: t`Live since ${since}`,
     paused: t({ message: "Paused", context: "a workflow someone paused" }),
   };
-  const { waiting } = view;
+  const { waiting, liveVersion } = view;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -400,6 +377,13 @@ export const WorkflowStatus = ({
           view={view}
           word={words[view.shows]}
         />
+        {/* Which version is live, for everyone: not only in the menu of
+            those who may change it. */}
+        {liveVersion === null || view.liveSince === null ? null : (
+          <span className="text-muted-foreground">
+            {t`Version ${liveVersion} went live on ${since}`}
+          </span>
+        )}
         {waiting === null ? null : (
           <span className="text-muted-foreground">
             <Trans>Version {waiting} waits to go live</Trans>
@@ -412,8 +396,7 @@ export const WorkflowStatus = ({
         onOpenChange={setAsking}
         onPause={() => {
           setAsking(false);
-          pending.current = lifecycle.revision;
-          setLeft(graceSeconds);
+          hold(lifecycle.revision);
         }}
         open={asking}
       />
