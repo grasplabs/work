@@ -403,6 +403,7 @@ describe(inInbox, () => {
       "asked:asked-1",
       "decision:decision-1",
       "goLive:app-invoices:4",
+      "revoked:revoked-1",
       "stopped:stopped-1",
       "workflowGoLive:workflow-quotes:2",
     ]);
