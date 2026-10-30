@@ -1,3 +1,10 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import {
+  chatFileMaxBytes,
+  chatFilesPerQuestionMax,
+  chatFileTypeOf,
+} from "@grasp-os/shared/chat";
+import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import {
   useNavigate,
@@ -19,13 +26,31 @@ import {
 import type { ModelChoice } from "./model-choice.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
-// the box's text, model and effort, and asking in the open chat, or in a
-// new one named after the question.
+// the box's text, model, effort and files, and asking in the open chat, or
+// in a new one named after the question. A question's files are attached to
+// its chat as it is sent, one at a time, then the question names them.
 
 /** A new chat's title: the start of its first question. */
 const titleOf = (question: string): string => {
   const line = question.trim().split("\n")[0] ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+};
+
+/** A file in the box, waiting for its question, by an ID of the page's own. */
+interface BoxFile {
+  id: string;
+  file: File;
+}
+
+/** Why core wouldn't take `file`, as core says it, before it is sent at all. */
+const problemOf = (file: File): string | undefined => {
+  if (chatFileTypeOf(file.name) === undefined) {
+    return failureText(agentErrors.create("agent.file_unsupported"));
+  }
+  if (file.size > chatFileMaxBytes) {
+    return failureText(agentErrors.create("agent.file_too_large"));
+  }
+  return undefined;
 };
 
 /** No model takes an effort, as before core says which do. */
@@ -67,6 +92,14 @@ export const useAsk = (
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<readonly BoxFile[]>([]);
+  // Why a file the person chose stays out of the box.
+  const [fileProblem, setFileProblem] = useState<string>();
+  // The box's files core already took, by chat: asking again in the same
+  // chat names them rather than attaching them twice.
+  const attached = useRef(
+    new Map<string, { chatId: string; fileId: string }>()
+  );
   // The person's last choice in this browser, against what core offers
   // now: until they make one, the default model at its default effort.
   const [choice, setChoice] = useState<ModelChoice>(() =>
@@ -90,7 +123,28 @@ export const useAsk = (
     question: string;
     projectId: string | undefined;
   } | null>(null);
-  const ask = async (question: string): Promise<void> => {
+  const attach = (chosen: readonly File[]): void => {
+    const problems = chosen.flatMap((file) => problemOf(file) ?? []);
+    const added = chosen
+      .filter((file) => problemOf(file) === undefined)
+      .map((file) => ({ id: crypto.randomUUID(), file }));
+    const room = chatFilesPerQuestionMax - files.length;
+    setFiles([...files, ...added.slice(0, Math.max(0, room))]);
+    setFileProblem(
+      added.length > room
+        ? failureText(agentErrors.create("agent.too_many_files"))
+        : problems[0]
+    );
+  };
+  const removeFile = (id: string): void => {
+    setFiles((now) => now.filter((each) => each.id !== id));
+    attached.current.delete(id);
+    setFileProblem(undefined);
+  };
+  const ask = async (
+    question: string,
+    carried: readonly BoxFile[] = []
+  ): Promise<void> => {
     if (sending.current) {
       return;
     }
@@ -113,12 +167,31 @@ export const useAsk = (
         ));
         created = id;
       }
-      await session.chats.send(id, {
+      const askedIn = id;
+      const fileIds: string[] = [];
+      for (const { id: boxId, file } of carried) {
+        const known = attached.current.get(boxId);
+        if (known?.chatId === askedIn) {
+          fileIds.push(known.fileId);
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+        const { id: fileId } = await session.chats.attachFile(askedIn, {
+          name: file.name,
+          bytes,
+        });
+        attached.current.set(boxId, { chatId: askedIn, fileId });
+        fileIds.push(fileId);
+      }
+      await session.chats.send(askedIn, {
         text: question,
         model,
         ...(effort === undefined ? {} : { effort }),
+        ...(fileIds.length === 0 ? {} : { files: fileIds }),
       });
-      return id;
+      return askedIn;
     });
     sending.current = false;
     if (sent === undefined) {
@@ -134,6 +207,10 @@ export const useAsk = (
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
     setText((now) => (now === question ? "" : now));
+    setFiles((now) => now.filter((each) => !carried.includes(each)));
+    for (const { id } of carried) {
+      attached.current.delete(id);
+    }
     if (chatId === undefined) {
       setActiveChat(sent, slot);
       if (opens === "page") {
@@ -167,9 +244,17 @@ export const useAsk = (
         choose({ model, effort: chosen });
       },
       busy,
-      failure,
+      failure: fileProblem ?? failure,
+      files: files.map(({ id, file }) => ({
+        id,
+        name: file.name,
+        bytes: file.size,
+      })),
+      onAttach: attach,
+      onRemoveFile: removeFile,
       onSend: () => {
-        void ask(text);
+        setFileProblem(undefined);
+        void ask(text, files);
       },
       onStop: () => {
         void stop();
