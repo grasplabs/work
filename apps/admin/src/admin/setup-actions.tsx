@@ -64,7 +64,6 @@ import { useRolloutAction } from "../rollout/use-action.ts";
 import { thenRefresh } from "../use-action.ts";
 import { ringChoices, ringWords } from "./platform-parts.tsx";
 import { Body, Facts, Failure, Quiet } from "./setup-parts.tsx";
-import { addSecretStep } from "./words.ts";
 
 /** Reads the page again after a change: whatever it shows, read anew. */
 export type Refresh = () => Promise<void>;
