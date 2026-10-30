@@ -11,11 +11,11 @@ const operationMs = 90_000;
 
 /** What the admin's placed seed made (apps/admin/test/e2e-seed.ts). */
 const seededSchema = z.object({
-  destinationId: z.string(),
+  clientId: z.string(),
   releaseIds: z.tuple([z.string(), z.string()]),
 });
 
-/** A dedicated destination, and two releases a placed client runs, oldest first. */
+/** A client live on the first of two releases, in a dedicated destination of its own. */
 const seed = async (
   request: APIRequestContext
 ): Promise<z.infer<typeof seededSchema>> => {
@@ -48,43 +48,20 @@ const doneOn = async (page: Page, releaseId: string): Promise<void> => {
   });
 };
 
-// Staff add an organization, provision it in a dedicated destination,
-// release it to a later release, roll it back and offboard it, from the
-// console alone (GRA-387, GRA-384): no engineer, no command line.
-test("staff provision a client as a placement, release it, roll it back and offboard it", async ({
+// Staff release a live client to a later release, roll it back and
+// offboard it, from the console alone (GRA-387, GRA-384): no engineer,
+// no command line. Adding one is the create journey's.
+test("staff release a placed client, roll it back and offboard it", async ({
   page,
   request,
 }) => {
-  const { destinationId, releaseIds } = await seed(request);
+  const { clientId, releaseIds } = await seed(request);
   const [first, second] = releaseIds;
-  const clientId = `placed-${crypto.randomUUID().slice(0, 8)}`;
 
-  // Added: who it is and how its people sign in. No account, no release.
-  await visit(page, "/new-organization");
-  await page.getByLabel("Name").fill("Placed Acme");
-  await page.getByLabel("Its address").fill(clientId);
-  await page.getByLabel("Email", { exact: true }).fill("ada@acme.test");
-  await page.getByLabel("Email domains").fill("acme.test");
-  await page.getByLabel("Google Workspace domain").fill("acme.test");
-  await page.getByRole("button", { name: "Add organization" }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`/organizations/${clientId}/setup`, "u")
-  );
-
-  // Placed in the dedicated destination staff choose, on the older release.
+  // Live on the first.
+  await visit(page, `/organizations/${clientId}/setup`);
   const section = hosting(page);
-  await section
-    .getByRole("button", { name: "Advanced: dedicated hosting" })
-    .click();
-  await section.getByText(destinationId, { exact: true }).click();
-  await section.getByLabel("Release").selectOption(first);
-  await section
-    .getByRole("button", { name: "Place and start provisioning" })
-    .click();
   await doneOn(page, first);
-  await expect(
-    section.getByText(`Placed in ${destinationId}`, { exact: false })
-  ).toBeVisible();
 
   // Released to the later one.
   await section.getByLabel("Release").selectOption(second);
