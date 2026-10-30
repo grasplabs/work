@@ -15,7 +15,7 @@ import {
   refusalsOf,
   startChild,
   times,
-  withGateway,
+  withProvider,
 } from "./run-lineages.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -41,13 +41,14 @@ describe("run lineages", { timeout: 90_000 }, () => {
     await finished(root.id);
     const rootActor = runActorOf({ runId: root.id, app, workflow: "idle" });
 
-    const result = await withGateway(
+    const result = await withProvider(
       undefined,
       [
         ...times(97, cheapAnswer),
         // Each of the step's attempts sends one request and two retries:
-        // its first fails on server errors, and is tried again.
-        ...times(3, { status: 500 }),
+        // its first is refused for the provider's rate each time, and is
+        // tried again.
+        ...times(3, { status: 429, headers: { "retry-after": "1" } }),
         ...times(6, dearTotal),
       ],
       async (fake) => {
@@ -90,7 +91,7 @@ describe("run lineages", { timeout: 90_000 }, () => {
       workflow: "reader",
     });
 
-    const result = await withGateway(
+    const result = await withProvider(
       undefined,
       times(110, cheapAnswer),
       async (fake) => {

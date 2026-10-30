@@ -36,7 +36,6 @@ import {
 } from "../knowledge/extract.ts";
 import type { LocalExtractorEnv } from "../knowledge/extract.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 
 // The kickoff, read for the ten things Stephen needs before his first
@@ -489,7 +488,7 @@ export const transcriptOf = async (
  * must be let take sensitive data (and keep in the EU, where every call
  * must stay there).
  */
-const readingModel = async (env: ModelsEnv): Promise<string | undefined> =>
+const readingModel = async (env: Env): Promise<string | undefined> =>
   modelForRole(await modelSettings(env), "careful", { sensitive: true });
 
 /** How long a reading may take: a long conversation, read once. */

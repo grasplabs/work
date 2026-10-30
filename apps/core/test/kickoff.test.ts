@@ -1,18 +1,17 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { authErrors } from "@grasp-os/shared/errors";
 import type { KickoffInput } from "@grasp-os/shared/kickoff";
+import { modelErrors } from "@grasp-os/shared/models";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { gatewaySettings, modelForRole, models } from "../src/models.ts";
-import type { ModelsEnv } from "../src/models.ts";
+import { modelForRole, models } from "../src/models.ts";
 import { OnboardingStaffRpc } from "../src/onboarding/staff-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { SessionCheck } from "../src/session-check.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor, testModel } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -24,8 +23,9 @@ import {
 
 // The kickoff (GRA-318): staff bring in Grasp's first conversation with
 // the sponsor, it is read through the model gateway for what Stephen needs,
-// and what it brought goes into his context. AI Gateway is the outside
-// system: a fake behind the AI binding. The ways it can fail, tried here:
+// and what it brought goes into his context. The model provider behind
+// connect is the outside system (test/model-provider.ts). The ways it can
+// fail, tried here:
 //
 // - A field kept whose quote the transcript doesn't hold: the model made
 //   it up, and Stephen would act on it.
@@ -36,8 +36,7 @@ import {
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-/** Hosted in the EU, as the tests' config says. */
+const mistral = "mistral/mistral-large-latest";
 const euModel = "openai/gpt-5.4";
 
 /** Grasp's first conversation with a Dutch company, as its transcript has it. */
@@ -97,39 +96,36 @@ const reading = {
   ],
 };
 
-const answer = (body: unknown): GatewayReply => ({
+const answer = (body: unknown): ProviderReply => ({
   text: JSON.stringify(body),
   inputTokens: 900,
   outputTokens: 300,
 });
 
 /**
- * What `run` returns while the gateway answers with `replies`, under the
- * deployment's gateway `config` when given.
+ * What `run` returns while the provider answers with `replies`, for the
+ * organization's chosen `models`, under the deployment's rules `config`
+ * when given.
  */
 const answering = async <T>(
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   run: () => Promise<T>,
-  config?: unknown
+  {
+    config,
+    models: chosen = [testModel],
+  }: { config?: unknown; models?: readonly string[] } = {}
 ) => {
   const before = env.MODEL_GATEWAY;
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
+  const provider = await fakeProviderFor(chosen, ...replies);
   try {
     if (config !== undefined) {
       env.MODEL_GATEWAY = config;
     }
-    return { requests: fake.requests, result: await run() };
+    return { requests: provider.requests, result: await run() };
   } finally {
     env.MODEL_GATEWAY = before;
-    spy.mockRestore();
   }
 };
-
-/** The gateway's settings under `config` as `MODEL_GATEWAY`. */
-const settings = (config: unknown) =>
-  gatewaySettings({ ...env, MODEL_GATEWAY: config });
 
 /** Grasp's staff, on a connection of their own. */
 const asStaff = async () => {
@@ -151,6 +147,14 @@ const file = (name: string, text: string): KickoffInput => ({
 });
 
 describe("the kickoff", { timeout: 60_000 }, () => {
+  // First in the file: no test has connected a provider yet.
+  it("is not read while the company connected no AI provider", async () => {
+    const staff = await asStaff();
+    await expect(
+      outcome(staff.onboardingStaff.saveKickoff(pasted(dutch)))
+    ).resolves.toBe("model.no_provider");
+  });
+
   it("is read for what Stephen needs, keeping only what its quotes show was said, and his context holds the pain and what to leave alone", async () => {
     const staff = await asStaff();
     const { result: view, requests } = await answering(
@@ -193,114 +197,82 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     });
   });
 
-  it("is read only by a model the rules let take sensitive data", async () => {
+  it("is read only by a model the rules let take sensitive data: the first the organization chose", async () => {
     const staff = await asStaff();
+    const sensitive = { sensitive: { models: [euModel], connections: [] } };
+    // The default may not take sensitive data: read by the fallback that may.
     const { requests } = await answering(
       [answer(reading)],
       async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
-      {
-        gateway: "grasp-os-test",
-        models: [workersAi, euModel],
-        sensitive: { models: [euModel], connections: [] },
-      }
+      { config: sensitive, models: [mistral, euModel] }
     );
     const { requests: none, result } = await answering(
       [],
       async () =>
         await outcome(staff.onboardingStaff.saveKickoff(pasted(dutch))),
-      {
-        gateway: "grasp-os-test",
-        models: [workersAi],
-        sensitive: { models: [euModel], connections: [] },
-      }
+      { config: sensitive, models: [mistral] }
     );
     expect({
-      model: requests.map(({ url }) => url.includes("openai")),
+      model: requests.map(({ url }) => url.includes("api.openai.com")),
       refused: result,
       sent: none.length,
     }).toStrictEqual({ model: [true], refused: "kickoff.not_read", sent: 0 });
   });
 
-  it("is read by the model the deployment names for careful work, and by no other when the rules refuse that one", async () => {
+  it("is read by the organization's default model when the rules let it", async () => {
     const staff = await asStaff();
     const { requests } = await answering(
       [answer(reading)],
       async () => await staff.onboardingStaff.saveKickoff(pasted(dutch)),
       {
-        gateway: "grasp-os-test",
-        // The careful model is not the first allowed one.
-        models: [workersAi, euModel],
-        roles: { quick: workersAi, careful: euModel },
+        config: { sensitive: { models: [mistral, euModel], connections: [] } },
+        models: [euModel, mistral],
       }
     );
-    const { requests: none, result } = await answering(
-      [],
-      async () =>
-        await outcome(staff.onboardingStaff.saveKickoff(pasted(dutch))),
-      {
-        gateway: "grasp-os-test",
-        // euModel may take sensitive data, but it isn't the careful one.
-        models: [workersAi, euModel],
-        roles: { careful: workersAi },
-        sensitive: { models: [euModel], connections: [] },
-      }
-    );
-    expect({
-      model: requests.map(({ url }) => url.includes("openai")),
-      refused: result,
-      sent: none.length,
-    }).toStrictEqual({ model: [true], refused: "kickoff.not_read", sent: 0 });
+    expect(
+      requests.map(({ url }) => url.includes("api.openai.com"))
+    ).toStrictEqual([true]);
   });
 
-  it("gives each role the model the deployment names for it, and allows no model through a role it doesn't allow", () => {
-    const named = settings({
-      gateway: "grasp-os-test",
-      models: [workersAi, euModel],
-      roles: { quick: workersAi, careful: euModel },
-    });
-    const unnamed = settings({
-      gateway: "grasp-os-test",
-      models: [workersAi, euModel],
-    });
-    const notAllowed = settings({
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      roles: { careful: euModel },
-    });
+  it("gives both roles the organization's default, and none while it chose none", () => {
+    const chosen = { models: [mistral, euModel], rules: undefined };
     const notSensitive = { sensitive: false };
+    let unchosen;
+    try {
+      modelForRole({ models: [], rules: undefined }, "careful", notSensitive);
+    } catch (error) {
+      unchosen = modelErrors.codeOf(error);
+    }
     expect({
-      quick: modelForRole(named, "quick", notSensitive),
-      careful: modelForRole(named, "careful", notSensitive),
-      unnamed: modelForRole(unnamed, "careful", notSensitive),
-      notAllowed: notAllowed.models,
+      quick: modelForRole(chosen, "quick", notSensitive),
+      careful: modelForRole(chosen, "careful", notSensitive),
+      unchosen,
     }).toStrictEqual({
-      quick: workersAi,
-      careful: euModel,
-      unnamed: workersAi,
-      notAllowed: [],
+      quick: mistral,
+      careful: mistral,
+      unchosen: "model.no_provider",
     });
   });
 
   it("goes through a gateway that judges every onboarding call as carrying sensitive data", async () => {
-    const gatewayEnv: ModelsEnv = {
+    const provider = await fakeProviderFor([mistral, euModel], answer(reading));
+    const rulesEnv: Env = {
       ...env,
-      AI: fakeGateway(answer(reading)).binding,
-      MODEL_GATEWAY: {
-        gateway: "grasp-os-test",
-        models: [workersAi, euModel],
-        sensitive: { models: [euModel], connections: [] },
-      },
+      MODEL_GATEWAY: { sensitive: { models: [euModel], connections: [] } },
     };
     const refused = await outcome(
-      models(gatewayEnv).call({
-        model: workersAi,
+      models(rulesEnv).call({
+        model: mistral,
         input: "Hallo.",
         purpose: "onboarding.kickoff",
         trigger: { type: "system" },
         work: { onboarding: true },
       })
     );
-    expect(refused).toBe("model.sensitive_data");
+    expect({ refused, sent: provider.requests.length }).toStrictEqual({
+      refused: "model.sensitive_data",
+      sent: 0,
+    });
   });
 
   it("takes a subtitle file, without its numbers and timings, and refuses what isn't a transcript", async () => {

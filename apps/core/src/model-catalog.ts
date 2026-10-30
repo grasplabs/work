@@ -5,7 +5,6 @@ import type {
   StreamFunction,
 } from "@earendil-works/pi-ai";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
-import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { MISTRAL_MODELS } from "@earendil-works/pi-ai/providers/mistral.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
 import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
@@ -14,47 +13,11 @@ import {
   compatibleModelNamePattern,
 } from "@grasp-os/shared/ai-providers";
 
-import { regionalPricesOf } from "./model-prices.ts";
-
-// The text models the model gateway offers (models.ts), whatever way a
-// deployment reaches them (model-transport.ts): each by `<provider>/<id>`,
-// with pi's catalog entry for its limits and list prices. The provider
-// names the model and its prices, never the way to it: Claude Sonnet 5.5
-// is `anthropic/claude-sonnet-5-5` through AI Gateway, OpenRouter or
-// Anthropic's own API alike, and costs its list price on each.
-
-/**
- * The Claude models Bedrock serves through its EU inference profile, by
- * their Anthropic IDs. Not Claude Fable 5.1 (regional only in us-east-1)
- * or Claude Fable 5, which Anthropic serves only with 30-day retention.
- */
-const euClaudeModels = [
-  "claude-opus-5-5",
-  "claude-sonnet-5-5",
-  "claude-haiku-5-5",
-  "claude-opus-5",
-  "claude-sonnet-5",
-  "claude-opus-4-8",
-] as const;
-
-/**
- * pi's Anthropic catalog entry for each EU model, pointed at Bedrock: sent
- * as its EU inference profile, at Bedrock's regional prices.
- */
-const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
-  Object.fromEntries(
-    euClaudeModels.map((id) => {
-      const model = ANTHROPIC_MODELS[id];
-      return [
-        id,
-        {
-          ...model,
-          id: `eu.anthropic.${id}`,
-          cost: regionalPricesOf(model.cost),
-        },
-      ];
-    })
-  );
+// The text models the model gateway offers (models.ts): each by
+// `<provider>/<id>`, with pi's catalog entry for its limits and list
+// prices. Every one is reached on the provider's own API through connect,
+// which holds the key (model-transport-connect.ts): the organization's
+// own, or Grasp's for platform features.
 
 /**
  * pi's Mistral catalog, pointed at Mistral's OpenAI-compatible chat
@@ -76,16 +39,11 @@ const mistralModels: Readonly<Record<string, Model<"openai-completions">>> =
 /**
  * The providers the gateway offers: pi's catalog of their models, which
  * gives each model's limits, prices and the API its native endpoint
- * speaks. Bedrock and Workers AI only through AI Gateway
- * (model-transport-cloudflare.ts); the others through connect, with the
- * organization's own key or Grasp's (model-transport-connect.ts).
+ * speaks.
  */
 const providers = {
   anthropic: ANTHROPIC_MODELS,
   openai: OPENAI_MODELS,
-  // Claude in Amazon Bedrock, in the EU, through its EU inference profile.
-  "bedrock-eu": bedrockEuModels,
-  "workers-ai": CLOUDFLARE_WORKERS_AI_MODELS,
   mistral: mistralModels,
   // By OpenRouter's own ID, its slash and all: `openrouter/openai/gpt-5`.
   openrouter: OPENROUTER_MODELS,
@@ -101,8 +59,6 @@ export type Provider = keyof typeof providers | "openai-compatible";
 export const providerNames: readonly Provider[] = [
   "anthropic",
   "openai",
-  "bedrock-eu",
-  "workers-ai",
   "mistral",
   "openrouter",
   "openai-compatible",
@@ -142,9 +98,9 @@ export interface ModelRef {
 
 /**
  * A model as the gateway names it: `<provider>/<model>`, such as
- * `anthropic/claude-sonnet-5` or
- * `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`. Only models in pi's
- * catalog, so every call has a price.
+ * `anthropic/claude-sonnet-5` or `openrouter/openai/gpt-5`. Only models in
+ * pi's catalog, or an organization's OpenAI-compatible endpoint's, which
+ * it names itself.
  */
 export const parseModelRef = (ref: string): ModelRef | undefined => {
   const slash = ref.indexOf("/");
@@ -183,18 +139,6 @@ export const catalogWindowOf = (model: string): number | undefined => {
   }
   return undefined;
 };
-
-/**
- * Workers AI counts the answer's cap against the model's window and refuses
- * a request whose total is over it, so answers are capped well below.
- */
-const workersAiMaxTokens = 32_768;
-
-/** The most tokens `ref`'s answers may take, as the gateway sends them. */
-export const maxTokensOf = (ref: ModelRef): number =>
-  ref.provider === "workers-ai"
-    ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
-    : ref.catalog.maxTokens;
 
 /*
  * pi's adapter for each API, loaded the first time a model is called: they

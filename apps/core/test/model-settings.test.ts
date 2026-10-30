@@ -1,5 +1,4 @@
 import { runActorOf } from "@grasp-os/shared/audit";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import { modelSpendListed } from "@grasp-os/shared/models";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -9,11 +8,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { budgetDay } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import type { LedgerScope } from "../src/model-ledger.ts";
-import { gatewaySettings, modelForRole, models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { modelForRole, models, modelSettings } from "../src/models.ts";
+import type { ModelCall, ModelsNow } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { connectModels, fakeProviderFor } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import {
   openRpc,
@@ -25,17 +24,18 @@ import {
 } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
-// Admins read the model gateway's settings: the allowlist, the client's
-// rules, and this month's spend against each budget, which real model
-// calls add to. AI Gateway is the outside system: a fake behind the AI
-// binding.
+// Admins read the model gateway's settings: the models the organization
+// chose, the client's rules, and this month's spend against each budget,
+// which real model calls add to. The provider behind connect is the
+// outside system: a fake (test/model-provider.ts).
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 const anthropic = "anthropic/claude-sonnet-4-5";
 const euModel = "openai/gpt-5.4";
-const allowed = [workersAi, anthropic, euModel];
+/** The models the organization chose: its default, then its fallbacks. */
+const chosen = [anthropic, mistral, euModel];
 
 /**
  * An answer that costs $0.0045 from Claude Sonnet 4.5, at its list prices:
@@ -51,20 +51,25 @@ const newMonth = (): string => {
   return `${2200 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/** Core's env with `config` as the gateway's, counting in its own month. */
 /** The model each onboarding role gets, for calls that carry sensitive data. */
-const roleIn = (settings: ReturnType<typeof gatewaySettings>) => ({
+const roleIn = (settings: ModelsNow) => ({
   quick: modelForRole(settings, "quick", { sensitive: true }),
   careful: modelForRole(settings, "careful", { sensitive: true }),
 });
 
+/** Core's env with `config` as the deployment's rules, counting in its own month. */
 const envWith = (config?: unknown) => {
-  const coreEnv: ModelsEnv & Env = {
+  const coreEnv: Env = {
     ...env,
     MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: newMonth(),
   };
   return coreEnv;
+};
+
+/** Chooses `refs` with a key no other test uses (`connectModels`). */
+const choose = async (...refs: string[]): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, refs);
 };
 
 /** A scope the ledger counts spend in, with no budget. */
@@ -105,10 +110,8 @@ const settingsIn = async (
 };
 
 describe("model settings", { timeout: 60_000 }, () => {
-  it("show admins the allowlist, the rules, and the spend against each budget (this month's, a run lineage's whole life), most first, with names", async () => {
+  it("show admins the organization's models, the rules, and the spend against each budget (this month's, a run lineage's whole life), most first, with names", async () => {
     const coreEnv = envWith({
-      gateway: "grasp-os-test",
-      models: allowed,
       eu: {
         models: [euModel],
         connections: ["conn-eu"],
@@ -131,8 +134,11 @@ describe("model settings", { timeout: 60_000 }, () => {
     const run = await builder.api.workflows.start(app, "idle");
     await finished(run.id);
     const appId = appIdSchema.parse(app);
-    const fake = fakeGateway(...Array.from({ length: 4 }, () => pricedAnswer));
-    const { call } = models({ ...coreEnv, AI: fake.binding });
+    await fakeProviderFor(
+      chosen,
+      ...Array.from({ length: 4 }, () => pricedAnswer)
+    );
+    const { call } = models(coreEnv);
     const work = (userId: string): ModelCall<undefined>["work"] => ({
       authority: {
         subject: { type: "app", appId },
@@ -179,7 +185,7 @@ describe("model settings", { timeout: 60_000 }, () => {
 
     const settings = await settingsIn(coreEnv);
     expect(settings).toStrictEqual({
-      models: allowed,
+      models: chosen,
       rules: {
         state: "on",
         eu: {
@@ -272,55 +278,55 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
-  it("say when the rules don't parse, or models aren't set up, and read to admins only", async () => {
-    const config = {
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      budgets: { user: { limit: 1 } },
-    };
+  it("say when the rules don't parse, or no model is chosen, and read to admins only", async () => {
+    const config = { budgets: { user: { limit: 1 } } };
+    await choose(mistral);
     await expect(
-      settingsIn(envWith({ ...config, budgets: { user: { limit: -1 } } }))
+      settingsIn(envWith({ budgets: { user: { limit: -1 } } }))
     ).resolves.toMatchObject({
-      models: [workersAi],
+      models: [mistral],
       rules: { state: "invalid" },
     });
-    // A config that doesn't parse allows nothing: calls fail closed.
     await expect(settingsIn(envWith("{"))).resolves.toMatchObject({
+      rules: { state: "invalid" },
+    });
+    await env.DB.prepare(
+      "DELETE FROM org_settings WHERE kind = 'ai_models'"
+    ).run();
+    await expect(settingsIn(envWith(config))).resolves.toMatchObject({
       models: [],
+      rules: { state: "on" },
     });
     await expect(outcome(settingsIn(envWith(config), "builder"))).resolves.toBe(
       "role.forbidden"
     );
   });
 
-  it("offer the default models on a deployment whose MODEL_GATEWAY isn't set, to admins and in chat", async () => {
+  it("offer the organization's chosen models, its default first, to admins and in chat, on a deployment whose MODEL_GATEWAY isn't set", async () => {
+    await choose(euModel, anthropic);
     const coreEnv = envWith();
     await expect(settingsIn(coreEnv)).resolves.toMatchObject({
-      models: [...defaultGatewayModels],
+      models: [euModel, anthropic],
+      rules: { state: "on", eu: null, sensitive: null, budgets: [] },
     });
     const { session } = await signedInWithRole(idp, "user");
     const { core } = await openRpc(session, { coreEnv });
     await expect(core.authenticate().chats.models()).resolves.toStrictEqual([
-      ...defaultGatewayModels,
+      euModel,
+      anthropic,
     ]);
   });
 
-  it("tell chat the efforts each allowed model takes, and none for one that doesn't think", async () => {
+  it("tell chat the efforts each chosen model takes, and none for one that doesn't think", async () => {
     const { session } = await signedInWithRole(idp, "user");
     const efforts = async (coreEnv: Env) => {
       const { core } = await openRpc(session, { coreEnv });
       return await core.authenticate().chats.efforts();
     };
 
-    await expect(
-      efforts(
-        envWith({
-          gateway: "grasp-os-test",
-          models: [...allowed, "anthropic/claude-opus-4-8"],
-        })
-      )
-    ).resolves.toStrictEqual({
-      [workersAi]: { levels: [], default: null },
+    await choose(...chosen, "anthropic/claude-opus-4-8");
+    await expect(efforts(envWith())).resolves.toStrictEqual({
+      [mistral]: { levels: [], default: null },
       [anthropic]: { levels: ["low", "medium", "high"], default: "medium" },
       [euModel]: {
         levels: ["low", "medium", "high", "xhigh"],
@@ -331,54 +337,50 @@ describe("model settings", { timeout: 60_000 }, () => {
         default: "medium",
       },
     });
-    // A new deployment's: neither DeepSeek V4.1 Flash nor GLM-5.3 Flash
-    // has medium, so a question that names no effort gets the next level
-    // up.
+    // Mistral Small has no medium, so a question that names no effort
+    // gets the next level up.
+    await choose("mistral/mistral-small-latest");
     await expect(efforts(envWith())).resolves.toStrictEqual({
-      "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017": {
-        levels: ["high", "max"],
-        default: "high",
-      },
-      "workers-ai/@cf/zai-org/glm-5.3-flash": {
-        levels: ["low", "high", "max"],
-        default: "high",
-      },
+      "mistral/mistral-small-latest": { levels: ["high"], default: "high" },
     });
   });
 
-  it("give a deployment that names no roles DeepSeek V4.1 Flash for chat and careful work, and GLM 5.3 Flash, at low effort, for quick lines", async () => {
-    const deepSeek = "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017";
-    const glm = "workers-ai/@cf/zai-org/glm-5.3-flash";
+  it("give every role the organization's default model, or the first of its fallbacks the rules let it use, and none until it chose one", async () => {
+    await choose(anthropic, euModel);
     const coreEnv = envWith();
     const { session } = await signedInWithRole(idp, "user");
     const { core } = await openRpc(session, { coreEnv });
-    const { chats } = core.authenticate();
-    const [chat] = await chats.models();
-    const { [glm]: quickEfforts } = await chats.efforts();
+    const [chat] = await core.authenticate().chats.models();
+    const rolesWith = async (config?: unknown) =>
+      roleIn(await modelSettings(envWith(config)));
 
-    expect({
+    const roles = {
       chat,
-      ...roleIn(gatewaySettings(coreEnv)),
-      quickTakesLow: quickEfforts?.levels.includes("low"),
-      // Where GLM isn't allowed, quick lines go to the first allowed model.
-      withoutGlm: roleIn(
-        gatewaySettings(
-          envWith({ gateway: "grasp-os-test", models: [deepSeek] })
-        )
-      ),
-    }).toStrictEqual({
-      chat: deepSeek,
-      quick: glm,
-      careful: deepSeek,
-      quickTakesLow: true,
-      withoutGlm: { quick: deepSeek, careful: deepSeek },
+      ...(await rolesWith()),
+      // Sensitive data only the fallback may take.
+      sensitive: await rolesWith({
+        sensitive: { models: [euModel], connections: [] },
+      }),
+      // Kept in the EU, where neither is hosted.
+      none: await rolesWith({ eu: { deployment: true, models: [mistral] } }),
+    };
+    await env.DB.prepare(
+      "DELETE FROM org_settings WHERE kind = 'ai_models'"
+    ).run();
+    const unchosen = await outcome(rolesWith());
+
+    expect({ ...roles, unchosen }).toStrictEqual({
+      chat: anthropic,
+      quick: anthropic,
+      careful: anthropic,
+      sensitive: { quick: euModel, careful: euModel },
+      none: { quick: undefined, careful: undefined },
+      unchosen: "model.no_provider",
     });
   });
 
   it("list the most who spent, most first and ties by key, say more spent, and name nobody who's gone", async () => {
     const coreEnv = envWith({
-      gateway: "grasp-os-test",
-      models: [workersAi],
       budgets: { workflow: { limit: 5 }, user: { limit: 1 } },
     });
     const period = coreEnv.MODEL_BUDGET_MONTH;
@@ -399,7 +401,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         id,
         period,
         scopes: [scope],
-        model: workersAi,
+        model: mistral,
         price: {
           version: "test",
           input: 1_000_000,
@@ -465,11 +467,7 @@ describe("model settings", { timeout: 60_000 }, () => {
   });
 
   it("show admins the reservations held for review, and let them release or charge each, audited, telling them when one was already decided, and nobody else", async () => {
-    const coreEnv = envWith({
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      budgets: { user: { limit: 1 } },
-    });
+    const coreEnv = envWith({ budgets: { user: { limit: 1 } } });
     const period = coreEnv.MODEL_BUDGET_MONTH;
     if (period === undefined) {
       throw new Error("Each test counts in a month of its own");
@@ -484,7 +482,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         id,
         period,
         scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
-        model: workersAi,
+        model: mistral,
         price: {
           version: "test",
           input: 1_000_000,
@@ -566,8 +564,8 @@ describe("model settings", { timeout: 60_000 }, () => {
         .toSorted(byJson),
     }).toStrictEqual({
       shown: [
-        [releasing, 0.01, workersAi, false],
-        [charging, 0.02, workersAi, false],
+        [releasing, 0.01, mistral, false],
+        [charging, 0.02, mistral, false],
       ].toSorted(byJson),
       decided: [
         { state: "decided", how: "release", amount: 0 },
@@ -589,11 +587,7 @@ describe("model settings", { timeout: 60_000 }, () => {
   });
 
   it("show admins which held reservations can only be released, as their budget record is damaged, and refuse to charge one", async () => {
-    const coreEnv = envWith({
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      budgets: { user: { limit: 1 } },
-    });
+    const coreEnv = envWith({ budgets: { user: { limit: 1 } } });
     const period = coreEnv.MODEL_BUDGET_MONTH;
     if (period === undefined) {
       throw new Error("Each test counts in a month of its own");
@@ -605,7 +599,7 @@ describe("model settings", { timeout: 60_000 }, () => {
       id,
       period,
       scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
-      model: workersAi,
+      model: mistral,
       price: {
         version: "test",
         input: 1_000_000,
@@ -651,9 +645,9 @@ describe("model settings", { timeout: 60_000 }, () => {
 
   it("show admins this month's spend with no budget set: the total, and the workflows that spent most with their runs, and nobody else", async () => {
     // The month it is: workflow runs are counted in it.
-    const coreEnv: ModelsEnv & Env = {
+    const coreEnv: Env = {
       ...env,
-      MODEL_GATEWAY: { gateway: "grasp-os-test", models: [anthropic] },
+      MODEL_GATEWAY: undefined,
       MODEL_BUDGET_MONTH: undefined,
     };
     const builder = await signedInApi(idp, "builder");
@@ -668,8 +662,11 @@ describe("model settings", { timeout: 60_000 }, () => {
         await finished(id);
       })
     );
-    const fake = fakeGateway(...Array.from({ length: 3 }, () => pricedAnswer));
-    const { call } = models({ ...coreEnv, AI: fake.binding });
+    await fakeProviderFor(
+      [anthropic],
+      ...Array.from({ length: 3 }, () => pricedAnswer)
+    );
+    const { call } = models(coreEnv);
     const step = (runId: string): ModelCall<undefined> => ({
       model: anthropic,
       input: "Hello.",
@@ -782,13 +779,14 @@ describe("model settings", { timeout: 60_000 }, () => {
   });
 
   it("read to Grasp staff too, through the admin role their access gives", async () => {
-    const coreEnv = envWith({ gateway: "grasp-os-test", models: [workersAi] });
+    await choose(mistral);
+    const coreEnv = envWith();
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { core } = await openRpc(session, { coreEnv });
     const staff = core.authenticate();
     await expect(staff.whoami()).resolves.toMatchObject({ staff: true });
     await expect(staff.models.settings()).resolves.toMatchObject({
-      models: [workersAi],
+      models: [mistral],
       rules: { state: "on", budgets: [] },
     });
   });

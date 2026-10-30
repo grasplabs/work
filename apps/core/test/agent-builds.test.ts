@@ -10,22 +10,22 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { maxFailedChecks } from "../src/agent-builds.ts";
 import {
   chatOf,
   codeResults,
   codeStep,
   says,
-  pointAtGateway,
   setObjectEnv,
   testRunOpening,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { outlook, published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 import { v1Server } from "./v1-app-server.ts";
@@ -141,7 +141,7 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
  * `write`, to build.
  */
 const setUp = async (
-  replies: GatewayReply[],
+  replies: ProviderReply[],
   role: "builder" | "user" = "builder"
 ) => {
   const admin = await signedInApi(idp, "admin");
@@ -598,55 +598,38 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("ends a repair session after ten minutes of checks, counted from its first", async () => {
+    // At the Workspace object's own boundary, which counts the checks:
+    // the agent's turn signs each model request by the clock, which connect
+    // checks by its own, so a clock moved ten minutes on can't run a turn.
+    const { chat } = await setUp([]);
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    const app = crypto.randomUUID();
     const started = Date.parse("2026-10-20T09:00:00Z");
     const minutes = 60_000;
-    /** A code step whose stream sets the clock to `at` on its way. */
-    const checkAt = (at: number): GatewayReply => ({
-      ...codeStep(`export default async (self, env) => {
-        ${findApp}
-        try {
-          return { failedInARow: (await env.build.check(app.id)).failedInARow };
-        } catch (error) {
-          return { refused: error.message };
-        }
-      };`),
-      text: "Checking again.",
-      pause: {
-        at: 0,
-        until: Promise.resolve(),
-        reached: () => {
-          vi.setSystemTime(at);
-        },
-      },
-    });
-    const { chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
-        return { failedInARow: (await env.build.check(app.id)).failedInARow };
-      };`),
-      checkAt(started + 10 * minutes),
-      checkAt(started + 10 * minutes + 1),
-      says("It still fails: the button is restyled."),
-    ]);
-    await grant();
+    const checkAt = async (at: number) => {
+      vi.setSystemTime(at);
+      const taken = await chat.stub.takeCheck(chatId, app, maxFailedChecks);
+      if (taken) {
+        await chat.stub.settleCheck(chatId, app, false);
+      }
+      return taken;
+    };
 
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(started);
+    let taken: boolean[] = [];
     try {
-      await chat.ask("Build an invoice desk");
+      taken = [
+        await checkAt(started),
+        await checkAt(started + 10 * minutes),
+        await checkAt(started + 10 * minutes + 1),
+      ];
     } finally {
       vi.useRealTimers();
     }
 
-    const results = await codeResults(chat.stub, chat.chat.id);
     // A check exactly ten minutes in still runs; a millisecond past, the
     // session is over though it has passes left.
-    expect(results.map(({ text }) => returned(text))).toStrictEqual([
-      { failedInARow: 1 },
-      { failedInARow: 2 },
-      { refused: appErrors.create("app.checks_exhausted").message },
-    ]);
+    expect(taken).toStrictEqual([true, true, false]);
   });
 
   it("caps the Apps a turn creates, counting none that wasn't created", async () => {
@@ -820,14 +803,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("lands no draft write whose run ran out of time while it was under way", async () => {
     const { chat, existing, grant } = await setUp([]);
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(`export default async (self, env) => {
+    await fakeProvider(
+      codeStep(`export default async (self, env) => {
           await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
         };`),
-        says("It ran out of time.")
-      )
+      says("It ran out of time.")
     );
     await grant();
 
@@ -852,18 +832,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("commits no proposal whose run ran out of time while it was checked", async () => {
     const { chat, builder, existing, grant } = await setUp([]);
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(`export default async (self, env) => {
+    await fakeProvider(
+      codeStep(`export default async (self, env) => {
           await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, again\\n" });
         };`),
-        says("Written."),
-        codeStep(`export default async (self, env) => {
+      says("Written."),
+      codeStep(`export default async (self, env) => {
           await env.build.propose(${JSON.stringify(existing)}, "Again");
         };`),
-        says("It ran out of time.")
-      )
+      says("It ran out of time.")
     );
     await grant();
     await chat.ask("Write it.");
@@ -887,18 +864,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("commits no proposal whose run ran out of time while it stored the version's files, after its last check", async () => {
     const { chat, builder, existing, grant } = await setUp([]);
-    await pointAtGateway(
-      chat.stub,
-      fakeGateway(
-        codeStep(`export default async (self, env) => {
+    await fakeProvider(
+      codeStep(`export default async (self, env) => {
           await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, once more\\n" });
         };`),
-        says("Written."),
-        codeStep(`export default async (self, env) => {
+      says("Written."),
+      codeStep(`export default async (self, env) => {
           await env.build.propose(${JSON.stringify(existing)}, "Once more");
         };`),
-        says("It ran out of time.")
-      )
+      says("It ran out of time.")
     );
     await grant();
     await chat.ask("Write it.");

@@ -31,11 +31,8 @@ import { routed, unique } from "./sign-in.ts";
 /** The transcription model recordings are written down by, the default. */
 const hearingModel = "openai/gpt-4o-transcribe";
 
-/** The deployment's gateway: no voice model needs allowing. */
-const gatewayConfig = {
-  gateway: "grasp-os-test",
-  models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
-};
+/** The deployment's rules: none, unless a test sets some. */
+const noRules = {};
 
 /** Something no recording would hold by chance: if it shows anywhere, the recording was kept. */
 const marker = "RECORDING-MARKER-7f3a";
@@ -89,13 +86,13 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns under the gateway config `config` and the platform's
+ * What `run` returns under the deployment's rules `config` and the platform's
  * AI settings `platform`, budgets counted in `month`.
  */
 const hearing = async <T>(
   run: () => Promise<T>,
   {
-    config = gatewayConfig,
+    config = noRules,
     platform,
     month,
   }: { config?: unknown; platform?: unknown; month?: string } = {}
@@ -458,7 +455,6 @@ describe(
           // 2.4 cents: 100 seconds (1.67¢) and half a minute (0.5¢) fit,
           // two minutes and half a minute don't, nor another half minute.
           config: {
-            ...gatewayConfig,
             budgets: { deployment: { limit: 0.024 } },
           },
           month,

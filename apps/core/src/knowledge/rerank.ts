@@ -3,7 +3,6 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
 import { readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 
@@ -39,7 +38,7 @@ const answerSchema = z.object({
  * may read them.
  */
 export const rerankCandidates = async (
-  env: ModelsEnv,
+  env: Env,
   reader: Reader,
   { question, candidates, provenance, deadlineMs }: RerankRequest
 ): Promise<string[]> => {

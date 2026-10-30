@@ -2,7 +2,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 
 import { models } from "./models.ts";
-import type { ModelsEnv, SpeechCall } from "./models.ts";
+import type { SpeechCall } from "./models.ts";
 import { platformAi } from "./platform-ai.ts";
 
 // Speech synthesis as core implements it: Grasp's own speech feature
@@ -21,7 +21,7 @@ export type SpeechCaller = Omit<
 >;
 
 /** The speech model the platform's settings name, as the gateway names it. */
-export const speechModelOf = (env: ModelsEnv): string | undefined => {
+export const speechModelOf = (env: Env): string | undefined => {
   const speech = platformAi(env)?.speech;
   return speech === undefined
     ? undefined
@@ -33,7 +33,7 @@ export const speechModelOf = (env: ModelsEnv): string | undefined => {
  * settings name, or the one the request names.
  */
 export const platformSpeech = (
-  env: ModelsEnv,
+  env: Env,
   caller: SpeechCaller
 ): SpeechSynthesis => ({
   speak: async ({ text, voice, language, model, instructions }, signal) => {

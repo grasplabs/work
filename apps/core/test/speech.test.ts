@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelsEnv } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
 import { speechPcmBytesPerChar } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome } from "./sign-in.ts";
 
@@ -22,7 +22,8 @@ import { outcome } from "./sign-in.ts";
 // Connect, the rules, the ledger and the audit log are real.
 
 const speechModel = "openai/gpt-4o-mini-tts";
-const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** A text model, as an organization chooses one: no speech model. */
+const textModel = "mistral/mistral-large-latest";
 
 /** Stephen's voice by default: an OpenAI voice. */
 const voice = "cedar";
@@ -57,19 +58,15 @@ const newMonth = (): string => {
   return `${2700 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/** Core's env under the gateway config `config`, budgets counted in a month of its own. */
-const withGateway = (config: Record<string, unknown> = {}) => {
+/** Core's env under the deployment's rules `config`, budgets counted in a month of its own. */
+const withRules = (config: Record<string, unknown> = {}) => {
   const month = newMonth();
-  const gatewayEnv: ModelsEnv = {
+  const rulesEnv: Env = {
     ...env,
-    MODEL_GATEWAY: {
-      gateway: "grasp-os-test",
-      models: [textModel],
-      ...config,
-    },
+    MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: month,
   };
-  return { gatewayEnv, month };
+  return { rulesEnv, month };
 };
 
 /** A person no other test uses, so their audit events are this test's. */
@@ -77,11 +74,8 @@ const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
 /** One of Stephen's lines in an interview, said for `trigger`. */
-const stephen = (
-  gatewayEnv: ModelsEnv,
-  trigger: ReturnType<typeof newPerson>
-) =>
-  platformSpeech(gatewayEnv, {
+const stephen = (rulesEnv: Env, trigger: ReturnType<typeof newPerson>) =>
+  platformSpeech(rulesEnv, {
     purpose: "onboarding.speech",
     trigger,
     work: { onboarding: true },
@@ -134,10 +128,10 @@ const sentWith = async (line: string) => {
 // A test waits up to 10 seconds for a line's audit events (`auditedFor`).
 describe("speech through the model gateway", { timeout: 30_000 }, () => {
   it("says a line as WAV, with when each word is said, timed by the length of the audio", async () => {
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const line = newLine();
 
-    const speech = await stephen(gatewayEnv, newPerson()).speak({
+    const speech = await stephen(rulesEnv, newPerson()).speak({
       text: line,
       voice,
       language: "en",
@@ -183,10 +177,10 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("sends how a line is said apart from the line, never said", async () => {
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const line = newLine();
 
-    const speech = await stephen(gatewayEnv, newPerson()).speak({
+    const speech = await stephen(rulesEnv, newPerson()).speak({
       text: line,
       voice,
       language: "en",
@@ -211,19 +205,19 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         lines.push(JSON.stringify(args));
       });
     }
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const person = newPerson();
     const said = newLine();
     const refused = newLine();
 
-    const speech = await stephen(gatewayEnv, person).speak({
+    const speech = await stephen(rulesEnv, person).speak({
       text: said,
       voice,
       language: "nl",
     });
     await plan(platformOpenAiKey, [busy, busy]);
     const failed = await thrown(
-      stephen(gatewayEnv, person).speak({
+      stephen(rulesEnv, person).speak({
         text: refused,
         voice,
         language: "nl",
@@ -246,14 +240,14 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("charges the line's characters against the budgets, and audits it as a platform call", async () => {
-    const { gatewayEnv, month } = withGateway({
+    const { rulesEnv, month } = withRules({
       budgets: { user: { limit: 10 } },
     });
     const person = newPerson();
     const line = newLine();
     const lineMicros = line.length * microsPerChar;
 
-    await stephen(gatewayEnv, person).speak({
+    await stephen(rulesEnv, person).speak({
       text: line,
       voice,
       language: "en",
@@ -286,7 +280,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
   it("refuses a line its budget has no room for, sending nothing", async () => {
     // Less than a cent: less than a line of 600 characters costs (1.8¢).
-    const { gatewayEnv } = withGateway({
+    const { rulesEnv } = withRules({
       budgets: { user: { limit: 0.01 } },
     });
     const person = newPerson();
@@ -294,7 +288,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
     await expect(
       outcome(
-        stephen(gatewayEnv, person).speak({ text: line, voice, language: "en" })
+        stephen(rulesEnv, person).speak({ text: line, voice, language: "en" })
       )
     ).resolves.toBe("model.over_budget");
     await expect(carrying(line)).resolves.toStrictEqual([]);
@@ -306,10 +300,12 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("refuses a model that isn't a speech model of the gateway's, and a speech model for a text call, sending nothing", async () => {
-    const { gatewayEnv } = withGateway();
+    // The organization chose a text model, which its text calls may use.
+    const provider = await fakeProviderFor([textModel]);
+    const { rulesEnv } = withRules();
     const line = newLine();
     const speak = async (model: string) =>
-      await stephen(gatewayEnv, newPerson()).speak({
+      await stephen(rulesEnv, newPerson()).speak({
         text: line,
         voice,
         language: "en",
@@ -320,12 +316,12 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(outcome(speak("openai/gpt-9-tts"))).resolves.toBe(
       "model.not_allowed"
     );
-    // A text model the deployment allows can't say a line.
+    // A text model can't say a line.
     await expect(outcome(speak(textModel))).resolves.toBe("model.not_allowed");
     // Nor can a speech model answer a text call.
     await expect(
       outcome(
-        models(gatewayEnv).call({
+        models(rulesEnv).call({
           model: speechModel,
           input: line,
           purpose: "onboarding.kickoff",
@@ -335,6 +331,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       )
     ).resolves.toBe("model.not_allowed");
     await expect(carrying(line)).resolves.toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
   it.each([
@@ -351,13 +348,13 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   ])(
     "refuses an onboarding line when %s, sending nothing",
     async (_, rules, code) => {
-      const { gatewayEnv } = withGateway(rules);
+      const { rulesEnv } = withRules(rules);
       const person = newPerson();
       const line = newLine();
 
       await expect(
         outcome(
-          stephen(gatewayEnv, person).speak({
+          stephen(rulesEnv, person).speak({
             text: line,
             voice,
             language: "de",
@@ -374,15 +371,14 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   );
 
   it("says an onboarding line in a speech model the rules list for sensitive data and the EU", async () => {
-    const { gatewayEnv } = withGateway({
-      models: [textModel, speechModel],
+    const { rulesEnv } = withRules({
       sensitive: { models: [speechModel] },
       eu: { models: [speechModel], deployment: true },
     });
     const person = newPerson();
     const line = newLine();
 
-    await stephen(gatewayEnv, person).speak({
+    await stephen(rulesEnv, person).speak({
       text: line,
       voice,
       language: "fr",
@@ -397,7 +393,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("asks once more when the provider is busy, charging only the line it said", async () => {
-    const { gatewayEnv, month } = withGateway({
+    const { rulesEnv, month } = withRules({
       budgets: { user: { limit: 10 } },
     });
     const person = newPerson();
@@ -406,7 +402,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       { status: 429, body: { error: { type: "too_many_requests" } } },
     ]);
 
-    const speech = await stephen(gatewayEnv, person).speak({
+    const speech = await stephen(rulesEnv, person).speak({
       text: line,
       voice,
       language: "en",
@@ -426,12 +422,12 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("gives up after asking once more, and says when to try again", async () => {
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const line = newLine();
     await plan(platformOpenAiKey, [busy, busy]);
 
     await expect(
-      stephen(gatewayEnv, newPerson()).speak({
+      stephen(rulesEnv, newPerson()).speak({
         text: line,
         voice,
         language: "en",
@@ -443,28 +439,15 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(carrying(line)).resolves.toHaveLength(2);
   });
 
-  it("says a line on plain workerd, with no AI binding, as on-prem", async () => {
-    const { gatewayEnv } = withGateway();
-    const { AI: _binding, ...onPrem } = gatewayEnv;
-
-    const speech = await stephen(onPrem, newPerson()).speak({
-      text: newLine(),
-      voice,
-      language: "en",
-    });
-
-    expect(speech.mime).toBe("audio/wav");
-  });
-
   it("fails closed while the platform's AI settings don't parse, sending nothing", async () => {
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const line = newLine();
 
     await expect(
       outcome(
         stephen(
           {
-            ...gatewayEnv,
+            ...rulesEnv,
             PLATFORM_AI: { speech: { provider: "elevenlabs" } },
           },
           newPerson()
@@ -475,12 +458,12 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("refuses a line longer than one request may have said", async () => {
-    const { gatewayEnv } = withGateway();
+    const { rulesEnv } = withRules();
     const line = `${newLine()}${"a".repeat(maxSpeechChars)}`;
 
     await expect(
       outcome(
-        stephen(gatewayEnv, newPerson()).speak({
+        stephen(rulesEnv, newPerson()).speak({
           text: line,
           voice,
           language: "en",

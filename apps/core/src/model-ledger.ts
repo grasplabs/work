@@ -1442,7 +1442,7 @@ export class ModelLedger extends DurableObject<Env> {
    * Notes how a request of a provider ended, as it settles, by whose key:
    * worked once it ended with a count, failed once it was refused or
    * failed with a failure named. Nothing for one never sent, or with no
-   * key of a provider's (an AI Gateway request's).
+   * key of a provider's.
    */
   #noteProvider(
     {

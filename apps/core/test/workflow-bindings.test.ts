@@ -22,7 +22,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   bindWorkflowToApp,
@@ -64,6 +64,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { connectModels } from "./model-provider.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Catalog bindings, App bindings and parameters of independent workflows
@@ -76,8 +77,14 @@ import { outcome, refusal, unique } from "./sign-in.ts";
 
 type Person = Identity;
 
-/** The model the test deployment's gateway allows (vite.config.ts). */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the only one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+// No call reaches the model: its provider is connected, and the model
+// chosen, so that an admin may bind it.
+const chooseModel = async (): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
+};
 
 const person = async (role: Role, staff = false): Promise<Person> => {
   const userId = crypto.randomUUID();
@@ -418,6 +425,8 @@ const decide = async (
 };
 
 describe("the host catalog", () => {
+  beforeAll(chooseModel);
+
   it("takes a contract once, from an admin, as the profile reads it, and never changes it", async () => {
     const admin = await person("admin");
     const builder = await person("builder");
@@ -530,6 +539,8 @@ const eventContract = async (admin: Person): Promise<string> => {
 };
 
 describe("event contracts", () => {
+  beforeAll(chooseModel);
+
   it("admit each event type only with its data's contract and whether a screen sends it", async () => {
     const admin = await person("admin");
     const data = JSON.stringify(emptyObject);
@@ -777,6 +788,8 @@ describe("event contracts", () => {
 });
 
 describe("approving a workflow's binding", () => {
+  beforeAll(chooseModel);
+
   it("is for admins, of a target that can serve it, in a version that declares it", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -794,7 +807,8 @@ describe("approving a workflow's binding", () => {
       builder: await outcome(approve(ada, model)),
       staff: await outcome(approve(staff, model)),
       notAllowed: await outcome(
-        approve(admin, { kind: "model", model: "openai/not-allowed" })
+        // A model there is, but one the organization didn't choose.
+        approve(admin, { kind: "model", model: "openai/gpt-5.4" })
       ),
       wrongKind: await outcome(
         approve(admin, { kind: "decision", deciders: ["role:admin"] })
@@ -972,6 +986,8 @@ describe("approving a workflow's binding", () => {
 });
 
 describe("approving an operation", () => {
+  beforeAll(chooseModel);
+
   it("takes no App's export as its target, whatever release or shape it names, and approves nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1063,6 +1079,8 @@ describe("approving an operation", () => {
 });
 
 describe("what a start freezes", () => {
+  beforeAll(chooseModel);
+
   it("serves an approval to the exact version an admin reviewed, never a later or an earlier one", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1319,6 +1337,8 @@ describe("what a start freezes", () => {
 });
 
 describe("parameter configuration", () => {
+  beforeAll(chooseModel);
+
   it("is revision-checked, checked against the current version, and edited by builders, never staff", async () => {
     const ada = await person("builder");
     const reader = await person("builder");
@@ -1586,6 +1606,8 @@ describe("parameter configuration", () => {
 });
 
 describe("a sensitive parameter", () => {
+  beforeAll(chooseModel);
+
   it("stays withheld once any version marked it, whatever a later version says", async () => {
     const ada = await person("builder");
     const reader = await person("builder");
@@ -1635,6 +1657,8 @@ describe("a sensitive parameter", () => {
 });
 
 describe("an App binding a workflow", () => {
+  beforeAll(chooseModel);
+
   it("pins an exact version, grants nothing, and while its App may start it keeps the workflow from being deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1795,6 +1819,8 @@ describe("an App binding a workflow", () => {
 });
 
 describe("screen trust through workflows", () => {
+  beforeAll(chooseModel);
+
   it("makes the screens of an App sensitive again when an App its workflow calls is granted more", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1836,6 +1862,8 @@ describe("screen trust through workflows", () => {
 });
 
 describe("retention", () => {
+  beforeAll(chooseModel);
+
   it("removes a receipt's input and values and a replaced revision's values, and nothing else", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
@@ -1906,6 +1934,8 @@ describe("retention", () => {
 });
 
 describe("deleting a workflow", () => {
+  beforeAll(chooseModel);
+
   it("is refused while a run of it hasn't ended, and the refusal audited with it", async () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(

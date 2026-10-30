@@ -14,9 +14,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -29,8 +29,8 @@ import {
 } from "./sign-in.ts";
 
 // The organization as Grasp's staff see it and put it right, over `/rpc`
-// (src/onboarding/organization.ts, the store and staff-rpc.ts). AI Gateway,
-// which draws a team's map, is the outside system. The ways it can fail,
+// (src/onboarding/organization.ts, the store and staff-rpc.ts). The model
+// provider, which draws a team's map, is the outside system. The ways it can fail,
 // tried here:
 //
 // - Anyone but staff reading who works where, or changing it.
@@ -156,7 +156,7 @@ const mapOps = async (ids: Awaited<ReturnType<typeof running>>) => {
     { secret, key: key ?? "" },
     progressOf("Max and Mia handle tickets; Lea plans the rota.").facts
   );
-  const reply: GatewayReply = {
+  const reply: ProviderReply = {
     text: JSON.stringify({
       does: "Answers customers' questions",
       works: [

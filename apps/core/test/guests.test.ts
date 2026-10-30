@@ -1,10 +1,16 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { guestTurnsMax } from "@grasp-os/shared/guests";
 import type { GuestView } from "@grasp-os/shared/guests";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
@@ -12,11 +18,11 @@ import { loadRelease } from "../src/app-releases.ts";
 import { callApp } from "../src/app.ts";
 import { sweepGuestChats } from "../src/guests.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { grantReviewed, release, requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider, fakeProvider } from "./model-provider.ts";
+import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { endLiveRuns, finished as runFinished, leave } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
@@ -303,26 +309,27 @@ const send = (token: string) => ({ action: "send", token, text: "Hello" });
 
 /** The model answers with `replies`, in order, while `run` runs. */
 const answering = async <T>(
-  replies: GatewayReply[],
-  run: (gateway: ReturnType<typeof fakeGateway>) => Promise<T>
-): Promise<T> => {
-  const gateway = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  try {
-    return await run(gateway);
-  } finally {
-    spy.mockRestore();
-  }
-};
+  replies: ProviderReply[],
+  run: (provider: FakeProvider) => Promise<T>
+): Promise<T> => await run(await fakeProvider(...replies));
 
-const reply = (text: string): GatewayReply => ({
+const reply = (text: string): ProviderReply => ({
   text,
   inputTokens: 50,
   outputTokens: 10,
 });
 
+/**
+ * The company connected an AI provider and chose its model, which a chat
+ * is invited with; a test that has the model answer connects its own.
+ */
+const connected = async (): Promise<void> => {
+  await fakeProvider();
+};
+
 describe("guest chats", { timeout: 60_000 }, () => {
+  beforeEach(connected);
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -338,14 +345,14 @@ describe("guest chats", { timeout: 60_000 }, () => {
     ];
     const { first, second, requests } = await answering(
       [reply("What do you do most weeks?"), reply("How long does that take?")],
-      async (gateway) => ({
+      async (provider) => ({
         first: await guest({
           action: "send",
           token,
           text: "I close the month.",
         }),
         second: await guest({ action: "send", token, text: "  Three days.  " }),
-        requests: gateway.requests,
+        requests: provider.requests,
       })
     );
     const read = z
@@ -578,30 +585,21 @@ describe("guest chats", { timeout: 60_000 }, () => {
     // The first message's model call waits until the second has been
     // refused, and the guest has finished the chat.
     const gate = Promise.withResolvers<null>();
-    const gateway = fakeGateway(reply("Question 1"));
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(async (...args) => {
+    const provider = await answeringProvider(async () => {
       await gate.promise;
-      return await gateway.binding.fetch(...args);
+      return reply("Question 1");
     });
-    let busy: { status: number; code: string };
-    let finished: GuestView;
-    let first: { status: number; body: unknown };
-    try {
-      const sending = guest({ action: "send", token, text: "First" });
-      await vi.waitFor(
-        () => {
-          expect(spy.mock.calls.length).toBeGreaterThan(0);
-        },
-        { timeout: 10_000, interval: 20 }
-      );
-      busy = codeOf(await guest({ action: "send", token, text: "Second" }));
-      finished = viewOf(await guest({ action: "finish", token }));
-      gate.resolve(null);
-      first = await sending;
-    } finally {
-      spy.mockRestore();
-    }
+    const sending = guest({ action: "send", token, text: "First" });
+    await vi.waitFor(
+      () => {
+        expect(provider.requests.length).toBeGreaterThan(0);
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    const busy = codeOf(await guest({ action: "send", token, text: "Second" }));
+    const finished = viewOf(await guest({ action: "finish", token }));
+    gate.resolve(null);
+    const first = await sending;
     const after = viewOf(await guest({ action: "open", token }));
     const logged = await allEvents();
     expect({
@@ -631,13 +629,13 @@ describe("guest chats", { timeout: 60_000 }, () => {
       status: 400,
       errorType: "invalid_request_error",
     }));
-    const { sent, calls } = await answering(refusals, async (gateway) => {
+    const { sent, calls } = await answering(refusals, async (provider) => {
       const answers: { status: number; code: string }[] = [];
       for (let turn = 0; turn <= guestTurnsMax; turn += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one turn at a time
         answers.push(codeOf(await guest(send(token))));
       }
-      return { sent: answers, calls: gateway.requests.length };
+      return { sent: answers, calls: provider.requests.length };
     });
     const after = viewOf(await guest({ action: "open", token }));
     expect({
@@ -916,6 +914,8 @@ const answerOf = (answer: unknown): unknown => {
 };
 
 describe("guest chats through a binding", { timeout: 90_000 }, () => {
+  beforeEach(connected);
+
   afterEach(async () => {
     await endLiveRuns();
   });

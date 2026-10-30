@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { workflowIdOf } from "@grasp-os/compiler";
 import {
   checkWorkflowBindings,
@@ -33,10 +32,10 @@ import {
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
+import { fakeProvider, testModel } from "./model-provider.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -163,9 +162,6 @@ export default function Hello() {
 `,
     },
   });
-
-/** A model the deployment allows. */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** A JSON Schema of an object of `properties`, all required. */
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -1062,18 +1058,16 @@ describe("the built-in blueprints", () => {
     const unapproved = await start(created.app.id, builder.userId, "k2");
     // The other copy's workflow is its own: the grant isn't its.
     const otherCopy = await start(theirs.app.id, other.userId, "k3");
-    await admin.api.workflowResources.approveBinding(workflow.id, {
-      alias: "model",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    const gateway = fakeGateway({
+    await fakeProvider({
       text: '{"line":"Hello, Ada"}',
       inputTokens: 1,
       outputTokens: 1,
     });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    await admin.api.workflowResources.approveBinding(workflow.id, {
+      alias: "model",
+      target: { kind: "model", model: testModel },
+      reviewed: { version: 1 },
+    });
     const started = await startAppBinding(
       env,
       authorityOf(created.app.id, builder.userId),
@@ -1092,7 +1086,6 @@ describe("the built-in blueprints", () => {
       { timeout: 30_000, interval: 100 }
     );
     const ran = await builder.api.workflowResources.run(workflow.id, runId);
-    vi.restoreAllMocks();
 
     expect({
       contract: installed

@@ -6,13 +6,12 @@ import {
   costMicros,
   listPricesOf,
   pinnedPrice,
-  regionalPricesOf,
 } from "../src/model-prices.ts";
 
 // What model requests cost in whole micros: pure arithmetic, tested on
 // its own.
 
-const llama = { input: 0.293, output: 2.253, cacheRead: 0, cacheWrite: 0 };
+const mistral = { input: 0.5, output: 1.5, cacheRead: 0, cacheWrite: 0 };
 const claude = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
 /** GPT-5.4's prices past 272K prompt tokens, as pi's catalog gives them. */
 const longPrompt = {
@@ -33,30 +32,30 @@ const gpt54 = {
 
 describe("model prices", () => {
   it("pin a model's list prices as whole micros a million tokens, rounded up, named by their hash", async () => {
-    const pinned = await pinnedPrice(llama);
+    const pinned = await pinnedPrice(mistral);
     expect(pinned).toMatchObject({
-      input: 293_000,
-      output: 2_253_000,
+      input: 500_000,
+      output: 1_500_000,
       cacheRead: 0,
       cacheWrite: 0,
     });
     expect(pinned?.version).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    await expect(pinnedPrice({ ...llama })).resolves.toStrictEqual(pinned);
+    await expect(pinnedPrice({ ...mistral })).resolves.toStrictEqual(pinned);
     const other = await pinnedPrice(claude);
     expect(other?.version).not.toBe(pinned?.version);
     await expect(
-      pinnedPrice({ ...llama, input: 0.0000001 })
+      pinnedPrice({ ...mistral, input: 0.0000001 })
     ).resolves.toMatchObject({ input: 1 });
   });
 
   it("give a model no price when its input or output has none, or one isn't a price", async () => {
     const prices = await Promise.all([
-      pinnedPrice({ ...llama, input: 0 }),
-      pinnedPrice({ ...llama, output: 0 }),
-      pinnedPrice({ ...llama, output: Number.NaN }),
-      pinnedPrice({ ...llama, cacheRead: -1 }),
-      pinnedPrice({ ...llama, cacheWrite: Number.POSITIVE_INFINITY }),
-      pinnedPrice({ ...llama, output: 1e300 }),
+      pinnedPrice({ ...mistral, input: 0 }),
+      pinnedPrice({ ...mistral, output: 0 }),
+      pinnedPrice({ ...mistral, output: Number.NaN }),
+      pinnedPrice({ ...mistral, cacheRead: -1 }),
+      pinnedPrice({ ...mistral, cacheWrite: Number.POSITIVE_INFINITY }),
+      pinnedPrice({ ...mistral, output: 1e300 }),
     ]);
     expect(prices.map((price) => price === undefined)).toStrictEqual([
       true,
@@ -170,7 +169,7 @@ describe("model prices", () => {
       listPricesOf("anthropic", "claude-sonnet-4-20250514", claude),
       listPricesOf("anthropic", "claude-sonnet-4-6", claude),
       listPricesOf("anthropic", "claude-opus-4-6", claude),
-      listPricesOf("workers-ai", "claude-sonnet-4-5", claude),
+      listPricesOf("openrouter", "claude-sonnet-4-5", claude),
       listPricesOf("openai", "gpt-5.4", gpt54),
     ]).toStrictEqual([
       { ...claude, tiers: [premium] },
@@ -181,42 +180,6 @@ describe("model prices", () => {
       claude,
       gpt54,
     ]);
-  });
-
-  it("price Bedrock's regional endpoints, the EU's among them, 10 percent over the list, every kind and tier, and pin them as whole micros", async () => {
-    const opus55 = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
-    const regional = await pinnedPrice(regionalPricesOf(opus55));
-    if (regional === undefined) {
-      throw new Error("Expected Bedrock's regional prices to be prices");
-    }
-    expect(regional).toMatchObject({
-      input: 4_400_000,
-      output: 22_000_000,
-      cacheRead: 220_000,
-      cacheWrite: 5_500_000,
-      tiers: [],
-    });
-    const list = await pinnedPrice(opus55);
-    expect(regional.version).not.toBe(list?.version);
-    expect(
-      costMicros(regional, {
-        input: 1000,
-        output: 100,
-        cacheRead: 0,
-        cacheWrite: 0,
-      })
-    ).toBe(6600);
-    await expect(pinnedPrice(regionalPricesOf(gpt54))).resolves.toMatchObject({
-      tiers: [
-        {
-          inputTokensAbove: 272_000,
-          input: 5_500_000,
-          output: 24_750_000,
-          cacheRead: 550_000,
-          cacheWrite: 0,
-        },
-      ],
-    });
   });
 
   it("cost in exact dollars at the tier a count is in, as the ledger charges it before rounding", async () => {

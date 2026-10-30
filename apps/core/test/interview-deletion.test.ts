@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { Workspace } from "@grasp-os/shared/brain";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
@@ -15,17 +14,16 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
+  answeringWith,
   approve,
-  gatewayConfig,
   holdAlarm,
   onLink,
   participate,
 } from "./interview-link.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import {
   agree,
   fact,
@@ -56,8 +54,8 @@ import {
 // else does (a sentinel), and the tests look for them, and for who said
 // them, everywhere they could be left: the store's tables, core's
 // database, the brain, the audit log, the lines kept of Stephen's voice,
-// and what the work is drawn again from. AI Gateway is the outside
-// system, faked behind the AI binding. The threat model's delete cases
+// and what the work is drawn again from. The model provider is the
+// outside system, faked behind connect. The threat model's delete cases
 // (GRA-361), tried here:
 //
 // - D1: drawn work left behind, or drawn again with them in it.
@@ -151,9 +149,9 @@ const toldWith = async (ids: Ids, said: Said) => {
 };
 
 /** Draws every piece of work due, each with the tickets' drawing, until none is. */
-const drawAll = async (ids: Ids): Promise<GatewayRequest[]> => {
+const drawAll = async (ids: Ids): Promise<SentRequest[]> => {
   const store = onboardingStore(env);
-  const requests: GatewayRequest[] = [];
+  const requests: SentRequest[] = [];
   for (let round = 0; round < 5; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
     const drew = await answering(
@@ -347,26 +345,6 @@ const ways: {
     audited: ["brain.records.purged", "onboarding.person.removed"],
   },
 ];
-
-/** A fake AI binding for the duration of `run`, answering as `respond` does. */
-const answeringWith = async <T>(
-  respond: (
-    requests: readonly GatewayRequest[]
-  ) => Promise<GatewayReply | undefined>,
-  run: () => Promise<T>
-) => {
-  const before = env.MODEL_GATEWAY;
-  const fake = answeringGateway(respond);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
-};
 
 /** Waits until someone's interview is gone from the store. */
 const goneFromStore = async (person: string): Promise<void> => {
@@ -572,7 +550,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
     await approve(anew, facts);
     // Her map can't be drawn again, until it is given up.
-    const failing: GatewayReply = {
+    const failing: ProviderReply = {
       status: 400,
       errorType: "invalid_request_error",
     };
@@ -632,7 +610,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await mapped(ids);
     await toldWith(ids, said);
     let deleted: number | undefined;
-    const drew = await answeringWith(
+    const { result: drew } = await answeringWith(
       async () => {
         // Max deletes his interview while his work is drawn.
         deleted ??= await deleteOnLink(ids.max);
@@ -681,7 +659,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       linesWith(said.lea)
     );
     let deleted: number | undefined;
-    const drew = await answeringWith(
+    const { result: drew } = await answeringWith(
       async () => {
         // Lea deletes her interview while her team's map is drawn from it.
         deleted ??= await deleteOnLink(ids.lea);
@@ -936,7 +914,7 @@ describe(
       const before = await versionsOf();
       await putRight(ids, said, sentinelOf("inbox"));
       // Every drawing of the tickets fails, until it is given up.
-      const failing: GatewayReply = {
+      const failing: ProviderReply = {
         status: 400,
         errorType: "invalid_request_error",
       };

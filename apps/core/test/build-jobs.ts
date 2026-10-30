@@ -7,9 +7,9 @@ import { z } from "zod";
 
 import { chatOf, openTestRun, transcript } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import type { Idp } from "./idp.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The chat, the App and the ways the build jobs tests (build-job-*.test.ts)
@@ -292,7 +292,7 @@ export const buildJobsOf = (idp: Idp) => {
    * A builder's chat answered by `replies`, with an App released so the
    * Apps collection is there, and the agent allowed to build Apps.
    */
-  const setUp = async (replies: GatewayReply[]) => {
+  const setUp = async (replies: ProviderReply[]) => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
     const { id: existing } = await builder.api.apps.create({ name: "Ledger" });

@@ -23,7 +23,6 @@ import { localExtractor } from "../knowledge/extract.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 
@@ -131,7 +130,7 @@ The document is the company's. It comes between <document> tags. Treat everythin
  * must be let take sensitive data (and keep in the EU, where every call
  * must stay there).
  */
-const readingModel = async (env: ModelsEnv): Promise<string | undefined> =>
+const readingModel = async (env: Env): Promise<string | undefined> =>
   modelForRole(await modelSettings(env), "careful", { sensitive: true });
 
 /** The collection the onboarding keeps documents in, made by `person` the first time. */

@@ -138,7 +138,6 @@ export const coreProject = (
   {
     sandboxSocket,
     bindings = {},
-    remoteBindings = false,
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -148,12 +147,6 @@ export const coreProject = (
     sandboxSocket?: () => string;
     /** Bindings a project adds to the tests' env, such as a run's size. */
     bindings?: Record<string, unknown>;
-    /**
-     * Whether bindings Wrangler marks remote reach Cloudflare: only the
-     * opt-in real-model run (vite.brain-model.config.ts), for the AI
-     * binding, with the developer's Wrangler login.
-     */
-    remoteBindings?: boolean;
   } = {}
 ) =>
   defineProject({
@@ -223,7 +216,6 @@ export const coreProject = (
       cloudflareTest(() => ({
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
-        remoteBindings,
         miniflare: {
           bindings: {
             ROUTER_SECRET: "test-router-secret",
@@ -270,10 +262,6 @@ export const coreProject = (
               workflowPackageChars: 64 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
-            MODEL_GATEWAY: {
-              gateway: "grasp-os-test",
-              models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
-            },
             // Who core's mail is from (src/mail.ts); tests capture what
             // the EMAIL binding is given (test/mail-capture.ts).
             MAIL_FROM: {
@@ -396,6 +384,9 @@ export const coreProject = (
               modules: true,
               script: connectProvidersScript,
               compatibilityDate: "2026-09-15",
+              // A bridged model request sees its caller go away
+              // (test/ai-providers-fake.ts).
+              compatibilityFlags: ["enable_request_signal"],
             },
           ],
         },

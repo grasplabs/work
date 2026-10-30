@@ -11,7 +11,8 @@
  * internal or metadata address; a key read back, logged, or opened after
  * its row was tampered with; a realtime socket (Grasp's live listening)
  * opened without a platform grant, to another path, or on an
- * organization's key, or left open at one end. Then what it is for.
+ * organization's key, or left open at one end; an on-prem relay set where
+ * it can't be taken. Then what it is for.
  */
 import {
   aiCredentialPlaceholder,
@@ -525,6 +526,86 @@ describe("AI providers in connect", () => {
         ])
       );
       expect(stores).toStrictEqual({ platform: false, organization: true });
+    });
+  });
+
+  describe("an on-prem relay for the providers' requests", () => {
+    const mistralUrl = "https://api.mistral.ai/v1/chat/completions";
+
+    /** One Mistral request through a connect with `vars`: why it was refused, or `sent`. */
+    const throughRelay = async (vars: Partial<Env>): Promise<string> => {
+      await connect(vars).saveAiProviderKey(
+        {
+          provider: "mistral",
+          key: newKey(),
+        },
+        byAdmin
+      );
+      const response = await connect(vars).modelFetch(
+        modelRequest(mistralUrl),
+        await grantFor({ provider: "mistral", host: "api.mistral.ai" })
+      );
+      return refusalOf(response);
+    };
+
+    it("sends nothing when the relay is set where it can't be taken: off-prem, at a host the deployment doesn't name, at a metadata address, or as more than an origin", async () => {
+      const refusals = [
+        await throughRelay({
+          AI_PRIVATE_HOSTS: "relay.acme.lan",
+          AI_PROVIDER_ORIGIN: "http://relay.acme.lan:8080",
+        }),
+        await throughRelay({
+          RUNTIME_PROFILE: "workerd",
+          AI_PROVIDER_ORIGIN: "http://relay.acme.lan:8080",
+        }),
+        await throughRelay({
+          RUNTIME_PROFILE: "workerd",
+          AI_PRIVATE_HOSTS: "169.254.169.254",
+          AI_PROVIDER_ORIGIN: "http://169.254.169.254",
+        }),
+        await throughRelay({
+          RUNTIME_PROFILE: "workerd",
+          AI_PRIVATE_HOSTS: "relay.acme.lan",
+          AI_PROVIDER_ORIGIN: "http://relay.acme.lan:8080/elsewhere",
+        }),
+        // A public host is no relay: the deployment names only its own.
+        await throughRelay({
+          RUNTIME_PROFILE: "workerd",
+          AI_PROVIDER_ORIGIN: "https://relay.example.com",
+        }),
+      ];
+
+      expect(refusals).toStrictEqual([
+        "endpoint",
+        "endpoint",
+        "endpoint",
+        "endpoint",
+        "endpoint",
+      ]);
+      expect(sent).toStrictEqual([]);
+    });
+
+    it("sends each request, on-prem, to the relay the deployment names, with its path and the provider's host", async () => {
+      const relayed = await throughRelay({
+        RUNTIME_PROFILE: "workerd",
+        AI_PRIVATE_HOSTS: "localhost",
+        AI_PROVIDER_ORIGIN: "http://localhost:8790",
+      });
+
+      expect(relayed).toBe("sent");
+      expect(
+        sent.map(({ host, path, headers }) => ({
+          host,
+          path,
+          forwardedHost: headers["x-forwarded-host"],
+        }))
+      ).toStrictEqual([
+        {
+          host: "localhost",
+          path: "/v1/chat/completions",
+          forwardedHost: "api.mistral.ai",
+        },
+      ]);
     });
   });
 
