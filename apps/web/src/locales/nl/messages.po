@@ -1843,9 +1843,21 @@ msgstr "Een wijziging wacht op goedkeuring van de persoon voor wie de run handel
 msgid "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
 msgstr "Een wijziging is verstuurd, maar het antwoord ging verloren: ze wacht tot de persoon voor wie de run handelt zegt of ze is gebeurd"
 
+#: src/engines/app-access-requests.tsx
+msgid "A collection"
+msgstr "Een collectie"
+
 #: src/knowledge/new-collection.tsx
 msgid "A collection holds documents Grasp and its agents may read."
 msgstr "Een collectie bevat documenten die Grasp en zijn agents mogen lezen."
+
+#: src/engines/app-access-requests.tsx
+msgid "A collection to read"
+msgstr "Een collectie om te lezen"
+
+#: src/engines/app-access-requests.tsx
+msgid "A connection"
+msgstr "Een verbinding"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -2185,6 +2197,10 @@ msgstr "Over tools"
 msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Geaccepteerd"
+
+#: src/engines/app-access-requests.tsx
+msgid "Access waiting for an admin"
+msgstr "Toegang die op een beheerder wacht"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3146,6 +3162,10 @@ msgstr "{name} erbij vragen"
 msgid "Ask again"
 msgstr "Opnieuw vragen"
 
+#: src/engines/app-access-requests.tsx
+msgid "Ask an admin"
+msgstr "Een beheerder vragen"
+
 #: src/chat/chat-dock.tsx
 msgid "Ask anything about the brain"
 msgstr "Vraag alles over het brein"
@@ -3158,6 +3178,14 @@ msgstr "Vraag alles over wat het brein weet"
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
+
+#: src/engines/app-access-requests.tsx
+msgid "Ask for access"
+msgstr "Toegang vragen"
+
+#: src/engines/app-access-requests.tsx
+msgid "Ask for access for this domain"
+msgstr "Toegang vragen voor dit domein"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Ask for it"
@@ -3207,6 +3235,7 @@ msgstr "Vragen om versie {askable} live te zetten"
 msgid "Ask your admin to connect an AI provider."
 msgstr "Vraag je beheerder een AI-aanbieder te koppelen."
 
+#: src/engines/app-access-requests.tsx
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
 msgid "Asked"
@@ -3251,6 +3280,7 @@ msgstr "Gevraagd door {requester} op {date}"
 msgid "Asked by a former member"
 msgstr "Aangevraagd door een voormalig lid"
 
+#: src/engines/app-access-requests.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Asked for"
 msgstr "Doorgegeven"
@@ -3695,6 +3725,7 @@ msgstr "Niet leesbaar"
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
+#: src/engines/app-access-requests.tsx
 #: src/engines/app-status.tsx
 #: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
@@ -3746,6 +3777,10 @@ msgstr "Kandidaat"
 #: src/routes/_shell.settings.models.tsx
 msgid "Cap reached"
 msgstr "Limiet bereikt"
+
+#: src/engines/app-access-requests.tsx
+msgid "Capital letters, digits and underscores, starting with a letter, such as CRM."
+msgstr "Hoofdletters, cijfers en underscores, beginnend met een letter, zoals CRM."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Caps"
@@ -4084,6 +4119,10 @@ msgstr "Kiezen uit Google Drive"
 msgid "Choose from SharePoint or OneDrive"
 msgstr "Kiezen uit SharePoint of OneDrive"
 
+#: src/engines/app-access-requests.tsx
+msgid "Choose one"
+msgstr "Kies er een"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Choose someone"
 msgstr "Kies iemand"
@@ -4137,6 +4176,7 @@ msgstr "Filters wissen"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/app-access-requests.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
@@ -4214,6 +4254,7 @@ msgstr "Codestap"
 msgid "colleagues talked"
 msgstr "collega’s gesproken"
 
+#: src/engines/app-access-requests.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
@@ -4494,6 +4535,7 @@ msgstr "Om het te koppelen heeft je organisatie een eigen inlog-app nodig, die G
 msgid "Connecting your Microsoft 365"
 msgstr "Je Microsoft 365 wordt gekoppeld"
 
+#: src/engines/app-access-requests.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
@@ -8486,6 +8528,10 @@ msgstr "Naam"
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Geef hieronder een model op dat dit endpoint aanbiedt, kies het en test het dan."
 
+#: src/engines/app-access-requests.tsx
+msgid "Name in the app's code"
+msgstr "Naam in de code van de app"
+
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
 msgstr "Naam van een nieuwe workflow"
@@ -9738,6 +9784,10 @@ msgstr "Nog niets uitgegeven."
 #: src/workflows/triggers.tsx
 msgid "Nothing starts it on its own: it runs when someone starts it."
 msgstr "Niets start hem vanzelf: hij draait wanneer iemand hem start."
+
+#: src/engines/app-access-requests.tsx
+msgid "Nothing this domain asked for is waiting."
+msgstr "Niets wat dit domein vroeg, wacht nog."
 
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
@@ -14342,6 +14392,10 @@ msgstr "de herinnering"
 msgid "The report as it stands today"
 msgstr "Het rapport zoals het er vandaag voor staat"
 
+#: src/engines/app-access-requests.tsx
+msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
+msgstr "Het verzoek staat niets toe tot een beheerder het verleent. Die ziet wat de app vraagt en beslist."
+
 #: src/screens/screen-files.ts
 #: src/screens/screen-links.ts
 msgid "The request failed."
@@ -15076,6 +15130,7 @@ msgid "to"
 msgstr "tot"
 
 #: src/activity/audit-log.tsx
+#: src/engines/app-access-requests.tsx
 msgid "To"
 msgstr "Tot"
 
@@ -15490,6 +15545,10 @@ msgstr "Een andere lijst gebruiken"
 #: src/onboarding/connect-steps.tsx
 msgid "Use another platform"
 msgstr "Ander platform kiezen"
+
+#: src/engines/app-access-requests.tsx
+msgid "Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself."
+msgstr "Gebruik hoofdletters, cijfers en underscores, beginnend met een letter, en geen naam die het platform zelf gebruikt."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Use the chat, Knowledge and the apps shared with them"
@@ -16108,6 +16167,10 @@ msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "Waarvoor hij is"
 
+#: src/engines/app-access-requests.tsx
+msgid "What it needs"
+msgstr "Wat het nodig heeft"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Waar het op berust"
@@ -16221,6 +16284,10 @@ msgstr "Waar Stephen niet aan komt"
 #: src/routes/_shell.settings.billing.tsx
 msgid "What Stripe emails to the billing email."
 msgstr "Wat Stripe naar het factuuradres mailt."
+
+#: src/engines/app-access-requests.tsx
+msgid "What the app may do with it"
+msgstr "Wat de app ermee mag doen"
 
 #: src/brain/brain-sections.ts
 msgid "What the board wants from the sprint: its goals and the rules of the road."
