@@ -10,9 +10,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { sendStaffAlert } from "../alerts.ts";
-import type { AlertOutcome } from "../alerts.ts";
-import { adminDatabase, audit } from "../db/act.ts";
+import { adminDatabase } from "../db/act.ts";
 import { rotateClientSecrets } from "../deploy/rotation.ts";
 import { adminReader } from "./admin.ts";
 import { applySettings } from "./apply.ts";
@@ -188,21 +186,6 @@ export const fetchTeamsPackageFn = createServerFn({ method: "GET" })
     async ({ data }) =>
       await clientTeamsPackage(adminDatabase(env.DB), data.clientId)
   );
-
-/**
- * Sends a test alert about a client to the staff alerts' channel
- * (src/alerts.ts), to see the channel works: audited as the staff member
- * who sent it (`alert.test`), and answered with what became of it.
- */
-export const sendTestAlertFn = createServerFn({ method: "POST" })
-  .validator(clientSchema)
-  .handler(async ({ data, context }): Promise<AlertOutcome> => {
-    await audit(adminDatabase(env.DB), context.staff, {
-      action: "alert.test",
-      clientId: data.clientId,
-    });
-    return await sendStaffAlert(env, { clientId: data.clientId, kind: "test" });
-  });
 
 /**
  * Rotates a client's derived secrets (src/deploy/rotation.ts): changed

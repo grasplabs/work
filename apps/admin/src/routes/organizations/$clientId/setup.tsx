@@ -8,13 +8,15 @@ import {
   fetchClientQuotaPolicy,
   fetchClientSetup,
 } from "../../../clients/functions.ts";
-import { fetchClientHosting } from "../../../hosting/functions.ts";
-import { hostingPolicyIds } from "../../../hosting/policy.ts";
+import {
+  fetchClientHosting,
+  fetchProvisioningProgress,
+} from "../../../hosting/functions.ts";
 import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
   const { clientId } = Route.useParams();
-  const { setup, releases, hosting, quotaPolicy, modelSpend } =
+  const { setup, releases, hosting, progress, quotaPolicy, modelSpend } =
     Route.useLoaderData();
   const { tab = "status" } = Route.useSearch();
   // Shown whether or not its core answered: being set up, it has none yet.
@@ -24,6 +26,7 @@ const Setup = () => {
       clientId={clientId}
       hosting={hosting}
       modelSpend={modelSpend}
+      progress={progress}
       quotaPolicy={quotaPolicy}
       releases={releases}
       setup={setup}
@@ -40,6 +43,8 @@ const Setup = () => {
  * (`/clients/$clientId`) was.
  */
 export const Route = createFileRoute("/organizations/$clientId/setup")({
+  // Being set up, or not answering, its core has nothing for it: it shows from what the admin recorded.
+  staticData: { withoutCore: true },
   // A tab it doesn't have is left out: the router keeps what this doesn't name.
   validateSearch: (search: Record<string, unknown>): { tab?: SetupTab } => {
     const tab = setupTabs.find((each) => each === search.tab);
@@ -67,17 +72,16 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
         return null;
       }
     })();
-    const [setup, { releases }, hosting] = await Promise.all([
+    const [setup, { releases }, hosting, progress] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
-      fetchClientHosting({
-        data: { clientId: params.clientId, policyId: hostingPolicyIds[0] },
-      }),
+      fetchClientHosting({ data: { clientId: params.clientId } }),
+      fetchProvisioningProgress({ data: { clientId: params.clientId } }),
     ]);
     if (setup === null) {
       throw notFound();
     }
-    return { setup, releases, hosting, quotaPolicy, modelSpend };
+    return { setup, releases, hosting, progress, quotaPolicy, modelSpend };
   },
   component: Setup,
 });

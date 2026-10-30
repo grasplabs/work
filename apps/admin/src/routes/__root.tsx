@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { FrameFailure } from "../admin/failure.tsx";
 import { AdminFrame } from "../admin/frame.tsx";
 import { fetchPlatformSidebar } from "../admin/platform-data.ts";
 import { fetchClientAdmins } from "../clients/functions.ts";
@@ -77,5 +78,6 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   component: Frame,
+  errorComponent: FrameFailure,
   notFoundComponent: NotFound,
 });

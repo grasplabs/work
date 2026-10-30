@@ -25,7 +25,7 @@ import { targetClient } from "../src/rollout/targets.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { callServerFn } from "./pages.ts";
+import { callServerFn, page } from "./pages.ts";
 import {
   deployPlaced,
   livePlacedClient,
@@ -50,6 +50,10 @@ const newBot = () => ({
   tenantId: crypto.randomUUID(),
   secretExpiresOn: "2027-04-30",
 });
+
+/** The day `days` from today, as Entra shows it. */
+const inDays = (days: number): string =>
+  new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 /** A live placed client in a destination of its own, running a new release as its operation made it. */
 const liveClient = async (name: string) => {
@@ -332,6 +336,35 @@ describe("a client's Teams bot", () => {
       same: first !== null && first.zip === second?.zip,
       without: await downloaded(without.clientId),
     }).toStrictEqual({ same: true, without: null });
+  });
+
+  it("says on its Setup that its bot's secret needs replacing once it's within a month of expiring, or has expired", async () => {
+    const acme = await liveClient("Acme Logistics");
+    /** The Setup's words once the secret expires on `day`. */
+    const setupWith = async (day: string): Promise<string> => {
+      await callServerFn(
+        setTeamsBotFn,
+        { clientId: acme.clientId, bot: { ...newBot(), secretExpiresOn: day } },
+        { email: staff.email }
+      );
+      const { html } = await page(
+        `/organizations/${acme.clientId}/setup`,
+        staff.email
+      );
+      return html.replaceAll("&#x27;", "'");
+    };
+
+    const far = await setupWith(inDays(90));
+    const soon = await setupWith(inDays(20));
+    const expired = await setupWith(inDays(-1));
+
+    expect({
+      far: far.includes("Its Teams bot's secret"),
+      soon: soon.includes("Its Teams bot's secret expires in 20 days."),
+      expired: expired.includes(
+        "Its Teams bot's secret has expired: Stephen can't answer in Teams."
+      ),
+    }).toStrictEqual({ far: false, soon: true, expired: true });
   });
 
   it("is set only by staff Access vouches for, refused when it isn't a bot, and audited only when it changes", async () => {

@@ -1,4 +1,4 @@
-import { releaseIdSchema } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Table,

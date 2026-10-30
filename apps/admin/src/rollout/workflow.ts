@@ -74,7 +74,6 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { sendStaffAlert } from "../alerts.ts";
 import { actIfChanged, adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
@@ -759,16 +758,9 @@ const operateAs = async (
     );
   }
   try {
-    await runClientProvision(
-      {
-        ...(await deployContext(env)),
-        alert: async (alert) => {
-          await sendStaffAlert(env, alert);
-        },
-      },
-      held,
-      { rollBackOnProbe }
-    );
+    await runClientProvision(await deployContext(env), held, {
+      rollBackOnProbe,
+    });
   } catch (error) {
     if (
       error instanceof ProvisionOperationError ||

@@ -16,8 +16,6 @@ import type { AdminRuns } from "./run-object.ts";
 
 /** The name each of the admin's workflows is started under. */
 export const adminWorkflows = {
-  /** A build of an integration (src/builds/workflow.ts). */
-  integrationBuild: "integration-build",
   /** Applying a client's settings now (src/clients/apply.ts). */
   applyClient: "apply-client",
   /** An attempt at provisioning a placed client (src/hosting/workflow.ts). */

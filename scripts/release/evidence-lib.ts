@@ -14,7 +14,6 @@ import {
   limitEvidenceFileSchema,
   limitEvidenceSchema,
   platformLimitsSchema,
-  releaseIdSchema,
   runtimeProfileSchema,
   verifyLimitEvidence,
 } from "@grasp-os/shared/release";
@@ -24,6 +23,7 @@ import type {
   PreviousRelease,
   ReleaseManifest,
 } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { z } from "zod";
 
 /**
