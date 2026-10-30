@@ -90,9 +90,7 @@ const Figure = ({
     <dt className="text-muted-foreground">{label}</dt>
     <dd
       className={
-        attention
-          ? "text-status-attention text-2xl font-medium tabular-nums"
-          : "text-2xl font-medium tabular-nums"
+        attention ? "type-figure text-status-attention" : "type-figure"
       }
     >
       {value === null ? "–" : formatNumber(value)}

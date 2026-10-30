@@ -217,7 +217,7 @@ const teamInterviews = async (env: Env): Promise<CameIn[]> => {
 
 const onboardingFacts = async (
   env: Env,
-  person: Identity
+  person: Pick<Identity, "role">
 ): Promise<OnboardingFacts | null> => {
   if (!isAdmin(person.role)) {
     return null;
@@ -914,20 +914,57 @@ export const goalsFor = async (
   }));
 };
 
+/**
+ * What every read of the brain starts from, as `person` may read it: the
+ * onboarding (an admin's alone), the brain's records, and its teams.
+ */
+const readBrainCore = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<{
+  facts: OnboardingFacts | null;
+  records: ReturnType<typeof withSuccessors>;
+  teams: Workspace["teams"];
+}> => {
+  const [facts, held] = await Promise.all([
+    onboardingFacts(env, person),
+    readBrainRecords(env),
+  ]);
+  const onboarding = onboardingTeams(facts);
+  const records = withSuccessors(onboarding, held);
+  return { facts, records, teams: teamsOf(onboarding, records) };
+};
+
+/**
+ * The brain's teams, what they said and its workflows, as `person` may
+ * read them, as `readBrain` reads them: what a step of a chat's thinking
+ * may name (agent-thinking.ts). What a team said is a claim five or more
+ * of its people made, or none.
+ */
+export const readThinkingBrain = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<Pick<Workspace, "teams" | "statements" | "workflows">> => {
+  const { records, teams } = await readBrainCore(env, person);
+  return {
+    teams,
+    statements: records.statements,
+    workflows: records.workflows,
+  };
+};
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
   person: Identity
 ): Promise<Workspace> => {
-  const [facts, name, connections, held, transcribed] = await Promise.all([
-    onboardingFacts(env, person),
-    organizationName(env),
-    connectionsOf(env, person),
-    readBrainRecords(env),
-    knowledgeTranscriptSources(env, person),
-  ]);
-  const onboarding = onboardingTeams(facts);
-  const records = withSuccessors(onboarding, held);
+  const [{ facts, records, teams }, name, connections, transcribed] =
+    await Promise.all([
+      readBrainCore(env, person),
+      organizationName(env),
+      connectionsOf(env, person),
+      knowledgeTranscriptSources(env, person),
+    ]);
 
   const company: Company = {
     name,
@@ -935,7 +972,6 @@ export const readBrain = async (
     people: facts?.view.roster?.people.length ?? 0,
   };
 
-  const teams = teamsOf(onboarding, records);
   // A member reads the onboarding's sources only as the records it reads
   // name them: when each came in, so a fact shows where it came from.
   const named = new Set(

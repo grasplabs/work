@@ -124,7 +124,7 @@ export const PulseCoverage = ({
     <div className="flex flex-col gap-3 border-t px-5 py-4">
       <p className="flex items-baseline gap-2">
         <Trans>
-          <span className="text-2xl font-medium tracking-tight tabular-nums">
+          <span className="type-figure">
             {reporting} of {total}
           </span>
           <span className="text-muted-foreground">
