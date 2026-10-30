@@ -74,7 +74,17 @@ import {
 } from "@grasp-os/ui/components/questionnaire";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { FileTextIcon } from "lucide-react";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/ui/components/trace";
+import { BrainIcon, CheckIcon, CodeIcon, FileTextIcon } from "lucide-react";
 
 const AttachmentDemo = () => (
   <Attachment>
@@ -260,6 +270,37 @@ const ShimmerDemo = () => (
   <Shimmer aria-live="polite">Thinking about your question…</Shimmer>
 );
 
+const TraceDemo = () => (
+  <Trace>
+    <TraceLine>
+      <TraceIcon>
+        <CheckIcon />
+      </TraceIcon>
+      <TraceTitle>Worked for 21s</TraceTitle>
+    </TraceLine>
+    <TraceCollapsible>
+      <TraceCollapsibleTrigger>
+        <TraceLine>
+          <TraceIcon>
+            <BrainIcon />
+          </TraceIcon>
+          <TraceTitle>Thought for 4s</TraceTitle>
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent>
+        The invoices are in the finance collection; the overdue ones first.
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+    <TraceLine status="running">
+      <TraceIcon>
+        <CodeIcon />
+      </TraceIcon>
+      <TraceTitle>Reading the invoices</TraceTitle>
+      <TraceDescription>2s</TraceDescription>
+    </TraceLine>
+  </Trace>
+);
+
 export const chatDemos = {
   attachment: AttachmentDemo,
   bubble: BubbleDemo,
@@ -270,4 +311,5 @@ export const chatDemos = {
   "prompt-input": PromptInputDemo,
   questionnaire: QuestionnaireDemo,
   shimmer: ShimmerDemo,
+  trace: TraceDemo,
 };

@@ -28,6 +28,7 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { downloadCsv } from "../landscape/download.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { FailedMailNotice } from "./failed-mail.tsx";
 import { fullLink, linksCsv, linksOf } from "./links-to-send.ts";
 import { Callout, Figure } from "./setup-parts.tsx";
 import { closesOn, teamNumbersOf } from "./setup.ts";
@@ -211,7 +212,9 @@ const LinkRow = ({
   const { t } = useLingui();
   const { name, team } = link;
   let about = t`${team} · not out yet`;
-  if (link.fresh) {
+  if (link.failedMail !== null) {
+    about = t`${team} · our email didn’t reach them`;
+  } else if (link.fresh) {
     about = t`${team} · new`;
   } else if (link.path !== null) {
     about = team;
@@ -390,6 +393,7 @@ export const InterviewsProgress = ({
         paused={paused}
         spoken={spoken}
       />
+      <FailedMailNotice links={links} />
       {children}
       <div className="flex flex-col gap-2">
         <div className="flex gap-1">
