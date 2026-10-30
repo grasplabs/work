@@ -2337,12 +2337,13 @@ msgstr "Agent {agent}"
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} pour {person}"
 
-#: src/knowledge/new-collection.tsx
-msgid "Agents read this before they look inside."
-msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}, in {app}"
 msgstr "Agent {agentId} pour {person}, dans {app}"
+
+#: src/knowledge/new-collection.tsx
+msgid "Agents read this before they look inside."
+msgstr "Les agents lisent ceci avant de regarder à l’intérieur."
 
 #: src/dashboard/returns.ts
 msgctxt "workflow stage"
@@ -5688,6 +5689,7 @@ msgstr "Tout le monde a parlé"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Tout le monde dans l’organisation, et leurs agents."
+
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
 msgstr "Tous ceux avec qui il est partagé, et leurs agents, le lisent comme accepté. Le vôtre reste tel quel."
