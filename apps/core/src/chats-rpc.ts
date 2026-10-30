@@ -16,6 +16,7 @@ import type {
   ChatDraftVersion,
   ChatProject,
   ChatQuestion,
+  ChatSearchHit,
   ChatsApi,
   ChatSummary,
   ChatUpdate,
@@ -319,6 +320,37 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     return await withPerson(
       this.#check,
       async ({ userId }) => await this.#chatsOf(userId).chats(userId)
+    );
+  }
+
+  async search(
+    query: string,
+    projectId?: string | null
+  ): Promise<ChatSearchHit[]> {
+    return await withPerson(this.#check, async ({ userId }) => {
+      if (
+        typeof query !== "string" ||
+        (projectId !== undefined &&
+          projectId !== null &&
+          typeof projectId !== "string")
+      ) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      // Only the signed-in person's own object, and only their chats in it:
+      // nobody searches another person's, an admin no more than anyone.
+      return await this.#chatsOf(userId).searchChats(
+        userId,
+        query,
+        projectId ?? null
+      );
+    });
+  }
+
+  async summary(chatId: string): Promise<ChatSummary> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        await this.#chatsOf(userId).chatSummary(chatIdOf(chatId), userId)
     );
   }
 
