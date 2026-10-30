@@ -193,7 +193,7 @@ describe("promoting a release from staging's bucket to production's", () => {
   });
 
   it("publishes nothing for a release staging doesn't hold", async () => {
-    await expect(promote("r999999-fffffff")).rejects.toThrow(
+    await expect(promote("26.01.999999")).rejects.toThrow(
       /isn't published in grasp-releases-staging/u
     );
     expect(buckets.get(PRODUCTION)?.size).toBe(0);

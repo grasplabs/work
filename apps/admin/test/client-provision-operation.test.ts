@@ -1,5 +1,6 @@
 import {
   clientsNamespace,
+  placedModelGateway,
   platformWorkerName,
   stageOfNamespace,
 } from "@grasp-os/shared/names";
@@ -17,7 +18,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import golden from "../../../scripts/release/testdata/golden-manifest.json" with { type: "json" };
-import type { StaffAlert } from "../src/alerts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
 import { queryD1 } from "../src/cloudflare/workers.ts";
 import {
@@ -48,6 +48,7 @@ import {
 } from "../src/hosting/offboarding.ts";
 import {
   ProvisionOperationError,
+  recordUnstarted,
   runClientProvision,
   sendsSettled,
   startClientProvision,
@@ -58,6 +59,7 @@ import {
   provisionPlacedClient,
   releasePlacedClient,
 } from "../src/hosting/workflow.ts";
+import { getProvisioning } from "../src/provision/queries.ts";
 import {
   claimRun,
   currentRun,
@@ -82,7 +84,11 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import {
+  emptyStoreSecret,
+  setStoreSecret,
+  useStoreSecrets,
+} from "./secrets-store.ts";
 
 const token = "test-deployer-token-0123456789";
 const cloudflare = mockCloudflareApi(token);
@@ -133,7 +139,7 @@ const bindsConnect = (core: WorkerEntry): WorkerEntry => ({
 /**
  * A release imported for a placed client: core binds its own Durable
  * Object classes, as the real one does, and nothing a placed client
- * refuses outright (Workflows, Workers AI). For a Workers for Platforms
+ * refuses outright (Workflows). For a Workers for Platforms
  * destination, only the bindings its documentation lists for user
  * Workers, and no cron triggers. `adjust` changes core.
  */
@@ -728,7 +734,7 @@ const refusals: Refusal[] = [
     spec: {
       platformLimits: { ...testLimits, workflowSteps: 2000 },
       previousRelease: {
-        releaseId: "r000000001-0000000",
+        releaseId: "26.01.1",
         platformLimits: testLimits,
       },
       limitEvidence: (release) => [
@@ -752,15 +758,6 @@ const refusals: Refusal[] = [
       },
     },
     code: "release_incompatible",
-  },
-  {
-    name: "a release that binds Workers AI, with no spend ceiling decided",
-    kind: "dedicated",
-    adjust: (core) => ({
-      ...core,
-      bindings: [...core.bindings, { type: "ai", name: "AI" }],
-    }),
-    code: "model_spend_undecided",
   },
   {
     name: "a release with a binding Workers for Platforms doesn't document",
@@ -1067,22 +1064,44 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("starting it again resumes the client's one operation, and refuses another release", async () => {
+  it("starting it again resumes the client's one operation, switched to a newer release while nothing is live, and refuses an older one", async () => {
+    const older = await importRelease("dedicated");
     const manifest = await importRelease("dedicated");
     const { clientId, operationId, held } = await setUp("dedicated", manifest);
     await expect(
       startClientProvision(db, staff, held, manifest.releaseId)
     ).resolves.toBe(operationId);
-    const other = await importRelease("dedicated");
     await expect(
-      startClientProvision(db, staff, held, other.releaseId)
+      startClientProvision(db, staff, held, older.releaseId)
     ).rejects.toMatchObject({ code: "operation_release_changed" });
+    const newer = await importRelease("dedicated");
+    await expect(
+      startClientProvision(db, staff, held, newer.releaseId)
+    ).resolves.toBe(operationId);
     await expect(
       db
-        .select({ id: clientProvisions.id })
+        .select({
+          id: clientProvisions.id,
+          releaseId: clientProvisions.releaseId,
+        })
         .from(clientProvisions)
         .where(eq(clientProvisions.clientId, clientId))
-    ).resolves.toStrictEqual([{ id: operationId }]);
+    ).resolves.toStrictEqual([{ id: operationId, releaseId: newer.releaseId }]);
+  });
+
+  it("keeps a live client's operation on its release: provisioning never switches what runs", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    await runClientProvision(context, held);
+    const newer = await importRelease("dedicated");
+
+    await expect(
+      startClientProvision(db, staff, held, newer.releaseId)
+    ).rejects.toMatchObject({ code: "operation_release_changed" });
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      releaseId: manifest.releaseId,
+      status: "done",
+    });
   });
 
   it.each(stops)(
@@ -1897,45 +1916,14 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("takes the real release into Workers for Platforms as far as model spend, and, once Workers AI is out of it, live without mail", async () => {
+  it("takes the real release live in Workers for Platforms, its model calls through the destination's gateway held to the client's ceiling, and without mail", async () => {
     const real = await importRealRelease();
-    const stopped = await setUp(
+    const { account, clientId, held } = await setUp(
       "workers_for_platforms",
       real,
       clientDispatchNamespace
     );
 
-    // Its core binds Workers AI: it stops there, in words staff act on,
-    // before anything is created or uploaded, and never at its mail.
-    await expect(failing(stopped.held)).resolves.toMatchObject({
-      code: "model_spend_undecided",
-    });
-    const operation = await operationOf(stopped.clientId);
-    expect({
-      operation,
-      uploads: stopped.account.scriptUploads.length,
-    }).toMatchObject({
-      operation: {
-        status: "failed",
-        step: null,
-        error: "model_spend_undecided",
-      },
-      uploads: 0,
-    });
-    expect(operationErrorWords(operation?.error ?? "")).toMatch(
-      /^Model spend isn't decided yet \(GRA-141\): provisioning stops here\./u
-    );
-
-    // The same release without Workers AI, as once model spend is decided.
-    const decided = await importRealRelease((worker) => ({
-      ...worker,
-      bindings: worker.bindings.filter(({ type }) => type !== "ai"),
-    }));
-    const { account, clientId, held } = await setUp(
-      "workers_for_platforms",
-      decided,
-      clientDispatchNamespace
-    );
     await runClientProvision(
       {
         ...context,
@@ -1960,8 +1948,17 @@ describe("provisioning a placed client", () => {
           ?.get(core)
           ?.versions.at(-1)?.metadata.bindings ?? []
       );
+    const gateway = coreBindings.find(({ name }) => name === "MODEL_GATEWAY");
     expect({
       operation: await operationOf(clientId),
+      // Workers AI bound, as the real core binds it.
+      ai: coreBindings
+        .filter(({ type }) => type === "ai")
+        .map(({ name }) => name),
+      // Through the destination's shared gateway, ensured before core went
+      // live, at the client's ceiling: €250 a month unless staff set another.
+      gateways: account.gateways.map(({ id }) => id),
+      gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
       // Its core goes live without `EMAIL`, so it sends nothing and says
       // so, and no sending domain is set up for it.
       mail: coreBindings.filter(
@@ -1971,9 +1968,64 @@ describe("provisioning a placed client", () => {
       routed: await routed(clientId),
     }).toMatchObject({
       operation: { status: "done" },
+      ai: ["AI"],
+      gateways: [placedModelGateway("production")],
+      gateway: {
+        gateway: placedModelGateway("production"),
+        budgets: { deployment: { limit: 250, alertAt: 80 } },
+      },
       mail: [],
       zones: 0,
       routed: true,
+    });
+  });
+
+  it("takes two clients first provisioned into one shared account at once live, through the one gateway either of them made", async () => {
+    const real = await importRealRelease();
+    const first = await setUp(
+      "workers_for_platforms",
+      real,
+      clientDispatchNamespace
+    );
+    const second = await placedOperation(first.destinationId, real);
+    const wfp = {
+      ...context,
+      router: {
+        ...context.router,
+        namespace: clientDispatchNamespace,
+        dispatcher: cloudflare.dispatcher(
+          first.account.id,
+          clientDispatchNamespace
+        ),
+      },
+    };
+    const gateway = placedModelGateway("production");
+    // The first finds no gateway, and before it creates one the second
+    // provisions all the way, making it: the first's create is refused.
+    let secondRan: Promise<unknown> = Promise.resolve();
+    cloudflare.afterAnswering(
+      ({ method, path }) =>
+        method === "GET" && path.endsWith(`/ai-gateway/gateways/${gateway}`),
+      async () => {
+        secondRan = runClientProvision(wfp, second.held);
+        await secondRan;
+      }
+    );
+
+    await runClientProvision(wfp, first.held);
+    await secondRan;
+
+    expect({
+      first: await operationOf(first.clientId),
+      second: await operationOf(second.clientId),
+      gateways: first.account.gateways.map(({ id, authentication }) => ({
+        id,
+        authentication,
+      })),
+    }).toMatchObject({
+      first: { status: "done" },
+      second: { status: "done" },
+      gateways: [{ id: gateway, authentication: true }],
     });
   });
 
@@ -2612,6 +2664,96 @@ describe("provisioning a placed client", () => {
     );
   });
 
+  it("records why an attempt stopped before its operation could run, a secret missing from Secrets Store by name, for Setup to say, and resumes once it's back", async () => {
+    const manifest = await importRelease("dedicated");
+    const account = cloudflare.addAccount();
+    const destinationId = await destination({
+      kind: "dedicated",
+      accountId: account.id,
+      namespace: null,
+    });
+    const { clientId } = await placedClient(destinationId);
+    using attempts = startsOf(adminWorkflows.provisionPlacedClient);
+    await emptyStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[0], "errored");
+    errors.mockRestore();
+
+    const code = "store_secret_missing: DEPLOYER_API_TOKEN";
+    const view = await getProvisioning(env, clientId);
+    const failed = await db
+      .select({ detail: auditEvents.detail })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.fail")
+        )
+      );
+    expect({
+      operation: await operationOf(clientId),
+      stopped: view?.stopped,
+      phase: view?.phase,
+      audited: failed.map(({ detail }): unknown => JSON.parse(detail ?? "{}")),
+      calls: account.d1.length,
+    }).toMatchObject({
+      operation: { status: "failed", step: null, error: code },
+      stopped: { step: "validated", error: code },
+      phase: "failed",
+      audited: [{ step: "validated", error: code }],
+      calls: 0,
+    });
+    expect(operationErrorWords(code)).toContain(
+      "Secrets Store has no DEPLOYER_API_TOKEN"
+    );
+
+    // Back in the store, a new attempt resumes it.
+    await setStoreSecret(env.DEPLOYER_API_TOKEN, "DEPLOYER_API_TOKEN", token);
+    await provisionPlacedClient(env, staff, clientId, manifest.releaseId);
+    await attemptEnded(attempts.started[1], "complete");
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "done",
+      error: null,
+    });
+  });
+
+  it("records a failure before the operation ran as that attempt alone: an old attempt's never lands over the retry that took the client over", async () => {
+    const manifest = await importRelease("dedicated");
+    const { clientId, held } = await setUp("dedicated", manifest);
+    const attemptKey = `${held.runId}-provision`;
+    const old = { ...held, attempt: 1, attemptKey };
+    const retry = { ...held, attempt: 2, attemptKey };
+    await takeAttempt(db, old);
+    // The old attempt timed out, and its retry took the client.
+    await takeAttempt(db, retry);
+    const code = "store_secret_missing: ROUTER_KEY";
+
+    await recordUnstarted(db, old, code);
+    const afterOld = await operationOf(clientId);
+    await recordUnstarted(db, retry, code);
+    const afterRetry = await operationOf(clientId);
+    const failed = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.clientId, clientId),
+          eq(auditEvents.action, "provision.fail")
+        )
+      );
+
+    expect({
+      afterOld: [afterOld?.status, afterOld?.error],
+      afterRetry: [afterRetry?.status, afterRetry?.error],
+      audited: failed.length,
+    }).toStrictEqual({
+      afterOld: ["running", null],
+      afterRetry: ["failed", code],
+      audited: 1,
+    });
+  });
+
   it("migrates a client once when its attempt times out mid-migration and its retry runs", async () => {
     const manifest = await importRelease("dedicated");
     const account = cloudflare.addAccount();
@@ -3148,17 +3290,12 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("rolls a release that fails its probe once live back to the release before on its own, audited, and tells staff", async () => {
+  it("rolls a release that fails its probe once live back to the release before on its own, audited, and records a rollback that fails too", async () => {
     const first = await importRelease("dedicated");
     const { account, clientId } = await liveClient(first);
     const later = await importRelease("dedicated", {
       notes: "feat(core): broken once live",
     });
-    // What staff are told, as the run sends it (src/alerts.ts).
-    const alert = vi
-      .fn<(alert: StaffAlert) => Promise<void>>()
-      .mockResolvedValue();
-    const alerting = { ...context, alert };
     const { connect } = await scriptsOf(clientId);
     // The release's core answers as another client; once the release's
     // connect went, the next upload of connect (the rollback's) finds core
@@ -3177,7 +3314,7 @@ describe("provisioning a placed client", () => {
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await runClientProvision(alerting, await attempt(clientId));
+      await runClientProvision(context, await attempt(clientId));
     } finally {
       errors.mockRestore();
     }
@@ -3191,11 +3328,8 @@ describe("provisioning a placed client", () => {
         )
       );
 
-    // A rollback that fails its probe too: thrown, and staff told so; an
-    // alert that can't be sent hides neither.
-    const unsent = vi
-      .fn<(alert: StaffAlert) => Promise<void>>()
-      .mockRejectedValue(new Error("channel down"));
+    // A rollback that fails its probe too: thrown, and recorded on the
+    // operation, where its Setup says so.
     const stuck = await liveClient(first);
     await startClientRelease(db, staff, await attempt(stuck.clientId), {
       releaseId: later.releaseId,
@@ -3203,7 +3337,7 @@ describe("provisioning a placed client", () => {
     stuck.account.coreProbe = { asClient: "someone-else" };
     const stuckErrors = vi.spyOn(console, "error").mockImplementation(() => {});
     const stuckError = await runClientProvision(
-      { ...context, alert: unsent },
+      context,
       await attempt(stuck.clientId)
     ).then(
       () => null,
@@ -3222,7 +3356,6 @@ describe("provisioning a placed client", () => {
         error: stuckError,
         operation: await operationOf(stuck.clientId),
       },
-      alerts: [...alert.mock.calls, ...unsent.mock.calls].map(([sent]) => sent),
     }).toMatchObject({
       operation: { releaseId: first.releaseId, status: "done" },
       runs: { core: first.releaseId, connect: first.releaseId },
@@ -3234,14 +3367,6 @@ describe("provisioning a placed client", () => {
         error: { code: "probe_identity_mismatch" },
         operation: { releaseId: first.releaseId, status: "failed" },
       },
-      alerts: [
-        { clientId, kind: "release_rolled_back", subject: later.releaseId },
-        {
-          clientId: stuck.clientId,
-          kind: "release_rollback_failed",
-          subject: later.releaseId,
-        },
-      ],
     });
   });
 

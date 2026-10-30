@@ -11,7 +11,7 @@ import { generateManifest } from "./manifest-lib.ts";
 const manifest = generateManifest(info, await builds());
 
 /** The fixture's limits, `workflowSteps` lower: what it raises over. */
-const before = (releaseId = "r000000-0000000") => ({
+const before = (releaseId = "25.12.1") => ({
   releaseId,
   platformLimits: { ...info.platformLimits, workflowSteps: 500 },
 });
@@ -20,7 +20,7 @@ describe("a release's limit evidence at publish", () => {
   it("is raised over the release published before it, and nothing when that one recorded no limits or there was none", () => {
     expect({
       none: previousReleaseOf(null),
-      unrecorded: previousReleaseOf({ releaseId: "r000000-0000000" }),
+      unrecorded: previousReleaseOf({ releaseId: "25.12.1" }),
       recorded: previousReleaseOf(before()),
     }).toStrictEqual({ none: null, unrecorded: null, recorded: before() });
   });
@@ -33,7 +33,7 @@ describe("a release's limit evidence at publish", () => {
           limit: "workflowSteps",
           raisedTo: 1000,
           commit: manifest.commit,
-          releaseId: "r000000-0000000",
+          releaseId: "25.12.1",
           profile: "cloudflare",
           capacityRun: {
             jobId: 1,
@@ -46,7 +46,7 @@ describe("a release's limit evidence at publish", () => {
     const itself = (): unknown =>
       limitEvidenceFor(manifest, before(manifest.releaseId));
     expect(raising).toThrow(/raises workflowSteps to 1000 without capacity/u);
-    expect(borrowed).toThrow(/is for release r000000-0000000/u);
+    expect(borrowed).toThrow(/is for release 25.12.1/u);
     expect(itself).toThrow(/is its own previous/u);
   });
 

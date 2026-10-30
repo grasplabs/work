@@ -1639,8 +1639,8 @@ msgid "{workflow} in {appName} failed"
 msgstr "{workflow} dans {appName} a échoué"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {domain}"
-msgstr "{workflowId} dans {domain}"
+msgid "{workflow} in {domain}"
+msgstr "{workflow} dans {domain}"
 
 #: src/dashboard/widget-board.tsx
 msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
@@ -11456,12 +11456,20 @@ msgid "Run {runId}"
 msgstr "Exécution {runId}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
-msgstr "Exécution {shortId} de {workflowId} dans {domain}, lancée le {started}"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}"
+msgstr "Exécution {shortId} de {workflow} dans {domain}, lancée le {started}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {domain}, started {started}, in the run chain started by run {rootId}"
-msgstr "Exécution {shortId} de {workflowId} dans {domain}, lancée le {started}, dans la chaîne d'exécutions lancée par l'exécution {rootId}"
+msgid "Run {shortId} of {workflow} in {domain}, started {started}, in the run chain started by run {rootId}"
+msgstr "Exécution {shortId} de {workflow} dans {domain}, lancée le {started}, dans la chaîne d'exécutions lancée par l'exécution {rootId}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}"
+msgstr "Exécution {shortId} de {workflow}, lancée le {started}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflow}, started {started}, in the run chain started by run {rootId}"
+msgstr "Exécution {shortId} de {workflow}, lancée le {started}, dans la chaîne d'exécutions lancée par l'exécution {rootId}"
 
 #: src/workflows/history-view.tsx
 msgid "Run history"
@@ -11585,7 +11593,9 @@ msgid "Runs: {total}"
 msgstr "Exécutions : {total}"
 
 #. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
+#: src/brain/brain.ts
 msgid "Said by five or more people"
 msgstr "Dit par cinq personnes ou plus"
 

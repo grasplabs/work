@@ -99,17 +99,12 @@ const deployedVersions = async (accountId: string, script: string) => {
 describe("deploying a release", () => {
   it("uploads the first release as a script, then later ones as versions", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     const version = await uploadVersion(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb")
+      release("26.01.2")
     );
 
     const uploaded = account.scripts.get("grasp-os-core")?.versions.at(-1);
@@ -117,7 +112,7 @@ describe("deploying a release", () => {
       id: version.id,
       metadata: {
         main_module: "index.js",
-        annotations: { "workers/tag": "r000002-bbbbbbb" },
+        annotations: { "workers/tag": "26.01.2" },
       },
       modules: [
         { name: "index.js", type: "application/javascript+module" },
@@ -136,18 +131,13 @@ describe("deploying a release", () => {
 
   it("sends all traffic to a version, and back to the one before it", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     const [first] = account.scripts.get("grasp-os-core")?.versions ?? [];
     const second = await uploadVersion(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb")
+      release("26.01.2")
     );
 
     await deployVersion(api, account.id, "grasp-os-core", second.id, {
@@ -172,12 +162,7 @@ describe("deploying a release", () => {
   it("can't upload a version of a Worker that doesn't exist yet", async () => {
     const account = cloudflare.addAccount();
     await expect(
-      uploadVersion(
-        api,
-        account.id,
-        "grasp-os-core",
-        release("r000001-aaaaaaa")
-      )
+      uploadVersion(api, account.id, "grasp-os-core", release("26.01.1"))
     ).rejects.toMatchObject({ status: 404, codes: [10_007] });
   });
 });
@@ -194,7 +179,7 @@ describe("static assets", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000001-aaaaaaa", files)
+      release("26.01.1", files)
     );
     const firstUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -203,7 +188,7 @@ describe("static assets", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb", [...files, file("/new.js", "1")])
+      release("26.01.2", [...files, file("/new.js", "1")])
     );
     const allUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -231,7 +216,7 @@ describe("static assets", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000001-aaaaaaa", [
+      release("26.01.1", [
         file("/index.html", "<html></html>"),
         file("/.hidden", "x"),
         file("/.well-known/security.txt", "x"),
@@ -286,13 +271,13 @@ describe("static assets", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000001-aaaaaaa", files)
+      release("26.01.1", files)
     );
     await uploadVersion(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb", files)
+      release("26.01.2", files)
     );
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -318,7 +303,7 @@ describe("uploads that fail part way", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000001-aaaaaaa", files)
+      release("26.01.1", files)
     );
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -333,19 +318,14 @@ describe("uploads that fail part way", () => {
     const account = cloudflare.addAccount();
     // The versions lookup (none yet), then the upload, which fails once.
     cloudflare.failCall(2, 500);
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
       "GET",
       "PUT",
       "PUT",
     ]);
 
-    const migrating = release("r000002-bbbbbbb");
+    const migrating = release("26.01.2");
     // The versions and deployments lookups, then the upload.
     cloudflare.failCall(3, 500);
     await expect(
@@ -364,12 +344,7 @@ describe("uploads that fail part way", () => {
 describe("secrets, schedules and workflows", () => {
   it("sets, lists and removes secrets, never reading a value back", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     await putSecret(api, account.id, "grasp-os-core", {
       name: "ROUTER_SECRET",
       value: "router-secret-value",
@@ -394,12 +369,7 @@ describe("secrets, schedules and workflows", () => {
 
   it("carries secrets to every new version, and gives a rollout's version exactly its own", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     await putSecret(api, account.id, "grasp-os-core", {
       name: "ROUTER_SECRET",
       value: "first",
@@ -408,13 +378,13 @@ describe("secrets, schedules and workflows", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb")
+      release("26.01.2")
     );
     const rotated = await uploadVersionWithSecrets(
       api,
       account.id,
       "grasp-os-core",
-      release("r000003-ccccccc"),
+      release("26.01.3"),
       [
         { name: "ROUTER_SECRET", value: "second" },
         { name: "ROUTER_SECRET_PREVIOUS", value: "first" },
@@ -438,17 +408,12 @@ describe("secrets, schedules and workflows", () => {
 
   it("can't set a secret while an uploaded version waits for its deployment", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     const waiting = await uploadVersion(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb")
+      release("26.01.2")
     );
     const secret = { name: "ROUTER_SECRET", value: "router-secret-value" };
 
@@ -467,18 +432,13 @@ describe("secrets, schedules and workflows", () => {
 
   it("rolls back past a secret change only when forced", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     const [first] = account.scripts.get("grasp-os-core")?.versions ?? [];
     const second = await uploadVersionWithSecrets(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb"),
+      release("26.01.2"),
       [{ name: "ROUTER_SECRET", value: "new" }]
     );
     await deployVersion(api, account.id, "grasp-os-core", second.id, {
@@ -512,12 +472,7 @@ describe("secrets, schedules and workflows", () => {
 
   it("never brings back a rolled-back secret in the next version", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     await putSecret(api, account.id, "grasp-os-core", {
       name: "ROUTER_SECRET",
       value: "v1",
@@ -528,7 +483,7 @@ describe("secrets, schedules and workflows", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb"),
+      release("26.01.2"),
       [
         { name: "ROUTER_SECRET", value: "v2" },
         { name: "LEAKED_KEY", value: "revoked" },
@@ -547,15 +502,10 @@ describe("secrets, schedules and workflows", () => {
       latestIsDeployed(api, account.id, "grasp-os-core")
     ).resolves.toBeFalsy();
     await expect(
-      uploadVersion(
-        api,
-        account.id,
-        "grasp-os-core",
-        release("r000003-ccccccc")
-      )
+      uploadVersion(api, account.id, "grasp-os-core", release("26.01.3"))
     ).rejects.toBeInstanceOf(RolledBackError);
     await expect(
-      uploadScript(api, account.id, "grasp-os-core", release("r000003-ccccccc"))
+      uploadScript(api, account.id, "grasp-os-core", release("26.01.3"))
     ).rejects.toBeInstanceOf(RolledBackError);
 
     // With every secret given, the new version has exactly those.
@@ -563,7 +513,7 @@ describe("secrets, schedules and workflows", () => {
       api,
       account.id,
       "grasp-os-core",
-      release("r000003-ccccccc"),
+      release("26.01.3"),
       [{ name: "ROUTER_SECRET", value: "v1" }]
     );
     const uploaded = account.scripts
@@ -574,18 +524,13 @@ describe("secrets, schedules and workflows", () => {
 
   it("deploys a Durable Object migration after a rollback with exactly the secrets given", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     const [first] = account.scripts.get("grasp-os-core")?.versions ?? [];
     const second = await uploadVersionWithSecrets(
       api,
       account.id,
       "grasp-os-core",
-      release("r000002-bbbbbbb"),
+      release("26.01.2"),
       [{ name: "LEAKED_KEY", value: "revoked" }]
     );
     await deployVersion(api, account.id, "grasp-os-core", second.id, {
@@ -597,7 +542,7 @@ describe("secrets, schedules and workflows", () => {
     });
 
     // A release with a migration can only go as a script upload.
-    const migrating = release("r000003-ccccccc");
+    const migrating = release("26.01.3");
     await uploadScript(
       api,
       account.id,
@@ -639,12 +584,7 @@ describe("secrets, schedules and workflows", () => {
 
   it("serves a Worker on workers.dev without preview URLs", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     await setScriptSubdomain(api, account.id, "grasp-os-core", {
       enabled: true,
       previewsEnabled: false,
@@ -657,12 +597,7 @@ describe("secrets, schedules and workflows", () => {
 
   it("sets cron schedules and the workflow a Worker runs", async () => {
     const account = cloudflare.addAccount();
-    await uploadScript(
-      api,
-      account.id,
-      "grasp-os-core",
-      release("r000001-aaaaaaa")
-    );
+    await uploadScript(api, account.id, "grasp-os-core", release("26.01.1"));
     await putSchedules(api, account.id, "grasp-os-core", [
       "* * * * *",
       "*/15 * * * *",

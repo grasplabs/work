@@ -13,10 +13,9 @@ import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { isNotNull } from "drizzle-orm";
 
-import { ifStored } from "../clients/grid.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
-import { storeSecret } from "../deploy/context.ts";
+import { ifStored, storeSecret } from "../deploy/context.ts";
 import { readStripeCustomer } from "./stripe.ts";
 import type {
   StripeInvoice,
