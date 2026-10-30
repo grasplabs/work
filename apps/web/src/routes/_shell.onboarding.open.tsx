@@ -7,6 +7,7 @@ import {
   NativeSelectOption,
 } from "@grasp-os/ui/components/native-select";
 import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import {
@@ -183,7 +184,7 @@ const Go = ({ gate }: { gate: GateView }) => {
       <div className="flex flex-col gap-4 border-t px-5 py-5">
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex flex-col gap-1">
-            <span className="type-figure">{known}%</span>
+            <Stat>{known}%</Stat>
             <span className="text-muted-foreground">
               <Trans>of what Grasp needs is known</Trans>
             </span>

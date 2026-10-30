@@ -1,3 +1,4 @@
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Tabs,
   TabsContent,
@@ -88,13 +89,9 @@ const Figure = ({
 }) => (
   <div className="bg-card flex flex-col gap-1 px-4 py-3">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd
-      className={
-        attention ? "type-figure text-status-attention" : "type-figure"
-      }
-    >
+    <Stat render={<dd />} variant={attention ? "attention" : "default"}>
       {value === null ? "–" : formatNumber(value)}
-    </dd>
+    </Stat>
   </div>
 );
 

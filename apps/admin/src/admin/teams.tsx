@@ -1,20 +1,3 @@
-/**
- * The organization as Grasp knows it, ported from the prototype
- * (grasplabs/prototype `components/admin/org-organization.tsx`,
- * `org-team.tsx` and `organization-parts.ts`): the company, its figures,
- * every team as a card with its lead, its people as dots, its work and
- * what needs a look there; a card opens the team, with everyone in it,
- * the work it does and where that work goes. Every figure is the shared
- * model's (`organizationOf`).
- *
- * Read only, as the admin is: the prototype puts the list right here
- * (a team or a person added, a lead named, a team asked in or left out,
- * the one reminder sent), which writes to the company's Grasp, and the
- * admin has no way to yet. A person opens nothing of their own: the
- * prototype's dialog leads to what they said, which the admin never
- * shows. Nor is where a piece of work goes said in the words of whoever
- * said it, when it isn't one of the company's own teams.
- */
 import type {
   ChartTeam,
   Organization,
@@ -35,6 +18,24 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+/**
+ * The organization as Grasp knows it, ported from the prototype
+ * (grasplabs/prototype `components/admin/org-organization.tsx`,
+ * `org-team.tsx` and `organization-parts.ts`): the company, its figures,
+ * every team as a card with its lead, its people as dots, its work and
+ * what needs a look there; a card opens the team, with everyone in it,
+ * the work it does and where that work goes. Every figure is the shared
+ * model's (`organizationOf`).
+ *
+ * Read only, as the admin is: the prototype puts the list right here
+ * (a team or a person added, a lead named, a team asked in or left out,
+ * the one reminder sent), which writes to the company's Grasp, and the
+ * admin has no way to yet. A person opens nothing of their own: the
+ * prototype's dialog leads to what they said, which the admin never
+ * shows. Nor is where a piece of work goes said in the words of whoever
+ * said it, when it isn't one of the company's own teams.
+ */
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { Progress } from "@grasp-os/ui/components/progress";
 import {
   ToggleGroup,
@@ -1079,7 +1080,7 @@ const OneTeam = ({
       <section className="bg-card overflow-hidden rounded-xl border">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4">
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-            <h2 className="type-title">{each.team.name}</h2>
+            <PageHeaderTitle render={<h2>{each.team.name}</h2>} />
             {each.team.does === "" ? null : (
               <p className="text-muted-foreground">{each.team.does}</p>
             )}
