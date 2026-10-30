@@ -160,9 +160,7 @@ const GoingOut = ({
             <ApproveRing next={next} rolloutId={rollout.id} />
           ) : (
             <Badge
-              variant={
-                rollout.status === "failed" ? "destructive" : "secondary"
-              }
+              variant={rollout.status === "failed" ? "attention" : "secondary"}
             >
               {status}
             </Badge>

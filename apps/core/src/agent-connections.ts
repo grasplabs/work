@@ -429,6 +429,7 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             method: "connections.call",
             detail: {
               connection: typeof connection === "string" ? connection : null,
+              action: typeof action === "string" ? action : null,
             },
           },
           forSandbox(error)

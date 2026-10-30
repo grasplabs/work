@@ -26,6 +26,7 @@ import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
+import { NewDocument } from "../knowledge/new-document.tsx";
 import { CollectionAdminMenu } from "../knowledge/purge.tsx";
 import { folderTree } from "../knowledge/tree.ts";
 import type { Folder } from "../knowledge/tree.ts";
@@ -307,7 +308,7 @@ const CollectionView = () => {
             <>
               <header className="flex flex-col gap-2.5">
                 <div className="flex items-start justify-between gap-3">
-                  <h1 className="text-2xl font-medium tracking-tight">
+                  <h1 className="type-title">
                     {collection.data.collection.name}
                   </h1>
                   {isMemberAdmin(identity) ? (
@@ -333,9 +334,14 @@ const CollectionView = () => {
                 />
               ) : null}
               <section aria-labelledby="files" className="flex flex-col gap-2">
-                <h2 className="text-sm font-medium" id="files">
-                  <Trans>Files</Trans>
-                </h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-medium" id="files">
+                    <Trans>Files</Trans>
+                  </h2>
+                  {writable ? (
+                    <NewDocument collectionId={collectionId} />
+                  ) : null}
+                </div>
                 <FileList documents={collection.data.documents} />
               </section>
             </>
