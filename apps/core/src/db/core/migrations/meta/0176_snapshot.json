@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6d18409b-cb1b-4bc1-ace2-0d89f4fda070",
+  "id": "5e3d9f0d-feaa-4242-a258-69d2e3e1ad99",
   "prevId": "d196fe40-31cd-4d10-82af-6d408453751f",
   "tables": {
     "access_revocations": {
@@ -1686,14 +1686,6 @@
         },
         "workflows": {
           "name": "workflows",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "screens": {
-          "name": "screens",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -12507,6 +12499,13 @@
             "principal_id",
             "created_at",
             "id"
+          ],
+          "isUnique": false
+        },
+        "workflow_resource_runs_created_idx": {
+          "name": "workflow_resource_runs_created_idx",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         }
