@@ -62,8 +62,14 @@ export const affectedProjects = (
 
 const listed = z.array(z.object({ path: z.string() }));
 
-/** The workspace packages' directories, of those `filter` selects, by pnpm. */
-export const packagesSelected = (filter?: string): string[] => {
+/**
+ * The workspace packages' directories, of those `filter` selects, by pnpm,
+ * in the workspace at `cwd`.
+ */
+export const packagesSelected = (
+  filter?: string,
+  cwd: string = process.cwd()
+): string[] => {
   const output = execFileSync(
     "vp",
     [
@@ -74,9 +80,39 @@ export const packagesSelected = (filter?: string): string[] => {
       "--json",
       ...(filter === undefined ? [] : [`--filter=${filter}`]),
     ],
-    { encoding: "utf-8" }
+    { cwd, encoding: "utf-8" }
   );
   return listed.parse(JSON.parse(output)).map(({ path: dir }) => dir);
+};
+
+/** What a change since a base reaches, by pnpm's graph. */
+export type Reach =
+  /** Files outside every package changed: any test may see them. */
+  | { readonly all: true; readonly changed: readonly string[] }
+  | {
+      readonly all: false;
+      /** The packages whose own files changed. */
+      readonly changed: readonly string[];
+      /** Those and every package that depends on one, directly or not. */
+      readonly affected: ReadonlySet<string>;
+    };
+
+/**
+ * The packages that changed since `base` (a commit) in the workspace at
+ * `root`, and what they reach. A change to the root's own files (config,
+ * the lockfile, CI, tooling) reaches everything.
+ */
+export const reachSince = (base: string, root: string): Reach => {
+  // Changed itself, without what depends on it: the root's own files.
+  const changed = packagesSelected(`[${base}]`, root);
+  if (changed.includes(root)) {
+    return { all: true, changed };
+  }
+  return {
+    all: false,
+    changed,
+    affected: new Set(packagesSelected(`...[${base}]`, root)),
+  };
 };
 
 const writeOutput = (name: string, value: string): void => {
@@ -106,13 +142,12 @@ const plan = async (base: string | undefined): Promise<void> => {
     why =
       "No base to compare with (the merge queue, or a run by hand): every project.";
   } else {
-    // Changed itself, without what depends on it: the root's own files.
-    const changed = packagesSelected(`[${base}]`);
-    if (changed.includes(root)) {
+    const reach = reachSince(base, root);
+    if (reach.all) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const packages = packagesSelected();
-      const affected = new Set(packagesSelected(`...[${base}]`));
+      const { changed, affected } = reach;
+      const packages = packagesSelected(undefined, root);
       projects = affectedProjects(
         specs.map((spec) => ({
           project: spec.project.name,
