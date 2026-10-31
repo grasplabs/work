@@ -32,6 +32,8 @@ const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.invalid_call": true,
   "model.unconfigured": true,
   "model.no_provider": true,
+  "model.provider_key_failed": true,
+  "model.provider_unavailable": true,
   "model.not_allowed": true,
   "model.eu_only": true,
   "model.sensitive_data": true,
@@ -163,6 +165,30 @@ const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
   return said;
 };
 
+/**
+ * What the thread says about each failed answer in `messages`, in order,
+ * and where the links in it go, for the signed-in `identity`.
+ */
+const shownFor = async (
+  messages: ChatMessage[],
+  identity: Identity
+): Promise<{ said: string[]; links: string[] }> => {
+  await showThread(messages, identity);
+  const alerts = [...document.querySelectorAll('[role="alert"]')];
+  // What each alert says went wrong, apart from the way to ask again under it.
+  const said = alerts.map(
+    (alert) =>
+      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
+  );
+  const links = alerts.flatMap((alert) =>
+    [...alert.querySelectorAll("a")].map(
+      (link) => link.getAttribute("href") ?? ""
+    )
+  );
+  cleared();
+  return { said, links };
+};
+
 /** What the thread shows for an answer that failed with `failure`, for `identity`. */
 const noProviderFor = async (identity: Identity, failure = noProvider) => {
   await showThread(failedWith([failure]), identity);
@@ -245,6 +271,33 @@ describe("a failed answer", () => {
     expect({ shown: again !== undefined, retried }).toStrictEqual({
       shown: true,
       retried: 1,
+    });
+  });
+
+  it("says the AI provider is refusing the key, with the way to check or replace it for the organization's own admins and who to ask for anyone else", async () => {
+    const failed = failedWith(["model.provider_key_failed"]);
+
+    const shown = {
+      admin: await shownFor(failed, signedIn("admin")),
+      member: await shownFor(failed, signedIn("user")),
+      staff: await shownFor(failed, signedIn("admin", true)),
+    };
+
+    const askAdmin = {
+      said: [
+        "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
+      ],
+      links: [],
+    };
+    expect(shown).toStrictEqual({
+      admin: {
+        said: [
+          "Your AI provider is refusing your key. Check or replace it in Settings › AI providers",
+        ],
+        links: ["/settings/ai-providers"],
+      },
+      member: askAdmin,
+      staff: askAdmin,
     });
   });
 

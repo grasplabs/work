@@ -43,6 +43,8 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
+import { aiWaitEnded, aiWaitStarted } from "./ai-waits.ts";
+import type { AiWait } from "./ai-waits.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
@@ -66,6 +68,11 @@ import {
 } from "./fixture-decisions.ts";
 import {
   busyMarker,
+  keyMarkerOf,
+  keyRound,
+  keyTimedOut,
+  keyWaitStart,
+  unbilledAiWaitOf,
   loadRound,
   busyOf,
   cpuLimitKill,
@@ -85,7 +92,7 @@ import {
   waitMsOf,
   waitStep,
 } from "./host.ts";
-import type { Busy, LoadWait, RunStep } from "./host.ts";
+import type { Busy, CoreMarker, KeyWait, LoadWait, RunStep } from "./host.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
@@ -974,6 +981,21 @@ const boundedJson = (
  * a record (`recordSchema` takes no such object), so it can't be taken
  * for one, fresh or replayed.
  */
+/**
+ * `marker` as the busy marker it must be here: a held one has its own
+ * marker (`heldMarker`) and a wait for the provider its own branch, so
+ * any other is one the host can't have recorded.
+ */
+const busyOnly = (
+  stepName: string,
+  marker: CoreMarker
+): Extract<CoreMarker, { kind: "busy" }> => {
+  if (marker.kind !== "busy") {
+    throw new Error(`Step "${stepName}" recorded a hold it can't have`);
+  }
+  return marker;
+};
+
 const heldMarker = { held: true } as const;
 const heldMarkerSchema = z.strictObject({ held: z.literal(true) });
 
@@ -1251,6 +1273,13 @@ interface StepAttempt {
   hostError: StepError | undefined;
   /** What its call failed with, once failed: the step's failure, first. */
   callError: StepError | undefined;
+  /**
+   * What its model call's provider showed, when the call failed on the
+   * organization's own key provably before anything could be billed
+   * (`unbilledAiWaitOf`): the step then waits for the provider and runs
+   * again, rather than fail (`keyMarkerOf`).
+   */
+  aiWait?: AiWait;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -2028,6 +2057,8 @@ export class ResourceRunHost
     // answers what they decided. Fresh or replayed alike, each round
     // as recorded.
     const waitKey = await waitKeyOf(stepName);
+    // Its wait for its AI provider, over its rounds in a row.
+    let keyWait: KeyWait = keyWaitStart();
     for (
       let marker = markerOf(recorded), round = 1;
       marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
@@ -2057,17 +2088,24 @@ export class ResourceRunHost
         );
         continue;
       }
-      // Only the host records a marker, and only a busy one.
-      if (marker.kind !== "busy") {
-        throw new Error(`Step "${stepName}" recorded a hold it can't have`);
+      if (marker.kind === "key") {
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        recorded = await this.#waitForProvider(run, marker, keyWait, {
+          prefix: waitStep(waitKey, "key", round),
+          attemptStep,
+        });
+        continue;
       }
-      run.wait = loadWaitAfter(run.wait, marker);
+      // oxlint-disable-next-line no-await-in-loop -- once per wait
+      keyWait = await this.#providerWaitOver(stepName, keyWait);
+      const busy = busyOnly(stepName, marker);
+      run.wait = loadWaitAfter(run.wait, busy);
       if (run.wait.sleepMs <= 0) {
-        throw toStepError(queueTimedOut(stepName, marker.maxWaitMs));
+        throw toStepError(queueTimedOut(stepName, busy.maxWaitMs));
       }
       const prefix = waitStep(waitKey, "busy", round);
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
-      await loadRound(this.#step, prefix, stepName, marker, run.wait.sleepMs);
+      await loadRound(this.#step, prefix, stepName, busy, run.wait.sleepMs);
       // oxlint-disable-next-line no-await-in-loop -- one round at a time
       recorded = await this.#step.do(
         `${prefix}:run`,
@@ -2075,6 +2113,7 @@ export class ResourceRunHost
         attemptStep
       );
     }
+    keyWait = await this.#providerWaitOver(stepName, keyWait);
     let outcome = entering ? this.#entered(step, recorded) : recorded;
     if (step.kind === "catch") {
       outcome = this.#noteCatch(step, recorded);
@@ -2085,6 +2124,67 @@ export class ResourceRunHost
     // Fresh or replayed alike: what the run has reached, in order.
     this.#noteRecorded(step, outcome);
     return outcome;
+  }
+
+  /**
+   * Round `prefix` of step `run`'s wait for its AI provider, its attempt
+   * having answered `marker` (`keyRound`, host.ts): past its hold, the
+   * step fails with what the provider showed; else, once the wait ends,
+   * the step runs again in a step of its own, whose call is tried once
+   * anew, and what it recorded is answered.
+   */
+  async #waitForProvider(
+    run: StepRun,
+    marker: Extract<CoreMarker, { kind: "key" }>,
+    wait: KeyWait,
+    {
+      prefix,
+      attemptStep,
+    }: { prefix: string; attemptStep: (context: unknown) => Promise<unknown> }
+  ): Promise<unknown> {
+    const { name: stepName, step } = run;
+    const ended = await keyRound(
+      this.#step,
+      this.#env,
+      prefix,
+      marker,
+      wait,
+      async (since, aiWait) => {
+        await aiWaitStarted(
+          this.#env,
+          { kind: "resource", runId: this.#run.runId },
+          stepName,
+          aiWait,
+          since
+        );
+      }
+    );
+    if (ended === "timed_out") {
+      await this.#providerWaitOver(stepName, wait);
+      throw toStepError(keyTimedOut(stepName, marker.trouble));
+    }
+    await this.#requirePerson();
+    return await this.#step.do(
+      `${prefix}:run`,
+      engineConfigOf(step),
+      attemptStep
+    );
+  }
+
+  /**
+   * Ends step `stepName`'s wait for its AI provider, if it waits, recorded
+   * once in a step named after its last round (ai-waits.ts): a wait no
+   * more.
+   */
+  async #providerWaitOver(stepName: string, wait: KeyWait): Promise<KeyWait> {
+    if (wait.since === undefined) {
+      return wait;
+    }
+    await this.#step.do(`${wait.prefix}:ended`, {}, async () => {
+      await aiWaitEnded(this.#env, this.#run.runId, stepName);
+      return null;
+    });
+    return keyWaitStart();
   }
 
   /**
@@ -2148,6 +2248,12 @@ export class ResourceRunHost
   ): unknown {
     if (attempt?.held === true) {
       return heldMarker;
+    }
+    // Its model call provably billed nothing, and its provider refused it
+    // or didn't answer it: the step waits for the provider (`keyRound`),
+    // then runs again in a step of its own, whose call is tried once anew.
+    if (attempt?.aiWait !== undefined) {
+      return keyMarkerOf(Date.now(), attempt.aiWait);
     }
     if (!result.ok) {
       // The host's own word for why, never the isolate's: a module may
@@ -3875,6 +3981,15 @@ export class ResourceRunHost
         attempt.held ||=
           task.call.name === "grasp.connector" &&
           connectErrors.codeOf(error) === "connect.held";
+        // A model call the gateway saw bill nothing, as its provider
+        // refused it or failed it with no answer begun, may run again,
+        // though tried once: nothing of it was taken on to go out twice.
+        // Any other failure, its outcome unknown (no answer at all, a
+        // deadline passed with it out, an answer broken partway), fails
+        // the step as before.
+        if (task.call.name === "grasp.model") {
+          attempt.aiWait = unbilledAiWaitOf(error);
+        }
         throw error;
       }
     });

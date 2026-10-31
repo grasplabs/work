@@ -101,6 +101,10 @@ export interface ModelTransport {
  * Why a provider request failed, as the gateway acts on it:
  * - `auth`: the endpoint refused the credentials (401, 403). Nothing was
  *   taken on; asking again the same way fails the same way.
+ * - `quota`: the key's account has no credit or quota left (OpenAI's 429
+ *   `insufficient_quota`, a 402, Anthropic's billing refusal). Nothing was
+ *   taken on; asking again fails the same way until someone pays, so it
+ *   is never retried as a rate limit is.
  * - `rate_limited`: the endpoint is taking no more for now (429), with how
  *   long it asks to wait. Nothing was taken on.
  * - `refused`: the endpoint refused this request (another 4xx). Nothing
@@ -112,6 +116,7 @@ export interface ModelTransport {
  */
 export type TransportFailure =
   | { kind: "auth"; status: number }
+  | { kind: "quota"; status: number }
   | { kind: "rate_limited"; status: number; retryAfterSeconds: number }
   | { kind: "refused"; status: number }
   | { kind: "provider_down"; status: number | undefined }
@@ -122,13 +127,18 @@ export const neverTakenOn = (failure: TransportFailure): boolean =>
   failure.kind !== "provider_down";
 
 /**
- * What a refused response means (`TransportFailure`), from its status and
- * the wait it asks for, as core bounds it (`retryAfterSeconds`).
+ * What a refused response means (`TransportFailure`), from its status, the
+ * wait it asks for, as core bounds it (`retryAfterSeconds`), and whether
+ * its body says the account ran out of credit (`outOfCredit`).
  */
 export const failureOfResponse = (
   status: number,
-  retryAfterSeconds: number
+  retryAfterSeconds: number,
+  outOfCredit = false
 ): TransportFailure => {
+  if (status === 402 || (outOfCredit && status < 500)) {
+    return { kind: "quota", status };
+  }
   if (status === 401 || status === 403) {
     return { kind: "auth", status };
   }
