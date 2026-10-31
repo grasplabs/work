@@ -17124,6 +17124,10 @@ msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wi
 msgid "Up to {upTo} minutes"
 msgstr "Tot {upTo} minuten"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Updated {when}"
+msgstr "Bijgewerkt {when}"
+
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
 msgstr "Grasp bijgewerkt"
