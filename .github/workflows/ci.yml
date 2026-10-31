@@ -84,6 +84,8 @@ jobs:
     outputs:
       projects: ${{ steps.plan.outputs.projects }}
       shards: ${{ steps.plan.outputs.shards }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      admin-e2e: ${{ steps.plan.outputs['admin-e2e'] }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -288,9 +290,14 @@ jobs:
   # GRA-1016). Its tag must be the catalog's @playwright/test, whose browser
   # builds it carries: check:playwright-image (static) holds the two
   # together, and Renovate moves them in one pull request.
+  #
+  # Only when the plan finds the change reaches its stack
+  # (scripts/test-plan.ts, `journeysReached`): a change to the admin, the
+  # router or Vitest's test files alone leaves what it runs as it was.
   e2e:
     name: e2e (${{ matrix.part }})
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       # The runner's own user, which owns the checkout, the caches and
@@ -391,18 +398,23 @@ jobs:
   # The one required e2e check (.github/rulesets/main.json) for every part,
   # so splitting leaves the ruleset as it is. Like `check`, it runs however
   # they ended and passes only if all of them passed: GitHub counts a
-  # skipped required check as passing. A draft skips the parts.
+  # skipped required check as passing. A draft skips the parts, and so does
+  # a plan that finds e2e's stack unchanged.
   e2e-result:
     name: e2e
-    needs: [e2e]
+    needs: [plan, e2e]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "e2e parts: $E2E, draft: $DRAFT"
+          echo "e2e parts: $E2E, plan: $PLAN (e2e: $RUNS), draft: $DRAFT"
           if [ "$DRAFT" = true ]; then
             echo "A draft skips the journeys; marking it ready for review runs them."
+            exit 0
+          fi
+          if [ "$E2E" = skipped ] && [ "$PLAN" = success ] && [ "$RUNS" = false ]; then
+            echo "The change doesn't reach e2e's stack: no journey to run."
             exit 0
           fi
           if [ "$E2E" != success ]; then
@@ -412,14 +424,20 @@ jobs:
         env:
           # A matrix job's result: a failure if any part failed.
           E2E: ${{ needs.e2e.result }}
+          PLAN: ${{ needs.plan.result }}
+          RUNS: ${{ needs.plan.outputs.e2e }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
 
   # The admin's journeys (playwright.admin.config.ts): a stack of
   # their own, the admin on the fake Cloudflare API, so apart from e2e's.
   # Chromium only, in e2e's image.
+  # Only when the plan finds the change reaches the admin (scripts/test-plan.ts,
+  # `journeysReached`). A required check: skipped, it passes, and `check`
+  # fails the run when the plan itself failed.
   admin-e2e:
     name: admin-e2e
-    if: github.event_name != 'push' && github.event.pull_request.draft != true
+    needs: plan
+    if: needs.plan.outputs['admin-e2e'] == 'true'
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
