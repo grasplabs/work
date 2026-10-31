@@ -2,18 +2,24 @@
  * Platform's Readiness checklist (src/admin/readiness.ts), and the banner
  * Home shows while a required line isn't ready.
  */
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
+import { TriangleAlertIcon } from "lucide-react";
 
-import { Panel } from "./panel.tsx";
 import type {
   CheckLink,
   CheckStatus,
   Readiness,
   ReadinessCheck,
 } from "./readiness.ts";
+import { Section } from "./section.tsx";
 
 /** Where Platform holds its checklist, for a link to it. */
 export const readinessId = "readiness";
@@ -27,47 +33,38 @@ const statusWords: Readonly<Record<CheckStatus, string>> = {
 };
 
 const statusVariant: Readonly<
-  Record<CheckStatus, "secondary" | "destructive" | "outline">
+  Record<CheckStatus, "passed" | "destructive" | "outline">
 > = {
-  ready: "secondary",
+  ready: "passed",
   blocked: "destructive",
   waiting: "outline",
   not_configured: "outline",
 };
 
-/** A check's link, where its next step is done in the admin. */
-const CheckLinkTo = ({ link }: { link: CheckLink }) => {
-  const className = cn(
-    buttonVariants({ variant: "ghost", size: "sm" }),
-    "flex-none"
-  );
-  switch (link) {
-    case "releases": {
-      return (
-        <Link className={className} to="/platform/releases">
-          Open Releases
-        </Link>
-      );
-    }
-    case "organizations": {
-      return (
-        <Link className={className} to="/">
-          Open Organizations
-        </Link>
-      );
-    }
-    case "platform": {
-      return (
-        <Link className={className} to="/platform">
-          Open Platform
-        </Link>
-      );
-    }
-    default: {
-      return link satisfies never;
-    }
-  }
+/** Where each check leads, for its next step in the admin. */
+const checkLinks: Readonly<
+  Record<
+    CheckLink,
+    { label: string; to: "/platform/releases" | "/" | "/platform" }
+  >
+> = {
+  releases: { label: "Open Releases", to: "/platform/releases" },
+  organizations: { label: "Open Organizations", to: "/" },
+  platform: { label: "Open Platform", to: "/platform" },
 };
+
+/** A check's link, where its next step is done in the admin. */
+const CheckLinkTo = ({ link }: { link: CheckLink }) => (
+  <Link
+    className={cn(
+      buttonVariants({ size: "sm", variant: "ghost" }),
+      "flex-none"
+    )}
+    to={checkLinks[link].to}
+  >
+    {checkLinks[link].label}
+  </Link>
+);
 
 const CheckRow = ({ check }: { check: ReadinessCheck }) => (
   <li className="flex flex-col gap-1 border-t px-5 py-3">
@@ -109,7 +106,7 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
   ];
   return (
     <div id={readinessId}>
-      <Panel
+      <Section
         description={
           readiness.blocking === 0
             ? "Everything onboarding an organization needs is ready."
@@ -122,7 +119,7 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
             <CheckRow check={check} key={check.id} />
           ))}
         </ul>
-      </Panel>
+      </Section>
     </div>
   );
 };
@@ -136,25 +133,21 @@ export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
     ({ required, status }) => required && status !== "ready"
   );
   return (
-    <output
-      aria-label="Readiness"
-      className="bg-card flex flex-wrap items-center justify-between gap-3 rounded-xl border px-5 py-4 text-sm"
-    >
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-status-attention font-medium">
-          {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
-        </span>
-        {first === undefined ? null : (
-          <span className="text-muted-foreground">{`${first.title}: ${first.words}`}</span>
-        )}
-      </span>
-      <Link
-        className={buttonVariants({ size: "sm", variant: "outline" })}
-        hash={readinessId}
-        to="/platform"
-      >
-        Open Readiness
-      </Link>
-    </output>
+    <Alert aria-label="Readiness" live="polite" variant="attention">
+      <TriangleAlertIcon aria-hidden />
+      <AlertTitle>
+        {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
+      </AlertTitle>
+      <AlertDescription>
+        {first === undefined ? null : <p>{`${first.title}: ${first.words}`}</p>}
+        <Link
+          className={buttonVariants({ size: "sm", variant: "outline" })}
+          hash={readinessId}
+          to="/platform"
+        >
+          Open Readiness
+        </Link>
+      </AlertDescription>
+    </Alert>
   );
 };

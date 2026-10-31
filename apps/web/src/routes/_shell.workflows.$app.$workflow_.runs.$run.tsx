@@ -48,12 +48,12 @@ const RunPage = () => {
       <Page>
         <PageHeading
           meta={
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
+            <>
               <RunResult queued={summary.queued} status={summary.status} />
-              <span className="tabular-nums">
+              <span className="text-muted-foreground tabular-nums">
                 {formatDateTime(summary.createdAt)}
               </span>
-            </div>
+            </>
           }
           title={t`Run of ${workflow}`}
         />
