@@ -513,6 +513,12 @@ const countNeeds = (
   if (lists.workflows.state !== "ready" || lists.goLives.state !== "ready") {
     return undefined;
   }
+  // Under a process, which go-live serves it is read off the independent
+  // workflows: without them it can't be told, so no count rather than a
+  // count that leaves the go-lives out.
+  if (process !== undefined && lists.independent.state !== "ready") {
+    return undefined;
+  }
   const served = new Map(
     lists.independent.state === "ready"
       ? lists.independent.data.map((workflow) => [
