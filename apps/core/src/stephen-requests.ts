@@ -3,6 +3,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  countsOnly,
   dayFrom,
   elsewhere,
   fewestPeople,
@@ -66,7 +67,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { gatewaySettings, modelForRole, models } from "./models.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -94,8 +95,12 @@ import { readStephenReach } from "./stephen-reach.ts";
 //   never Grasp staff, and only after an owner turned `requestsPerPerson`
 //   on: it is off until then (in the Netherlands the works council may
 //   need to agree first). Turning it on or off is in the audit log, by
-//   who did it. Even then a person is counts, never their kinds, topics
-//   or tools.
+//   who did it. Even then a person is counts (`countsOnly`), never their
+//   kinds, topics, tools, thumbs or why one wasn't billed, and a person's
+//   panel can't be narrowed to a topic or a question, which would say
+//   whether they asked it.
+// - A topic's row names only tools he called for five or more of its
+//   people, as the tools' own split does.
 // - Anyone else reading it: admins only, Grasp staff's every view audited
 //   (staff-audit.ts); members get `role.forbidden`.
 // - Words: none are kept (channels/stephen-requests.ts). A proposal is the
@@ -435,6 +440,55 @@ const pointsAtFew = (
   return narrowed && (people < fewestPeople || smallTeam);
 };
 
+/**
+ * The report of `span` and of the span before it for `filter`, each held
+ * to the floor on its own: a filter five or more asked about now may have
+ * pointed at one or two then. A person's panel is counts only, with no
+ * span before.
+ */
+const reportsOf = (
+  requests: readonly StephenRequest[],
+  filter: z.output<typeof requestsFilterSchema>,
+  {
+    span,
+    before,
+    reach,
+    perPerson,
+  }: {
+    span: RequestSpan;
+    before: RequestSpan | null;
+    reach: Reach;
+    perPerson: boolean;
+  }
+) => {
+  const peopleIn = ({ from, to }: RequestSpan): number =>
+    new Set(
+      requests
+        .filter(({ day }) => day >= from && day <= to)
+        .map(({ personId }) => personId)
+    ).size;
+  const onePerson = filter.person !== null;
+  const tooFew = pointsAtFew(filter, peopleIn(span), reach);
+  const full = tooFew
+    ? emptyReport(span, perPerson)
+    : requestsReport(requests, span, { perPerson, reach: reach.byTeam });
+  const beforeReport =
+    before === null ||
+    tooFew ||
+    onePerson ||
+    pointsAtFew(filter, peopleIn(before), reach)
+      ? null
+      : requestsReport(requests, before, {
+          perPerson: false,
+          reach: reach.byTeam,
+        });
+  return {
+    tooFew,
+    report: onePerson ? countsOnly(full) : full,
+    beforeReport,
+  };
+};
+
 /** The report a page reads, for `by`. */
 const pageOf = async (
   env: Env,
@@ -462,6 +516,12 @@ const pageOf = async (
   if (filter.person !== null && !perPerson) {
     throw roleErrors.create("role.forbidden");
   }
+  // A person's panel is counts: never narrowed to what they asked, which
+  // would say whether they asked it.
+  const onePerson = filter.person !== null;
+  if (onePerson && (filter.topic !== null || filter.question !== null)) {
+    throw stephenRequestErrors.create("stephen_requests.filter_invalid");
+  }
   const span = rangeSpan(filter.range, today);
   const before = spanBefore(filter.range, today);
   const requests = await requestsIn(
@@ -470,25 +530,12 @@ const pageOf = async (
     span.to,
     filter
   );
-  const peopleIn = ({ from, to }: RequestSpan): number =>
-    new Set(
-      requests
-        .filter(({ day }) => day >= from && day <= to)
-        .map(({ personId }) => personId)
-    ).size;
-  const tooFew = pointsAtFew(filter, peopleIn(span), reach);
-  const report = tooFew
-    ? emptyReport(span, perPerson)
-    : requestsReport(requests, span, { perPerson, reach: reach.byTeam });
-  // The span before is held to the same floor: a filter five or more
-  // asked about now may have pointed at one or two then.
-  const beforeReport =
-    before === null || tooFew || pointsAtFew(filter, peopleIn(before), reach)
-      ? null
-      : requestsReport(requests, before, {
-          perPerson: false,
-          reach: reach.byTeam,
-        });
+  const { tooFew, report, beforeReport } = reportsOf(requests, filter, {
+    span,
+    before,
+    reach,
+    perPerson,
+  });
   const places = await drizzle(env.DB)
     .selectDistinct({ place: stephenRequests.place })
     .from(stephenRequests)
@@ -507,7 +554,8 @@ const pageOf = async (
             total: beforeReport.total,
           },
     settings,
-    pace: filter.range === "month" ? paceToEnd(report, today) : null,
+    pace:
+      filter.range === "month" && !onePerson ? paceToEnd(report, today) : null,
     topics,
     questions: await questionsNamed(env, [
       ...namedIn(report),
@@ -633,7 +681,7 @@ const proposeFor = async (
   },
   locale: string
 ): Promise<string | null> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {
@@ -848,7 +896,7 @@ const proposalsFor = async (
     .from(stephenRequestProposals)
     .where(eq(stephenRequestProposals.locale, language));
   const proposals = new Map(rows.map((row) => [row.key, row.text]));
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (proposer === null || model === undefined) {
@@ -1016,12 +1064,21 @@ export const teamsChatOf = async (
   return found;
 };
 
-/** The weekly summary as it would go to `userId` now. */
+/**
+ * The weekly summary as it would go to `userId` now, or, given the Monday
+ * `weekFrom`, of that week as it went the Monday after: a summary sent
+ * late still sums up the week it was queued for. Needs and their statuses
+ * are only known as they are now, so a summary sent after its own week
+ * has passed names none rather than mix today's into an older week.
+ */
 export const summaryFor = async (
   env: Env,
-  userId: string
+  userId: string,
+  weekFrom?: string
 ): Promise<WeeklySummary> => {
-  const today = await companyDay(env);
+  const now = await companyDay(env);
+  const today = weekFrom === undefined ? now : dayFrom(weekFrom, 7);
+  const late = today < weekStart(now);
   const { week, before } = lastWeeks(today);
   const month = rangeSpan("month", today);
   const [settings, reach, reader, teamsChat] = await Promise.all([
@@ -1043,7 +1100,7 @@ export const summaryFor = async (
   const weekReport = requestsReport(requests, week, options);
   const beforeReport = requestsReport(requests, before, options);
   const monthReport = requestsReport(requests, month, options);
-  const needs = await needsOf(env, null, "en");
+  const needs = late ? [] : await needsOf(env, null, "en");
   const earlier = new Set(
     needsIn(beforeReport, reach, new Map()).map(({ key }) => key)
   );

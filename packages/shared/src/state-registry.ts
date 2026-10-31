@@ -266,6 +266,10 @@ const coreDb: D1State = {
       `${core}channels/stephen-requests.ts`,
       "One record per request Stephen took on outside Grasp, labels only: what he is billed by."
     ),
+    stephen_request_cards: transient(
+      `${core}channels/stephen-requests.ts`,
+      "Which request a card still to be pressed was posted for (a Start, a held change), good for a day: a press after a move counts for no request."
+    ),
     stephen_request_topics: exported(`${core}channels/request-sorting.ts`),
     stephen_request_questions: exported(`${core}channels/request-sorting.ts`),
     stephen_request_needs: exported(`${core}stephen-requests.ts`),
@@ -604,6 +608,10 @@ const connectDb: D1State = {
       `${connect}vault.ts`,
       "OAuth tokens sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
     ),
+    ai_provider_keys: secret(
+      `${connect}ai-providers.ts`,
+      "Organizations' AI provider keys sealed with TOKEN_ENCRYPTION_KEY: only the encrypted envelope may carry them."
+    ),
     audit_outbox: exported(`${connect}audit.ts`),
     audit_outbox_rejected: exported(`${connect}audit.ts`),
     call_changes: exported(`${connect}changes.ts`),
@@ -850,6 +858,10 @@ const modelLedger: DurableObjectState = {
     spend: exported(`${core}model-ledger.ts`),
     alerts: exported(`${core}model-ledger.ts`),
     person_limits: exported(`${core}model-ledger.ts`),
+    provider_health: cache(
+      `${core}model-ledger.ts`,
+      "Each provider's last success and failure, by whose key: the next calls write it again."
+    ),
     audit_outbox: exported(`${core}model-ledger.ts`),
   },
 };
