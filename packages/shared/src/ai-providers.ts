@@ -233,6 +233,17 @@ export const aiModelChoiceSchema = z.strictObject({
 });
 export type AiModelChoice = z.output<typeof aiModelChoiceSchema>;
 
+/**
+ * The organization's models as they stand, each of a provider it still
+ * has connected: its default, none once the provider it was of is
+ * removed, until an admin chooses another; and its fallbacks.
+ */
+export const aiModelChoiceNowSchema = z.strictObject({
+  defaultModel: aiModelChoiceSchema.shape.defaultModel.nullable(),
+  fallbacks: aiModelChoiceSchema.shape.fallbacks,
+});
+export type AiModelChoiceNow = z.output<typeof aiModelChoiceNowSchema>;
+
 /** A key connect keeps, as it shows it: never the key, only its mask. */
 export interface AiProviderKey {
   provider: AiProviderId;
@@ -308,8 +319,8 @@ export interface AiProvidersListing {
   providers: AiProviderListed[];
   /** Every provider an admin can add, with where it runs. */
   offered: { provider: AiProviderId; label: string; whereItRuns: string }[];
-  /** The models its calls use; none until an admin chose. */
-  choice: AiModelChoice | null;
+  /** The models its calls use, as they stand; none until an admin chose. */
+  choice: AiModelChoiceNow | null;
   /**
    * Who handles Grasp's own AI features (document conversion,
    * transcription, speech), on Grasp's keys; none of a feature this

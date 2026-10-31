@@ -2,6 +2,7 @@
 import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
+  AiModelChoiceNow,
   AiPlatformUse,
   AiProviderAdd,
   AiProviderId,
@@ -58,7 +59,7 @@ const fakeAiProviders = ({
   platform = [],
 }: {
   connected?: { provider: AiProviderId; status?: AiProviderStatus }[];
-  choice?: AiModelChoice | null;
+  choice?: AiModelChoiceNow | null;
   tested?: AiProviderTest;
   platform?: AiPlatformUse[];
 } = {}) => {
@@ -82,7 +83,7 @@ const fakeAiProviders = ({
   let providers = connected.map(({ provider, status }) =>
     listed(provider, "sk-old-key-0000", null, status)
   );
-  let choice = initial;
+  let choice: AiModelChoiceNow | null = initial;
   const api = {
     list: async (): Promise<AiProvidersListing> => {
       await Promise.resolve();
@@ -128,6 +129,19 @@ const fakeAiProviders = ({
       await Promise.resolve();
       asked.push(["remove", provider]);
       providers = providers.filter((each) => each.provider !== provider);
+      // As core keeps the choice: none of the removed provider's models,
+      // its default none when it was one of them.
+      const kept = (model: string) => !model.startsWith(`${provider}/`);
+      choice =
+        choice === null
+          ? null
+          : {
+              defaultModel:
+                choice.defaultModel !== null && kept(choice.defaultModel)
+                  ? choice.defaultModel
+                  : null,
+              fallbacks: choice.fallbacks.filter(kept),
+            };
     },
   };
   return { api, asked };
@@ -455,6 +469,86 @@ describe("Settings › AI providers", () => {
       ["remove", "openai"],
     ]);
     expect(text()).toContain("No AI provider is connected yet");
+  });
+
+  it("offers none of a removed provider's models, and asks for a new default before the fallbacks change when its was the default", async () => {
+    const { api, asked } = fakeAiProviders({
+      connected: [
+        { provider: "anthropic" },
+        { provider: "openai" },
+        { provider: "mistral" },
+      ],
+      choice: {
+        defaultModel: "anthropic/claude-haiku-4-5",
+        fallbacks: ["openai/gpt-4.1", "mistral/mistral-small-latest"],
+      },
+    });
+    await shown(api);
+    const remove = async (label: string) => {
+      await press(button(`Remove ${label}`));
+      const confirm = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          '[role="dialog"] button'
+        ),
+      ].find((each) => each.textContent?.trim() === "Remove");
+      if (confirm === undefined) {
+        throw new TypeError("No confirmation");
+      }
+      await press(confirm);
+    };
+
+    // A fallback's provider removed: a later change sends none of its models.
+    await remove("Mistral AI");
+    await enter(choice("Add a fallback"), "openai/gpt-5-mini");
+    // The default's provider removed: the fallbacks wait for a new default.
+    await remove("Anthropic");
+    const waiting = {
+      defaultModel: choice("Default model").value,
+      canRemoveFallback: !button("Remove GPT-4.1 from the fallbacks").disabled,
+      asksForDefault: text().includes("Choose a new default model"),
+    };
+    await enter(choice("Default model"), "openai/gpt-5.4");
+
+    expect(waiting).toStrictEqual({
+      defaultModel: "",
+      canRemoveFallback: false,
+      asksForDefault: true,
+    });
+    expect(asked.filter(([what]) => what === "models")).toStrictEqual([
+      [
+        "models",
+        {
+          defaultModel: "anthropic/claude-haiku-4-5",
+          fallbacks: ["openai/gpt-4.1", "openai/gpt-5-mini"],
+        },
+      ],
+      [
+        "models",
+        {
+          defaultModel: "openai/gpt-5.4",
+          fallbacks: ["openai/gpt-4.1", "openai/gpt-5-mini"],
+        },
+      ],
+    ]);
+  });
+
+  it("shows no earlier test's result for a key that replaced the one tested", async () => {
+    const { api } = fakeAiProviders({ connected: [{ provider: "openai" }] });
+    await shown(api);
+    await press(button("Test OpenAI"));
+    const before = document.querySelector("output")?.textContent ?? null;
+
+    await press(button("Replace the key for OpenAI"));
+    await enter(textField("New key for OpenAI"), pastedKey);
+    await press(button("Save key"));
+
+    expect({
+      before,
+      after: document.querySelector("output")?.textContent ?? null,
+    }).toStrictEqual({
+      before: "It works: GPT-5 mini answered the test.",
+      after: null,
+    });
   });
 
   it("shows the providers and models without a way to change them to anyone who can't", async () => {

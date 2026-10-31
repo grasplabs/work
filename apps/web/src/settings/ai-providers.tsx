@@ -1,6 +1,7 @@
 import { compatibleModelNamePattern } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
+  AiModelChoiceNow,
   AiPlatformUse,
   AiProviderId,
   AiProviderListed,
@@ -100,6 +101,16 @@ const useStatusLine = () => {
 };
 
 /** A model's name for people: the catalog's, or a custom endpoint's own. */
+/** The models chosen, the default first while there is one. */
+const chosenOf = (choice: AiModelChoiceNow | null): string[] => {
+  if (choice === null) {
+    return [];
+  }
+  return choice.defaultModel === null
+    ? choice.fallbacks
+    : [choice.defaultModel, ...choice.fallbacks];
+};
+
 const nameOf = (
   model: string,
   providers: readonly AiProviderListed[]
@@ -472,7 +483,8 @@ const Models = ({
   onChoose,
 }: {
   providers: readonly AiProviderListed[];
-  choice: AiModelChoice | null;
+  /** As core read it: never a model of a provider no longer connected. */
+  choice: AiModelChoiceNow | null;
   editable: boolean;
   busy: boolean;
   onChoose: (choice: AiModelChoice) => void;
@@ -480,8 +492,10 @@ const Models = ({
   const { t } = useLingui();
   const defaultId = useId();
   const fallbackId = useId();
-  const chosen =
-    choice === null ? [] : [choice.defaultModel, ...choice.fallbacks];
+  // None once the provider it was of is removed: the fallbacks wait for
+  // a new one, as a choice is saved with its default.
+  const defaultModel = choice?.defaultModel ?? null;
+  const chosen = chosenOf(choice);
   // A custom endpoint's models, as the organization named them: those it
   // chose, and those named here since.
   const [named, setNamed] = useState<string[]>(() =>
@@ -491,6 +505,12 @@ const Models = ({
     ({ provider }) => provider === "openai-compatible"
   );
   const fallbacks = choice?.fallbacks ?? [];
+  const chooseFallbacks = (next: string[]): void => {
+    if (defaultModel !== null) {
+      onChoose({ defaultModel, fallbacks: next });
+    }
+  };
+  const fallbacksFrozen = busy || defaultModel === null;
   const move = (from: number, to: number): string[] => {
     const next = [...fallbacks];
     const [moved] = next.splice(from, 1);
@@ -514,7 +534,13 @@ const Models = ({
                 <dt className="text-muted-foreground">
                   <Trans>Default model</Trans>
                 </dt>
-                <dd>{nameOf(choice.defaultModel, providers)}</dd>
+                <dd>
+                  {defaultModel === null ? (
+                    <Trans>None: its provider was removed.</Trans>
+                  ) : (
+                    nameOf(defaultModel, providers)
+                  )}
+                </dd>
               </div>
               <div className="flex flex-col">
                 <dt className="text-muted-foreground">
@@ -562,14 +588,22 @@ const Models = ({
             }
           }}
           size="sm"
-          value={choice?.defaultModel ?? ""}
+          value={defaultModel ?? ""}
         >
-          {choice === null ? (
+          {defaultModel === null ? (
             <NativeSelectOption value="">{t`Choose a model`}</NativeSelectOption>
           ) : null}
           <ModelOptions except={[]} named={named} providers={providers} />
         </NativeSelect>
       </SettingsRow>
+      {choice !== null && defaultModel === null ? (
+        <p className="text-muted-foreground px-5 pb-4">
+          <Trans>
+            The default model&apos;s provider was removed. Choose a new default
+            model to change the fallbacks.
+          </Trans>
+        </p>
+      ) : null}
       {choice === null ? null : (
         <div className="flex flex-col gap-3 border-t px-5 py-4">
           <span>
@@ -589,9 +623,9 @@ const Models = ({
                     <span className="min-w-0 flex-1 truncate">{name}</span>
                     <Button
                       aria-label={t`Move ${name} up`}
-                      disabled={busy || at === 0}
+                      disabled={fallbacksFrozen || at === 0}
                       onClick={() => {
-                        onChoose({ ...choice, fallbacks: move(at, at - 1) });
+                        chooseFallbacks(move(at, at - 1));
                       }}
                       size="icon-sm"
                       variant="ghost"
@@ -600,9 +634,9 @@ const Models = ({
                     </Button>
                     <Button
                       aria-label={t`Move ${name} down`}
-                      disabled={busy || at === fallbacks.length - 1}
+                      disabled={fallbacksFrozen || at === fallbacks.length - 1}
                       onClick={() => {
-                        onChoose({ ...choice, fallbacks: move(at, at + 1) });
+                        chooseFallbacks(move(at, at + 1));
                       }}
                       size="icon-sm"
                       variant="ghost"
@@ -611,12 +645,11 @@ const Models = ({
                     </Button>
                     <Button
                       aria-label={t`Remove ${name} from the fallbacks`}
-                      disabled={busy}
+                      disabled={fallbacksFrozen}
                       onClick={() => {
-                        onChoose({
-                          ...choice,
-                          fallbacks: fallbacks.filter((each) => each !== model),
-                        });
+                        chooseFallbacks(
+                          fallbacks.filter((each) => each !== model)
+                        );
                       }}
                       size="icon-sm"
                       variant="ghost"
@@ -632,12 +665,12 @@ const Models = ({
             <div className="flex flex-col gap-1 sm:w-64 sm:self-end">
               <label htmlFor={fallbackId}>{t`Add a fallback`}</label>
               <NativeSelect
-                disabled={busy}
+                disabled={fallbacksFrozen}
                 id={fallbackId}
                 onChange={(event) => {
                   const model = event.target.value;
                   if (model !== "") {
-                    onChoose({ ...choice, fallbacks: [...fallbacks, model] });
+                    chooseFallbacks([...fallbacks, model]);
                   }
                 }}
                 size="sm"
@@ -715,14 +748,14 @@ const RemoveDialog = ({
 /** The model a test of `provider` asks: its own test model, or for a custom endpoint the first of its models chosen; null when it has none yet. */
 const testModelOf = (
   provider: AiProviderId,
-  choice: AiModelChoice | null
+  choice: AiModelChoiceNow | null
 ): string | undefined | null => {
   if (provider !== "openai-compatible") {
     return undefined;
   }
-  const chosen =
-    choice === null ? [] : [choice.defaultModel, ...choice.fallbacks];
-  return chosen.find((model) => model.startsWith(compatiblePrefix)) ?? null;
+  return (
+    chosenOf(choice).find((model) => model.startsWith(compatiblePrefix)) ?? null
+  );
 };
 
 /** One of Grasp's own features, and who handles it, in a sentence. */
@@ -829,8 +862,8 @@ export const AiProvidersSettings = ({
                 onRemove={() => {
                   setRemoving(provider);
                 }}
-                onReplace={async (key) =>
-                  await change(async (session) =>
+                onReplace={async (key) => {
+                  const replaced = await change(async (session) =>
                     provider.provider === "openai-compatible"
                       ? await session.aiProviders.add({
                           provider: "openai-compatible",
@@ -841,8 +874,16 @@ export const AiProvidersSettings = ({
                           provider: provider.provider,
                           key,
                         })
-                  )
-                }
+                  );
+                  // A test of the key it replaced says nothing of this one.
+                  if (replaced) {
+                    setTests((now) => ({
+                      ...now,
+                      [provider.provider]: undefined,
+                    }));
+                  }
+                  return replaced;
+                }}
                 onTest={() => {
                   void change(async (session) => {
                     const outcome = await session.aiProviders.test(

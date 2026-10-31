@@ -10464,6 +10464,10 @@ msgstr "Aún ninguno."
 msgid "None yet. A team's work shows up here once its lead has named it."
 msgstr "Aún no hay ninguno. El trabajo de un equipo aparece aquí cuando su responsable lo ha nombrado."
 
+#: src/settings/ai-providers.tsx
+msgid "None: its provider was removed."
+msgstr "Ninguno: su proveedor se eliminó."
+
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Ninguno."
@@ -15399,6 +15403,10 @@ msgstr "el plazo"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "El predeterminado"
+
+#: src/settings/ai-providers.tsx
+msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
+msgstr "Se eliminó el proveedor del modelo predeterminado. Elige un nuevo modelo predeterminado para cambiar los modelos de reserva."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"

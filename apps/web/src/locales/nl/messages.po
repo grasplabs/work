@@ -10464,6 +10464,10 @@ msgstr "Nog geen."
 msgid "None yet. A team's work shows up here once its lead has named it."
 msgstr "Nog geen. Het werk van een team verschijnt hier zodra de teamleider het heeft genoemd."
 
+#: src/settings/ai-providers.tsx
+msgid "None: its provider was removed."
+msgstr "Geen: de provider ervan is verwijderd."
+
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Geen."
@@ -15399,6 +15403,10 @@ msgstr "de deadline"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "De standaard"
+
+#: src/settings/ai-providers.tsx
+msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
+msgstr "De provider van het standaardmodel is verwijderd. Kies een nieuw standaardmodel om de reservemodellen te wijzigen."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"

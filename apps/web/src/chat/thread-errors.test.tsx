@@ -98,7 +98,10 @@ const signedIn = (role: Identity["role"], staff = false): Identity => ({
 /** The thread showing `messages`, in the app's frame for `identity`. */
 const showThread = async (
   messages: ChatMessage[],
-  identity: Identity = signedIn("user")
+  identity: Identity = signedIn("user"),
+  onRetry: () => void = () => {
+    // The test reads what the thread says, not a retry.
+  }
 ): Promise<void> => {
   const rootRoute = createRootRoute();
   const shell = createRoute({
@@ -114,9 +117,7 @@ const showThread = async (
         chatId="chat-1"
         loaded
         messages={messages}
-        onRetry={() => {
-          // The test reads what the thread says, not a retry.
-        }}
+        onRetry={onRetry}
         output={null}
         partial={null}
         running={false}
@@ -225,6 +226,24 @@ describe("a failed answer", () => {
       expect(other).toMatchObject({ alerts: 0, link: null });
       expect(other.text).toContain("Ask your admin to connect an AI provider.");
     }
+  });
+
+  it("still asks the question again once a provider is connected, without typing it again", async () => {
+    let retried = 0;
+    await showThread(failedWith([noProvider]), signedIn("admin"), () => {
+      retried += 1;
+    });
+    const again = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Try again"
+    );
+    act(() => {
+      again?.click();
+    });
+
+    expect({ shown: again !== undefined, retried }).toStrictEqual({
+      shown: true,
+      retried: 1,
+    });
   });
 
   it("says Grasp could not be reached for a code it doesn't know, or none", async () => {

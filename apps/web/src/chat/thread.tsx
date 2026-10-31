@@ -513,10 +513,20 @@ const needsProvider: ReadonlySet<unknown> = new Set([
   "model.unconfigured",
 ]);
 
+/** Asking a failed answer's question again, without typing it again. */
+const TryAgain = ({ onRetry }: { onRetry: (() => void) | undefined }) =>
+  onRetry === undefined ? null : (
+    <Button onClick={onRetry} size="sm" variant="outline">
+      <RefreshCcwIcon data-icon="inline-start" />
+      <Trans>Try again</Trans>
+    </Button>
+  );
+
 /**
  * Why an answer failed, in people's words, and the way to ask again; with
- * no AI provider to call, the way to connect one instead (to Settings ›
- * AI providers for the organization's admins), never an error.
+ * no AI provider to call, the way to connect one (to Settings › AI
+ * providers for the organization's admins), never an error, and still the
+ * way to ask again once one is.
  */
 const Failed = ({
   failure,
@@ -527,7 +537,12 @@ const Failed = ({
 }) => {
   const { i18n } = useLingui();
   if (needsProvider.has(failure)) {
-    return <ConnectAiProvider size="xs" />;
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ConnectAiProvider size="xs" />
+        <TryAgain onRetry={onRetry} />
+      </div>
+    );
   }
   return (
     <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
@@ -535,12 +550,7 @@ const Failed = ({
       <p className="flex-1" role="alert">
         {failureMessage(failure, i18n)}
       </p>
-      {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="sm" variant="outline">
-          <RefreshCcwIcon data-icon="inline-start" />
-          <Trans>Try again</Trans>
-        </Button>
-      )}
+      <TryAgain onRetry={onRetry} />
     </div>
   );
 };

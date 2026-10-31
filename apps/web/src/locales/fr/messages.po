@@ -10464,6 +10464,10 @@ msgstr "Aucun pour l'instant."
 msgid "None yet. A team's work shows up here once its lead has named it."
 msgstr "Aucun pour l’instant. Le travail d’une équipe apparaît ici dès que son responsable l’a nommé."
 
+#: src/settings/ai-providers.tsx
+msgid "None: its provider was removed."
+msgstr "Aucun : son fournisseur a été supprimé."
+
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Aucun."
@@ -15399,6 +15403,10 @@ msgstr "l’échéance"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "La limite par défaut"
+
+#: src/settings/ai-providers.tsx
+msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
+msgstr "Le fournisseur du modèle par défaut a été supprimé. Choisissez un nouveau modèle par défaut pour modifier les modèles de secours."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"

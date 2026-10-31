@@ -8,7 +8,7 @@ import {
   aiProviders,
 } from "@grasp-os/shared/ai-providers";
 import type {
-  AiModelChoice,
+  AiModelChoiceNow,
   AiProviderAdd,
   AiProviderId,
   AiProviderKey,
@@ -30,6 +30,7 @@ import type { z } from "zod";
 import {
   aiModelsKind,
   aiRoutesOf,
+  choiceOf,
   isConnectedModel,
   readModelChoice,
 } from "./ai-model-choice.ts";
@@ -181,7 +182,11 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       label: aiProviders[provider].label,
       whereItRuns: aiProviders[provider].whereItRuns,
     })),
-    choice,
+    // As it stands: never a model of a provider no longer connected.
+    choice: choiceOf(
+      keys.map(({ provider }) => provider),
+      choice
+    ),
     // Grasp's own features don't go through a provider of their own yet.
     platform: [],
   };
@@ -283,33 +288,16 @@ const testProvider = async (
 };
 
 /**
- * Sets the organization's models, each one of a provider it connected,
- * while `by` is one of its own admins: the write and its audit event in
- * one batch, recorded only when it changed.
+ * Keeps `choice` as the organization's models while `by` is still one of
+ * its admins: the write and its audit event in one batch, recorded only
+ * when it changed.
  */
-const setModels = async (
+const writeChoice = async (
   env: Env,
   by: Identity,
-  input: unknown
+  choice: AiModelChoiceNow
 ): Promise<void> => {
-  requireOwnAdmin(by);
-  const parsed = aiModelChoiceSchema.safeParse(input);
-  if (!parsed.success) {
-    throw aiProviderErrors.create("ai_provider.invalid");
-  }
-  const routes = await aiRoutesOf(env);
-  const { defaultModel } = parsed.data;
-  const fallbacks = [...new Set(parsed.data.fallbacks)].filter(
-    (model) => model !== defaultModel
-  );
-  if (
-    ![defaultModel, ...fallbacks].every((model) =>
-      isConnectedModel(routes, model)
-    )
-  ) {
-    throw aiProviderErrors.create("ai_provider.model_unavailable");
-  }
-  const choice: AiModelChoice = { defaultModel, fallbacks };
+  const { defaultModel, fallbacks } = choice;
   const value = JSON.stringify(choice);
   const now = Date.now();
   const db = drizzle(env.DB);
@@ -350,6 +338,36 @@ const setModels = async (
 };
 
 /**
+ * Sets the organization's models, each one of a provider it connected,
+ * while `by` is one of its own admins: the write and its audit event in
+ * one batch, recorded only when it changed.
+ */
+const setModels = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<void> => {
+  requireOwnAdmin(by);
+  const parsed = aiModelChoiceSchema.safeParse(input);
+  if (!parsed.success) {
+    throw aiProviderErrors.create("ai_provider.invalid");
+  }
+  const routes = await aiRoutesOf(env);
+  const { defaultModel } = parsed.data;
+  const fallbacks = [...new Set(parsed.data.fallbacks)].filter(
+    (model) => model !== defaultModel
+  );
+  if (
+    ![defaultModel, ...fallbacks].every((model) =>
+      isConnectedModel(routes, model)
+    )
+  ) {
+    throw aiProviderErrors.create("ai_provider.model_unavailable");
+  }
+  await writeChoice(env, by, { defaultModel, fallbacks });
+};
+
+/**
  * Removes the provider's key from connect, which audits it in the same
  * write when it had one, in the admin's name.
  */
@@ -371,6 +389,16 @@ const removeProvider = async (
   }
   if (removed) {
     drainConnectOutboxSoon(env);
+  }
+  // Its models go from the choice too, so none is offered or saved again:
+  // a default of it is none until an admin chooses another.
+  const stored = await readModelChoice(env);
+  const kept = choiceOf(
+    aiProviderIds.filter((id) => id !== parsed.data),
+    stored
+  );
+  if (kept !== null && JSON.stringify(kept) !== JSON.stringify(stored)) {
+    await writeChoice(env, by, kept);
   }
 };
 

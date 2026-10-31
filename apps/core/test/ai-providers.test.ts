@@ -476,6 +476,44 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
     });
 
+    it("drops a removed provider's models from the choice for good, its default none until an admin chooses another", async () => {
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: anthropicCase.model,
+        fallbacks: [openaiCase.model],
+      });
+
+      const choiceNow = async () => {
+        const { choice } = await by.api.aiProviders.list();
+        return choice;
+      };
+      await by.api.aiProviders.remove("openai");
+      const fallbackGone = await choiceNow();
+      await by.api.aiProviders.remove("anthropic");
+      const defaultGone = await choiceNow();
+      // Connected again, neither comes back: the choice was changed, not
+      // only read without them.
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const reconnected = await choiceNow();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+
+      expect({ fallbackGone, defaultGone, reconnected }).toStrictEqual({
+        fallbackGone: { defaultModel: anthropicCase.model, fallbacks: [] },
+        defaultGone: { defaultModel: null, fallbacks: [] },
+        reconnected: { defaultModel: null, fallbacks: [] },
+      });
+      await expect(choiceNow()).resolves.toStrictEqual({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+    });
+
     it("adds, tests, uses, replaces and removes a key", async () => {
       const { admin: by } = await admin();
       const first = newKey();
@@ -535,9 +573,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await by.api.aiProviders.add({ provider: "anthropic", key: newKey() });
       await by.api.aiProviders.remove("anthropic");
 
-      const events = await auditedFor(by.userId, 6);
+      const events = await auditedFor(by.userId, 7);
       // Connect records a key's changes in its own outbox, core the rest
-      // in its: the log has them all, each in its own outbox's order.
+      // in its: the log has them all, each in its own outbox's order. The
+      // removal took its model out of the choice too: a change of its own.
       expect(
         events
           .filter(({ action }) => action.startsWith("ai_provider."))
@@ -547,6 +586,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         "connect ai_provider.added",
         "connect ai_provider.removed",
         "connect ai_provider.replaced",
+        "core ai_provider.models_set",
         "core ai_provider.models_set",
         "core ai_provider.tested",
       ]);
