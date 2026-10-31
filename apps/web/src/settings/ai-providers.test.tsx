@@ -532,6 +532,30 @@ describe("Settings › AI providers", () => {
     ]);
   });
 
+  it("offers a custom model another admin chose meanwhile, once the page reads again", async () => {
+    const { api } = fakeAiProviders({
+      connected: [{ provider: "openai-compatible" }],
+      choice: { defaultModel: "openai-compatible/llama-a", fallbacks: [] },
+    });
+    await shown(api);
+    // Another admin chooses a model this page never named.
+    await api.setModels({
+      defaultModel: "openai-compatible/llama-b",
+      fallbacks: [],
+    });
+    // Any change here reads the providers again.
+    await press(button("Test OpenAI-compatible endpoint"));
+
+    const picked = choice("Default model");
+    expect({
+      value: picked.value,
+      offered: [...picked.options].map(({ value }) => value),
+    }).toStrictEqual({
+      value: "openai-compatible/llama-b",
+      offered: ["openai-compatible/llama-b"],
+    });
+  });
+
   it("shows no earlier test's result for a key that replaced the one tested", async () => {
     const { api } = fakeAiProviders({ connected: [{ provider: "openai" }] });
     await shown(api);

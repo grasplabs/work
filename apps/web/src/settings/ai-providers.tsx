@@ -496,11 +496,17 @@ const Models = ({
   // a new one, as a choice is saved with its default.
   const defaultModel = choice?.defaultModel ?? null;
   const chosen = chosenOf(choice);
-  // A custom endpoint's models, as the organization named them: those it
-  // chose, and those named here since.
-  const [named, setNamed] = useState<string[]>(() =>
-    chosen.filter((model) => model.startsWith(compatiblePrefix))
-  );
+  // A custom endpoint's models: those chosen now, as core read them (so a
+  // choice another admin saved meanwhile is among them), and those named
+  // here since.
+  const [namedHere, setNamedHere] = useState<string[]>([]);
+  const named = [
+    ...new Set(
+      [...chosen, ...namedHere].filter((model) =>
+        model.startsWith(compatiblePrefix)
+      )
+    ),
+  ];
   const custom = providers.some(
     ({ provider }) => provider === "openai-compatible"
   );
@@ -570,7 +576,9 @@ const Models = ({
         <NameModel
           busy={busy}
           onName={(model) => {
-            setNamed((now) => (now.includes(model) ? now : [...now, model]));
+            setNamedHere((now) =>
+              now.includes(model) ? now : [...now, model]
+            );
           }}
         />
       ) : null}
