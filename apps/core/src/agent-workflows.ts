@@ -13,8 +13,8 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { asPerson } from "./agent-person.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { askableFor, offerStart } from "./channels/workflow-offers.ts";
-import type { AskableWorkflow } from "./channels/workflow-offers.ts";
+import { askableFor } from "./channels/askable-workflows.ts";
+import type { AskableWorkflow } from "./channels/askable-workflows.ts";
 import { appHost } from "./durable-objects.ts";
 import { listWorkflowResources } from "./workflow-resources.ts";
 import { listAllRuns, workflowOverview } from "./workflows/overview.ts";
@@ -218,9 +218,10 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       read: async (person) => {
         const { via } = this.ctx.props;
         // Offered only on a chat app's card: elsewhere there is none.
-        return via === undefined || via === "web"
-          ? []
-          : await askableFor(this.env, person);
+        if (via === undefined || via === "web") {
+          return [];
+        }
+        return await askableFor(this.env, person);
       },
       detail: (listed) => ({ workflows: listed.length }),
     });
@@ -259,8 +260,18 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       allowed: () => true,
       action: "write",
       method: "workflows.offer",
-      read: async (person) =>
-        await offerStart(this.env, this.ctx.props, person, workflow, input),
+      read: async (person) => {
+        // The offer's card brings the Chat SDK, which core loads when first
+        // used, not as it starts (GRA-1349).
+        const { offerStart } = await import("./channels/workflow-offers.ts");
+        return await offerStart(
+          this.env,
+          this.ctx.props,
+          person,
+          workflow,
+          input
+        );
+      },
       detail: (offered) => ({
         workflow: offered.workflow,
         version: offered.version,
