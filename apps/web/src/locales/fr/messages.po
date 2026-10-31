@@ -6472,6 +6472,7 @@ msgid "Fewer than 10 users"
 msgstr "Moins de 10 utilisateurs"
 
 #: src/workflows/requests/request-needs.tsx
+#: src/workflows/requests/request-who.tsx
 msgid "Fewer than five of {reach} asked him"
 msgstr "Moins de cinq sur {reach} l’ont sollicité"
 
@@ -9577,6 +9578,10 @@ msgstr "Pas d’IA"
 #: src/landscape/landscape.ts
 msgid "No AI capabilities found in this app."
 msgstr "Aucune fonction d’IA détectée dans cette application."
+
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "Aucun fournisseur d'IA n'est encore connecté. Demandez à votre admin d'en connecter un."
 
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."

@@ -286,7 +286,8 @@ interface FairInput {
           | "dashboard_widgets"
           | "brain_recall"
           | "policy_reading"
-          | "stephen_requests";
+          | "stephen_requests"
+          | "provider_test";
       };
   binding?: { app: string };
   /** For a workflow run's call: whose share it takes (models.ts). */

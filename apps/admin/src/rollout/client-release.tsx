@@ -78,6 +78,7 @@ const Drift = ({ clientId }: { clientId: string }) => {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-4">
         <Button
+          size="sm"
           variant="outline"
           disabled={reading}
           onClick={() => {
@@ -207,11 +208,12 @@ export const ClientRelease = ({
                   </option>
                 ))}
               </datalist>
-              <Button type="submit" disabled={busy}>
+              <Button disabled={busy} size="sm" type="submit">
                 Pin
               </Button>
               {pinnedReleaseId === null ? null : (
                 <Button
+                  size="sm"
                   type="button"
                   variant="outline"
                   disabled={busy}

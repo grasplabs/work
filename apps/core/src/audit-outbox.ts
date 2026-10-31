@@ -386,6 +386,16 @@ const drainSoon = (env: OutboxEnv, db: AuditedDatabase): void => {
   waitUntil(drainLogged(env, databaseOutbox(name, db.$client), 1));
 };
 
+/**
+ * Drains connect's outbox soon, one batch, in the background: after a
+ * change connect recorded in its own outbox (an AI provider's key), so its
+ * event reaches the log a moment later rather than at the clock's next
+ * drain. A drain that fails is logged; the clock drains it later.
+ */
+export const drainConnectOutboxSoon = (env: Env): void => {
+  waitUntil(drainLogged(env, connectOutbox(env), 1));
+};
+
 /** Drains Knowledge's outbox soon, as `drainSoon` does: its `audit` port. */
 export const drainKnowledgeOutboxSoon = (env: OutboxEnv): void => {
   waitUntil(drainLogged(env, databaseOutbox("knowledge", env.KNOWLEDGE), 1));
