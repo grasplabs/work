@@ -26,7 +26,6 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   GlobeIcon,
-  GlobeLockIcon,
   MoreHorizontalIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -195,7 +194,7 @@ export const StatusActions = ({ app }: { app: App }) => {
                     move("unpublish");
                   }}
                 >
-                  <GlobeLockIcon />
+                  <GlobeIcon />
                   <Trans>Unpublish</Trans>
                 </DropdownMenuItem>
               ) : null}
