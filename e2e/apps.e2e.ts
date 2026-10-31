@@ -300,13 +300,14 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "AI providers",
         "Models",
         "AI spend",
+        // The company's groups of teams, the brain's regions: right after
+        // AI spend, as in the prototype.
+        "Brain",
         // Who can reach Stephen and what he may do for whom.
         "Stephen",
         "Pulse",
         // The company admin's view of the onboarding interviews.
         "Onboarding",
-        // The company's groups of teams, the brain's regions.
-        "Brain",
         "Audit trail",
         // Every person's calls of unknown outcome, read only, for admins.
         "Unknown outcomes",
