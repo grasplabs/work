@@ -198,8 +198,8 @@ describe("importing releases", () => {
     await expect(importEvents(release.id)).resolves.toHaveLength(1);
   });
 
-  it("imports a release built when manifests carried more, keeping its manifest as published", async () => {
-    const built = await buildRelease({ notes: "feat(core): from before" });
+  it("imports a manifest with top-level fields it doesn't know, keeping it as published", async () => {
+    const built = await buildRelease({ notes: "feat(core): more fields" });
     const manifestText = `${JSON.stringify(
       {
         ...built.manifest,
