@@ -32,6 +32,7 @@ import {
   MessageCircleIcon,
   MessagesSquareIcon,
   PackageIcon,
+  PlugIcon,
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
@@ -52,6 +53,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 type SettingsPath =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/ai-providers"
   | "/settings/models"
   | "/settings/spend"
   | "/settings/stephen"
@@ -108,6 +110,11 @@ const groupsFor = ({
                 icon: UsersIcon,
               },
             ]),
+        {
+          label: msg`AI providers`,
+          to: "/settings/ai-providers",
+          icon: PlugIcon,
+        },
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         // A name, like Pulse: the company's assistant in its chat apps.
