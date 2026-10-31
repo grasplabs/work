@@ -4,6 +4,7 @@ import type {
   AppContents,
   AppsApi,
   CurrentExports,
+  ListedScreen,
   NewApp,
   ViewedApp,
 } from "@grasp-os/shared/apps";
@@ -24,6 +25,7 @@ import {
   createApp,
   getApp,
   listApps,
+  listScreens,
 } from "./apps.ts";
 import { exportAppDefinition } from "./definition-export.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -101,6 +103,13 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await appContents(this.#env, by, app)
+    );
+  }
+
+  async screens(): Promise<ListedScreen[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await listScreens(this.#env, by)
     );
   }
 
