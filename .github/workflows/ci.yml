@@ -25,6 +25,14 @@ on:
   push:
     branches: [main]
 
+# Runners: Jog's, since the repo went private (October 2026), where
+# GitHub's are 2 vCPU and billed by the rounded minute. Jobs that build or
+# run tests take jog-4vcpu, what they were tuned on (4 vCPU and 16 GB on
+# GitHub's public runners; a test shard ran out of memory on 8 GB). Jobs
+# that only read the plan or a few results take jog, the 2 vCPU size, at
+# half the price. A job that holds a secret stays on GitHub's runners, so
+# no secret leaves GitHub's machines (publish-release, and the deploy,
+# promote and eval workflows).
 permissions:
   contents: read
 
@@ -39,7 +47,7 @@ jobs:
   static:
     name: static
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +87,7 @@ jobs:
   plan:
     name: plan
     if: github.event_name != 'push' && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: jog
     timeout-minutes: 5
     outputs:
       projects: ${{ steps.plan.outputs.projects }}
@@ -113,7 +121,7 @@ jobs:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: plan
     if: needs.plan.outputs.shards != '[]'
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     # The test step's 15 minutes, and room for the steps around it.
     timeout-minutes: 21
     strategy:
@@ -240,7 +248,7 @@ jobs:
     name: check
     needs: [static, plan, release, test]
     if: always() && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: jog
     timeout-minutes: 5
     steps:
       - run: |
@@ -298,7 +306,7 @@ jobs:
       # in a home it doesn't own. A host IPC namespace, so Chromium's shared
       # memory isn't held to Docker's 64 MB /dev/shm.
       options: --user 1001 --ipc=host
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     # About 1 minute of setup and 2 for the stack to build and start, then
     # each part's tests.
     timeout-minutes: 20
@@ -396,7 +404,7 @@ jobs:
     name: e2e
     needs: [e2e]
     if: always() && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: jog
     timeout-minutes: 5
     steps:
       - run: |
@@ -423,8 +431,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
       options: --user 1001 --ipc=host
-    # On GitHub's runners, as e2e above.
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -450,7 +457,7 @@ jobs:
   workerd:
     name: workerd
     if: github.event_name != 'push' && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -480,7 +487,7 @@ jobs:
     name: release
     # Not for a draft; a push to main has no pull request.
     if: github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
+    runs-on: jog-4vcpu
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -525,7 +532,7 @@ jobs:
   conventions:
     name: conventions
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: jog
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -550,7 +557,7 @@ jobs:
   stephen:
     name: stephen
     if: github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: jog
     timeout-minutes: 5
     steps:
       - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
