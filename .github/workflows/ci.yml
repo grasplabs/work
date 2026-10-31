@@ -169,12 +169,9 @@ jobs:
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
-      # file and ends the run once it is well past its timeout. It also ends
-      # a run a minute after every file of the shard has ended when Vitest
-      # hasn't ended it, naming the open handles: a worker that never said
-      # its file was done (a log the pool held, October 2026). Any other
-      # hang outside a test (teardown) fails at this step's timeout, instead
-      # of at the job's limit. Two minutes before
+      # file and ends the run once it is well past its timeout. A hang
+      # outside any test (teardown, shutting the pool down) fails at this
+      # step's timeout, instead of at the job's limit. Two minutes before
       # that, the reporter prints the files and tests still running, and
       # each finished test is in the shard's test-progress artifact. "0
       # files, 0 tests" there means the hang is in teardown or in shutting
