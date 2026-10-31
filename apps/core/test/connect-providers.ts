@@ -45,9 +45,6 @@ export const connectClient = clients.microsoft;
 /** Grasp's Google client for connections, as set on connect in the tests. */
 export const googleConnectClient = clients.google;
 
-/** Grasp's Entra app for the application landscape, as set on connect. */
-export const landscapeClient = clients.microsoftLandscape;
-
 /** Grasp's Entra app for the directory's connection, as set on connect. */
 export const directoryClient = clients.microsoftDirectory;
 
@@ -82,10 +79,6 @@ export const documentsControlUrl = "https://graph-control.test/documents";
 /** What the documents' Entra app is granted, as Entra's token answer says. */
 export const documentsGranted =
   "openid profile email User.Read Files.Read.All Sites.Read.All";
-
-/** What the landscape's Entra app is granted, as Entra's token answer says. */
-export const landscapeGranted =
-  "openid profile email Application.Read.All DelegatedPermissionGrant.Read.All User.Read User.ReadBasic.All";
 
 /**
  * The code Entra sends back once `subject` in `tenant` consents at `url`:
@@ -794,17 +787,14 @@ export default {
     const digest = base64Url(
       new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
     );
-    // The landscape's, the directory's or the documents' own app, or the one for every other connection.
-    const forLandscape = form.get("client_id") === ${JSON.stringify(landscapeClient.id)};
+    // The directory's or the documents' own app, or the one for every other connection.
     const forDirectory = form.get("client_id") === ${JSON.stringify(directoryClient.id)};
     const forDocuments = form.get("client_id") === ${JSON.stringify(documentsClient.id)};
-    const client = forLandscape
-      ? ${JSON.stringify(landscapeClient)}
-      : forDirectory
-        ? ${JSON.stringify(directoryClient)}
-        : forDocuments
-          ? ${JSON.stringify(documentsClient)}
-          : ${JSON.stringify(connectClient)};
+    const client = forDirectory
+      ? ${JSON.stringify(directoryClient)}
+      : forDocuments
+        ? ${JSON.stringify(documentsClient)}
+        : ${JSON.stringify(connectClient)};
     if (form.get("client_secret") !== client.secret || digest !== challenge) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }
@@ -825,7 +815,6 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forLandscape ? { scope: ${JSON.stringify(landscapeGranted)} } : {}),
       ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),

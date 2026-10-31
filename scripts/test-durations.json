@@ -52,7 +52,6 @@
   "@grasp-os/connect test/health.test.ts": 0,
   "@grasp-os/connect test/hr.test.ts": 0.3,
   "@grasp-os/connect test/idempotency.test.ts": 1.7,
-  "@grasp-os/connect test/landscape.test.ts": 0.6,
   "@grasp-os/connect test/mcp-client.test.ts": 0,
   "@grasp-os/connect test/microsoft-365-apps.test.ts": 7.2,
   "@grasp-os/connect test/microsoft-365-drafts.test.ts": 4.5,

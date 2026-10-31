@@ -17,7 +17,6 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
-import { landscapeProviderSchema } from "./landscape.ts";
 import type { PackageRegistryApi } from "./packages.ts";
 import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
 import type { CodeSubject, WorkContext } from "./permissions.ts";
@@ -135,14 +134,13 @@ export interface PendingReference {
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
- * itself; the landscape's, the directory's, the documents' and the HR
- * platform's admin connections (`./landscape.ts`, `./directory.ts`,
- * `./document-places.ts`, `./hr.ts`), which no connector's calls may use;
+ * itself; the directory's, the documents' and the HR platform's admin
+ * connections (`./directory.ts`, `./document-places.ts`, `./hr.ts`),
+ * which no connector's calls may use;
  * and Composio, whose connections are another kind.
  */
 const reservedProviderIds: ReadonlySet<string> = new Set([
   ...oauthProviderSchema.options,
-  ...landscapeProviderSchema.options,
   ...directoryProviderSchema.options,
   ...placesProviderSchema.options,
   ...hrProviderSchema.options,
@@ -222,12 +220,11 @@ export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
   /**
    * A connector's provider, or a read-only admin connection of a suite
-   * (the landscape's, the directory's, the documents'), which no
+   * (the directory's, the documents'), which no
    * connector's calls use.
    */
   provider: z.union([
     connectorProviderSchema,
-    landscapeProviderSchema,
     directoryProviderSchema,
     placesProviderSchema,
   ]),
