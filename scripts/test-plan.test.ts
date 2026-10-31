@@ -21,6 +21,7 @@ import {
   packageOf,
   packagesSelected,
   filesImporting,
+  journeysReached,
   reachSince,
   reachedPackages,
 } from "./test-plan.ts";
@@ -370,5 +371,95 @@ describe("following a change through Grasp's workspace", () => {
     expect(
       reachedPackages(workspace, ["/repo/apps/web"], new Map())
     ).toStrictEqual(new Set(["/repo/apps/web", "/repo/apps/core"]));
+  });
+});
+
+/** The journey stacks' packages and two apart from them, as Grasp's are. */
+const stackPackages = [
+  { name: "grasp-os", dir: root, dependsOn: ["/repo/packages/shared"] },
+  { name: "@grasp-os/shared", dir: "/repo/packages/shared", dependsOn: [] },
+  {
+    name: "@grasp-os/ui",
+    dir: "/repo/packages/ui",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/web",
+    dir: "/repo/apps/web",
+    dependsOn: ["/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/connect",
+    dir: "/repo/apps/connect",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/core",
+    dir: "/repo/apps/core",
+    dependsOn: ["/repo/apps/web", "/repo/apps/connect"],
+  },
+  {
+    name: "@grasp-os/admin",
+    dir: "/repo/apps/admin",
+    dependsOn: ["/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/router",
+    dir: "/repo/apps/router",
+    dependsOn: ["/repo/packages/shared"],
+  },
+];
+
+const journeysFor = (...changedFiles: string[]) =>
+  journeysReached({
+    changedFiles,
+    testFiles: new Set(["/repo/apps/core/test/agent.test.ts"]),
+    packages: stackPackages,
+    root,
+  });
+
+describe("choosing which journey suites a change reaches", () => {
+  it("runs e2e for a change in what its stack runs, web's build included", () => {
+    expect(journeysFor("/repo/apps/web/src/app.tsx")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+  });
+
+  it("runs both for a package both stacks depend on", () => {
+    expect(journeysFor("/repo/packages/ui/src/button.tsx")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs only admin-e2e for a change to the admin alone", () => {
+    expect(journeysFor("/repo/apps/admin/src/rollout.ts")).toStrictEqual({
+      e2e: false,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs neither for a test file, which no build bundles, or a package no stack runs", () => {
+    expect(
+      journeysFor(
+        "/repo/apps/core/test/agent.test.ts",
+        "/repo/apps/router/src/index.ts"
+      )
+    ).toStrictEqual({ e2e: false, "admin-e2e": false });
+  });
+
+  it("runs a stack for a helper of the tests, which isn't a test file", () => {
+    expect(journeysFor("/repo/apps/core/test/helpers.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+  });
+
+  it("runs both for a file outside every package: a journey, its config or the tooling", () => {
+    expect(journeysFor("/repo/e2e/chat.e2e.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
   });
 });
