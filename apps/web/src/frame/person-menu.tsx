@@ -69,22 +69,36 @@ export const initials = (name: string): string =>
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
 
-/** The person's name and role, on the menu's button. */
-const Who = ({ identity }: { identity: Identity }) => {
+/**
+ * The person on the menu's button, as the prototype's: their initials and
+ * their name, which is the button's name. Their role is in the menu.
+ */
+const Who = ({ identity }: { identity: Identity }) => (
+  <>
+    <Avatar shape="square">
+      <AvatarFallback aria-hidden="true">
+        {initials(identity.name)}
+      </AvatarFallback>
+    </Avatar>
+    <span className="flex-1 truncate text-left text-sm font-medium">
+      {identity.name}
+    </span>
+  </>
+);
+
+/** Who is signed in, atop the menu: their address and their role. */
+const SignedIn = ({ identity }: { identity: Identity }) => {
   const { t } = useLingui();
   const role = roleLabel(identity.role);
   return (
-    <>
-      <Avatar shape="square">
-        <AvatarFallback>{initials(identity.name)}</AvatarFallback>
-      </Avatar>
-      <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
-        <span className="truncate font-medium">{identity.name}</span>
-        <span className="text-sidebar-foreground/70 truncate text-xs">
+    <DropdownMenuLabel>
+      <span className="grid min-w-0 leading-tight">
+        <span className="truncate">{identity.email}</span>
+        <span className="truncate">
           {identity.staff ? t`${role}, Grasp staff` : role}
         </span>
       </span>
-    </>
+    </DropdownMenuLabel>
   );
 };
 
@@ -183,7 +197,7 @@ export const PersonMenu = ({
             sideOffset={4}
           >
             <DropdownMenuGroup>
-              <DropdownMenuLabel>{identity.email}</DropdownMenuLabel>
+              <SignedIn identity={identity} />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
