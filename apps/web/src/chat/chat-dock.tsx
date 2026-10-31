@@ -349,7 +349,7 @@ const dockLook = (mode: DockMode): { place: string; look: string } => {
   let place =
     "pointer-events-none fixed inset-x-9 bottom-9 z-40 flex justify-end";
   let look =
-    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-100.5 has-aria-expanded:w-100.5 motion-reduce:transition-none";
+    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-100.5 motion-reduce:transition-none";
   if (mode === "drawer") {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
@@ -519,7 +519,6 @@ const Dock = ({
       {...composer}
       compact
       describedBy={unfolds ? hintId : undefined}
-      expanded={open}
       label={words.title}
       onSend={() => {
         if (mode === "bar") {
