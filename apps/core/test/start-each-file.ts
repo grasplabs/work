@@ -26,15 +26,19 @@ import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // What core loads on first use rather than at startup (models.ts,
-// auth/auth.ts, channels/teams.ts, clock.ts, workflows/kept-email.ts),
-// loaded here up front: Vite transforms a module the first time a test
-// imports it, seconds for these, which would land in the middle of a
-// test's timing.
+// auth/auth.ts, channels/teams.ts, clock.ts, workflows/kept-email.ts,
+// workspace.ts, entry.ts), loaded here up front: Vite transforms a module
+// the first time a test imports it, seconds for these, which would land in
+// the middle of a test's timing. On a laptop the agent loop took 1.6 s at
+// a chat's first turn and the channels' door 0.3 s at their first
+// message; on loaded CI runners, together, long enough that a streamed
+// answer's first words missed their 15 s (channels-stream.test.ts).
 //
 // And a module whose first import starts inside a Durable Object can
 // never load at all. The clock's alarm imports the Gmail channel for its
-// quarter-hour tasks as soon as a test arms it, and a workflow step
-// imports postal-mime to read a kept message. The module runner keeps
+// quarter-hour tasks as soon as a test arms it, a workflow step imports
+// postal-mime to read a kept message, and a workspace imports the agent
+// loop at a chat's first turn. The module runner keeps
 // that import's promise for every later import of the module in this
 // runtime, but the next file's reset (reset-storage.ts) aborts the object
 // mid-import, so the promise never settles: each later import, such as a
@@ -49,6 +53,9 @@ await Promise.all([
   import("../src/channels/teams-adapter.ts"),
   import("../src/channels/gmail.ts"),
   import("postal-mime"),
+  import("../src/agent.ts"),
+  import("../src/agent-thinking.ts"),
+  import("../src/channels/door.ts"),
 ]);
 
 /** Migrations, read by vite.config.ts into bindings. */
