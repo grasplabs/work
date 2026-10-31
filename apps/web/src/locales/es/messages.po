@@ -8315,10 +8315,6 @@ msgstr "Su presupuesto no se puede leer, así que no sirve nada en lugar de func
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Su presupuesto no se puede leer, así que no atiende nada."
 
-#: src/routes/_shell.domains.index.tsx
-msgid "Its contents couldn't be read."
-msgstr "No se pudo leer su contenido."
-
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "Su versión actual no tiene parámetros."

@@ -8315,10 +8315,6 @@ msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts, statt oh
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Ihr Budget kann nicht gelesen werden, daher bedient sie nichts."
 
-#: src/routes/_shell.domains.index.tsx
-msgid "Its contents couldn't be read."
-msgstr "Der Inhalt konnte nicht gelesen werden."
-
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "Die aktuelle Version hat keine Parameter."
