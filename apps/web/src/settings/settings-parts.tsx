@@ -25,11 +25,14 @@ import { useRouteErrorReason } from "../route-error.tsx";
 export const SettingsSection = ({
   title,
   description,
+  media,
   action,
   children,
 }: {
   title: string;
   description?: ReactNode;
+  /** A picture before the title, such as Stephen's head: the title then stands in line with it. */
+  media?: ReactNode;
   action?: ReactNode;
   children?: ReactNode;
 }) => {
@@ -39,7 +42,14 @@ export const SettingsSection = ({
     <Card aria-labelledby={id} render={<section />} variant="panel">
       <CardHeader>
         <CardTitle>
-          <h2 id={id}>{title}</h2>
+          {media === undefined ? (
+            <h2 id={id}>{title}</h2>
+          ) : (
+            <span className="flex items-center gap-3">
+              {media}
+              <h2 id={id}>{title}</h2>
+            </span>
+          )}
         </CardTitle>
         {description === undefined ? null : (
           <CardDescription>{description}</CardDescription>
