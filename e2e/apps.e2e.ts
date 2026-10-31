@@ -159,16 +159,81 @@ test.beforeAll(async () => {
 test("a builder finds an engine in the list, opens it and uses its app with live data", async ({
   pageOf,
 }) => {
+  // Seven more domains of this run's own, each with one app: five
+  // published, two drafts, so the Apps page offers its search and tabs.
+  // Their names carry `run`, which no other test's do.
+  const run = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
+    String.fromCodePoint(97 + (byte % 26))
+  ).join("");
+  const published = ["books", "payroll", "stock", "fleet", "sales"];
+  const drafts = ["hiring", "legal"];
+  await withApi(builder, async (api) => {
+    await Promise.all([
+      ...published.map(async (domain) => {
+        const { id } = await api.apps.create({ name: `${domain} ${run}` });
+        await release(api, id, counterApp(`${domain}app${run}`), "First");
+      }),
+      ...drafts.map(async (domain) => {
+        const { id } = await api.apps.create({ name: `${domain} ${run}` });
+        const { version } = await api.apps.files.commit(
+          id,
+          counterApp(`${domain}app${run}`),
+          "First"
+        );
+        await api.apps.versions.setCurrent(id, version);
+      }),
+    ]);
+  });
+
   const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
+  await nav.getByRole("link", { name: "Apps" }).click();
+  const tiles = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  const search = page.getByRole("textbox", { name: "Search the apps" });
+  const tab = (label: string) =>
+    page.getByRole("tab", { name: new RegExp(`^${label}`, "u") });
+  /** What each tab counts, in the order they stand. */
+  const counts = async () =>
+    await Promise.all(
+      ["All", "Published", "Draft"].map(
+        async (label) => await tab(label).textContent()
+      )
+    );
+
+  // A search by domain name finds that domain's apps, and the tabs count
+  // what it leaves: this run's seven, five published and two drafts.
+  await search.fill(run);
+  await expect(tiles).toHaveCount(7);
+  expect(await counts()).toStrictEqual(["All7", "Published5", "Draft2"]);
+  await tab("Draft").click();
+  await expect(tiles).toHaveCount(2);
+  await expect(
+    tiles.getByRole("link", { name: `legalapp${run}` })
+  ).toBeVisible();
+  await tab("Published").click();
+  await expect(tiles).toHaveCount(5);
+  await tab("All").click();
+  await expect(tiles).toHaveCount(7);
+
+  // A search by an app's own name finds it alone, under its domain.
+  await search.fill(`payrollapp${run}`);
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles).toContainText(`payroll ${run}`);
+  expect(await counts()).toStrictEqual(["All1", "Published1", "Draft0"]);
+
+  // A search nothing matches says so, and lists nothing.
+  await search.fill(`nothing-${run}`);
+  await expect(
+    page.getByText(`No app is called “nothing-${run}”`)
+  ).toBeVisible();
+  await expect(tiles).toHaveCount(0);
+  expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
+  await search.fill("");
+
   // On the Apps page its app is a tile, under its domain's name, which
   // opens the app in its domain.
-  await nav.getByRole("link", { name: "Apps" }).click();
-  const tile = page
-    .getByRole("list", { name: "Apps" })
-    .getByRole("listitem")
-    .filter({ hasText: name });
+  const tile = tiles.filter({ hasText: name });
   await tile.getByRole("link", { name: "counter" }).click();
   await expect(page).toHaveURL(
     new RegExp(`/domains/${app}/apps/counter$`, "u")
