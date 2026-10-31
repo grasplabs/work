@@ -33,10 +33,11 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
-import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import {
   decideEntityMatch,
+  entitiesFor,
   entityMatchProposals,
+  entitySources,
 } from "@grasp-os/brain/entities";
 import {
   lessonLineage,

@@ -1,18 +1,16 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { settleMs } from "@grasp-os/brain/entities";
 import type {
   EntityMatch,
   EntityMatchDecisionInput,
   KnowledgeApi,
 } from "@grasp-os/shared/knowledge";
-import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { answeringGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
-import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { runMinuteTasks } from "./maintenance.ts";
+import { answeringProvider } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Entity matches across collections in core (GRA-1080): proposals and
@@ -68,7 +66,7 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       ifVersion: 0,
     });
     // The model names her wherever the text does; anything else, nothing.
-    const gateway = answeringGateway((requests) => ({
+    await answeringProvider((requests) => ({
       text: JSON.stringify({
         entities: JSON.stringify(requests.at(-1)?.body ?? "").includes(name)
           ? [{ kind: "person", name }]
@@ -77,69 +75,63 @@ describe("entity matches for the signed-in person", setUpTime, () => {
       inputTokens: 300,
       outputTokens: 40,
     }));
-    const ai: AiBinding = env.AI;
-    const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
     const adminBrain: KnowledgeApi = admin.api.knowledge;
     const memberBrain: KnowledgeApi = member.api.knowledge;
     const hers = (matches: EntityMatch[]) =>
       matches.filter((match) => match.name === name);
-    try {
-      const proposed = await vi.waitFor(
-        async () => {
-          await runCron({}, new Date(Date.now() + settleMs + 60_000));
-          const [match] = hers(await adminBrain.entityMatches());
-          if (match === undefined) {
-            throw new Error("Not linked yet");
-          }
-          return match;
-        },
-        { timeout: 60_000, interval: 200 }
-      );
-      const [first = "", second = ""] = proposed.entities.map(({ id }) => id);
-      const decision: EntityMatchDecisionInput = {
+    const proposed = await vi.waitFor(
+      async () => {
+        await runMinuteTasks({}, new Date(Date.now() + settleMs + 60_000));
+        const [match] = hers(await adminBrain.entityMatches());
+        if (match === undefined) {
+          throw new Error("Not linked yet");
+        }
+        return match;
+      },
+      { timeout: 60_000, interval: 200 }
+    );
+    const [first = "", second = ""] = proposed.entities.map(({ id }) => id);
+    const decision: EntityMatchDecisionInput = {
+      entities: [first, second],
+      decision: "same",
+      evidence: { documentId: proof.id, version: 1 },
+    };
+    const byMember = await outcome(memberBrain.decideEntityMatch(decision));
+    const memberSees = hers(await memberBrain.entityMatches());
+    const decided = await adminBrain.decideEntityMatch(decision);
+    const byColleague = await outcome(
+      colleague.api.knowledge.decideEntityMatch({
         entities: [first, second],
-        decision: "same",
-        evidence: { documentId: proof.id, version: 1 },
-      };
-      const byMember = await outcome(memberBrain.decideEntityMatch(decision));
-      const memberSees = hers(await memberBrain.entityMatches());
-      const decided = await adminBrain.decideEntityMatch(decision);
-      const byColleague = await outcome(
-        colleague.api.knowledge.decideEntityMatch({
-          entities: [first, second],
-          decision: "different",
-        })
-      );
-      const events = await allEvents();
+        decision: "different",
+      })
+    );
+    const events = await allEvents();
 
-      expect({
-        sides: proposed.entities
-          .flatMap(({ collectionIds }) => collectionIds)
-          .toSorted(),
-        memberSees,
-        byMember,
-        decided: decided.decision,
-        byColleague,
-        left: hers(await adminBrain.entityMatches()),
-        audited: events.filter(
-          ({ action, target }) =>
-            action === "brain.entity_match.decided" &&
-            target?.id === [first, second].toSorted().join(":")
-        ).length,
-      }).toStrictEqual({
-        sides: [open, hidden].toSorted(),
-        // The board's Rosa is no side of anything the member sees, and
-        // deciding on her is refused as for an entity that isn't there.
-        memberSees: [],
-        byMember: "brain.not_found",
-        decided: "same",
-        // Only the decider or an admin replaces a decision.
-        byColleague: "brain.denied",
-        left: [],
-        audited: 1,
-      });
-    } finally {
-      spy.mockRestore();
-    }
+    expect({
+      sides: proposed.entities
+        .flatMap(({ collectionIds }) => collectionIds)
+        .toSorted(),
+      memberSees,
+      byMember,
+      decided: decided.decision,
+      byColleague,
+      left: hers(await adminBrain.entityMatches()),
+      audited: events.filter(
+        ({ action, target }) =>
+          action === "brain.entity_match.decided" &&
+          target?.id === [first, second].toSorted().join(":")
+      ).length,
+    }).toStrictEqual({
+      sides: [open, hidden].toSorted(),
+      // The board's Rosa is no side of anything the member sees, and
+      // deciding on her is refused as for an entity that isn't there.
+      memberSees: [],
+      byMember: "brain.not_found",
+      decided: "same",
+      // Only the decider or an admin replaces a decision.
+      byColleague: "brain.denied",
+      left: [],
+      audited: 1,
+    });
   });
 });
