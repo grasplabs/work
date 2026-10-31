@@ -251,11 +251,12 @@ export const loadWakesOf = async (run: string): Promise<number[]> =>
   );
 
 /**
- * Once `run` waits in round `round` of waiting for load: the engine has
- * the run waiting, and that round's wait, its latest, under way. With
- * `end`, the round then ends now, as its time passing would (`woken`):
- * its deadline, and the run's alarm with it, moved to now. Read and moved
- * in one go in the run's object, so the round can't end on its own
+ * Once `run` waits in round `round` of waiting for load, or a later one:
+ * the engine has the run waiting, its latest round's wait under way. With
+ * `end`, round `round` then ends now, as its time passing would (`woken`):
+ * its deadline, and the run's alarm with it, moved to now; a round that
+ * already ended on its own (a runner stalled past it) is left be. Read and
+ * moved in one go in the run's object, so the round can't end on its own
  * between the two. A test drives rounds so, round by round, instead of
  * sleeping for as long as it guesses they take on a busy runner.
  */
@@ -281,12 +282,12 @@ export const inRound = async (
           const latest = rounds.at(-1);
           if (
             current?.status !== "waiting" ||
-            rounds.length !== round ||
+            rounds.length < round ||
             latest?.state !== "waiting"
           ) {
             return false;
           }
-          if (end) {
+          if (end && rounds.length === round) {
             const now = Date.now();
             sql.exec(
               "UPDATE steps SET deadline = ? WHERE ordinal = ?",
