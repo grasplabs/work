@@ -32,7 +32,9 @@ const db = adminDatabase(env.DB);
 /** A live organization named `name`, whose core reports `spend` on Grasp's keys. */
 const liveClient = async (
   name: string,
-  spend: { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
+  spend:
+    | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
+    | "unreported"
 ) => {
   const release = await placedRelease("feat(core): platform AI spend");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
@@ -126,6 +128,33 @@ describe("what Grasp's own AI features cost", () => {
     });
   });
 
+  it("still reads the AI status of a core on an earlier release, which reports no spend, and says its release doesn't report it, leaving it out of the sums", async () => {
+    const before = await liveClient("Oudegracht", "unreported");
+    await liveClient("Acme", { thisMonth: [conversion(1_250_000)] });
+
+    const own = await page(`/organizations/${before}/ai-use`);
+    const spend = await callServerFn(fetchPlatformSpend);
+    const platform = await page("/platform/ai");
+
+    expect({
+      status: own.status,
+      saysUnreported: own.html.includes("Not reported by this release"),
+      sum: spend.thisMonth.micros,
+      unread: spend.unread,
+      unreported: spend.unreported,
+      platformSays: platform.html.includes(
+        "Not reported by their release, so not in these sums: Oudegracht."
+      ),
+    }).toStrictEqual({
+      status: 200,
+      saysUnreported: true,
+      sum: 1_250_000,
+      unread: [],
+      unreported: ["Oudegracht"],
+      platformSays: true,
+    });
+  });
+
   it("sums every active organization's on Platform → AI, this month and last, with those that cost the most this month first and none that cost nothing", async () => {
     const thisPeriod = monthBack(0);
     const lastPeriod = monthBack(1);
@@ -160,6 +189,7 @@ describe("what Grasp's own AI features cost", () => {
       })),
       organizations: spend.organizations,
       unread: spend.unread,
+      unreported: spend.unreported,
       shown: tableText(html, "Top organizations"),
     }).toStrictEqual({
       thisMonth: {
@@ -195,6 +225,7 @@ describe("what Grasp's own AI features cost", () => {
       ],
       organizations: 4,
       unread: [],
+      unreported: [],
       shown: `Organization ${thisMonth} ${lastMonth} Calder $5.00 $0.00 Acme $3.55 $0.50 Brightline $0.00 $9.00`,
     });
   });

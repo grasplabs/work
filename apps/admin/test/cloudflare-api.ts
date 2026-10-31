@@ -34,7 +34,10 @@ import {
   aiStatusReportPurpose,
   aiStatusReportRequestSchema,
 } from "@grasp-os/shared/ai-status-report";
-import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
+import type {
+  AiStatusReport,
+  PlatformSpendRow,
+} from "@grasp-os/shared/ai-status-report";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -401,21 +404,25 @@ export const monthBack = (monthsBack: number): string => {
 
 /**
  * A core's AI status report: `providers`, and what Grasp's own features
- * cost on its keys this month and last (none unless given).
+ * cost on its keys this month and last (none unless given), or no spend
+ * at all (`unreported`), as a core on a release before it was reported
+ * answers.
  */
 export const aiStatusOf = (
   providers: AiStatusReport["providers"] = [],
-  spend: {
-    thisMonth?: AiStatusReport["platformSpend"]["thisMonth"]["rows"];
-    lastMonth?: AiStatusReport["platformSpend"]["lastMonth"]["rows"];
-  } = {}
-): AiStatusReport => ({
-  providers,
-  platformSpend: {
-    thisMonth: { period: monthBack(0), rows: spend.thisMonth ?? [] },
-    lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
-  },
-});
+  spend:
+    | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
+    | "unreported" = {}
+): AiStatusReport =>
+  spend === "unreported"
+    ? { providers }
+    : {
+        providers,
+        platformSpend: {
+          thisMonth: { period: monthBack(0), rows: spend.thisMonth ?? [] },
+          lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
+        },
+      };
 
 /**
  * What a client's core answers the admin's AI status request with, as

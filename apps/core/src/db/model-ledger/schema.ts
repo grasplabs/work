@@ -146,6 +146,9 @@ export const requests = sqliteTable(
     index("requests_settled_at").on(table.settledAt),
     // The leases held: requests in flight, by when they end.
     index("requests_leases").on(table.state, table.leaseEndsAt),
+    // Grasp's own features' requests, month by month: what the admin's
+    // spend overview sums (`platformSpend`), never a scan of them all.
+    index("requests_credential_period").on(table.credential, table.period),
   ]
 );
 

@@ -181,6 +181,21 @@ const Line = ({ children }: { children: string }) => (
   <p className="text-muted-foreground border-t px-5 py-4">{children}</p>
 );
 
+/** What its core reported, or that its release doesn't report it yet. */
+const OrganizationSpendBody = ({
+  overview,
+}: {
+  overview: SpendOverview | null;
+}) =>
+  overview === null ? (
+    <Line>
+      Not reported by this release: its core runs a release from before these
+      costs were reported. They show once it is updated.
+    </Line>
+  ) : (
+    <SpendBody overview={overview} />
+  );
+
 /**
  * One organization's spend on Grasp's keys, as its core reports it now,
  * on its AI use. Read only.
@@ -201,7 +216,7 @@ export const OrganizationPlatformSpend = ({
             Its core didn’t answer, so what they cost isn’t known now.
           </Line>
         ) : (
-          <SpendBody overview={organizationSpendOf(report)} />
+          <OrganizationSpendBody overview={organizationSpendOf(report)} />
         )
       }
     </Await>
@@ -258,9 +273,13 @@ const TopOrganizations = ({
   </div>
 );
 
-/** Which organizations aren't in the sums, if any. */
+/** Which organizations aren't in the sums, as their core didn't answer. */
 const unreadLine = ({ unread, organizations }: PlatformSpend): string =>
   `Read from ${organizations - unread.length} of ${organizations} active organizations. Not in these sums, as their core didn’t answer: ${unread.join(", ")}.`;
+
+/** Which organizations aren't in the sums, as their core's release doesn't report it. */
+const unreportedLine = ({ unreported }: PlatformSpend): string =>
+  `Not reported by their release, so not in these sums: ${unreported.join(", ")}.`;
 
 /**
  * Every active organization's spend on Grasp's keys summed, read from
@@ -287,6 +306,9 @@ export const PlatformSpendPanel = ({
               <TopOrganizations overview={all} top={all.top} />
             )}
             {all.unread.length === 0 ? null : <Line>{unreadLine(all)}</Line>}
+            {all.unreported.length === 0 ? null : (
+              <Line>{unreportedLine(all)}</Line>
+            )}
           </>
         );
       }}

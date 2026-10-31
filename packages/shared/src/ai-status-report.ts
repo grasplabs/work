@@ -80,10 +80,17 @@ export const aiStatusReportSchema = z.strictObject({
    * then every provider Grasp's own key was used with (`platform`).
    */
   providers: z.array(aiProviderStatusSchema).max(16),
-  /** What Grasp's own features cost on its keys, this month and last. */
-  platformSpend: z.strictObject({
-    thisMonth: platformMonthSpendSchema,
-    lastMonth: platformMonthSpendSchema,
-  }),
+  /**
+   * What Grasp's own features cost on its keys, this month and last.
+   * Optional: a core on an earlier release reports its providers only,
+   * and the admin and the cores roll out on their own, so its AI status
+   * still reads, its spend shown as not reported by its release.
+   */
+  platformSpend: z
+    .strictObject({
+      thisMonth: platformMonthSpendSchema,
+      lastMonth: platformMonthSpendSchema,
+    })
+    .optional(),
 });
 export type AiStatusReport = z.infer<typeof aiStatusReportSchema>;

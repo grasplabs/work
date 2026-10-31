@@ -48,20 +48,20 @@ export const platformSpend = async (
   );
   const thisPeriod = periodOf(now, 0);
   const lastPeriod = periodOf(now, 1);
-  const months = reports.flatMap(({ report }) =>
-    report === null
+  // A core on a release before it reported spend answers its providers
+  // only: not in the sums, and named for it.
+  const reported = reports.flatMap(({ client, report }) =>
+    report?.platformSpend === undefined
       ? []
-      : [report.platformSpend.thisMonth, report.platformSpend.lastMonth]
+      : [{ client, spend: report.platformSpend }]
   );
-  const top = reports
-    .flatMap(({ client, report }) => {
-      if (report === null) {
-        return [];
-      }
-      const own = [
-        report.platformSpend.thisMonth,
-        report.platformSpend.lastMonth,
-      ];
+  const months = reported.flatMap(({ spend }) => [
+    spend.thisMonth,
+    spend.lastMonth,
+  ]);
+  const top = reported
+    .flatMap(({ client, spend: reportedSpend }) => {
+      const own = [reportedSpend.thisMonth, reportedSpend.lastMonth];
       const spend = {
         clientId: client.id,
         name: client.name,
@@ -84,6 +84,11 @@ export const platformSpend = async (
     organizations: active.length,
     unread: reports
       .filter(({ report }) => report === null)
+      .map(({ client }) => client.name),
+    unreported: reports
+      .filter(
+        ({ report }) => report !== null && report.platformSpend === undefined
+      )
       .map(({ client }) => client.name),
   };
 };

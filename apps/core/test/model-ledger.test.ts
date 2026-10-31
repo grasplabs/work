@@ -1,6 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Admission, LedgerScope } from "../src/model-ledger.ts";
 import { allEvents } from "./audit-events.ts";
@@ -181,6 +181,29 @@ const spendOf = async (ledger: ReturnType<typeof newLedger>, key = "ada") => {
 };
 
 describe("the model ledger", () => {
+  it("sums what Grasp's own features cost by an index of its requests' months, never a scan of every request kept", async () => {
+    const ledger = newLedger();
+
+    const plan = await runInDurableObject(ledger, async (instance, state) => {
+      const exec = vi.spyOn(state.storage.sql, "exec");
+      await instance.platformSpend(["2400-01", "2399-12"]);
+      const [query = "", ...rest] = exec.mock.calls.at(-1) ?? [];
+      const values: unknown[] = rest;
+      exec.mockRestore();
+      return state.storage.sql
+        .exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, ...values)
+        .toArray()
+        .map(({ detail }) => detail);
+    });
+
+    expect({
+      scansRequests: plan.some((step) => /^SCAN requests\b/u.test(step)),
+      byIndex: plan.some((step) =>
+        step.includes("USING INDEX requests_credential_period")
+      ),
+    }).toStrictEqual({ scansRequests: false, byIndex: true });
+  });
+
   it("admits concurrent requests only while their reservations fit every scope together, and refuses the rest whole", async () => {
     const ledger = newLedger();
     const team = {

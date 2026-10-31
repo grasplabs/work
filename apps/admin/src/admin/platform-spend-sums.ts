@@ -47,6 +47,11 @@ export interface PlatformSpend extends SpendOverview {
   organizations: number;
   /** The active organizations whose core didn't answer: not in the sums. */
   unread: string[];
+  /**
+   * The active organizations whose core answered on a release that
+   * doesn't report what Grasp's features cost: not in the sums either.
+   */
+  unreported: string[];
 }
 
 /** `rows` summed by `keyOf`, the dearest first. */
@@ -86,14 +91,17 @@ export const monthSpendOf = (
   };
 };
 
-/** One organization's, as its core reported its months. */
+/** One organization's, as its core reported its months; null when its release doesn't report them. */
 export const organizationSpendOf = ({
   platformSpend,
-}: AiStatusReport): SpendOverview => ({
-  thisMonth: monthSpendOf(platformSpend.thisMonth.period, [
-    platformSpend.thisMonth,
-  ]),
-  lastMonth: monthSpendOf(platformSpend.lastMonth.period, [
-    platformSpend.lastMonth,
-  ]),
-});
+}: AiStatusReport): SpendOverview | null =>
+  platformSpend === undefined
+    ? null
+    : {
+        thisMonth: monthSpendOf(platformSpend.thisMonth.period, [
+          platformSpend.thisMonth,
+        ]),
+        lastMonth: monthSpendOf(platformSpend.lastMonth.period, [
+          platformSpend.lastMonth,
+        ]),
+      };
