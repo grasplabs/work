@@ -372,10 +372,9 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   ]) {
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
     await page.goto(`/sign-in?returnTo=${encodeURIComponent(elsewhere)}`);
+    // Chat's box, whether its heading greets or offers the tour.
     // oxlint-disable-next-line no-await-in-loop -- one address at a time
-    await expect(
-      page.getByRole("heading", { name: "What should we look at today?" })
-    ).toBeVisible();
+    await expect(page.getByLabel("Your question")).toBeVisible();
     expect(page.url()).toBe(`${origin}/`);
   }
 });

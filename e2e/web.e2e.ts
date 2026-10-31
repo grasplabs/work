@@ -54,6 +54,16 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
+test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+  page,
+}) => {
+  await page.goto(`/interview#${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "This interview can't be opened" })
+  ).toBeVisible();
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+});
+
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({
   context,
   page,
