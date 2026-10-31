@@ -97,7 +97,22 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
-import { ChevronRightIcon, InfoIcon } from "lucide-react";
+import {
+  Tile,
+  TileContent,
+  TileDescription,
+  TileField,
+  TileMeta,
+  TileSheet,
+  TileSheetBar,
+  TileTitle,
+} from "@grasp-os/ui/components/tile";
+import {
+  ChevronRightIcon,
+  CogIcon,
+  InfoIcon,
+  LayoutGridIcon,
+} from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -326,6 +341,27 @@ const ItemDemo = () => (
   </div>
 );
 
+const TileDemo = () => (
+  <Tile className="max-w-sm">
+    <TileField painting="dawn" pattern="columns">
+      <Badge variant="passed">Published</Badge>
+      <TileSheet>
+        <TileSheetBar icon={<LayoutGridIcon />}>Board</TileSheetBar>
+      </TileSheet>
+    </TileField>
+    <TileContent>
+      <TileTitle href="#board">Board</TileTitle>
+      <TileDescription>
+        Every open lead, from first call to contract.
+      </TileDescription>
+      <TileMeta>
+        <CogIcon aria-hidden="true" />
+        Sales pipeline
+      </TileMeta>
+    </TileContent>
+  </Tile>
+);
+
 const KbdDemo = () => (
   <p className="text-sm">
     Search with{" "}
@@ -472,4 +508,5 @@ export const displayDemos = {
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
+  tile: TileDemo,
 };

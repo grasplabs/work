@@ -943,6 +943,21 @@ export const graspComponents = {
       "A check that lands with a pulse, for a step that went through. Decorative: say what succeeded beside it.",
     exports: ["SuccessMark"],
   },
+  tile: {
+    status: "supported",
+    summary:
+      "Something to open, as the brand shows the product: a white sheet on a painted field (`TileField`, `TileSheet`, `TileSheetBar`), then its title, whose `render` makes it the link over the whole tile, a description and a quiet last line (`TileMeta`). A `Badge` in the field sits top left.",
+    exports: [
+      "Tile",
+      "TileContent",
+      "TileDescription",
+      "TileField",
+      "TileMeta",
+      "TileSheet",
+      "TileSheetBar",
+      "TileTitle",
+    ],
+  },
   "split-pane": {
     status: "supported",
     summary:
