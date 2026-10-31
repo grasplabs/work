@@ -33,7 +33,7 @@ import {
   teams,
   workflowBindingApprovals,
 } from "./db/core/schema.ts";
-import { gatewaySettings } from "./models.ts";
+import { modelSettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 import { pinnedTemplate } from "./resource-templates.ts";
 import { isRestricted, restrict } from "./restricted.ts";
@@ -561,7 +561,8 @@ export const requireTargetServes = async (
   }
   switch (target.kind) {
     case "model": {
-      if (!gatewaySettings(env).models.includes(target.model)) {
+      const { models: allowed } = await modelSettings(env);
+      if (!allowed.includes(target.model)) {
         throw invalid("target.model: The deployment doesn't allow it.");
       }
       return;

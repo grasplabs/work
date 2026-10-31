@@ -1,17 +1,6 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/ui/components/breadcrumb";
-import { Separator } from "@grasp-os/ui/components/separator";
-import { SidebarTrigger } from "@grasp-os/ui/components/sidebar";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { SiteHeader as SiteHeaderBar } from "@grasp-os/ui/components/site-header";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
@@ -103,75 +92,33 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   );
 };
 
-const CrumbLink = ({ crumb }: { crumb: Crumb }) => {
-  if (!("to" in crumb)) {
-    return <BreadcrumbPage>{crumb.label}</BreadcrumbPage>;
-  }
-  return (
-    <BreadcrumbLink render={crumbLink(crumb)}>{crumb.label}</BreadcrumbLink>
-  );
-};
-
 /**
- * The bar above every signed-in page: the sidebar's trigger, then where the
- * page is, and on the right any page action. It stays in view while the
- * page scrolls. On one line whatever the window: on a narrow one only the
- * step before the page is kept. With no crumbs yet (the page is loading), a
- * skeleton where they will be.
+ * The bar above every signed-in page (`SiteHeader` in the kit, the same
+ * as the admin's): the sidebar's trigger, then where the page is, and on
+ * the right any page action. `phoneCrumbs` says which crumbs a phone
+ * keeps (the kit's `phoneCrumbs`).
  */
 export const SiteHeader = ({
   crumbs,
   actions,
+  phoneCrumbs,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
-  const last = crumbs.length - 1;
   return (
-    <header className="bg-background sticky top-0 z-30 flex h-(--header-height) shrink-0 items-center border-b">
-      {/* A square of its own, as wide as a page sidebar's rail, so the
-          line beside it continues that sidebar's edge. */}
-      <div className="flex h-full w-12 flex-none items-center justify-center">
-        <SidebarTrigger label={t`Show or hide the sidebar`} />
-      </div>
-      <Separator
-        className="-ml-px h-4 data-vertical:self-auto"
-        orientation="vertical"
-      />
-      <div className="flex min-w-0 flex-1 items-center gap-1 px-4 lg:gap-2 lg:pr-6">
-        {crumbs.length === 0 ? (
-          <Skeleton className="h-4 w-32" />
-        ) : (
-          <Breadcrumb aria-label={t`Breadcrumb`} className="min-w-0">
-            <BreadcrumbList className="flex-nowrap">
-              {crumbs.map((crumb, index) => (
-                <Fragment key={`${index}:${crumb.label}`}>
-                  {index > 0 ? (
-                    <BreadcrumbSeparator
-                      className={index < last ? "max-md:hidden" : undefined}
-                    />
-                  ) : null}
-                  <BreadcrumbItem
-                    className={
-                      index === last
-                        ? "min-w-8"
-                        : `flex-none ${index < last - 1 ? "max-md:hidden" : ""}`
-                    }
-                  >
-                    <CrumbLink crumb={crumb} />
-                  </BreadcrumbItem>
-                </Fragment>
-              ))}
-            </BreadcrumbList>
-          </Breadcrumb>
-        )}
-        {actions === undefined ? null : (
-          <div className="ml-auto flex flex-none items-center gap-2">
-            {actions}
-          </div>
-        )}
-      </div>
-    </header>
+    <SiteHeaderBar
+      actions={actions}
+      phoneCrumbs={phoneCrumbs}
+      breadcrumbLabel={t`Breadcrumb`}
+      crumbs={crumbs.map((crumb) =>
+        "to" in crumb
+          ? { label: crumb.label, link: crumbLink(crumb) }
+          : { label: crumb.label }
+      )}
+      triggerLabel={t`Show or hide the sidebar`}
+    />
   );
 };

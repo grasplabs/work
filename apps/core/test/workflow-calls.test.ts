@@ -73,7 +73,7 @@ import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled, StepError } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { cpuLimitKill } from "../src/workflows/host.ts";
+import { cpuLimitKill, modelCallLimitOf } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import { quotaPolicy } from "../src/workflows/quotas.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
@@ -129,6 +129,10 @@ const idp = mockIdp();
 
 /** The model the test deployment's gateway allows (vite.config.ts). */
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+/** Whether `value` is a function, as host.ts's `modelCallLimitOf` is. */
+const isModelCallLimitOf = (value: unknown): value is typeof modelCallLimitOf =>
+  typeof value === "function";
 
 const identityOf = (userId: string, role: Role): Identity => ({
   userId,
@@ -1545,11 +1549,28 @@ describe("a JSON workflow's model call limit, when the quota policy can't be rea
   });
 
   it("holds a run on an isolate that never read the policy to the platform's limit", async () => {
-    // A fresh isolate's module, which has read no policy yet.
-    vi.resetModules();
-    const { modelCallLimitOf } = await import("../src/workflows/host.ts");
+    // A fresh isolate's module, which has read no policy yet: host.ts
+    // loaded again, under an ID of its own. Not by resetting the module
+    // registry: the files after this one share its runtime (`isolate:
+    // false`), and their setup would load anew what it loads once per
+    // runtime, the env as configured among it (configured-env.ts).
+    const freshHost = "../src/workflows/host.ts?isolate=fresh";
+    const fresh: unknown = await import(
+      /* @vite-ignore */
+      freshHost
+    );
+    const freshLimitOf: unknown =
+      typeof fresh === "object" && fresh !== null
+        ? Reflect.get(fresh, "modelCallLimitOf")
+        : undefined;
+    if (
+      !isModelCallLimitOf(freshLimitOf) ||
+      freshLimitOf === modelCallLimitOf
+    ) {
+      throw new Error("Expected host.ts loaded afresh");
+    }
     const { failed, value } = await withPolicyReadFailingOnce(
-      async () => await modelCallLimitOf(env),
+      async () => await freshLimitOf(env),
       { by: "modelCallLimitOf" }
     );
 

@@ -29,6 +29,8 @@ test("offers the tour on first sign-in, takes it to its end, and starts it again
     "Welcome to Grasp. Shall I show you around?"
   );
   await tour.getByRole("button", { name: "Start the tour" }).click();
+  // The button it was on is gone: focus is on his card.
+  await expect(tour).toBeFocused();
   await expect(tour).toContainText("Are you ready?");
   await tour.getByRole("button", { name: "I’m ready" }).click();
   for (const [index, [address, line]] of stops.entries()) {

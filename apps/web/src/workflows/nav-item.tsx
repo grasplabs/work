@@ -8,13 +8,12 @@ import {
   SidebarMenuSubItem,
 } from "@grasp-os/ui/components/sidebar";
 import { Plural, Trans } from "@lingui/react/macro";
-import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { useCore } from "../use-core.ts";
+import { useFrameRead } from "../frame/frame-read.ts";
 
 // The nav's way to Workflows, with how many workflows need the person, as
 // the prototype's badge (`components/app-sidebar.tsx`, `needsYou` in
@@ -22,8 +21,8 @@ import { useCore } from "../use-core.ts";
 // What needs them today is a decision of a run waiting for their answer;
 // a change waiting for its test and approval, and a workflow in testing,
 // join it with the workflow lifecycle (GRA-512). Read again as the
-// Dashboard's count is (dashboard/nav-item.tsx): on every other page the
-// person opens and after every change on one.
+// Dashboard's count is (frame/frame-read.ts): after every change on a page,
+// and on the way to another once the count is older than half a minute.
 
 /** The workflow a decision's run belongs to: an App's, or an independent one. */
 const workflowOf = (decision: DecisionView): string =>
@@ -53,39 +52,8 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
  * the person is in Workflows.
  */
 export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
-  const router = useRouter();
   const matchRoute = useMatchRoute();
-  const core = useCore();
-  const [waiting, setWaiting] = useState<number>();
-  useEffect(() => {
-    // Each read's number: only the latest one's count is shown.
-    let latest = 0;
-    const read = async (): Promise<void> => {
-      latest += 1;
-      const mine = latest;
-      const count = await readCount(core);
-      if (mine === latest) {
-        setWaiting(count);
-      }
-    };
-    void read();
-    // Again once another page has loaded, and after a change on this one
-    // (the page reads again, its address unchanged); not when only the
-    // search changes, as a filter typed into does.
-    const unsubscribe = router.subscribe(
-      "onResolved",
-      ({ pathChanged, hrefChanged }) => {
-        if (pathChanged || !hrefChanged) {
-          void read();
-        }
-      }
-    );
-    return () => {
-      // Nothing read after this is shown.
-      latest += 1;
-      unsubscribe();
-    };
-  }, [router, core]);
+  const { value: waiting } = useFrameRead(readCount);
   const shown = waiting !== undefined && waiting > 0;
   // As the prototype's: Requests is under Workflows while the person is
   // in them, and lit on its own there.
@@ -104,7 +72,7 @@ export const WorkflowsItem = ({ requests = false }: { requests?: boolean }) => {
         </span>
         {/* Inside the link, so its name says how many need the person. */}
         {shown ? (
-          <SidebarMenuBadge className="top-1.5">
+          <SidebarMenuBadge placement="inside">
             <span aria-hidden="true">{waiting}</span>
             <span className="sr-only">
               <Plural

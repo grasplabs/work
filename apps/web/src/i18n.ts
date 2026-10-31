@@ -1,6 +1,8 @@
 import { i18n } from "@lingui/core";
 import type { Messages } from "@lingui/core";
 
+import { localeCookie, pickLocale } from "./locale-choice.ts";
+
 // The languages the frontend speaks: English is written in the code, the
 // others are catalogs in `locales/<locale>/messages.po` (lingui.config.ts).
 // Each is named in its own words, so anyone can find theirs.
@@ -18,8 +20,6 @@ export type Locale = keyof typeof localeNames;
 export const isLocale = (value: unknown): value is Locale =>
   typeof value === "string" && Object.hasOwn(localeNames, value);
 
-/** The person's choice, kept for this browser. Not a secret, read by no server. */
-const localeCookie = "grasp-locale";
 const aYear = 365 * 24 * 60 * 60 * 1000;
 
 const catalogs: Record<Locale, () => Promise<{ messages: Messages }>> = {
@@ -31,21 +31,15 @@ const catalogs: Record<Locale, () => Promise<{ messages: Messages }>> = {
 };
 
 /** The language the person chose in this browser, if they did. */
-const chosenLocale = async (): Promise<Locale | undefined> => {
+const chosenLocale = async (): Promise<string | undefined> => {
   try {
     const cookie = await cookieStore.get(localeCookie);
-    return isLocale(cookie?.value) ? cookie.value : undefined;
+    return cookie?.value;
   } catch {
     // Without the Cookie Store API (an older browser), nothing was kept.
     return undefined;
   }
 };
-
-/** The first of the browser's languages the frontend speaks. */
-const browserLocale = (): Locale | undefined =>
-  navigator.languages
-    .map((tag) => tag.toLowerCase().split("-")[0])
-    .find(isLocale);
 
 /** Loads a language and switches every message to it. */
 const activate = async (locale: Locale): Promise<void> => {
@@ -61,7 +55,12 @@ const activate = async (locale: Locale): Promise<void> => {
  * English, so the page still says something.
  */
 export const startI18n = async (): Promise<void> => {
-  const locale = (await chosenLocale()) ?? browserLocale() ?? "en";
+  const picked = pickLocale(
+    await chosenLocale(),
+    navigator.languages,
+    Object.keys(localeNames)
+  );
+  const locale = isLocale(picked) ? picked : "en";
   try {
     await activate(locale);
   } catch (error) {

@@ -183,8 +183,15 @@ export const InterviewFrame = ({
   middle,
   right,
   box,
+  open = false,
   children,
 }: {
+  /**
+   * Whether the interview is open on this device, so what they say is
+   * kept: only then does the frame say "Saved". A link that can't be
+   * opened, or is open elsewhere, has kept nothing here.
+   */
+  open?: boolean;
   /** Where the frame's top and bottom are measured, so the stage takes what is left. */
   top: RefObject<HTMLElement | null>;
   bottom: RefObject<HTMLElement | null>;
@@ -221,7 +228,7 @@ export const InterviewFrame = ({
       <div className="flex items-center justify-between sm:contents">
         <div className="flex h-14 items-center gap-2 sm:order-1 sm:flex-1 sm:basis-0">
           <GraspMark className="size-5 flex-none" />
-          <SaveNote />
+          {open ? <SaveNote /> : null}
         </div>
         <div className="flex h-14 items-center justify-end sm:order-3 sm:flex-1 sm:basis-0">
           <LanguageButton />
@@ -667,6 +674,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
           <PhaseBar phase={reading ? "readback" : progress.phase} />
         ) : null
       }
+      open
       right={right}
       top={top}
     >

@@ -1,6 +1,7 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   Link,
@@ -17,13 +18,15 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { buildsApp } from "../engines/app-role.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
+import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -37,9 +40,15 @@ import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
-import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
 import type { AskOptions } from "./use-ask.ts";
+
+// The conversation, with its Markdown and code highlighting, loads once a
+// chat is open: most pages show the dock folded or empty.
+const ChatThread = lazy(async () => {
+  const { ChatThread: thread } = await import("./thread.tsx");
+  return { default: thread };
+});
 
 // Grasp's chat on every page but Chat's own, bottom right, as in the
 // prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
@@ -63,7 +72,7 @@ interface Offered {
 /** The models a question may name, as core lists them, with their efforts. */
 const readModels = async (
   core: CoreConnection,
-  signal?: AbortSignal
+  signal: AbortSignal
 ): Promise<Loaded<Offered>> =>
   await loadFromCore(
     core,
@@ -78,53 +87,67 @@ const readModels = async (
   );
 
 /**
- * The models a question may name, read once the dock is shown and again
- * on `retry`, as after core was out of reach.
+ * Why nothing can be asked yet, if that is so: the models are what a
+ * question names. None offered means no AI provider to call yet, or none
+ * of its models chosen: `provider`, said as a state with the way out.
  */
-const useModels = (): {
-  models: Loaded<Offered> | undefined;
-  retry: () => void;
-} => {
-  const core = useCore();
-  const [models, setModels] = useState<Loaded<Offered>>();
-  useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await readModels(core, left.signal);
-      if (!left.signal.aborted) {
-        setModels(loaded);
-      }
-    };
-    void read();
-    return () => {
-      left.abort();
-    };
-  }, [core]);
-  return {
-    models,
-    retry: () => {
-      setModels(undefined);
-      void (async () => {
-        setModels(await readModels(core));
-      })();
-    },
-  };
-};
-
-/** Why nothing can be asked yet, if that is so: the models are what a question names. */
 const useNoModels = (
   models: Loaded<Offered> | undefined
-): string | undefined => {
+): { why: "provider" } | { why: "read"; text: string } | undefined => {
   const { t } = useLingui();
   if (models === undefined || models.state === "ready") {
     return models?.state === "ready" && models.data.models.length === 0
-      ? t`No model is set up for this deployment yet.`
+      ? { why: "provider" }
       : undefined;
   }
   if (models.state === "offline") {
-    return t`Grasp can't be reached right now. Try again in a moment.`;
+    return {
+      why: "read",
+      text: t`Grasp can't be reached right now. Try again in a moment.`,
+    };
   }
-  return models.state === "refused" ? models.message : undefined;
+  return models.state === "refused"
+    ? { why: "read", text: models.message }
+    : undefined;
+};
+
+/**
+ * Why nothing can be asked yet, under the box: the way to connect an AI
+ * provider, or why the models couldn't be read, with the way to read them
+ * again.
+ */
+const NoModels = ({
+  noModels,
+  open,
+  onRetry,
+}: {
+  noModels: NonNullable<ReturnType<typeof useNoModels>>;
+  open: boolean;
+  onRetry: (() => void) | undefined;
+}) => {
+  if (noModels.why === "provider") {
+    return (
+      <div className={open ? undefined : "px-3 pb-3"}>
+        <ConnectAiProvider size="xs" />
+      </div>
+    );
+  }
+  return (
+    <p
+      className={
+        open
+          ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
+          : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
+      }
+    >
+      {noModels.text}
+      {onRetry === undefined ? null : (
+        <Button onClick={onRetry} size="xs" variant="link">
+          <Trans>Try again</Trans>
+        </Button>
+      )}
+    </p>
+  );
 };
 
 /** A button in the dock's header, named by its label. */
@@ -245,31 +268,40 @@ const DockThread = ({
   failure: string | undefined;
   onRetry: () => void;
 }) => {
+  const { t } = useLingui();
   // Before anything is asked: a chat not made yet, or one made empty (an
   // App's, opened before its first question).
   if (chatId === undefined || (view.loaded && view.messages.length === 0)) {
     return <p className="text-muted-foreground flex-1 p-5">{empty}</p>;
   }
   return (
-    <ChatThread
-      chatId={chatId}
-      compact
-      loaded={view.loaded || failure !== undefined}
-      messages={view.messages}
-      onRetry={onRetry}
-      output={view.output}
-      partial={view.partial}
-      running={view.running}
-      tools={view.tools}
-    >
-      {failure === undefined && view.stopped === null ? null : (
-        <div className="flex flex-col gap-2">
-          <ErrorText>{failure}</ErrorText>
-          <ErrorText>{view.stopped ?? undefined}</ErrorText>
+    <Suspense
+      fallback={
+        <div className="flex flex-1 justify-center py-8">
+          <Spinner aria-label={t`Loading…`} />
         </div>
-      )}
-      <HeldWrites chatId={chatId} version={view.held} />
-    </ChatThread>
+      }
+    >
+      <ChatThread
+        chatId={chatId}
+        compact
+        loaded={view.loaded || failure !== undefined}
+        messages={view.messages}
+        onRetry={onRetry}
+        output={view.output}
+        partial={view.partial}
+        running={view.running}
+        tools={view.tools}
+      >
+        {failure === undefined && view.stopped === null ? null : (
+          <div className="flex flex-col gap-2">
+            <ErrorText>{failure}</ErrorText>
+            <ErrorText>{view.stopped ?? undefined}</ErrorText>
+          </div>
+        )}
+        <HeldWrites chatId={chatId} version={view.held} />
+      </ChatThread>
+    </Suspense>
   );
 };
 
@@ -408,14 +440,19 @@ const Dock = ({
   slot,
   words,
   app,
+  models,
+  retry,
 }: {
   slot: ChatSlot;
   words: DockWords;
   app?: string;
+  /** The models a question may name; none while they are read. */
+  models: Loaded<Offered> | undefined;
+  /** Reads the models again, as after core was out of reach. */
+  retry: () => void;
 }) => {
   const chatId = useActiveChat(slot);
   const { view, failure } = useFollowedChat(chatId);
-  const { models, retry } = useModels();
   const noModels = useNoModels(models);
   // Core out of reach or refusing may pass: the read can be asked for again.
   const canRetry = models !== undefined && models.state !== "ready";
@@ -540,20 +577,11 @@ const Dock = ({
           {box}
           <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (
-            <p
-              className={
-                open
-                  ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
-                  : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
-              }
-            >
-              {noModels}
-              {canRetry ? (
-                <Button onClick={retry} size="xs" variant="link">
-                  <Trans>Try again</Trans>
-                </Button>
-              ) : null}
-            </p>
+            <NoModels
+              noModels={noModels}
+              onRetry={canRetry ? retry : undefined}
+              open={open}
+            />
           )}
         </div>
       </section>
@@ -583,15 +611,22 @@ export const ChatDock = () => {
   const appPage = useMatch({ from: "/_shell/apps/$app", shouldThrow: false });
   const loaded = appPage?.loaderData;
   const app = loaded?.state === "ready" ? loaded.data.app : undefined;
-  // Chat is the chat at full size; a project's page has its own box,
-  // which starts a chat in the project.
-  if (pathname === "/" || pathname.startsWith("/projects/")) {
+  // Read here, once for every page, not by each dock: the brain's dock, each
+  // App's and the chat's take each other's place between pages, and each
+  // read them again when it did. Chat is the chat at full size, and a
+  // project's page has its own box, which starts a chat in the project:
+  // neither shows a dock, nor reads its models.
+  const shown = !(pathname === "/" || pathname.startsWith("/projects/"));
+  const { value: models, readAgain } = useFrameRead(readModels, shown);
+  if (!shown) {
     return null;
   }
   if (pathname === "/brain" || pathname.startsWith("/brain/")) {
     return (
       <Dock
         key="brain"
+        models={models}
+        retry={readAgain}
         slot="brain"
         words={{
           title: t`Ask the brain`,
@@ -613,6 +648,8 @@ export const ChatDock = () => {
       <Dock
         app={id}
         key={`app:${id}`}
+        models={models}
+        retry={readAgain}
         slot={appSlot(id)}
         words={{
           title: name,
@@ -625,6 +662,8 @@ export const ChatDock = () => {
   return (
     <Dock
       key="chat"
+      models={models}
+      retry={readAgain}
       slot="chat"
       words={{
         title: t`Ask Grasp`,

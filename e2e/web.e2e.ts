@@ -54,6 +54,16 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
+test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+  page,
+}) => {
+  await page.goto(`/interview#${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "This interview can't be opened" })
+  ).toBeVisible();
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+});
+
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({
   context,
   page,
@@ -229,8 +239,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
-  browser,
   context,
+  newContext,
   page,
 }) => {
   const { admin, member } = peopleIn("workspaceSettings");
@@ -248,7 +258,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await expect(zone).toHaveText(/^Amsterdam/u);
   await expect(page.getByText("European Union")).toBeVisible();
 
-  const other = await browser.newContext();
+  const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
   await theirs.goto("/settings/workspace");
@@ -593,13 +603,19 @@ test("never sends what it gave up on while core was out of reach, once core is b
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
 
-  // Core is back. Trying again asks who is signed in once more: that is the
-  // only status read sent, not the one the page gave up on as well.
+  // Core is back. Trying the page again reads the brain once more: that is
+  // the only read of it sent, not the one the page gave up on as well. The
+  // shell knew who was signed in already, and asks core nothing for it.
   refusing = false;
-  await page.getByRole("button", { name: "Try again" }).click();
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Try again" })
+    .click();
   await expect(
     page.getByRole("complementary", { name: "The brain" })
   ).toBeVisible({ timeout: reconnectMs });
-  const pings = sent.filter((message) => message.includes('["ping"]'));
-  expect(pings).toHaveLength(1);
+  const brainReads = sent.filter((message) =>
+    message.includes('["brain","read"]')
+  );
+  expect(brainReads).toHaveLength(1);
 });

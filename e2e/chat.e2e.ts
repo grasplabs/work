@@ -123,6 +123,10 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
+  // Offered the tour first, in the greeting's place: turned down, the box
+  // to ask in has the focus the gone button had.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByLabel("Your question")).toBeFocused();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -388,6 +392,26 @@ test("a person groups chats in a project with a goal and a document, moves them 
   await expect(scopeOf(chats, projectName)).toHaveCount(0);
   await expect(rowOf(chats, first)).toBeVisible();
   await expect(rowOf(chats, second)).toBeVisible();
+});
+
+test("a person starts a chat from one of the questions under the box", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  await page.goto("/");
+  // The questions wait while the tour is offered, as in the prototype:
+  // turned down, they are under the box.
+  await page.getByRole("button", { name: "Not now" }).click();
+  const questions = page.getByRole("list", { name: "Questions to start with" });
+  await expect(questions.getByRole("button")).toHaveCount(4);
+  await questions
+    .getByRole("button", { name: "What waits on me today?" })
+    .click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  await expect(
+    page.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
+  ).toHaveText("What waits on me today?");
 });
 
 test("a followed chat says core can't be reached when it stays out of reach", async ({

@@ -779,10 +779,6 @@ msgstr "{kind}, {severity}, {about} : {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} workflows connus sur {workflows}"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -2072,6 +2068,10 @@ msgstr "Un budget de modèles a atteint son seuil d’alerte ou est épuisé"
 msgid "A model call was refused"
 msgstr "Un appel de modèle a été refusé"
 
+#: src/settings/ai-providers.tsx
+msgid "A model your endpoint serves"
+msgstr "Un modèle que votre endpoint propose"
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "under an amount on a dashboard chart"
 msgid "a month"
@@ -2341,6 +2341,7 @@ msgid "Account"
 msgstr "Compte"
 
 #: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Action"
 msgstr "Action"
 
@@ -2420,6 +2421,7 @@ msgstr "ID de l’acteur"
 
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.settings.pulse.tsx
+#: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Ajouter"
@@ -2435,6 +2437,10 @@ msgstr "Ajouter une condition"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Add a domain for a second brand or an old one."
 msgstr "Ajoutez un domaine pour une deuxième marque ou une ancienne."
+
+#: src/settings/ai-providers.tsx
+msgid "Add a fallback"
+msgstr "Ajouter un modèle de secours"
 
 #: src/brain/goals-editor.tsx
 msgid "Add a goal"
@@ -2458,6 +2464,10 @@ msgstr "Ajouter une personne"
 msgid "Add a place"
 msgstr "Ajouter un lieu"
 
+#: src/settings/ai-providers.tsx
+msgid "Add a provider"
+msgstr "Ajouter un fournisseur"
+
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Add a team"
@@ -2471,9 +2481,17 @@ msgstr "Ajouter un widget"
 msgid "Add a word"
 msgstr "Ajouter un mot"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "Ajouter une app"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ajouter une exception"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "Ajouter une app"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -2691,6 +2709,12 @@ msgstr "L’IA est une fonction au sein d’une application plus large : sugge
 msgid "AI is a primary function of this app. It generates, decides or acts on data."
 msgstr "L’IA est une fonction principale de cette application. Elle génère, décide ou agit sur les données."
 
+#: src/routes/_shell.settings.ai-providers.tsx
+#: src/routes/_shell.settings.tsx
+#: src/settings/ai-providers.tsx
+msgid "AI providers"
+msgstr "Fournisseurs d'IA"
+
 #: src/routes/_shell.settings.spend.tsx
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
@@ -2794,7 +2818,7 @@ msgstr "Tous les appels"
 msgid "All calls together"
 msgstr "Tous les appels ensemble"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "All chats"
 msgstr "Tous les chats"
 
@@ -3399,6 +3423,10 @@ msgstr "Comme la liste de l’entreprise devrait les avoir. Son lien reste le m�
 msgid "As the kickoff suggests"
 msgstr "Comme le propose le lancement"
 
+#: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b."
+msgstr "Tel que votre endpoint le nomme, par exemple llama-3.3-70b."
+
 #: src/settings/stephen-card.tsx
 msgid "Ask"
 msgstr "Demander"
@@ -3446,6 +3474,10 @@ msgstr "Demander à Grasp"
 msgid "Ask Grasp for a widget"
 msgstr "Demander un widget à Grasp"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Demander à Grasp d’ajouter « {typed} »"
+
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le domaine apparaît à côté du chat, pour un aperçu avant d’être proposé."
@@ -3484,6 +3516,10 @@ msgstr "Demandez à l’éditeur où les données sont stockées et traitées av
 #: src/workflows/workflow-status.tsx
 msgid "Ask to go live with version {askable}"
 msgstr "Demander la mise en service de la version {askable}"
+
+#: src/frame/connect-ai-provider.tsx
+msgid "Ask your admin to connect an AI provider."
+msgstr "Demandez à votre admin de connecter un fournisseur d'IA."
 
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
@@ -3693,6 +3729,10 @@ msgstr "Retour aux utilisateurs"
 #: src/onboarding/work-record.tsx
 msgid "Back to what is still missing"
 msgstr "Retour à ce qui manque encore"
+
+#: src/settings/ai-providers.tsx
+msgid "Base URL"
+msgstr "URL de base"
 
 #: src/brain/brain.ts
 msgid "Became"
@@ -4044,6 +4084,7 @@ msgstr "Illisible"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -4118,10 +4159,6 @@ msgstr "Continuez là-bas. Vous n’avez plus cet appareil ? Demandez à la pers
 #: src/workflows/workflow-diagram.tsx
 msgid "Case {name}, when it holds"
 msgstr "Cas {name}, lorsqu'il s'applique"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Catégories"
 
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
@@ -4374,7 +4411,7 @@ msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sen
 msgstr "Les applications de chat où Grasp sait que c’est vous. Écrivez à Grasp dans l’une d’elles, et il vous envoie un lien pour relier votre compte ici. Dissociez celle que vous n’utilisez plus."
 
 #: src/chat/chat-more.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chat name"
 msgstr "Nom du chat"
@@ -4384,6 +4421,7 @@ msgid "Chat width"
 msgstr "Largeur du chat"
 
 #: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
 msgstr "Discussions"
@@ -4443,6 +4481,10 @@ msgstr "Chine"
 #: src/engines/resource-bindings.tsx
 msgid "Choose a collection"
 msgstr "Choisir une collection"
+
+#: src/settings/ai-providers.tsx
+msgid "Choose a model"
+msgstr "Choisir un modèle"
 
 #: src/settings/person-limits.tsx
 msgid "Choose a person or a team"
@@ -4754,7 +4796,7 @@ msgstr "Calculs"
 msgid "Condition {position}"
 msgstr "Condition {position}"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Configuration"
 msgstr "Configuration"
 
@@ -4813,6 +4855,10 @@ msgstr "Connecter {app}"
 msgid "Connect {name}"
 msgstr "Connecter {name}"
 
+#: src/onboarding/review-parts.tsx
+msgid "Connect a provider"
+msgstr "Connecter un fournisseur"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Connecter leurs propres comptes"
@@ -4820,6 +4866,11 @@ msgstr "Connecter leurs propres comptes"
 #: src/onboarding/place-picker.tsx
 msgid "Connect again"
 msgstr "Reconnecter"
+
+#: src/frame/connect-ai-provider.tsx
+#: src/onboarding/review-parts.tsx
+msgid "Connect an AI provider"
+msgstr "Connectez un fournisseur d'IA"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
@@ -4832,6 +4883,11 @@ msgstr "Connecter des comptes partagés et décider de ce que les domaines peuve
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
 msgstr "Connecté"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Connectées"
 
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
@@ -4869,13 +4925,25 @@ msgstr "Connectée dans Intégrations, via le connecteur propre à Grasp."
 msgid "Connected on"
 msgstr "Connectée le"
 
+#: src/settings/ai-providers.tsx
+msgid "Connected providers"
+msgstr "Fournisseurs connectés"
+
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Connecté, en direct"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow you can open"
+msgstr "Connectées, utilisées par aucun workflow que vous pouvez ouvrir"
+
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Connecté, via Composio"
+
+#: src/onboarding/review-parts.tsx
+msgid "Connected: {names}"
+msgstr "Connecté : {names}"
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5299,7 +5367,7 @@ msgstr "Décider"
 msgid "Decided on a held action"
 msgstr "A statué sur une action en attente"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -5331,6 +5399,10 @@ msgstr "Par défaut"
 #: src/settings/person-limits.tsx
 msgid "Default limit"
 msgstr "Limite par défaut"
+
+#: src/settings/ai-providers.tsx
+msgid "Default model"
+msgstr "Modèle par défaut"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -5906,8 +5978,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Chaque document fait au plus {maxKb} Ko."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Chaque domaine fait tourner une partie de l’activité : ses workflows, ses applications et ses connexions."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Chaque domaine est une partie de l’activité : ses workflows, ses applications et ses connexions."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -5941,7 +6013,7 @@ msgstr "Chaque exécution de workflow, avec les exécutions qu’elle lance"
 msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
 msgstr "Chaque exécution de workflow, avec les exécutions qu’elle lance, peut faire au plus 100 requêtes au modèle, nouvelles tentatives comprises."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Plus anciennes"
@@ -6156,6 +6228,10 @@ msgstr "Chaque lundi matin, pour vous"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Chaque lundi : heures, exécutions et ce qui est en attente."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Toutes les autres apps que Grasp peut connecter."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6325,10 +6401,6 @@ msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Exceptions"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Déplier les filtres"
-
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
@@ -6463,6 +6535,14 @@ msgstr "Échec : {0}"
 msgid "Failed: {failed}"
 msgstr "En échec : {failed}"
 
+#: src/settings/ai-providers.tsx
+msgid "Fallbacks"
+msgstr "Modèles de secours"
+
+#: src/settings/ai-providers.tsx
+msgid "Fallbacks, in order"
+msgstr "Modèles de secours, dans l'ordre"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Moins de {least} sur {of}"
@@ -6472,6 +6552,7 @@ msgid "Fewer than 10 users"
 msgstr "Moins de 10 utilisateurs"
 
 #: src/workflows/requests/request-needs.tsx
+#: src/workflows/requests/request-who.tsx
 msgid "Fewer than five of {reach} asked him"
 msgstr "Moins de cinq sur {reach} l’ont sollicité"
 
@@ -6541,11 +6622,6 @@ msgid "Filter integrations"
 msgstr "Filtrer les intégrations"
 
 #: src/activity/audit-log.tsx
-msgid "Filters"
-msgstr "Filtres"
-
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
 msgid "Filters"
 msgstr "Filtres"
 
@@ -6673,10 +6749,6 @@ msgstr "Signale ou bloque les applications qui l’enfreignent."
 msgid "Fold the chat away"
 msgstr "Replier le chat"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Replier les filtres"
-
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Fold the navigation"
@@ -6716,6 +6788,10 @@ msgstr "Pour {0}, déjà sollicité"
 msgid "For {person}"
 msgstr "Pour {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Pour une partie de l’activité, comme une gamme de produits ou un bureau. Il démarre vide : ce que Grasp y construit apporte ses workflows, ses applications et ses intégrations."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Pour un administrateur"
@@ -6737,6 +6813,10 @@ msgstr "pour tous les appels de modèle ce mois-ci"
 msgid "For everyone"
 msgstr "Pour tout le monde"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Par exemple Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Par exemple Personio ou Twinfield"
@@ -6744,6 +6824,10 @@ msgstr "Par exemple Personio ou Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Par exemple : répond aux questions des clients"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Par exemple : tout ce qui concerne les contrats de leasing, de la demande au renouvellement"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -6828,6 +6912,10 @@ msgstr "Depuis Google Drive. Je ne lis que les fichiers que vous ajoutez."
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Depuis SharePoint ou OneDrive. Je ne lis que les fichiers que vous ajoutez."
 
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Du catalogue"
+
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
 msgstr "De la fin de ce que quelqu’un a dit au premier son de la réponse, mesuré sur sa propre page pendant qu’il parle : la réponse médiane de chaque jour, et celle que neuf sur dix ont battue en rapidité."
@@ -6901,6 +6989,10 @@ msgstr "Mise en production"
 #: src/interview/sound-check.tsx
 msgid "Go on without sound"
 msgstr "Continuer sans le son"
+
+#: src/frame/connect-ai-provider.tsx
+msgid "Go to AI providers"
+msgstr "Aller aux fournisseurs d'IA"
 
 #: src/frame/page-states.tsx
 msgid "Go to Chat"
@@ -7002,6 +7094,14 @@ msgstr "Grasp a modifié un widget de votre tableau de bord."
 msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp vérifie ce qu’il faut pour la connecter. Vous la trouvez sous Demandées."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
+msgstr "Grasp convertit les documents importés sur ce déploiement : rien n'est envoyé à l'extérieur."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
+msgstr "Grasp convertit les PDF importés avec {whereItRuns}, avec la propre clé de Grasp. Les fichiers des collections sensibles sont convertis sur ce déploiement et jamais envoyés à l'extérieur."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -7121,6 +7221,10 @@ msgstr "Grasp ouvre bientôt à tout le monde, dès que Stephen aura parlé avec
 msgid "Grasp proposes"
 msgstr "Grasp propose"
 
+#: src/settings/ai-providers.tsx
+msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
+msgstr "Grasp lit à voix haute les questions de l'entretien avec {whereItRuns}, avec la propre clé de Grasp."
+
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Grasp reads these in every chat of the project."
 msgstr "Grasp les lit dans chaque chat du projet."
@@ -7146,10 +7250,6 @@ msgstr "Grasp a envoyé ce lien à ce compte dans {app}. Reliez-le seulement s�
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
-msgstr "Grasp les définit pour votre organisation, comme convenu avec vous. Pour les modifier, contactez Grasp."
-
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
 msgid "Grasp staff access"
@@ -7172,6 +7272,10 @@ msgstr "L’équipe Grasp ne peut pas connecter de comptes ni modifier ce qui es
 msgid "Grasp staff signed in"
 msgstr "Le personnel de Grasp s’est connecté"
 
+#: src/settings/ai-providers.tsx
+msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
+msgstr "Grasp transcrit les entretiens avec {whereItRuns}, avec la propre clé de Grasp."
+
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
@@ -7183,6 +7287,22 @@ msgstr "Grasp affichera un chemin ici dès qu’il observera un MCP, un connecte
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp n’exécutera pas ce dont {about} a besoin : {requirement}"
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters."
+msgstr "L'IA de Grasp appelle les modèles avec les propres clés de fournisseur de votre organisation. Les clés sont stockées scellées : personne ne peut les relire, seulement leurs quatre derniers caractères."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's AI uses the default model. When its provider refuses a call before anything was billed, the fallbacks are tried in order."
+msgstr "L'IA de Grasp utilise le modèle par défaut. Si son fournisseur refuse un appel avant toute facturation, les modèles de secours sont essayés dans l'ordre."
+
+#: src/onboarding/review-parts.tsx
+msgid "Grasp’s AI works with your organization’s own AI provider key, such as Anthropic, OpenAI or Mistral AI. Connect one and choose a model, then come back here."
+msgstr "L'IA de Grasp fonctionne avec la propre clé d'un fournisseur d'IA de votre organisation, comme Anthropic, OpenAI ou Mistral AI. Connectez-en un, choisissez un modèle, puis revenez ici."
+
+#: src/frame/connect-ai-provider.tsx
+msgid "Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start."
+msgstr "L'IA de Grasp fonctionne avec la propre clé d'un fournisseur d'IA de votre organisation. Connectez-en un et choisissez un modèle pour commencer."
 
 #: src/settings/person-limits.tsx
 msgid "Grasp's budget allows at most {most} a month for one person, so no limit can be above it. Ask Grasp to raise the budget first."
@@ -7199,6 +7319,10 @@ msgstr "Le chat de Grasp"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Grasp's go was taken back: only the admins and Grasp's staff come in until it is given again."
 msgstr "Le feu vert de Grasp a été retiré : jusqu’à ce qu’il soit redonné, seuls les administrateurs et l’équipe de Grasp entrent."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's own AI features"
+msgstr "Les fonctionnalités d'IA propres à Grasp"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Grasp’s proposal counts once you confirm it."
@@ -7782,7 +7906,7 @@ msgstr "Entrée"
 msgid "Instructions"
 msgstr "Instructions"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Instructions and files"
 msgstr "Instructions et fichiers"
 
@@ -7964,7 +8088,7 @@ msgstr "C'est arrivé"
 msgid "It happened: {who}"
 msgstr "C'est arrivé : {who}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Elle a des modifications non enregistrées, ou une modification sans réponse. En quittant, les modifications non enregistrées sont perdues ; ce qui est déjà enregistré ou en cours reste."
 
@@ -8120,6 +8244,10 @@ msgstr "Il n’est passé par aucun autre workflow aujourd’hui."
 msgid "It works in no app."
 msgstr "Il ne travaille dans aucune application."
 
+#: src/settings/ai-providers.tsx
+msgid "It works: {model} answered the test."
+msgstr "Ça marche : {model} a répondu au test."
+
 #: src/onboarding/review-parts.tsx
 msgid "It’s done"
 msgstr "C’est fait"
@@ -8179,6 +8307,10 @@ msgstr "Ses exceptions disparaissent avec elle. Cette action est irréversible."
 #: src/chat/chat-menus.tsx
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Son objectif et ses documents sont supprimés. Ses chats restent, de retour parmi les chats par date."
+
+#: src/settings/ai-providers.tsx
+msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
+msgstr "Sa clé est supprimée et les appels cessent aussitôt de l'utiliser. Les modèles de ce fournisseur ne sont plus utilisés, même en secours."
 
 #: src/policies/policy-editing.tsx
 msgid "Its last day: the rule catches the app again after it."
@@ -8389,6 +8521,14 @@ msgstr "A conservé l’accès chez le fournisseur pour un compte reconnecté"
 msgid "Kept something the chat can no longer read from the model"
 msgstr "A caché au modèle quelque chose que le chat ne peut plus lire"
 
+#: src/settings/ai-providers.tsx
+msgid "Key"
+msgstr "Clé"
+
+#: src/settings/ai-providers.tsx
+msgid "Key: <0>{mask}</0>"
+msgstr "Clé : <0>{mask}</0>"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Clés, jetons, secrets, identifiants ou procédures d’exploitation susceptibles de donner accès."
@@ -8491,7 +8631,7 @@ msgstr "Langues dans lesquelles il mène les entretiens"
 msgid "Last"
 msgstr "Dernière fois"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "7 derniers jours"
@@ -8571,7 +8711,7 @@ msgstr "Les responsables reçoivent leur lien {when}. Tous les autres juste apr�
 msgid "Leads talked: {count} of {of}"
 msgstr "Responsables ayant parlé : {count} sur {of}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Quitter"
 
@@ -8600,7 +8740,7 @@ msgstr "Écarter"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Laissez de côté les dossiers du personnel et tout ce qui concerne une seule personne."
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave this app?"
 msgstr "Quitter cette app ?"
 
@@ -8833,6 +8973,7 @@ msgid "Loading"
 msgstr "Chargement"
 
 #: src/activity/audit-log.tsx
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -8935,6 +9076,10 @@ msgstr "En faire un workflow"
 #: src/routes/_shell.settings.members.tsx
 msgid "Make admin"
 msgstr "Faire admin"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Créer le domaine"
 
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
@@ -9105,7 +9250,7 @@ msgstr "Manquant"
 msgid "Model"
 msgstr "Modèle"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Appel de modèle"
 
@@ -9127,16 +9272,13 @@ msgstr "Modèle : {name}. Changer de modèle"
 
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/ai-providers.tsx
 msgid "Models"
 msgstr "Modèles"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
-msgstr "Aucun modèle n’est encore configuré pour ce déploiement : aucun appel de modèle n’est possible. Grasp s’en charge."
-
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
-msgstr "Les modèles ne sont pas encore configurés. Demandez à votre admin de les faire configurer par Grasp."
+msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
+msgstr "Aucun modèle n'est encore configuré. Demandez à votre administrateur de connecter un fournisseur d'IA dans Paramètres › Fournisseurs d'IA."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9172,6 +9314,11 @@ msgstr "En savoir plus sur ces connexions"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "En savoir plus sur cette connexion"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Plus d’apps"
 
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
@@ -9245,6 +9392,14 @@ msgstr "Déplacer"
 msgid "Move {label}, use the arrow keys"
 msgstr "Déplacer {label}, utilisez les flèches du clavier"
 
+#: src/settings/ai-providers.tsx
+msgid "Move {name} down"
+msgstr "Descendre {name}"
+
+#: src/settings/ai-providers.tsx
+msgid "Move {name} up"
+msgstr "Monter {name}"
+
 #: src/dashboard/widget-board.tsx
 msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "Déplacer {title} : faites glisser, ou utilisez les flèches du clavier"
@@ -9269,6 +9424,7 @@ msgid "Muted"
 msgstr "Micro coupé"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9296,6 +9452,10 @@ msgstr "Nom"
 msgctxt "the name of a policy rule"
 msgid "Name"
 msgstr "Nom"
+
+#: src/settings/ai-providers.tsx
+msgid "Name a model this endpoint serves below and choose it, then test it."
+msgstr "Indiquez ci-dessous un modèle que cet endpoint propose, choisissez-le, puis testez-le."
 
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
@@ -9395,6 +9555,7 @@ msgstr "Reconnexion nécessaire"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Quelqu’un doit se reconnecter"
@@ -9442,12 +9603,12 @@ msgid "New board goal"
 msgstr "Nouvel objectif du conseil"
 
 #: src/chat/chat-dock.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nouveau chat"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "New chat in {projectName}"
 msgstr "Nouveau chat dans {projectName}"
 
@@ -9463,6 +9624,11 @@ msgstr "Nouvelle collection"
 msgid "New document"
 msgstr "Nouveau document"
 
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Nouveau domaine"
+
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
 msgstr "faits nouveaux dans les derniers entretiens"
@@ -9471,11 +9637,15 @@ msgstr "faits nouveaux dans les derniers entretiens"
 msgid "New group"
 msgstr "Nouveau groupe"
 
+#: src/settings/ai-providers.tsx
+msgid "New key for {label}"
+msgstr "Nouvelle clé pour {label}"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "Nouvelle note"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-dialog.tsx
 #: src/chat/project-shelf.tsx
 msgid "New project"
@@ -9578,6 +9748,18 @@ msgstr "Pas d’IA"
 msgid "No AI capabilities found in this app."
 msgstr "Aucune fonction d’IA détectée dans cette application."
 
+#: src/settings/ai-providers.tsx
+msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
+msgstr "Aucun fournisseur d'IA n'est encore connecté, donc les fonctions d'IA de Grasp ne peuvent pas répondre."
+
+#: src/settings/ai-providers.tsx
+msgid "No AI provider is connected yet, so Grasp's AI features can't answer. Add one below."
+msgstr "Aucun fournisseur d'IA n'est encore connecté, donc les fonctions d'IA de Grasp ne peuvent pas répondre. Ajoutez-en un ci-dessous."
+
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "Aucun fournisseur d'IA n'est encore connecté. Demandez à votre admin d'en connecter un."
+
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."
 msgstr "Aucune application n’enfreint une règle active."
@@ -9648,11 +9830,11 @@ msgstr "Aucune certification au dossier"
 msgid "No chat app accounts are linked."
 msgstr "Aucun compte d’application de chat n’est relié."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chat has that."
 msgstr "Aucun chat ne contient cela."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chats here yet."
 msgstr "Pas encore de chat ici."
 
@@ -9837,8 +10019,14 @@ msgstr "Aucun fichier de mémoire n’a encore été écrit."
 msgid "No Microsoft or Google? A staff list works too."
 msgstr "Pas de Microsoft ni de Google ? Une liste du personnel fonctionne aussi."
 
-#: src/chat/chat-dock.tsx
-#: src/chat/composer.tsx
+#: src/routes/_shell.settings.models.tsx
+msgid "No model is chosen for your organization yet, so no model call can be made."
+msgstr "Aucun modèle n'est encore choisi pour votre organisation, donc aucun appel de modèle n'est possible."
+
+#: src/settings/ai-providers.tsx
+msgid "No model is chosen yet."
+msgstr "Aucun modèle n'est encore choisi."
+
 #: src/workflows/requests/request-needs.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
@@ -10232,6 +10420,7 @@ msgid "none"
 msgstr "aucune"
 
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/settings/ai-providers.tsx
 msgid "None"
 msgstr "Aucune"
 
@@ -10304,9 +10493,17 @@ msgstr "Aucune en attente d’un admin."
 msgid "None yet"
 msgstr "Rien pour l’instant"
 
+#: src/settings/ai-providers.tsx
+msgid "None yet."
+msgstr "Aucun pour l'instant."
+
 #: src/onboarding/work-list.tsx
 msgid "None yet. A team's work shows up here once its lead has named it."
 msgstr "Aucun pour l’instant. Le travail d’une équipe apparaît ici dès que son responsable l’a nommé."
+
+#: src/settings/ai-providers.tsx
+msgid "None: its provider was removed."
+msgstr "Aucun : son fournisseur a été supprimé."
 
 #: src/connections/connection-list.tsx
 msgid "None."
@@ -10406,6 +10603,10 @@ msgstr "Pas bien"
 #: src/landscape/landscape.ts
 msgid "Not in a domain yet"
 msgstr "Pas encore dans un domaine"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Absente du catalogue"
 
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
@@ -10533,9 +10734,17 @@ msgstr "Pas la même chose chez {team}"
 msgid "Not used in the last 30 days"
 msgstr "Pas utilisé ces 30 derniers jours"
 
+#: src/settings/ai-providers.tsx
+msgid "Not used yet."
+msgstr "Pas encore utilisé."
+
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Non vérifié"
+
+#: src/settings/ai-providers.tsx
+msgid "Not working: the last call, {when}, failed because {why}."
+msgstr "Ne fonctionne pas : le dernier appel, {when}, a échoué parce que {why}."
 
 #: src/workflows/run-detail.tsx
 msgctxt "a run that hasn't ended"
@@ -10637,6 +10846,10 @@ msgstr "Rien ici ne correspond au filtre."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Rien ici pour l’instant."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Rien dans le catalogue ne correspond à « {typed} »."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -11578,6 +11791,10 @@ msgstr "Passation"
 msgid "Past the alert"
 msgstr "Seuil d'alerte dépassé"
 
+#: src/settings/ai-providers.tsx
+msgid "Paste the key from your provider's console. It is stored sealed and never shown again: only its first and last characters."
+msgstr "Collez la clé depuis la console de votre fournisseur. Elle est stockée scellée et n'est plus jamais affichée : seuls ses premiers et derniers caractères."
+
 #: src/knowledge/document.tsx
 msgid "Path"
 msgstr "Chemin"
@@ -11812,7 +12029,7 @@ msgstr "Par requête"
 msgid "Per request, in US dollars"
 msgstr "Par requête, en dollars américains"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Autorisation"
 
@@ -11904,7 +12121,7 @@ msgstr "Mesures de la plateforme"
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 msgstr "Statistiques de la plateforme. Ce domaine peut lire le nombre d’exécutions et de signaux de chaque domaine, et les montrer à quiconque l’utilise"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Platform update"
 msgstr "Mise à jour de la plateforme"
 
@@ -11949,6 +12166,10 @@ msgstr "Politique"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Politique introuvable"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Populaires dans le catalogue"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -12022,7 +12243,7 @@ msgstr "Profil"
 msgid "Project"
 msgstr "Projet"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-shelf.tsx
 msgid "Projects"
 msgstr "Projets"
@@ -12082,6 +12303,10 @@ msgstr "Règles proposées"
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Fourni par Grasp, non réinstallé : {provided}"
+
+#: src/settings/ai-providers.tsx
+msgid "Provider"
+msgstr "Fournisseur"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
@@ -12271,7 +12496,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "read"
 msgstr "lire"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Lecture"
 
@@ -12567,6 +12792,7 @@ msgstr "Relancé le {date}"
 
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Remove"
@@ -12585,6 +12811,18 @@ msgstr "Retirer {domain}"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "Retirer {file}"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {label}"
+msgstr "Retirer {label}"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {label}?"
+msgstr "Retirer {label} ?"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {name} from the fallbacks"
+msgstr "Retirer {name} des modèles de secours"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
@@ -12689,9 +12927,17 @@ msgstr "Se répète, {items} :"
 msgid "Repeats, once per item:"
 msgstr "Se répète, une fois par élément :"
 
+#: src/settings/ai-providers.tsx
+msgid "Replace key"
+msgstr "Remplacer la clé"
+
 #: src/engines/resource-bindings.tsx
 msgid "Replace the binding of {alias}"
 msgstr "Remplacer la liaison de {alias}"
+
+#: src/settings/ai-providers.tsx
+msgid "Replace the key for {label}"
+msgstr "Remplacer la clé de {label}"
 
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
@@ -13210,6 +13456,10 @@ msgstr "Exécutions par semaine"
 msgid "runs a week by these workflows"
 msgstr "exécutions par semaine de ces workflows"
 
+#: src/settings/ai-providers.tsx
+msgid "Runs at: {whereItRuns}"
+msgstr "Fonctionne chez : {whereItRuns}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Exécutions par jour de démarrage"
@@ -13319,6 +13569,10 @@ msgstr "Enregistrer d'abord"
 msgid "Save instructions"
 msgstr "Enregistrer les instructions"
 
+#: src/settings/ai-providers.tsx
+msgid "Save key"
+msgstr "Enregistrer la clé"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
 msgstr "Enregistrer les accords"
@@ -13413,7 +13667,7 @@ msgstr "Rechercher par nom"
 msgid "Search by name or kind"
 msgstr "Rechercher par nom ou type"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search chats and projects"
 msgstr "Rechercher dans les chats et les projets"
 
@@ -13455,11 +13709,15 @@ msgstr "Rechercher des personnes et des équipes"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Rechercher dans le catalogue"
+
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
 msgstr "Chercher dans la transcription"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Recherchez dans vos chats et vos projets, et ouvrez-en un."
 
@@ -14082,6 +14340,10 @@ msgstr "Autre chose"
 msgid "Something new is marked"
 msgstr "Quelque chose de nouveau est surligné"
 
+#: src/settings/ai-providers.tsx
+msgid "something went wrong"
+msgstr "un problème est survenu"
+
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Une erreur s’est produite."
@@ -14288,7 +14550,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Statut"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Rester"
 
@@ -14853,8 +15115,13 @@ msgid "Terms and conditions"
 msgstr "Conditions générales"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/settings/ai-providers.tsx
 msgid "Test"
 msgstr "Tester"
+
+#: src/settings/ai-providers.tsx
+msgid "Test {label}"
+msgstr "Tester {label}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test of {workflow}"
@@ -15189,6 +15456,10 @@ msgstr "l’échéance"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "La limite par défaut"
+
+#: src/settings/ai-providers.tsx
+msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
+msgstr "Le fournisseur du modèle par défaut a été supprimé. Choisissez un nouveau modèle par défaut pour modifier les modèles de secours."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -15550,6 +15821,22 @@ msgstr "La plateforme est ouverte à toute l’entreprise : elle n’a jamais é
 msgid "The policy's text"
 msgstr "Texte de la politique"
 
+#: src/settings/ai-providers.tsx
+msgid "the provider didn't answer"
+msgstr "le fournisseur n'a pas répondu"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider refused the call"
+msgstr "le fournisseur a refusé l'appel"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider refused the key"
+msgstr "le fournisseur a refusé la clé"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider was too busy and asked to wait"
+msgstr "le fournisseur était trop occupé et a demandé d'attendre"
+
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "Le plus rapide est de connecter votre compte {signIn}. Je ne verrai que les noms, les équipes et les rôles. Vos e-mails, discussions et agendas restent fermés."
@@ -15692,6 +15979,10 @@ msgstr "Le travail de l’équipe, et qui interroger"
 msgctxt "kickoff field"
 msgid "The teams"
 msgstr "Les équipes"
+
+#: src/settings/ai-providers.tsx
+msgid "The test didn't work. {model} didn't answer: {why}"
+msgstr "Le test n'a pas fonctionné. {model} n'a pas répondu : {why}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "The text each interview ran on"
@@ -15857,6 +16148,10 @@ msgstr "Il n’y a encore aucune collection que vous pouvez lire."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Il n’y a pas encore de domaine que vous puissiez ouvrir. Les domaines se créent dans le chat : décrivez une partie de votre travail, et Grasp en construit les workflows et les applications."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Aucun domaine à ouvrir pour l’instant. Créez-en un avec « Nouveau domaine », ou décrivez une partie de votre travail dans le chat, et Grasp construit ses workflows et ses applications."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Il n’y a pas encore de workflows à lier."
@@ -15884,6 +16179,10 @@ msgstr "Il n’y a personne dans cette liste."
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
 msgstr "Voici vos domaines. Chacun est une partie de votre entreprise, avec ses workflows, ses applications et ses intégrations réunis."
+
+#: src/settings/ai-providers.tsx
+msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
+msgstr "Ces fonctionnalités utilisent toujours les propres clés de fournisseur de Grasp, quels que soient les fournisseurs que vous connectez ci-dessus."
 
 #: src/engines/store-changes.tsx
 msgid "These fields stay reserved with their current meaning: {reserved}."
@@ -16337,6 +16636,14 @@ msgstr "à"
 msgid "To"
 msgstr "Au"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "To change them, ask your admin."
+msgstr "Pour les modifier, demandez à votre admin."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "To change them, go to <0>Settings › AI providers</0>."
+msgstr "Pour les modifier, allez dans <0>Paramètres › Fournisseurs d'IA</0>."
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
@@ -16383,7 +16690,7 @@ msgstr "Pour les utiliser à nouveau, une personne qui approuve les paquets les 
 msgid "Today"
 msgstr "Aujourd’hui"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Aujourd’hui"
@@ -17372,6 +17679,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Ce qui compte comme un succès"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "Que gère-t-il ?"
+
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
 msgstr "Que veut atteindre le conseil ?"
@@ -17983,6 +18294,10 @@ msgstr "Si des personnes de Grasp peuvent se connecter pour aider sur cet espace
 msgid "Which AI tools do people use?"
 msgstr "Quels outils d’IA les gens utilisent-ils ?"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Quelle app Grasp doit-il commencer à suivre ? Grasp connaît une app dès qu’elle est connectée : une app du catalogue s’ouvre donc là où vous la connectez."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Quels domaines et quels agents ont des autorisations : {why}"
@@ -18436,6 +18751,10 @@ msgstr "Travail en cours"
 msgid "Working on it since {date}"
 msgstr "En cours depuis le {date}"
 
+#: src/settings/ai-providers.tsx
+msgid "Working. Last used {when}."
+msgstr "Fonctionne. Dernière utilisation : {when}."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Works council"
 msgstr "CSE"
@@ -18723,6 +19042,10 @@ msgstr "Le numéro de TVA de votre entreprise, tel qu’il figure sur les factur
 msgid "Your decision changed nothing."
 msgstr "Votre décision n'a rien changé."
 
+#: src/settings/ai-providers.tsx
+msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
+msgstr "L'adresse HTTPS publique de votre endpoint, par exemple https://models.example.com/v1."
+
 #: src/routes/guest.tsx
 msgid "Your message"
 msgstr "Votre message"
@@ -18734,6 +19057,10 @@ msgstr "Votre onboarding"
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "votre organisation"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Your organization chooses these with its own AI provider keys."
+msgstr "Votre organisation les choisit avec ses propres clés de fournisseurs d'IA."
 
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."

@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelRightIcon, PlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
@@ -22,7 +22,7 @@ import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
 import { ChatStudio } from "../chat/studio.tsx";
-import { Suggestions } from "../chat/suggestions.tsx";
+import { StartingQuestions } from "../chat/suggestions.tsx";
 import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
@@ -32,6 +32,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { useWide } from "../frame/wide.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { usePageSidePanel } from "../screens/app-panel-context.tsx";
+import { TourOffer } from "../tour/tour-layer.tsx";
+import { useTour } from "../tour/tour-state.ts";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the open chat has the page's
@@ -43,7 +45,9 @@ import { usePageSidePanel } from "../screens/app-panel-context.tsx";
 // hold what can be done with this one. A new chat starts on Grasp's buddy
 // and the question "What should we look at today?", centred in the middle
 // of the page, with questions to start from and the person's projects as
-// quiet rows under the box; once its agent writes a draft of an App, the
+// quiet rows under the box (the first time, Stephen's offer of his tour
+// stands in the question's place, tour/tour-layer.tsx); once its agent
+// writes a draft of an App, the
 // chat moves left and the App's preview stands on the right
 // (chat/studio.tsx).
 
@@ -127,21 +131,34 @@ const NewChat = ({
     project?.id
   );
   const projectName = project?.name;
+  const { identity } = Route.useRouteContext();
+  // Offered the tour, his question stands in the greeting's place, and
+  // nothing to start from under the box until it is answered.
+  const offered = useTour().phase === "invited";
+  // Where focus goes once the offer is turned down: the box to ask in.
+  const page = useRef<HTMLDivElement>(null);
   return (
     <section
       aria-labelledby="new-chat"
       className="flex min-w-0 flex-1 flex-col overflow-y-auto"
     >
       <div className="flex min-h-full items-center justify-center px-6 py-12">
-        <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
+        <div className="flex w-full max-w-3xl flex-col gap-8 pb-10" ref={page}>
           <div className="flex flex-col items-center gap-6 text-center">
             <GraspBuddy />
-            <h1
-              className="text-2xl font-medium tracking-tight text-balance"
-              id="new-chat"
-            >
-              <Trans>What should we look at today?</Trans>
-            </h1>
+            {offered ? (
+              <TourOffer
+                headingId="new-chat"
+                onDeclined={() => {
+                  page.current?.querySelector("textarea")?.focus();
+                }}
+                userId={identity.userId}
+              />
+            ) : (
+              <h1 className="type-display" id="new-chat">
+                <Trans>What should we look at today?</Trans>
+              </h1>
+            )}
           </div>
           {projectName === undefined ? null : (
             <p className="text-muted-foreground text-center">
@@ -149,9 +166,9 @@ const NewChat = ({
             </p>
           )}
           <Composer running={false} {...composer} />
-          {project === undefined ? (
+          {project === undefined && !offered ? (
             <div className="flex flex-col gap-6">
-              <Suggestions
+              <StartingQuestions
                 disabled={composer.busy || models.length === 0}
                 onPick={(question) => {
                   void ask(question);
@@ -411,6 +428,9 @@ const Chat = () => {
           </div>
         }
         crumbs={crumbsOf(t`Chat`, chat, projects)}
+        // On a phone, Chat alone beside the chat's four icons, as in the
+        // prototype; the project and the chat from sm up.
+        phoneCrumbs="first"
       />
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">

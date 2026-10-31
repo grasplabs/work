@@ -1007,6 +1007,16 @@ export const appVersions = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     /**
+     * The names of the version's screens (JSON, `screensIn`), written when
+     * it is committed: so listing every screen someone can open, across
+     * their Apps, is one query and reads no files (`listScreens`). A row
+     * the previous release writes gets none (the default).
+     */
+    screens: text({ mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
      * The App's bindings each of the version's workflows calls, by
      * workflow ID (JSON, `WorkflowCalls`), written when it is committed
      * from the same reading its review shows: a run's calls are held to
@@ -5380,6 +5390,18 @@ export const stephenRequests = sqliteTable(
   ]
 );
 
+/**
+ * The cards a request's answer posted that can be pressed later (a held
+ * change, a workflow's Start), each by `write:<id>` or `offer:<id>`, with
+ * the request it belongs to: a press on it updates that request, never
+ * another the person made in the same chat since. Swept with its request.
+ */
+export const stephenRequestCards = sqliteTable("stephen_request_cards", {
+  key: text().primaryKey(),
+  requestId: text("request_id").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
 /** The company's topics Stephen's requests are sorted into (channels/request-sorting.ts). */
 export const stephenRequestTopics = sqliteTable("stephen_request_topics", {
   id: text().primaryKey(),
@@ -5443,6 +5465,8 @@ export const stephenSummaries = sqliteTable(
     attempts: integer().notNull().default(0),
     reason: text(),
     queuedAt: timestamp("queued_at").notNull(),
+    /** While a run sends it: no other run takes it until then. */
+    claimedUntil: timestamp("claimed_until"),
     settledAt: timestamp("settled_at"),
   },
   (table) => [primaryKey({ columns: [table.week, table.personId] })]
