@@ -334,12 +334,12 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         )
         .map((link) => link.textContent ?? "")
     );
-    // The person menu, at the sidebar's foot, ends in their role.
-    await page
-      .getByRole("button", {
-        name: new RegExp(`${roleNames[person.role]}$`, "u"),
-      })
-      .click();
+    // The person menu, at the sidebar's foot, by their name; their role is
+    // said inside it.
+    await page.getByRole("button", { name: "Person", exact: true }).click();
+    await expect(
+      page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
+    ).toBeVisible();
     const items = page.getByRole("menuitem");
     await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
     const menuTexts = await items.allTextContents();
