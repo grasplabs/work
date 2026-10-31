@@ -6,7 +6,11 @@ import { setTimeout as wait } from "node:timers/promises";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import StallReporter, { budgetMs, reportDelayMs } from "./stall-reporter.ts";
-import type { ReportedCase, ReportedModule } from "./stall-reporter.ts";
+import type {
+  ReportedCase,
+  ReportedModule,
+  ReportedSpecification,
+} from "./stall-reporter.ts";
 
 /** A report due 60 ms after the run starts, written to `written`. */
 const reporting = (progressFile?: string) => {
@@ -139,7 +143,7 @@ describe("the stall report", () => {
     const admin = file("admin");
     const done = test(builds, "builds the browser target");
     const stuck = test(builds, "resolves each target by its own conditions");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     reporter.onTestModuleStart(board);
     reporter.onTestModuleStart(admin);
@@ -175,7 +179,7 @@ describe("the stall report", () => {
     const { reporter, written } = reporting();
     const builds = file("package-builds");
     const done = test(builds, "builds the browser target");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     reporter.onTestCaseReady(done);
     reporter.onTestCaseResult(finish(done));
@@ -198,7 +202,7 @@ describe("the progress file", () => {
     const tests = Array.from({ length: 500 }, (_, index) =>
       test(builds, `test ${index}`)
     );
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     for (const each of tests) {
       reporter.onTestCaseReady(each);
@@ -246,7 +250,7 @@ describe("a test past its timeout", () => {
     const { reporter, written, state } = ending();
     const builds = file("package-builds");
     const spinning = test(builds, "spins forever", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     reporter.onTestCaseReady(spinning);
     await wait(pastTheGrace);
@@ -268,7 +272,7 @@ describe("a test past its timeout", () => {
     const builds = file("package-builds");
     const done = test(builds, "builds", { timeout: 20 });
     test(builds, "spins forever", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleCollected(builds);
     reporter.onTestCaseReady(done);
     reporter.onTestCaseResult(finish(done));
@@ -291,7 +295,7 @@ describe("a test past its timeout", () => {
     const builds = file("package-builds");
     const timedOut = test(builds, "times out", { timeout: 20 });
     const untimed = test(builds, "has no timeout", {});
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     reporter.onTestCaseReady(timedOut);
     reporter.onTestCaseReady(untimed);
@@ -315,7 +319,7 @@ describe("a test past its timeout", () => {
     const builds = file("package-builds");
     const done = test(builds, "builds", { timeout: 20 });
     test(builds, "resolves", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleCollected(builds);
     reporter.onTestCaseReady(done);
     reporter.onTestCaseResult(finish(done));
@@ -344,8 +348,121 @@ describe("a test past its timeout", () => {
       },
     });
     const builds = file("package-builds");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
+    await wait(pastTheGrace);
+
+    expect({ ended: state.ended, written }).toStrictEqual({
+      ended: 0,
+      written: [],
+    });
+  });
+});
+
+/**
+ * A reporter that ends the run once every file of it has ended 50 ms ago
+ * without Vitest ending the run, looking every 10 ms. The run's files are
+ * `shard`'s of those Vitest hands over, all of them by default.
+ */
+const watchingTheEnd = (
+  shard: (
+    specs: readonly ReportedSpecification[]
+  ) => ReportedSpecification[] = (specs) => [...specs]
+) => {
+  const written: string[] = [];
+  const state = { ended: 0 };
+  const reporter = new StallReporter({
+    overdueGraceSeconds: 60,
+    overdueCheckMs: 10,
+    runEndGraceMs: 50,
+    shardOf: async (specs) => {
+      await Promise.resolve();
+      return shard(specs);
+    },
+    activeResources: () => ["TCPSocketWrap", "Timeout", "TCPSocketWrap"],
+    write: (text) => {
+      written.push(text);
+    },
+    end: () => {
+      state.ended += 1;
+    },
+  });
+  return { reporter, written, state };
+};
+
+/** A file of the run, collected once `collected` holds its module. */
+const specOf = (collected: { module?: ReportedModule }) => ({
+  get testModule() {
+    return collected.module;
+  },
+});
+
+describe("a run every file of which has ended", () => {
+  it("is ended, naming what holds it, when Vitest never ends it", async () => {
+    const { reporter, written, state } = watchingTheEnd();
+    const builds = file("package-builds");
+    const board = file("board-page");
+    await reporter.onTestRunStart([
+      specOf({ module: builds }),
+      specOf({ module: board }),
+    ]);
+    reporter.onTestModuleEnd(finishFile(builds));
+    reporter.onTestModuleEnd(finishFile(board));
+    await wait(pastTheGrace);
+
+    const report = written.join("");
+    expect({
+      ended: state.ended,
+      heading: report.includes(
+        "no longer times it out: every file of the run (2) finished"
+      ),
+      handles: report.includes(
+        "Open handles in Vitest's process: TCPSocketWrap ×2, Timeout"
+      ),
+    }).toStrictEqual({ ended: 1, heading: true, handles: true });
+  });
+
+  it("counts only the files of this shard", async () => {
+    const builds = file("package-builds");
+    const { reporter, state } = watchingTheEnd((specs) =>
+      specs.filter(({ testModule }) => testModule === builds)
+    );
+    // Another shard's file: never collected here.
+    await reporter.onTestRunStart([specOf({ module: builds }), specOf({})]);
+    reporter.onTestModuleEnd(finishFile(builds));
+    await wait(pastTheGrace);
+
+    expect(state.ended).toBe(1);
+  });
+
+  it("is left alone while a file of it hasn't been collected or hasn't ended", async () => {
+    const { reporter, written, state } = watchingTheEnd();
+    const builds = file("package-builds");
+    const board = file("board-page");
+    const later: { module?: ReportedModule } = {};
+    await reporter.onTestRunStart([
+      specOf({ module: builds }),
+      specOf({ module: board }),
+      specOf(later),
+    ]);
+    reporter.onTestModuleEnd(finishFile(builds));
+    await wait(pastTheGrace);
+    later.module = file("admin");
+    reporter.onTestModuleEnd(finishFile(board));
+    await wait(pastTheGrace);
+
+    expect({ ended: state.ended, written }).toStrictEqual({
+      ended: 0,
+      written: [],
+    });
+  });
+
+  it("is left alone when Vitest ends it in time", async () => {
+    const { reporter, written, state } = watchingTheEnd();
+    const builds = file("package-builds");
+    await reporter.onTestRunStart([specOf({ module: builds })]);
+    reporter.onTestModuleEnd(finishFile(builds));
+    await reporter.onTestRunEnd([builds]);
     await wait(pastTheGrace);
 
     expect({ ended: state.ended, written }).toStrictEqual({
@@ -363,7 +480,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const { reporter, written, state } = ending();
     const workflows = file("lifecycle");
     const paused = test(workflows, "pauses a sleeping run", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseReady(paused);
     // Neither its result nor its file's end arrives.
@@ -381,7 +498,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const { reporter, written, state } = ending();
     const bridge = file("screen-bridge");
     const flood = test(bridge, "passes on twenty reports", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(bridge);
     reporter.onTestCaseResult(finish(flood));
     reporter.onTestCaseReady(flood);
@@ -398,7 +515,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const { reporter, written, state } = ending();
     const workflows = file("batches");
     const deleted = test(workflows, "deletes each ID once", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseReady(deleted);
     reporter.onTestCaseResult(sameTest(finish(deleted)));
@@ -414,7 +531,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
   it("counts none of a file's tests as running once the file has ended", async () => {
     const { reporter, written, state } = ending();
     const workflows = file("results");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseReady(test(workflows, "streams", { timeout: 20 }));
     reporter.onTestModuleEnd(finishFile(workflows));
@@ -430,7 +547,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const { reporter, written, state } = ending();
     const artifacts = file("package-artifacts");
     const served = test(artifacts, "serves", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleCollected(artifacts);
     reporter.onTestCaseReady(served);
     finish(served);
@@ -447,7 +564,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const { reporter, state } = ending();
     const workflows = file("lifecycle");
     const spinning = test(workflows, "spins forever", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseReady(spinning);
     reporter.onTestCaseReady(sameTest(spinning));
@@ -466,7 +583,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const early = test(workflows, "result first");
     const lost = test(workflows, "result lost");
     const twice = test(workflows, "result twice");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseResult(finish(early));
     reporter.onTestCaseReady(early);
@@ -500,7 +617,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const workflows = file("batches");
     const early = test(workflows, "result event early");
     const settled = test(workflows, "result event early, state later");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(workflows);
     reporter.onTestCaseReady(early);
     reporter.onTestCaseResult(early);
@@ -533,7 +650,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
     const unended = file("retries");
     const silent = finish(test(ended, "no events"));
     finish(test(unended, "no events, nor its file's end"));
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(ended);
     reporter.onTestModuleStart(unended);
     reporter.onTestModuleEnd(finishFile(ended));
@@ -588,7 +705,7 @@ describe("why a run ended", () => {
   it("is the reporter's own verdict, with what still ran and the memory, when it ends the run", async () => {
     const { reporter, written, state, summary } = await explaining(0.05);
     const builds = file("package-builds");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     // A clock a millisecond on at every reading while the test starts, as
     // a loaded runner's can be between two readings, then held just past
     // the test's timeout and grace (70 ms) from its first reading.
@@ -645,7 +762,7 @@ describe("why a run ended", () => {
     const failing = file("ledger");
     const passing = file("budgets");
     states.set(failing.id, "failed");
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     await reporter.onTestRunEnd(
       [failing, finishFile(passing)],
       [
@@ -681,7 +798,7 @@ describe("why a run ended", () => {
 
   it("is left unsaid for a run that passes", async () => {
     const { reporter, written, summary } = await explaining();
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     await reporter.onTestRunEnd([finishFile(file("budgets"))], [], "passed");
 
     expect({ summary: await summary(), written }).toStrictEqual({
@@ -720,9 +837,9 @@ const endingWithStacks = (
 };
 
 /** Starts a test that never reports, overdue once `pastTheGrace` is over. */
-const stall = (reporter: StallReporter): void => {
+const stall = async (reporter: StallReporter): Promise<void> => {
   const builds = file("package-builds");
-  reporter.onTestRunStart();
+  await reporter.onTestRunStart();
   reporter.onTestModuleStart(builds);
   reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
 };
@@ -741,7 +858,7 @@ describe("the stacks of a stalled run", () => {
         order.push(`flushed, ended ${state.ended} times`);
       }
     );
-    stall(reporter);
+    await stall(reporter);
     await wait(pastTheGrace);
 
     expect({ order, ended: state.ended }).toStrictEqual({
@@ -761,7 +878,7 @@ describe("the stacks of a stalled run", () => {
         await Promise.withResolvers<undefined>().promise;
       }
     );
-    stall(reporter);
+    await stall(reporter);
     await wait(pastTheGrace + 150);
 
     expect(state.ended).toBe(1);
@@ -774,7 +891,7 @@ describe("the stacks of a stalled run", () => {
       await wait(10);
       return "--- workerd 150 ---\n#0 epoll_wait\n";
     });
-    stall(reporter);
+    await stall(reporter);
     await wait(pastTheGrace);
 
     const beforeEnd = written.slice(0, state.writtenAtEnd).join("");
@@ -792,7 +909,7 @@ describe("the stacks of a stalled run", () => {
       async () => await Promise.withResolvers<string>().promise,
       50
     );
-    stall(reporter);
+    await stall(reporter);
     await wait(pastTheGrace + 100);
 
     expect({
@@ -806,7 +923,7 @@ describe("the stacks of a stalled run", () => {
       await Promise.resolve();
       throw new Error("gdb: ptrace not permitted");
     });
-    stall(reporter);
+    await stall(reporter);
     await wait(pastTheGrace);
 
     expect({
@@ -826,7 +943,7 @@ describe("the stacks of a stalled run", () => {
     });
     const builds = file("package-builds");
     const done = test(builds, "builds", { timeout: 20 });
-    reporter.onTestRunStart();
+    await reporter.onTestRunStart();
     reporter.onTestModuleStart(builds);
     reporter.onTestCaseReady(done);
     reporter.onTestCaseResult(finish(done));

@@ -20,6 +20,13 @@
 //   it until the step's timeout. A blocked worker may not even have sent
 //   that its test started: hence the file's silence. Past that, nothing
 //   will report it any more;
+// - ends the run, after naming what holds it, once every file of the run
+//   has ended and Vitest still hasn't ended the run a minute later, when
+//   GRASP_TEST_OVERDUE_GRACE_SECONDS is set (the same check's timer).
+//   Vitest ends it within a second of the last file once each worker has
+//   said its file is done; a worker that never says so (one waiting for a
+//   reply to a log the pool held, say) holds the run until the step's
+//   timeout, with nothing running;
 // - before it ends a run, prints the thread stacks of every workerd the
 //   run started, when GRASP_STALL_DUMP_STACKS is "gdb" (stack-dump.ts):
 //   what the stalled runtime is stuck in, which nothing else records;
@@ -47,7 +54,7 @@ import { freemem, totalmem } from "node:os";
 import { finished } from "node:stream/promises";
 import { setTimeout as wait } from "node:timers/promises";
 
-import type { Reporter } from "vite-plus/test/node";
+import type { Reporter, TestSpecification, Vitest } from "vite-plus/test/node";
 
 import { dumpBounds, dumpWorkerdStacks } from "./stack-dump.ts";
 
@@ -93,6 +100,15 @@ export interface ReportedCase {
   result: () => { readonly state: string };
 }
 
+/**
+ * What the reporter reads of a file the run is to run: Vitest's
+ * `TestSpecification` has it. Its module is there once the file is
+ * collected.
+ */
+export interface ReportedSpecification {
+  readonly testModule?: ReportedModule | undefined;
+}
+
 /** What the reporter reads of an unhandled error Vitest reports. */
 export interface ReportedError {
   readonly name?: string | undefined;
@@ -135,6 +151,13 @@ const defaultOverdueCheckMs = 5000;
  */
 const flushMs = 5000;
 
+/**
+ * How long after every file of the run ended Vitest may take to end the run,
+ * by default. It took milliseconds in CI (October 2026): what is left is
+ * writing its cache.
+ */
+const defaultRunEndGraceMs = 60_000;
+
 /** How long ending a run waits for the stacks to leave stdout. */
 const outputFlushMs = 3000;
 
@@ -173,6 +196,21 @@ export interface StallReporterOptions {
   overdueGraceSeconds?: number;
   /** How often to look for an overdue test, in milliseconds. */
   overdueCheckMs?: number;
+  /**
+   * How long after every file of the run ended Vitest may take to end it,
+   * in milliseconds, before the run is ended; looked at with overdue tests,
+   * so only when `overdueGraceSeconds` is set.
+   */
+  runEndGraceMs?: number;
+  /**
+   * The files of the run this process runs, of all Vitest is given: by
+   * default, Vitest's sequencer's shard of them when the run is sharded.
+   */
+  shardOf?: (
+    specifications: readonly ReportedSpecification[]
+  ) => Promise<readonly ReportedSpecification[]>;
+  /** What keeps this process's event loop alive, named, for the verdict. */
+  activeResources?: () => readonly string[];
   /** The progress file; none when unset. */
   progressFile?: string;
   /**
@@ -222,6 +260,20 @@ const fromEnv = (): StallReporterOptions => ({
       ? async () => await dumpWorkerdStacks({ root: process.pid })
       : undefined,
 });
+
+/** Resources by kind, counted: "TCPWRAP ×3, Timeout". */
+const handles = (resources: readonly string[]): string => {
+  const counts = new Map<string, number>();
+  for (const resource of resources) {
+    counts.set(resource, (counts.get(resource) ?? 0) + 1);
+  }
+  if (counts.size === 0) {
+    return "none";
+  }
+  return [...counts]
+    .map(([kind, count]) => (count === 1 ? kind : `${kind} ×${count}`))
+    .join(", ");
+};
 
 const moduleName = (testModule: ReportedModule): string =>
   `${testModule.project.name} ${testModule.relativeModuleId}`;
@@ -292,6 +344,18 @@ export default class StallReporter implements Reporter {
   readonly #stackDumpTimeoutMs: number;
   readonly #outputFlushed: () => Promise<void>;
   readonly #outputFlushTimeoutMs: number;
+  readonly #runEndGraceMs: number;
+  readonly #shardOf:
+    | ((
+        specifications: readonly ReportedSpecification[]
+      ) => Promise<readonly ReportedSpecification[]>)
+    | undefined;
+  readonly #activeResources: () => readonly string[];
+  #vitest: Vitest | undefined;
+  /** The files this process runs, once known. */
+  #runFiles: readonly ReportedSpecification[] | undefined;
+  /** When every file of the run was first seen ended. */
+  #allEndedAt: number | undefined;
   #timer: NodeJS.Timeout | undefined;
   #overdueTimer: NodeJS.Timeout | undefined;
   #ended = false;
@@ -328,6 +392,10 @@ export default class StallReporter implements Reporter {
       options.stackDumpTimeoutMs ?? dumpBounds.timeoutMs + flushMs;
     this.#outputFlushed = options.outputFlushed ?? stdoutFlushed;
     this.#outputFlushTimeoutMs = options.outputFlushTimeoutMs ?? outputFlushMs;
+    this.#runEndGraceMs = options.runEndGraceMs ?? defaultRunEndGraceMs;
+    this.#shardOf = options.shardOf;
+    this.#activeResources =
+      options.activeResources ?? (() => process.getActiveResourcesInfo());
     const file = options.progressFile;
     this.#progress =
       file === undefined || file === ""
@@ -341,9 +409,17 @@ export default class StallReporter implements Reporter {
     });
   }
 
-  onTestRunStart(): void {
+  onInit(vitest: Vitest): void {
+    this.#vitest = vitest;
+  }
+
+  async onTestRunStart(
+    specifications: readonly ReportedSpecification[] = []
+  ): Promise<void> {
     clearTimeout(this.#timer);
     clearInterval(this.#overdueTimer);
+    this.#runFiles = undefined;
+    this.#allEndedAt = undefined;
     const minutes = this.#reportAfterMinutes;
     if (minutes !== undefined) {
       this.#timer = setTimeout(
@@ -362,7 +438,40 @@ export default class StallReporter implements Reporter {
         void this.#endIfOverdue(graceMs);
       }, this.#overdueCheckMs);
       this.#overdueTimer.unref();
+      try {
+        this.#runFiles = await this.#filesOfRun(specifications);
+      } catch (error) {
+        // Without them the run's end isn't watched; the run stands.
+        process.stderr.write(
+          `The stall reporter can't tell which files this run runs: ${error instanceof Error ? error.message : String(error)}\n`
+        );
+      }
     }
+  }
+
+  /**
+   * The files of `specifications` this process runs: Vitest hands every
+   * reporter the whole run's, and its pool runs only the shard's
+   * (`--shard`), which the reporter asks the run's own sequencer for, as
+   * the pool does.
+   */
+  async #filesOfRun(
+    specifications: readonly ReportedSpecification[]
+  ): Promise<readonly ReportedSpecification[]> {
+    if (this.#shardOf !== undefined) {
+      return await this.#shardOf(specifications);
+    }
+    const vitest = this.#vitest;
+    if (vitest?.config.shard === undefined) {
+      return specifications;
+    }
+    const { sequencer: Sequencer } = vitest.config.sequence;
+    // SAFETY: Vitest is set (onInit), so Vitest is what called this hook,
+    // and it hands its reporters its own TestSpecifications; the reporter
+    // names only what it reads of them.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const given = specifications as readonly TestSpecification[];
+    return await new Sequencer(vitest).shard([...given]);
   }
 
   // A file counts as running from when it is collected: Vitest's worker
@@ -549,12 +658,37 @@ export default class StallReporter implements Reporter {
     return undefined;
   }
 
+  /**
+   * Whether every file of the run has ended longer than the run's end may
+   * take, though Vitest hasn't ended it: what keeps it, if so.
+   */
+  #runHeld(now: number): string | undefined {
+    const files = this.#runFiles;
+    const allEnded =
+      files !== undefined &&
+      files.length > 0 &&
+      files.every(
+        ({ testModule }) => testModule !== undefined && moduleEnded(testModule)
+      );
+    if (!allEnded) {
+      this.#allEndedAt = undefined;
+      return undefined;
+    }
+    this.#allEndedAt ??= now;
+    const held = now - this.#allEndedAt;
+    if (held <= this.#runEndGraceMs) {
+      return undefined;
+    }
+    return `every file of the run (${files.length}) finished ${seconds(held)} ago, but Vitest hasn't ended the run, so the process would not exit: a worker never said its file was done (one waiting for a reply the pool never sent, such as to a log from another request than the test's), or the pool didn't shut down. Open handles in Vitest's process: ${handles(this.#activeResources())}`;
+  }
+
   async #endIfOverdue(graceMs: number): Promise<void> {
     if (this.#ended) {
       return;
     }
     this.#settle();
-    const overdue = this.#overdue(Date.now(), graceMs);
+    const now = Date.now();
+    const overdue = this.#overdue(now, graceMs) ?? this.#runHeld(now);
     if (overdue === undefined) {
       return;
     }
