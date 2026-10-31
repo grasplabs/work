@@ -17,7 +17,7 @@ import type {
 import { thinkingStepSchema } from "@grasp-os/shared/thinking";
 import type { ThinkingStep } from "@grasp-os/shared/thinking";
 
-import { showThinkingName } from "./agent-thinking.ts";
+import { showThinkingName } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person

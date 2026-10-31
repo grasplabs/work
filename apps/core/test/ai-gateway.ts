@@ -585,6 +585,47 @@ const spokenLine = (
   );
 };
 
+/**
+ * The whole stream `api` sends for `answer`, as text, its pauses left out,
+ * or only its beginning for one that breaks off (`cut`): what a provider's
+ * own API answers (test/ai-providers-fake.ts).
+ */
+export const streamText = (
+  api: "anthropic-messages" | "openai-completions" | "openai-responses",
+  answer: Answer
+): string => {
+  const { cut } = answer;
+  // An answer that breaks off: only the events up to its first text.
+  const begun = { ...answer, text: answer.text.slice(0, cut), toolCalls: [] };
+  let events: (StreamEvent | StreamPause)[] = [];
+  if (api === "anthropic-messages") {
+    events =
+      cut === undefined
+        ? anthropicEvents(answer)
+        : anthropicEvents(begun).slice(0, 3);
+  } else if (api === "openai-completions") {
+    events =
+      cut === undefined
+        ? chatCompletionEvents(answer)
+        : chatCompletionEvents(begun).slice(0, 1);
+  } else {
+    const all: (StreamEvent | StreamPause)[] = responsesEvents(
+      cut === undefined ? answer : begun
+    );
+    const firstText = all.findIndex(
+      (item) =>
+        "data" in item &&
+        JSON.stringify(item.data).includes("response.output_text.delta")
+    );
+    events = cut === undefined ? all : all.slice(0, firstText + 1);
+  }
+  const decoder = new TextDecoder();
+  return events
+    .filter((item): item is StreamEvent => !("until" in item))
+    .map((item) => decoder.decode(sse(item)))
+    .join("");
+};
+
 /** The provider's stream for `answer`, by the gateway route requested. */
 const providerStream = (
   { url, signal }: Request,

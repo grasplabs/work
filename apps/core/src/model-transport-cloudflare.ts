@@ -41,7 +41,7 @@ export const aiBindingHost = "workers-binding.ai";
  * OpenAI-compatible endpoint, not the gateway's cross-provider /compat
  * layer, which drops provider features.
  */
-const gatewayPaths: Readonly<Record<Provider, string>> = {
+const gatewayPaths: Readonly<Partial<Record<Provider, string>>> = {
   anthropic: "anthropic",
   openai: "openai",
   "bedrock-eu": "custom-bedrock-eu",
@@ -149,7 +149,9 @@ export const cloudflareAiGateway = (
   return {
     kind: "cloudflare-ai-gateway",
     capabilities: {
-      providers: providerNames,
+      providers: providerNames.filter(
+        (provider) => gatewayPaths[provider] !== undefined
+      ),
       payloadLoggingOff: true,
       sharedCacheOff: true,
       voice: true,
@@ -157,14 +159,15 @@ export const cloudflareAiGateway = (
     },
     route: (ref, metadata): TransportRoute | undefined => {
       const { api } = ref.catalog;
-      if (!isRouteApi(api)) {
+      const path = gatewayPaths[ref.provider];
+      if (!isRouteApi(api) || path === undefined) {
         return undefined;
       }
       return {
         transport: "cloudflare-ai-gateway",
         model: {
           ...ref.catalog,
-          baseUrl: `${gatewayBase(gateway)}/${gatewayPaths[ref.provider]}`,
+          baseUrl: `${gatewayBase(gateway)}/${path}`,
           maxTokens: maxTokensOf(ref),
         },
         api,

@@ -112,6 +112,17 @@ export const requests = sqliteTable(
      * most. It holds its shares only while `dispatched` and before this.
      */
     leaseEndsAt: integer("lease_ends_at"),
+    /**
+     * The way it went (models.ts): its transport (`connect`, or
+     * `cloudflare-ai-gateway`), the provider and the provider's region
+     * (@grasp-os/shared/ai-providers). Metadata only; null for one admitted
+     * before routes were recorded, and for a voice model's.
+     */
+    transport: text(),
+    provider: text(),
+    region: text(),
+    /** Whose key it went with: `organization` or `platform`; null without one. */
+    credential: text(),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -308,6 +319,28 @@ export const personLimits = sqliteTable(
       sql`${table.messagesAnHour} IS NULL OR ${table.messagesAnHour} > 0`
     ),
   ]
+);
+
+/**
+ * How each provider's requests fared last, by whose key, as they settled
+ * (`ModelLedger.settle`): when one last worked, and when one last failed
+ * and how, never what it carried. What an admin reads as a provider's
+ * status (core's ai-providers.ts).
+ */
+export const providerHealth = sqliteTable(
+  "provider_health",
+  {
+    provider: text().notNull(),
+    /** `organization` or `platform`. */
+    credential: text().notNull(),
+    lastOkAt: integer("last_ok_at"),
+    lastFailedAt: integer("last_failed_at"),
+    /** How it last failed (`TransportFailure`'s kind). */
+    lastFailure: text("last_failure"),
+    /** The HTTP status it last failed with, if it answered. */
+    lastStatus: integer("last_status"),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );
 
 /** Audit events stored with the change they record, until the log has them. */

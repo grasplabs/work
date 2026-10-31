@@ -50,6 +50,7 @@ import { Route as ShellOnboardingStephenRouteImport } from './routes/_shell.onbo
 import { Route as ShellPoliciesIndexRouteImport } from './routes/_shell.policies.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
+import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsBillingRouteImport } from './routes/_shell.settings.billing'
 import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings.brain'
@@ -302,6 +303,12 @@ const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsAiProvidersRoute =
+  ShellSettingsAiProvidersRouteImport.update({
+    id: '/ai-providers',
+    path: '/ai-providers',
+    getParentRoute: () => ShellSettingsRoute,
+  } as any)
 const ShellSettingsAuditRoute = ShellSettingsAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
@@ -572,6 +579,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
+  '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
   '/settings/brain': typeof ShellSettingsBrainRoute
@@ -653,6 +661,7 @@ export interface FileRoutesByTo {
   '/onboarding/open': typeof ShellOnboardingOpenRoute
   '/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
+  '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/billing': typeof ShellSettingsBillingRoute
   '/settings/brain': typeof ShellSettingsBrainRoute
@@ -740,6 +749,7 @@ export interface FileRoutesById {
   '/_shell/onboarding/open': typeof ShellOnboardingOpenRoute
   '/_shell/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
+  '/_shell/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/billing': typeof ShellSettingsBillingRoute
   '/_shell/settings/brain': typeof ShellSettingsBrainRoute
@@ -827,6 +837,7 @@ export interface FileRouteTypes {
     | '/onboarding/open'
     | '/onboarding/stephen'
     | '/projects/$projectId'
+    | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
     | '/settings/brain'
@@ -908,6 +919,7 @@ export interface FileRouteTypes {
     | '/onboarding/open'
     | '/onboarding/stephen'
     | '/projects/$projectId'
+    | '/settings/ai-providers'
     | '/settings/audit'
     | '/settings/billing'
     | '/settings/brain'
@@ -994,6 +1006,7 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/open'
     | '/_shell/onboarding/stephen'
     | '/_shell/projects/$projectId'
+    | '/_shell/settings/ai-providers'
     | '/_shell/settings/audit'
     | '/_shell/settings/billing'
     | '/_shell/settings/brain'
@@ -1349,6 +1362,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof ShellSettingsIndexRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/ai-providers': {
+      id: '/_shell/settings/ai-providers'
+      path: '/ai-providers'
+      fullPath: '/settings/ai-providers'
+      preLoaderRoute: typeof ShellSettingsAiProvidersRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
     '/_shell/settings/audit': {
@@ -1714,6 +1734,7 @@ const ShellOnboardingRouteWithChildren = ShellOnboardingRoute._addFileChildren(
 )
 
 interface ShellSettingsRouteChildren {
+  ShellSettingsAiProvidersRoute: typeof ShellSettingsAiProvidersRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsBillingRoute: typeof ShellSettingsBillingRoute
   ShellSettingsBrainRoute: typeof ShellSettingsBrainRoute
@@ -1734,6 +1755,7 @@ interface ShellSettingsRouteChildren {
 }
 
 const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
+  ShellSettingsAiProvidersRoute: ShellSettingsAiProvidersRoute,
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsBillingRoute: ShellSettingsBillingRoute,
   ShellSettingsBrainRoute: ShellSettingsBrainRoute,

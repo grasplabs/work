@@ -16,11 +16,18 @@ import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
+import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
+
+/**
+ * Grasp's own key at OpenAI, for platform features, as set on connect in
+ * the tests; none for the other providers, which aren't offered for them.
+ */
+export const platformOpenAiKey = "test-platform-openai-key-0001";
 
 /** Connect's version metadata, as set on connect in the tests. */
 export const connectVersionMetadata = {
@@ -539,10 +546,14 @@ const landscapeGraph = (url) => {
   return undefined;
 };
 const osv = (${osvFake.toString()})();
+const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
+    if (aiProviders.handles(url)) {
+      return await aiProviders.answer(request, url);
+    }
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
     }
