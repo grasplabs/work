@@ -112,6 +112,8 @@ interface __BaseEnv_Env {
   ANTHROPIC_API_KEY?: string;
   MISTRAL_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  /** Grasp's own ElevenLabs key, for its speech feature alone. */
+  ELEVENLABS_API_KEY?: string;
   /**
    * `workerd` on plain workerd (on-prem): only then may an organization's
    * OpenAI-compatible endpoint be on the deployment's own network, and only

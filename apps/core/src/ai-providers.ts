@@ -3,8 +3,8 @@ import {
   aiModelChoiceSchema,
   aiProviderAddSchema,
   aiProviderErrors,
-  aiProviderIdSchema,
-  aiProviderIds,
+  organizationProviderIdSchema,
+  organizationProviderIds,
   aiProviders,
 } from "@grasp-os/shared/ai-providers";
 import type {
@@ -243,7 +243,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
   ]);
   return {
     providers: keys.map((key) => listed(key, health)),
-    offered: aiProviderIds.map((provider) => ({
+    offered: organizationProviderIds.map((provider) => ({
       provider,
       label: aiProviders[provider].label,
       whereItRuns: aiProviders[provider].whereItRuns,
@@ -302,7 +302,7 @@ const testProvider = async (
   model: unknown
 ): Promise<AiProviderTest> => {
   requireOwnAdmin(by);
-  const parsedProvider = aiProviderIdSchema.safeParse(provider);
+  const parsedProvider = organizationProviderIdSchema.safeParse(provider);
   if (
     !parsedProvider.success ||
     (model !== undefined && typeof model !== "string")
@@ -510,7 +510,7 @@ const removeProvider = async (
   provider: unknown
 ): Promise<void> => {
   await requireOwnAdminNow(env, by);
-  const parsed = aiProviderIdSchema.safeParse(provider);
+  const parsed = organizationProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiProviderErrors.create("ai_provider.invalid");
   }

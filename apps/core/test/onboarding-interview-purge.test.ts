@@ -32,7 +32,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 // audit log naming them.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "openai/gpt-4o-mini-tts";
+const speechModel = "elevenlabs/eleven_v4";
 const idp = mockIdp();
 
 /** An interview in which `term` was said, marked and read back. */

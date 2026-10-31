@@ -54,7 +54,7 @@ import { wordFile } from "./word-file.ts";
 // - A drawing under way as the document goes, kept as it ends.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "openai/gpt-4o-mini-tts";
+const speechModel = "elevenlabs/eleven_v4";
 const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;

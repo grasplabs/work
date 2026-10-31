@@ -15,20 +15,26 @@ describe("the platform's AI settings", () => {
     expect(parsePlatformAi({})).toStrictEqual(defaultPlatformAi);
   });
 
-  it("give each speaker a voice the speech model has when the settings name none", () => {
+  it("give each speaker one of the ElevenLabs voices Grasp chose when the settings name none", () => {
     expect(
-      parsePlatformAi({ speech: { provider: "openai", model: "tts-1" } })
-        ?.speech.voices
+      parsePlatformAi({
+        speech: { provider: "elevenlabs", model: "eleven_v3" },
+      })?.speech
     ).toStrictEqual({
-      stephen: "onyx",
-      claire: "nova",
-      mark: "ash",
-      lisa: "coral",
-      tim: "echo",
+      provider: "elevenlabs",
+      model: "eleven_v3",
+      quickModel: "eleven_v4_turbo",
+      voices: {
+        stephen: "s3TPKV1kjDlVtZbl4Ksh",
+        claire: "r1KmysJdVYZjJCm4mL3b",
+        lisa: "EXAVITQu4vr4xnSDxMaL",
+        mark: "cjVigY5qzO86Huf0OWal",
+        tim: "TX3LPaxmHKxFdv7VOQHJ",
+      },
     });
   });
 
-  it("keep Grasp's OpenAI project in the EU unless set", () => {
+  it("keep Grasp's OpenAI and ElevenLabs projects in the EU unless set", () => {
     expect([
       parsePlatformAi({})?.region,
       parsePlatformAi({ region: "us" })?.region,
@@ -40,19 +46,23 @@ describe("the platform's AI settings", () => {
       parsePlatformAi({
         conversion: { provider: "anthropic", model: "claude-haiku-4-5" },
         speech: {
-          provider: "openai",
-          model: "tts-1-hd",
-          voices: { claire: "sage" },
+          provider: "elevenlabs",
+          model: "eleven_flash_v2_5",
+          voices: { claire: "EXAVITQu4vr4xnSDxMaL" },
         },
       })
     ).toStrictEqual({
       conversion: { provider: "anthropic", model: "claude-haiku-4-5" },
       transcription: defaultPlatformAi.transcription,
       speech: {
-        provider: "openai",
-        model: "tts-1-hd",
+        provider: "elevenlabs",
+        model: "eleven_flash_v2_5",
+        quickModel: "eleven_v4_turbo",
         // The rest in the model's own default voices.
-        voices: { ...defaultVoicesOf["tts-1-hd"], claire: "sage" },
+        voices: {
+          ...defaultVoicesOf.eleven_flash_v2_5,
+          claire: "EXAVITQu4vr4xnSDxMaL",
+        },
       },
       region: "eu",
     });
@@ -88,8 +98,8 @@ describe("the platform's AI settings", () => {
       "a voice that isn't one",
       {
         speech: {
-          provider: "openai",
-          model: "gpt-4o-mini-tts",
+          provider: "elevenlabs",
+          model: "eleven_v4",
           voices: { stephen: "a voice" },
         },
       },
@@ -98,25 +108,29 @@ describe("the platform's AI settings", () => {
       "a speaker there isn't",
       {
         speech: {
-          provider: "openai",
-          model: "gpt-4o-mini-tts",
-          voices: { adam: "ash" },
+          provider: "elevenlabs",
+          model: "eleven_v4",
+          voices: { adam: "s3TPKV1kjDlVtZbl4Ksh" },
         },
       },
     ],
     [
-      "a voice the speech model doesn't have",
+      "a voice that isn't one Grasp chose",
       {
         speech: {
-          provider: "openai",
-          model: "tts-1",
-          voices: { stephen: "cedar" },
+          provider: "elevenlabs",
+          model: "eleven_v4",
+          voices: { stephen: "pNInz6obpgDQGcFmaJgB" },
         },
       },
     ],
     [
       "a speech model there isn't",
-      { speech: { provider: "openai", model: "gpt-9-tts" } },
+      { speech: { provider: "elevenlabs", model: "eleven_v9" } },
+    ],
+    [
+      "speech on a provider other than ElevenLabs",
+      { speech: { provider: "openai", model: "gpt-4o-mini-tts" } },
     ],
     ["a region there isn't", { region: "asia" }],
     ["nothing at all", null],

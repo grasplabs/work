@@ -4,10 +4,11 @@ import {
   aiKeyErrors,
   aiProviderHost,
   platformHostsOf,
-  aiProviderIdSchema,
   aiProviderIds,
   aiProviderKeySaveSchema,
   aiProviders,
+  organizationProviderIdSchema,
+  organizationProviderIds,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
 import type {
@@ -62,10 +63,11 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 // - A key sent somewhere else: only to its provider's own host, or the
 //   organization's registered base URL for a custom endpoint (checked by
 //   src/ai-endpoint-guard.ts when it is saved and again on every request),
-//   over HTTPS, and only to the provider's model paths, never its files,
-//   fine-tuning or account endpoints. The grant names the host too, so a
-//   request core didn't decide for that host is refused. Redirects are
-//   never followed (one would take the key along).
+//   over HTTPS, and only to the provider's model paths, with no query but
+//   one it names, never its files, fine-tuning or account endpoints. The
+//   grant names the host too, so a request core didn't decide for that
+//   host is refused. Redirects are never followed (one would take the key
+//   along).
 // - The key in more than one place, or core's own: the request must carry
 //   `aiCredentialPlaceholder` exactly where the key goes, or it is refused
 //   before anything is sent; nothing else of core's headers goes on but
@@ -142,7 +144,7 @@ const baseUrlOf = (
 
 /** A row as core may see it: never the key. */
 const keyOf = (row: typeof aiProviderKeys.$inferSelect): AiProviderKey => ({
-  provider: aiProviderIdSchema.parse(row.provider),
+  provider: organizationProviderIdSchema.parse(row.provider),
   mask: row.mask,
   baseUrl: row.baseUrl,
   addedAt: row.createdAt.getTime(),
@@ -290,7 +292,7 @@ export const removeAiProviderKey = async (
   provider: unknown,
   by: unknown
 ): Promise<boolean> => {
-  const parsed = aiProviderIdSchema.safeParse(provider);
+  const parsed = organizationProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiKeyErrors.create("ai_key.invalid");
   }
@@ -324,12 +326,14 @@ export const listAiProviderKeys = async (
 ): Promise<AiProviderKey[]> => {
   const rows = await drizzle(env.DB).select().from(aiProviderKeys);
   return rows
-    .filter((row) => aiProviderIdSchema.safeParse(row.provider).success)
+    .filter(
+      (row) => organizationProviderIdSchema.safeParse(row.provider).success
+    )
     .map(keyOf)
     .toSorted(
       (one, other) =>
-        aiProviderIds.indexOf(one.provider) -
-        aiProviderIds.indexOf(other.provider)
+        organizationProviderIds.indexOf(one.provider) -
+        organizationProviderIds.indexOf(other.provider)
     );
 };
 
@@ -422,11 +426,29 @@ const answeredHeaders = [
 const carriesPlaceholder = (
   request: Request,
   provider: AiProviderId
-): boolean =>
-  aiProviders[provider].keyHeader === "x-api-key"
-    ? request.headers.get("x-api-key") === aiCredentialPlaceholder
-    : request.headers.get("authorization") ===
-      `Bearer ${aiCredentialPlaceholder}`;
+): boolean => {
+  const { keyHeader } = aiProviders[provider];
+  return keyHeader === "authorization"
+    ? request.headers.get("authorization") ===
+        `Bearer ${aiCredentialPlaceholder}`
+    : request.headers.get(keyHeader) === aiCredentialPlaceholder;
+};
+
+/** One ID a `*` path segment stands for: letters and digits, nothing else. */
+const idSegment = /^[A-Za-z0-9]{1,64}$/u;
+
+/** Whether `pathname` is `path`, each `*` segment of it one ID. */
+const matchesPath = (pathname: string, path: string): boolean => {
+  const asked = pathname.split("/");
+  const allowed = path.split("/");
+  return (
+    asked.length === allowed.length &&
+    allowed.every((segment, index) => {
+      const given = asked[index] ?? "";
+      return segment === "*" ? idSegment.test(given) : segment === given;
+    })
+  );
+};
 
 /** Whether `url` is one of the provider's model endpoints, at `base`. */
 const isModelEndpoint = (
@@ -438,8 +460,8 @@ const isModelEndpoint = (
   // A fixed provider's paths are whole; a custom endpoint's sit below its
   // base URL's own path.
   const custom = provider === "openai-compatible";
-  return aiProviders[provider].paths.some(
-    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
+  return aiProviders[provider].paths.some((path) =>
+    matchesPath(url.pathname, custom ? `${prefix}${path}` : path)
   );
 };
 
@@ -480,12 +502,6 @@ const destinationOf = async (
 };
 
 /**
- * The query a model request may carry: none, or the one Anthropic's SDK
- * puts on its beta Messages API (`?beta=true`), which names no data.
- */
-const allowedQueries: ReadonlySet<string> = new Set(["", "?beta=true"]);
-
-/**
  * How long past the call's deadline connect still lets a request run: core
  * cuts it off at its deadline itself; this is the backstop should core's
  * cut never reach here.
@@ -496,12 +512,21 @@ const deadlineBackstopMs = 5000;
 const socketOpenMs = 10_000;
 
 /** Whether `url` may be sent to, `base`'s origin, checked again as it is sent. */
-const sendsToBase = (url: URL, base: URL, policy: EndpointPolicy): boolean => {
+const sendsToBase = (
+  url: URL,
+  base: URL,
+  provider: AiProviderId,
+  policy: EndpointPolicy
+): boolean => {
   const checked = checkEndpoint(url.href, policy);
+  // The query a model request may carry: none, or one its provider names
+  // exactly (`queries`), as Anthropic's SDK's `?beta=true`: none names data.
+  const query =
+    url.search === "" || aiProviders[provider].queries.includes(url.search);
   return (
     !("refused" in checked) &&
     url.origin === base.origin &&
-    allowedQueries.has(url.search) &&
+    query &&
     url.hash === ""
   );
 };
@@ -519,11 +544,8 @@ const headersFor = (
       headers.set(name, value);
     }
   }
-  if (aiProviders[provider].keyHeader === "x-api-key") {
-    headers.set("x-api-key", key);
-  } else {
-    headers.set("authorization", `Bearer ${key}`);
-  }
+  const { keyHeader } = aiProviders[provider];
+  headers.set(keyHeader, keyHeader === "authorization" ? `Bearer ${key}` : key);
   return headers;
 };
 
@@ -672,7 +694,10 @@ export const modelFetch = async (
   const { key, base } = destination;
   // A Request's URL is always absolute and parsed.
   const url = new URL(request.url);
-  if (url.hostname !== claims.host || !sendsToBase(url, base, policyOf(env))) {
+  if (
+    url.hostname !== claims.host ||
+    !sendsToBase(url, base, claims.provider, policyOf(env))
+  ) {
     return refused("endpoint", claims);
   }
   if (!isModelEndpoint(url, claims.provider, base)) {
@@ -900,7 +925,7 @@ export const resealAiProviderKeys = async (env: Env): Promise<void> => {
     .where(like(aiProviderKeys.sealed, vault.sealedWithPrevious))
     .limit(resealBatchSize);
   for (const row of rows) {
-    const parsed = aiProviderIdSchema.safeParse(row.provider);
+    const parsed = organizationProviderIdSchema.safeParse(row.provider);
     if (!parsed.success) {
       continue;
     }

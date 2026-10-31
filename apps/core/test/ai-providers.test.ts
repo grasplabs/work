@@ -19,7 +19,7 @@ import {
   aiCredentialPlaceholder,
   aiProviderErrors,
 } from "@grasp-os/shared/ai-providers";
-import type { AiProviderId } from "@grasp-os/shared/ai-providers";
+import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -178,7 +178,7 @@ const callOf = async (
 
 /** Where each provider's route goes, and how it takes its key. */
 interface ProviderCase {
-  provider: AiProviderId;
+  provider: OrganizationProviderId;
   model: string;
   api: Parameters<typeof streamText>[0];
   host: string;
@@ -1069,22 +1069,23 @@ describe("AI providers", { timeout: 60_000 }, () => {
         }
       };
 
-      // Grasp's OpenAI project keeps its data in the EU unless set.
+      // Grasp's OpenAI project and ElevenLabs account keep their data in
+      // the EU unless set.
       await expect(uses()).resolves.toStrictEqual([
         "conversion: OpenAI, European Union",
         "transcription: OpenAI, European Union",
-        "speech: OpenAI, European Union",
+        "speech: ElevenLabs, European Union",
       ]);
       await expect(
         uses({ conversion: { provider: "local" }, region: "us" })
       ).resolves.toStrictEqual([
         "conversion: here",
         "transcription: OpenAI, United States",
-        "speech: OpenAI, United States",
+        "speech: ElevenLabs, United States",
       ]);
       // Set but broken: every feature off, never the defaults' provider.
       for (const broken of [
-        { speech: { provider: "elevenlabs" } },
+        { speech: { provider: "openai" } },
         '{"conversion": {"provider": "local"',
         "null",
         null,
@@ -1135,7 +1136,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["anthropic", "openai"],
+        platform: ["anthropic", "openai", "elevenlabs"],
         noKey: "model.not_allowed",
         notPlatform: "model.invalid_call",
       });

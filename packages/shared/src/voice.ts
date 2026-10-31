@@ -6,8 +6,8 @@
 // any model call.
 //
 // Each goes to the provider and model the platform's settings name
-// (@grasp-os/shared/platform-ai), OpenAI's by default, with Grasp's own
-// key, which connect holds.
+// (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
+// holds: ElevenLabs says lines, OpenAI writes down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -38,8 +38,6 @@ export interface SpeechRequest {
    * platform's setting when not named.
    */
   model?: string;
-  /** How to say it, such as its tone: never said itself. */
-  instructions?: string;
 }
 
 /** A word of a line, and when it is said, in ms from the start of the audio. */
@@ -141,7 +139,7 @@ export const speechRequestSchema = z.strictObject({
   speaker: z.enum(speakers).default("stephen"),
   /**
    * For a line only known as it is said, such as one with a count or a
-   * name: said by the quicker voice model where the deployment allows it.
+   * name: said by the platform's quicker speech model.
    */
   quick: z.boolean().default(false),
   /** How the line is said: one of the tones Stephen may use. */

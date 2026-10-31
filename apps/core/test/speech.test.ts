@@ -7,38 +7,29 @@ import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelsEnv } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
-import { speechPcmBytesPerChar } from "./ai-providers-fake.ts";
+import { speechBytesPerChar } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome } from "./sign-in.ts";
 
 // Speech through the model gateway: Grasp's own speech feature
-// (@grasp-os/shared/platform-ai), OpenAI's by default, says a line, judged
-// by the deployment's rules, charged its text and its audio against its budgets and
+// (@grasp-os/shared/platform-ai), ElevenLabs', says a line, judged by the
+// deployment's rules, charged per character against its budgets and
 // audited like any model call, through connect with Grasp's own key.
-// OpenAI is the outside system: a fake behind connect's fetch
-// (test/ai-providers-fake.ts), which says 25 ms of silence a character.
+// ElevenLabs is the outside system: a fake behind connect's fetch
+// (test/ai-providers-fake.ts), which says each character in 25 ms.
 // Connect, the rules, the ledger and the audit log are real.
 
-const speechModel = "openai/gpt-4o-mini-tts";
+const speechModel = "elevenlabs/eleven_v4";
+const quickModel = "elevenlabs/eleven_v4_turbo";
 const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
-/** Stephen's voice by default: an OpenAI voice. */
-const voice = "cedar";
+/** Stephen's voice by default: an ElevenLabs voice ID. */
+const voice = "s3TPKV1kjDlVtZbl4Ksh";
 
-/**
- * What a line of `characters` costs at GPT-4o mini TTS's prices, in
- * micros: $0.60 a million characters of text in (0.6 micros each), and
- * $0.015 a minute of audio out (0.25 micros a ms), at the fake's 25 ms of
- * audio a character.
- */
-const lineMicrosOf = (characters: number): number =>
-  characters * 0.6 + characters * 25 * 0.25;
-
-/** The same, as the ledger charges it: whole micros, rounded up. */
-const chargedMicrosOf = (characters: number): number =>
-  Math.ceil(lineMicrosOf(characters));
+/** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
+const lineMicrosOf = (characters: number): number => characters * 80;
 
 /**
  * A line of 18 characters no other test says, so what reached the
@@ -143,7 +134,7 @@ const sentWith = async (line: string) => {
 
 // A test waits up to 10 seconds for a line's audit events (`auditedFor`).
 describe("speech through the model gateway", { timeout: 30_000 }, () => {
-  it("says a line as WAV, with when each word is said, timed by the length of the audio", async () => {
+  it("says a line as MP3, with when each word is said, grouped from the characters' timing", async () => {
     const { gatewayEnv } = withGateway();
     const line = newLine();
 
@@ -153,68 +144,77 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       language: "en",
     });
 
-    const pcmBytes = line.length * speechPcmBytesPerChar;
-    const header = new DataView(speech.audio.buffer, speech.audio.byteOffset);
-    expect({
-      riff: new TextDecoder().decode(speech.audio.subarray(0, 4)),
-      wave: new TextDecoder().decode(speech.audio.subarray(8, 12)),
-      sampleRate: header.getUint32(24, true),
-      dataBytes: header.getUint32(40, true),
-      bytes: speech.audio.byteLength,
-      mime: speech.mime,
-    }).toStrictEqual({
-      riff: "RIFF",
-      wave: "WAVE",
-      sampleRate: 24_000,
-      dataBytes: pcmBytes,
-      bytes: 44 + pcmBytes,
-      mime: "audio/wav",
-    });
-    // 18 characters at 25 ms: 450 ms, shared out by each word's characters
-    // (16 but the spaces); punctuation stays with its word.
+    expect({ bytes: speech.audio.byteLength, mime: speech.mime }).toStrictEqual(
+      { bytes: line.length * speechBytesPerChar, mime: "audio/mpeg" }
+    );
+    // Each character takes the fake 25 ms; punctuation stays with its word.
     const last = line.split(" ").at(-1);
     expect(speech.words).toStrictEqual([
-      { text: "Hello", startMs: 0, endMs: 141 },
-      { text: "there,", startMs: 141, endMs: 309 },
-      { text: last, startMs: 309, endMs: 450 },
+      { text: "Hello", startMs: 0, endMs: 125 },
+      { text: "there,", startMs: 150, endMs: 300 },
+      { text: last, startMs: 325, endMs: 450 },
     ]);
+    // ElevenLabs keeps neither the line nor the audio.
     await expect(sentWith(line)).resolves.toStrictEqual([
       {
-        host: "eu.api.openai.com",
-        path: "/v1/audio/speech",
+        host: "api.eu.residency.elevenlabs.io",
+        path: `/v1/text-to-speech/${voice}/with-timestamps?enable_logging=false&output_format=mp3_44100_128`,
         body: {
-          model: "gpt-4o-mini-tts",
-          input: line,
-          voice,
-          response_format: "pcm",
+          text: line,
+          model_id: "eleven_v4",
+          language_code: "en",
+          seed: 7,
+          voice_settings: { stability: 0.7, similarity_boost: 0.8 },
         },
       },
     ]);
   });
 
-  it("sends how a line is said apart from the line, never said", async () => {
-    const { gatewayEnv } = withGateway();
+  it("says a quick line in Eleven v4 Turbo, at half the price", async () => {
+    const { gatewayEnv, month } = withGateway({
+      budgets: { user: { limit: 10 } },
+    });
+    const person = newPerson();
     const line = newLine();
 
-    const speech = await stephen(gatewayEnv, newPerson()).speak({
+    await stephen(gatewayEnv, person).speak({
       text: line,
       voice,
       language: "en",
-      instructions: "Say it in this tone: warm, relaxed.",
+      model: quickModel,
     });
 
-    expect(speech.words.map(({ text }) => text).join(" ")).toBe(line);
     await expect(sentWith(line)).resolves.toMatchObject([
-      {
-        body: {
-          input: line,
-          instructions: "Say it in this tone: warm, relaxed.",
-        },
-      },
+      { body: { model_id: "eleven_v4_turbo" } },
     ]);
+    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+      spentMicros: lineMicrosOf(line.length) / 2,
+    });
   });
 
-  it("sends Grasp's key only from connect, once, to OpenAI alone, and never logs or hands it back", async () => {
+  it("refuses a voice the speech model doesn't have, charging nothing", async () => {
+    const { gatewayEnv, month } = withGateway({
+      budgets: { user: { limit: 10 } },
+    });
+    const person = newPerson();
+    const line = newLine();
+
+    await expect(
+      outcome(
+        stephen(gatewayEnv, person).speak({
+          text: line,
+          voice: "NotAVoiceOfGrasps0001",
+          language: "en",
+        })
+      )
+    ).resolves.toBe("model.failed");
+    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+      spentMicros: 0,
+      reservedMicros: 0,
+    });
+  });
+
+  it("sends Grasp's key only from connect, once, to ElevenLabs alone, and never logs or hands it back", async () => {
     const lines: string[] = [];
     for (const level of ["info", "warn", "error"] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -231,7 +231,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       voice,
       language: "nl",
     });
-    await plan(platformOpenAiKey, [busy, busy]);
+    await plan(platformElevenLabsKey, [busy, busy]);
     const failed = await thrown(
       stephen(gatewayEnv, person).speak({
         text: refused,
@@ -241,21 +241,23 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     );
 
     const events = await auditedFor(person.userId, 2);
-    await expect(keyPlaces(said, platformOpenAiKey)).resolves.toStrictEqual({
-      hosts: ["eu.api.openai.com"],
-      headers: ["authorization"],
-      inBody: false,
-      placeholder: false,
-    });
+    await expect(keyPlaces(said, platformElevenLabsKey)).resolves.toStrictEqual(
+      {
+        hosts: ["api.eu.residency.elevenlabs.io"],
+        headers: ["xi-api-key"],
+        inBody: false,
+        placeholder: false,
+      }
+    );
     const seen = JSON.stringify([speech.words, failed, String(failed), events]);
     expect({
       logged: lines.some((logged) => logged.includes("model.failed")),
-      inLogs: lines.some((logged) => logged.includes(platformOpenAiKey)),
-      handedBack: seen.includes(platformOpenAiKey),
+      inLogs: lines.some((logged) => logged.includes(platformElevenLabsKey)),
+      handedBack: seen.includes(platformElevenLabsKey),
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the line's text and the audio it was said in, and audits it as a platform call", async () => {
+  it("charges the line's characters, and audits it as a platform call", async () => {
     const { gatewayEnv, month } = withGateway({
       budgets: { user: { limit: 10 } },
     });
@@ -271,25 +273,24 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
 
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: chargedMicrosOf(line.length),
+      spentMicros: lineMicros,
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
       action: "model.call",
-      model: { provider: "openai", model: "gpt-4o-mini-tts" },
+      model: { provider: "elevenlabs", model: "eleven_v4" },
       cost: { amount: lineMicros / 1_000_000, currency: "USD" },
       detail: {
         purpose: "onboarding.speech",
         outcome: "answered",
         characters: line.length,
-        // The fake says 25 ms a character: the audio charged, as played.
-        audioMs: line.length * 25,
         transport: "connect",
         credential: "platform",
+        region: "eu",
         ledger: "settled",
         ledgerRequests: 1,
-        ledgerCharged: chargedMicrosOf(line.length) / 1_000_000,
+        ledgerCharged: lineMicros / 1_000_000,
       },
     });
     // Never the line itself.
@@ -297,8 +298,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("refuses a line its budget has no room for, sending nothing", async () => {
-    // Less than a cent: less than the most a line of 600 characters may
-    // cost, its audio played at its slowest (3¢).
+    // A cent: less than a line of 600 characters costs at Eleven v4 (4.8¢).
     const { gatewayEnv } = withGateway({
       budgets: { user: { limit: 0.01 } },
     });
@@ -330,7 +330,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       });
 
     // One the gateway doesn't offer.
-    await expect(outcome(speak("openai/gpt-9-tts"))).resolves.toBe(
+    await expect(outcome(speak("elevenlabs/eleven_v9"))).resolves.toBe(
       "model.not_allowed"
     );
     // A text model the deployment allows can't say a line.
@@ -394,7 +394,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }
   );
 
-  it("says an EU-only deployment's line at OpenAI's EU host, where Grasp's project keeps its data, whatever its EU models list", async () => {
+  it("says an EU-only deployment's line at ElevenLabs's EU residency host, where Grasp's account keeps its data, whatever its EU models list", async () => {
     const { gatewayEnv } = withGateway({
       models: [textModel, speechModel],
       sensitive: { models: [speechModel] },
@@ -410,7 +410,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
 
     const sent = await carrying(line);
-    expect(sent.map(({ host }) => host)).toStrictEqual(["eu.api.openai.com"]);
+    expect(sent.map(({ host }) => host)).toStrictEqual([
+      "api.eu.residency.elevenlabs.io",
+    ]);
     const [event] = await auditedFor(person.userId, 1);
     expect(event?.detail).toMatchObject({
       euOnly: "deployment",
@@ -425,7 +427,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
     const person = newPerson();
     const line = newLine();
-    await plan(platformOpenAiKey, [
+    await plan(platformElevenLabsKey, [
       { status: 429, body: { error: { type: "too_many_requests" } } },
     ]);
 
@@ -438,7 +440,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     expect(speech.words).toHaveLength(3);
     await expect(carrying(line)).resolves.toHaveLength(2);
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: chargedMicrosOf(line.length),
+      spentMicros: lineMicrosOf(line.length),
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
@@ -451,7 +453,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   it("gives up after asking once more, and says when to try again", async () => {
     const { gatewayEnv } = withGateway();
     const line = newLine();
-    await plan(platformOpenAiKey, [busy, busy]);
+    await plan(platformElevenLabsKey, [busy, busy]);
 
     await expect(
       stephen(gatewayEnv, newPerson()).speak({
@@ -476,7 +478,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       language: "en",
     });
 
-    expect(speech.mime).toBe("audio/wav");
+    expect(speech.mime).toBe("audio/mpeg");
   });
 
   it("fails closed while the platform's AI settings don't parse, sending nothing", async () => {
@@ -488,7 +490,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         stephen(
           {
             ...gatewayEnv,
-            PLATFORM_AI: { speech: { provider: "elevenlabs" } },
+            PLATFORM_AI: { speech: { provider: "openai" } },
           },
           newPerson()
         ).speak({ text: line, voice, language: "en" })

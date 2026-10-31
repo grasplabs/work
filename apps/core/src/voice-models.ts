@@ -10,54 +10,46 @@ import type { ListPrices } from "./model-prices.ts";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is priced by what the provider bills for it:
-// the text it is asked to say, per character, and the audio it answers
-// with, per millisecond, the ledger reserving the longest a line may play
-// and charging how long it did. Each transcription model is priced per
-// second it hears, at a price never below what the provider bills for it.
-// Grasp pays for these on its own keys: no organization's budget holds
-// them, but the ledger records what each cost, for the spend overview.
+// models. Each speech model is ElevenLabs's, priced per character it is
+// asked to say, which is how ElevenLabs bills speech: what the ledger
+// reserves for a line is what it charges. Each transcription model is
+// OpenAI's, priced per second it hears, at a price never below what the
+// provider bills for it. Grasp pays for these on its own keys: no
+// organization's budget holds them, but the ledger records what each
+// cost, for the spend overview.
 
 /**
- * OpenAI's prices for text to speech (OpenAI's pricing page, read on
- * 2026-10-31), in US dollars: the text in, per million characters, and
- * the audio out, per minute. GPT-4o mini TTS is billed per token: $0.60 a
- * million of text in, never more tokens than characters in the languages
- * an interview is held in, and $12 a million of audio out, which OpenAI
- * puts at $0.015 a minute of speech. `tts-1` and `tts-1-hd` are billed
- * per character alone, $15 and $30 a million, nothing for the audio.
+ * ElevenLabs's API prices for text to speech, in US dollars per 1,000
+ * characters, the same on every plan.
+ *
+ * Source: ElevenLabs's API pricing page, "Model pricing"
+ * (https://elevenlabs.io/pricing/api), read on 2026-10-21: v4 and v3 at
+ * $0.08, v4 Turbo and Flash at $0.04.
  */
-const speechPrices = {
-  "gpt-4o-mini-tts": { perMillionChars: 0.6, perMinuteAudio: 0.015 },
-  "tts-1": { perMillionChars: 15, perMinuteAudio: 0 },
-  "tts-1-hd": { perMillionChars: 30, perMinuteAudio: 0 },
-} as const satisfies Record<
-  SpeechModel,
-  { perMillionChars: number; perMinuteAudio: number }
->;
-
-/**
- * The longest a line plays, per character it says, in ms: five
- * characters a second, slower than anyone speaks. What the ledger
- * reserves for a line's audio before it is said.
- */
-export const speechMsPerCharMost = 200;
+const dollarsPer1000Chars = {
+  /** Eleven v4: the most expressive, in which Stephen's lines are said. */
+  eleven_v4: 0.08,
+  /** Eleven v4 Turbo: for a line only known as it is said. Same voices. */
+  eleven_v4_turbo: 0.04,
+  eleven_v3: 0.08,
+  eleven_flash_v2_5: 0.04,
+} as const satisfies Record<SpeechModel, number>;
 
 /** A speech model the gateway offers. */
 export interface VoiceRef {
   provider: (typeof speechProviders)[number];
-  id: keyof typeof speechPrices;
+  id: keyof typeof dollarsPer1000Chars;
 }
 
 const isVoiceModel = (id: string): id is VoiceRef["id"] =>
-  Object.hasOwn(speechPrices, id);
+  Object.hasOwn(dollarsPer1000Chars, id);
 
 const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
   speechProviders.some((one) => one === provider);
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `openai/gpt-4o-mini-tts`; `undefined` for any other.
+ * `elevenlabs/eleven_v4`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
@@ -71,35 +63,15 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
 };
 
 /**
- * A speech model's prices in the shape the ledger pins: its input per
- * million characters of text it is asked to say, its output per million
- * ms of audio it answers with. A model that bills nothing for the audio
- * is priced its input rate for it too, as the ledger takes no free rate,
- * and is never charged any (`speechCountsOf`).
+ * A speech model's prices in the shape the ledger pins: per million
+ * characters, as the input a request sends. Its answer, the audio, is
+ * what the characters pay for, so a request counts no output: it is
+ * priced the same, and never charged.
  */
 export const voicePricesOf = ({ id }: VoiceRef): ListPrices => {
-  const { perMillionChars, perMinuteAudio } = speechPrices[id];
-  const perMillionMs = (perMinuteAudio / 60_000) * 1_000_000;
-  return {
-    input: perMillionChars,
-    output: perMillionMs > 0 ? perMillionMs : perMillionChars,
-    cacheRead: 0,
-    cacheWrite: 0,
-  };
+  const perMillion = dollarsPer1000Chars[id] * 1000;
+  return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
 };
-
-/**
- * What a line counts as, at `voicePricesOf`'s rates: its characters in,
- * and the ms of audio it answered with, for a model that bills its audio.
- */
-export const speechCountsOf = (
-  { id }: VoiceRef,
-  characters: number,
-  audioMs: number
-): { input: number; output: number } => ({
-  input: characters,
-  output: speechPrices[id].perMinuteAudio > 0 ? Math.ceil(audioMs) : 0,
-});
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -158,75 +130,63 @@ export const hearingPricesOf = ({ id }: HearingRef): ListPrices => {
 };
 
 /**
- * Characters a line is charged as, its instructions with it: their UTF-16
- * length, never fewer than the characters (code points) or tokens a
- * provider counts, so the ledger's reservation is never below what the
- * line's text is billed.
+ * Characters a line is charged as: its UTF-16 length, never fewer than
+ * the characters (code points) ElevenLabs counts, so the ledger's
+ * reservation is never below what the line is billed.
  */
 export const charactersOf = (text: string): number => text.length;
 
-/**
- * The audio OpenAI's speech answers with when asked for `pcm`: 16-bit
- * signed little-endian samples, mono, at 24 kHz. Asked for so the line's
- * length is known exactly, from its size, as no provider's speech says
- * when each word is said.
- */
-export const speechPcm = { sampleRate: 24_000, bytesPerSample: 2 } as const;
+/** When each character of a line is said, in seconds, as ElevenLabs aligns it. */
+export interface Alignment {
+  characters: readonly string[];
+  character_start_times_seconds: readonly number[];
+  character_end_times_seconds: readonly number[];
+}
 
-/** How long `bytes` of the speech's PCM take to play, in ms. */
-export const pcmMs = (bytes: number): number =>
-  (bytes / (speechPcm.sampleRate * speechPcm.bytesPerSample)) * 1000;
-
-const wavHeaderBytes = 44;
+const space = /^\s$/u;
 
 /**
- * `pcm` (16-bit, mono, at `sampleRate`) as a WAV file, which every browser
- * plays: the canonical 44-byte RIFF header, then the samples unchanged.
+ * The words of an aligned line, each a run of characters between spaces,
+ * with when its first character starts and its last ends, in whole ms.
+ * `undefined` when the alignment doesn't hold one time of each kind for
+ * every character.
  */
-export const wavOf = (pcm: Uint8Array, sampleRate: number): Uint8Array => {
-  const wav = new Uint8Array(wavHeaderBytes + pcm.byteLength);
-  const view = new DataView(wav.buffer);
-  const ascii = (at: number, text: string): void => {
-    for (let offset = 0; offset < text.length; offset += 1) {
-      view.setUint8(at + offset, text.codePointAt(offset) ?? 0);
+export const wordsOf = ({
+  characters,
+  character_start_times_seconds: starts,
+  character_end_times_seconds: ends,
+}: Alignment): SpokenWord[] | undefined => {
+  if (
+    starts.length !== characters.length ||
+    ends.length !== characters.length
+  ) {
+    return undefined;
+  }
+  const words: SpokenWord[] = [];
+  let word: { text: string; start: number; end: number } | undefined =
+    undefined;
+  const close = (): void => {
+    if (word !== undefined) {
+      words.push({
+        text: word.text,
+        startMs: Math.round(word.start * 1000),
+        endMs: Math.round(word.end * 1000),
+      });
+      word = undefined;
     }
   };
-  ascii(0, "RIFF");
-  view.setUint32(4, wavHeaderBytes - 8 + pcm.byteLength, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  // The format chunk: 16 bytes, PCM, mono.
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * speechPcm.bytesPerSample, true);
-  view.setUint16(32, speechPcm.bytesPerSample, true);
-  view.setUint16(34, speechPcm.bytesPerSample * 8, true);
-  ascii(36, "data");
-  view.setUint32(40, pcm.byteLength, true);
-  wav.set(pcm, wavHeaderBytes);
-  return wav;
-};
-
-const wordPattern = /\S+/gu;
-
-/**
- * The words of a line said in `ms`, each between spaces, punctuation with
- * its word, timed by its share of the line's characters: when each word is
- * said, as near as the length of the audio tells, for the page to light
- * the words up as they are said. The last ends with the audio.
- */
-export const wordsTimed = (text: string, ms: number): SpokenWord[] => {
-  const words = [...text.matchAll(wordPattern)].map(([word]) => word);
-  const total = words.reduce((sum, word) => sum + word.length, 0);
-  if (total === 0) {
-    return [];
+  for (const [at, character] of characters.entries()) {
+    const start = starts[at] ?? 0;
+    const end = ends[at] ?? start;
+    if (space.test(character)) {
+      close();
+    } else if (word === undefined) {
+      word = { text: character, start, end };
+    } else {
+      word.text += character;
+      word.end = end;
+    }
   }
-  let said = 0;
-  return words.map((word) => {
-    const startMs = Math.round((said / total) * ms);
-    said += word.length;
-    return { text: word, startMs, endMs: Math.round((said / total) * ms) };
-  });
+  close();
+  return words;
 };

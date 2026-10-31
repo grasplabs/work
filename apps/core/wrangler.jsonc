@@ -68,7 +68,8 @@
   //
   // So is `PLATFORM_AI` (src/platform-ai.ts, @grasp-os/shared/platform-ai):
   // the provider and model of each of Grasp's own AI features (converting
-  // PDFs for the Brain, transcription, speech), OpenAI's while unset. They
+  // PDFs for the Brain, transcription, speech), OpenAI's and, for speech,
+  // ElevenLabs's while unset. They
   // go through the model gateway with Grasp's own keys, which connect holds
   // as its secrets.
   //

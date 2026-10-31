@@ -87,10 +87,8 @@ const agreementWords: Record<keyof Agreed, string> = {
 /** Who else handles the company's data for Grasp, and what for. */
 const others = [
   { name: "Anthropic", what: "The model that reads, talks and writes." },
-  {
-    name: "OpenAI",
-    what: "Stephen’s voice, writing out what people say, and reading PDFs.",
-  },
+  { name: "ElevenLabs", what: "Stephen’s voice." },
+  { name: "OpenAI", what: "Writing out what people say, and reading PDFs." },
   { name: "Cloudflare", what: "Where Grasp runs." },
   { name: "Stripe", what: "Invoices and payments." },
 ] as const;

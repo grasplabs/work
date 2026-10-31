@@ -19,13 +19,26 @@ import { defineErrorFamily } from "./errors.ts";
 //
 // Where a provider runs is shown, never enforced: the admin chooses.
 
-/** The providers, in the order they are offered. */
-export const aiProviderIds = [
+/** The providers an organization can add a key of its own for, in the order they are offered. */
+export const organizationProviderIds = [
   "anthropic",
   "openai",
   "mistral",
   "openrouter",
   "openai-compatible",
+] as const;
+export const organizationProviderIdSchema = z.enum(organizationProviderIds);
+export type OrganizationProviderId = z.infer<
+  typeof organizationProviderIdSchema
+>;
+
+/**
+ * Every provider: an organization's, and ElevenLabs, which only Grasp's
+ * own speech feature reaches, on Grasp's key (@grasp-os/shared/platform-ai).
+ */
+export const aiProviderIds = [
+  ...organizationProviderIds,
+  "elevenlabs",
 ] as const;
 export const aiProviderIdSchema = z.enum(aiProviderIds);
 export type AiProviderId = z.infer<typeof aiProviderIdSchema>;
@@ -37,7 +50,7 @@ export type AiProviderApi =
   | "openai-completions";
 
 /** The one request header a provider takes its key in. */
-export type AiKeyHeader = "x-api-key" | "authorization";
+export type AiKeyHeader = "x-api-key" | "xi-api-key" | "authorization";
 
 /** One provider, as core routes to it and connect sends to it. */
 export interface AiProviderSpec {
@@ -52,9 +65,15 @@ export interface AiProviderSpec {
   /**
    * The paths below its host a model request may go to, and nothing else
    * its key could reach (files, fine-tuning, an account's settings). For
-   * an OpenAI-compatible endpoint, below its base URL's own path.
+   * an OpenAI-compatible endpoint, below its base URL's own path. A `*`
+   * segment is one ID of letters and digits, such as a voice's.
    */
   paths: readonly string[];
+  /**
+   * The queries a model request may carry: none, or one of these exactly,
+   * each naming no data.
+   */
+  queries: readonly string[];
   /**
    * The paths below its host a realtime WebSocket may open, with the one
    * query each takes, and nothing else: OpenAI's realtime transcription,
@@ -62,7 +81,7 @@ export interface AiProviderSpec {
    * organization's key). Empty for a provider with none.
    */
   realtime: readonly { path: string; query: string }[];
-  /** Where its key goes: `x-api-key: <key>` or `authorization: Bearer <key>`. */
+  /** Where its key goes: `x-api-key: <key>`, `xi-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
   whereItRuns: string;
@@ -78,6 +97,7 @@ export interface AiProviderSpec {
     | "OPENAI_API_KEY"
     | "MISTRAL_API_KEY"
     | "OPENROUTER_API_KEY"
+    | "ELEVENLABS_API_KEY"
     | undefined;
   /**
    * The model a test of a newly added key asks, one of the cheapest of its
@@ -97,6 +117,8 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "Anthropic",
     baseUrls: { "anthropic-messages": "https://api.anthropic.com" },
     paths: ["/v1/messages"],
+    // Anthropic's SDK asks its beta Messages API, which names no data.
+    queries: ["?beta=true"],
     realtime: [],
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
@@ -117,8 +139,8 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "/v1/responses",
       "/v1/chat/completions",
       "/v1/audio/transcriptions",
-      "/v1/audio/speech",
     ],
+    queries: [],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
@@ -131,6 +153,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
     paths: ["/v1/chat/completions"],
+    queries: [],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
@@ -146,6 +169,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-completions": "https://openrouter.ai/api/v1",
     },
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
+    queries: [],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns:
@@ -159,11 +183,27 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "OpenAI-compatible endpoint",
     baseUrls: {},
     paths: ["/chat/completions"],
+    queries: [],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
     platformSecret: undefined,
+    testModel: undefined,
+  },
+  // Grasp's own speech feature only, never an organization's key: a line
+  // said with when each character is said, kept by neither side.
+  elevenlabs: {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    baseUrls: {},
+    paths: ["/v1/text-to-speech/*/with-timestamps"],
+    queries: ["?enable_logging=false&output_format=mp3_44100_128"],
+    realtime: [],
+    keyHeader: "xi-api-key",
+    whereItRuns: "ElevenLabs, United States",
+    region: "us",
+    platformSecret: "ELEVENLABS_API_KEY",
     testModel: undefined,
   },
 };
@@ -175,21 +215,25 @@ export const aiProviderHost = (provider: AiProviderId): string | undefined => {
 };
 
 /**
- * Where Grasp's own OpenAI project keeps its data: the EU (a data
- * residency project, which OpenAI answers at its EU host only) or the US.
- * The platform's AI settings say which (@grasp-os/shared/platform-ai).
+ * Where Grasp's own projects at OpenAI and ElevenLabs keep their data: the
+ * EU (data residency projects, each answered at its provider's EU host
+ * only) or the US. The platform's AI settings say which
+ * (@grasp-os/shared/platform-ai).
  */
 export const platformRegions = ["eu", "us"] as const;
 export type PlatformRegion = (typeof platformRegions)[number];
 
 /**
  * The hosts Grasp's own key for a provider goes to, by its project's
- * region, for a provider whose host depends on it: OpenAI's.
+ * region, for a provider whose host depends on it: OpenAI's and
+ * ElevenLabs's.
  */
 const platformHosts: Readonly<
   Partial<Record<AiProviderId, Readonly<Record<PlatformRegion, string>>>>
 > = {
   openai: { eu: "eu.api.openai.com", us: "api.openai.com" },
+  // ElevenLabs's EU data residency host, for a workspace there.
+  elevenlabs: { eu: "api.eu.residency.elevenlabs.io", us: "api.elevenlabs.io" },
 };
 
 /** Where a platform feature's requests go on Grasp's own key, and where that is. */
@@ -339,7 +383,7 @@ export type AiModelChoiceNow = z.output<typeof aiModelChoiceNowSchema>;
 
 /** A key connect keeps, as it shows it: never the key, only its mask. */
 export interface AiProviderKey {
-  provider: AiProviderId;
+  provider: OrganizationProviderId;
   /** The key's last four characters, such as `…a3f2`: never its start. */
   mask: string;
   /** For an OpenAI-compatible endpoint: the base URL its key goes to. */
@@ -354,7 +398,7 @@ export interface AiProviderKey {
  * custom endpoint's base URL) and those Grasp has a key for. Never a key.
  */
 export interface AiProviderRoutes {
-  organization: { provider: AiProviderId; baseUrl: string | null }[];
+  organization: { provider: OrganizationProviderId; baseUrl: string | null }[];
   platform: AiProviderId[];
 }
 
@@ -416,7 +460,11 @@ export interface AiPlatformUse {
 export interface AiProvidersListing {
   providers: AiProviderListed[];
   /** Every provider an admin can add, with where it runs. */
-  offered: { provider: AiProviderId; label: string; whereItRuns: string }[];
+  offered: {
+    provider: OrganizationProviderId;
+    label: string;
+    whereItRuns: string;
+  }[];
   /** The models its calls use, as they stand; none until an admin chose. */
   choice: AiModelChoiceNow | null;
   /**
@@ -457,16 +505,19 @@ export interface AiProvidersApi {
   /** Adds the provider's key, or replaces the one it has. */
   add: (request: AiProviderAdd) => Promise<AiProviderListed>;
   /** One tiny call to `model`, or the provider's own test model. */
-  test: (provider: AiProviderId, model?: string) => Promise<AiProviderTest>;
+  test: (
+    provider: OrganizationProviderId,
+    model?: string
+  ) => Promise<AiProviderTest>;
   /** Sets the default model and its fallbacks, each a connected provider's. */
   setModels: (choice: z.input<typeof aiModelChoiceSchema>) => Promise<void>;
   /** Removes the provider's key; connect deletes it. */
-  remove: (provider: AiProviderId) => Promise<void>;
+  remove: (provider: OrganizationProviderId) => Promise<void>;
 }
 
 /** A key core hands connect to keep, as an admin gave it. */
 export const aiProviderKeySaveSchema = z.strictObject({
-  provider: aiProviderIdSchema,
+  provider: organizationProviderIdSchema,
   key: aiKeySchema,
   /** Only for an OpenAI-compatible endpoint, and required for it. */
   baseUrl: z.string().trim().min(1).max(aiBaseUrlMaxLength).optional(),

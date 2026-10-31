@@ -84,7 +84,7 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   await readyForTheAdmin();
   // The story on "How this works" is told at once.
   await page.emulateMedia({ reducedMotion: "reduce" });
-  // The voice is OpenAI behind the model gateway and connect, which the local
+  // The voice is ElevenLabs behind the model gateway, which the local
   // stack doesn't reach: Stephen says nothing, and every line still shows.
   await page.route("**/api/speech", async (route) => {
     await route.fulfill({

@@ -88,10 +88,17 @@ const baseUrlOf = (
  * The headers every request carries: the placeholder where the key goes,
  * in the one header the provider takes it in, and no SDK's own.
  */
-const placeholderHeaders = (provider: AiProviderId): ProviderHeaders =>
-  aiProviders[provider].keyHeader === "x-api-key"
-    ? { "x-api-key": aiCredentialPlaceholder, Authorization: null }
-    : { Authorization: `Bearer ${aiCredentialPlaceholder}`, "x-api-key": null };
+const placeholderHeaders = (provider: AiProviderId): ProviderHeaders => {
+  const { keyHeader } = aiProviders[provider];
+  const none: ProviderHeaders = {
+    Authorization: null,
+    "x-api-key": null,
+    "xi-api-key": null,
+  };
+  return keyHeader === "authorization"
+    ? { ...none, Authorization: `Bearer ${aiCredentialPlaceholder}` }
+    : { ...none, [keyHeader]: aiCredentialPlaceholder };
+};
 
 /** The core env a connect route needs. */
 type ConnectEnv = Pick<Env, "CONNECT" | "CAPABILITY_SIGNING_KEY">;
@@ -365,7 +372,8 @@ export const connectTransport = (
 ): ModelTransport => ({
   kind: "connect",
   capabilities: {
-    providers: [target.provider],
+    // ElevenLabs speaks no text API: it says lines (`connectRequest`).
+    providers: target.provider === "elevenlabs" ? [] : [target.provider],
     payloadLoggingOff: true,
     sharedCacheOff: true,
     sdkRetries: false,

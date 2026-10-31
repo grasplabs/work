@@ -561,7 +561,148 @@ describe("AI providers in connect", () => {
   });
 
   describe("Grasp's own speech and transcription", () => {
-    it("sends a line to say and a recording to write down, and nothing else of OpenAI's audio", async () => {
+    /** Grasp's own key at ElevenLabs, as a connect secret. */
+    const elevenLabsKey = "test-platform-elevenlabs-key-0001";
+    const speechQuery = "?enable_logging=false&output_format=mp3_44100_128";
+    const euHost = "api.eu.residency.elevenlabs.io";
+
+    /** A line to say, at `host`, as core's gateway sends it. */
+    const lineRequest = (
+      path: string,
+      {
+        host = euHost,
+        headers = { "xi-api-key": aiCredentialPlaceholder },
+      }: { host?: string; headers?: Record<string, string> } = {}
+    ): Request => modelRequest(`https://${host}${path}`, { headers });
+
+    const elevenLabsGrant = async (host = euHost) =>
+      await grantFor({ provider: "elevenlabs", host, credential: "platform" });
+
+    it("sends a line to ElevenLabs with Grasp's key in its one header, at its EU residency host or its US one", async () => {
+      const path = `/v1/text-to-speech/s3TPKV1kjDlVtZbl4Ksh/with-timestamps${speechQuery}`;
+      const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
+
+      const outcomes = [
+        refusalOf(
+          await withKey.modelFetch(lineRequest(path), await elevenLabsGrant())
+        ),
+        refusalOf(
+          await withKey.modelFetch(
+            lineRequest(path, { host: "api.elevenlabs.io" }),
+            await elevenLabsGrant("api.elevenlabs.io")
+          )
+        ),
+      ];
+
+      expect({
+        outcomes,
+        sent: sent.map(({ host, path: sentPath, headers }) => ({
+          host,
+          path: sentPath,
+          key: headers["xi-api-key"],
+          authorization: headers.authorization,
+        })),
+        routes: await withKey.aiProviderRoutes(),
+      }).toStrictEqual({
+        outcomes: ["sent", "sent"],
+        sent: [euHost, "api.elevenlabs.io"].map((host) => ({
+          host,
+          path,
+          key: elevenLabsKey,
+          authorization: undefined,
+        })),
+        routes: { organization: [], platform: ["openai", "elevenlabs"] },
+      });
+    });
+
+    it("refuses anything else of ElevenLabs's: another path, voice, query or host, the key in another header, an organization's key, or no key of Grasp's", async () => {
+      const voice = "s3TPKV1kjDlVtZbl4Ksh";
+      const line = `/v1/text-to-speech/${voice}/with-timestamps${speechQuery}`;
+      const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
+
+      const outcomes = {
+        voices: refusalOf(
+          await withKey.modelFetch(
+            lineRequest("/v1/voices"),
+            await elevenLabsGrant()
+          )
+        ),
+        history: refusalOf(
+          await withKey.modelFetch(
+            lineRequest("/v1/history"),
+            await elevenLabsGrant()
+          )
+        ),
+        traversal: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(
+              `/v1/text-to-speech/${voice}%2F..%2F..%2Fuser/with-timestamps${speechQuery}`
+            ),
+            await elevenLabsGrant()
+          )
+        ),
+        logging: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(
+              `/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`
+            ),
+            await elevenLabsGrant()
+          )
+        ),
+        host: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(line, { host: "api.openai.com" }),
+            await elevenLabsGrant("api.openai.com")
+          )
+        ),
+        bearer: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(line, {
+              headers: { authorization: `Bearer ${aiCredentialPlaceholder}` },
+            }),
+            await elevenLabsGrant()
+          )
+        ),
+        organization: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(line),
+            await grantFor({ provider: "elevenlabs", host: euHost })
+          )
+        ),
+        noKey: refusalOf(
+          await connect().modelFetch(lineRequest(line), await elevenLabsGrant())
+        ),
+      };
+
+      expect(outcomes).toStrictEqual({
+        voices: "path",
+        history: "path",
+        traversal: "path",
+        logging: "endpoint",
+        host: "endpoint",
+        bearer: "credential_header",
+        organization: "no_credential",
+        noKey: "no_credential",
+      });
+      expect(sent).toStrictEqual([]);
+      await expect(connect().aiProviderRoutes()).resolves.toStrictEqual({
+        organization: [],
+        platform: ["openai"],
+      });
+    });
+
+    it("takes no organization key for ElevenLabs, which only Grasp's speech uses", async () => {
+      await expect(
+        outcome(
+          connect().saveAiProviderKey(
+            { provider: "elevenlabs", key: newKey() },
+            byAdmin
+          )
+        )
+      ).resolves.toBe("ai_key.invalid");
+    });
+
+    it("sends a recording to write down, and nothing else of OpenAI's audio, its speech included", async () => {
       const grant = async () =>
         await grantFor({
           provider: "openai",
@@ -600,12 +741,12 @@ describe("AI providers in connect", () => {
         paths: sent.map(({ path }) => path),
       }).toStrictEqual({
         outcomes: {
-          speech: "sent",
+          speech: "path",
           transcription: "sent",
           translation: "path",
           voices: "path",
         },
-        paths: ["/v1/audio/speech", "/v1/audio/transcriptions"],
+        paths: ["/v1/audio/transcriptions"],
       });
     });
   });

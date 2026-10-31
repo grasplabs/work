@@ -1,17 +1,18 @@
 /**
  * The AI providers connect reaches in core's tests (test/connect-providers.ts):
- * Anthropic, OpenAI, Mistral, OpenRouter and an organization's own
- * OpenAI-compatible endpoint, each at its own host. Each answers the
+ * Anthropic, OpenAI, Mistral, OpenRouter, ElevenLabs and an organization's
+ * own OpenAI-compatible endpoint, each at its own host. Each answers the
  * replies a test planned for the key it is sent (`aiProvidersControlUrl`),
  * one per request, and refuses a key it has no plan for, as a provider
  * refuses a key it doesn't know. Every request it got is kept, with all of
  * its headers, so a test can read where a key went and in which header.
  *
- * OpenAI's audio endpoints, which Grasp's own speech and transcription
- * reach (@grasp-os/shared/platform-ai), answer as OpenAI does when no reply
- * is planned for the key: speech with silence, 25 ms for each character of
- * the line, as 24 kHz PCM (`speechPcmBytesPerChar`); a recording with
- * `writtenText`; and a realtime transcription socket with a delta of
+ * ElevenLabs's speech and OpenAI's transcription, which Grasp's own
+ * features reach (@grasp-os/shared/platform-ai), answer as the provider
+ * does when no reply is planned for the key: a line with
+ * `speechBytesPerChar` bytes of audio for each character, each character
+ * said in `secondsPerCharacter`, one after another, and a voice Grasp
+ * didn't choose refused; a recording with `writtenText`; and a realtime transcription socket with a delta of
  * `partialText` for the first audio of each stretch, and `writtenText` for
  * each commit that has audio, or OpenAI's error for one that has none.
  * Every socket's opening, events and close are kept (`realtimeControlUrl`).
@@ -29,8 +30,11 @@ export const partialText = "Hello";
 /** What a stretch settled at a pause (`{ pause: true }`) is written down as. */
 export const pausedText = "Before the pause";
 
-/** Bytes of speech the fake says for each character: 25 ms of 24 kHz PCM. */
-export const speechPcmBytesPerChar = 1200;
+/** Bytes of audio the fake says for each character of a line. */
+export const speechBytesPerChar = 400;
+
+/** How long the fake takes to say each character of a line. */
+export const secondsPerCharacter = 0.025;
 
 /**
  * Where tests read the realtime sockets (GET: each one's opening, events,
@@ -104,6 +108,8 @@ export const aiProvidersFake = () => {
     "api.anthropic.com",
     "api.openai.com",
     "eu.api.openai.com",
+    "api.elevenlabs.io",
+    "api.eu.residency.elevenlabs.io",
     "api.mistral.ai",
     "openrouter.ai",
     "llm.acme-ai.test",
@@ -125,7 +131,8 @@ export const aiProvidersFake = () => {
       typeof value.release === "string");
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: its source is embedded
   const keyOf = (request: Request): string | null => {
-    const apiKey = request.headers.get("x-api-key");
+    const apiKey =
+      request.headers.get("x-api-key") ?? request.headers.get("xi-api-key");
     if (apiKey !== null) {
       return apiKey;
     }
@@ -264,12 +271,70 @@ export const aiProvidersFake = () => {
     });
     return new Response(null, { status: 101, webSocket: client });
   };
-  /** How OpenAI's audio endpoints answer when nothing is planned. */
+  /**
+   * ElevenLabs's line said with timestamps: the audio in base64, and when
+   * each character of the line is said; a voice Grasp didn't choose is
+   * refused, as ElevenLabs refuses a voice the account doesn't have.
+   */
+  const spokenLine = (url: URL, body: string): Response => {
+    const voices = [
+      "s3TPKV1kjDlVtZbl4Ksh",
+      "r1KmysJdVYZjJCm4mL3b",
+      "EXAVITQu4vr4xnSDxMaL",
+      "cjVigY5qzO86Huf0OWal",
+      "TX3LPaxmHKxFdv7VOQHJ",
+    ];
+    const voice =
+      /^\/v1\/text-to-speech\/(?<voice>[^/]+)\/with-timestamps$/u.exec(
+        url.pathname
+      )?.groups?.voice;
+    if (voice === undefined || !voices.includes(voice)) {
+      return Response.json(
+        {
+          detail: {
+            status: "voice_not_found",
+            message: `A voice with the voice_id ${voice} was not found.`,
+          },
+        },
+        { status: 404 }
+      );
+    }
+    const asked: unknown = JSON.parse(body);
+    const text =
+      isRecord(asked) && typeof asked.text === "string" ? asked.text : "";
+    // The fake's lines are plain text, one code point to a character.
+    // oxlint-disable-next-line typescript/no-misused-spread -- see above
+    const characters = [...text];
+    const seconds = 0.025;
+    return Response.json(
+      {
+        audio_base64: btoa("\0".repeat(characters.length * 400)),
+        alignment: {
+          characters,
+          character_start_times_seconds: characters.map(
+            (_, at) => at * seconds
+          ),
+          character_end_times_seconds: characters.map(
+            (_, at) => (at + 1) * seconds
+          ),
+        },
+      },
+      { headers: { "request-id": `req-speech-${seen.length}` } }
+    );
+  };
+  /** How ElevenLabs's speech and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
     body: string
   ): Response | undefined => {
+    // Grasp's own ElevenLabs answers at its EU residency host, or its US one.
+    if (
+      url.hostname === "api.elevenlabs.io" ||
+      url.hostname === "api.eu.residency.elevenlabs.io"
+    ) {
+      return request.method === "POST" ? spokenLine(url, body) : undefined;
+    }
     // Grasp's own project answers at OpenAI's EU host, or its US one.
     if (
       url.hostname !== "api.openai.com" &&
@@ -282,49 +347,6 @@ export const aiProvidersFake = () => {
       request.headers.get("upgrade") === "websocket"
     ) {
       return openRealtime(request, url);
-    }
-    if (url.pathname === "/v1/audio/speech") {
-      const asked: unknown = JSON.parse(body);
-      const input =
-        isRecord(asked) && typeof asked.input === "string" ? asked.input : "";
-      // As OpenAI does: a voice the model doesn't have is refused.
-      const classic = [
-        "alloy",
-        "ash",
-        "coral",
-        "echo",
-        "fable",
-        "nova",
-        "onyx",
-        "sage",
-        "shimmer",
-      ];
-      const voicesOf: Record<string, string[]> = {
-        "gpt-4o-mini-tts": [...classic, "ballad", "verse", "marin", "cedar"],
-        "tts-1": classic,
-        "tts-1-hd": classic,
-      };
-      const model = isRecord(asked) ? String(asked.model) : "";
-      const voice = isRecord(asked) ? String(asked.voice) : "";
-      if (!(voicesOf[model] ?? []).includes(voice)) {
-        return Response.json(
-          {
-            error: {
-              message: `The voice ${voice} isn't available for ${model}.`,
-              type: "invalid_request_error",
-              param: "voice",
-              code: null,
-            },
-          },
-          { status: 400 }
-        );
-      }
-      return new Response(new Uint8Array(input.length * 1200), {
-        headers: {
-          "content-type": "audio/pcm",
-          "x-request-id": `req-speech-${seen.length}`,
-        },
-      });
     }
     if (url.pathname === "/v1/audio/transcriptions") {
       // As OpenAI does: the audio's format by the file name's extension

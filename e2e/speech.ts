@@ -1,8 +1,7 @@
 import type { Page, Request } from "@playwright/test";
 
 // Stephen's voice on the onboarding's pages (apps/web/src/voice) is
-// Grasp's own speech feature behind the model gateway (OpenAI by
-// default, through connect with Grasp's key), which the local stack doesn't
+// ElevenLabs behind the model gateway, which the local stack doesn't
 // reach: the page's speech requests are answered here as core answers
 // them, with silence the length of the line, and kept, to see what he was
 // asked to say.

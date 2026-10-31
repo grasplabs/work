@@ -145,16 +145,11 @@ import type {
 import { platformRouteFor } from "./platform-ai.ts";
 import {
   charactersOf,
-  speechCountsOf,
-  speechMsPerCharMost,
   hearingPricesOf,
   parseHearingRef,
   parseVoiceRef,
-  pcmMs,
-  speechPcm,
   voicePricesOf,
-  wavOf,
-  wordsTimed,
+  wordsOf,
 } from "./voice-models.ts";
 import type { HearingRef, VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
@@ -3630,14 +3625,11 @@ const relayOrFail = async (
 // and a provider Grasp has no key for is refused (`model.not_allowed`,
 // because `platform`), never served by another.
 
-/** Text without anything a URL or a request would read apart: a voice's ID. */
-const voiceIdPattern = /^[\w-]{1,64}$/u;
+/** Text without anything a URL's path would read apart: a voice's ID. */
+const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
 
 /** An ISO 639-1 language code. */
 const languagePattern = /^[a-z]{2}$/u;
-
-/** The longest direction a line may be said with, such as a tone. */
-const maxInstructionChars = 200;
 
 const speechSchema = z.strictObject({
   model: sessionShape.model,
@@ -3652,8 +3644,6 @@ const speechSchema = z.strictObject({
   text: z.string().trim().min(1).max(maxSpeechChars),
   voice: z.string().regex(voiceIdPattern),
   language: z.string().regex(languagePattern),
-  /** How to say it, such as its tone: never said, and never charged. */
-  instructions: z.string().trim().min(1).max(maxInstructionChars).optional(),
 });
 type SpeechSession = z.output<typeof speechSchema>;
 
@@ -3667,8 +3657,8 @@ export type SpeechCall = z.input<typeof speechSchema> & {
 const speechTimeoutMs = 60_000;
 
 /**
- * Retries for a line the provider refused for a moment (429 or 5xx): a
- * provider says a few lines at a time and turns the rest away, which is
+ * Retries for a line the provider refused for a moment (429 or 5xx):
+ * ElevenLabs says a few lines at a time and turns the rest away, which is
  * over in a moment.
  */
 const speechRetries = 1;
@@ -3676,15 +3666,41 @@ const speechRetries = 1;
 /** The wait before a line turned away is asked for again. */
 const speechRetryMs = 500;
 
-/** The audio a line is answered with: WAV, made from the provider's PCM. */
-const speechMime = "audio/wav";
+/** The audio asked for: MP3 at 44.1 kHz, 128 kbit/s, ElevenLabs's default. */
+const speechFormat = { query: "mp3_44100_128", mime: "audio/mpeg" } as const;
+
+/**
+ * Steadier than the model's default: a voice says many separate lines, so
+ * one line should sound like the next more than it should surprise.
+ */
+const voiceSettings = { stability: 0.7, similarity_boost: 0.8 };
+
+/** The same seed for every line, so the same words sound the same. */
+const voiceSeed = 7;
+
+/** ElevenLabs's answer: the audio, and when each character is said. */
+const spokenSchema = z.object({
+  audio_base64: z.string().min(1),
+  alignment: z.object({
+    characters: z.array(z.string()),
+    character_start_times_seconds: z.array(z.number().nonnegative()),
+    character_end_times_seconds: z.array(z.number().nonnegative()),
+  }),
+});
+
+/** Base64 as bytes; `undefined` for text that isn't base64. */
+const bytesOf = (base64: string): Uint8Array | undefined => {
+  try {
+    return Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0);
+  } catch {
+    return undefined;
+  }
+};
 
 /** What the audit log records of one line, however it ended. */
 interface SpeechRecord {
   /** Characters charged; 0 when the provider said nothing. */
   characters: number;
-  /** Ms of audio charged; 0 when the provider said nothing or bills none. */
-  audioMs: number;
   /** Where its route went (`platformRouteOf`). */
   region: LedgerRoute["region"];
   cost: number;
@@ -3734,7 +3750,6 @@ const speechEntry = (
       status: recorded.status ?? null,
       errorType: recorded.errorType ?? null,
       characters: recorded.characters,
-      audioMs: recorded.audioMs,
       voice: call.voice,
       language: call.language,
       ledger: recorded.ledger.state,
@@ -3760,7 +3775,6 @@ const speechEntry = (
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
-  audioMs: Number.MAX_SAFE_INTEGER,
   region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
@@ -3780,8 +3794,6 @@ interface SpeechRoute extends Admitting {
   send: (id: string, limit: Deadline) => Promise<Response>;
   /** What the line's text is charged as (`charactersOf`). */
   characters: number;
-  /** The longest its audio may play, which the ledger reserves for. */
-  audioMsMost: number;
   /** Where its requests go on Grasp's own key (`platformRouteOf`). */
   platform: PlatformRoute;
 }
@@ -3853,20 +3865,19 @@ const admitSpeech = async (
     return await refuse(env, call, { code: "model.unpriced" });
   }
   const place = crypto.randomUUID();
-  // The instructions are text the model reads too, billed with the line.
-  const characters =
-    charactersOf(call.text) + charactersOf(call.instructions ?? "");
-  const audioMsMost = characters * speechMsPerCharMost;
-  const most = speechCountsOf(ref, characters, audioMsMost);
+  const characters = charactersOf(call.text);
+  const query = new URLSearchParams({
+    // ElevenLabs keeps neither the line nor the audio.
+    enable_logging: "false",
+    output_format: speechFormat.query,
+  });
+  const path = `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`;
   const body = JSON.stringify({
-    model: ref.id,
-    input: call.text,
-    voice: call.voice,
-    // Raw samples, so the line's length is known exactly (voice-models.ts).
-    response_format: "pcm",
-    ...(call.instructions === undefined
-      ? {}
-      : { instructions: call.instructions }),
+    text: call.text,
+    model_id: ref.id,
+    language_code: call.language,
+    seed: voiceSeed,
+    voice_settings: voiceSettings,
   });
   return {
     env,
@@ -3879,16 +3890,21 @@ const admitSpeech = async (
       await connectRequest(
         env,
         target,
-        "/v1/audio/speech",
-        { headers: { "content-type": "application/json" }, body },
+        path,
+        {
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body,
+        },
         { ledgerRequest: id, endsAt: limit.endsAt, signal: limit.signal }
       ),
     characters,
-    audioMsMost,
     platform: target.platform,
-    // Its text, known before it is sent, and the longest its audio may
-    // play: settled to how long it did once it is said (`heardSpeech`).
-    bound: () => ({ inputTokens: most.input, outputTokens: most.output }),
+    // The line's characters are all it is billed for, known before it is
+    // sent: what the ledger reserves is what it charges.
+    bound: () => ({ inputTokens: characters, outputTokens: 0 }),
     perRequest: undefined,
     scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
       scopesFor(rules.budgets, call, lineageRequests)
@@ -3985,72 +4001,52 @@ const sendSpeech = async (
   return sent;
 };
 
-/**
- * What a line's answer holds, read: its samples as WAV, and its words,
- * timed by the length of the audio; `undefined` when it isn't a line.
- */
-const readSpeech = async (
-  answered: Response,
-  text: string
-): Promise<{ speech: Speech | undefined; audioMs: number }> => {
-  const pcm = new Uint8Array(await answered.arrayBuffer());
-  const audioMs = pcmMs(pcm.byteLength);
-  if (pcm.byteLength === 0 || pcm.byteLength % speechPcm.bytesPerSample !== 0) {
-    return { speech: undefined, audioMs };
+/** What a line's answer holds, read; `undefined` when it isn't a line. */
+const readSpeech = async (answered: Response): Promise<Speech | undefined> => {
+  const parsed = spokenSchema.safeParse(
+    await answered.json().catch(() => null)
+  );
+  if (!parsed.success) {
+    return undefined;
   }
-  return {
-    speech: {
-      audio: wavOf(pcm, speechPcm.sampleRate),
-      mime: speechMime,
-      words: wordsTimed(text, audioMs),
-    },
-    audioMs,
-  };
+  const audio = bytesOf(parsed.data.audio_base64);
+  const words = wordsOf(parsed.data.alignment);
+  return audio === undefined || words === undefined
+    ? undefined
+    : { audio, mime: speechFormat.mime, words };
 };
 
-/** A line as the ledger counts it: its characters in, its audio out. */
-const speechCounts = (
-  ref: VoiceRef,
-  characters: number,
-  audioMs: number
-): TokenCounts => ({
-  ...speechCountsOf(ref, characters, audioMs),
+/** A line's characters as the ledger counts them: all of them input. */
+const characterCounts = (characters: number): TokenCounts => ({
+  input: characters,
+  output: 0,
   cacheRead: 0,
   cacheWrite: 0,
 });
 
 /**
  * The line the provider answered with, read, and its provider request
- * settled: charged the line's characters and how long its audio played,
- * which the provider bills once it answered, whether its answer could be
- * read or not; the longest it may play when how long isn't known (cut
- * off while it came in).
+ * settled: charged the line's characters, which the provider bills once
+ * it answered, whether its answer could be read or not.
  */
 const heardSpeech = async (
   route: SpeechRoute,
   { answered, pending }: SpeechSent
-): Promise<{
-  speech: Speech | undefined;
-  audioMs: number;
-  settled: RequestSettled[];
-}> => {
+): Promise<{ speech: Speech | undefined; settled: RequestSettled[] }> => {
   if (answered === undefined || pending === undefined) {
-    return { speech: undefined, audioMs: 0, settled: [] };
+    return { speech: undefined, settled: [] };
   }
-  let read: { speech: Speech | undefined; audioMs: number } = {
-    speech: undefined,
-    audioMs: route.audioMsMost,
-  };
+  let speech: Speech | undefined = undefined;
   try {
-    read = await readSpeech(answered, route.call.text);
+    speech = await readSpeech(answered);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
   }
   const settled = await settleAdmitted(route, pending, {
     by: "usage",
-    tokens: speechCounts(route.ref, route.characters, read.audioMs),
+    tokens: characterCounts(route.characters),
   });
-  return { ...read, settled: [settled] };
+  return { speech, settled: [settled] };
 };
 
 /** How a line ended, as the audit log records it. */
@@ -4081,13 +4077,10 @@ const recordSpeech = async (
     outcome,
     stopped,
     ledger,
-    audioMs,
   }: {
     outcome: Outcome;
     stopped: Stopped | undefined;
     ledger: Ledgered;
-    /** How long the line's audio played, as it was charged. */
-    audioMs: number;
   }
 ): Promise<void> => {
   const { env, call } = route;
@@ -4108,15 +4101,13 @@ const recordSpeech = async (
     });
   }
   const characters = said ? route.characters : 0;
-  const counts = speechCounts(route.ref, characters, said ? audioMs : 0);
   await keepAuditEvent(
     env,
     drizzle(env.DB),
     speechEntry(call, route.ref, route.judged, {
       characters,
-      audioMs: counts.output,
       region: route.platform.region,
-      cost: costDollars(route.price, counts),
+      cost: costDollars(route.price, characterCounts(characters)),
       logId: providerLogIdOf(sent.answered?.headers),
       outcome,
       status,
@@ -4419,7 +4410,7 @@ const speakLine = async (
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const { speech, audioMs, settled } = await heardSpeech(route, sent);
+    const { speech, settled } = await heardSpeech(route, sent);
     const ledger = ledgerOf([...sent.settled, ...settled]);
     const { held } = sent;
     // Held back before any request was sent: a refusal, and nothing else;
@@ -4429,7 +4420,7 @@ const speakLine = async (
     }
     const stopped = limit.stopped();
     const outcome = speechOutcome(speech, sent.pending !== undefined, stopped);
-    await recordSpeech(route, sent, { outcome, stopped, ledger, audioMs });
+    await recordSpeech(route, sent, { outcome, stopped, ledger });
     if (held !== undefined) {
       return await refuse(env, call, held);
     }

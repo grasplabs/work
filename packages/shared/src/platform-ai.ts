@@ -20,11 +20,12 @@ import type { Speaker } from "./voice.ts";
 //   `{ provider: "local" }` reads every file locally (on-prem).
 // - `transcription`: what someone says on the onboarding's pages, live
 //   over the provider's realtime socket, or from a recording.
-// - `speech`: the onboarding's lines said out loud, each speaker in a
-//   voice the model has (`speechVoicesOf`).
-// - `region`: where Grasp's own OpenAI project keeps its data, the EU by
-//   default (`platformRouteOf` in ./ai-providers.ts makes it a host). An
-//   EU-only deployment uses an OpenAI feature only while it is the EU.
+// - `speech`: the onboarding's lines said out loud by ElevenLabs, each
+//   speaker in one of the voices Grasp chose (`speechVoicesOf`).
+// - `region`: where Grasp's own projects at OpenAI and ElevenLabs keep
+//   their data, the EU by default (`platformRouteOf` in ./ai-providers.ts
+//   makes it a host). An EU-only deployment uses those features only
+//   while it is the EU.
 //
 // A feature whose provider Grasp has no key for fails with a clear code,
 // never silently, and never on another provider.
@@ -39,8 +40,8 @@ export const conversionProviders = [
 /** The providers that write down speech, live and from a recording. */
 export const transcriptionProviders = ["openai"] as const;
 
-/** The providers that say a line. */
-export const speechProviders = ["openai"] as const;
+/** The providers that say a line: ElevenLabs. */
+export const speechProviders = ["elevenlabs"] as const;
 
 /**
  * A model as its provider names it, without the provider: `gpt-5.4-mini`,
@@ -53,12 +54,12 @@ const modelIdSchema = z
   // Each part starts with a letter or digit: never `.` or `..`.
   .regex(/^[A-Za-z0-9][\w.:@-]*(?:\/[A-Za-z0-9][\w.:@-]*)*$/u);
 
-/** A provider's voice, by its own name for it, such as `cedar`. */
+/** A voice, by its ElevenLabs ID, such as `s3TPKV1kjDlVtZbl4Ksh`. */
 const voiceIdSchema = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[\w-]+$/u);
+  .regex(/^[A-Za-z0-9]+$/u);
 
 const conversionSchema = z.discriminatedUnion("provider", [
   z.strictObject({
@@ -74,70 +75,65 @@ const transcriptionSchema = z.strictObject({
   model: modelIdSchema,
 });
 
-/** The speech models a line can be said in. */
-export const speechModels = ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"] as const;
+/**
+ * The speech models a line can be said in, ElevenLabs's: Eleven v4, the
+ * most expressive, in which Stephen's lines are said; v4 Turbo, quicker,
+ * with the same voices and directions, for a line only known as it is
+ * said; and v3 and Flash v2.5.
+ */
+export const speechModels = [
+  "eleven_v4",
+  "eleven_v4_turbo",
+  "eleven_v3",
+  "eleven_flash_v2_5",
+] as const;
 export type SpeechModel = (typeof speechModels)[number];
 
-/** The voices `tts-1` and `tts-1-hd` have; GPT-4o mini TTS has more. */
-const classicVoices = [
-  "alloy",
-  "ash",
-  "coral",
-  "echo",
-  "fable",
-  "nova",
-  "onyx",
-  "sage",
-  "shimmer",
-] as const;
+/**
+ * Each speaker's voice when the settings name none, by its ElevenLabs ID.
+ * Stephen's is "Adam", the voice Eleven v4 is shown with: young,
+ * confident, conversational. Claire's is "Jessica": playful, bright and
+ * warm, checked by ElevenLabs in English, Dutch, German and Spanish, not
+ * in French. The sample speakers are ElevenLabs's own voices, each
+ * clearly not Stephen.
+ */
+const elevenLabsVoices = {
+  stephen: "s3TPKV1kjDlVtZbl4Ksh",
+  claire: "r1KmysJdVYZjJCm4mL3b",
+  lisa: "EXAVITQu4vr4xnSDxMaL",
+  mark: "cjVigY5qzO86Huf0OWal",
+  tim: "TX3LPaxmHKxFdv7VOQHJ",
+} as const satisfies Record<Speaker, string>;
 
 /**
- * The voices each speech model has, by OpenAI's names (OpenAI's text to
- * speech guide, read on 2026-10-31): a voice it doesn't have fails every
- * line said in it.
+ * The voices each speech model may say a line in: the ones Grasp chose
+ * and checked, which every model of ElevenLabs's here has. A voice
+ * outside them is refused rather than tried on a deployment's people.
  */
 export const speechVoicesOf: Readonly<Record<SpeechModel, readonly string[]>> =
   {
-    "gpt-4o-mini-tts": [...classicVoices, "ballad", "verse", "marin", "cedar"],
-    "tts-1": classicVoices,
-    "tts-1-hd": classicVoices,
+    eleven_v4: Object.values(elevenLabsVoices),
+    eleven_v4_turbo: Object.values(elevenLabsVoices),
+    eleven_v3: Object.values(elevenLabsVoices),
+    eleven_flash_v2_5: Object.values(elevenLabsVoices),
   };
 
-/**
- * Each speaker's voice when the settings name none, by the model: each a
- * voice the model has. Stephen: young, confident, conversational. Claire:
- * warm and bright. The sample speakers: each clearly not Stephen.
- */
+/** Each speaker's voice when the settings name none, by the model. */
 export const defaultVoicesOf: Readonly<
   Record<SpeechModel, Readonly<Record<Speaker, string>>>
 > = {
-  "gpt-4o-mini-tts": {
-    stephen: "cedar",
-    claire: "marin",
-    mark: "ash",
-    lisa: "coral",
-    tim: "verse",
-  },
-  "tts-1": {
-    stephen: "onyx",
-    claire: "nova",
-    mark: "ash",
-    lisa: "coral",
-    tim: "echo",
-  },
-  "tts-1-hd": {
-    stephen: "onyx",
-    claire: "nova",
-    mark: "ash",
-    lisa: "coral",
-    tim: "echo",
-  },
+  eleven_v4: elevenLabsVoices,
+  eleven_v4_turbo: elevenLabsVoices,
+  eleven_v3: elevenLabsVoices,
+  eleven_flash_v2_5: elevenLabsVoices,
 };
 
 const speechSchema = z
   .strictObject({
     provider: z.enum(speechProviders),
     model: z.enum(speechModels),
+    /** The model a line only known as it is said is said in: quicker. */
+    quickModel: z.enum(speechModels).default("eleven_v4_turbo"),
     /** A voice for any speaker; the model's default for the rest. */
     voices: z.partialRecord(z.enum(speakers), voiceIdSchema).default({}),
   })
@@ -156,16 +152,17 @@ const speechSchema = z
 /**
  * Each feature's provider and model, as the defaults have them: OpenAI's
  * GPT-5.4 mini reads PDFs (text and page images, so scans too), GPT-4o
- * Transcribe writes down speech, live and recorded, and GPT-4o mini TTS
- * says the lines, which it can be told the tone of.
+ * Transcribe writes down speech, live and recorded, and ElevenLabs's
+ * Eleven v4 says the lines, in the tone each is directed to.
  */
 export const defaultPlatformAi = {
   conversion: { provider: "openai", model: "gpt-5.4-mini" },
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
   speech: {
-    provider: "openai",
-    model: "gpt-4o-mini-tts",
-    voices: defaultVoicesOf["gpt-4o-mini-tts"],
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    quickModel: "eleven_v4_turbo",
+    voices: defaultVoicesOf.eleven_v4,
   },
   region: "eu",
 } as const satisfies {
@@ -185,7 +182,7 @@ export const platformAiSchema = z.strictObject({
   conversion: conversionSchema.default(defaultPlatformAi.conversion),
   transcription: transcriptionSchema.default(defaultPlatformAi.transcription),
   speech: speechSchema.default(defaultPlatformAi.speech),
-  /** Where Grasp's own OpenAI project keeps its data: the EU unless set. */
+  /** Where Grasp's own OpenAI and ElevenLabs projects keep their data: the EU unless set. */
   region: z.enum(platformRegions).default(defaultPlatformAi.region),
 });
 export type PlatformAiInput = z.input<typeof platformAiSchema>;

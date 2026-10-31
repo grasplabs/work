@@ -10,29 +10,25 @@ import { forgetLines, storedKeysOf } from "../speech-cache.ts";
 // told, and the cache keeps a line's words with its sound for a month.
 
 /**
- * Each speaker's voice, by the speech provider's name for it: the
- * platform's settings' (@grasp-os/shared/platform-ai); none while they
- * don't parse.
+ * Each speaker's voice, by its ElevenLabs ID: the platform's settings'
+ * (@grasp-os/shared/platform-ai); none while they don't parse.
  */
 export const speakerVoicesOf = (
   env: Pick<Env, "PLATFORM_AI">
 ): Record<Speaker, string> | undefined => platformAi(env)?.speech.voices;
 
 /**
- * How a line is to be said, for the speech model to hear apart from the
- * line itself: the tone it takes, one of Stephen's (`voiceTags`).
+ * What the voice is sent: the line led by its tone, in English; the bare
+ * line in any other language. A direction is English words in front of
+ * the line, and the voice then starts it in English: the first Dutch word
+ * came out with an English sound, "nog" as "nok".
  */
-export const toneInstructions = (
+export const spokenOf = (
+  text: string,
+  language: string,
   tone: string | undefined
-): string | undefined =>
-  tone === undefined ? undefined : `Say it in this tone: ${tone}.`;
-
-/**
- * What a line is kept by in the cache, of what is said: the line led by
- * its tone, in any language, as the tone changes how it sounds.
- */
-export const spokenOf = (text: string, tone: string | undefined): string =>
-  tone === undefined ? text : `[${tone}] ${text}`;
+): string =>
+  tone !== undefined && language === "en" ? `[${tone}] ${text}` : text;
 
 /** What was said in an interview, as its lines may have been kept. */
 export interface SaidIn {

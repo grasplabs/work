@@ -84,7 +84,7 @@ import {
 //   old words in what landed.
 
 /** The speech model lines are said in: the platform's default. */
-const speechModel = "openai/gpt-4o-mini-tts";
+const speechModel = "elevenlabs/eleven_v4";
 const idp = mockIdp();
 
 /** Words only one person says, to look for where they must not be. */
@@ -777,13 +777,13 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     });
     await keepLine(env, keyOf(said.max), answer);
     await keepLine(env, keyOf(said.mia), answer);
-    // Said before the speech settings changed: another provider's model
-    // and voice, another language, no tone. Erased all the same.
+    // Said before the speech settings changed: another model and voice,
+    // another language, no tone. Erased all the same.
     const before: SpokenKey = {
       text: stephenSays(said.max),
       spoken: stephenSays(said.max),
-      voice: "s3TPKV1kjDlVtZbl4Ksh",
-      model: "elevenlabs/eleven_v4",
+      voice: "EXAVITQu4vr4xnSDxMaL",
+      model: "elevenlabs/eleven_v3",
       language: "nl",
     };
     await keepLine(env, before, answer);
