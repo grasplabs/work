@@ -2780,6 +2780,11 @@ msgctxt "activity filter: everyone"
 msgid "All"
 msgstr "Alle"
 
+#: src/routes/_shell.apps.index.tsx
+msgctxt "filter: every app"
+msgid "All"
+msgstr "Alle"
+
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: every integration"
 msgid "All"
@@ -3313,7 +3318,9 @@ msgstr "Genehmigt: {who}."
 msgid "Approver for new tools named"
 msgstr "Freigabe für neue Tools benannt"
 
+#: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -9594,6 +9601,7 @@ msgctxt "asked for the first time this span"
 msgid "New"
 msgstr "Neu"
 
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "New app"
@@ -9780,6 +9788,10 @@ msgstr "Keine App in der App-Landschaft verstößt gegen diese Regel."
 #: src/policies/policy-editing.tsx
 msgid "No app is allowed to break this rule."
 msgstr "Keine App darf gegen diese Regel verstoßen."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "No app is called “{asked}”"
+msgstr "Keine App heißt „{asked}“"
 
 #: src/policies/policy.ts
 msgid "No apps"
@@ -13644,6 +13656,11 @@ msgstr "Zeitplan gestoppt"
 msgid "Screens"
 msgstr "Bildschirme"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Screens made for a team or one person, standing on your workflows."
+msgstr "Bildschirme für ein Team oder eine Person, aufgebaut auf Ihren Workflows."
+
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Suchen"
@@ -13675,6 +13692,10 @@ msgstr "Chats und Projekte durchsuchen"
 #: src/landscape/audit-trail.tsx
 msgid "Search events"
 msgstr "Ereignisse durchsuchen"
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Search for another name, or look under another tab."
+msgstr "Suchen Sie nach einem anderen Namen oder schauen Sie unter einem anderen Tab."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
@@ -13709,6 +13730,10 @@ msgstr "Personen und Teams suchen"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Die Suche durchsucht jede Sammlung, die Sie lesen dürfen. Versuchen Sie andere oder weniger Wörter."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Search the apps"
+msgstr "Apps durchsuchen"
 
 #: src/landscape/add-app-dialog.tsx
 msgid "Search the catalog"
@@ -15326,6 +15351,10 @@ msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die 
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
 msgstr "Die Apps, die Teams genannt haben, und die, die im Einsatz sind, aber niemand erwähnt hat."
+
+#: src/routes/_shell.apps.index.tsx
+msgid "The apps your colleagues are making show here."
+msgstr "Hier erscheinen die Apps, die Ihre Kollegen erstellen."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
@@ -17919,6 +17948,7 @@ msgid "What should Grasp do there?"
 msgstr "Was soll Grasp dort tun?"
 
 #: src/engines/new-app.tsx
+#: src/routes/_shell.apps.index.tsx
 msgid "What should the app show, and for whom?"
 msgstr "Was soll die App zeigen, und für wen?"
 
