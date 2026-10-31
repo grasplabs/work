@@ -4395,10 +4395,6 @@ msgstr "Gewijzigd: deze code handelt namens iedereen die het domein gebruikt, me
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Gewijzigd: leest en herschrijft elk record van {table}, van wie het ook is"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Changes"
-msgstr "Wijzigt"
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Wijzigingen die Grasp voor iemand verstuurde waarvan het antwoord verloren ging, zodat niemand weet of ze effect hadden. Alleen die persoon kan op haar dashboard zeggen wat er gebeurde; volg het met haar op."
@@ -5233,6 +5229,11 @@ msgstr "Geteld over de workflows van de domeinen die je kunt openen; zelfstandig
 #: src/workflows/independent-workflows.tsx
 msgid "Create"
 msgstr "Aanmaken"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Create and change"
+msgstr "Aanmaken en wijzigen"
 
 #: src/knowledge/new-collection.tsx
 msgid "Create collection"
@@ -12568,6 +12569,11 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Gelezen"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Read"
+msgstr "Lezen"
+
 #: src/connections/connect-dialog.tsx
 msgctxt "what a tool may do"
 msgid "Read"
@@ -12704,10 +12710,6 @@ msgstr "Bezig met lezen…"
 msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
 msgstr "Wordt gelezen…"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reads"
-msgstr "Leest"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
