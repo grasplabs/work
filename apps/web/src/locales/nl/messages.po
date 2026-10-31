@@ -4076,6 +4076,7 @@ msgstr "Niet leesbaar"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5964,8 +5965,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Elk document is maximaal {maxKb} KB."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Elk domein draait één deel van het bedrijf: de workflows, apps en koppelingen die erbij horen."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Elk domein is één deel van het bedrijf: de workflows, apps en koppelingen ervan."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6783,6 +6784,10 @@ msgstr "Voor {0}, die is gevraagd"
 msgid "For {person}"
 msgstr "Voor {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Voor een deel van het bedrijf, zoals een productlijn of een vestiging. Het begint leeg: wat Grasp erin bouwt, brengt de workflows, apps en integraties mee."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Voor een beheerder"
@@ -6804,6 +6809,10 @@ msgstr "voor alle modelaanroepen deze maand"
 msgid "For everyone"
 msgstr "Voor iedereen"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Bijvoorbeeld Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Bijvoorbeeld Personio of Twinfield"
@@ -6811,6 +6820,10 @@ msgstr "Bijvoorbeeld Personio of Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Bijvoorbeeld: beantwoordt vragen van klanten"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Bijvoorbeeld: alles rond leasecontracten, van aanvraag tot verlenging"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -9056,6 +9069,10 @@ msgstr "Er een workflow van maken"
 msgid "Make admin"
 msgstr "Beheerder maken"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Domein maken"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Versie {version} actueel maken"
@@ -9394,6 +9411,7 @@ msgid "Muted"
 msgstr "Gedempt"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9591,6 +9609,11 @@ msgstr "Nieuwe collectie"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "Nieuw document"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Nieuw domein"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -16095,6 +16118,10 @@ msgstr "Er zijn nog geen collecties die je kunt lezen."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Er zijn nog geen domeinen die je kunt openen. Domeinen maak je in de chat: beschrijf een deel van je werk, en Grasp bouwt de workflows en apps ervoor."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Er zijn nog geen domeinen die je kunt openen. Maak er een met ‘Nieuw domein’, of beschrijf in de chat een deel van je werk, en Grasp bouwt de workflows en apps ervan."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Er zijn nog geen workflows om te koppelen."
@@ -17621,6 +17648,10 @@ msgstr "Wat beter kan"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Wat als succes telt"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "Wat loopt erin?"
 
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"

@@ -4076,6 +4076,7 @@ msgstr "Can’t be read"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5964,8 +5965,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Each document holds up to {maxKb} KB."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Each domain runs one part of the business: its workflows, apps and connections."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Each domain is one part of the business: its workflows, apps and connections."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6783,6 +6784,10 @@ msgstr "For {0}, who was asked"
 msgid "For {person}"
 msgstr "For {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "For an admin"
@@ -6804,6 +6809,10 @@ msgstr "for every model call this month"
 msgid "For everyone"
 msgstr "For everyone"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "For example Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "For example Personio or Twinfield"
@@ -6811,6 +6820,10 @@ msgstr "For example Personio or Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "For example: answers customers' questions"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "For example: everything around lease contracts, from request to renewal"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -9056,6 +9069,10 @@ msgstr "Make a workflow of it"
 msgid "Make admin"
 msgstr "Make admin"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Make domain"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Make version {version} current"
@@ -9394,6 +9411,7 @@ msgid "Muted"
 msgstr "Muted"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9591,6 +9609,11 @@ msgstr "New collection"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "New document"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "New domain"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -16095,6 +16118,10 @@ msgstr "There are no collections you can read yet."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "There are no workflows to link yet."
@@ -17621,6 +17648,10 @@ msgstr "What could be better"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "What counts as success"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "What does it run?"
 
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
