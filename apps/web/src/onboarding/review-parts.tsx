@@ -8,11 +8,14 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { formatList } from "../format.ts";
 import { copyText, useEntrance } from "./setup-parts.tsx";
+import type { AiReadiness } from "./setup.ts";
 
 // What only the admin can settle in their onboarding, one item each
 // (prototype `components/onboarding/review-parts.tsx`): a step people told
@@ -272,6 +275,53 @@ export const NoMailItem = () => {
     <div className="flex flex-col border-t py-4 text-left last:border-b">
       <span className="font-medium">{t`Mail isn’t available on this hosting yet`}</span>
       <span className="text-muted-foreground">{t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}</span>
+    </div>
+  );
+};
+
+/**
+ * Connecting an AI provider, which only the admin can do: Grasp's AI
+ * calls models with the organization's own key (Settings › AI providers).
+ * Done once a model is ready for calls, as core says; nothing to tick
+ * here. Where the deployment's own gateway still serves models and no
+ * provider is connected, nothing needs the admin, and nothing is shown.
+ */
+export const AiProviderItem = ({ ai }: { ai: AiReadiness }) => {
+  const { t } = useLingui();
+  const title = t`Connect an AI provider`;
+  if (ai.ready && ai.providers.length === 0) {
+    return null;
+  }
+  if (ai.ready) {
+    const names = formatList(ai.providers);
+    return (
+      <div className="flex flex-col gap-3 border-t py-4 text-left last:border-b">
+        <span className="text-muted-foreground">{title}</span>
+        <div className="text-muted-foreground flex items-center gap-2">
+          <CheckIcon
+            aria-hidden="true"
+            className="text-status-agreed size-4 flex-none"
+          />
+          <span className="min-w-0 flex-1">{t`Connected: ${names}`}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3 border-t py-4 text-left last:border-b">
+      <div className="flex flex-col">
+        <span className="font-medium">{title}</span>
+        <span className="text-muted-foreground">{t`Grasp’s AI works with your organization’s own AI provider key, such as Anthropic, OpenAI or Mistral AI. Connect one and choose a model, then come back here.`}</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          nativeButton={false}
+          render={<Link to="/settings/ai-providers" />}
+          size="sm"
+        >
+          {t`Connect a provider`}
+        </Button>
+      </div>
     </div>
   );
 };

@@ -91,6 +91,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { agentApis } from "./agent-apis.ts";
+import { isMessage } from "./agent-messages.ts";
 import {
   auditAgentCall,
   chatAuthority,
@@ -104,9 +105,7 @@ import type {
   CodeRunAdmission,
   CodeRunCall,
 } from "./agent-scope.ts";
-import { showThinking } from "./agent-thinking.ts";
 import type { ThinkingBrain } from "./agent-thinking.ts";
-import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import { draftFiles } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
@@ -201,7 +200,7 @@ import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
-import { gatewaySettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import { personRole } from "./permissions.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -1243,15 +1242,16 @@ export class Workspace extends DurableObject<Env> {
    * `fix`), made only if the deployment allows `model`, which its question
    * will name: a refused model leaves no chat without a question.
    */
-  createFixChat(
+  async createFixChat(
     title: string,
     personId: string,
     agentId: string,
     by: AuditActor,
     fix: RunToFix,
     model: string
-  ): Chat {
-    if (!gatewaySettings(this.env).models.includes(model)) {
+  ): Promise<Chat> {
+    const { models: allowed } = await modelSettings(this.env);
+    if (!allowed.includes(model)) {
       throw modelErrors.create("model.not_allowed");
     }
     return this.createChat(title, personId, agentId, by, fix);
@@ -1589,7 +1589,9 @@ export class Workspace extends DurableObject<Env> {
         platform,
         where?.thread
       );
-    const [model] = gatewaySettings(this.env).models;
+    const {
+      models: [model],
+    } = await modelSettings(this.env);
     if (model === undefined) {
       throw modelErrors.create("model.unconfigured");
     }
@@ -1735,6 +1737,9 @@ export class Workspace extends DurableObject<Env> {
       let answer: number | undefined;
       const textSoFar = onText === undefined ? undefined : throttled(onText);
       const readsBrain = await hasBrainGrant(this.env, authority);
+      // Loaded at the first turn, not as core starts: the loop brings Pi
+      // and TypeBox (GRA-1349).
+      const { runTurn } = await import("./agent.ts");
       const result = await runTurn({
         history: this.#transcript(chat.id),
         question: parsed.data.text,
@@ -1760,7 +1765,7 @@ export class Workspace extends DurableObject<Env> {
         // The Brain's recall before the first request, under the agent's
         // own grant, as its code would recall (GRA-1029).
         recallFirst: readsBrain,
-        ...this.#thinking(readsBrain, shared, personId),
+        ...(await this.#thinking(readsBrain, shared, personId)),
         signal: cancel.signal,
         events: () => live.events.splice(0),
         withheld: async () => await this.#withheldRuns(scope),
@@ -5031,14 +5036,19 @@ export class Workspace extends DurableObject<Env> {
    * The tool that shows the turn's thinking in the brain, as the person
    * reads the brain: only in their own chat, by an agent that may read it.
    */
-  #thinking(
+  async #thinking(
     readsBrain: boolean,
     shared: boolean,
     personId: string
-  ): { thinking?: AgentTool } {
-    return readsBrain && !shared
-      ? { thinking: showThinking(async () => await this.#brainOf(personId)) }
-      : {};
+  ): Promise<{ thinking?: AgentTool }> {
+    if (!readsBrain || shared) {
+      return {};
+    }
+    // Loaded with the turn, as the agent loop is: it brings TypeBox.
+    const { showThinking } = await import("./agent-thinking.ts");
+    return {
+      thinking: showThinking(async () => await this.#brainOf(personId)),
+    };
   }
 
   /**

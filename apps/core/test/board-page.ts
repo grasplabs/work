@@ -4,7 +4,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
-import { builtins, fingerprintOf, release } from "../src/builtins.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { grantReviewed, release as releaseFiles } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import { calledAs } from "./sealed-apps.ts";
@@ -81,7 +81,7 @@ const figureSchema = z.object({
 
 /** An App created from the built-in `blueprint` by `admin`. */
 const fromBuiltin = async (admin: Person, blueprint: string) => {
-  await builtins(env).ensureInstalled(await fingerprintOf(release));
+  await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
   const made = await admin.api.apps.blueprints.create(blueprint, {
     name: `Ours ${unique()}`,
   });

@@ -67,7 +67,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { gatewaySettings, modelForRole, models } from "./models.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -681,7 +681,7 @@ const proposeFor = async (
   },
   locale: string
 ): Promise<string | null> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {
@@ -896,7 +896,7 @@ const proposalsFor = async (
     .from(stephenRequestProposals)
     .where(eq(stephenRequestProposals.locale, language));
   const proposals = new Map(rows.map((row) => [row.key, row.text]));
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (proposer === null || model === undefined) {
