@@ -62,9 +62,12 @@ const scopes: { value: ScopeKind; label: string }[] = [
   { value: "all", label: "Every client, ring by ring" },
 ];
 
-/** What a rollout takes to clients, as the form offers it. */
+/**
+ * What a rollout takes to clients, as the form offers it: named apart from
+ * the Release field under it, so neither is heard as the other.
+ */
 const kinds: { value: RolloutKind; label: string }[] = [
-  { value: "release", label: "A release" },
+  { value: "release", label: "A new version of Grasp" },
   { value: "secrets", label: "Secrets only" },
 ];
 
@@ -146,11 +149,12 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
           >
             {kinds.map((each) => (
               <Field key={each.value} orientation="horizontal">
+                {/* Apart from the fields' own ids: `rollout-release` is the Release field's. */}
                 <RadioGroupItem
-                  id={`rollout-${each.value}`}
+                  id={`rollout-what-${each.value}`}
                   value={each.value}
                 />
-                <FieldLabel htmlFor={`rollout-${each.value}`}>
+                <FieldLabel htmlFor={`rollout-what-${each.value}`}>
                   {each.label}
                 </FieldLabel>
               </Field>
