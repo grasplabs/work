@@ -7,7 +7,10 @@ import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowResourceErrors,
+  workflowRunsListed,
+} from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
   WorkflowRunStatus,
@@ -1398,7 +1401,7 @@ export const projectResourceRun = async (
 };
 
 /** The most runs `listResourceRuns` answers: the newest. */
-const runsListed = 50;
+const runsListed = workflowRunsListed;
 
 /**
  * Workflow `id`'s runs, newest first, the latest {@link runsListed}, for
