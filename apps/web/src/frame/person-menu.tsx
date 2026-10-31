@@ -75,7 +75,7 @@ const Who = ({ identity }: { identity: Identity }) => {
   const role = roleLabel(identity.role);
   return (
     <>
-      <Avatar>
+      <Avatar shape="square">
         <AvatarFallback>{initials(identity.name)}</AvatarFallback>
       </Avatar>
       <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
