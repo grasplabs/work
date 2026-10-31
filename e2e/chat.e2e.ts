@@ -400,6 +400,9 @@ test("a person starts a chat from one of the questions under the box", async ({
   const { user } = peopleIn("chat");
   const page = await pageOf(user);
   await page.goto("/");
+  // The questions wait while the tour is offered, as in the prototype:
+  // turned down, they are under the box.
+  await page.getByRole("button", { name: "Not now" }).click();
   const questions = page.getByRole("list", { name: "Questions to start with" });
   await expect(questions.getByRole("button")).toHaveCount(4);
   await questions
