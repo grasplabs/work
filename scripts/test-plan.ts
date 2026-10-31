@@ -421,13 +421,37 @@ export const journeyStacks = {
 export type JourneySuite = keyof typeof journeyStacks;
 
 /**
+ * The suites a changed file outside every package runs, by its path from
+ * the root: a suite's own journeys or config run that suite alone (the
+ * admin's first, since its journeys sit inside e2e's folder), and any
+ * other file, the repo's tooling, runs both.
+ */
+const suitesOf = (file: string): JourneySuite[] => {
+  if (
+    ["e2e/admin/**", "playwright.admin.config.ts"].some((pattern) =>
+      path.matchesGlob(file, pattern)
+    )
+  ) {
+    return ["admin-e2e"];
+  }
+  if (
+    ["e2e/**", "playwright.config.ts"].some((pattern) =>
+      path.matchesGlob(file, pattern)
+    )
+  ) {
+    return ["e2e"];
+  }
+  return ["e2e", "admin-e2e"];
+};
+
+/**
  * Which journey suites a pull request's changes reach. A suite runs when a
  * changed file sits in a package its stack runs or depends on, directly or
- * not, by every dependency (web's build included, which core serves). Two
+ * not, by every dependency (web's build included, which core serves), or
+ * when one of its own journeys or its config changed (`suitesOf`). Two
  * kinds of change never reach a stack: a Vitest test file (`testFiles`),
  * which no build bundles, and a file in a package no stack depends on (the
- * admin's, for e2e; the router's, for both). A changed file outside every
- * package (a journey, its config, the repo's tooling) runs both. In 150
+ * admin's, for e2e; the router's, for both). In 150
  * merged pull requests, 33 changed nothing either e2e stack runs, mostly
  * the admin or tests alone, each running every journey for it (October
  * 2026). The merge queue and the nightly run always run both.
@@ -446,19 +470,20 @@ export const journeysReached = ({
   readonly root: string;
 }): Record<JourneySuite, boolean> => {
   const dirs = packages.map(({ dir }) => dir).filter((dir) => dir !== root);
-  const owners = changedFiles
-    .filter((file) => !testFiles.has(file))
-    .map((file) => packageOf(file, dirs));
-  if (owners.includes(undefined)) {
-    return { e2e: true, "admin-e2e": true };
-  }
+  const built = changedFiles.filter((file) => !testFiles.has(file));
+  const outside = built
+    .filter((file) => packageOf(file, dirs) === undefined)
+    .map((file) => path.relative(root, file));
   const reached = reachedPackages(
     packages,
-    owners.filter((dir) => dir !== undefined),
+    built
+      .map((file) => packageOf(file, dirs))
+      .filter((dir) => dir !== undefined),
     new Map()
   );
   const dirOf = new Map(packages.map(({ name, dir }) => [name, dir]));
   const runs = (suite: JourneySuite): boolean =>
+    outside.some((file) => suitesOf(file).includes(suite)) ||
     journeyStacks[suite].some((name) => reached.has(dirOf.get(name) ?? ""));
   return { e2e: runs("e2e"), "admin-e2e": runs("admin-e2e") };
 };
