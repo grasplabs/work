@@ -6,7 +6,7 @@ import {
   relationsPerSource,
 } from "@grasp-os/brain/entities";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 
 // Core's side of the Brain's `extractEntities` port (packages/brain's
@@ -58,7 +58,7 @@ export const extractEntities = async (
   env: ModelsEnv,
   text: string
 ): Promise<unknown> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

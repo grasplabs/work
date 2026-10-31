@@ -48,7 +48,7 @@ const Line = ({
 }) => {
   const said = useSaidOf(text);
   const className =
-    "type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500";
+    "type-display animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none max-w-lg duration-500";
   return (
     <div
       aria-live="polite"
@@ -207,7 +207,8 @@ const Who = ({
     line = also;
   }
   return (
-    <div className="flex w-full flex-col items-center gap-6 text-center">
+    // As wide as the two figures, so each name stands under its own figure, as the prototype has them.
+    <div className="flex w-fit max-w-full flex-col items-center gap-6 text-center">
       <div className="flex justify-center gap-4">
         {interviewers.map((each) => {
           const who = interviewerNames[each];
@@ -230,7 +231,7 @@ const Who = ({
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line text={line} />
-        <fieldset className="grid w-full max-w-md grid-cols-2 gap-4">
+        <fieldset className="grid w-full grid-cols-2 gap-4">
           <legend className="sr-only">{t`Who would you like to talk with?`}</legend>
           {interviewers.map((each) => (
             <Button
