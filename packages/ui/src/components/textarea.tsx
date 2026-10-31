@@ -8,7 +8,8 @@ const textareaVariants = cva(
   {
     variants: {
       variant: {
-        default: "text-base md:text-sm",
+        // 16px on a touch screen, so iOS doesn't zoom in on focus; 14px wherever there is a mouse.
+        default: "text-base md:text-sm pointer-fine:text-sm",
         // Source text, such as JSON: fixed-width, so columns line up.
         code: "font-mono text-xs",
       },
