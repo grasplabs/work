@@ -380,7 +380,30 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   await status.click();
   await page.getByRole("option", { name: "All" }).click();
   await expect(page).not.toHaveURL(/status=/u);
-  await expect(stillWaiting).toHaveCount(0, { timeout: 30_000 });
+  // Both of its runs listed again (not the moment the log is loading,
+  // with no rows at all), and neither waits any more.
+  await expect(
+    page
+      .getByRole("row")
+      .filter({ hasText: name })
+      .filter({
+        has: page.getByRole("link", { name: "approval", exact: true }),
+      })
+  ).toHaveCount(2, pageRead);
+  await expect(stillWaiting).toHaveCount(0);
+
+  // An address filtering by a workflow the domain doesn't have: dropped
+  // once the domain's workflows are known, so the log shows the domain's
+  // runs rather than none under a filter that can't say why.
+  await page.goto(`/workflows?tab=runs&app=${app}&workflow=no-such-workflow`);
+  await expect(page).not.toHaveURL(/workflow=no-such-workflow/u, pageRead);
+  await expect(page).toHaveURL(new RegExp(`app=${app}`, "u"));
+  await expect(stillWaiting).toHaveCount(0);
+  await expect(
+    page.getByRole("row").filter({
+      has: page.getByRole("link", { name: "approval", exact: true }),
+    })
+  ).toHaveCount(2, pageRead);
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({

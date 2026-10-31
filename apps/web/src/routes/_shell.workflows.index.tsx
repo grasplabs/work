@@ -202,7 +202,17 @@ const Filter = ({
  * The Runs tab's filters: an App, then one of its workflows (none to pick
  * before an App is), and a status.
  */
-const RunFilters = ({ options }: { options: FilterOptions }) => {
+const RunFilters = ({
+  options,
+  settled,
+}: {
+  options: FilterOptions;
+  /**
+   * Whether `options` are the chosen domain's: while another domain's
+   * workflows are on their way, the Workflow filter offers none.
+   */
+  settled: boolean;
+}) => {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/workflows/" });
   const filterBy = (change: Partial<WorkflowsSearch>): void => {
@@ -221,13 +231,14 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
         value={search.app}
       />
       <Filter
-        // Nothing to pick from while the App's workflows can't be read.
-        disabled={options.workflows === null}
+        // Nothing to pick from while the App's workflows can't be read,
+        // or while the chosen one's are still on their way.
+        disabled={!settled || options.workflows === null}
         label={t`Workflow`}
         onChange={(workflow) => {
           filterBy({ workflow });
         }}
-        options={(options.workflows ?? []).map((name) => ({
+        options={(settled ? (options.workflows ?? []) : []).map((name) => ({
           value: name,
           label: name,
         }))}
@@ -244,7 +255,7 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
         }))}
         value={search.status}
       />
-      {options.workflows === null ? (
+      {settled && options.workflows === null ? (
         <p className="text-destructive self-center text-sm">
           <Trans>Couldn&apos;t load this domain&apos;s workflows.</Trans>
         </p>
@@ -624,6 +635,32 @@ const filterOf = ({
   ...(status === undefined ? {} : { status }),
 });
 
+/**
+ * What of the address's run filters isn't on offer once the filters'
+ * options are read, to drop, or null. A domain the Domain filter doesn't
+ * offer (one the reader can't open, or that is gone) goes with its
+ * workflow. A workflow that isn't one of the chosen domain's (an old
+ * address, or one picked from the previous domain's while the new one's
+ * were on their way) goes once that domain's are known. Either would
+ * filter the log by something the filters can't show.
+ */
+const strayOf = (
+  { app, workflow }: Pick<WorkflowsSearch, "app" | "workflow">,
+  read: { app: string | undefined; data: RunsRead } | undefined
+): { app?: undefined; workflow: undefined } | null => {
+  if (app === undefined || read?.data.filters.state !== "ready") {
+    return null;
+  }
+  const { apps, workflows } = read.data.filters.data;
+  if (!apps.some(({ value }) => value === app)) {
+    return { app: undefined, workflow: undefined };
+  }
+  const own = read.app === app ? workflows : null;
+  return workflow !== undefined && own !== null && !own.includes(workflow)
+    ? { workflow: undefined }
+    : null;
+};
+
 /** One read of the log: the filters it was read for, and what it answers. */
 interface LogRead {
   key: string;
@@ -648,7 +685,13 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   // run: a later change of filters, back to these too, reads again, as
   // the runs may have moved on since.
   const taken = useRef<LogRead | null>(null);
-  const [read, setRead] = useState<{ key: string; data: RunsRead }>();
+  const navigate = useNavigate({ from: "/workflows/" });
+  const [read, setRead] = useState<{
+    key: string;
+    /** The domain whose workflows its filter options are. */
+    app: string | undefined;
+    data: RunsRead;
+  }>();
   useEffect(() => {
     const left = new AbortController();
     const filter = filterOf({ app, workflow, status });
@@ -661,7 +704,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
           ? await log.read
           : await readRuns(core, filter, left.signal);
       if (!left.signal.aborted) {
-        setRead({ key: shown, data });
+        setRead({ key: shown, app: filter.app, data });
       }
     };
     void load();
@@ -669,6 +712,15 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
       left.abort();
     };
   }, [core, log, app, workflow, status]);
+  const stray = strayOf({ app, workflow }, read);
+  useEffect(() => {
+    if (stray !== null) {
+      void navigate({
+        replace: true,
+        search: (previous) => ({ ...previous, ...stray }),
+      });
+    }
+  }, [stray, navigate]);
   if (read === undefined) {
     return <LoadingLines lines={4} />;
   }
@@ -685,6 +737,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
             ? read.data.filters.data
             : { apps: [], workflows: [] }
         }
+        settled={read.app === app}
       />
       {current ? null : <LoadingLines lines={4} />}
       {current && read.data.runs.state === "ready" ? (
