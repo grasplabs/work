@@ -405,6 +405,57 @@ export const reachSince = (
   };
 };
 
+/**
+ * What the plan left out that it can't have: a changed file whose package
+ * pnpm didn't report as changed, or a changed test file whose project
+ * doesn't run. Either means the planner itself is wrong (pnpm's filter,
+ * its flags, the checkout's history), and a plan that silently selects
+ * too little passes `check` green, so the plan fails instead. Checked
+ * from git's own list of changed files, apart from pnpm's.
+ */
+export const missedByPlan = ({
+  changedFiles,
+  packages,
+  changedPackages,
+  tests,
+  projects,
+  root,
+}: {
+  /** Every file changed since the base, absolute. */
+  readonly changedFiles: readonly string[];
+  /** Every workspace package's directory, the root's included. */
+  readonly packages: readonly string[];
+  /** The packages pnpm reported changed. */
+  readonly changedPackages: readonly string[];
+  readonly tests: readonly PlannedFile[];
+  readonly projects: readonly string[];
+  readonly root: string;
+}): string[] => {
+  const changed = new Set(changedFiles);
+  const reported = new Set(changedPackages);
+  const selected = new Set(projects);
+  const unreported = changedFiles.filter((file) => {
+    const own = packageOf(file, packages);
+    const journey = journeyFiles.some((pattern) =>
+      path.matchesGlob(path.relative(root, file), pattern)
+    );
+    return own !== undefined && !journey && !reported.has(own);
+  });
+  const unrun = tests.filter(
+    ({ project, file }) => changed.has(file) && !selected.has(project)
+  );
+  return [
+    ...unreported.map(
+      (file) =>
+        `${path.relative(root, file)} changed, but pnpm didn't report its package as changed.`
+    ),
+    ...unrun.map(
+      ({ project, file }) =>
+        `${path.relative(root, file)} changed, but its project ${project} doesn't run.`
+    ),
+  ];
+};
+
 const writeOutput = (name: string, value: string): void => {
   const file = process.env.GITHUB_OUTPUT;
   if (file !== undefined && file !== "") {
@@ -455,6 +506,19 @@ const plan = async (base: string | undefined): Promise<void> => {
           ...importing,
         ]),
       ].toSorted(byKey);
+      const missed = missedByPlan({
+        changedFiles: filesChangedSince(base, root),
+        packages,
+        changedPackages: changed,
+        tests,
+        projects,
+        root,
+      });
+      if (missed.length > 0) {
+        throw new Error(
+          `The test plan left out what its changes reach:\n${missed.join("\n")}`
+        );
+      }
       why = `Changed since ${base}: ${
         changed.map((dir) => path.relative(root, dir)).join(", ") ||
         "no package"
