@@ -198,6 +198,28 @@ describe("importing releases", () => {
     await expect(importEvents(release.id)).resolves.toHaveLength(1);
   });
 
+  it("imports a release built when manifests carried more, keeping its manifest as published", async () => {
+    const built = await buildRelease({ notes: "feat(core): from before" });
+    const manifestText = `${JSON.stringify(
+      {
+        ...built.manifest,
+        compatibility: { interfaces: { connect: { serves: 3, calls: {} } } },
+        platformLimits: { workflowSteps: 1000 },
+      },
+      null,
+      2
+    )}\n`;
+    await putBlobs(built);
+    await putManifest({ ...built, manifestText });
+
+    const result = await runImport();
+
+    expect(result.imported).toContain(built.id);
+    await expect(releaseRow(built.id)).resolves.toMatchObject({
+      manifest: manifestText,
+    });
+  });
+
   it("skips a release until its manifest is written", async () => {
     const release = await buildRelease({ notes: "feat(core): halfway" });
     await putBlobs(release);

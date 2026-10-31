@@ -27,6 +27,11 @@ export const releases = sqliteTable("releases", {
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
+  // Unused since releases stopped carrying limit evidence; kept until the
+  // admin that read them is gone everywhere, then dropped (expand, then
+  // contract).
+  limitEvidence: text("limit_evidence"),
+  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**

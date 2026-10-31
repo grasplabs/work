@@ -124,8 +124,12 @@ const workerEntrySchema = z.strictObject({
 /** Everything the manifest says about one Worker. */
 export type WorkerEntry = z.infer<typeof workerEntrySchema>;
 
-/** The release manifest (see the header comment). */
-export const releaseManifestSchema = z.strictObject({
+/**
+ * The release manifest (see the header comment). Its top level ignores
+ * fields it doesn't know, so a release built when manifests carried more
+ * (interface versions, limit evidence) still imports and promotes.
+ */
+export const releaseManifestSchema = z.object({
   manifestVersion: z.literal(MANIFEST_VERSION),
   releaseId: releaseIdSchema,
   /** The full commit SHA it was built from. */
