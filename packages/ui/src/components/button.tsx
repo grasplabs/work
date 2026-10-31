@@ -22,7 +22,7 @@ const buttonVariants = cva(
         // with a dotted line under it (size `inline`).
         hint: "text-muted-foreground hover:text-foreground focus-visible:text-foreground underline decoration-dotted underline-offset-4",
         // Asking Grasp: the one dark button in the header, so it reads as the way in to the chat.
-        ask: "bg-primary text-primary-foreground hover:bg-primary/85 shadow-sm",
+        ask: "bg-primary text-primary-foreground hover:bg-primary/80 shadow-sm",
         // The one action a page is for, in lime with a soft light under it,
         // as the brand book's main button: once a page at most, or lime
         // stops meaning anything.
@@ -31,12 +31,12 @@ const buttonVariants = cva(
       },
       size: {
         default:
-          "h-9 gap-1.5 px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),8px)] px-2 text-xs in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1 rounded-[min(var(--radius-md),10px)] px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5",
-        lg: "h-10 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
+          "h-9 gap-1.5 px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pe-2 has-data-[icon=inline-start]:ps-2",
+        xs: "h-6 gap-1 rounded-[min(var(--radius-md),8px)] px-2 text-xs in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pe-1.5 has-data-[icon=inline-start]:ps-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1 rounded-[min(var(--radius-md),10px)] px-2.5 in-data-[slot=button-group]:rounded-md has-data-[icon=inline-end]:pe-1.5 has-data-[icon=inline-start]:ps-1.5",
+        lg: "h-10 gap-1.5 px-2.5 has-data-[icon=inline-end]:pe-2 has-data-[icon=inline-start]:ps-2",
         // The one main button of an onboarding step: full width, taller, easy to hit.
-        xl: "h-11.5 gap-2 rounded-lg px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
+        xl: "h-11.5 gap-2 rounded-lg px-4 has-data-[icon=inline-end]:pe-3 has-data-[icon=inline-start]:ps-3",
         icon: "size-9",
         "icon-xs":
           "size-6 rounded-[min(var(--radius-md),8px)] in-data-[slot=button-group]:rounded-md [&_svg:not([class*='size-'])]:size-3",
