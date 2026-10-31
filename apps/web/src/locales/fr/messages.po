@@ -2485,9 +2485,17 @@ msgstr "Ajouter un widget"
 msgid "Add a word"
 msgstr "Ajouter un mot"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "Ajouter une app"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ajouter une exception"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "Ajouter une app"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3470,6 +3478,10 @@ msgstr "Demander à Grasp"
 msgid "Ask Grasp for a widget"
 msgstr "Demander un widget à Grasp"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Demander à Grasp d’ajouter « {typed} »"
+
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le domaine apparaît à côté du chat, pour un aperçu avant d’être proposé."
@@ -4076,6 +4088,7 @@ msgstr "Illisible"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5964,8 +5977,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Chaque document fait au plus {maxKb} Ko."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Chaque domaine fait tourner une partie de l’activité : ses workflows, ses applications et ses connexions."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Chaque domaine est une partie de l’activité : ses workflows, ses applications et ses connexions."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6783,6 +6796,10 @@ msgstr "Pour {0}, déjà sollicité"
 msgid "For {person}"
 msgstr "Pour {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Pour une partie de l’activité, comme une gamme de produits ou un bureau. Il démarre vide : ce que Grasp y construit apporte ses workflows, ses applications et ses intégrations."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Pour un administrateur"
@@ -6804,6 +6821,10 @@ msgstr "pour tous les appels de modèle ce mois-ci"
 msgid "For everyone"
 msgstr "Pour tout le monde"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Par exemple Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Par exemple Personio ou Twinfield"
@@ -6811,6 +6832,10 @@ msgstr "Par exemple Personio ou Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Par exemple : répond aux questions des clients"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Par exemple : tout ce qui concerne les contrats de leasing, de la demande au renouvellement"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -6894,6 +6919,10 @@ msgstr "Depuis Google Drive. Je ne lis que les fichiers que vous ajoutez."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Depuis SharePoint ou OneDrive. Je ne lis que les fichiers que vous ajoutez."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Du catalogue"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -9056,6 +9085,10 @@ msgstr "En faire un workflow"
 msgid "Make admin"
 msgstr "Faire admin"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Créer le domaine"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Rendre la version {version} actuelle"
@@ -9394,6 +9427,7 @@ msgid "Muted"
 msgstr "Micro coupé"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9591,6 +9625,11 @@ msgstr "Nouvelle collection"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "Nouveau document"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Nouveau domaine"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -10567,6 +10606,10 @@ msgstr "Pas bien"
 msgid "Not in a domain yet"
 msgstr "Pas encore dans un domaine"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Absente du catalogue"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Pas encore interviewée."
@@ -10805,6 +10848,10 @@ msgstr "Rien ici ne correspond au filtre."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Rien ici pour l’instant."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Rien dans le catalogue ne correspond à « {typed} »."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12121,6 +12168,10 @@ msgstr "Politique"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Politique introuvable"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Populaires dans le catalogue"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13659,6 +13710,10 @@ msgstr "Rechercher des personnes et des équipes"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Rechercher dans le catalogue"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -16095,6 +16150,10 @@ msgstr "Il n’y a encore aucune collection que vous pouvez lire."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Il n’y a pas encore de domaine que vous puissiez ouvrir. Les domaines se créent dans le chat : décrivez une partie de votre travail, et Grasp en construit les workflows et les applications."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Aucun domaine à ouvrir pour l’instant. Créez-en un avec « Nouveau domaine », ou décrivez une partie de votre travail dans le chat, et Grasp construit ses workflows et ses applications."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Il n’y a pas encore de workflows à lier."
@@ -17622,6 +17681,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Ce qui compte comme un succès"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "Que gère-t-il ?"
+
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
 msgstr "Que veut atteindre le conseil ?"
@@ -18232,6 +18295,10 @@ msgstr "Si des personnes de Grasp peuvent se connecter pour aider sur cet espace
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Quels outils d’IA les gens utilisent-ils ?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Quelle app Grasp doit-il commencer à suivre ? Grasp connaît une app dès qu’elle est connectée : une app du catalogue s’ouvre donc là où vous la connectez."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"

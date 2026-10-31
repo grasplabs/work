@@ -76,7 +76,8 @@ const itemVariants = cva(
         quiet:
           "text-muted-foreground [button]:hover:text-foreground rounded-lg border-transparent text-left disabled:pointer-events-none disabled:opacity-50",
         // A row of a card list (`ItemGroup variant="card"`), under a line.
-        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset in-[li:last-child]:border-b-0",
+        // Disabled as a button is: faded, and nothing to press.
+        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0 aria-disabled:pointer-events-none aria-disabled:opacity-50",
       },
       size: {
         default: "gap-3.5 px-4 py-3.5",
@@ -88,6 +89,8 @@ const itemVariants = cva(
       // In line with the text in the chat's box above the questions.
       { variant: "quiet", size: "sm", className: "px-4.5 py-2" },
       { variant: "row", size: "sm", className: "gap-3 px-3.5 py-2.5" },
+      // In line with the title of a panel card above the rows (`Card variant="panel"`).
+      { variant: "row", size: "default", className: "gap-3 px-5 py-3" },
     ],
     defaultVariants: {
       variant: "default",
