@@ -10,7 +10,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { tellingText } from "./interviewer-text.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
@@ -78,7 +78,7 @@ export const interviewStoryResponse = async (
     return linkRefusal(found.code, requestId);
   }
   // The model that says his lines tells it: someone is waiting for it.
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {

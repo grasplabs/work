@@ -13,7 +13,7 @@ import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
-import { gatewaySettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import type { ModelsEnv } from "./models.ts";
 
 // Ask Grasp (GRA-657) on Grasp's own core: the admin's chat over every
@@ -57,8 +57,8 @@ const askTimeoutMs = 90_000;
  * let take sensitive data, and in the EU when the deployment must stay
  * there; undefined when none may.
  */
-const askModel = (env: ModelsEnv): string | undefined => {
-  const { models: allowed, rules } = gatewaySettings(env);
+const askModel = async (env: ModelsEnv): Promise<string | undefined> => {
+  const { models: allowed, rules } = await modelSettings(env);
   return allowed.find(
     (model) =>
       (rules?.sensitive === undefined ||
@@ -101,7 +101,7 @@ export const adminAskResponse = async (
       ? errorResponse(401, authErrors.create("auth.unauthenticated"), requestId)
       : forbidden(requestId);
   }
-  const model = askModel(env);
+  const model = await askModel(env);
   if (model === undefined) {
     log.warn("admin.ask.no_model", {});
     return errorResponse(
