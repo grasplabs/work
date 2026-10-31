@@ -4,7 +4,7 @@ import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-xl border px-4 py-3 text-left text-sm has-[[data-slot=alert-action][data-placement=corner]]:pr-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
+  "group/alert relative grid w-full gap-0.5 rounded-xl border px-4 py-3 text-left text-sm has-[[data-slot=alert-action][data-placement=corner]]:pe-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -89,7 +89,7 @@ function AlertAction({
       data-placement={placement}
       className={cn(
         placement === "corner"
-          ? "absolute top-2.5 right-3"
+          ? "absolute end-3 top-2.5"
           : "mt-2.5 flex flex-wrap gap-2 group-has-[>svg]/alert:col-start-2",
         className
       )}
