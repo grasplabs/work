@@ -22,7 +22,7 @@ import { z } from "zod";
 import { budgetPeriods, budgetSpend, monthSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings } from "./models.ts";
+import { modelRules, modelSettings } from "./models.ts";
 import { personLimitsIn, setPersonLimit } from "./person-limits.ts";
 import { modelBindingSpend } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -67,7 +67,7 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
   async settings(): Promise<ModelSettings> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
-      const { models, rules } = gatewaySettings(this.#env);
+      const { models, rules } = await modelSettings(this.#env);
       // One clock for the month and the day, as a request reads them.
       const periods = budgetPeriods(this.#env);
       const { month, day } = periods;
@@ -186,7 +186,7 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
 
   /** Grasp's budgets, as the console set them; `invalid` when they don't parse. */
   #budgets() {
-    const { rules } = gatewaySettings(this.#env);
+    const rules = modelRules(this.#env);
     return rules === undefined ? ("invalid" as const) : rules.budgets;
   }
 
