@@ -18,10 +18,11 @@
 // Writes `projects` (Vitest's `--project` arguments, empty for all) and
 // `shards` (a JSON array of shard numbers, empty for none) to
 // $GITHUB_OUTPUT, and why to the step summary.
-import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { parseSync } from "vite-plus";
 import { createVitest } from "vite-plus/test/node";
 import { z } from "zod";
 
@@ -68,7 +69,7 @@ export const affectedProjects = (
  * journeys and their configs. They aren't config every test runs under
  * (unlike the root's vite.config.ts or the lockfile), so a change to them
  * runs only the projects with a test that imports one, directly or not,
- * by TypeScript's module resolution (`projectsImporting`). For a journey
+ * by their parsed and resolved imports (`filesImporting`). For a journey
  * (e2e/*.e2e.ts) that is none, and the journeys run in full on every ready
  * pull request (`e2e`); for playwright.config.ts it is the scripts
  * project, whose e2e-parts.test.ts imports it through e2e-parts.ts. They
@@ -217,6 +218,11 @@ export type Reach =
        * (absolute paths): they run the projects whose tests import them.
        */
       readonly journeys: readonly string[];
+      /**
+       * Those and every file that imports one, directly or not
+       * (`filesImporting`): a test among them runs.
+       */
+      readonly importers: ReadonlySet<string>;
     };
 
 /** The files changed since `base` in the repository at `root`, absolute. */
@@ -229,89 +235,121 @@ const filesChangedSince = (base: string, root: string): string[] =>
     .filter((file) => file !== "")
     .map((file) => path.join(root, file));
 
-/** A line of `tsc --explainFiles` that says which file imports the one above. */
-const importedVia = /^\s+Imported via .+ from file '(?<importer>[^']+)'/u;
+/** The source files that can import others, by extension. */
+const sourceFile = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 
 /**
- * Each file's importers, by TypeScript's own module resolution: `tsc
- * --explainFiles` of every tsconfig.json in the repository at `root`
- * (tsconfig paths, package exports and imports, as type-checking resolves
- * them). Also every file some program holds, so a test no program holds is
- * known as one whose imports are unknown. Vitest's `--related` walk follows
- * each project's Vite environment, and core's Workers pool isn't one it
- * can transform (its .sql imports, the compiler's `#kit`).
+ * What a relative specifier in `importer` resolves to, as TypeScript and
+ * Node resolve one: the path itself, a `.js`-style extension written for
+ * its TypeScript source, an added extension, or a folder's index.
  */
-const importGraph = (
-  root: string
-): { importers: Map<string, Set<string>>; files: Set<string> } => {
-  const tsconfigs = execFileSync(
-    "git",
-    ["ls-files", "tsconfig.json", "**/tsconfig.json"],
-    { cwd: root, encoding: "utf-8" }
-  )
-    .split("\n")
-    .filter((file) => file !== "");
-  const importers = new Map<string, Set<string>>();
-  const files = new Set<string>();
-  for (const tsconfig of tsconfigs) {
-    // Its files whatever the exit: a config with no inputs (TS18003)
-    // lists none, and a test no program lists counts as reaching all.
-    const { stdout: output } = spawnSync(
-      "vp",
-      ["exec", "tsc", "-p", tsconfig, "--explainFiles", "--listFilesOnly"],
-      { cwd: root, encoding: "utf-8", maxBuffer: 512 * 1024 * 1024 }
-    );
-    let current: string | undefined;
-    for (const line of output.split("\n")) {
-      if (line !== "" && !line.startsWith(" ")) {
-        current = path.resolve(root, line);
-        files.add(current);
-        continue;
-      }
-      const importer = importedVia.exec(line)?.groups?.importer;
-      if (current !== undefined && importer !== undefined) {
-        const known = importers.get(current) ?? new Set<string>();
-        known.add(path.resolve(root, importer));
-        importers.set(current, known);
-      }
-    }
-  }
-  return { importers, files };
+const resolveRelative = (
+  importer: string,
+  specifier: string
+): string | undefined => {
+  // Without a query (`?raw`), which names how, not what.
+  const [file = specifier] = specifier.split("?");
+  const base = path.resolve(path.dirname(importer), file);
+  const stem = base.replace(/\.(?:[cm]?js|jsx)$/u, "");
+  const extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs"];
+  return [
+    base,
+    ...extensions.map((extension) => `${stem}${extension}`),
+    ...extensions.map((extension) => path.join(base, `index${extension}`)),
+  ].find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
 };
 
 /**
- * The projects with a test file (`files` of the plan) that imports one of
- * `changed` (absolute), directly or not, in the repository at `root`, by
- * TypeScript's resolution (`importGraph`). A test file no tsconfig holds
- * counts as importing them: a change is only left out where every test is
- * known not to reach it.
+ * The files `file` imports by a relative specifier, statically,
+ * dynamically or by re-export, parsed by oxc (Vite+'s `parseSync`), or
+ * `undefined` when that can't be known: it doesn't parse, or imports by an
+ * expression.
  */
-export const projectsImporting = (
-  changed: readonly string[],
-  tests: readonly PlannedFile[],
-  root: string
-): string[] => {
-  if (changed.length === 0) {
-    return [];
+const relativeImportsOf = (
+  file: string,
+  source: string
+): Set<string> | undefined => {
+  const { errors, module } = parseSync(file, source);
+  if (errors.length > 0) {
+    return undefined;
   }
-  const { importers, files } = importGraph(root);
+  const specifiers = [
+    ...module.staticImports.map(({ moduleRequest }) => moduleRequest.value),
+    ...module.staticExports.flatMap(({ entries }) =>
+      entries.flatMap(({ moduleRequest }) =>
+        moduleRequest === null ? [] : [moduleRequest.value]
+      )
+    ),
+  ];
+  for (const { moduleRequest } of module.dynamicImports) {
+    const literal = /^(?<quote>["'`])(?<value>[^"'`$]*)\k<quote>$/u.exec(
+      source.slice(moduleRequest.start, moduleRequest.end)
+    )?.groups?.value;
+    if (literal === undefined) {
+      return undefined;
+    }
+    specifiers.push(literal);
+  }
+  return new Set(
+    specifiers
+      .filter((specifier) => specifier.startsWith("."))
+      .map((specifier) => resolveRelative(file, specifier))
+      .filter((resolved) => resolved !== undefined)
+  );
+};
+
+/**
+ * The files of the repository at `root` that import one of `changed`
+ * (absolute), directly or not, and those: each file's own imports, parsed
+ * and resolved, walked back from `changed`. A file outside every package
+ * has no package name, and every alias here (tsconfig paths, core's
+ * `#blueprints` and `#version`) points inside its own package, so only a
+ * relative specifier reaches one. Past a file in a package, its package's
+ * dependents are reached by pnpm's graph (`reachSince`). A file whose
+ * imports can't be known (it doesn't parse, or imports by an expression)
+ * that names a file of the walk counts as importing it. Only files that
+ * name one are parsed, so the walk reads every source file once and
+ * parses few.
+ */
+export const filesImporting = (
+  changed: readonly string[],
+  root: string
+): Set<string> => {
   const reached = new Set(changed);
+  if (changed.length === 0) {
+    return reached;
+  }
+  const sources = execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    { cwd: root, encoding: "utf-8" }
+  )
+    .split("\n")
+    .filter((file) => sourceFile.test(file))
+    .map((file) => path.join(root, file))
+    .filter((file) => existsSync(file))
+    .map((file) => ({ file, source: readFileSync(file, "utf-8") }));
+  const imports = new Map<string, Set<string> | undefined>();
   const queue = [...changed];
-  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    for (const importer of importers.get(file) ?? []) {
-      if (!reached.has(importer) && !importer.includes("/node_modules/")) {
-        reached.add(importer);
-        queue.push(importer);
+  for (let target = queue.pop(); target !== undefined; target = queue.pop()) {
+    // A specifier names the file or, for an index, its folder.
+    const name = path.basename(target).replace(/\.[^.]+$/u, "");
+    const named = name === "index" ? path.basename(path.dirname(target)) : name;
+    for (const { file, source } of sources) {
+      if (reached.has(file) || !source.includes(named)) {
+        continue;
+      }
+      if (!imports.has(file)) {
+        imports.set(file, relativeImportsOf(file, source));
+      }
+      const resolved = imports.get(file);
+      if (resolved === undefined || resolved.has(target)) {
+        reached.add(file);
+        queue.push(file);
       }
     }
   }
-  const projects = new Set<string>();
-  for (const { project, file } of tests) {
-    if (reached.has(file) || !files.has(file)) {
-      projects.add(project);
-    }
-  }
-  return [...projects].toSorted(byKey);
+  return reached;
 };
 
 /**
@@ -342,11 +380,18 @@ export const reachSince = (
         path.matchesGlob(path.relative(root, file), pattern)
       )
   );
+  const importers = filesImporting(journeys, root);
+  // A package with a file that imports a journey file reaches what
+  // depends on it, as a change to it would.
+  const holding = [...importers]
+    .map((file) => packageOf(file, packageDirs))
+    .filter((dir) => dir !== undefined);
   return {
     all: false,
     changed,
-    affected: reachedPackages(packages, changed, buildOnly),
+    affected: reachedPackages(packages, [...changed, ...holding], buildOnly),
     journeys,
+    importers,
   };
 };
 
@@ -381,13 +426,19 @@ const plan = async (base: string | undefined): Promise<void> => {
     if (reach.all) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const { changed, affected, journeys } = reach;
+      const { changed, affected, journeys, importers } = reach;
       const packages = packagesSelected(undefined, root);
       const tests = specs.map((spec) => ({
         project: spec.project.name,
         file: spec.moduleId,
       }));
-      const importing = projectsImporting(journeys, tests, root);
+      const importing = [
+        ...new Set(
+          tests
+            .filter(({ file }) => importers.has(file))
+            .map(({ project }) => project)
+        ),
+      ].toSorted(byKey);
       projects = [
         ...new Set([
           ...affectedProjects(tests, packages, affected),

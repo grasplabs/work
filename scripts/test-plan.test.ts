@@ -20,7 +20,7 @@ import {
   affectedProjects,
   packageOf,
   packagesSelected,
-  projectsImporting,
+  filesImporting,
   reachSince,
   reachedPackages,
 } from "./test-plan.ts";
@@ -228,44 +228,64 @@ describe("leaving out what no Vitest test sees", () => {
     }
   });
 
-  // This repository's own files, by TypeScript's resolution of their
-  // imports: some of its tests, in their projects.
-  const repoRoot = path.join(import.meta.dirname, "..");
-  const repoTests = [
-    { project: "scripts", file: "scripts/e2e-parts.test.ts" },
-    { project: "scripts", file: "scripts/test-shards.test.ts" },
-    { project: "@grasp-os/core", file: "apps/core/test/agent.test.ts" },
-    { project: "@grasp-os/web", file: "apps/web/src/error-reports.test.ts" },
-  ].map(({ project, file }) => ({ project, file: path.join(repoRoot, file) }));
+  /**
+   * A repository shaped like this one where it matters: the Playwright
+   * config imports a journey helper, and a script its test imports reads
+   * the config, as scripts/e2e-parts.ts does.
+   */
+  const importing = (changed: string): string[] => {
+    const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "importers-")));
+    try {
+      const sources: Record<string, string> = {
+        "e2e/stack.ts": "export const port = 1;\n",
+        "e2e/apps.e2e.ts": 'import { port } from "./stack.ts";\n',
+        "playwright.config.ts":
+          'import { port } from "./e2e/stack.ts";\nexport const journeys = port;\n',
+        "scripts/parts.ts":
+          'import { journeys } from "../playwright.config.ts";\nexport const parts = journeys;\n',
+        // A `.js` specifier for its TypeScript source.
+        "scripts/parts.test.ts": 'import { parts } from "./parts.js";\n',
+        "scripts/other.test.ts": "export const other = 1;\n",
+        // A re-export, with no extension, out of a package.
+        "packages/lib/src/helper.ts":
+          'export { port } from "../../../e2e/stack";\n',
+        // An import by an expression, naming the helper.
+        "scripts/loose.test.ts":
+          'const name = "../e2e/stack.ts";\nawait import(name);\n',
+      };
+      for (const [file, content] of Object.entries(sources)) {
+        mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+        writeFileSync(path.join(repo, file), content);
+      }
+      execFileSync("git", ["init", "--quiet"], { cwd: repo });
+      return relativeTo(repo, filesImporting([path.join(repo, changed)], repo));
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  };
 
-  it("runs the scripts project when playwright.config.ts changes, which e2e-parts.test.ts imports", () => {
-    expect(
-      projectsImporting(
-        [path.join(repoRoot, "playwright.config.ts")],
-        repoTests,
-        repoRoot
-      )
-    ).toStrictEqual(["scripts"]);
+  it("reaches the tests that import playwright.config.ts through a script", () => {
+    expect(importing("playwright.config.ts")).toStrictEqual([
+      "playwright.config.ts",
+      "scripts/parts.test.ts",
+      "scripts/parts.ts",
+    ]);
   });
 
-  it("runs no project when only a journey changes", () => {
-    expect(
-      projectsImporting(
-        [path.join(repoRoot, "e2e/apps.e2e.ts")],
-        repoTests,
-        repoRoot
-      )
-    ).toStrictEqual([]);
+  it("reaches no test when only a journey changes", () => {
+    expect(importing("e2e/apps.e2e.ts")).toStrictEqual(["e2e/apps.e2e.ts"]);
   });
 
-  it("runs a test no tsconfig holds, whose imports are unknown", () => {
-    expect(
-      projectsImporting(
-        [path.join(repoRoot, "e2e/apps.e2e.ts")],
-        [{ project: "loose", file: path.join(repoRoot, "loose.test.ts") }],
-        repoRoot
-      )
-    ).toStrictEqual(["loose"]);
+  it("reaches every importer of a helper, a package's file and an import it can't read included", () => {
+    expect(importing("e2e/stack.ts")).toStrictEqual([
+      "e2e/apps.e2e.ts",
+      "e2e/stack.ts",
+      "packages/lib/src/helper.ts",
+      "playwright.config.ts",
+      "scripts/loose.test.ts",
+      "scripts/parts.test.ts",
+      "scripts/parts.ts",
+    ]);
   });
 
   it("doesn't reach a package through a dependency on another's build alone", () => {
