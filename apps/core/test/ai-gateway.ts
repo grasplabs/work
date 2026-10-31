@@ -442,6 +442,7 @@ const responsesEvents = ({
   inputTokens,
   outputTokens,
   thinking,
+  truncated,
 }: Answer) => {
   const message = { type: "message", id: "msg_1", role: "assistant" };
   const reasoning = { type: "reasoning", id: "rs_1" };
@@ -528,11 +529,15 @@ const responsesEvents = ({
       },
     ]),
     {
+      // Cut off at the output cap, as OpenAI ends such a response.
       data: {
-        type: "response.completed",
+        type: truncated === true ? "response.incomplete" : "response.completed",
         response: {
           id: "resp_1",
-          status: "completed",
+          status: truncated === true ? "incomplete" : "completed",
+          ...(truncated === true
+            ? { incomplete_details: { reason: "max_output_tokens" } }
+            : {}),
           usage: {
             input_tokens: inputTokens,
             output_tokens: outputTokens,

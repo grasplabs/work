@@ -11,8 +11,8 @@ import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { deploymentStaysInEu, models } from "../models.ts";
-import type { ModelAnswer, ModelsEnv } from "../models.ts";
+import { deploymentStaysInEu, models, usableAnswerTokens } from "../models.ts";
+import type { ModelAnswer, ModelCall, ModelsEnv } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import {
   boundedInCore,
@@ -64,7 +64,10 @@ import type ExtractorWorker from "./extractor/worker.ts";
 // - The file's own words taken as instructions: the answer is only ever
 //   the document's text, saved as its version, which a person reads; it
 //   is checked as the local extractor's is (`markdownMaxBytes`), and an
-//   answer cut short fails the upload rather than save half a document.
+//   answer cut short is never saved as the document: one cut off at the
+//   model's output cap is continued until it is whole (`platformConverter`),
+//   and fails the upload when it can't be within the size, the requests
+//   and the time a conversion has.
 //
 // The local extractor (extractor/worker.ts, with the parsers in
 // extractor/formats.ts) never runs in core's isolate: core starts a
@@ -386,8 +389,22 @@ const conversionInstructions = [
   "Answer with the Markdown alone.",
 ].join("\n");
 
-/** How long a conversion may take, retries included: a long document. */
+/** How long a conversion may take, retries and continuations included: a long document. */
 const conversionTimeoutMs = 10 * 60_000;
+
+/** What a conversion asks the model first. */
+const conversionAsk = "Write out this document as Markdown.";
+
+/** What a conversion asks the model after an answer cut off at its output cap. */
+const continueAsk =
+  "Your answer was cut off. Continue the Markdown exactly where it stopped: repeat nothing, and add no remark of your own.";
+
+/**
+ * Most requests one conversion makes: its first, and continuations of an
+ * answer cut off at the model's output cap. With the model's whole output
+ * cap each time, a document that needs more is past `markdownMaxBytes`.
+ */
+const conversionRequestsMax = 8;
 
 /** The gateway's refusals that no retry changes: conversion isn't set up. */
 const unavailableCodes: ReadonlySet<string> = new Set([
@@ -414,8 +431,39 @@ type ConversionSettings = Exclude<
 >;
 
 /**
+ * One request of a conversion through the gateway with Grasp's key, the
+ * gateway's refusals as the upload takes them: not set up, or a wait.
+ */
+const conversionRequest = async (
+  env: ModelsEnv,
+  call: ModelCall<undefined>
+): Promise<ModelAnswer<undefined>> => {
+  try {
+    return await models(env).platformCall(call);
+  } catch (error) {
+    const code = modelErrors.codeOf(error);
+    if (code !== undefined && unavailableCodes.has(code)) {
+      throw uploadErrors.create("upload.conversion_unavailable");
+    }
+    if (code === undefined || code === "model.invalid_call") {
+      throw error;
+    }
+    throw new ExtractorUnavailableError({
+      cause: error,
+      busy: busyCodes.has(code),
+    });
+  }
+};
+
+/**
  * Grasp's own conversion of a PDF, through the model gateway with
- * Grasp's key (`platformCall`), for `trigger`, who uploaded it.
+ * Grasp's key (`platformCall`), for `trigger`, who uploaded it. Each
+ * request may take the model's whole output cap, as its catalog has it
+ * (`usableAnswerTokens`); an answer cut off at it anyway is continued,
+ * the document sent again with what was written so far, until the answer
+ * is whole. One that isn't within `markdownMaxBytes`, the requests a
+ * conversion has (`conversionRequestsMax`) and its deadline fails as
+ * `knowledge.too_large`: half a document is never saved.
  */
 const platformConverter =
   (
@@ -428,39 +476,48 @@ const platformConverter =
       // Never expected: only a PDF is routed here (`extractorFor`).
       throw new Error("Only a PDF is converted by a model");
     }
-    let answer: ModelAnswer<undefined>;
-    try {
-      answer = await models(env).platformCall({
-        model: `${provider}/${model}`,
+    const ref = `${provider}/${model}`;
+    const maxTokens = usableAnswerTokens(ref);
+    const endsAt = Date.now() + conversionTimeoutMs;
+    let written = "";
+    for (let request = 0; request < conversionRequestsMax; request += 1) {
+      const left = endsAt - Date.now();
+      if (left <= 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each continues the one before
+      const answer = await conversionRequest(env, {
+        model: ref,
         purpose: "knowledge.conversion",
         trigger,
         work: { platform: "document_conversion" },
         system: conversionInstructions,
-        input: "Write out this document as Markdown.",
+        ...(written === ""
+          ? { input: conversionAsk }
+          : {
+              messages: [
+                { role: "user", content: conversionAsk },
+                { role: "assistant", content: written },
+                { role: "user", content: continueAsk },
+              ],
+            }),
         document: { name, mediaType, bytes },
-        timeoutMs: conversionTimeoutMs,
+        ...(maxTokens === undefined ? {} : { maxTokens }),
+        timeoutMs: left,
       });
-    } catch (error) {
-      const code = modelErrors.codeOf(error);
-      if (code !== undefined && unavailableCodes.has(code)) {
-        throw uploadErrors.create("upload.conversion_unavailable");
+      written += answer.text;
+      if (new TextEncoder().encode(written).byteLength > markdownMaxBytes) {
+        break;
       }
-      if (code === undefined || code === "model.invalid_call") {
-        throw error;
+      if (!answer.truncated) {
+        return { markdown: written.trim() };
       }
-      throw new ExtractorUnavailableError({
-        cause: error,
-        busy: busyCodes.has(code),
-      });
+      if (answer.text === "") {
+        // Cut off before it wrote anything more: no continuing that.
+        break;
+      }
     }
-    const markdown = answer.text.trim();
-    if (
-      answer.truncated ||
-      new TextEncoder().encode(markdown).byteLength > markdownMaxBytes
-    ) {
-      throw knowledgeErrors.create("knowledge.too_large");
-    }
-    return { markdown };
+    throw knowledgeErrors.create("knowledge.too_large");
   };
 
 /** Which extractor an upload got, as its audit events name it. */

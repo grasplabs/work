@@ -4,8 +4,10 @@ import { uploadTypes } from "@grasp-os/shared/uploads";
 import type { Upload } from "@grasp-os/shared/uploads";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { extractUpload, originalKey } from "../src/knowledge/uploads.ts";
+import { usableAnswerTokens } from "../src/models.ts";
 import { streamText } from "./ai-gateway.ts";
 import type { PlannedReply } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
@@ -42,12 +44,14 @@ const fixture = async (name: string): Promise<Uint8Array> => {
 /** A conversion's answer, as `api` streams it. */
 const converted = (
   api: Parameters<typeof streamText>[0],
-  markdown: string
+  markdown: string,
+  { truncated = false } = {}
 ): PlannedReply => ({
   sse: streamText(api, {
     text: markdown,
     inputTokens: 2000,
     outputTokens: 100,
+    truncated,
   }),
 });
 
@@ -225,6 +229,77 @@ describe("upload routing", { timeout: 60_000 }, () => {
       headers: ["authorization"],
       inBody: false,
       placeholder: false,
+    });
+  });
+
+  it("asks for the model's whole output, and continues an answer cut off at it until the document is whole", async () => {
+    const person = await signedInApi(idp, "user");
+    const collectionId = await ownCollection(person.api);
+    const name = newName("pdf");
+    await plan(platformOpenAiKey, [
+      converted("openai-responses", "# Expense policy\n\n## Travel\n\nFly", {
+        truncated: true,
+      }),
+      converted("openai-responses", " economy, always."),
+    ]);
+
+    const upload = await uploadedTo(person.api, collectionId, name);
+
+    const { hits } = await person.api.knowledge.search("always", {
+      collectionId,
+    });
+    const carried = await carrying(name);
+    const sent = carried.map(({ body }) =>
+      z
+        .object({
+          max_output_tokens: z.number(),
+          input: z.array(
+            z.object({ role: z.string(), content: z.unknown() }).loose()
+          ),
+        })
+        .parse(JSON.parse(body))
+    );
+    expect({
+      status: upload.status,
+      hits: hits.map(({ path }) => path),
+      requests: sent.length,
+      // The catalog's cap for the model, not the gateway's default.
+      capped: sent.every(
+        ({ max_output_tokens: cap }) =>
+          cap === usableAnswerTokens("openai/gpt-5.4-mini") && cap > 16_384
+      ),
+      // The second carries what the first wrote, and asks to go on.
+      continued: sent[1]?.input.map(({ role }) => role),
+      wrote: JSON.stringify(sent[1]?.input).includes("Fly"),
+    }).toStrictEqual({
+      status: "ready",
+      hits: [name],
+      requests: 2,
+      capped: true,
+      continued: ["developer", "user", "assistant", "user"],
+      wrote: true,
+    });
+  });
+
+  it("fails as too large a document whose answer, cut off, can't be continued", async () => {
+    const person = await signedInApi(idp, "user");
+    const collectionId = await ownCollection(person.api);
+    const name = newName("pdf");
+    await plan(platformOpenAiKey, [
+      converted("openai-responses", "# Expense policy", { truncated: true }),
+      converted("openai-responses", "", { truncated: true }),
+    ]);
+
+    const upload = await uploadedTo(person.api, collectionId, name);
+
+    expect({
+      status: upload.status,
+      failure: upload.failure?.code,
+      requests: await sentCount(name),
+    }).toStrictEqual({
+      status: "failed",
+      failure: "knowledge.too_large",
+      requests: 2,
     });
   });
 
