@@ -64,6 +64,13 @@
       "when": 1793349706935,
       "tag": "0008_platform_feature",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793458328015,
+      "tag": "0009_platform_spend_index",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+CREATE INDEX `requests_credential_period` ON `requests` (`credential`,`period`);

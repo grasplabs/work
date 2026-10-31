@@ -435,6 +435,66 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
+  it("count a run's call on Grasp's own key as a request of its lineage, never as money against the run's budget", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
+    const run = await builder.api.workflows.start(app, "idle");
+    await finished(run.id);
+    const month = newMonth();
+    const rulesEnv: Env = {
+      ...env,
+      MODEL_GATEWAY: { budgets: { run: { limit: 0.1 } } },
+      MODEL_BUDGET_MONTH: month,
+    };
+    await plan(platformOpenAiKey, [
+      {
+        sse: streamText("openai-responses", {
+          text: "# Expense policy",
+          inputTokens: 2000,
+          outputTokens: 100,
+        }),
+      },
+    ]);
+
+    // A document the run's step converts, on Grasp's key.
+    const converted = await outcome(
+      models(rulesEnv).platformCall({
+        model: "openai/gpt-5.4-mini",
+        purpose: "knowledge.conversion",
+        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
+        work: { platform: "document_conversion" },
+        input: "Write out this document as Markdown.",
+        document: {
+          name: "policy.pdf",
+          mediaType: "application/pdf",
+          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
+        },
+      })
+    );
+    const { run: lineage = [] } = await modelLedger(env).spendOf(
+      month,
+      ["run"],
+      10
+    );
+    const grasp = await modelLedger(env).platformSpend([month]);
+
+    expect({
+      converted,
+      // Counted in the lineage, as a request: no money held or spent.
+      run: lineage
+        .filter(({ key }) => key === run.id)
+        .map(({ spentMicros, reservedMicros }) => ({
+          spentMicros,
+          reservedMicros,
+        })),
+      grasp: grasp.some(({ micros }) => micros > 0),
+    }).toStrictEqual({
+      converted: "ok",
+      run: [{ spentMicros: 0, reservedMicros: 0 }],
+      grasp: true,
+    });
+  });
+
   it("admit concurrent requests only while their reservations fit the budget together, telling the rest to try again once those finish", async () => {
     // A request to Sonnet 4.5 may write 24,576 tokens (its cap with a
     // thinking budget), reserved at its long-context price of $22.50 a

@@ -253,6 +253,10 @@ describe("the organization's AI, for the admin", () => {
     const { platformSpend } = aiStatusReportSchema.parse(
       JSON.parse(await reportText())
     );
+    // This release always reports it; an earlier one's report may not.
+    if (platformSpend === undefined) {
+      throw new Error("The report has no platform spend");
+    }
     const conversion = platformSpend.thisMonth.rows.find(
       ({ feature }) => feature === "conversion"
     );
