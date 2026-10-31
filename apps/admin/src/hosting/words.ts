@@ -52,12 +52,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   stage_unset:
     "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
-  release_undeclared:
-    "The release declares nothing of what its code works with.",
-  release_incompatible:
-    "The release doesn't work with what the client runs, or with itself.",
-  schema_incompatible:
-    "The release's code doesn't run on the client's databases as its migrations left them.",
   release_without_limits:
     "The release was built before platform limits were recorded, so it isn't made live.",
   limit_evidence_missing:
@@ -161,9 +155,6 @@ const failureCauses = {
   // The operation's own.
   client_unknown: "staff",
   release_not_imported: "release",
-  release_undeclared: "release",
-  release_incompatible: "release",
-  schema_incompatible: "release",
   limit_evidence_missing: "release",
   release_without_limits: "release",
   release_history_incomplete: "release",

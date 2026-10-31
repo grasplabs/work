@@ -17,21 +17,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
-import {
-  connectInterfaceServedFrom,
-  connectInterfacesCoreCalls,
-  connectInterfaceVersion,
-} from "@grasp-os/shared/connect";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import type { ReleaseCompatibility } from "@grasp-os/shared/release";
-import {
-  journalSchemaVersion,
-  oldestJournalSchemaVersion,
-} from "@grasp-os/workerflow/journal-schema";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -112,27 +100,6 @@ const packageVersions = (apps: readonly string[]): Record<string, string> => {
   return versions;
 };
 
-const schemaModule = z.object({
-  compatibleFromMigration: z.int().nonnegative(),
-});
-
-// Each D1 database's oldest migration whose code still runs on its schema,
-// declared next to its schema: the schema.ts beside its migrations
-// directory (src/db/<name>/ in core).
-const compatibleFrom = async (
-  dir: string,
-  migrationsDir: string
-): Promise<number> => {
-  const file = path.join(dir, path.dirname(migrationsDir), "schema.ts");
-  const parsed = schemaModule.safeParse(await import(pathToFileURL(file).href));
-  if (!parsed.success) {
-    throw new Error(
-      `${path.relative(ROOT, file)} declares no compatibleFromMigration: the oldest migration whose code still runs on its schema`
-    );
-  }
-  return parsed.data.compatibleFromMigration;
-};
-
 const buildWorker = async (
   app: string,
   bundleDir: string
@@ -161,39 +128,12 @@ const buildWorker = async (
         )
       )
     ),
-    d1CompatibleFrom: Object.fromEntries(
-      await Promise.all(
-        config.d1_databases.map(async (database): Promise<[string, number]> => [
-          database.binding,
-          await compatibleFrom(dir, database.migrations_dir),
-        ])
-      )
-    ),
     ...(config.assets
       ? {
           assets: await collectAssets(path.join(dir, config.assets.directory)),
         }
       : {}),
   };
-};
-
-// What the release's code works with, from where each is declared next
-// to the code it describes. Core accepts App releases of exactly its own
-// SDK protocol. Its databases' schemas come with each Worker's build.
-const compatibility: Omit<ReleaseCompatibility, "databases"> = {
-  interfaces: {
-    connect: {
-      serves: connectInterfaceVersion,
-      servesFrom: connectInterfaceServedFrom,
-      calls: {},
-    },
-    core: { calls: { connect: { ...connectInterfacesCoreCalls } } },
-  },
-  workflowJournal: {
-    min: oldestJournalSchemaVersion,
-    max: journalSchemaVersion,
-  },
-  sdkProtocols: { min: sdkProtocolVersion, max: sdkProtocolVersion },
 };
 
 const releaseId = args["release-id"] ?? defaultReleaseId();
@@ -236,7 +176,6 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
-    compatibility,
     platformLimits: { ...platformLimits },
   },
   workers

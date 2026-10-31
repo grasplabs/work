@@ -28,39 +28,6 @@ export { catalogGroups, oauthProviderSchema } from "./connect-names.ts";
 export type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 
 /**
- * The version of the interface connect serves core over the service
- * binding (its entrypoint's methods, and the calls and answers in this
- * file). A release's core and connect don't switch at once in a client:
- * the admin deploys connect first, then core, and a rollback runs the
- * release before in the same order. So a change a core of the release
- * before couldn't call correctly, or one that needs a connect of this
- * release, is a new version, with the ranges here moved to say which
- * cores work with which connects; a release declares them
- * (scripts/release, src/deploy/compatibility.ts in the admin).
- */
-export const connectInterfaceVersion = 3;
-
-/**
- * The oldest version of connect's interface this connect still serves
- * correctly: a core that calls any version from here to
- * `connectInterfaceVersion` works with it. 3 only added methods
- * (`modelFetch`, `aiProviderRoutes`), so a core that calls 2 still does.
- * Raise it when connect drops or changes something an older core calls:
- * to the first version whose cores don't call it, never past the oldest
- * version the release before's core calls, or that release's clients
- * can't take this one.
- */
-export const connectInterfaceServedFrom = 2;
-
-/**
- * The versions of connect's interface this core calls correctly. 2: a
- * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
- * strict schema refuses. 3: core reaches every model through connect
- * (`modelFetch`, `aiProviderRoutes`), which connect 2 doesn't serve.
- */
-export const connectInterfacesCoreCalls = { min: 3, max: 3 } as const;
-
-/**
  * One call from core to connect, over the service binding: an action on a
  * connection, with the capability core made for exactly this call.
  */

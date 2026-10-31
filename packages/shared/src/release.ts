@@ -372,96 +372,6 @@ const workerEntrySchema = z.strictObject({
 /** Everything the manifest says about one Worker. */
 export type WorkerEntry = z.infer<typeof workerEntrySchema>;
 
-/** Versions from `min` to `max`, both included. */
-const versionRangeSchema = z
-  .strictObject({ min: z.int().positive(), max: z.int().positive() })
-  .refine(({ min, max }) => min <= max, "A range's min is at most its max");
-
-/**
- * A D1 database's schema, by migration number: the `0016` of
- * `0016_pending_action_keys.sql`. Migrations are numbered in the order
- * they're applied, so a schema is its newest migration's number.
- */
-const migrationNumberSchema = z.int().nonnegative();
-
-/** What a release's code needs of one D1 database, and what its schema keeps. */
-const databaseSchemaSchema = z
-  .strictObject({
-    /**
-     * The schema its code needs: its newest migration, which a deploy
-     * applies before any of its code runs.
-     */
-    schema: migrationNumberSchema,
-    /**
-     * The oldest schema whose code still runs on this one: code of a
-     * release whose newest migration is older doesn't. A migration that
-     * only expands leaves it where it is; one that contracts (drops or
-     * renames what an older release's code uses) raises it.
-     */
-    compatibleFrom: migrationNumberSchema,
-  })
-  .refine(
-    ({ schema, compatibleFrom }) => compatibleFrom <= schema,
-    "A schema is compatible from no later than itself"
-  );
-
-/**
- * The interface a Worker serves the release's other Workers: the newest
- * version, `serves`, and the oldest it still serves correctly,
- * `servesFrom`. A change that only adds to an interface is a new version
- * that still serves the callers of the versions before it, so a caller of
- * the release before keeps working while the Workers switch one at a time;
- * one that drops or changes what an older caller uses raises `servesFrom`
- * past that caller's version. Releases built before `servesFrom` was
- * declared have none, and serve exactly `serves`.
- */
-const servedInterfaceSchema = z
-  .strictObject({
-    serves: z.int().positive().optional(),
-    servesFrom: z.int().positive().optional(),
-    calls: z.record(z.string(), versionRangeSchema),
-  })
-  .refine(
-    ({ serves, servesFrom }) =>
-      servesFrom === undefined ||
-      (serves !== undefined && servesFrom <= serves),
-    "An interface is served from no later than its newest version, and only when one is served"
-  );
-
-/**
- * What a release's code works with, which the admin checks before it
- * makes the release live in a client (spec 40.3): every Worker that
- * calls another must call a version that one serves, at each step of a
- * deploy or rollback, since a client's Workers switch one at a time; and
- * the release must read every workflow journal and run every App
- * release the client's current code may have left, and run on every D1
- * database's schema the client's migrations left: a deploy applies the
- * release's migrations first, but a rollback applies none, and a
- * release's code may run on the schema of a later one only as far as
- * that one's migrations kept it working.
- */
-export const releaseCompatibilitySchema = z.strictObject({
-  /**
-   * By app: the versions of the interface it serves the release's other
-   * Workers, if it serves one (`servedInterfaceSchema`), and the versions
-   * of each other Worker's interface it calls correctly.
-   */
-  interfaces: z.record(z.string(), servedInterfaceSchema),
-  /** The workflow journal schemas core's engine reads. */
-  workflowJournal: versionRangeSchema,
-  /** The SDK protocol versions of the App releases core runs. */
-  sdkProtocols: versionRangeSchema,
-  /**
-   * By name, each D1 database it ships migrations for. Releases built
-   * before it was declared have none, and the admin checks their
-   * schemas only by the old rule: migrations only expand for the release
-   * before, and a rollback goes back no further than that release.
-   */
-  databases: z.record(workerNameSchema, databaseSchemaSchema).optional(),
-});
-
-export type ReleaseCompatibility = z.infer<typeof releaseCompatibilitySchema>;
-
 /** The release manifest (see the header comment). */
 export const releaseManifestSchema = z.strictObject({
   manifestVersion: z.literal(MANIFEST_VERSION),
@@ -483,11 +393,6 @@ export const releaseManifestSchema = z.strictObject({
   workers: z.record(z.string(), workerEntrySchema),
   /** Every asset blob, by content key. */
   assets: z.record(assetHash, z.strictObject({ size, r2Key: z.string() })),
-  /**
-   * What its code works with. Releases built before it was declared
-   * have none, and the admin makes none of those live.
-   */
-  compatibility: releaseCompatibilitySchema.optional(),
   /**
    * The platform limits core and connect were built with. Releases built
    * before they were recorded have none, and the admin makes none of

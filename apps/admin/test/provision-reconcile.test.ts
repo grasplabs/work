@@ -353,7 +353,7 @@ describe("provisioning that heals itself", () => {
       .select({ releaseId: clientProvisions.releaseId })
       .from(clientProvisions)
       .where(eq(clientProvisions.clientId, clientId));
-    await stopped(clientId, runId, "release_incompatible");
+    await stopped(clientId, runId, "release_without_limits");
     using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const waiting = await reconcileClient(env, clientId, later());
@@ -489,7 +489,7 @@ describe("what a stopped provisioning needs", () => {
         "unexpected",
         "cloudflare_503_10013",
         "cloudflare_429",
-        "release_incompatible",
+        "release_without_limits",
         "resource_outside_jurisdiction",
         "foreign_resource",
         "sign_in_incomplete",

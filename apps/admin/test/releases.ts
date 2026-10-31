@@ -20,7 +20,6 @@ import type {
   LimitEvidenceFile,
   PlatformLimits,
   PreviousRelease,
-  ReleaseCompatibility,
   ReleaseManifest,
   RuntimeProfile,
   WorkerEntry,
@@ -55,15 +54,6 @@ export interface ReleaseSpec {
    * one does; without it, a deploy sets up no sending domain.
    */
   sendsMail?: boolean;
-  /** What its code works with: `declared` by default, none when null. */
-  compatibility?: ReleaseCompatibility | null;
-  /**
-   * By name, a database's oldest migration whose code runs on its schema
-   * (0 for one it doesn't name). With it, the release declares each
-   * database's schema from its migrations, as the release build does;
-   * without it, none, as releases built before that did.
-   */
-  compatibleFrom?: Record<string, number>;
   /** Its platform limits: {@link testLimits} by default, none when null. */
   platformLimits?: PlatformLimits | null;
   /** The release before it, as its evidence file names it: none by default. */
@@ -96,16 +86,6 @@ export const evidenceFor = (
   capacityRun: { jobId: 4242, commit: release.commit, profile },
   securityReviews: [{ pullRequest: 101, approvedBy: "nickruigrok" }],
 });
-
-/** What a test release's code works with unless its spec says otherwise. */
-export const declared: ReleaseCompatibility = {
-  interfaces: {
-    connect: { serves: 1, calls: {} },
-    core: { calls: { connect: { min: 1, max: 1 } } },
-  },
-  workflowJournal: { min: 8, max: 9 },
-  sdkProtocols: { min: 2, max: 2 },
-};
 
 /** A built release: its manifest and every blob, by R2 key. */
 export interface TestRelease {
@@ -181,33 +161,6 @@ const worker = (
   previewUrls: false,
   observability: { enabled: true },
 });
-
-/**
- * The databases' schemas a release of `spec` declares, core's at
- * `coreSchema` and the others at their one migration; none without
- * `spec.compatibleFrom`.
- */
-const databasesOf = (
-  { compatibleFrom }: ReleaseSpec,
-  coreSchema: number
-): Pick<ReleaseCompatibility, "databases"> => {
-  if (compatibleFrom === undefined) {
-    return {};
-  }
-  const schemas = {
-    "grasp-os-connect": 0,
-    "grasp-os-core": coreSchema,
-    "grasp-os-knowledge": 0,
-  };
-  return {
-    databases: Object.fromEntries(
-      Object.entries(schemas).map(([name, schema]) => [
-        name,
-        { schema, compatibleFrom: compatibleFrom[name] ?? 0 },
-      ])
-    ),
-  };
-};
 
 /** The limits a release of `spec` records, and its evidence file. */
 const limitsOf = (
@@ -358,14 +311,6 @@ export const buildRelease = async (
       },
     },
     assets,
-    ...(spec.compatibility === null
-      ? {}
-      : {
-          compatibility: {
-            ...(spec.compatibility ?? declared),
-            ...databasesOf(spec, migrations.length - 1),
-          },
-        }),
     ...limits.manifest,
   });
   return {

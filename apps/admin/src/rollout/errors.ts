@@ -36,17 +36,6 @@ export const rolloutErrorCodes = [
   "nothing_to_roll_back",
   /** Something newer was deployed to the client after the rollout. */
   "superseded",
-  /**
-   * What the client ran before doesn't work with what it runs now, or
-   * declares nothing of what it works with (src/deploy/compatibility.ts).
-   */
-  "incompatible",
-  /**
-   * What the client ran before doesn't run on its databases' schemas: a
-   * migration since contracted what that code uses
-   * (src/deploy/compatibility.ts).
-   */
-  "schema_incompatible",
   /** Another runner (provisioning, another rollout, a rollback) has the client. */
   "client_busy",
   /** The rollback's run failed or was ended before it finished. */

@@ -32,7 +32,6 @@ import {
 } from "@grasp-os/shared/release";
 import type {
   PlatformLimits,
-  ReleaseCompatibility,
   ReleaseManifest,
   WorkerEntry,
 } from "@grasp-os/shared/release";
@@ -159,11 +158,6 @@ export interface WorkerBuild {
   modules: CollectedModule[];
   /** Each D1 binding's migrations. */
   d1Migrations: Record<string, CollectedFile[]>;
-  /**
-   * Each D1 binding's oldest migration whose code still runs on its
-   * schema: `compatibleFromMigration`, next to the database's schema.
-   */
-  d1CompatibleFrom: Record<string, number>;
   /** The assets directory's contents, for a Worker that serves assets. */
   assets?: CollectedAssets;
 }
@@ -305,98 +299,12 @@ export interface ReleaseInfo {
   wranglerVersion: string;
   packages: Record<string, string>;
   /**
-   * What its code works with (`checkCompatibility` checks it covers the
-   * build), but for its databases' schemas, which come from the build.
-   */
-  compatibility: Omit<ReleaseCompatibility, "databases">;
-  /**
    * The platform limits core and connect were built with
    * (@grasp-os/shared/platform-limits). What they're raised over, and the
    * evidence for it, are written at publish (evidence-release.ts).
    */
   platformLimits: PlatformLimits;
 }
-
-// Migrations are numbered from 0000 in the order they're applied, as
-// Drizzle names them: `0016_pending_action_keys.sql`.
-const MIGRATION_NAME = /^(?<number>\d{4,})_[^/]*\.sql$/u;
-
-/**
- * Each database's schema (`compatibility.databases`): its newest
- * migration's number, and the oldest whose code runs on it. Fails the
- * build on a migration that isn't numbered in order from 0000, since the
- * admin compares schemas by those numbers.
- */
-const databaseSchemas = (
-  workers: readonly WorkerBuild[]
-): NonNullable<ReleaseCompatibility["databases"]> => {
-  const schemas: NonNullable<ReleaseCompatibility["databases"]> = {};
-  for (const { config, d1Migrations, d1CompatibleFrom } of workers) {
-    for (const database of config.d1_databases) {
-      const migrations = d1Migrations[database.binding] ?? [];
-      for (const [index, { name }] of migrations.entries()) {
-        const number = MIGRATION_NAME.exec(name)?.groups?.number;
-        if (number === undefined || Number(number) !== index) {
-          throw new Error(
-            `${config.name}: ${database.binding}'s migration ${name} isn't numbered ${String(index).padStart(4, "0")} in order`
-          );
-        }
-      }
-      const compatibleFrom = d1CompatibleFrom[database.binding];
-      const schema = migrations.length - 1;
-      if (
-        compatibleFrom === undefined ||
-        compatibleFrom < 0 ||
-        compatibleFrom > schema
-      ) {
-        throw new Error(
-          `${config.name}: ${database.binding} is compatible from migration ${compatibleFrom ?? "none"}, which it doesn't ship`
-        );
-      }
-      schemas[database.database_name] = { schema, compatibleFrom };
-    }
-  }
-  return schemas;
-};
-
-/**
- * Throws unless `compatibility` declares every Worker of `workers`, and
- * each service binding one has to another: the range of the other's
- * interface it calls, which the other must serve.
- */
-const checkCompatibility = (
-  { interfaces }: ReleaseInfo["compatibility"],
-  workers: readonly WorkerBuild[]
-): void => {
-  const appByName = new Map(workers.map((w) => [w.config.name, w.key]));
-  const declared = Object.keys(interfaces).toSorted();
-  const built = workers.map((w) => w.key).toSorted();
-  if (JSON.stringify(declared) !== JSON.stringify(built)) {
-    throw new Error(
-      `The release's compatibility declares ${declared.join(", ")}, but it builds ${built.join(", ")}`
-    );
-  }
-  for (const worker of workers) {
-    const calls = interfaces[worker.key]?.calls ?? {};
-    const bound = new Set(
-      worker.config.services.flatMap(
-        ({ service }) => appByName.get(service) ?? []
-      )
-    );
-    for (const callee of new Set([...bound, ...Object.keys(calls)])) {
-      if (!(bound.has(callee) && callee in calls)) {
-        throw new Error(
-          `${worker.key} binds ${callee} exactly when it declares the versions of ${callee} it calls`
-        );
-      }
-      if (interfaces[callee]?.serves === undefined) {
-        throw new Error(
-          `${worker.key} calls ${callee}, which declares no version it serves`
-        );
-      }
-    }
-  }
-};
 
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
@@ -414,7 +322,6 @@ export const generateManifest = (
   const entries = Object.fromEntries(
     workers.map((w) => [w.key, workerEntry(w, releaseNames)])
   );
-  checkCompatibility(info.compatibility, workers);
   const assets: ReleaseManifest["assets"] = {};
   for (const [hash, bytes] of workers.flatMap((w) => [
     ...(w.assets?.blobs ?? []),
@@ -424,10 +331,6 @@ export const generateManifest = (
   return releaseManifestSchema.parse({
     manifestVersion: MANIFEST_VERSION,
     ...info,
-    compatibility: {
-      ...info.compatibility,
-      databases: databaseSchemas(workers),
-    },
     compatibilityDate,
     workers: entries,
     assets,

@@ -326,18 +326,10 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
-    // Newer, but its core calls a connect it doesn't ship: it fits no one.
-    await importedRelease((manifest) => ({
-      ...manifest,
-      compatibility: {
-        interfaces: {
-          connect: { serves: 1, calls: {} },
-          core: { calls: { connect: { min: 2, max: 2 } } },
-        },
-        workflowJournal: { min: 8, max: 9 },
-        sdkProtocols: { min: 2, max: 2 },
-      },
-    }));
+    // Newer, but it records no platform limits: it fits no one.
+    await importedRelease(
+      ({ platformLimits: _limits, ...manifest }) => manifest
+    );
 
     const retried = await retry(clientId);
     await latestStopped(attempts);

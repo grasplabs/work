@@ -29,10 +29,6 @@ const refusals: Readonly<Record<RolloutErrorCode, string>> = {
     "The rollout didn't reach that client, so there's nothing to roll back.",
   superseded:
     "Something newer was deployed to that client since: roll out the release you want instead.",
-  incompatible:
-    "What that client ran before doesn't work with what it runs now, so going back could break it: roll out a release that does instead.",
-  schema_incompatible:
-    "What that client ran before doesn't run on its databases since this rollout's migrations: roll out a release that does instead.",
   client_busy:
     "Something else is deploying to that client right now: try again in a moment.",
   rollback_past_migration:
