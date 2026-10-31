@@ -369,7 +369,7 @@ export const SoundCheck = ({
           className="flex min-h-16 w-full items-start justify-center"
         >
           <h1
-            className="type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500"
+            className="type-display animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
             key={check}
           >
             <SpokenText said={said} text={line} />
