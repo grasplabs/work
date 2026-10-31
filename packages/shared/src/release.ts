@@ -406,9 +406,32 @@ const databaseSchemaSchema = z
   );
 
 /**
+ * The interface a Worker serves the release's other Workers: the newest
+ * version, `serves`, and the oldest it still serves correctly,
+ * `servesFrom`. A change that only adds to an interface is a new version
+ * that still serves the callers of the versions before it, so a caller of
+ * the release before keeps working while the Workers switch one at a time;
+ * one that drops or changes what an older caller uses raises `servesFrom`
+ * past that caller's version. Releases built before `servesFrom` was
+ * declared have none, and serve exactly `serves`.
+ */
+const servedInterfaceSchema = z
+  .strictObject({
+    serves: z.int().positive().optional(),
+    servesFrom: z.int().positive().optional(),
+    calls: z.record(z.string(), versionRangeSchema),
+  })
+  .refine(
+    ({ serves, servesFrom }) =>
+      servesFrom === undefined ||
+      (serves !== undefined && servesFrom <= serves),
+    "An interface is served from no later than its newest version, and only when one is served"
+  );
+
+/**
  * What a release's code works with, which the admin checks before it
  * makes the release live in a client (spec 40.3): every Worker that
- * calls another must call the version that one serves, at each step of a
+ * calls another must call a version that one serves, at each step of a
  * deploy or rollback, since a client's Workers switch one at a time; and
  * the release must read every workflow journal and run every App
  * release the client's current code may have left, and run on every D1
@@ -419,17 +442,11 @@ const databaseSchemaSchema = z
  */
 export const releaseCompatibilitySchema = z.strictObject({
   /**
-   * By app: the version of the interface it serves the release's other
-   * Workers, if it serves one, and the versions of each other Worker's
-   * interface it calls correctly.
+   * By app: the versions of the interface it serves the release's other
+   * Workers, if it serves one (`servedInterfaceSchema`), and the versions
+   * of each other Worker's interface it calls correctly.
    */
-  interfaces: z.record(
-    z.string(),
-    z.strictObject({
-      serves: z.int().positive().optional(),
-      calls: z.record(z.string(), versionRangeSchema),
-    })
-  ),
+  interfaces: z.record(z.string(), servedInterfaceSchema),
   /** The workflow journal schemas core's engine reads. */
   workflowJournal: versionRangeSchema,
   /** The SDK protocol versions of the App releases core runs. */

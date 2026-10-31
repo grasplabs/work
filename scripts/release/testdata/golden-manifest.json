@@ -28,7 +28,8 @@
     "interfaces": {
       "connect": {
         "calls": {},
-        "serves": 1
+        "serves": 1,
+        "servesFrom": 1
       },
       "core": {
         "calls": {

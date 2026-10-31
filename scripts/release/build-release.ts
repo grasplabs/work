@@ -22,6 +22,7 @@ import { parseArgs } from "node:util";
 
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
+  connectInterfaceServedFrom,
   connectInterfacesCoreCalls,
   connectInterfaceVersion,
 } from "@grasp-os/shared/connect";
@@ -181,7 +182,11 @@ const buildWorker = async (
 // SDK protocol. Its databases' schemas come with each Worker's build.
 const compatibility: Omit<ReleaseCompatibility, "databases"> = {
   interfaces: {
-    connect: { serves: connectInterfaceVersion, calls: {} },
+    connect: {
+      serves: connectInterfaceVersion,
+      servesFrom: connectInterfaceServedFrom,
+      calls: {},
+    },
     core: { calls: { connect: { ...connectInterfacesCoreCalls } } },
   },
   workflowJournal: {
