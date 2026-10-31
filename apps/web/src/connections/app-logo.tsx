@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 // An app's tile, as the prototype draws it (`components/app-logo.tsx`): its
@@ -21,6 +22,10 @@ const tileClass = {
 } as const;
 
 type TileSize = keyof typeof tileClass;
+
+/** The default tile, dashed and without its light ground: a place for something still to add. */
+const addTileClass =
+  "flex size-9 flex-none items-center justify-center rounded-md border border-dashed";
 
 const letterClassOf = (size: TileSize, inText: boolean): string => {
   if (inText) {
@@ -74,3 +79,13 @@ export const AppLogo = ({
     </Tile>
   );
 };
+
+/**
+ * The tile of something still to add, beside the logos of what is there:
+ * the same tile, dashed and empty, with a plus.
+ */
+export const AddLogo = () => (
+  <div aria-hidden="true" className={addTileClass}>
+    <PlusIcon className="size-4" />
+  </div>
+);

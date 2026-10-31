@@ -197,16 +197,18 @@ const askedBefore = (
 
 const RequestFlow = ({
   integrations,
+  initial,
   onClose,
 }: {
   integrations: readonly Integration[];
+  initial: string;
   onClose: () => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initial);
   const [url, setUrl] = useState("");
   const [why, setWhy] = useState("");
   // Pressed once the apps shown are none of what is meant.
@@ -353,10 +355,13 @@ const RequestFlow = ({
 /** The Request app dialog; `integrations` is the page's whole list. */
 export const RequestAppDialog = ({
   integrations,
+  initial = "",
   onOpenChange,
   open,
 }: {
   integrations: readonly Integration[];
+  /** The name it starts with, when the app was named elsewhere (the Landscape's Add app). */
+  initial?: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) => (
@@ -364,6 +369,7 @@ export const RequestAppDialog = ({
     <DialogContent className="sm:max-w-md">
       {open ? (
         <RequestFlow
+          initial={initial}
           integrations={integrations}
           onClose={() => {
             onOpenChange(false);

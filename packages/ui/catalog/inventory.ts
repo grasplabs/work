@@ -148,14 +148,14 @@ export const shadcnComponents = {
     summary: "A chat message's bubble, with reactions.",
     exports: ["Bubble", "BubbleContent", "BubbleGroup", "BubbleReactions"],
     changes:
-      "Adds the `tinted` variant, on the theme's `tinted` and `tinted-foreground`. Hovers are shadcn's `/80`.",
+      "Adds the `tinted` variant, on the theme's `tinted` and `tinted-foreground`, and `size=\"lg\"` for the chat's question, roomier and as wide as the thread allows. Keeps the line breaks it was given. Hovers are shadcn's `/80`.",
   },
   button: {
     status: "supported",
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use.",
+      "Adds the `ask`, `highlight` (lime, the one action of a page) and `hint` (a quiet dotted-underlined word under a figure) variants, and the `xl` and `inline` (no box, in a line of text) sizes Grasp's own pages use.",
   },
   "button-group": {
     status: "supported",
@@ -519,12 +519,16 @@ export const shadcnComponents = {
     summary: "A chat message: who sent it, its content and its footer.",
     exports: [
       "Message",
+      "MessageAction",
+      "MessageActions",
       "MessageAvatar",
       "MessageContent",
       "MessageFooter",
       "MessageGroup",
       "MessageHeader",
     ],
+    changes:
+      'Adds `MessageContent size="reading"`, Grasp\'s answers as the prototype sets them, and `MessageActions` with `MessageAction`, the quiet row of icon actions under an answer.',
   },
   "message-scroller": {
     status: "supported",
