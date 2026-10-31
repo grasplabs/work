@@ -1261,6 +1261,13 @@
       "when": 1793430229743,
       "tag": "0179_policy_rule_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "6",
+      "when": 1793454385485,
+      "tag": "0180_drop_policies_and_landscape",
+      "breakpoints": true
     }
   ]
 }
