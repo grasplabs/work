@@ -9,9 +9,7 @@ import * as React from "react";
 /*
  * `spacing`: how close the items sit. By default as far apart as their size
  * asks; `tight` and `snug` keep a list of small items together, as the
- * prototype's Landscape lists a vendor's documents and an insight's evidence;
- * `flush` sets them one right under the next, as the quiet questions under a
- * chat's box.
+ * prototype's Landscape lists a vendor's documents and an insight's evidence.
  */
 /*
  * `variant="card"`: the items as rows on a card, each under a line (its
@@ -24,7 +22,7 @@ function ItemGroup({
   render,
   ...props
 }: useRender.ComponentProps<"div"> & {
-  spacing?: "default" | "tight" | "snug" | "flush";
+  spacing?: "default" | "tight" | "snug";
   variant?: "default" | "card";
 }) {
   // `render` makes it a `ul` of `li`s, a list by its own element.
@@ -74,10 +72,9 @@ const itemVariants = cva(
         outline: "border-border",
         muted: "bg-muted/50 border-transparent",
         // A quiet row of muted text, as the questions under a chat's box:
-        // the box stays what the page is about. No border, so each is as
-        // tall as its line and its padding.
+        // the box stays what the page is about.
         quiet:
-          "text-muted-foreground [button]:hover:text-foreground rounded-lg border-0 text-left disabled:pointer-events-none disabled:opacity-50",
+          "text-muted-foreground [button]:hover:text-foreground rounded-lg border-transparent text-left disabled:pointer-events-none disabled:opacity-50",
         // A row of a card list (`ItemGroup variant="card"`), under a line.
         // Disabled as a button is: faded, and nothing to press.
         row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0 aria-disabled:pointer-events-none aria-disabled:opacity-50",

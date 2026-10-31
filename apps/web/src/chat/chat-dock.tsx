@@ -339,14 +339,13 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
 // One tree in every mode, so the box, and the draft in it, stays as the
 // dock opens, grows or folds away. As in the prototype's corner chat
 // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
-// 416 typed in, 36 pixels off the window's corner (its `right-7 bottom-7`
-// inside a layer 8 pixels in); the frame 442 wide,
+// 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
 // kept 16 pixels off every edge of the window and rising out of the bar
 // as it opens; the drawer as wide as its edge was dragged. Each is a
 // white card on `shadow-lifted`, with no glow, blur or ring round it.
 const dockLook = (mode: DockMode): { place: string; look: string } => {
   let place =
-    "pointer-events-none fixed inset-x-9 bottom-9 z-40 flex justify-end";
+    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
   let look =
     "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
   if (mode === "drawer") {
