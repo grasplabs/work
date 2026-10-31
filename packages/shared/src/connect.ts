@@ -1,8 +1,11 @@
 import { z } from "zod";
 
+import type { AiProviderConnectApi } from "./ai-providers.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
+import { oauthProviderSchema } from "./connect-names.ts";
+import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
 import { directoryProviderSchema } from "./directory.ts";
 import { placesProviderSchema } from "./document-places.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
@@ -22,6 +25,9 @@ import { isAdmin, roleSchema } from "./roles.ts";
 import type { StephenReachApi } from "./stephen-reach.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
+export { catalogGroups, oauthProviderSchema } from "./connect-names.ts";
+export type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
+
 /**
  * The version of the interface connect serves core over the service
  * binding (its entrypoint's methods, and the calls and answers in this
@@ -32,14 +38,15 @@ import { eventTypeSchema } from "./workflows.ts";
  * version, with the range below moved to say which cores work with
  * which connects; a release declares both (scripts/release).
  */
-export const connectInterfaceVersion = 2;
+export const connectInterfaceVersion = 3;
 
 /**
  * The versions of connect's interface this core calls correctly. 2: a
  * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
- * strict schema refuses.
+ * strict schema refuses. 3: core reaches every model through connect
+ * (`modelFetch`, `aiProviderRoutes`), which connect 2 doesn't serve.
  */
-export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
+export const connectInterfacesCoreCalls = { min: 3, max: 3 } as const;
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -112,13 +119,6 @@ export interface PendingReference {
 // own browser, signed in to core; core says who they are, and connect keeps
 // everything else: the flow's state and PKCE verifier, and the tokens, which
 // never leave it (threat model R1).
-
-/**
- * The suites a person connects through OAuth, pinned to the organization's
- * own tenant: the IdPs people sign in with.
- */
-export const oauthProviderSchema = z.enum(["microsoft", "google"]);
-export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 
 /**
  * Names no app may take: the suites above, whose sign-in connect handles
@@ -666,32 +666,6 @@ export interface CatalogEntry {
  * toolkit is refused (`connection.own_auth_required`).
  */
 export type CatalogAuth = "managed" | "own";
-
-/**
- * Grasp's kinds of app, in the order the Integrations page lists them. Each
- * id is the group's English name, which the web app translates; `Other` is
- * for an app none of the others fits.
- */
-export const catalogGroups = [
-  "Email and calendar",
-  "Files and documents",
-  "Chat",
-  "CRM",
-  "Finance and accounting",
-  "HR",
-  "Signing",
-  "Marketing",
-  "Support",
-  "Projects and tasks",
-  "Forms and surveys",
-  "Data and analytics",
-  "AI",
-  "Commerce",
-  "Design and media",
-  "Developer tools",
-  "Other",
-] as const;
-export type CatalogGroup = (typeof catalogGroups)[number];
 
 /**
  * Which group a category is in, by its words in lower case. The first
@@ -1685,7 +1659,8 @@ export interface ChannelApi {
  * npm registry among the rest (`PackageRegistryApi`), and the chat
  * platforms (`ChannelApi`).
  */
-export interface ConnectApi extends PackageRegistryApi, ChannelApi {
+export interface ConnectApi
+  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;
