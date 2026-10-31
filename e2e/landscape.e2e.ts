@@ -294,8 +294,8 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await Promise.all(
       book.rules
         .filter((each) => each.name === name)
-        .map(async ({ id }) => {
-          await api.policies.removeRule(id);
+        .map(async ({ id, revision }) => {
+          await api.policies.removeRule(id, revision);
         })
     );
     await Promise.all(

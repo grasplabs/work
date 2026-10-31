@@ -5328,6 +5328,11 @@ export const policyRules = sqliteTable(
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
+    /**
+     * 1 when made, one more with each change: a write names the revision
+     * its page read, and is refused once the rule changed since (policies.ts).
+     */
+    revision: integer().notNull().default(1),
   },
   (table) => [index("policy_rules_policy_idx").on(table.policyId)]
 );

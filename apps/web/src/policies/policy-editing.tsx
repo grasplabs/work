@@ -538,12 +538,12 @@ const useSaveRule = (rule?: PolicyRule) => {
       if (edit === undefined) {
         return false;
       }
-      // With the status this page shows: core changes the effect only
-      // while the rule still has it. Read again either way, so a refusal
-      // shows the rule as it is now.
+      // From the revision this page read: core refuses it once the rule
+      // changed since. Read again either way, so a refusal shows the rule
+      // as it is now.
       const edited = await run(
         async (session) =>
-          await session.policies.updateRule(rule.id, edit, rule.status)
+          await session.policies.updateRule(rule.id, edit, rule.revision)
       );
       await router.invalidate();
       return edited !== undefined;
@@ -841,8 +841,8 @@ const EditRuleDialog = ({
   const { busy, failure, save } = useSaveRule(rule);
   const [confirming, setConfirming] = useState(false);
   const canSave = canSaveRule(draft) && !busy;
-  // Made to block while it acts: from the save on, apps are blocked. Core
-  // takes the change only while the rule is as active as this page shows.
+  // Made to block while it acts: from the save on, apps are blocked. The
+  // page's rule is current as the save writes, or core refuses the save.
   const startsBlocking =
     rule.status === "active" &&
     rule.effect !== "block" &&
@@ -928,10 +928,10 @@ const EditRuleDialog = ({
 
 /**
  * Whether a rule watches, acts or is paused, turned on its page as in the
- * prototype. Core turns the status alone (`setRuleStatus`), so whatever
- * else the rule says stays as core has it, even when another admin
- * changed it since this page was read. Turning a rule that blocks on asks
- * first: from then on it marks apps as blocked.
+ * prototype. Core turns the status alone (`setRuleStatus`), and only from
+ * the revision this page read, so the rule the page shows is the rule as
+ * it turns. Turning a rule that blocks on asks first: from then on it
+ * marks apps as blocked.
  */
 export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
   const { t, i18n } = useLingui();
@@ -941,10 +941,8 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
   const turn = async (status: RuleStatus): Promise<void> => {
     await run(async (session) => {
       await changeThenRefresh(
-        // The effect this page shows: core turns it only while the rule
-        // still has it, so the warning above was for the rule as it is.
         async () =>
-          await session.policies.setRuleStatus(rule.id, status, rule.effect),
+          await session.policies.setRuleStatus(rule.id, status, rule.revision),
         async () => {
           await router.invalidate();
         }
@@ -1476,7 +1474,7 @@ export const RuleActions = ({
   const { name } = rule;
   const remove = async (): Promise<void> => {
     const removed = await run(async (session) => {
-      await session.policies.removeRule(rule.id);
+      await session.policies.removeRule(rule.id, rule.revision);
       return true;
     });
     if (removed === true) {

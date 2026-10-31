@@ -1,6 +1,7 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type {
   PoliciesApi,
+  PolicyRule,
   RuleEdit,
   RuleInput,
 } from "@grasp-os/shared/policies";
@@ -240,15 +241,19 @@ describe("the company's policies", () => {
     });
 
     await admin.api.policies.removePolicy(policy.id);
-    await admin.api.policies.removeRule(gone.id);
+    await admin.api.policies.removeRule(gone.id, gone.revision);
 
     const book = await admin.api.policies.book();
     expect({
       policies: book.policies,
-      rules: book.rules.map(({ id, policyId }) => ({ id, policyId })),
+      rules: book.rules.map(({ id, policyId, revision }) => ({
+        id,
+        policyId,
+        revision,
+      })),
       exceptions: book.exceptions.map(({ ruleId }) => ruleId),
       again: await Promise.all([
-        outcome(admin.api.policies.removeRule(gone.id)),
+        outcome(admin.api.policies.removeRule(gone.id, gone.revision)),
         outcome(admin.api.policies.publish(policy.id)),
         outcome(
           admin.api.policies.grantException({
@@ -261,7 +266,7 @@ describe("the company's policies", () => {
       ]),
     }).toStrictEqual({
       policies: [],
-      rules: [{ id: kept.id, policyId: null }],
+      rules: [{ id: kept.id, policyId: null, revision: kept.revision + 1 }],
       exceptions: [kept.id],
       again: ["policy.not_found", "policy.not_found", "policy.not_found"],
     });
@@ -304,114 +309,133 @@ describe("the company's policies", () => {
     });
   });
 
-  it("turn a rule's status alone, keeping an edit another admin made since the page read it, and only while it has the effect the page showed", async () => {
+  it("take a write to a rule only from the revision the page read: any change by another admin since refuses an edit, a turn or a removal from the old page", async () => {
     const admin = await signedInApi(idp, "admin");
-    const rule = await admin.api.policies.createRule(outsideEu);
-    // Another admin renames it meanwhile; the first turns it on from a
-    // page that still has the old name.
-    await admin.api.policies.updateRule(
-      rule.id,
-      { ...outsideEuEdit, name: "Renamed meanwhile" },
-      "watching"
+    // Another admin's change, each kind on a rule of its own.
+    const changes = {
+      effect: async (rule: PolicyRule) =>
+        await admin.api.policies.updateRule(
+          rule.id,
+          { ...outsideEuEdit, effect: "flag" },
+          rule.revision
+        ),
+      status: async (rule: PolicyRule) =>
+        await admin.api.policies.setRuleStatus(
+          rule.id,
+          "paused",
+          rule.revision
+        ),
+      name: async (rule: PolicyRule) =>
+        await admin.api.policies.updateRule(
+          rule.id,
+          { ...outsideEuEdit, name: "Renamed meanwhile" },
+          rule.revision
+        ),
+    };
+    const fromOldPage = async (
+      change: (rule: PolicyRule) => Promise<PolicyRule>
+    ) => {
+      const old = await admin.api.policies.createRule({
+        ...outsideEu,
+        status: "active",
+      });
+      const changed = await change(old);
+      const writes = await Promise.all([
+        outcome(
+          admin.api.policies.updateRule(
+            old.id,
+            { ...outsideEuEdit, name: "From the old page" },
+            old.revision
+          )
+        ),
+        outcome(
+          admin.api.policies.setRuleStatus(old.id, "watching", old.revision)
+        ),
+        outcome(admin.api.policies.removeRule(old.id, old.revision)),
+      ]);
+      const { rules } = await admin.api.policies.book();
+      const now = rules.find(({ id }) => id === old.id);
+      return {
+        bumped: changed.revision === old.revision + 1,
+        writes,
+        kept: JSON.stringify(now) === JSON.stringify(changed),
+      };
+    };
+    const refused = {
+      bumped: true,
+      writes: ["policy.conflict", "policy.conflict", "policy.conflict"],
+      kept: true,
+    };
+    const [effect, status, name] = await Promise.all([
+      fromOldPage(changes.effect),
+      fromOldPage(changes.status),
+      fromOldPage(changes.name),
+    ]);
+
+    // From the revision it has now, the same writes go through: an edit
+    // keeps the status, a turn keeps the rest.
+    const current = await admin.api.policies.createRule(outsideEu);
+    const renamed = await admin.api.policies.updateRule(
+      current.id,
+      { ...outsideEuEdit, name: "Renamed now" },
+      current.revision
     );
     const turned = await admin.api.policies.setRuleStatus(
-      rule.id,
+      current.id,
       "active",
-      "block"
+      renamed.revision
     );
-    const again = await admin.api.policies.setRuleStatus(
-      rule.id,
-      "active",
-      "block"
+    const removed = await outcome(
+      admin.api.policies.removeRule(current.id, turned.revision)
     );
-
-    // Another admin makes it flag; a page that still shows it blocking
-    // can't pause it, and a page showing it flagging can't turn it on
-    // believing it only flags once it blocks again.
-    await admin.api.policies.updateRule(
-      rule.id,
-      { ...outsideEuEdit, name: "Renamed meanwhile", effect: "flag" },
-      "active"
-    );
-    const stale = await outcome(
-      admin.api.policies.setRuleStatus(rule.id, "paused", "block")
-    );
-    const { rules } = await admin.api.policies.book();
 
     expect({
-      turned: { name: turned.name, status: turned.status },
-      again: again.status,
-      stale: { refused: stale, kept: rules.map(({ status }) => status) },
-      refused: await Promise.all([
+      effect,
+      status,
+      name,
+      current: {
+        renamed: [renamed.name, renamed.status],
+        turned: [turned.name, turned.status, turned.revision],
+        removed,
+      },
+      invalid: await Promise.all([
         outcome(
           admin.api.policies.setRuleStatus(
-            rule.id,
+            current.id,
             // SAFETY: invalid on purpose: anything a client can send, as
             // Cap'n Web checks no types, so core must.
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
             "on" as never,
-            "block"
+            1
           )
         ),
         outcome(
-          admin.api.policies.setRuleStatus("no-such-rule", "paused", "block")
+          admin.api.policies.updateRule(
+            current.id,
+            // SAFETY: invalid on purpose: a status in an edit, which only
+            // `setRuleStatus` turns.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            { ...outsideEu, status: "active" } as never,
+            1
+          )
         ),
+        outcome(admin.api.policies.removeRule(current.id, 0)),
+        outcome(admin.api.policies.setRuleStatus("no-such-rule", "paused", 1)),
       ]),
     }).toStrictEqual({
-      turned: { name: "Renamed meanwhile", status: "active" },
-      again: "active",
-      stale: { refused: "policy.conflict", kept: ["active"] },
-      refused: ["policy.invalid", "policy.not_found"],
-    });
-  });
-
-  it("keep a rule's status through an edit from an old page, and change its effect only on the status the page showed", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const rule = await admin.api.policies.createRule({
-      ...outsideEu,
-      effect: "flag",
-      status: "active",
-    });
-    // Two admins open the active rule; the second pauses it, then the
-    // first saves a rename from the page that still shows it active.
-    await admin.api.policies.setRuleStatus(rule.id, "paused", "flag");
-    const renamed = await admin.api.policies.updateRule(
-      rule.id,
-      { ...outsideEuEdit, effect: "flag", name: "Renamed from an old page" },
-      "active"
-    );
-    // From that same old page, making it block is refused: whether it
-    // starts blocking was decided on a status it no longer has.
-    const toBlock = await outcome(
-      admin.api.policies.updateRule(
-        rule.id,
-        { ...outsideEuEdit, name: "Renamed from an old page" },
-        "active"
-      )
-    );
-    const sneaked = await outcome(
-      admin.api.policies.updateRule(
-        rule.id,
-        // SAFETY: invalid on purpose: a status in an edit, as an old
-        // client might send it; Cap'n Web checks no types, so core must.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        { ...outsideEu, status: "active" } as never,
-        "paused"
-      )
-    );
-    const { rules } = await admin.api.policies.book();
-
-    expect({
-      renamed: { name: renamed.name, status: renamed.status },
-      toBlock,
-      sneaked,
-      now: rules.map(({ name, effect, status }) => ({ name, effect, status })),
-    }).toStrictEqual({
-      renamed: { name: "Renamed from an old page", status: "paused" },
-      toBlock: "policy.conflict",
-      sneaked: "policy.invalid",
-      now: [
-        { name: "Renamed from an old page", effect: "flag", status: "paused" },
+      effect: refused,
+      status: refused,
+      name: refused,
+      current: {
+        renamed: ["Renamed now", "watching"],
+        turned: ["Renamed now", "active", 3],
+        removed: "ok",
+      },
+      invalid: [
+        "policy.invalid",
+        "policy.invalid",
+        "policy.invalid",
+        "policy.not_found",
       ],
     });
   });
@@ -432,11 +456,11 @@ describe("the company's policies", () => {
           api.policies.updateRule(
             rule.id,
             { ...outsideEuEdit, name: "Theirs" },
-            "watching"
+            rule.revision
           )
         ),
-        outcome(api.policies.setRuleStatus(rule.id, "active", "block")),
-        outcome(api.policies.removeRule(rule.id)),
+        outcome(api.policies.setRuleStatus(rule.id, "active", rule.revision)),
+        outcome(api.policies.removeRule(rule.id, rule.revision)),
         outcome(
           api.policies.grantException({
             ruleId: rule.id,
@@ -676,28 +700,37 @@ describe("the company's policies", () => {
       await admin.api.policies.publish(policyId);
       // Already published: nothing changes, nothing is recorded.
       await admin.api.policies.publish(policyId);
-      ({ id: ruleId } = await admin.api.policies.createRule(outsideEu));
-      await admin.api.policies.setRuleStatus(ruleId, "active", "block");
-      // The same again: nothing is recorded.
-      await admin.api.policies.setRuleStatus(ruleId, "active", "block");
+      const made = await admin.api.policies.createRule(outsideEu);
+      ruleId = made.id;
+      const active = await admin.api.policies.setRuleStatus(
+        ruleId,
+        "active",
+        made.revision
+      );
+      // The same again, from the page that shows it active: nothing is recorded.
+      await admin.api.policies.setRuleStatus(ruleId, "active", active.revision);
       // The effect changes; a status turned after it records the effect
       // the rule has as it turns, and the same turn again nothing.
-      await admin.api.policies.updateRule(
+      const flagged = await admin.api.policies.updateRule(
         ruleId,
         { ...outsideEuEdit, effect: "flag" },
-        "active"
+        active.revision
       );
       // The same edit again: nothing is recorded.
       await admin.api.policies.updateRule(
         ruleId,
         { ...outsideEuEdit, effect: "flag" },
-        "active"
+        flagged.revision
       );
-      await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
-      await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
-      // From a page that still shows it blocking: refused, nothing recorded.
+      const paused = await admin.api.policies.setRuleStatus(
+        ruleId,
+        "paused",
+        flagged.revision
+      );
+      await admin.api.policies.setRuleStatus(ruleId, "paused", paused.revision);
+      // From a page that read it before the edit: refused, nothing recorded.
       await outcome(
-        admin.api.policies.setRuleStatus(ruleId, "watching", "block")
+        admin.api.policies.setRuleStatus(ruleId, "watching", active.revision)
       );
       await admin.api.policies.grantException({
         ruleId,
@@ -706,7 +739,11 @@ describe("the company's policies", () => {
         until: "2099-01-31",
       });
       await admin.api.policies.revokeException(ruleId, "app-chatgpt");
-      await admin.api.policies.removeRule(ruleId);
+      const { rules } = await admin.api.policies.book();
+      await admin.api.policies.removeRule(
+        ruleId,
+        rules.find(({ id }) => id === ruleId)?.revision ?? 0
+      );
       await admin.api.policies.removePolicy(policyId);
     });
 

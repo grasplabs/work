@@ -52,6 +52,7 @@ const rule = (
   patch: Partial<PolicyRule> = {}
 ): PolicyRule => ({
   id: "rule-test",
+  revision: 1,
   name: "Test rule",
   description: "",
   conditions,

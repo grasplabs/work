@@ -191,7 +191,16 @@ export interface PolicyRule {
   createdBy: string;
   /** ISO 8601. */
   createdAt: string;
+  /**
+   * 1 when made, one more with each change. Every write to the rule names
+   * the revision its page read, and is refused as `policy.conflict` once
+   * the rule changed since.
+   */
+  revision: number;
 }
+
+/** A rule's revision, as a write names the one its page read. */
+export const ruleRevisionSchema = z.int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /** A rule Grasp proposed from a policy, waiting for someone to take or leave it. */
 export interface RuleProposal {
@@ -337,7 +346,7 @@ export const policyErrors = defineErrorFamily({
     "That isn't a policy, rule or exception as Grasp keeps them: check each field.",
   "policy.not_found": "There's no such policy, rule or exception.",
   "policy.conflict":
-    "A rule names a policy that isn't there, or the policy changed meanwhile.",
+    "The rule or its policy changed since it was read, or a rule names a policy that isn't there. Read it again, then retry.",
 });
 
 /** The company's policies, over `/rpc`. */
@@ -383,30 +392,29 @@ export interface PoliciesApi {
   createRule: (rule: RuleInput) => Promise<PolicyRule>;
   /** Replaces a rule's name, conditions, effect or status. The organization's own admins only; audited. */
   /**
-   * Replaces what a rule says, keeping its status as core has it.
-   * `shownStatus` is the status the admin's page showed: an edit that
-   * changes the effect applies only while the rule still has it, as
-   * turning a rule that acts to block (or back) is decided against it;
-   * otherwise it is refused as `policy.conflict`.
+   * Replaces what a rule says, keeping its status. Only from `revision`,
+   * the one the admin's page read: refused as `policy.conflict` once the
+   * rule changed since. The organization's own admins only; audited.
    */
   updateRule: (
     ruleId: string,
     rule: RuleEdit,
-    shownStatus: RuleStatus
+    revision: number
   ) => Promise<PolicyRule>;
   /**
-   * Turns a rule to watching, active or paused, leaving everything else it
-   * says as core has it now; only while it still has `effect`, the effect
-   * the admin's page showed, else refused as `policy.conflict`. The
-   * organization's own admins only; audited.
+   * Turns a rule to watching, active or paused, and nothing else. Only from
+   * `revision`, as `updateRule`. The organization's own admins only; audited.
    */
   setRuleStatus: (
     ruleId: string,
     status: RuleStatus,
-    effect: RuleEffect
+    revision: number
   ) => Promise<PolicyRule>;
-  /** Removes a rule and its exceptions. The organization's own admins only; audited. */
-  removeRule: (ruleId: string) => Promise<void>;
+  /**
+   * Removes a rule and its exceptions. Only from `revision`, as
+   * `updateRule`. The organization's own admins only; audited.
+   */
+  removeRule: (ruleId: string, revision: number) => Promise<void>;
   /**
    * Lets one app break one rule until a date, in place of any exception it
    * had for it. The organization's own admins only; audited.

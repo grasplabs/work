@@ -2,7 +2,7 @@
 import {
   exceptionInputSchema,
   ruleEditSchema,
-  ruleEffectSchema,
+  ruleRevisionSchema,
   ruleInputSchema,
   ruleStatusSchema,
 } from "@grasp-os/shared/policies";
@@ -60,6 +60,7 @@ const outsideEu: PolicyRule = {
   policyId: null,
   createdBy: "user-1",
   createdAt: "2026-10-20T08:00:00.000Z",
+  revision: 1,
 };
 
 const chatGpt: LandscapeApp = {
@@ -86,7 +87,7 @@ const chatGpt: LandscapeApp = {
 const fakePolicies = () => {
   const sent: {
     updated: RuleEdit[];
-    turned: [string, string, string][];
+    turned: [string, string, number][];
     granted: ExceptionInput[];
   } = {
     updated: [],
@@ -99,24 +100,31 @@ const fakePolicies = () => {
     updateRule: async (
       ruleId: string,
       input: RuleEdit,
-      shownStatus: string
+      revision: number
     ): Promise<PolicyRule> => {
-      // As core takes an edit: never a status, and the status shown.
+      // As core takes an edit: never a status, from the revision read.
       const parsed = ruleEditSchema.parse(input);
-      ruleStatusSchema.parse(shownStatus);
+      const read = book.rules[0] ?? outsideEu;
+      if (ruleRevisionSchema.parse(revision) !== read.revision) {
+        throw new Error("policy.conflict");
+      }
       sent.updated.push(input);
-      const rule = { ...outsideEu, ...parsed, id: ruleId };
+      const rule = { ...read, ...parsed, id: ruleId, revision: revision + 1 };
       book = { ...book, rules: [rule] };
       return await Promise.resolve(rule);
     },
     setRuleStatus: async (
       ruleId: string,
       status: string,
-      effect: string
+      revision: number
     ): Promise<PolicyRule> => {
       const parsed = ruleStatusSchema.parse(status);
-      sent.turned.push([ruleId, parsed, ruleEffectSchema.parse(effect)]);
-      const rule = { ...(book.rules[0] ?? outsideEu), status: parsed };
+      const read = book.rules[0] ?? outsideEu;
+      if (ruleRevisionSchema.parse(revision) !== read.revision) {
+        throw new Error("policy.conflict");
+      }
+      sent.turned.push([ruleId, parsed, revision]);
+      const rule = { ...read, status: parsed, revision: revision + 1 };
       book = { ...book, rules: [rule] };
       return await Promise.resolve(rule);
     },
@@ -360,7 +368,7 @@ describe("changing the policies", () => {
     });
   });
 
-  it("turns a rule that blocks on from its page once it is confirmed, sending core its status alone and the effect it showed", async () => {
+  it("turns a rule that blocks on from its page once it is confirmed, sending core its status alone and the revision it read", async () => {
     const { sent, policies } = fakePolicies();
     await opened(policies);
 
@@ -383,7 +391,7 @@ describe("changing the policies", () => {
       asked: { shown: "watching", confirms: true },
       shown: "active",
       updated: [],
-      turned: [[outsideEu.id, "active", "block"]],
+      turned: [[outsideEu.id, "active", outsideEu.revision]],
     });
   });
 
