@@ -13,7 +13,13 @@ import {
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Label } from "@grasp-os/ui/components/label";
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
 import {
   Table,
   TableBody,
@@ -134,33 +140,36 @@ export const RingChecklist = ({
 }) => {
   const id = useId();
   return (
-    <fieldset className="flex flex-col gap-1 text-sm">
-      <legend className="sr-only">Before the next ring</legend>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={checks.evalPassed}
-          id={`${id}-eval`}
-          onCheckedChange={(checked) => {
-            onChange({ ...checks, evalPassed: checked });
-          }}
-        />
-        <Label htmlFor={`${id}-eval`}>
-          Stephen&apos;s eval passed on this release
-        </Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          checked={checks.demoSent}
-          id={`${id}-demo`}
-          onCheckedChange={(checked) => {
-            onChange({ ...checks, demoSent: checked });
-          }}
-        />
-        <Label htmlFor={`${id}-demo`}>
-          The five demo messages, sent in real Teams on this ring, all answered
-        </Label>
-      </div>
-    </fieldset>
+    <FieldSet>
+      <FieldLegend className="sr-only">Before the next ring</FieldLegend>
+      <FieldGroup data-slot="checkbox-group">
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={checks.evalPassed}
+            id={`${id}-eval`}
+            onCheckedChange={(checked) => {
+              onChange({ ...checks, evalPassed: checked });
+            }}
+          />
+          <FieldLabel htmlFor={`${id}-eval`}>
+            Stephen&apos;s eval passed on this release
+          </FieldLabel>
+        </Field>
+        <Field orientation="horizontal">
+          <Checkbox
+            checked={checks.demoSent}
+            id={`${id}-demo`}
+            onCheckedChange={(checked) => {
+              onChange({ ...checks, demoSent: checked });
+            }}
+          />
+          <FieldLabel htmlFor={`${id}-demo`}>
+            The five demo messages, sent in real Teams on this ring, all
+            answered
+          </FieldLabel>
+        </Field>
+      </FieldGroup>
+    </FieldSet>
   );
 };
 
