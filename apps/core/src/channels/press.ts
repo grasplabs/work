@@ -236,8 +236,8 @@ export const pressCard = async (
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await pressedChanges(env, {
         userId,
-        chatId,
-        failed: held[index] === undefined ? [] : [held[index].action],
+        writeId: write.id,
+        action: held[index]?.action ?? "",
       });
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await editCard(event, shown(outcome));
