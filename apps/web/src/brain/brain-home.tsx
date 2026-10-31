@@ -486,7 +486,7 @@ export const HomePage = ({
   return (
     <div className="flex min-h-0 flex-1">
       <article className="min-w-0 flex-1 overflow-y-auto">
-        <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 pb-24 md:px-12">
+        <div className="pb-chat @container mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
           <header className="flex flex-col gap-2.5">
             {toolbar}
             <PageHeaderTitle className="wrap-break-word">

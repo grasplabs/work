@@ -94,20 +94,32 @@ const keptTopic = async (env: Env, name: string): Promise<string | null> => {
   return found?.id ?? null;
 };
 
-/** Keeps a new question under `topicId`, while there is room; its id. */
+/**
+ * Keeps a new question under `topicId`, once by its wording, while there
+ * is room; its id. One the model wasn't shown (past the latest
+ * `shownQuestions`) is found by its wording, never named twice.
+ */
 const keptQuestion = async (
   env: Env,
   topicId: string,
   wording: string,
   role: string | null
 ): Promise<string | null> => {
-  const id = crypto.randomUUID();
-  const written = await drizzle(env.DB).run(
+  const db = drizzle(env.DB);
+  const sameWording = sql`${stephenRequestQuestions.topicId} = ${topicId} AND lower(${stephenRequestQuestions.wording}) = lower(${wording})`;
+  await db.run(
     sql`INSERT INTO ${stephenRequestQuestions} (id, topic_id, wording, role, created_at)
-      SELECT ${id}, ${topicId}, ${wording}, ${role}, ${Date.now()}
-      WHERE (SELECT count(*) FROM ${stephenRequestQuestions}) < ${maxQuestions}`
+      SELECT ${crypto.randomUUID()}, ${topicId}, ${wording}, ${role}, ${Date.now()}
+      WHERE (SELECT count(*) FROM ${stephenRequestQuestions}) < ${maxQuestions}
+        AND NOT EXISTS (SELECT 1 FROM ${stephenRequestQuestions} WHERE ${sameWording})`
   );
-  return written.meta.changes > 0 ? id : null;
+  const [found] = await db
+    .select({ id: stephenRequestQuestions.id })
+    .from(stephenRequestQuestions)
+    .where(sameWording)
+    .orderBy(stephenRequestQuestions.createdAt)
+    .limit(1);
+  return found?.id ?? null;
 };
 
 /**
