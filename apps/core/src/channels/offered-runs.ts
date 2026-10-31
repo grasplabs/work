@@ -1,5 +1,3 @@
-// Teams' adapter sends through axios, which needs the fix in first (door.ts).
-import "@grasp-os/chat/workerd";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
