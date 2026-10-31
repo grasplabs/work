@@ -27,15 +27,6 @@ export const releases = sqliteTable("releases", {
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
-  /**
-   * Its limit evidence file, as CI's publish wrote it next to the manifest
-   * (@grasp-os/shared/release `limitEvidenceFileSchema`): JSON, checked on
-   * import against the manifest and R2's SHA-256. Null for a release that
-   * records no platform limits (built before they were).
-   */
-  limitEvidence: text("limit_evidence"),
-  /** That file's sha256, hex; null with it. */
-  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**

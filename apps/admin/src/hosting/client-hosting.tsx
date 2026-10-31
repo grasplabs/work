@@ -390,7 +390,7 @@ const provisionable = (view: ClientHostingView): boolean =>
  * Its hosting for staff, read-only: where it runs, where it is placed or
  * would go, what each requirement stands at, its operation, and once it
  * stopped or hasn't started, one button that tries again now, in the
- * automatic destination with the newest release that fits, as the
+ * automatic destination with the newest release, as the
  * admin does by itself anyway.
  */
 export const ClientHosting = ({

@@ -29,7 +29,6 @@ import {
   clients,
   releases,
 } from "../src/db/schema.ts";
-import { appliedSchema } from "../src/deploy/compatibility.ts";
 import { deployContext } from "../src/deploy/context.ts";
 import {
   clientMailDomain,
@@ -72,7 +71,7 @@ import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
-import { buildRelease, evidenceFor, putBlobs, testLimits } from "./releases.ts";
+import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 import {
   deliverAlarm,
@@ -181,7 +180,6 @@ const importRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -227,7 +225,6 @@ const importRealRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -708,57 +705,11 @@ const probeFailures: ProbeFailure[] = [
 interface Refusal {
   name: string;
   kind: Kind;
-  spec?: Partial<ReleaseSpec>;
   adjust?: (core: WorkerEntry) => WorkerEntry;
-  /** Its `previousRelease` names a release imported just before it. */
-  follows?: true;
   code: string;
 }
 
 const refusals: Refusal[] = [
-  {
-    name: "a release that declares nothing of what it works with",
-    kind: "dedicated",
-    spec: { compatibility: null },
-    code: "release_undeclared",
-  },
-  {
-    name: "a release built before platform limits were recorded",
-    kind: "dedicated",
-    spec: { platformLimits: null },
-    code: "release_without_limits",
-  },
-  {
-    name: "a release raising a platform limit with evidence for on-premises only",
-    kind: "dedicated",
-    spec: {
-      platformLimits: { ...testLimits, workflowSteps: 2000 },
-      previousRelease: {
-        releaseId: "26.01.1",
-        platformLimits: testLimits,
-      },
-      limitEvidence: (release) => [
-        evidenceFor(release, "workflowSteps", 2000, "workerd"),
-      ],
-    },
-    follows: true,
-    code: "limit_evidence_missing",
-  },
-  {
-    name: "a release whose core calls a connect it doesn't ship",
-    kind: "dedicated",
-    spec: {
-      compatibility: {
-        interfaces: {
-          connect: { serves: 1, calls: {} },
-          core: { calls: { connect: { min: 2, max: 2 } } },
-        },
-        workflowJournal: { min: 8, max: 9 },
-        sdkProtocols: { min: 2, max: 2 },
-      },
-    },
-    code: "release_incompatible",
-  },
   {
     name: "a release with a binding Workers for Platforms doesn't document",
     kind: "workers_for_platforms",
@@ -1268,17 +1219,8 @@ describe("provisioning a placed client", () => {
 
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
-    async ({ kind, spec, adjust, follows, code }) => {
-      const before = follows === true ? await importRelease(kind) : null;
-      const previous =
-        before !== null && spec?.previousRelease
-          ? { ...spec.previousRelease, releaseId: before.releaseId }
-          : spec?.previousRelease;
-      const manifest = await importRelease(
-        kind,
-        spec === undefined ? spec : { ...spec, previousRelease: previous },
-        adjust
-      );
+    async ({ kind, adjust, code }) => {
+      const manifest = await importRelease(kind, {}, adjust);
       const { account, clientId, held } = await setUp(kind, manifest);
 
       await expect(failing(held)).resolves.toMatchObject({ code });
@@ -3045,13 +2987,12 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("rolls back a release that stopped before any script ran its new Durable Object migration, and keeps the schema a stopped release migrated to", async () => {
+  it("rolls back a release that stopped before any script ran its new Durable Object migration", async () => {
     const first = await importRelease("dedicated");
     const { clientId } = await liveClient(first);
     const { connect } = await scriptsOf(clientId);
-    // Declares a new class and a migration of its databases; stops at
-    // connect's upload, after its databases migrated and before any
-    // script ran the class's migration.
+    // Declares a new class; stops at connect's upload, before any script
+    // ran the class's migration.
     const later = await importRelease(
       "dedicated",
       {
@@ -3078,13 +3019,8 @@ describe("provisioning a placed client", () => {
     const back = await codeOf(
       startClientRelease(db, staff, await attempt(clientId), { rollback: true })
     );
-    const schema = await appliedSchema(db, clientId);
 
-    expect({ back, schema: schema?.releaseId }).toStrictEqual({
-      back: "started",
-      // Back on the release before, its databases stay at the later one's.
-      schema: later.releaseId,
-    });
+    expect(back).toBe("started");
   });
 
   it("never lowers what a script ran on a stale read: an upload whose answer was lost still keeps a rollback from going back past its migration", async () => {
@@ -3918,7 +3854,6 @@ describe("a release's runner crashing, and another action on the client after", 
   it.each(walk)(
     "$at, then $action: ends coherent, by what its Workers ran, and the dead runner writes nothing",
     async ({ action, ...point }) => {
-      const { started } = point;
       const { clientId, dead, a, b, c } = await crashedAt(point);
 
       // The next action, as a new holder.
@@ -3947,18 +3882,12 @@ describe("a release's runner crashing, and another action on the client after", 
         b: b.releaseId,
         c: c.releaseId,
       });
-      const schema = await appliedSchema(db, clientId);
 
       expect({
         startedAs,
         operation: settled,
         runs: await runs(clientId),
         staleWrote,
-        // Never behind what any run migrated its databases to.
-        schemaAtLeastB:
-          started && action !== "rollback"
-            ? schema?.releaseId === (action === "resume" ? b : c).releaseId
-            : true,
       }).toMatchObject({
         startedAs: expected.startedAs,
         ...(expected.releaseId === undefined
@@ -3974,7 +3903,6 @@ describe("a release's runner crashing, and another action on the client after", 
               runs: { core: expected.releaseId, connect: expected.releaseId },
             }),
         staleWrote: false,
-        schemaAtLeastB: true,
       });
     }
   );

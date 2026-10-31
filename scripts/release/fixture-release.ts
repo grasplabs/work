@@ -35,9 +35,6 @@ export const fixtureBuild = async (app: string): Promise<WorkerBuild> => {
     d1Migrations: Object.fromEntries(
       config.d1_databases.map((database) => [database.binding, migrations])
     ),
-    d1CompatibleFrom: Object.fromEntries(
-      config.d1_databases.map((database) => [database.binding, 0])
-    ),
     ...(config.assets
       ? { assets: await collectAssets(path.join(TESTDATA, "assets")) }
       : {}),
@@ -51,15 +48,6 @@ export const info: ReleaseInfo = {
   notes: "feat(core): a fixture",
   wranglerVersion: "0.0.0-fixture",
   packages: { zod: "0.0.0-fixture" },
-  compatibility: {
-    interfaces: {
-      connect: { serves: 1, servesFrom: 1, calls: {} },
-      core: { calls: { connect: { min: 1, max: 1 } } },
-    },
-    workflowJournal: { min: 8, max: 9 },
-    sdkProtocols: { min: 2, max: 2 },
-  },
-  platformLimits: { authoringFiles: 200, workflowSteps: 1000 },
 };
 
 export const builds = async (): Promise<WorkerBuild[]> =>
