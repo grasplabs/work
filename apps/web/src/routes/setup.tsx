@@ -1,4 +1,4 @@
-import { oauthProviderSchema } from "@grasp-os/shared/connect";
+import { oauthProviderSchema } from "@grasp-os/shared/connect-names";
 import { directorySuiteSchema } from "@grasp-os/shared/directory";
 import type { OnboardingDirectory } from "@grasp-os/shared/directory";
 import type { OnboardingPlaces } from "@grasp-os/shared/document-places";
@@ -22,9 +22,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DotBrain } from "../brain/dot-brain.tsx";
 import type { BrainScene } from "../brain/dot-brain.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
+import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
-import { useReveal } from "../onboarding/platform-reveal.tsx";
+import { useReveal } from "../onboarding/reveal-state.ts";
 import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -41,7 +42,12 @@ import {
   suitesFor,
   waysFrom,
 } from "../onboarding/setup.ts";
-import type { Kept, ReviewItemId, SetupStep } from "../onboarding/setup.ts";
+import type {
+  AiReadiness,
+  Kept,
+  ReviewItemId,
+  SetupStep,
+} from "../onboarding/setup.ts";
 import { wasHeard } from "../onboarding/visit.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { resumeVoice, stopSpeaking, voiceLevel } from "../voice/voice.ts";
@@ -467,6 +473,27 @@ const companyOf = async (
   }
 };
 
+/**
+ * What Grasp's AI has to call, for what needs the admin: the connected AI
+ * providers, and whether any model is ready for calls (the models a chat
+ * may name); null when core can't say, which leaves the rest of the
+ * onboarding as it is.
+ */
+const aiReadinessOf = async (session: Session): Promise<AiReadiness | null> => {
+  try {
+    const [{ providers }, models] = await Promise.all([
+      session.aiProviders.list(),
+      session.chats.models(),
+    ]);
+    return {
+      providers: providers.map(({ label }) => label),
+      ready: models.length > 0,
+    };
+  } catch {
+    return null;
+  }
+};
+
 /** What the onboarding reads from core. */
 interface Loaded {
   view: OnboardingView;
@@ -482,6 +509,8 @@ interface Loaded {
   directory: OnboardingDirectory | null;
   places: OnboardingPlaces | null;
   hr: OnboardingHr | null;
+  /** What Grasp's AI has to call; null when core can't say. */
+  ai: AiReadiness | null;
 }
 
 export const Route = createFileRoute("/setup")({
@@ -537,6 +566,7 @@ export const Route = createFileRoute("/setup")({
         places,
         review,
         hr,
+        ai,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -548,6 +578,7 @@ export const Route = createFileRoute("/setup")({
         session.onboarding.documentPlaces(),
         session.onboarding.review(),
         session.onboarding.hrPlatform(),
+        aiReadinessOf(session),
       ]);
       return {
         view,
@@ -560,6 +591,7 @@ export const Route = createFileRoute("/setup")({
         places,
         review,
         hr,
+        ai,
       };
     }),
   component: Setup,

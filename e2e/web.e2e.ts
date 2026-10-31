@@ -54,6 +54,16 @@ test("shows a refusal with the request ID core answered it under, for the person
   );
 });
 
+test("an interview link nobody made can't be opened, and says nothing was saved", async ({
+  page,
+}) => {
+  await page.goto(`/interview#${"A".repeat(43)}`);
+  await expect(
+    page.getByRole("heading", { name: "This interview can't be opened" })
+  ).toBeVisible();
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+});
+
 test("reports an error the page never caught once core has it, cut to the size core takes", async ({
   context,
   page,
@@ -227,8 +237,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({
-  browser,
   context,
+  newContext,
   page,
 }) => {
   const { admin, member } = peopleIn("workspaceSettings");
@@ -246,7 +256,7 @@ test("lets an admin rename the workspace and set its time zone, and shows them t
   await expect(zone).toHaveText(/^Amsterdam/u);
   await expect(page.getByText("European Union")).toBeVisible();
 
-  const other = await browser.newContext();
+  const other = await newContext();
   const theirs = await other.newPage();
   await signInTo(other, member);
   await theirs.goto("/settings/workspace");
