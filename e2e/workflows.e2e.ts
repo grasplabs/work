@@ -392,18 +392,23 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   ).toHaveCount(2, pageRead);
   await expect(stillWaiting).toHaveCount(0);
 
-  // An address filtering by a workflow the domain doesn't have: dropped
-  // once the domain's workflows are known, so the log shows the domain's
-  // runs rather than none under a filter that can't say why.
-  await page.goto(`/workflows?tab=runs&app=${app}&workflow=no-such-workflow`);
-  await expect(page).not.toHaveURL(/workflow=no-such-workflow/u, pageRead);
-  await expect(page).toHaveURL(new RegExp(`app=${app}`, "u"));
-  await expect(stillWaiting).toHaveCount(0);
-  await expect(
-    page.getByRole("row").filter({
-      has: page.getByRole("link", { name: "approval", exact: true }),
-    })
-  ).toHaveCount(2, pageRead);
+  // An address filtering by a workflow the domain's current version
+  // doesn't list (renamed or removed since): it stays, as core still
+  // filters kept runs by that name, and the Workflow filter shows it,
+  // said to be no longer the domain's, rather than the other workflows'
+  // runs under a filter that can't say why.
+  await page.goto(`/workflows?tab=runs&app=${app}&workflow=retired-workflow`);
+  await expect(page.getByRole("combobox", { name: "Workflow" })).toContainText(
+    "retired-workflow (no longer in this domain)",
+    pageRead
+  );
+  await expect(page).toHaveURL(/workflow=retired-workflow/u);
+  await expect(page.getByText("No runs match these filters.")).toBeVisible();
+  // Another domain chosen is a new selection: the workflow goes with it.
+  const domain = page.getByRole("combobox", { name: "Domain" });
+  await domain.click();
+  await page.getByRole("option", { name: "All" }).click();
+  await expect(page).not.toHaveURL(/workflow=/u);
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({

@@ -304,6 +304,10 @@ msgstr "{category} van {vendor}, met ingebouwde AI"
 msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 msgstr "{caught, plural, one {Zou vandaag # app treffen.} other {Zou vandaag # apps treffen.}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{chosen} (no longer in this domain)"
+msgstr "{chosen} (niet meer in dit domein)"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Dan wordt het {chosen}. Dit duurt ongeveer {minutes} minuten. Zullen we beginnen?"

@@ -219,6 +219,21 @@ const RunFilters = ({
     void navigate({ search: (previous) => ({ ...previous, ...change }) });
   };
   const { t } = useLingui();
+  const listed = settled ? (options.workflows ?? []) : [];
+  const chosen = search.workflow;
+  // A workflow the address filters by that the domain's current version
+  // doesn't list (renamed or removed since): core still filters its kept
+  // runs by that name, so it stays, offered under the name it has, said
+  // to be no longer the domain's once the domain's workflows are known.
+  const kept =
+    chosen === undefined || listed.includes(chosen)
+      ? []
+      : [
+          {
+            value: chosen,
+            label: settled ? t`${chosen} (no longer in this domain)` : chosen,
+          },
+        ];
   return (
     <div className="flex flex-wrap gap-2">
       <Filter
@@ -238,10 +253,10 @@ const RunFilters = ({
         onChange={(workflow) => {
           filterBy({ workflow });
         }}
-        options={(settled ? (options.workflows ?? []) : []).map((name) => ({
-          value: name,
-          label: name,
-        }))}
+        options={[
+          ...listed.map((name) => ({ value: name, label: name })),
+          ...kept,
+        ]}
         value={search.workflow}
       />
       <Filter
@@ -637,29 +652,21 @@ const filterOf = ({
 
 /**
  * What of the address's run filters isn't on offer once the filters'
- * options are read, to drop, or null. A domain the Domain filter doesn't
- * offer (one the reader can't open, or that is gone) goes with its
- * workflow. A workflow that isn't one of the chosen domain's (an old
- * address, or one picked from the previous domain's while the new one's
- * were on their way) goes once that domain's are known. Either would
- * filter the log by something the filters can't show.
+ * options are read, to drop, or null: a domain the Domain filter doesn't
+ * offer (one the reader can't open, or that is gone), with its workflow,
+ * as it would filter the log by a domain the filter can't show. A
+ * workflow the domain's current version doesn't list stays: core still
+ * filters kept runs by that name, and the Workflow filter shows it.
  */
 const strayOf = (
-  { app, workflow }: Pick<WorkflowsSearch, "app" | "workflow">,
-  read: { app: string | undefined; data: RunsRead } | undefined
-): { app?: undefined; workflow: undefined } | null => {
-  if (app === undefined || read?.data.filters.state !== "ready") {
-    return null;
-  }
-  const { apps, workflows } = read.data.filters.data;
-  if (!apps.some(({ value }) => value === app)) {
-    return { app: undefined, workflow: undefined };
-  }
-  const own = read.app === app ? workflows : null;
-  return workflow !== undefined && own !== null && !own.includes(workflow)
-    ? { workflow: undefined }
+  app: string | undefined,
+  read: { data: RunsRead } | undefined
+): { app: undefined; workflow: undefined } | null =>
+  app !== undefined &&
+  read?.data.filters.state === "ready" &&
+  !read.data.filters.data.apps.some(({ value }) => value === app)
+    ? { app: undefined, workflow: undefined }
     : null;
-};
 
 /** One read of the log: the filters it was read for, and what it answers. */
 interface LogRead {
@@ -712,7 +719,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
       left.abort();
     };
   }, [core, log, app, workflow, status]);
-  const stray = strayOf({ app, workflow }, read);
+  const stray = strayOf(app, read);
   useEffect(() => {
     if (stray !== null) {
       void navigate({
