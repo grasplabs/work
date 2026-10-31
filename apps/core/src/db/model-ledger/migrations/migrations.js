@@ -8,7 +8,7 @@ import m0005 from './0005_model_admission.sql';
 import m0006 from './0006_person_limits.sql';
 import m0007 from './0007_provider_routes.sql';
 import m0008 from './0008_platform_feature.sql';
-import m0009 from './0009_platform_spend_index.sql';
+import m0009 from './0009_platform_spend.sql';
 
   export default {
     journal,

@@ -68,8 +68,8 @@
     {
       "idx": 9,
       "version": "6",
-      "when": 1793458328015,
-      "tag": "0009_platform_spend_index",
+      "when": 1793462860819,
+      "tag": "0009_platform_spend",
       "breakpoints": true
     }
   ]

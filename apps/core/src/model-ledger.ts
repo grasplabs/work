@@ -689,14 +689,20 @@ const holdsMoney = (
   credential: string | null
 ): boolean => credential !== "platform" || scope === "platform";
 
-/** `holdsMoney` in SQL, for a request joined with one of its scopes: 1 or 0. */
-const holdsMoneySql = sql<number>`(CASE WHEN ${requests.credential} = 'platform' AND ${requestScopes.scope} <> 'platform' THEN 0 ELSE 1 END)`;
+/**
+ * What a request reserved on one of its scopes, as recorded when it was
+ * admitted (`request_scopes.reserved_micros`); its whole reservation for
+ * one admitted before that was recorded, as every scope then held it.
+ * What settling releases and a rebuild sums: never worked out again from
+ * a rule, which may have changed since.
+ */
+const reservedOn = (
+  kept: { reservedMicros: number | null },
+  row: { reservedMicros: number }
+): number => kept.reservedMicros ?? row.reservedMicros;
 
-/** What `row` holds on `scope`: its reservation, or nothing (`holdsMoney`). */
-const heldOn = (
-  scope: LedgerScopeName,
-  row: { reservedMicros: number; credential: string | null }
-): number => (holdsMoney(scope, row.credential) ? row.reservedMicros : 0);
+/** `reservedOn` in SQL, for a request joined with one of its scopes. */
+const reservedOnSql = sql<number>`coalesce(${requestScopes.reservedMicros}, ${requests.reservedMicros})`;
 
 const storedScopesSchema = z.array(scopeSchema);
 
@@ -946,6 +952,9 @@ export class ModelLedger extends DurableObject<Env> {
         limitRequests,
         names,
       } of scopes) {
+        const held = holdsMoney(scope, credential)
+          ? admission.reservedMicros
+          : 0;
         this.#db
           .insert(requestScopes)
           .values({
@@ -957,6 +966,7 @@ export class ModelLedger extends DurableObject<Env> {
             names: JSON.stringify(names),
             period: periodOf(scope, admission.period),
             limitRequests: limitRequests ?? null,
+            reservedMicros: held,
           })
           .run();
         this.#db
@@ -965,10 +975,7 @@ export class ModelLedger extends DurableObject<Env> {
             scope,
             key,
             period: periodOf(scope, admission.period),
-            reservedMicros: heldOn(scope, {
-              reservedMicros: admission.reservedMicros,
-              credential,
-            }),
+            reservedMicros: held,
             requests: 1,
           })
           .onConflictDoUpdate({
@@ -1050,7 +1057,7 @@ export class ModelLedger extends DurableObject<Env> {
       return;
     }
     const open = this.#db
-      .select({ id: requests.id })
+      .select({ id: requests.id, reserved: reservedOnSql })
       .from(requests)
       .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
       .where(
@@ -1062,7 +1069,7 @@ export class ModelLedger extends DurableObject<Env> {
         )
       )
       .all();
-    for (const { id } of open) {
+    for (const { id, reserved } of open) {
       this.#db
         .insert(requestScopes)
         .values({
@@ -1074,6 +1081,8 @@ export class ModelLedger extends DurableObject<Env> {
           names: JSON.stringify({ user: person }),
           period: personPeriod,
           limitRequests: null,
+          // What it holds on the user scope, carried over with it.
+          reservedMicros: reserved,
         })
         .run();
     }
@@ -1577,18 +1586,15 @@ export class ModelLedger extends DurableObject<Env> {
         period: requests.period,
         reservedMicros: requests.reservedMicros,
         dispatchedAt: requests.dispatchedAt,
-        credential: requests.credential,
       })
       .from(requests)
       .where(eq(requests.state, "quarantined"))
       .orderBy(asc(requests.dispatchedAt))
       .limit(limit)
       .all();
-    const listed = rows.map(({ credential, ...row }) => ({
+    const listed = rows.map((row) => ({
       ...row,
-      releaseOnly: this.#heldScopes({ ...row, credential }).some(
-        ({ damaged }) => damaged
-      ),
+      releaseOnly: this.#heldScopes(row).some(({ damaged }) => damaged),
     }));
     await Promise.resolve();
     return listed;
@@ -1718,7 +1724,7 @@ export class ModelLedger extends DurableObject<Env> {
     const after = this.#db
       .update(spend)
       .set({
-        reservedMicros: sql`${spend.reservedMicros} - ${heldOn(kept.scope, row)}`,
+        reservedMicros: sql`${spend.reservedMicros} - ${reservedOn(kept, row)}`,
         spentMicros: sql`${spend.spentMicros} + ${money ? charged : 0}`,
       })
       .where(
@@ -1830,12 +1836,7 @@ export class ModelLedger extends DurableObject<Env> {
    * its spend holds in the period it reserved against, and whether that
    * spend is damaged: missing, or holding less than `row` alone reserved.
    */
-  #heldScopes(row: {
-    id: string;
-    period: string;
-    reservedMicros: number;
-    credential: string | null;
-  }): {
+  #heldScopes(row: { id: string; period: string; reservedMicros: number }): {
     kept: typeof requestScopes.$inferSelect;
     holds: number | undefined;
     damaged: boolean;
@@ -1860,7 +1861,7 @@ export class ModelLedger extends DurableObject<Env> {
         return {
           kept,
           holds,
-          damaged: holds === undefined || holds < heldOn(kept.scope, row),
+          damaged: holds === undefined || holds < reservedOn(kept, row),
         };
       });
   }
@@ -1879,7 +1880,7 @@ export class ModelLedger extends DurableObject<Env> {
     return (
       this.#db
         .select({
-          reserved: sql<number>`coalesce(sum(${requests.reservedMicros} * ${holdsMoneySql}), 0)`,
+          reserved: sql<number>`coalesce(sum(${reservedOnSql}), 0)`,
         })
         .from(requests)
         .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
@@ -2219,7 +2220,7 @@ export class ModelLedger extends DurableObject<Env> {
     for (const { scope, row } of full) {
       const underWay = this.#db
         .select({
-          releasable: sql<number>`coalesce(sum(${requests.reservedMicros} * ${holdsMoneySql}), 0)`,
+          releasable: sql<number>`coalesce(sum(${reservedOnSql}), 0)`,
           soonest: sql<number | null>`min(${requests.deadline})`,
         })
         .from(requests)
@@ -2333,7 +2334,7 @@ export class ModelLedger extends DurableObject<Env> {
       const after = this.#db
         .update(spend)
         .set({
-          reservedMicros: sql`${spend.reservedMicros} - ${heldOn(scope.scope, row)}`,
+          reservedMicros: sql`${spend.reservedMicros} - ${reservedOn(scope, row)}`,
           spentMicros: sql`${spend.spentMicros} + ${money ? charged : 0}`,
           // A request never sent wasn't made: its count comes back.
           ...(by === "unsent"

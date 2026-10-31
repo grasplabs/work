@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f47d26ce-ff23-41e1-aacd-124648c149ca",
+  "id": "fb1ca062-ad97-4a62-a6ec-9db33b36ece6",
   "prevId": "7bd0d151-7fcb-4438-8088-9c57d8ceedf8",
   "tables": {
     "alerts": {
@@ -401,6 +401,13 @@
         },
         "limit_requests": {
           "name": "limit_requests",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reserved_micros": {
+          "name": "reserved_micros",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

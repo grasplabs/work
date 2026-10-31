@@ -230,6 +230,15 @@ export const requestScopes = sqliteTable(
     period: text(),
     /** The most requests its scope may admit, when admitted; null for none. */
     limitRequests: integer("limit_requests"),
+    /**
+     * What the request reserved on this scope when admitted: the whole
+     * reservation, or none where it holds no money (model-ledger.ts,
+     * `holdsMoney`). It settles, is rebuilt and is summed by exactly this,
+     * never by a rule worked out again later, so a change of rule never
+     * strands money. Null for a request admitted before it was recorded,
+     * which reserved its whole reservation on every scope.
+     */
+    reservedMicros: integer("reserved_micros"),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),
