@@ -514,6 +514,63 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
     });
 
+    it("prunes a removed provider's models from a choice another admin saved meanwhile, never overwriting it", async () => {
+      const mistralCase = providerCases.find(
+        ({ provider }) => provider === "mistral"
+      );
+      if (mistralCase === undefined) {
+        throw new TypeError("Expected Mistral's case");
+      }
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      await added(mistralCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [anthropicCase.model],
+      });
+      const other = await signedInApi(idp, "admin");
+      const saved = {
+        defaultModel: anthropicCase.model,
+        fallbacks: [mistralCase.model],
+      };
+      // The other admin saves after the removal read the choice and
+      // before it wrote: as it asks connect which providers are left.
+      const real = env.CONNECT;
+      let between = true;
+      env.CONNECT = new Proxy(real, {
+        get: (target, name) => {
+          if (name === "aiProviderRoutes") {
+            return async () => {
+              if (between) {
+                between = false;
+                await other.api.aiProviders.setModels(saved);
+              }
+              return await real.aiProviderRoutes();
+            };
+          }
+          // Any other method as connect has it: an RPC stub binds nothing.
+          const method: unknown = Reflect.get(target, name);
+          if (typeof method !== "function") {
+            return method;
+          }
+          return async (...args: unknown[]): Promise<unknown> =>
+            await Reflect.apply(method, target, args);
+        },
+      });
+      try {
+        await by.api.aiProviders.remove("openai");
+      } finally {
+        env.CONNECT = real;
+      }
+
+      const { choice } = await by.api.aiProviders.list();
+      expect({ interleaved: !between, choice }).toStrictEqual({
+        interleaved: true,
+        choice: saved,
+      });
+    });
+
     it("adds, tests, uses, replaces and removes a key", async () => {
       const { admin: by } = await admin();
       const first = newKey();

@@ -23,16 +23,18 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import {
   aiModelsKind,
   aiRoutesOf,
+  choiceNow,
   choiceOf,
   isConnectedModel,
   readModelChoice,
+  readStoredChoice,
 } from "./ai-model-choice.ts";
 import {
   auditedBatch,
@@ -337,6 +339,72 @@ const writeChoice = async (
   }
 };
 
+/** How often a prune is tried while other writes keep getting there first. */
+const pruneAttempts = 5;
+
+/**
+ * Takes every model of a provider the organization no longer has
+ * connected, as connect says now, out of its choice, while `by` is still
+ * one of its admins: a default of one is none until an admin chooses
+ * another. The write lands only while the stored choice is the one read
+ * (compare and set), so a save another admin made meanwhile is pruned in
+ * turn, never overwritten; tried again while one keeps getting there
+ * first. Its audit event in the same batch, recorded only when it landed.
+ */
+const pruneChoice = async (env: Env, by: Identity): Promise<void> => {
+  for (let attempt = 0; attempt < pruneAttempts; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const stored = await readStoredChoice(env);
+    if (stored === null) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const kept = choiceNow(await aiRoutesOf(env), stored.choice);
+    if (
+      kept === null ||
+      JSON.stringify(kept) === JSON.stringify(stored.choice)
+    ) {
+      return;
+    }
+    const value = JSON.stringify(kept);
+    const db = drizzle(env.DB);
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const [written] = await auditedBatch(env, db, [
+      db
+        .update(orgSettings)
+        .set({ value, updatedAt: new Date() })
+        .where(
+          and(
+            eq(orgSettings.kind, aiModelsKind),
+            eq(orgSettings.value, stored.value),
+            activeMember(by.userId, ["admin"])
+          )
+        ),
+      outboxedIfChanged(db, {
+        actor: actorOf(by),
+        action: "ai_provider.models_set",
+        target: { type: "organization_ai", id: aiModelsKind },
+        detail: {
+          defaultModel: kept.defaultModel,
+          fallbacks: kept.fallbacks.join(" "),
+        },
+      }),
+    ]);
+    if (written.meta.changes > 0) {
+      return;
+    }
+    // Unchanged since it was read: what stopped the write was `by` no
+    // longer being an admin. Changed: another write got there first.
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const now = await readStoredChoice(env);
+    if (now?.value === stored.value) {
+      throw roleErrors.create("role.forbidden");
+    }
+  }
+  log.error("ai_models.prune_conflict", { attempts: pruneAttempts });
+  throw aiProviderErrors.create("ai_provider.failed");
+};
+
 /**
  * Sets the organization's models, each one of a provider it connected,
  * while `by` is one of its own admins: the write and its audit event in
@@ -365,6 +433,8 @@ const setModels = async (
     throw aiProviderErrors.create("ai_provider.model_unavailable");
   }
   await writeChoice(env, by, { defaultModel, fallbacks });
+  // A provider removed since the check above leaves none of its models.
+  await pruneChoice(env, by);
 };
 
 /**
@@ -390,16 +460,8 @@ const removeProvider = async (
   if (removed) {
     drainConnectOutboxSoon(env);
   }
-  // Its models go from the choice too, so none is offered or saved again:
-  // a default of it is none until an admin chooses another.
-  const stored = await readModelChoice(env);
-  const kept = choiceOf(
-    aiProviderIds.filter((id) => id !== parsed.data),
-    stored
-  );
-  if (kept !== null && JSON.stringify(kept) !== JSON.stringify(stored)) {
-    await writeChoice(env, by, kept);
-  }
+  // Its models go from the choice too, so none is offered or saved again.
+  await pruneChoice(env, by);
 };
 
 /** The organization's AI providers over `/rpc`, for admins. */

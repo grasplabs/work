@@ -31,12 +31,13 @@ export const aiRoutesOf = async (
 ): Promise<AiProviderRoutes> => await env.CONNECT.aiProviderRoutes();
 
 /**
- * The models the organization's admins chose, as stored, checked again as
- * read: none until they chose, or when it no longer parses.
+ * The models the organization's admins chose, and the stored value they
+ * were read from, for a write that only lands while it is still that
+ * value: none until they chose, or when it no longer parses.
  */
-export const readModelChoice = async (
+export const readStoredChoice = async (
   env: Pick<Env, "DB">
-): Promise<AiModelChoiceNow | null> => {
+): Promise<{ value: string; choice: AiModelChoiceNow } | null> => {
   const [row] = await drizzle(env.DB)
     .select({ value: orgSettings.value })
     .from(orgSettings)
@@ -55,7 +56,18 @@ export const readModelChoice = async (
     log.warn("ai_models.unreadable", {});
     return null;
   }
-  return parsed.data;
+  return { value: row.value, choice: parsed.data };
+};
+
+/**
+ * The models the organization's admins chose, as stored, checked again as
+ * read: none until they chose, or when it no longer parses.
+ */
+export const readModelChoice = async (
+  env: Pick<Env, "DB">
+): Promise<AiModelChoiceNow | null> => {
+  const stored = await readStoredChoice(env);
+  return stored?.choice ?? null;
 };
 
 /** Whether `model` is one of `providers`. */
