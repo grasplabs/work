@@ -31,7 +31,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 
 import { errorResponse } from "../errors.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { ModelCall, ModelsEnv } from "../models.ts";
 import { readOrganization } from "../organization.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
@@ -442,7 +442,7 @@ export const turnStream = async ({
   meter,
   ran,
 }: TurnInput): Promise<Response> => {
-  const settings = gatewaySettings(env);
+  const settings = await modelSettings(env);
   const quick = modelForRole(settings, "quick", { sensitive: true });
   const careful = modelForRole(settings, "careful", { sensitive: true });
   if (quick === undefined || careful === undefined) {

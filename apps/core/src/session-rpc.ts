@@ -1,5 +1,6 @@
 import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
 
+import { AiProvidersRpc } from "./ai-providers.ts";
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { BrainRpc } from "./brain-rpc.ts";
@@ -81,6 +82,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #stephenRequests: StephenRequestsRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
+  readonly #aiProviders: AiProvidersRpc;
   readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #unknownOutcomes: UnknownOutcomesRpc;
@@ -130,6 +132,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#stephenRequests = new StephenRequestsRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
+    this.#aiProviders = new AiProvidersRpc(env, full);
     this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
@@ -301,6 +304,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get models(): ModelsRpc {
     return this.#models;
+  }
+
+  get aiProviders(): AiProvidersRpc {
+    return this.#aiProviders;
   }
 
   get stores(): StoresRpc {
