@@ -44,7 +44,6 @@ import {
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
-import { EngineIcon } from "../engines/engine-icon.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
@@ -536,8 +535,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
       <div className="flex flex-wrap items-start gap-4">
-        <EngineIcon />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {/* The name keeps a width of its own: with no room beside it, the
+            actions go under it rather than squeezing it. */}
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
           <PageHeaderTitle>{app.name}</PageHeaderTitle>
           {app.description === "" ? null : (
             <p className="text-muted-foreground">{app.description}</p>
