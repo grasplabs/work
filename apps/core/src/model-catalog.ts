@@ -6,7 +6,13 @@ import type {
 } from "@earendil-works/pi-ai";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
+import { MISTRAL_MODELS } from "@earendil-works/pi-ai/providers/mistral.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
+import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
+import {
+  aiProviders,
+  compatibleModelNamePattern,
+} from "@grasp-os/shared/ai-providers";
 
 import { regionalPricesOf } from "./model-prices.ts";
 
@@ -51,9 +57,28 @@ const bedrockEuModels: Readonly<Record<string, Model<"anthropic-messages">>> =
   );
 
 /**
+ * pi's Mistral catalog, pointed at Mistral's OpenAI-compatible chat
+ * completions (@grasp-os/shared/ai-providers): pi's own Mistral adapter
+ * takes no custom fetch, and every request must go through the gateway's.
+ */
+const mistralModels: Readonly<Record<string, Model<"openai-completions">>> =
+  Object.fromEntries(
+    Object.entries(MISTRAL_MODELS).map(([id, model]) => [
+      id,
+      {
+        ...model,
+        api: "openai-completions",
+        baseUrl: aiProviders.mistral.baseUrls["openai-completions"] ?? "",
+      },
+    ])
+  );
+
+/**
  * The providers the gateway offers: pi's catalog of their models, which
  * gives each model's limits, prices and the API its native endpoint
- * speaks.
+ * speaks. Bedrock and Workers AI only through AI Gateway
+ * (model-transport-cloudflare.ts); the others through connect, with the
+ * organization's own key or Grasp's (model-transport-connect.ts).
  */
 const providers = {
   anthropic: ANTHROPIC_MODELS,
@@ -61,9 +86,16 @@ const providers = {
   // Claude in Amazon Bedrock, in the EU, through its EU inference profile.
   "bedrock-eu": bedrockEuModels,
   "workers-ai": CLOUDFLARE_WORKERS_AI_MODELS,
+  mistral: mistralModels,
+  // By OpenRouter's own ID, its slash and all: `openrouter/openai/gpt-5`.
+  openrouter: OPENROUTER_MODELS,
 } as const;
 
-export type Provider = keyof typeof providers;
+/**
+ * A provider the gateway offers: one of pi's catalogs, or an
+ * organization's OpenAI-compatible endpoint, whose models it names itself.
+ */
+export type Provider = keyof typeof providers | "openai-compatible";
 
 /** Every provider the gateway offers, in a stable order. */
 export const providerNames: readonly Provider[] = [
@@ -71,10 +103,35 @@ export const providerNames: readonly Provider[] = [
   "openai",
   "bedrock-eu",
   "workers-ai",
-] satisfies readonly (keyof typeof providers)[];
+  "mistral",
+  "openrouter",
+  "openai-compatible",
+];
 
-const isProvider = (value: string): value is Provider =>
+const isCatalogProvider = (value: string): value is keyof typeof providers =>
   Object.hasOwn(providers, value);
+
+/**
+ * What the gateway knows of a model an OpenAI-compatible endpoint serves
+ * under `name`: chat completions, and no price, so no budget admits it
+ * (models.ts, `model.unpriced`). Its window and answers are assumed
+ * modest; the endpoint refuses what its model can't take.
+ */
+const compatibleModel = (name: string): Model<"openai-completions"> => ({
+  id: name,
+  name,
+  api: "openai-completions",
+  provider: "openai-compatible",
+  baseUrl: "",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128_000,
+  maxTokens: 8192,
+});
+
+/** The most characters a custom endpoint's model name may have. */
+const compatibleNameMaxLength = 128;
 
 export interface ModelRef {
   provider: Provider;
@@ -93,7 +150,16 @@ export const parseModelRef = (ref: string): ModelRef | undefined => {
   const slash = ref.indexOf("/");
   const provider = ref.slice(0, slash);
   const id = ref.slice(slash + 1);
-  if (slash === -1 || !isProvider(provider)) {
+  if (slash === -1) {
+    return undefined;
+  }
+  if (provider === "openai-compatible") {
+    return id.length <= compatibleNameMaxLength &&
+      compatibleModelNamePattern.test(id)
+      ? { provider, id, catalog: compatibleModel(id) }
+      : undefined;
+  }
+  if (!isCatalogProvider(provider)) {
     return undefined;
   }
   const catalog: Readonly<Record<string, Model<Api>>> = providers[provider];

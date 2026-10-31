@@ -1,3 +1,4 @@
+import type { AiProvidersApi } from "./ai-providers.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { BrainApi } from "./brain.ts";
@@ -199,6 +200,11 @@ export interface SessionApi {
    * month's spend against its budgets. Admins only.
    */
   readonly models: ModelsApi;
+  /**
+   * The organization's own AI provider keys, sealed in connect, and the
+   * models its calls use. Admins read them; its own admins change them.
+   */
+  readonly aiProviders: AiProvidersApi;
   /**
    * Business stores: a store's failed schema change, and abandoning it.
    * Admins only, never Grasp staff.
