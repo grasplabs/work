@@ -4394,10 +4394,6 @@ msgstr "Changed: it acts for whoever uses the domain, with everything the domain
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Changes"
-msgstr "Changes"
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
@@ -5233,6 +5229,11 @@ msgstr "Counted over the workflows of the domains you can open; independent work
 msgid "Create"
 msgstr "Create"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Create and change"
+msgstr "Create and change"
+
 #: src/knowledge/new-collection.tsx
 msgid "Create collection"
 msgstr "Create collection"
@@ -5290,10 +5291,6 @@ msgstr "Current version"
 #: src/landscape/landscape.ts
 msgid "Customer data"
 msgstr "Customer data"
-
-#: src/policies/policy-editing.tsx
-msgid "Customer data stays in the EU"
-msgstr "Customer data stays in the EU"
 
 #: src/landscape/landscape.ts
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
@@ -6871,6 +6868,10 @@ msgstr "For example: answers customers' questions"
 msgid "For example: everything around lease contracts, from request to renewal"
 msgstr "For example: everything around lease contracts, from request to renewal"
 
+#: src/policies/policy-editing.tsx
+msgid "For example: No AI tools hosted in China"
+msgstr "For example: No AI tools hosted in China"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "For example: read new hires and prepare their first day"
@@ -7931,6 +7932,10 @@ msgstr "In your documents I saw {tools}."
 #: src/dashboard/in-inbox.tsx
 msgid "In your inbox"
 msgstr "In your inbox"
+
+#: src/policies/policy-editing.tsx
+msgid "In your own words, so everyone knows why the rule is there."
+msgstr "In your own words, so everyone knows why the rule is there."
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -12566,6 +12571,11 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Read"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Read"
+msgstr "Read"
+
 #: src/connections/connect-dialog.tsx
 msgctxt "what a tool may do"
 msgid "Read"
@@ -12702,10 +12712,6 @@ msgstr "Reading…"
 msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
 msgstr "Reading…"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reads"
-msgstr "Reads"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -17204,6 +17210,11 @@ msgstr "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgid "Upload a policy"
 msgstr "Upload a policy"
 
+#: src/policies/policy-editing.tsx
+msgctxt "button: opens the dialog to upload a policy"
+msgid "Upload policy"
+msgstr "Upload policy"
+
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
 msgid "Uploaded"
@@ -17950,6 +17961,10 @@ msgstr "What it is bound to can't serve it any more: its permission was revoked,
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 
+#: src/policies/policy-editing.tsx
+msgid "What it is for"
+msgstr "What it is for"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "What it rests on"
@@ -17969,10 +17984,6 @@ msgstr "What it should say"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "What it was for, and which model did it."
-
-#: src/policies/policy-editing.tsx
-msgid "What it's for"
-msgstr "What it's for"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"

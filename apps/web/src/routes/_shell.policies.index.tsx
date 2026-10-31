@@ -97,7 +97,7 @@ const Figure = ({
 
 const PoliciesPage = () => {
   const { t, i18n } = useLingui();
-  const { book, found: read } = Route.useLoaderData();
+  const { book, found: read, people: names } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const navigate = useNavigate();
   const tab = Route.useSearch().tab ?? "rules";
@@ -227,7 +227,7 @@ const PoliciesPage = () => {
           </TabsContent>
 
           <TabsContent className="mt-2" value="policies">
-            <PoliciesTable policies={policies} rules={rules} />
+            <PoliciesTable people={names} policies={policies} rules={rules} />
           </TabsContent>
         </Tabs>
       </Page>

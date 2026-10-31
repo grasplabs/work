@@ -4394,10 +4394,6 @@ msgstr "Geändert: Er handelt für jeden, der die Domäne nutzt, mit allem, was 
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Geändert: liest und überschreibt jeden Datensatz von {table}, egal wem er gehört"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Changes"
-msgstr "Ändert"
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Änderungen, die Grasp für jemanden gesendet hat und deren Antwort verloren ging, sodass niemand sagen kann, ob sie wirksam wurden. Nur diese Person kann auf ihrem Dashboard sagen, was geschehen ist; fragen Sie bei ihr nach."
@@ -5233,6 +5229,11 @@ msgstr "Gezählt über die Workflows der Domänen, die Sie öffnen können; eige
 msgid "Create"
 msgstr "Erstellen"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Create and change"
+msgstr "Erstellen und ändern"
+
 #: src/knowledge/new-collection.tsx
 msgid "Create collection"
 msgstr "Sammlung erstellen"
@@ -5290,10 +5291,6 @@ msgstr "Aktuelle Version"
 #: src/landscape/landscape.ts
 msgid "Customer data"
 msgstr "Kundendaten"
-
-#: src/policies/policy-editing.tsx
-msgid "Customer data stays in the EU"
-msgstr "Kundendaten bleiben in der EU"
 
 #: src/landscape/landscape.ts
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
@@ -6871,6 +6868,10 @@ msgstr "Zum Beispiel: beantwortet Fragen von Kunden"
 msgid "For example: everything around lease contracts, from request to renewal"
 msgstr "Zum Beispiel: alles rund um Leasingverträge, von der Anfrage bis zur Verlängerung"
 
+#: src/policies/policy-editing.tsx
+msgid "For example: No AI tools hosted in China"
+msgstr "Zum Beispiel: Keine KI-Tools, die in China gehostet werden"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "Zum Beispiel: neue Mitarbeitende lesen und ihren ersten Tag vorbereiten"
@@ -7931,6 +7932,10 @@ msgstr "In Ihren Dokumenten habe ich {tools} gesehen."
 #: src/dashboard/in-inbox.tsx
 msgid "In your inbox"
 msgstr "In Ihrem Posteingang"
+
+#: src/policies/policy-editing.tsx
+msgid "In your own words, so everyone knows why the rule is there."
+msgstr "In Ihren eigenen Worten, damit alle wissen, wozu die Regel da ist."
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -12566,6 +12571,11 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Gelesen"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Read"
+msgstr "Lesen"
+
 #: src/connections/connect-dialog.tsx
 msgctxt "what a tool may do"
 msgid "Read"
@@ -12702,10 +12712,6 @@ msgstr "Wird gelesen …"
 msgctxt "Grasp is reading an uploaded policy"
 msgid "Reading…"
 msgstr "Wird gelesen…"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reads"
-msgstr "Liest"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -17204,6 +17210,11 @@ msgstr "Laden Sie eine PDF-, Word- oder Excel-Datei oder Untertitel (.vtt) hoch"
 msgid "Upload a policy"
 msgstr "Richtlinie hochladen"
 
+#: src/policies/policy-editing.tsx
+msgctxt "button: opens the dialog to upload a policy"
+msgid "Upload policy"
+msgstr "Richtlinie hochladen"
+
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
 msgid "Uploaded"
@@ -17950,6 +17961,10 @@ msgstr "Woran sie gebunden ist, kann sie nicht mehr bedienen: Die Berechtigung w
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Woran sie gebunden ist, hat sich seit der Genehmigung der Bindung geändert. Binde sie erneut, sobald du geprüft hast, dass es noch passt."
 
+#: src/policies/policy-editing.tsx
+msgid "What it is for"
+msgstr "Wozu sie dient"
+
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Worauf es sich stützt"
@@ -17969,10 +17984,6 @@ msgstr "Was dort stehen soll"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "Wofür sie genutzt wurde, und welches Modell es tat."
-
-#: src/policies/policy-editing.tsx
-msgid "What it's for"
-msgstr "Wozu sie dient"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"

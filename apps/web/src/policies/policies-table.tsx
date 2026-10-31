@@ -56,13 +56,29 @@ const rulesText = (
   return "—";
 };
 
+/** Who uploaded a policy and on which day; the day alone when their name can't be read. */
+const Uploaded = ({
+  person,
+  on,
+}: {
+  person: string | undefined;
+  on: string;
+}) => (
+  <span className="text-muted-foreground block truncate">
+    {person === undefined ? on : `${person} · ${on}`}
+  </span>
+);
+
 /** The company's own policies: which are in use, which wait for a review, and how many rules each gave. */
 export const PoliciesTable = ({
   policies,
   rules,
+  people,
 }: {
   policies: readonly PolicyDocument[];
   rules: readonly PolicyRule[];
+  /** People's names by ID: who uploaded each policy, never shown by ID. */
+  people: ReadonlyMap<string, string>;
 }) => {
   const { i18n } = useLingui();
   return (
@@ -149,9 +165,10 @@ export const PoliciesTable = ({
                   </span>
                 </TableCell>
                 <TableCell className="hidden @3xl:table-cell" variant="roomy">
-                  <span className="text-muted-foreground">
-                    {policy.uploadedBy} · {formatDate(policy.uploadedAt)}
-                  </span>
+                  <Uploaded
+                    on={formatDate(policy.uploadedAt)}
+                    person={people.get(policy.uploadedBy)}
+                  />
                 </TableCell>
                 <TableCell variant="end">
                   <span className="text-muted-foreground">

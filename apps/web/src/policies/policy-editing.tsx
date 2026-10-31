@@ -283,7 +283,8 @@ const ConditionCard = ({
   const ops = opsOf[condition.field] ?? [];
   const choices = choicesOf[condition.field] ?? [];
   return (
-    <Item size="sm" variant="outline">
+    // Its remove button sits by its name, as in the prototype's card.
+    <Item className="items-start" size="sm" variant="outline">
       <ItemContent className="min-w-0">
         <ItemTitle id={`${ids}-field`}>{field}</ItemTitle>
         {ops.length === 0 ? null : (
@@ -477,7 +478,8 @@ export const draftOf = (
     ? {
         name: "",
         description: "",
-        conditions: [freshCondition("data")],
+        // As the prototype starts one: catching AI tools.
+        conditions: [{ ...freshCondition("ai"), values: ["tool"] }],
         effect: "flag",
         // A new rule only shows what it would do until someone turns it on.
         status: "watching",
@@ -636,13 +638,13 @@ const RuleForm = ({
           onChange={(event) => {
             onChange({ ...draft, name: event.target.value });
           }}
-          placeholder={t`Customer data stays in the EU`}
+          placeholder={t`For example: No AI tools hosted in China`}
           value={draft.name}
         />
       </Field>
       <Field>
         <FieldLabel htmlFor={`${ids}-description`}>
-          <Trans>What it&apos;s for</Trans>
+          <Trans>What it is for</Trans>
         </FieldLabel>
         <Textarea
           disabled={disabled}
@@ -651,6 +653,7 @@ const RuleForm = ({
           onChange={(event) => {
             onChange({ ...draft, description: event.target.value });
           }}
+          placeholder={t`In your own words, so everyone knows why the rule is there.`}
           rows={2}
           value={draft.description}
         />
@@ -1380,7 +1383,9 @@ export const PoliciesActions = () => {
         variant="outline"
       >
         <FileUpIcon data-icon="inline-start" />
-        <Trans>Upload a policy</Trans>
+        <Trans context="button: opens the dialog to upload a policy">
+          Upload policy
+        </Trans>
       </Button>
       <Button
         nativeButton={false}
