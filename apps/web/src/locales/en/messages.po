@@ -8327,10 +8327,6 @@ msgstr "Its budget can't be read, so it serves nothing rather than run without o
 msgid "Its budget can't be read, so it serves nothing."
 msgstr "Its budget can't be read, so it serves nothing."
 
-#: src/routes/_shell.domains.index.tsx
-msgid "Its contents couldn't be read."
-msgstr "Its contents couldn't be read."
-
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "Its current version has no parameters."
