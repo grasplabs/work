@@ -9,3 +9,18 @@ GMAIL_MAILBOX=
 GMAIL_CLIENT_ID=
 GMAIL_CLIENT_SECRET=
 GMAIL_REFRESH_TOKEN=
+# Optional: Grasp's own keys at the AI providers, for platform features
+# (src/ai-providers.ts). A provider whose key is unset isn't offered for
+# them; an organization's own keys are added in the product, not here.
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+MISTRAL_API_KEY=
+OPENROUTER_API_KEY=
+# On-prem only (RUNTIME_PROFILE=workerd): the private hosts an organization's
+# OpenAI-compatible endpoint may be at, comma-separated, exactly as their URLs
+# name them, e.g. `models.acme.lan,10.0.0.8`. Open workerd's network to each
+# named host's own address alone (`allow = ["public", "10.0.0.8/32"]`), never
+# to "private": the endpoint guard can't resolve names, so the network is what
+# keeps any other private address out. A cloud metadata address is refused
+# whatever this names.
+AI_PRIVATE_HOSTS=

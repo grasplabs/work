@@ -52,7 +52,7 @@ import { bindingScopes } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings, usableAnswerTokens } from "./models.ts";
+import { modelSettings, usableAnswerTokens } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
@@ -888,10 +888,11 @@ const choicesFor = async (
   grants: ReviewGrants
 ): Promise<BindingChoices> => {
   if (declaration["~resource"] === "model") {
+    const { models: allowed } = await modelSettings(env);
     return {
       kind: "model",
       // Only those approving accepts: each can give its longest request.
-      models: gatewaySettings(env).models.filter((model) =>
+      models: allowed.filter((model) =>
         modelAnswers(model, longestAsk(declaration))
       ),
       truncated: false,

@@ -139,7 +139,8 @@ export interface BudgetInput {
           | "dashboard_widgets"
           | "brain_recall"
           | "policy_reading"
-          | "stephen_requests";
+          | "stephen_requests"
+          | "provider_test";
       };
 }
 
