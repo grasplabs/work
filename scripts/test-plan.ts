@@ -15,9 +15,10 @@
 //
 //   GRASP_TEST_BASE=HEAD^1 node scripts/test-plan.ts
 //
-// Writes `projects` (Vitest's `--project` arguments, empty for all) and
-// `shards` (a JSON array of shard numbers, empty for none) to
-// $GITHUB_OUTPUT, and why to the step summary.
+// Writes `projects` (Vitest's `--project` arguments, empty for all),
+// `shards` (a JSON array of shard numbers, empty for none) and, for each
+// journey suite, `e2e` and `admin-e2e` (whether its stack changed: true or
+// false) to $GITHUB_OUTPUT, and why to the step summary.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -70,8 +71,8 @@ export const affectedProjects = (
  * (unlike the root's vite.config.ts or the lockfile), so a change to them
  * runs only the projects with a test that imports one, directly or not,
  * by their parsed and resolved imports (`filesImporting`). For a journey
- * (e2e/*.e2e.ts) that is none, and the journeys run in full on every ready
- * pull request (`e2e`); for playwright.config.ts it is the scripts
+ * (e2e/*.e2e.ts) that is none, and a change to one runs the journeys
+ * (`journeysReached`); for playwright.config.ts it is the scripts
  * project, whose e2e-parts.test.ts imports it through e2e-parts.ts. They
  * were the only files outside a package in 22 of 150 merged pull requests
  * (October 2026), each running every project for it.
@@ -92,10 +93,10 @@ export const journeyFiles = [
  * (apps/core/test/global-setup.ts writes it, and core's vite.config.ts
  * points the pool's assets at it instead of wrangler.jsonc's). The
  * frontend core really serves is tested by `workerd`'s smoke and the
- * journeys, which run on every ready pull request. Without this, a change
- * to web alone ran core's projects, four fifths of the suite's time
- * (October 2026). A package that depends on web for its code belongs
- * elsewhere.
+ * journeys, which run whenever web changes (`journeysReached`). Without
+ * this, a change to web alone ran core's projects, four fifths of the
+ * suite's time (October 2026). A package that depends on web for its code
+ * belongs elsewhere.
  */
 export const buildOnlyDependencies: ReadonlyMap<string, readonly string[]> =
   new Map([["@grasp-os/core", ["@grasp-os/web"]]]);
@@ -405,6 +406,63 @@ export const reachSince = (
   };
 };
 
+/**
+ * The packages each journey suite's stack runs, by package name: e2e's,
+ * core's dev server (playwright.config.ts), which builds web and bundles
+ * connect beside it, and admin-e2e's, the admin on the fake Cloudflare API
+ * (playwright.admin.config.ts). Every package they depend on runs with
+ * them, by pnpm's graph.
+ */
+export const journeyStacks = {
+  e2e: ["@grasp-os/core", "@grasp-os/web", "@grasp-os/connect"],
+  "admin-e2e": ["@grasp-os/admin"],
+} as const;
+
+export type JourneySuite = keyof typeof journeyStacks;
+
+/**
+ * Which journey suites a pull request's changes reach. A suite runs when a
+ * changed file sits in a package its stack runs or depends on, directly or
+ * not, by every dependency (web's build included, which core serves). Two
+ * kinds of change never reach a stack: a Vitest test file (`testFiles`),
+ * which no build bundles, and a file in a package no stack depends on (the
+ * admin's, for e2e; the router's, for both). A changed file outside every
+ * package (a journey, its config, the repo's tooling) runs both. In 150
+ * merged pull requests, 33 changed nothing either e2e stack runs, mostly
+ * the admin or tests alone, each running every journey for it (October
+ * 2026). The merge queue and the nightly run always run both.
+ */
+export const journeysReached = ({
+  changedFiles,
+  testFiles,
+  packages,
+  root,
+}: {
+  /** Every file changed since the base, absolute. */
+  readonly changedFiles: readonly string[];
+  /** Every Vitest test file, absolute. */
+  readonly testFiles: ReadonlySet<string>;
+  readonly packages: readonly WorkspacePackage[];
+  readonly root: string;
+}): Record<JourneySuite, boolean> => {
+  const dirs = packages.map(({ dir }) => dir).filter((dir) => dir !== root);
+  const owners = changedFiles
+    .filter((file) => !testFiles.has(file))
+    .map((file) => packageOf(file, dirs));
+  if (owners.includes(undefined)) {
+    return { e2e: true, "admin-e2e": true };
+  }
+  const reached = reachedPackages(
+    packages,
+    owners.filter((dir) => dir !== undefined),
+    new Map()
+  );
+  const dirOf = new Map(packages.map(({ name, dir }) => [name, dir]));
+  const runs = (suite: JourneySuite): boolean =>
+    journeyStacks[suite].some((name) => reached.has(dirOf.get(name) ?? ""));
+  return { e2e: runs("e2e"), "admin-e2e": runs("admin-e2e") };
+};
+
 const writeOutput = (name: string, value: string): void => {
   const file = process.env.GITHUB_OUTPUT;
   if (file !== undefined && file !== "") {
@@ -428,6 +486,10 @@ const plan = async (base: string | undefined): Promise<void> => {
 
   let projects: string[] | undefined;
   let why: string;
+  let journeys: Record<JourneySuite, boolean> = {
+    e2e: true,
+    "admin-e2e": true,
+  };
   if (base === undefined) {
     why =
       "No base to compare with (the merge queue, or a run by hand): every project.";
@@ -436,7 +498,7 @@ const plan = async (base: string | undefined): Promise<void> => {
     if (reach.all) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const { changed, affected, journeys, importers } = reach;
+      const { changed, affected, journeys: journeyChanges, importers } = reach;
       const packages = packagesSelected(undefined, root);
       const tests = specs.map((spec) => ({
         project: spec.project.name,
@@ -455,6 +517,12 @@ const plan = async (base: string | undefined): Promise<void> => {
           ...importing,
         ]),
       ].toSorted(byKey);
+      journeys = journeysReached({
+        changedFiles: filesChangedSince(base, root),
+        testFiles: new Set(tests.map(({ file }) => file)),
+        packages: workspacePackages(root),
+        root,
+      });
       why = `Changed since ${base}: ${
         changed.map((dir) => path.relative(root, dir)).join(", ") ||
         "no package"
@@ -462,9 +530,9 @@ const plan = async (base: string | undefined): Promise<void> => {
         [...affected].map((dir) => path.relative(root, dir)).join(", ") ||
         "nothing"
       }.${
-        journeys.length === 0
+        journeyChanges.length === 0
           ? ""
-          : ` Journey files: ${journeys
+          : ` Journey files: ${journeyChanges
               .map((file) => path.relative(root, file))
               .join(", ")}, imported by tests of ${
               importing.join(", ") || "no project"
@@ -485,6 +553,8 @@ const plan = async (base: string | undefined): Promise<void> => {
     (projects ?? []).map((project) => `--project=${project}`).join(" ")
   );
   writeOutput("shards", JSON.stringify(shards));
+  writeOutput("e2e", String(journeys.e2e));
+  writeOutput("admin-e2e", String(journeys["admin-e2e"]));
   summarize([
     "### Test plan",
     "",
@@ -493,6 +563,8 @@ const plan = async (base: string | undefined): Promise<void> => {
     projects === undefined
       ? `Every project: ${files.length} files in ${count} shards.`
       : `${projects.length} projects (${projects.join(", ") || "none"}): ${files.length} files in ${count} shards.`,
+    "",
+    `Journeys: e2e ${journeys.e2e ? "runs" : "skipped, its stack unchanged"}; admin-e2e ${journeys["admin-e2e"] ? "runs" : "skipped, its stack unchanged"}.`,
   ]);
 };
 
