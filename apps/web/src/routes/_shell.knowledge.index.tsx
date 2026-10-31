@@ -3,7 +3,8 @@ import type {
   DocumentSummary,
   SearchHit,
 } from "@grasp-os/shared/knowledge";
-import { pageMaxLimit, searchQueryMaxLength } from "@grasp-os/shared/knowledge";
+import { pageMaxLimit } from "@grasp-os/shared/knowledge";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import {
   Empty,
   EmptyDescription,
@@ -341,7 +342,7 @@ const Knowledge = () => {
 export const Route = createFileRoute("/_shell/knowledge/")({
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === "string" && search.q.trim() !== ""
-      ? { q: search.q.slice(0, searchQueryMaxLength) }
+      ? { q: search.q.slice(0, knowledgeSearchMaxLength) }
       : {},
   loaderDeps: ({ search: { q } }) => ({ q }),
   // Each part says on its own why it failed; search runs beside the rest.
