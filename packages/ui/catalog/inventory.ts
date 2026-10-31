@@ -155,7 +155,7 @@ export const shadcnComponents = {
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
     changes:
-      "Adds the `ask` and `highlight` (lime, the one action of a page) variants and the `xl` size Grasp's own pages use.",
+      "Adds the `ask`, `highlight` (lime, the one action of a page) and `hint` (a quiet dotted-underlined word under a figure) variants, and the `xl` and `inline` (no box, in a line of text) sizes Grasp's own pages use.",
   },
   "button-group": {
     status: "supported",

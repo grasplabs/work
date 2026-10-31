@@ -783,10 +783,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} von {workflows} Workflows bekannt"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -2489,9 +2485,17 @@ msgstr "Widget hinzufügen"
 msgid "Add a word"
 msgstr "Ein Wort hinzufügen"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "App hinzufügen"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ausnahme hinzufügen"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "App hinzufügen"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3469,6 +3473,10 @@ msgstr "Grasp fragen"
 msgid "Ask Grasp for a widget"
 msgstr "Grasp um ein Widget bitten"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Grasp bitten, „{typed}“ hinzuzufügen"
+
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht die Domäne neben dem Chat zur Vorschau, bevor sie vorgeschlagen wird."
@@ -4150,10 +4158,6 @@ msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die 
 #: src/workflows/workflow-diagram.tsx
 msgid "Case {name}, when it holds"
 msgstr "Fall {name}, wenn er zutrifft"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Kategorien"
 
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
@@ -4880,6 +4884,11 @@ msgid "Connected"
 msgstr "Verbunden"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Verbunden"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Verbunden"
@@ -4922,6 +4931,10 @@ msgstr "Verbundene Anbieter"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Verbunden, direkt"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow you can open"
+msgstr "Verbunden, von keinem Workflow genutzt, den Sie öffnen können"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6214,6 +6227,10 @@ msgstr "Jeden Montagmorgen, an Sie"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Jeden Montag: Stunden, Läufe und was wartet."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Alle anderen Apps, die Grasp verbinden kann."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6382,10 +6399,6 @@ msgstr "Ausnahmen"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Ausnahmen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Filter ausklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6611,11 +6624,6 @@ msgstr "Integrationen filtern"
 msgid "Filters"
 msgstr "Filter"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filter"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Finanzen"
@@ -6739,10 +6747,6 @@ msgstr "Markiert oder blockiert die Apps, die gegen sie verstoßen."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Chat einklappen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Filter einklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6906,6 +6910,10 @@ msgstr "Aus Google Drive. Ich lese nur die Dateien, die Sie hinzufügen."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Aus SharePoint oder OneDrive. Ich lese nur die Dateien, die Sie hinzufügen."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Aus dem Katalog"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -9306,6 +9314,11 @@ msgstr "Mehr über diese Verbindungen"
 msgid "More about this connection"
 msgstr "Mehr über diese Verbindung"
 
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Weitere Apps"
+
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Mehr zu {title}"
@@ -9535,6 +9548,7 @@ msgstr "Erneute Anmeldung nötig"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Jemand muss sich erneut anmelden"
@@ -10584,6 +10598,10 @@ msgstr "Nicht gut"
 msgid "Not in a domain yet"
 msgstr "Noch in keiner Domäne"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Nicht im Katalog"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Noch nicht interviewt."
@@ -10822,6 +10840,10 @@ msgstr "Hier passt nichts zum Filter."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Hier ist noch nichts."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Nichts im Katalog passt zu „{typed}“."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12138,6 +12160,10 @@ msgstr "Richtlinie"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Richtlinie nicht gefunden"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Beliebt im Katalog"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13676,6 +13702,10 @@ msgstr "Personen und Teams suchen"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Die Suche durchsucht jede Sammlung, die Sie lesen dürfen. Versuchen Sie andere oder weniger Wörter."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Katalog durchsuchen"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -18256,6 +18286,10 @@ msgstr "Ob sich Personen von Grasp anmelden können, um bei diesem Workspace zu 
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Welche KI-Tools nutzen die Leute?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Welche App soll Grasp künftig erfassen? Grasp kennt eine App, sobald sie verbunden ist. Eine App aus dem Katalog öffnet sich daher dort, wo Sie sie verbinden."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
