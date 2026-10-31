@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import {
   exceptionInputSchema,
+  ruleEditSchema,
   ruleEffectSchema,
   ruleInputSchema,
   ruleStatusSchema,
@@ -9,7 +10,7 @@ import type {
   ExceptionInput,
   PolicyBook,
   PolicyRule,
-  RuleInput,
+  RuleEdit,
 } from "@grasp-os/shared/policies";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
@@ -84,7 +85,7 @@ const chatGpt: LandscapeApp = {
 /** Core's `policies` over one book, refusing what core's schemas refuse. */
 const fakePolicies = () => {
   const sent: {
-    updated: RuleInput[];
+    updated: RuleEdit[];
     turned: [string, string, string][];
     granted: ExceptionInput[];
   } = {
@@ -97,9 +98,12 @@ const fakePolicies = () => {
     book: async (): Promise<PolicyBook> => await Promise.resolve(book),
     updateRule: async (
       ruleId: string,
-      input: RuleInput
+      input: RuleEdit,
+      shownStatus: string
     ): Promise<PolicyRule> => {
-      const parsed = ruleInputSchema.parse(input);
+      // As core takes an edit: never a status, and the status shown.
+      const parsed = ruleEditSchema.parse(input);
+      ruleStatusSchema.parse(shownStatus);
       sent.updated.push(input);
       const rule = { ...outsideEu, ...parsed, id: ruleId };
       book = { ...book, rules: [rule] };

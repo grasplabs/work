@@ -5,6 +5,7 @@ import {
   ruleStatusSchema,
 } from "@grasp-os/shared/policies";
 import type {
+  RuleEdit,
   RuleEffect,
   RuleInput,
   RuleStatus,
@@ -505,6 +506,20 @@ export const ruleInputOf = (draft: RuleDraft): RuleInput | undefined => {
   };
 };
 
+/**
+ * An edit core takes from the dialog: the rule without its status, which
+ * only the status control turns, so an edit saved from an old page never
+ * turns a rule back on or off.
+ */
+export const ruleEditOf = (draft: RuleDraft): RuleEdit | undefined => {
+  const input = ruleInputOf(draft);
+  if (input === undefined) {
+    return undefined;
+  }
+  const { status: _status, ...edit } = input;
+  return edit;
+};
+
 /** Whether `draft` can be saved: a name, and every condition one core takes. */
 export const canSaveRule = (draft: RuleDraft): boolean =>
   draft.name.trim() !== "" && ruleInputOf(draft) !== undefined;
@@ -518,24 +533,35 @@ const useSaveRule = (rule?: PolicyRule) => {
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
   const save = async (draft: RuleDraft): Promise<boolean> => {
+    if (rule !== undefined) {
+      const edit = ruleEditOf(draft);
+      if (edit === undefined) {
+        return false;
+      }
+      // With the status this page shows: core changes the effect only
+      // while the rule still has it. Read again either way, so a refusal
+      // shows the rule as it is now.
+      const edited = await run(
+        async (session) =>
+          await session.policies.updateRule(rule.id, edit, rule.status)
+      );
+      await router.invalidate();
+      return edited !== undefined;
+    }
     const input = ruleInputOf(draft);
     if (input === undefined) {
       return false;
     }
-    const saved = await run(async (session) =>
-      rule === undefined
-        ? await session.policies.createRule(input)
-        : await session.policies.updateRule(rule.id, input)
+    const saved = await run(
+      async (session) => await session.policies.createRule(input)
     );
     if (saved === undefined) {
       return false;
     }
-    if (rule === undefined) {
-      await navigate({
-        to: "/policies/rules/$ruleId",
-        params: { ruleId: saved.id },
-      });
-    }
+    await navigate({
+      to: "/policies/rules/$ruleId",
+      params: { ruleId: saved.id },
+    });
     await router.invalidate();
     return true;
   };
@@ -813,7 +839,19 @@ const EditRuleDialog = ({
     draftOf(rule, rule.policyId)
   );
   const { busy, failure, save } = useSaveRule(rule);
+  const [confirming, setConfirming] = useState(false);
   const canSave = canSaveRule(draft) && !busy;
+  // Made to block while it acts: from the save on, apps are blocked. Core
+  // takes the change only while the rule is as active as this page shows.
+  const startsBlocking =
+    rule.status === "active" &&
+    rule.effect !== "block" &&
+    draft.effect === "block";
+  const commit = async (): Promise<void> => {
+    if (await save(draft)) {
+      onOpenChange(false);
+    }
+  };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-h-svh overflow-y-auto sm:max-w-2xl">
@@ -821,12 +859,13 @@ const EditRuleDialog = ({
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (canSave) {
-              void (async () => {
-                if (await save(draft)) {
-                  onOpenChange(false);
-                }
-              })();
+            if (!canSave) {
+              return;
+            }
+            if (startsBlocking) {
+              setConfirming(true);
+            } else {
+              void commit();
             }
           }}
         >
@@ -853,6 +892,35 @@ const EditRuleDialog = ({
             </Button>
           </DialogFooter>
         </form>
+        <AlertDialog onOpenChange={setConfirming} open={confirming}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                <Trans>Start blocking?</Trans>
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                <Trans>
+                  The rule is active, so from the moment it is saved every app
+                  that breaks it is marked as blocked, and its access should be
+                  removed.
+                </Trans>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                <Trans>Cancel</Trans>
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setConfirming(false);
+                  void commit();
+                }}
+              >
+                <Trans>Start blocking</Trans>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );

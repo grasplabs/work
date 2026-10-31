@@ -1,5 +1,9 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import type { PoliciesApi, RuleInput } from "@grasp-os/shared/policies";
+import type {
+  PoliciesApi,
+  RuleEdit,
+  RuleInput,
+} from "@grasp-os/shared/policies";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -46,7 +50,7 @@ const handbook = {
   text: `Staff may not paste customer data into AI tools hosted outside the EU. ${sentinel}.`,
 };
 
-const outsideEu: RuleInput = {
+const outsideEuEdit: RuleEdit = {
   name: "Customer data stays in the EU",
   description: "No customer data in AI tools hosted outside the EU.",
   conditions: [
@@ -54,9 +58,10 @@ const outsideEu: RuleInput = {
     { field: "hosting", op: "outside", values: ["eu"] },
   ],
   effect: "block",
-  status: "watching",
   policyId: null,
 };
+
+const outsideEu: RuleInput = { ...outsideEuEdit, status: "watching" };
 
 /** A model's answer: `reading` as its JSON. */
 const answer = (reading: unknown): GatewayReply => ({
@@ -304,10 +309,11 @@ describe("the company's policies", () => {
     const rule = await admin.api.policies.createRule(outsideEu);
     // Another admin renames it meanwhile; the first turns it on from a
     // page that still has the old name.
-    await admin.api.policies.updateRule(rule.id, {
-      ...outsideEu,
-      name: "Renamed meanwhile",
-    });
+    await admin.api.policies.updateRule(
+      rule.id,
+      { ...outsideEuEdit, name: "Renamed meanwhile" },
+      "watching"
+    );
     const turned = await admin.api.policies.setRuleStatus(
       rule.id,
       "active",
@@ -322,12 +328,11 @@ describe("the company's policies", () => {
     // Another admin makes it flag; a page that still shows it blocking
     // can't pause it, and a page showing it flagging can't turn it on
     // believing it only flags once it blocks again.
-    await admin.api.policies.updateRule(rule.id, {
-      ...outsideEu,
-      name: "Renamed meanwhile",
-      effect: "flag",
-      status: "active",
-    });
+    await admin.api.policies.updateRule(
+      rule.id,
+      { ...outsideEuEdit, name: "Renamed meanwhile", effect: "flag" },
+      "active"
+    );
     const stale = await outcome(
       admin.api.policies.setRuleStatus(rule.id, "paused", "block")
     );
@@ -360,6 +365,57 @@ describe("the company's policies", () => {
     });
   });
 
+  it("keep a rule's status through an edit from an old page, and change its effect only on the status the page showed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const rule = await admin.api.policies.createRule({
+      ...outsideEu,
+      effect: "flag",
+      status: "active",
+    });
+    // Two admins open the active rule; the second pauses it, then the
+    // first saves a rename from the page that still shows it active.
+    await admin.api.policies.setRuleStatus(rule.id, "paused", "flag");
+    const renamed = await admin.api.policies.updateRule(
+      rule.id,
+      { ...outsideEuEdit, effect: "flag", name: "Renamed from an old page" },
+      "active"
+    );
+    // From that same old page, making it block is refused: whether it
+    // starts blocking was decided on a status it no longer has.
+    const toBlock = await outcome(
+      admin.api.policies.updateRule(
+        rule.id,
+        { ...outsideEuEdit, name: "Renamed from an old page" },
+        "active"
+      )
+    );
+    const sneaked = await outcome(
+      admin.api.policies.updateRule(
+        rule.id,
+        // SAFETY: invalid on purpose: a status in an edit, as an old
+        // client might send it; Cap'n Web checks no types, so core must.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        { ...outsideEu, status: "active" } as never,
+        "paused"
+      )
+    );
+    const { rules } = await admin.api.policies.book();
+
+    expect({
+      renamed: { name: renamed.name, status: renamed.status },
+      toBlock,
+      sneaked,
+      now: rules.map(({ name, effect, status }) => ({ name, effect, status })),
+    }).toStrictEqual({
+      renamed: { name: "Renamed from an old page", status: "paused" },
+      toBlock: "policy.conflict",
+      sneaked: "policy.invalid",
+      now: [
+        { name: "Renamed from an old page", effect: "flag", status: "paused" },
+      ],
+    });
+  });
+
   it("are changed by the organization's own admins alone", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
@@ -373,7 +429,11 @@ describe("the company's policies", () => {
         outcome(api.policies.upload(handbook)),
         outcome(api.policies.createRule(outsideEu)),
         outcome(
-          api.policies.updateRule(rule.id, { ...outsideEu, status: "paused" })
+          api.policies.updateRule(
+            rule.id,
+            { ...outsideEuEdit, name: "Theirs" },
+            "watching"
+          )
         ),
         outcome(api.policies.setRuleStatus(rule.id, "active", "block")),
         outcome(api.policies.removeRule(rule.id)),
@@ -617,22 +677,22 @@ describe("the company's policies", () => {
       // Already published: nothing changes, nothing is recorded.
       await admin.api.policies.publish(policyId);
       ({ id: ruleId } = await admin.api.policies.createRule(outsideEu));
-      await admin.api.policies.updateRule(ruleId, {
-        ...outsideEu,
-        status: "active",
-      });
+      await admin.api.policies.setRuleStatus(ruleId, "active", "block");
       // The same again: nothing is recorded.
-      await admin.api.policies.updateRule(ruleId, {
-        ...outsideEu,
-        status: "active",
-      });
+      await admin.api.policies.setRuleStatus(ruleId, "active", "block");
       // The effect changes; a status turned after it records the effect
       // the rule has as it turns, and the same turn again nothing.
-      await admin.api.policies.updateRule(ruleId, {
-        ...outsideEu,
-        effect: "flag",
-        status: "active",
-      });
+      await admin.api.policies.updateRule(
+        ruleId,
+        { ...outsideEuEdit, effect: "flag" },
+        "active"
+      );
+      // The same edit again: nothing is recorded.
+      await admin.api.policies.updateRule(
+        ruleId,
+        { ...outsideEuEdit, effect: "flag" },
+        "active"
+      );
       await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
       await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
       // From a page that still shows it blocking: refused, nothing recorded.
@@ -695,7 +755,7 @@ describe("the company's policies", () => {
         action: "policy.rule.updated",
         by: actor,
         target: { type: "policy_rule", id: ruleId },
-        detail: { effect: "flag", status: "active" },
+        detail: { effect: "flag" },
       },
       {
         action: "policy.rule.updated",

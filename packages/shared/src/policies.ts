@@ -169,6 +169,14 @@ export const ruleInputSchema = z.strictObject({
 });
 export type RuleInput = z.input<typeof ruleInputSchema>;
 
+/**
+ * A rule as an admin edits it: everything but its status, which only
+ * `setRuleStatus` changes, so an edit saved from an old page never turns a
+ * rule back on or off.
+ */
+export const ruleEditSchema = ruleInputSchema.omit({ status: true });
+export type RuleEdit = z.input<typeof ruleEditSchema>;
+
 /** A rule the company set for the apps its people use, usually drawn from one of its policies. */
 export interface PolicyRule {
   id: string;
@@ -374,7 +382,18 @@ export interface PoliciesApi {
   /** Makes a rule. The organization's own admins only; audited. */
   createRule: (rule: RuleInput) => Promise<PolicyRule>;
   /** Replaces a rule's name, conditions, effect or status. The organization's own admins only; audited. */
-  updateRule: (ruleId: string, rule: RuleInput) => Promise<PolicyRule>;
+  /**
+   * Replaces what a rule says, keeping its status as core has it.
+   * `shownStatus` is the status the admin's page showed: an edit that
+   * changes the effect applies only while the rule still has it, as
+   * turning a rule that acts to block (or back) is decided against it;
+   * otherwise it is refused as `policy.conflict`.
+   */
+  updateRule: (
+    ruleId: string,
+    rule: RuleEdit,
+    shownStatus: RuleStatus
+  ) => Promise<PolicyRule>;
   /**
    * Turns a rule to watching, active or paused, leaving everything else it
    * says as core has it now; only while it still has `effect`, the effect

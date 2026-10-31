@@ -15988,6 +15988,10 @@ msgstr "L’analyse des risques n’est pas faite"
 msgid "The roles above say what each may do."
 msgstr "Les rôles ci-dessus indiquent ce que chacun peut faire."
 
+#: src/policies/policy-editing.tsx
+msgid "The rule is active, so from the moment it is saved every app that breaks it is marked as blocked, and its access should be removed."
+msgstr "La règle est active : dès son enregistrement, chaque application qui l’enfreint est marquée comme bloquée, et son accès devrait être retiré."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "The rule is paused, so it catches nothing."
 msgstr "La règle est en pause : elle ne concerne aucune application."

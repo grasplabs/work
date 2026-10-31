@@ -4,6 +4,7 @@ import {
   exceptionInputSchema,
   policyErrors,
   policyUploadSchema,
+  ruleEditSchema,
   ruleEffectSchema,
   ruleInputSchema,
   ruleStatusSchema,
@@ -18,13 +19,14 @@ import type {
   PolicyRule,
   PolicyUpload,
   RuleInput,
+  RuleEdit,
   RuleEffect,
   RuleProposal,
   RuleStatus,
 } from "@grasp-os/shared/policies";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -372,6 +374,25 @@ const removePolicy = async (
 };
 
 /** The rule's row as `input` says it, checked: a rule from a policy names one that is there. */
+/** What an edit says, checked: its policy must be there. Never a status. */
+const editRow = async (env: Env, input: unknown) => {
+  const rule = parsed(ruleEditSchema, input);
+  if (rule.policyId !== null) {
+    const policy = await readDocument(env, rule.policyId);
+    if (policy === undefined) {
+      throw policyErrors.create("policy.conflict");
+    }
+  }
+  return {
+    name: rule.name,
+    description: rule.description,
+    conditions: rule.conditions,
+    effect: rule.effect,
+    policyId: rule.policyId,
+    excerpt: rule.excerpt ?? null,
+  };
+};
+
 const ruleRow = async (env: Env, input: unknown) => {
   const rule = parsed(ruleInputSchema, input);
   if (rule.policyId !== null) {
@@ -446,13 +467,12 @@ const createRule = async (
 
 /** What a rule says, as `updateRule` compares it. */
 const sameFieldsOf = (
-  rule: Omit<RuleInput, "excerpt"> & { excerpt?: string }
+  rule: Omit<RuleEdit, "excerpt"> & { excerpt?: string }
 ) => [
   rule.name,
   rule.description,
   rule.conditions,
   rule.effect,
-  rule.status,
   rule.policyId,
   rule.excerpt ?? null,
 ];
@@ -508,14 +528,22 @@ const setRuleStatus = async (
   return found;
 };
 
+/**
+ * Replaces what a rule says, never its status: that stays as core has it,
+ * however old the admin's page is. An edit that changes the effect applies
+ * only while the rule has the status the page showed (`shown`), since
+ * whether it starts or stops blocking was decided against that status.
+ */
 const updateRule = async (
   env: Env,
   by: Identity,
   id: string,
-  input: unknown
+  input: unknown,
+  shown: unknown
 ): Promise<PolicyRule> => {
   requireOwnAdmin(by, "updateRule");
-  const row = await ruleRow(env, input);
+  const row = await editRow(env, input);
+  const shownStatus = parsed(ruleStatusSchema, shown);
   const db = drizzle(env.DB);
   const conditions = JSON.stringify(row.conditions);
   const [written] = await auditedBatch(env, db, [
@@ -527,10 +555,15 @@ const updateRule = async (
           eq(policyRules.id, id),
           // Only when something differs: the same save twice records one change.
           sql`(${policyRules.name}, ${policyRules.description}, ${policyRules.conditions},
-            ${policyRules.effect}, ${policyRules.status}, coalesce(${policyRules.policyId}, ''),
+            ${policyRules.effect}, coalesce(${policyRules.policyId}, ''),
             coalesce(${policyRules.excerpt}, ''))
             IS NOT (${row.name}, ${row.description}, ${conditions}, ${row.effect},
-            ${row.status}, ${row.policyId ?? ""}, ${row.excerpt ?? ""})`,
+            ${row.policyId ?? ""}, ${row.excerpt ?? ""})`,
+          // The effect changes only on the status the page showed.
+          or(
+            eq(policyRules.effect, row.effect),
+            eq(policyRules.status, shownStatus)
+          ),
           policyStillThere(row.policyId),
           stillAdmin(by)
         )
@@ -539,7 +572,7 @@ const updateRule = async (
       actor: actorOf(by),
       action: "policy.rule.updated",
       target: target("policy_rule", id),
-      detail: { effect: row.effect, status: row.status },
+      detail: { effect: row.effect },
     }),
   ]);
   const found = await readRule(env, id);
@@ -931,10 +964,15 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
     );
   }
 
-  async updateRule(ruleId: string, rule: RuleInput): Promise<PolicyRule> {
+  async updateRule(
+    ruleId: string,
+    rule: RuleEdit,
+    shownStatus: RuleStatus
+  ): Promise<PolicyRule> {
     return await withPerson(
       this.#check,
-      async (by) => await updateRule(this.#env, by, idOf(ruleId), rule)
+      async (by) =>
+        await updateRule(this.#env, by, idOf(ruleId), rule, shownStatus)
     );
   }
 

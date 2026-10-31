@@ -15988,6 +15988,10 @@ msgstr "Die Risikobewertung ist nicht erledigt"
 msgid "The roles above say what each may do."
 msgstr "Die Rollen oben zeigen, was jede darf."
 
+#: src/policies/policy-editing.tsx
+msgid "The rule is active, so from the moment it is saved every app that breaks it is marked as blocked, and its access should be removed."
+msgstr "Die Regel ist aktiv: Sobald sie gespeichert ist, wird jede App, die gegen sie verstößt, als blockiert markiert, und ihr Zugang sollte entfernt werden."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "The rule is paused, so it catches nothing."
 msgstr "Die Regel ist pausiert und erfasst daher nichts."
