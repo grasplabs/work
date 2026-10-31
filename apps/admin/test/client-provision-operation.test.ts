@@ -71,7 +71,7 @@ import { envelope, notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, placedClient, staff } from "./hosting.ts";
-import { buildRelease, evidenceFor, putBlobs, testLimits } from "./releases.ts";
+import { buildRelease, putBlobs } from "./releases.ts";
 import type { ReleaseSpec } from "./releases.ts";
 import {
   deliverAlarm,
@@ -180,7 +180,6 @@ const importRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -226,7 +225,6 @@ const importRealRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });
@@ -707,36 +705,11 @@ const probeFailures: ProbeFailure[] = [
 interface Refusal {
   name: string;
   kind: Kind;
-  spec?: Partial<ReleaseSpec>;
   adjust?: (core: WorkerEntry) => WorkerEntry;
-  /** Its `previousRelease` names a release imported just before it. */
-  follows?: true;
   code: string;
 }
 
 const refusals: Refusal[] = [
-  {
-    name: "a release built before platform limits were recorded",
-    kind: "dedicated",
-    spec: { platformLimits: null },
-    code: "release_without_limits",
-  },
-  {
-    name: "a release raising a platform limit with evidence for on-premises only",
-    kind: "dedicated",
-    spec: {
-      platformLimits: { ...testLimits, workflowSteps: 2000 },
-      previousRelease: {
-        releaseId: "26.01.1",
-        platformLimits: testLimits,
-      },
-      limitEvidence: (release) => [
-        evidenceFor(release, "workflowSteps", 2000, "workerd"),
-      ],
-    },
-    follows: true,
-    code: "limit_evidence_missing",
-  },
   {
     name: "a release with a binding Workers for Platforms doesn't document",
     kind: "workers_for_platforms",
@@ -1246,17 +1219,8 @@ describe("provisioning a placed client", () => {
 
   it.each(refusals)(
     "refuses $name before anything is created or uploaded",
-    async ({ kind, spec, adjust, follows, code }) => {
-      const before = follows === true ? await importRelease(kind) : null;
-      const previous =
-        before !== null && spec?.previousRelease
-          ? { ...spec.previousRelease, releaseId: before.releaseId }
-          : spec?.previousRelease;
-      const manifest = await importRelease(
-        kind,
-        spec === undefined ? spec : { ...spec, previousRelease: previous },
-        adjust
-      );
+    async ({ kind, adjust, code }) => {
+      const manifest = await importRelease(kind, {}, adjust);
       const { account, clientId, held } = await setUp(kind, manifest);
 
       await expect(failing(held)).resolves.toMatchObject({ code });

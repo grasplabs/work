@@ -52,12 +52,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
   stage_unset:
     "This admin's STAGE is neither staging nor production, so it runs no operation: set it in its deploy, then start again.",
   release_not_imported: "That release isn't imported.",
-  release_without_limits:
-    "The release was built before platform limits were recorded, so it isn't made live.",
-  limit_evidence_missing:
-    "The release raises a platform limit without capacity and security evidence for this client's profile.",
-  release_history_incomplete:
-    "A release between where the client starts and this one isn't imported, so its evidence can't be read: import it first.",
   operation_release_changed:
     "Its provisioning is on a newer release already, or it's live: pick that release or a later one.",
   unknown_worker: "The release has a Worker other than core and connect.",
@@ -143,7 +137,7 @@ export const operationErrorWords = (code: string): string => {
  * - `retry`: something passing (Cloudflare's lag or a 5xx, a run gone, a
  *   core still starting): the admin resumes it by itself, backing off;
  * - `release`: the release itself can't go there: the admin resumes it
- *   once a newer release fits, and until then tells staff;
+ *   once a newer release is imported, and until then tells staff;
  * - `staff`: a person must look first (a policy or hosting check that
  *   didn't hold, the admin's own setup, a resource someone else has): the
  *   admin tells staff and resumes nothing.
@@ -155,9 +149,6 @@ const failureCauses = {
   // The operation's own.
   client_unknown: "staff",
   release_not_imported: "release",
-  limit_evidence_missing: "release",
-  release_without_limits: "release",
-  release_history_incomplete: "release",
   operation_release_changed: "release",
   unknown_worker: "release",
   wfp_binding_unqualified: "release",
@@ -262,7 +253,7 @@ export const placeRefusals: Readonly<Record<PlaceRefusal, string>> = {
     "Another kind of run last worked on the client: let it end first.",
   hosted_on_prem:
     "It runs on its own premises: Grasp's cloud sets nothing up for it.",
-  no_fitting_release:
+  no_release:
     "No imported release can provision it yet: CI publishes one per merge, and the admin imports it within 5 minutes. Look at Releases if none comes.",
   already_running:
     "Something is working on the client already: wait for it to end.",

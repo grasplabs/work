@@ -169,8 +169,7 @@ const configuredAtOf = sql<
 
 /**
  * Whether config changed at `configChangedAt` waits for a run, given the
- * client's `operation` (`isConfigPending`): one read singly and one read
- * with every client (`targetClients`) decided alike.
+ * client's `operation` (`isConfigPending`).
  */
 const configPendingOf = (
   configChangedAt: Date | null,
@@ -278,80 +277,6 @@ export const targetClient = async (
     configPending: await isConfigPending(db, clientId, configChangedAt),
     workers,
   };
-};
-
-/**
- * Every client, as a rollout reads it (`targetClient`), by id: three
- * reads, whatever their number, so a rollout of hundreds checks each
- * within the reads one request may make.
- */
-export const targetClients = async (
-  db: AdminDatabase
-): Promise<Map<string, TargetClient>> => {
-  const [rows, workers, operations] = await Promise.all([
-    db
-      .select({
-        id: clients.id,
-        status: clients.status,
-        generation: clients.generation,
-        pinnedReleaseId: clients.pinnedReleaseId,
-        rotatedAt: clients.rotatedAt,
-        rotationLiveAt: clients.rotationLiveAt,
-        configChangedAt: clients.configChangedAt,
-      })
-      .from(clients),
-    db
-      .select({
-        clientId: clientWorkers.clientId,
-        worker: clientWorkers.worker,
-        scriptName: clientWorkers.scriptName,
-        releaseId: clientWorkers.releaseId,
-        releaseBuiltAt: releases.builtAt,
-      })
-      .from(clientWorkers)
-      .leftJoin(releases, eq(releases.id, clientWorkers.releaseId)),
-    db
-      .select({
-        clientId: clientProvisions.clientId,
-        releaseId: clientProvisions.releaseId,
-        status: clientProvisions.status,
-        previousReleaseId: clientProvisions.previousReleaseId,
-        change: clientProvisions.change,
-        progress: clientProvisions.progress,
-        configuredAt: configuredAtOf,
-      })
-      .from(clientProvisions),
-  ]);
-  const workersOf = new Map<string, TargetClient["workers"]>();
-  for (const { clientId, ...worker } of workers) {
-    workersOf.set(clientId, [...(workersOf.get(clientId) ?? []), worker]);
-  }
-  const operationOf = new Map(operations.map((row) => [row.clientId, row]));
-  return new Map(
-    rows.map(({ rotatedAt, rotationLiveAt, configChangedAt, ...rest }) => {
-      const row = operationOf.get(rest.id);
-      let operation: TargetClient["operation"] = null;
-      if (row !== undefined) {
-        const {
-          clientId: _clientId,
-          progress,
-          configuredAt: _at,
-          ...fields
-        } = row;
-        operation = { ...fields, shared: deliveredShared(progress) };
-      }
-      return [
-        rest.id,
-        {
-          ...rest,
-          operation,
-          rotationPending: rotatedAt !== null && rotationLiveAt === null,
-          configPending: configPendingOf(configChangedAt, row),
-          workers: workersOf.get(rest.id) ?? [],
-        },
-      ];
-    })
-  );
 };
 
 /** A release, and when it was built: what orders releases. */

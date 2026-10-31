@@ -295,6 +295,13 @@
       "when": 1793449398166,
       "tag": "0041_drop_release_compatibility",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1793450472317,
+      "tag": "0042_drop_release_limit_evidence",
+      "breakpoints": true
     }
   ]
 }

@@ -9,23 +9,6 @@ import { MissingStoreSecretError } from "./context.ts";
 export const deployErrorCodes = [
   /** The release isn't imported, or its manifest no longer parses. */
   "release_not_imported",
-  /**
-   * The release raises a platform limit over what the client runs without
-   * capacity and security evidence for the client's runtime profile
-   * (src/releases/limits.ts).
-   */
-  "limit_evidence_missing",
-  /**
-   * The release records no platform limits: it was built before they
-   * were, and isn't made live (src/releases/limits.ts).
-   */
-  "release_without_limits",
-  /**
-   * A release on the way to the one deployed, named by the next as the one
-   * before it, isn't imported: its evidence can't be read
-   * (src/releases/limits.ts).
-   */
-  "release_history_incomplete",
   /** A blob in R2 is missing, or isn't what the imported manifest says. */
   "release_blob_mismatch",
   /** Two Workers give one database different migrations. */

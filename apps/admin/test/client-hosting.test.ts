@@ -1,4 +1,3 @@
-import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -52,11 +51,8 @@ const caller = "ops@grasp.test";
  * attempt in a shared destination stops at validation
  * (`wfp_schedule_unqualified`) before it reaches Cloudflare.
  */
-const importedRelease = async (
-  adjust: (manifest: ReleaseManifest) => ReleaseManifest = (manifest) =>
-    manifest
-): Promise<string> => {
-  const manifest = adjust(await release());
+const importedRelease = async (): Promise<string> => {
+  const manifest = await release();
   const now = new Date();
   await db.insert(releases).values({
     id: manifest.releaseId,
@@ -298,7 +294,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
   });
 
-  it("tries a stopped provisioning again on the newest release that fits, a fix released since included", async () => {
+  it("tries a stopped provisioning again on the newest release, a fix released since included", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
@@ -319,17 +315,13 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     }).toStrictEqual({ retried: null, operation: fixed, switched: [caller] });
   });
 
-  it("tries a stopped provisioning again on its own release when no newer release fits it", async () => {
+  it("tries a stopped provisioning again on its own release when no newer release is imported", async () => {
     await destination();
     const clientId = await client();
     const own = await importedRelease();
     using attempts = followAttempts();
     await place(clientId, own, null);
     await latestStopped(attempts);
-    // Newer, but it records no platform limits: it fits no one.
-    await importedRelease(
-      ({ platformLimits: _limits, ...manifest }) => manifest
-    );
 
     const retried = await retry(clientId);
     await latestStopped(attempts);
@@ -409,7 +401,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     });
 
     // Stopped with nothing live: a newer release takes its operation
-    // over, and resuming offers the newest that fits it; an older one,
+    // over, and resuming offers the newest; an older one,
     // or another destination, is refused.
     const newer = await importedRelease();
     const offered = await hostingOf(clientId);

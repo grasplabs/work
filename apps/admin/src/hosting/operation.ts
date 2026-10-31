@@ -93,15 +93,10 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { releaseManifestSchema } from "@grasp-os/shared/release";
-import type {
-  LimitRaise,
-  ReleaseManifest,
-  WorkerEntry,
-} from "@grasp-os/shared/release";
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
-import { and, desc, eq, gt, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
@@ -135,13 +130,12 @@ import {
 import {
   clientGatewayId,
   clientMailDomain,
-  clientRuntimeProfile,
   defaultGatewayModels,
   derivedCoreConfig,
 } from "../deploy/core-config.ts";
 import type { SignInApps } from "../deploy/core-config.ts";
 import { configuredCoreVars, mailSenderOf } from "../deploy/core-vars.ts";
-import { DeployError, errorCode } from "../deploy/errors.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { migrateDatabases } from "../deploy/migrations.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { sendsMail } from "../deploy/resources.ts";
@@ -170,7 +164,6 @@ import {
 } from "../deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../deploy/versions.ts";
 import type { ReleaseStore } from "../releases/import.ts";
-import { uncoveredLimitRaise } from "../releases/limits.ts";
 import { holdsClient, releaseRun, stillHolds } from "../runners.ts";
 import type { HeldClient } from "../runners.ts";
 import {
@@ -199,16 +192,6 @@ export const provisionOperationErrorCodes = [
   "client_unknown",
   /** The operation's release isn't imported. */
   "release_not_imported",
-  /**
-   * The release raises a platform limit, over the oldest release the admin
-   * holds that records limits, without evidence for the client's profile
-   * (src/releases/limits.ts).
-   */
-  "limit_evidence_missing",
-  /** The release was built before platform limits were recorded, and isn't made live. */
-  "release_without_limits",
-  /** A release on the way to it isn't imported, so its evidence can't be read. */
-  "release_history_incomplete",
   /** The operation provisions another release: it's fixed for the operation. */
   "operation_release_changed",
   /** The release has a Worker other than core and connect. */
@@ -1663,59 +1646,6 @@ const load = async (
   };
 };
 
-/**
- * Throws unless client `clientId` may run `manifest` as far as the
- * admin's records tell, before anything of its destination is read:
- * any platform limit it raises has evidence for the client's profile. What
- * the first step checks first (`validate`), and what picks the release a
- * provisioning offers (`newestFittingRelease`).
- */
-const assertReleaseFits = async (
-  db: AdminDatabase,
-  clientId: string,
-  manifest: ReleaseManifest
-): Promise<void> => {
-  // A new client runs nothing yet: a raise from before it needs evidence
-  // for its profile too.
-  let raise: LimitRaise | undefined;
-  try {
-    raise = await uncoveredLimitRaise(
-      db,
-      clientId,
-      manifest.releaseId,
-      clientRuntimeProfile
-    );
-  } catch (error) {
-    // A release that records no limits isn't made live.
-    if (error instanceof DeployError) {
-      throw new ProvisionOperationError(
-        error.code === "release_without_limits" ||
-          error.code === "release_history_incomplete"
-          ? error.code
-          : "release_not_imported",
-        error.message
-      );
-    }
-    throw error;
-  }
-  if (raise !== undefined) {
-    throw new ProvisionOperationError(
-      "limit_evidence_missing",
-      `Release ${manifest.releaseId} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} without capacity and security evidence for ${clientRuntimeProfile}`
-    );
-  }
-};
-
-/** How many imported releases are read at a time while looking for one that fits. */
-const fittingReleasesPage = 20;
-
-/** Releases listed after `row`, newest first: built before it, or at once with a lower id. */
-const olderThan = (row: { id: string; builtAt: Date }): SQL | undefined =>
-  or(
-    lt(releases.builtAt, row.builtAt),
-    and(eq(releases.builtAt, row.builtAt), lt(releases.id, row.id))
-  );
-
 /** Releases listed before `row`, newest first: built after it, or at once with a higher id. */
 const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
   or(
@@ -1724,61 +1654,22 @@ const newerThanRow = (row: { id: string; builtAt: Date }): SQL | undefined =>
   );
 
 /**
- * The newest imported release client `clientId` may be provisioned with
- * (`assertReleaseFits`), looking through every imported release, newest
- * first, a page at a time, never only a window of the newest; with
- * `newerThan`, only releases built after that one (by when built, then
- * id). Null when none fits. What a client is provisioned with when staff
- * don't pick one, and what a retry moves a stopped one forward to.
+ * The newest imported release (by when built, then id); with `newerThan`,
+ * only one built after that one. Null when there is none. What a client
+ * is provisioned with when staff don't pick one, and what a retry moves a
+ * stopped one forward to.
  */
-export const newestFittingRelease = async (
+export const newestRelease = async (
   db: AdminDatabase,
-  clientId: string,
   newerThan?: { id: string; builtAt: Date }
 ): Promise<string | null> => {
-  let after: { id: string; builtAt: Date } | undefined;
-  for (;;) {
-    const page: { id: string; builtAt: Date; manifest: string }[] =
-      // oxlint-disable-next-line no-await-in-loop -- a page at a time, newest first
-      await db
-        .select({
-          id: releases.id,
-          builtAt: releases.builtAt,
-          manifest: releases.manifest,
-        })
-        .from(releases)
-        .where(
-          and(
-            after === undefined ? undefined : olderThan(after),
-            newerThan === undefined ? undefined : newerThanRow(newerThan)
-          )
-        )
-        .orderBy(desc(releases.builtAt), desc(releases.id))
-        .limit(fittingReleasesPage);
-    for (const row of page) {
-      const parsed = releaseManifestSchema.safeParse(JSON.parse(row.manifest));
-      if (!parsed.success) {
-        continue;
-      }
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- newest first, the first that fits
-        await assertReleaseFits(db, clientId, parsed.data);
-        return row.id;
-      } catch (error) {
-        if (
-          !(error instanceof ProvisionOperationError) &&
-          !(error instanceof DeployError)
-        ) {
-          throw error;
-        }
-      }
-    }
-    const last = page.at(-1);
-    if (last === undefined || page.length < fittingReleasesPage) {
-      return null;
-    }
-    after = last;
-  }
+  const [row] = await db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(newerThan === undefined ? undefined : newerThanRow(newerThan))
+    .orderBy(desc(releases.builtAt), desc(releases.id))
+    .limit(1);
+  return row?.id ?? null;
 };
 
 /**
@@ -1792,7 +1683,6 @@ const validate = async (
   const { db } = context;
   const { manifest, held } = loaded;
   const order = appsOf(manifest);
-  await assertReleaseFits(db, held.clientId, manifest);
   const vars = await coreVarsOf(context, loaded);
   for (const app of order) {
     const worker = workerOf(manifest, app);

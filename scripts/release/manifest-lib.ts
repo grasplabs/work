@@ -30,11 +30,7 @@ import {
   releaseManifestSchema,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
-import type {
-  PlatformLimits,
-  ReleaseManifest,
-  WorkerEntry,
-} from "@grasp-os/shared/release";
+import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { stableStringify } from "./hash-lib.ts";
@@ -298,12 +294,6 @@ export interface ReleaseInfo {
   notes: string;
   wranglerVersion: string;
   packages: Record<string, string>;
-  /**
-   * The platform limits core and connect were built with
-   * (@grasp-os/shared/platform-limits). What they're raised over, and the
-   * evidence for it, are written at publish (evidence-release.ts).
-   */
-  platformLimits: PlatformLimits;
 }
 
 /** Assembles the manifest from each Worker's build. */

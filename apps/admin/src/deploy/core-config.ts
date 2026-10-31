@@ -34,7 +34,6 @@ import { clientDomain } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
-import type { RuntimeProfile } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
@@ -82,10 +81,9 @@ const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
 /**
  * The runtime every client's core runs on: Cloudflare, where the isolates
  * Code Mode loads have their CPU limit enforced. Not a setting: a client
- * can't make its run records claim otherwise. Also the profile a release's
- * limit evidence must cover to reach a client (src/releases/limits.ts).
+ * can't make its run records claim otherwise.
  */
-export const clientRuntimeProfile: RuntimeProfile = "cloudflare";
+export const clientRuntimeProfile = "cloudflare";
 
 /**
  * The client's sending domain: `mail.<id>.<domain>`, a zone of its own in

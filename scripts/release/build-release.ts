@@ -19,7 +19,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
-import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { z } from "zod";
 
 import { parseJsonc } from "../wrangler-config-rules.ts";
@@ -176,7 +175,6 @@ const manifest = generateManifest(
     notes: run("git", ["log", "-1", "--format=%s", commit]),
     wranglerVersion,
     packages: packageVersions([...RELEASED_APPS, FRONTEND]),
-    platformLimits: { ...platformLimits },
   },
   workers
 );

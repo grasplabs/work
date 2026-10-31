@@ -580,12 +580,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: staging
-    # Reads the run's jobs (its own id) and the merged pull request's
-    # reviews, for the release's limit evidence.
     permissions:
       contents: read
-      actions: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -597,8 +593,7 @@ jobs:
           run-install: |
             - args: ["--frozen-lockfile"]
       # Staging's releases bucket and the account's R2 endpoint, by the names
-      # module, for every step after: the release before is read from the
-      # bucket, and the release goes to it.
+      # module, for every step after: the release goes to it.
       - run: |
           set -euo pipefail
           echo "R2_BUCKET=$(vp exec node scripts/platform-names.ts staging releasesBucket)" >> "$GITHUB_ENV"
@@ -613,24 +608,7 @@ jobs:
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           secrets: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
           required: R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-      # What the release's platform limits are raised over: the release
-      # published before it. Its limit evidence goes next to its manifest,
-      # and a raise without evidence (a capacity run per profile and the
-      # PR's CODEOWNERS approval, GRA-942) fails here, before anything is
-      # uploaded. The release itself is the release job's bundle, unchanged.
-      - run: vp run release:previous --out previous-manifest.json
-      # The capacity job for each limit the release raises, on workerd, on
-      # this commit (the release's own): its workloads, or nothing when it
-      # raises none. The cloudflare profile waits for a real account in CI
-      # (GRA-382), so a raise reaches only on-premises clients until then.
-      - run: vp run capacity --profile workerd --release release-out --previous previous-manifest.json --out capacity-workerd.json
-      # Each passing workload, this job's id and the merged PR's CODEOWNER
-      # approval, as the release's evidence (read with this job's token).
-      - run: vp run release:evidence --release release-out --previous previous-manifest.json --capacity capacity-workerd.json
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CI_JOB_NAME: publish-release
       # Published under the month's next id (`YY.MM.N`, from the bucket;
-      # @grasp-os/shared/release-id): only the manifest's id and the
-      # evidence's change from the release job's bundle, never a blob.
+      # @grasp-os/shared/release-id): only the manifest's id changes from
+      # the release job's bundle, never a blob.
       - run: vp run release:upload --release release-out --assign-id
