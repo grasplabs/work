@@ -14,7 +14,11 @@
 # ready for review, which runs them all (`ready_for_review`). A draft can't
 # be merged, and the merge queue runs everything again on top of main.
 # A ready pull request runs only the test projects its changes can affect
-# (plan, below); the merge queue runs every one.
+# (plan, below); the merge queue runs every one. So does a nightly run on
+# main: merges an admin makes skip the queue, and with them the full suite,
+# so a gap in what the plan selects would otherwise show only once someone
+# touches the package it missed. A run by hand from the Actions tab is the
+# same full run.
 name: CI
 
 on:
@@ -24,12 +28,18 @@ on:
   merge_group:
   push:
     branches: [main]
+  schedule:
+    # Every night, 02:17 UTC.
+    - cron: "17 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# The nightly and by-hand runs on main in a group of their own: in main's,
+# a push would wait for the full suite to end before it could publish.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) && 'full-' || '' }}${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
