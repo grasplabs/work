@@ -16,6 +16,7 @@ import {
 import type {
   App,
   AppContents,
+  AppOverview,
   CurrentExports,
   AppFiles,
   AppRole,
@@ -730,6 +731,48 @@ export const appContents = async (
     screens: screensIn(files),
     workflows: workflowsIn(files),
   };
+};
+
+/**
+ * The Apps `by` has a role in, as `listApps` gives them, each with what
+ * `appContents` says of it: one query, from its current version's row
+ * (`app_versions.screens`, `workflows`), so no files are read.
+ */
+export const listAppOverviews = async (
+  env: Env,
+  by: Member
+): Promise<AppOverview[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      app: apps,
+      screens: appVersions.screens,
+      workflows: appVersions.workflows,
+    })
+    .from(apps)
+    .leftJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(appsFoundBy(env, by))
+    .orderBy(asc(apps.createdAt), asc(apps.id));
+  const found = rows.map((row) => ({ ...row, app: toApp(row.app) }));
+  const builds = await appsBuiltBy(
+    env,
+    by,
+    found.map(({ app }) => app.id)
+  );
+  return found.map(({ app, screens, workflows }) => ({
+    app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
+    // None without a current version, whose row the join doesn't find.
+    contents: {
+      version: app.currentVersion,
+      screens: (screens ?? []).toSorted(),
+      workflows: (workflows ?? []).toSorted(),
+    },
+  }));
 };
 
 /**

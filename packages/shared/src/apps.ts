@@ -213,6 +213,12 @@ export interface AppContents {
   workflows: string[];
 }
 
+/** An App as `AppsApi.list` gives it, with its current version's contents. */
+export interface AppOverview {
+  app: ViewedApp;
+  contents: AppContents;
+}
+
 /**
  * One screen of an App's current version (`AppsApi.screens`), with what
  * a list of screens shows of its App: its name, where it stands and the
@@ -707,6 +713,11 @@ export interface AppsApi {
    * read: the newest App first, its screens by name.
    */
   screens: () => Promise<ListedScreen[]>;
+  /**
+   * The Apps `list` gives, each with what `contents` says of it, in one
+   * read: the Domains page's cards.
+   */
+  overview: () => Promise<AppOverview[]>;
   /**
    * What the App's current version exports to other Apps: read from its
    * version alone, for anyone with a role in the App.
