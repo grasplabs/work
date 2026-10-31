@@ -340,6 +340,47 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   await expect(waitingRow).not.toContainText("Waiting for a decision", {
     timeout: 30_000,
   });
+
+  // Another run waits, and is answered elsewhere while the page stays
+  // open: a filter chosen and taken back reads the log again, rather than
+  // showing it as the page first read it.
+  const again = await withApi(builder, async (api) => {
+    const { id } = await api.workflows.start(app, "approval");
+    await expect(async () => {
+      const waiting = await api.workflows.runs({ app, status: "waiting" });
+      expect(waiting.runs.map(({ id: runId }) => runId)).toContain(id);
+    }).toPass({ timeout: 30_000 });
+    return id;
+  });
+  await page.goto("/workflows?tab=runs");
+  const stillWaiting = page
+    .getByRole("row")
+    .filter({ hasText: name })
+    .filter({ hasText: "Waiting for a decision" });
+  await expect(stillWaiting).toHaveCount(1, pageRead);
+  await withApi(builder, async (api) => {
+    const asked = await api.decisions.waiting();
+    const decision = asked.find(({ run }) => run === again);
+    expect(decision).toBeDefined();
+    const id = decision?.id ?? "";
+    const review = await api.decisions.review(id, { approved: true });
+    if (review.state === "review") {
+      const { confirmation } = await api.decisions.confirm(
+        id,
+        review.decision.revision,
+        review.response
+      );
+      await api.decisions.answer(id, review.response, confirmation);
+    }
+  });
+  const status = page.getByRole("combobox", { name: "Status" });
+  await status.click();
+  await page.getByRole("option", { name: "Done" }).click();
+  await expect(page).toHaveURL(/status=done/u);
+  await status.click();
+  await page.getByRole("option", { name: "All" }).click();
+  await expect(page).not.toHaveURL(/status=/u);
+  await expect(stillWaiting).toHaveCount(0, { timeout: 30_000 });
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({

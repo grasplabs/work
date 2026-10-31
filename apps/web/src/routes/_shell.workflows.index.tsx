@@ -40,7 +40,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
@@ -403,28 +403,33 @@ const NeedsAttention = ({
 };
 
 /**
- * The figures over the runs, where core counted them for the person: read
- * once while the Runs tab shows, as they count a window of days whatever
- * the log's filters, which never read them again.
+ * The figures over the runs, where core counted them for the person. The
+ * loader starts their read on every run of it (the page opened, "Try
+ * again", a decision answered in the lanes), beside its other reads, so
+ * they count the same moment as the lanes; they count a window of days
+ * whatever the log's filters, which never read them again.
  */
-const Figures = () => {
-  const core = useCore();
-  const [activity, setActivity] = useState<Loaded<RunActivity | null>>();
+const Figures = ({
+  activity,
+}: {
+  activity: Promise<Loaded<RunActivity | null>>;
+}) => {
+  const [read, setRead] = useState<Loaded<RunActivity | null>>();
   useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await loadFromCore(core, readActivity, left.signal);
-      if (!left.signal.aborted) {
-        setActivity(loaded);
+    let current = true;
+    const settle = async (): Promise<void> => {
+      const loaded = await activity;
+      if (current) {
+        setRead(loaded);
       }
     };
-    void read();
+    void settle();
     return () => {
-      left.abort();
+      current = false;
     };
-  }, [core]);
-  return activity?.state === "ready" && activity.data !== null ? (
-    <RunFiguresView figures={runFiguresOf(activity.data)} scope="all" />
+  }, [activity]);
+  return read?.state === "ready" && read.data !== null ? (
+    <RunFiguresView figures={runFiguresOf(read.data)} scope="all" />
   ) : null;
 };
 
@@ -638,18 +643,25 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
   const { app, workflow, status } = Route.useSearch();
-  const [read, setRead] = useState<RunsRead>();
+  const key = JSON.stringify(filterOf({ app, workflow, status }));
+  // The loader's read is taken once, on the first read after that loader
+  // run: a later change of filters, back to these too, reads again, as
+  // the runs may have moved on since.
+  const taken = useRef<LogRead | null>(null);
+  const [read, setRead] = useState<{ key: string; data: RunsRead }>();
   useEffect(() => {
     const left = new AbortController();
     const filter = filterOf({ app, workflow, status });
+    const fresh = taken.current !== log;
+    taken.current = log;
     const load = async (): Promise<void> => {
-      // The loader's read where it is for these filters; else this one's.
-      const loaded =
-        JSON.stringify(filter) === log.key
+      const shown = JSON.stringify(filter);
+      const data =
+        fresh && shown === log.key
           ? await log.read
           : await readRuns(core, filter, left.signal);
       if (!left.signal.aborted) {
-        setRead(loaded);
+        setRead({ key: shown, data });
       }
     };
     void load();
@@ -660,28 +672,33 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   if (read === undefined) {
     return <LoadingLines lines={4} />;
   }
+  // Read for other filters than those now chosen: the filters stay, and
+  // the log is loading rather than showing runs the filters don't say.
+  const current = read.key === key;
   const filtered =
     app !== undefined || workflow !== undefined || status !== undefined;
   return (
     <div className="flex flex-col gap-4">
       <RunFilters
         options={
-          read.filters.state === "ready"
-            ? read.filters.data
+          read.data.filters.state === "ready"
+            ? read.data.filters.data
             : { apps: [], workflows: [] }
         }
       />
-      {read.runs.state === "ready" ? (
+      {current ? null : <LoadingLines lines={4} />}
+      {current && read.data.runs.state === "ready" ? (
         <RunsLog
           empty={filtered ? t`No runs match these filters.` : undefined}
           me={identity.userId}
-          model={read.model}
-          more={read.runs.data.more}
-          runs={read.runs.data.runs}
+          model={read.data.model}
+          more={read.data.runs.data.more}
+          runs={read.data.runs.data.runs}
         />
-      ) : (
-        <NotLoadedState page={read.runs} />
-      )}
+      ) : null}
+      {current && read.data.runs.state !== "ready" ? (
+        <NotLoadedState page={read.data.runs} />
+      ) : null}
     </div>
   );
 };
@@ -783,7 +800,7 @@ const Workflows = () => {
                 ) : (
                   <NotLoadedState page={page.today} />
                 )}
-                <Figures />
+                <Figures activity={page.activity} />
                 <RunsLogRead log={page.log} />
               </div>
             ) : null}
@@ -885,11 +902,13 @@ export const Route = createFileRoute("/_shell/workflows/")({
       key: JSON.stringify(filter),
       read: readRuns(core, filter),
     };
+    // The figures likewise: started now, taken by the page once.
+    const activity = loadFromCore(core, readActivity);
     const [lists, today] = await Promise.all([
       readLists(core),
       loadFromCore(core, async (session) => await session.workflows.today()),
     ]);
-    return { tab: "runs" as const, lists, today, log };
+    return { tab: "runs" as const, lists, today, log, activity };
   },
   component: Workflows,
 });
