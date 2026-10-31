@@ -133,12 +133,18 @@ const press = async (init: KeyboardEventInit): Promise<void> => {
   });
 };
 
-/** Opens the window with `keys`, once it has read the chats. */
+/** How long the window may take to open: the first time, its code loads first. */
+const openMs = 5000;
+
+/** Opens the window with `keys`, once it has loaded and read the chats. */
 const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
   await press(keys);
-  await vi.waitFor(() => {
-    expect(rows().length).toBeGreaterThan(0);
-  });
+  await vi.waitFor(
+    () => {
+      expect(rows().length).toBeGreaterThan(0);
+    },
+    { timeout: openMs }
+  );
 };
 
 /** Types `text` into the window's search, as a person would. */
