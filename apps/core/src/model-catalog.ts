@@ -13,6 +13,10 @@ import {
   aiProviders,
   compatibleModelNamePattern,
 } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderId,
+  AiProviderModel,
+} from "@grasp-os/shared/ai-providers";
 
 import { regionalPricesOf } from "./model-prices.ts";
 
@@ -166,6 +170,22 @@ export const parseModelRef = (ref: string): ModelRef | undefined => {
   // Own keys only, so `constructor` and the like are no model.
   const model = Object.hasOwn(catalog, id) ? catalog[id] : undefined;
   return model === undefined ? undefined : { provider, id, catalog: model };
+};
+
+/**
+ * The models an admin can choose of `provider`, by `<provider>/<model>`,
+ * as `parseModelRef` takes them, with pi's name for each; none for an
+ * OpenAI-compatible endpoint, whose models the organization names.
+ */
+export const catalogModelsOf = (provider: AiProviderId): AiProviderModel[] => {
+  if (provider === "openai-compatible") {
+    return [];
+  }
+  const catalog: Readonly<Record<string, Model<Api>>> = providers[provider];
+  return Object.entries(catalog).map(([id, model]) => ({
+    model: `${provider}/${id}`,
+    name: model.name,
+  }));
 };
 
 /**

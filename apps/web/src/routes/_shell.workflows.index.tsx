@@ -2,13 +2,13 @@ import type { App } from "@grasp-os/shared/apps";
 import { businessProcesses } from "@grasp-os/shared/business-processes";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { canBuild } from "@grasp-os/shared/roles";
+import { runFilterStatuses } from "@grasp-os/shared/run-filter";
+import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
 import type { WorkflowGoLiveWaiting } from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { runFilterStatuses } from "@grasp-os/shared/workflows";
 import type {
   RunActivity,
   RunFilter,
-  RunFilterStatus,
   RunsPage,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
