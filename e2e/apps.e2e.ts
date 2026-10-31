@@ -296,6 +296,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       settings: [
         "Workspace",
         "Members and roles",
+        // The organization's own AI provider keys and the models its calls use.
+        "AI providers",
         "Models",
         "AI spend",
         // Who can reach Stephen and what he may do for whom.
