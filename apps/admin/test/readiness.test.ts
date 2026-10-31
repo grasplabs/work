@@ -3,7 +3,7 @@
  * entry, written from how onboarding fails when nobody looked first: a
  * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
- * namespace, model spend undecided; and an optional feature left
+ * namespace, Grasp's AI on a provider it has no key for; and an optional feature left
  * unconfigured without saying so.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
@@ -96,7 +96,7 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        model_spend: "ready",
+        platform_ai: "ready",
         rooms: "not_configured",
         discord_bot: "ready",
         grasp_organization: "not_configured",
@@ -160,7 +160,7 @@ describe("Platform's Readiness", () => {
         release: "ready",
         secrets: "ready",
         deployer: "ready",
-        model_spend: "ready",
+        platform_ai: "ready",
       },
       blocking: 0,
       destination: `New organizations are placed in ${destinationId}, Grasp's shared destination.`,
@@ -186,16 +186,30 @@ describe("Platform's Readiness", () => {
     }).toStrictEqual({ deployer: "blocked", deployerWords: true });
   });
 
-  it("says every organization is held to the default model spend ceiling unless staff set another", async () => {
-    const read = await withVars(production, readiness);
+  it("says Grasp's AI isn't configured while Secrets Store lacks the chosen provider's key, naming it, without blocking onboarding", async () => {
+    const keyed = await withVars(production, readiness);
+    await emptyStoreSecret(env.ELEVENLABS_API_KEY, "ELEVENLABS_API_KEY");
+    const unspoken = await withVars(production, readiness);
+    await emptyStoreSecret(env.OPENAI_API_KEY, "OPENAI_API_KEY");
+    const unkeyed = await withVars(production, readiness);
 
     expect({
-      status: statuses(read).model_spend,
-      words: wordsOf(read, "model_spend"),
+      keyed: statuses(keyed).platform_ai,
+      unkeyed: statuses(unkeyed).platform_ai,
+      words: [
+        wordsOf(unspoken, "platform_ai"),
+        wordsOf(unkeyed, "platform_ai"),
+      ],
+      // Provisioning and deploys go on without it.
+      blocking: unkeyed.blocking - keyed.blocking,
     }).toStrictEqual({
-      status: "ready",
-      words:
-        "Every organization is held to a model spend ceiling of €250 a month, its gateway's budget, unless staff set another on its Setup.",
+      keyed: "ready",
+      unkeyed: "not_configured",
+      words: [
+        "Secrets Store has no ELEVENLABS_API_KEY, so speech isn't configured yet in any organization; everything else works. Add ELEVENLABS_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
+        "Secrets Store has no OPENAI_API_KEY and ELEVENLABS_API_KEY, so document conversion, transcription and speech aren't configured yet in any organization; everything else works. Add OPENAI_API_KEY and ELEVENLABS_API_KEY to the stage's 1Password Environment, then run Deploy platform. Or choose another provider on Platform → AI.",
+      ],
+      blocking: 0,
     });
   });
 

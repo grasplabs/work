@@ -29,6 +29,11 @@ import {
   adminSnapshotRequestSchema,
 } from "@grasp-os/shared/admin-snapshot";
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import {
+  aiStatusReportPath,
+  aiStatusReportPurpose,
+  aiStatusReportRequestSchema,
+} from "@grasp-os/shared/ai-status-report";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -383,6 +388,38 @@ const answerSummary = async (
   return Response.json(account.onboarding ?? noOnboarding);
 };
 
+/**
+ * What a client's core answers the admin's AI status request with, as
+ * core does (core's src/ai-status-report.ts): the account's report once
+ * the signature checks out, with the key its live version's auth secret
+ * gives, and the request parses; 403 otherwise.
+ */
+const answerAiStatus = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    aiStatusReportPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = aiStatusReportRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  return Response.json(account.ai ?? { providers: [] });
+};
+
 /** The `QUOTA_LIMITS` a version was deployed with, if one core takes. */
 const quotaLimitsOf = (version: VersionState) => {
   const bindings = z
@@ -679,6 +716,7 @@ const signedPosts: ReadonlyMap<
   [connectVersionPath, answerConnectVersion],
   [adminAskPath, answerAsk],
   [adminKickoffPath, answerKickoff],
+  [aiStatusReportPath, answerAiStatus],
 ]);
 
 /**
@@ -818,41 +856,6 @@ const accountRoutes: Route[] = [
       }
       account.lifecycles.set(bucket.name, json);
       return envelope(null);
-    },
-  },
-  {
-    method: "GET",
-    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
-    answer: ({ account, params }) => {
-      const gateway = account.gateways.find(({ id }) => id === params.id);
-      return gateway === undefined ? notFound() : envelope(gateway);
-    },
-  },
-  {
-    method: "POST",
-    path: /^\/ai-gateway\/gateways$/u,
-    answer: ({ account, json }) => {
-      const gateway = { authentication: false, ...json };
-      // One id per account: a second create of it is refused, as the API does.
-      if (account.gateways.some((each) => each.id === json?.id)) {
-        return refusal(400, 7001, "A gateway with this id already exists");
-      }
-      account.gateways.push(gateway);
-      return envelope(gateway);
-    },
-  },
-  {
-    method: "PUT",
-    path: /^\/ai-gateway\/gateways\/(?<id>[^/]+)$/u,
-    answer: ({ account, params, json }) => {
-      const index = account.gateways.findIndex(({ id }) => id === params.id);
-      if (index === -1) {
-        return notFound();
-      }
-      // An update replaces the gateway's settings, as the API does.
-      const gateway = { id: params.id, authentication: false, ...json };
-      account.gateways[index] = gateway;
-      return envelope(gateway);
     },
   },
 ];
@@ -1034,7 +1037,6 @@ export const fakeCloudflareApi = (token: string) => {
       buckets: [],
       fullBuckets: new Set(),
       lifecycles: new Map(),
-      gateways: [],
       zones: [],
       scripts: new Map(),
       namespaces: new Map(),
