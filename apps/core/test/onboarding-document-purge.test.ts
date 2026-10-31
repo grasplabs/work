@@ -11,7 +11,7 @@ import type { SessionApi } from "@grasp-os/shared/rpc";
 import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -27,6 +27,7 @@ import {
   answering,
   answeringWith as answeringWithRequests,
   approveAgreed,
+  holdAlarm,
 } from "./interview-link.ts";
 import type { Answer, ProviderReply } from "./model-provider.ts";
 import { intakeAlike } from "./onboarding-team.ts";
@@ -595,6 +596,11 @@ describe(
   "a document shared in the onboarding, purged from Knowledge",
   { timeout: 180_000 },
   () => {
+    // Each test draws step by step, as the alarm would: the store's own
+    // alarm, which agreeing and purging set, would otherwise race it for
+    // the drawing and the provider's replies (`holdAlarm`).
+    beforeEach(holdAlarm);
+
     it("takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns, and draws the work again", async () => {
       const { api: admin } = await signedInApi(idp, "admin");
       const word = sentinelOf();
@@ -934,6 +940,8 @@ describe(
   "what was drawn, as a purge and a new drawing cross",
   { timeout: 120_000 },
   () => {
+    beforeEach(holdAlarm);
+
     it("drops a work's checked difference when the work is drawn again", async () => {
       const word = sentinelOf();
       const { ids, tickets } = await ticketsNaming(word);
