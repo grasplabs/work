@@ -8983,6 +8983,10 @@ msgstr "Live, wird gemessen"
 msgid "Live: {who}, version {version}."
 msgstr "Live: {who}, Version {version}."
 
+#: src/policies/policy-editing.tsx
+msgid "Load it as it is now to edit it. What you changed here isn't kept."
+msgstr "Laden Sie sie so, wie sie jetzt ist, um sie zu bearbeiten. Was Sie hier geändert haben, wird nicht übernommen."
+
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Mehr laden"
@@ -8990,6 +8994,10 @@ msgstr "Mehr laden"
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Ältere laden"
+
+#: src/policies/policy-editing.tsx
+msgid "Load the current rule"
+msgstr "Aktuelle Regel laden"
 
 #: src/chat/builds.tsx
 msgid "Load the review again"
@@ -16616,6 +16624,10 @@ msgstr "Diese Richtlinie gibt es nicht mehr"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "This project isn't here any more."
 msgstr "Dieses Projekt gibt es nicht mehr."
+
+#: src/policies/policy-editing.tsx
+msgid "This rule changed since you started editing it"
+msgstr "Diese Regel hat sich geändert, seit Sie mit der Bearbeitung begonnen haben"
 
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"

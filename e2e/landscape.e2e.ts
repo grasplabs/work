@@ -227,6 +227,49 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
       status.getByRole("button", { name: "Active" })
     ).toHaveAttribute("aria-pressed", "true");
 
+    // Another admin changes the rule while this one edits it: the save is
+    // refused, the dialog says the rule changed, and loads it as it is
+    // now; saving from there goes through. The old draft is never sent
+    // again under the new revision.
+    await adminPage.getByRole("button", { name: "More for this rule" }).click();
+    await adminPage.getByRole("menuitem", { name: "Edit rule" }).click();
+    const editing = adminPage.getByRole("dialog", { name: "Edit the rule" });
+    const { rules: before } = await api.policies.book();
+    const meanwhile = before.find((each) => each.name === name);
+    if (meanwhile === undefined) {
+      throw new Error(`No rule ${name}`);
+    }
+    await api.policies.updateRule(
+      meanwhile.id,
+      {
+        name: meanwhile.name,
+        description: "Changed meanwhile",
+        conditions: meanwhile.conditions,
+        effect: meanwhile.effect,
+        policyId: meanwhile.policyId,
+        ...(meanwhile.excerpt === undefined
+          ? {}
+          : { excerpt: meanwhile.excerpt }),
+      },
+      meanwhile.revision
+    );
+    await editing.getByLabel("What it's for").fill("Changed here");
+    await editing.getByRole("button", { name: "Save" }).click();
+    await expect(
+      editing.getByText("This rule changed since you started editing it")
+    ).toBeVisible();
+    await expect(editing.getByRole("button", { name: "Save" })).toBeDisabled();
+    await editing
+      .getByRole("button", { name: "Load the current rule" })
+      .click();
+    await expect(editing.getByLabel("What it's for")).toHaveValue(
+      "Changed meanwhile"
+    );
+    await editing.getByLabel("What it's for").fill("Changed after reading it");
+    await editing.getByRole("button", { name: "Save" }).click();
+    await expect(editing).toHaveCount(0);
+    await expect(adminPage.getByText("Changed after reading it")).toBeVisible();
+
     await adminPage.getByRole("button", { name: "Grant an exception" }).click();
     await adminPage.getByLabel("Why").fill(reason);
     await adminPage.getByLabel("Until").fill("2099-01-31");

@@ -13,6 +13,12 @@ import type {
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -532,18 +538,22 @@ const useSaveRule = (rule?: PolicyRule) => {
   const router = useRouter();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
-  const save = async (draft: RuleDraft): Promise<boolean> => {
-    if (rule !== undefined) {
+  /** `revision`: the one an edit's draft was started from, never a later one. */
+  const save = async (
+    draft: RuleDraft,
+    revision?: number
+  ): Promise<boolean> => {
+    if (rule !== undefined && revision !== undefined) {
       const edit = ruleEditOf(draft);
       if (edit === undefined) {
         return false;
       }
-      // From the revision this page read: core refuses it once the rule
-      // changed since. Read again either way, so a refusal shows the rule
-      // as it is now.
+      // Core refuses it once the rule changed since the draft's revision.
+      // Read again either way, so a refusal shows the rule as it is now and
+      // the dialog sees its draft is stale.
       const edited = await run(
         async (session) =>
-          await session.policies.updateRule(rule.id, edit, rule.revision)
+          await session.policies.updateRule(rule.id, edit, revision)
       );
       await router.invalidate();
       return edited !== undefined;
@@ -838,17 +848,24 @@ const EditRuleDialog = ({
   const [draft, setDraft] = useState<RuleDraft>(() =>
     draftOf(rule, rule.policyId)
   );
+  // The revision the draft was started from: a save always sends it, so a
+  // draft of an older rule is never written over a newer one.
+  const [from, setFrom] = useState(rule.revision);
+  // The rule changed since (another admin, or a refused save read it
+  // again): the draft is of a rule that isn't there any more.
+  const stale = rule.revision !== from;
   const { busy, failure, save } = useSaveRule(rule);
   const [confirming, setConfirming] = useState(false);
-  const canSave = canSaveRule(draft) && !busy;
+  const canSave = canSaveRule(draft) && !busy && !stale;
   // Made to block while it acts: from the save on, apps are blocked. The
-  // page's rule is current as the save writes, or core refuses the save.
+  // rule as the draft was started from it, which is the rule as the save
+  // writes, or core refuses the save.
   const startsBlocking =
     rule.status === "active" &&
     rule.effect !== "block" &&
     draft.effect === "block";
   const commit = async (): Promise<void> => {
-    if (await save(draft)) {
+    if (await save(draft, from)) {
       onOpenChange(false);
     }
   };
@@ -874,14 +891,40 @@ const EditRuleDialog = ({
               <Trans>Edit the rule</Trans>
             </DialogTitle>
           </DialogHeader>
+          {stale ? (
+            <Alert variant="attention">
+              <AlertTitle>
+                <Trans>This rule changed since you started editing it</Trans>
+              </AlertTitle>
+              <AlertDescription>
+                <Trans>
+                  Load it as it is now to edit it. What you changed here
+                  isn&apos;t kept.
+                </Trans>
+              </AlertDescription>
+              <AlertAction>
+                <Button
+                  onClick={() => {
+                    setDraft(draftOf(rule, rule.policyId));
+                    setFrom(rule.revision);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  <Trans>Load the current rule</Trans>
+                </Button>
+              </AlertAction>
+            </Alert>
+          ) : null}
           <RuleForm
-            disabled={busy}
+            disabled={busy || stale}
             draft={draft}
             fresh={false}
             onChange={setDraft}
             policies={policies}
           />
-          <ErrorText>{failure}</ErrorText>
+          {stale ? null : <ErrorText>{failure}</ErrorText>}
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>
               <Trans>Cancel</Trans>
@@ -937,12 +980,14 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
   const { t, i18n } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [confirming, setConfirming] = useState(false);
-  const turn = async (status: RuleStatus): Promise<void> => {
+  // The revision the "Start blocking?" warning was shown for: confirming
+  // turns the rule from that one, so a change since is refused, never
+  // confirmed unseen.
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const turn = async (status: RuleStatus, from: number): Promise<void> => {
     await run(async (session) => {
       await changeThenRefresh(
-        async () =>
-          await session.policies.setRuleStatus(rule.id, status, rule.revision),
+        async () => await session.policies.setRuleStatus(rule.id, status, from),
         async () => {
           await router.invalidate();
         }
@@ -960,9 +1005,9 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
             return;
           }
           if (next.data === "active" && rule.effect === "block") {
-            setConfirming(true);
+            setConfirming(rule.revision);
           } else {
-            void turn(next.data);
+            void turn(next.data, rule.revision);
           }
         }}
         size="sm"
@@ -976,7 +1021,14 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
         ))}
       </ToggleGroup>
       <ErrorText>{failure}</ErrorText>
-      <AlertDialog onOpenChange={setConfirming} open={confirming}>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirming(null);
+          }
+        }}
+        open={confirming !== null}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -995,8 +1047,10 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                setConfirming(false);
-                void turn("active");
+                if (confirming !== null) {
+                  void turn("active", confirming);
+                }
+                setConfirming(null);
               }}
             >
               <Trans>Start blocking</Trans>
@@ -1385,9 +1439,12 @@ export const PolicyActions = ({ policy }: { policy: PolicyDocument }) => {
       await session.policies.removePolicy(policy.id);
       return true;
     });
-    if (removed === true) {
-      await leave("/policies");
+    if (removed !== true) {
+      // Refused: read the page again, so a retry is of the policy as it is.
+      await router.invalidate();
+      return;
     }
+    await leave("/policies");
   };
   return (
     <div className="flex flex-col items-end gap-1">
@@ -1468,18 +1525,24 @@ export const RuleActions = ({
 }) => {
   const { t } = useLingui();
   const leave = useLeaveAndReload();
+  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [editing, setEditing] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  // The revision the rule had when its removal was asked: confirming
+  // removes that one, and a rule changed since is refused, not removed unseen.
+  const [removing, setRemoving] = useState<number | null>(null);
   const { name } = rule;
-  const remove = async (): Promise<void> => {
+  const remove = async (from: number): Promise<void> => {
     const removed = await run(async (session) => {
-      await session.policies.removeRule(rule.id, rule.revision);
+      await session.policies.removeRule(rule.id, from);
       return true;
     });
-    if (removed === true) {
-      await leave("/policies");
+    if (removed !== true) {
+      // Refused: read the rule again, so a retry is of the rule as it is.
+      await router.invalidate();
+      return;
     }
+    await leave("/policies");
   };
   return (
     <div className="flex flex-col items-end gap-1">
@@ -1508,7 +1571,7 @@ export const RuleActions = ({
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
-                setRemoving(true);
+                setRemoving(rule.revision);
               }}
               variant="destructive"
             >
@@ -1529,12 +1592,18 @@ export const RuleActions = ({
       ) : null}
       <RemoveDialog
         description={t`Its exceptions go with it. This can't be undone.`}
-        onOpenChange={setRemoving}
-        onRemove={() => {
-          setRemoving(false);
-          void remove();
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoving(null);
+          }
         }}
-        open={removing}
+        onRemove={() => {
+          if (removing !== null) {
+            void remove(removing);
+          }
+          setRemoving(null);
+        }}
+        open={removing !== null}
         title={t`Delete ${name}?`}
       />
     </div>

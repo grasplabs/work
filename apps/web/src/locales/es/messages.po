@@ -8983,6 +8983,10 @@ msgstr "En marcha, en medición"
 msgid "Live: {who}, version {version}."
 msgstr "En producción: {who}, versión {version}."
 
+#: src/policies/policy-editing.tsx
+msgid "Load it as it is now to edit it. What you changed here isn't kept."
+msgstr "Cárguela tal como está ahora para editarla. Lo que cambió aquí no se conserva."
+
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Cargar más"
@@ -8990,6 +8994,10 @@ msgstr "Cargar más"
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Cargar anteriores"
+
+#: src/policies/policy-editing.tsx
+msgid "Load the current rule"
+msgstr "Cargar la regla actual"
 
 #: src/chat/builds.tsx
 msgid "Load the review again"
@@ -16616,6 +16624,10 @@ msgstr "Esta política ya no está aquí"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "This project isn't here any more."
 msgstr "Este proyecto ya no está aquí."
+
+#: src/policies/policy-editing.tsx
+msgid "This rule changed since you started editing it"
+msgstr "Esta regla cambió desde que empezó a editarla"
 
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "This rule is not here any more"
