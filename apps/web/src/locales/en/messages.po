@@ -451,6 +451,14 @@ msgstr "{count, plural, one {Adding up the hours of # workflow} other {Adding up
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Back to the question} other {Back to the # questions}}"
+
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {once} other {# times}}"
@@ -3408,6 +3416,7 @@ msgstr "Away these weeks. Nothing waits for {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -6414,6 +6423,14 @@ msgstr "Grasp access"
 msgid "Grasp added a widget to your dashboard."
 msgstr "Grasp added a widget to your dashboard."
 
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp asks"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp asks, {number} of {total}"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
 #: src/core.ts
@@ -8807,6 +8824,7 @@ msgstr "Newest first"
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Next"
@@ -12487,6 +12505,7 @@ msgstr "Self-approved"
 msgid "Self-approved: nobody else could approve it"
 msgstr "Self-approved: nobody else could approve it"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Send"
@@ -13004,6 +13023,7 @@ msgstr "Someone no longer in your organization"
 msgid "Someone's own work"
 msgstr "Someone's own work"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Something else"
@@ -15429,6 +15449,7 @@ msgstr "Two answers"
 msgid "Type"
 msgstr "Type"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Type instead"
@@ -17369,6 +17390,7 @@ msgstr "Your AI provider is refusing your key. Ask your admin to check or replac
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"

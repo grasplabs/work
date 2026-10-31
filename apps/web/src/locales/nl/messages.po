@@ -451,6 +451,14 @@ msgstr "{count, plural, one {De uren van # workflow optellen} other {De uren van
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antwoorden steunen op # bron} other {Antwoorden steunen op # bronnen}}"
 
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Stelde je een vraag} other {Stelde je # vragen}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}}"
+
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {één keer} other {# keer}}"
@@ -3408,6 +3416,7 @@ msgstr "Deze weken afwezig. Niets wacht op {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -6414,6 +6423,14 @@ msgstr "Toegang van Grasp"
 msgid "Grasp added a widget to your dashboard."
 msgstr "Grasp heeft een widget aan je dashboard toegevoegd."
 
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp vraagt"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp vraagt, {number} van {total}"
+
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
 #: src/core.ts
@@ -8807,6 +8824,7 @@ msgstr "Nieuwste eerst"
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Nieuwste item eerst. Er is niets verzonden of gewijzigd: elke aanroep is beantwoord met wat jij hebt opgegeven."
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Volgende"
@@ -12487,6 +12505,7 @@ msgstr "Zelf goedgekeurd"
 msgid "Self-approved: nobody else could approve it"
 msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Versturen"
@@ -13004,6 +13023,7 @@ msgstr "Iemand die niet meer bij je organisatie hoort"
 msgid "Someone's own work"
 msgstr "Iemands eigen werk"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Iets anders"
@@ -15429,6 +15449,7 @@ msgstr "Twee antwoorden"
 msgid "Type"
 msgstr "Type"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Liever typen"
@@ -17369,6 +17390,7 @@ msgstr "Je AI-aanbieder weigert je sleutel. Vraag je beheerder hem te controlere
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Je AI-aanbieder antwoordt niet. Meestal is dat een storing aan hun kant; probeer het over een tijdje opnieuw."
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
