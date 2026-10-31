@@ -9,33 +9,44 @@ import type { ListPrices } from "./model-prices.ts";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is priced per character it is asked to say,
-// and each transcription model per second it hears, at a price never below
-// what the provider bills for it, so the ledger's reservation always
-// covers the bill.
+// models. Each speech model is priced by what the provider bills for it:
+// the text it is asked to say, per character, and the audio it answers
+// with, per millisecond, the ledger reserving the longest a line may play
+// and charging how long it did. Each transcription model is priced per
+// second it hears, at a price never below what the provider bills for it.
+// Grasp pays for these on its own keys: no organization's budget holds
+// them, but the ledger records what each cost, for the spend overview.
 
 /**
- * OpenAI's prices for text to speech, in US dollars per 1,000 characters.
- * `tts-1` and `tts-1-hd` are billed per character, $15 and $30 a million.
- * GPT-4o mini TTS is billed per token, $0.60 a million of text in and $12
- * of audio out, about $0.015 a minute of speech (OpenAI's pricing page,
- * read on 2026-10-29): at 600 characters a minute, slower than anyone
- * speaks, $0.025 per 1,000; charged $0.03, so slow lines are covered too.
+ * OpenAI's prices for text to speech (OpenAI's pricing page, read on
+ * 2026-10-31), in US dollars: the text in, per million characters, and
+ * the audio out, per minute. GPT-4o mini TTS is billed per token: $0.60 a
+ * million of text in, never more tokens than characters in the languages
+ * an interview is held in, and $12 a million of audio out, which OpenAI
+ * puts at $0.015 a minute of speech. `tts-1` and `tts-1-hd` are billed
+ * per character alone, $15 and $30 a million, nothing for the audio.
  */
-const dollarsPer1000Chars = {
-  "gpt-4o-mini-tts": 0.03,
-  "tts-1": 0.015,
-  "tts-1-hd": 0.03,
+const speechPrices = {
+  "gpt-4o-mini-tts": { perMillionChars: 0.6, perMinuteAudio: 0.015 },
+  "tts-1": { perMillionChars: 15, perMinuteAudio: 0 },
+  "tts-1-hd": { perMillionChars: 30, perMinuteAudio: 0 },
 } as const;
+
+/**
+ * The longest a line plays, per character it says, in ms: five
+ * characters a second, slower than anyone speaks. What the ledger
+ * reserves for a line's audio before it is said.
+ */
+export const speechMsPerCharMost = 200;
 
 /** A speech model the gateway offers. */
 export interface VoiceRef {
   provider: (typeof speechProviders)[number];
-  id: keyof typeof dollarsPer1000Chars;
+  id: keyof typeof speechPrices;
 }
 
 const isVoiceModel = (id: string): id is VoiceRef["id"] =>
-  Object.hasOwn(dollarsPer1000Chars, id);
+  Object.hasOwn(speechPrices, id);
 
 const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
   speechProviders.some((one) => one === provider);
@@ -56,15 +67,35 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
 };
 
 /**
- * A speech model's prices in the shape the ledger pins: per million
- * characters, as the input a request sends. Its answer, the audio, is
- * what the characters pay for, so a request counts no output: it is
- * priced the same, and never charged.
+ * A speech model's prices in the shape the ledger pins: its input per
+ * million characters of text it is asked to say, its output per million
+ * ms of audio it answers with. A model that bills nothing for the audio
+ * is priced its input rate for it too, as the ledger takes no free rate,
+ * and is never charged any (`speechCountsOf`).
  */
 export const voicePricesOf = ({ id }: VoiceRef): ListPrices => {
-  const perMillion = dollarsPer1000Chars[id] * 1000;
-  return { input: perMillion, output: perMillion, cacheRead: 0, cacheWrite: 0 };
+  const { perMillionChars, perMinuteAudio } = speechPrices[id];
+  const perMillionMs = (perMinuteAudio / 60_000) * 1_000_000;
+  return {
+    input: perMillionChars,
+    output: perMillionMs > 0 ? perMillionMs : perMillionChars,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
 };
+
+/**
+ * What a line counts as, at `voicePricesOf`'s rates: its characters in,
+ * and the ms of audio it answered with, for a model that bills its audio.
+ */
+export const speechCountsOf = (
+  { id }: VoiceRef,
+  characters: number,
+  audioMs: number
+): { input: number; output: number } => ({
+  input: characters,
+  output: speechPrices[id].perMinuteAudio > 0 ? Math.ceil(audioMs) : 0,
+});
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -123,9 +154,10 @@ export const hearingPricesOf = ({ id }: HearingRef): ListPrices => {
 };
 
 /**
- * Characters a line is charged as: its UTF-16 length, never fewer than
- * the characters (code points) a provider counts, so the ledger's
- * reservation is never below what the line is billed.
+ * Characters a line is charged as, its instructions with it: their UTF-16
+ * length, never fewer than the characters (code points) or tokens a
+ * provider counts, so the ledger's reservation is never below what the
+ * line's text is billed.
  */
 export const charactersOf = (text: string): number => text.length;
 

@@ -15,7 +15,7 @@ import { outcome } from "./sign-in.ts";
 
 // Speech through the model gateway: Grasp's own speech feature
 // (@grasp-os/shared/platform-ai), OpenAI's by default, says a line, judged
-// by the deployment's rules, charged per character against its budgets and
+// by the deployment's rules, charged its text and its audio against its budgets and
 // audited like any model call, through connect with Grasp's own key.
 // OpenAI is the outside system: a fake behind connect's fetch
 // (test/ai-providers-fake.ts), which says 25 ms of silence a character.
@@ -27,8 +27,18 @@ const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 /** Stephen's voice by default: an OpenAI voice. */
 const voice = "cedar";
 
-/** At GPT-4o mini TTS's $0.03 per 1,000 characters: 30 micros each. */
-const microsPerChar = 30;
+/**
+ * What a line of `characters` costs at GPT-4o mini TTS's prices, in
+ * micros: $0.60 a million characters of text in (0.6 micros each), and
+ * $0.015 a minute of audio out (0.25 micros a ms), at the fake's 25 ms of
+ * audio a character.
+ */
+const lineMicrosOf = (characters: number): number =>
+  characters * 0.6 + characters * 25 * 0.25;
+
+/** The same, as the ledger charges it: whole micros, rounded up. */
+const chargedMicrosOf = (characters: number): number =>
+  Math.ceil(lineMicrosOf(characters));
 
 /**
  * A line of 18 characters no other test says, so what reached the
@@ -245,13 +255,13 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the line's characters against the budgets, and audits it as a platform call", async () => {
+  it("charges the line's text and the audio it was said in, and audits it as a platform call", async () => {
     const { gatewayEnv, month } = withGateway({
       budgets: { user: { limit: 10 } },
     });
     const person = newPerson();
     const line = newLine();
-    const lineMicros = line.length * microsPerChar;
+    const lineMicros = lineMicrosOf(line.length);
 
     await stephen(gatewayEnv, person).speak({
       text: line,
@@ -261,7 +271,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
 
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: lineMicros,
+      spentMicros: chargedMicrosOf(line.length),
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
@@ -273,11 +283,13 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         purpose: "onboarding.speech",
         outcome: "answered",
         characters: line.length,
+        // The fake says 25 ms a character: the audio charged, as played.
+        audioMs: line.length * 25,
         transport: "connect",
         credential: "platform",
         ledger: "settled",
         ledgerRequests: 1,
-        ledgerCharged: lineMicros / 1_000_000,
+        ledgerCharged: chargedMicrosOf(line.length) / 1_000_000,
       },
     });
     // Never the line itself.
@@ -285,7 +297,8 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("refuses a line its budget has no room for, sending nothing", async () => {
-    // Less than a cent: less than a line of 600 characters costs (1.8¢).
+    // Less than a cent: less than the most a line of 600 characters may
+    // cost, its audio played at its slowest (3¢).
     const { gatewayEnv } = withGateway({
       budgets: { user: { limit: 0.01 } },
     });
@@ -415,7 +428,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     expect(speech.words).toHaveLength(3);
     await expect(carrying(line)).resolves.toHaveLength(2);
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: line.length * microsPerChar,
+      spentMicros: chargedMicrosOf(line.length),
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);

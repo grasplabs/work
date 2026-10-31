@@ -67,8 +67,8 @@ export const PRICES: Record<
   haiku: { tokensIn: 1, tokensOut: 5, minute: 0 },
   // OpenAI's list prices (developers.openai.com/api/docs/pricing, October 2026). gpt-4o-mini-tts:
   // $0.60 a million text tokens in, $12 a million audio tokens out, which OpenAI estimates at
-  // $0.015 a minute of speech. gpt-4o-transcribe: $2.50 a million audio tokens in, $10 a million
-  // text tokens out, estimated on that page at $0.006 a minute.
+  // $0.015 a minute of speech. gpt-4o-transcribe: $6 a million audio tokens in ($2.50 a million
+  // text tokens in), $10 a million text tokens out, estimated on that page at $0.006 a minute.
   voice: { tokensIn: 0, tokensOut: 0, minute: 0.015 },
   ears: { tokensIn: 0, tokensOut: 0, minute: 0.006 },
   // Not known: its tokens count, its spend stays out of the total.

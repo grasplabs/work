@@ -141,6 +141,8 @@ import type {
 } from "./model-transport.ts";
 import {
   charactersOf,
+  speechCountsOf,
+  speechMsPerCharMost,
   hearingPricesOf,
   parseHearingRef,
   parseVoiceRef,
@@ -3659,6 +3661,8 @@ const speechMime = "audio/wav";
 interface SpeechRecord {
   /** Characters charged; 0 when the provider said nothing. */
   characters: number;
+  /** Ms of audio charged; 0 when the provider said nothing or bills none. */
+  audioMs: number;
   cost: number;
   logId: string | undefined;
   outcome: Outcome;
@@ -3703,6 +3707,7 @@ const speechEntry = (
       status: recorded.status ?? null,
       errorType: recorded.errorType ?? null,
       characters: recorded.characters,
+      audioMs: recorded.audioMs,
       voice: call.voice,
       language: call.language,
       ledger: recorded.ledger.state,
@@ -3728,6 +3733,7 @@ const speechEntry = (
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
+  audioMs: Number.MAX_SAFE_INTEGER,
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
   outcome: "invalid_output",
@@ -3744,8 +3750,10 @@ interface SpeechRoute extends Admitting {
   price: PinnedPrice;
   /** Sends the line once, as the ledger admitted it (`id`). */
   send: (id: string, limit: Deadline) => Promise<Response>;
-  /** What the line is charged as (`charactersOf`). */
+  /** What the line's text is charged as (`charactersOf`). */
   characters: number;
+  /** The longest its audio may play, which the ledger reserves for. */
+  audioMsMost: number;
 }
 
 /**
@@ -3805,7 +3813,11 @@ const admitSpeech = async (
     return await refuse(env, call, { code: "model.unpriced" });
   }
   const place = crypto.randomUUID();
-  const characters = charactersOf(call.text);
+  // The instructions are text the model reads too, billed with the line.
+  const characters =
+    charactersOf(call.text) + charactersOf(call.instructions ?? "");
+  const audioMsMost = characters * speechMsPerCharMost;
+  const most = speechCountsOf(ref, characters, audioMsMost);
   const body = JSON.stringify({
     model: ref.id,
     input: call.text,
@@ -3832,9 +3844,10 @@ const admitSpeech = async (
         { ledgerRequest: id, endsAt: limit.endsAt, signal: limit.signal }
       ),
     characters,
-    // The line's characters are all it is billed for, known before it is
-    // sent: what the ledger reserves is what it charges.
-    bound: () => ({ inputTokens: characters, outputTokens: 0 }),
+    audioMsMost,
+    // Its text, known before it is sent, and the longest its audio may
+    // play: settled to how long it did once it is said (`heardSpeech`).
+    bound: () => ({ inputTokens: most.input, outputTokens: most.output }),
     perRequest: undefined,
     scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
       scopesFor(rules.budgets, call, lineageRequests)
@@ -3938,49 +3951,65 @@ const sendSpeech = async (
 const readSpeech = async (
   answered: Response,
   text: string
-): Promise<Speech | undefined> => {
+): Promise<{ speech: Speech | undefined; audioMs: number }> => {
   const pcm = new Uint8Array(await answered.arrayBuffer());
+  const audioMs = pcmMs(pcm.byteLength);
   if (pcm.byteLength === 0 || pcm.byteLength % speechPcm.bytesPerSample !== 0) {
-    return undefined;
+    return { speech: undefined, audioMs };
   }
   return {
-    audio: wavOf(pcm, speechPcm.sampleRate),
-    mime: speechMime,
-    words: wordsTimed(text, pcmMs(pcm.byteLength)),
+    speech: {
+      audio: wavOf(pcm, speechPcm.sampleRate),
+      mime: speechMime,
+      words: wordsTimed(text, audioMs),
+    },
+    audioMs,
   };
 };
 
-/** A line's characters as the ledger counts them: all of them input. */
-const characterCounts = (characters: number): TokenCounts => ({
-  input: characters,
-  output: 0,
+/** A line as the ledger counts it: its characters in, its audio out. */
+const speechCounts = (
+  ref: VoiceRef,
+  characters: number,
+  audioMs: number
+): TokenCounts => ({
+  ...speechCountsOf(ref, characters, audioMs),
   cacheRead: 0,
   cacheWrite: 0,
 });
 
 /**
  * The line the provider answered with, read, and its provider request
- * settled: charged the line's characters, which the provider bills once
- * it answered, whether its answer could be read or not.
+ * settled: charged the line's characters and how long its audio played,
+ * which the provider bills once it answered, whether its answer could be
+ * read or not; the longest it may play when how long isn't known (cut
+ * off while it came in).
  */
 const heardSpeech = async (
   route: SpeechRoute,
   { answered, pending }: SpeechSent
-): Promise<{ speech: Speech | undefined; settled: RequestSettled[] }> => {
+): Promise<{
+  speech: Speech | undefined;
+  audioMs: number;
+  settled: RequestSettled[];
+}> => {
   if (answered === undefined || pending === undefined) {
-    return { speech: undefined, settled: [] };
+    return { speech: undefined, audioMs: 0, settled: [] };
   }
-  let speech: Speech | undefined = undefined;
+  let read: { speech: Speech | undefined; audioMs: number } = {
+    speech: undefined,
+    audioMs: route.audioMsMost,
+  };
   try {
-    speech = await readSpeech(answered, route.call.text);
+    read = await readSpeech(answered, route.call.text);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
   }
   const settled = await settleAdmitted(route, pending, {
     by: "usage",
-    tokens: characterCounts(route.characters),
+    tokens: speechCounts(route.ref, route.characters, read.audioMs),
   });
-  return { speech, settled: [settled] };
+  return { ...read, settled: [settled] };
 };
 
 /** How a line ended, as the audit log records it. */
@@ -4011,10 +4040,13 @@ const recordSpeech = async (
     outcome,
     stopped,
     ledger,
+    audioMs,
   }: {
     outcome: Outcome;
     stopped: Stopped | undefined;
     ledger: Ledgered;
+    /** How long the line's audio played, as it was charged. */
+    audioMs: number;
   }
 ): Promise<void> => {
   const { env, call } = route;
@@ -4035,12 +4067,14 @@ const recordSpeech = async (
     });
   }
   const characters = said ? route.characters : 0;
+  const counts = speechCounts(route.ref, characters, said ? audioMs : 0);
   await keepAuditEvent(
     env,
     drizzle(env.DB),
     speechEntry(call, route.ref, route.judged, {
       characters,
-      cost: costDollars(route.price, characterCounts(characters)),
+      audioMs: counts.output,
+      cost: costDollars(route.price, counts),
       logId: providerLogIdOf(sent.answered?.headers),
       outcome,
       status,
@@ -4333,7 +4367,7 @@ const speakLine = async (
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const { speech, settled } = await heardSpeech(route, sent);
+    const { speech, audioMs, settled } = await heardSpeech(route, sent);
     const ledger = ledgerOf([...sent.settled, ...settled]);
     const { held } = sent;
     // Held back before any request was sent: a refusal, and nothing else;
@@ -4343,7 +4377,7 @@ const speakLine = async (
     }
     const stopped = limit.stopped();
     const outcome = speechOutcome(speech, sent.pending !== undefined, stopped);
-    await recordSpeech(route, sent, { outcome, stopped, ledger });
+    await recordSpeech(route, sent, { outcome, stopped, ledger, audioMs });
     if (held !== undefined) {
       return await refuse(env, call, held);
     }
