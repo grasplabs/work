@@ -42,9 +42,6 @@ export type InboxKind =
   | "confirmResult"
   | "conflict"
   | "openQuestion"
-  | "reviewPolicy"
-  | "watchingRule"
-  | "exceptionEnding"
   | "unknownAiTool"
   | "signInAgain"
   | "externalDomain"
@@ -111,7 +108,7 @@ export interface InboxItem {
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group = "all" | "workflows" | "brain" | "policies" | "apps";
+export type Group = "all" | "workflows" | "brain" | "apps";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   checkDrawing: "workflows",
@@ -121,9 +118,6 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   confirmResult: "workflows",
   conflict: "brain",
   openQuestion: "brain",
-  reviewPolicy: "policies",
-  watchingRule: "policies",
-  exceptionEnding: "policies",
   unknownAiTool: "apps",
   signInAgain: "apps",
   externalDomain: "apps",

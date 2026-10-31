@@ -542,7 +542,6 @@ const sources: Source[] = [
     who: "COO",
     how: "Upload",
     step: 2,
-    policyId: "policy-ai-data",
   },
   {
     id: "src-tools-decision",
@@ -1022,26 +1021,5 @@ export const testWorkspace = (): Workspace => ({
       permissions: [],
     },
     ...extraApps,
-  ],
-  policies: [
-    {
-      id: "policy-ai-data",
-      title: "AI and data guideline",
-      uploadedAt: "2026-09-05T10:12",
-      status: "published",
-      summary: "What AI tools may do with client data.",
-      proposals: [
-        {
-          excerpt: "Client data stays in the EU.",
-          decision: "accepted",
-        },
-        {
-          excerpt: "A new AI tool is approved by the COO.",
-          decision: "open",
-        },
-      ],
-      unchecked: [{ excerpt: "Staff are trained once a year." }],
-      publishedAt: "2026-09-08T09:00",
-    },
   ],
 });

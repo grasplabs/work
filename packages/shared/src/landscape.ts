@@ -2,11 +2,12 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 
-// The application landscape (GRA-539): the apps a company's people use,
-// as its identity provider records them, read through a read-only admin
-// connection of their own, apart from the suite's mail, calendar and
-// files. Connect reads the provider and answers bounded rows; core keeps
-// them and serves the Landscape.
+// The application landscape's admin connection (GRA-539): the apps a
+// company's people use, as its identity provider records them, read
+// through a read-only connection of its own, apart from the suite's mail,
+// calendar and files. Connect reads the provider and answers bounded
+// rows. The Landscape page and core's sync of it were removed
+// (2026-10-31); this is connect's side of it only.
 
 /**
  * The connections the landscape reads, one per suite: Microsoft Entra's
@@ -28,10 +29,6 @@ export const landscapeLimits = {
   grantsPerRead: 100,
   /** Provider requests one read may send. */
   requestsPerRead: 20,
-  /** Reads one sync makes at most: a sync that reaches it is partial. */
-  readsPerSync: 200,
-  /** Reads one clock run makes, so a sync spreads over runs. */
-  readsPerRun: 10,
   /** Longest cursor connect hands back. */
   cursorLength: 4096,
 } as const;
@@ -89,118 +86,6 @@ export const landscapeReadRequestSchema = z.strictObject({
   cursor: z.string().min(1).max(landscapeLimits.cursorLength).nullable(),
 });
 export type LandscapeReadRequest = z.input<typeof landscapeReadRequestSchema>;
-
-/**
- * How long a person's grant is kept once it was last seen: a default
- * Nick can change (GRA-539, decision 4). An app goes the same way.
- */
-export const landscapeRetentionDays = 90;
-
-/** How new an app is, while it counts as new. */
-export const landscapeNewAppDays = 7;
-
-/** What may need an admin's look at an app, each saying why. */
-export const landscapeSignals = [
-  /** Its publisher isn't verified by the provider. */
-  "unverified_publisher",
-  /** A person, not an admin, gave it mail, files, chat or directory writes. */
-  "person_high_privilege",
-  /** First seen within `landscapeNewAppDays`. */
-  "new_app",
-  /** People use it, and no admin consented to it for everyone. */
-  "no_admin_consent",
-] as const;
-export type LandscapeSignal = (typeof landscapeSignals)[number];
-
-/**
- * Whether `scope` reaches a person's mail, files, chats, calendars or
- * contacts, or writes the directory: what a person shouldn't give an app
- * alone.
- */
-export const isHighPrivilegeScope = (scope: string): boolean =>
-  /^(?:Mail|MailboxSettings|Files|Sites|Notes|Chat|ChatMessage|ChannelMessage|Calendars|Contacts|EWS|IMAP|POP|SMTP)\./iu.test(
-    scope
-  ) ||
-  // A person's own profile (`User.ReadWrite`) is theirs to give; anyone
-  // else's, or the directory's, isn't.
-  /^(?:Directory|Group|GroupMember|Application|AppRoleAssignment|DelegatedPermissionGrant|RoleManagement)\.ReadWrite/iu.test(
-    scope
-  ) ||
-  // The signed-in person's own rights over the directory: an admin's write.
-  /^Directory\.AccessAsUser\./iu.test(scope) ||
-  /^User\.ReadWrite\./iu.test(scope);
-
-/** An app of the landscape, as anyone in the organization may see it. */
-export interface LandscapeAppSummary {
-  connectionId: string;
-  /** Its client ID at the provider. */
-  appId: string;
-  name: string;
-  /** As the provider verified it: the only publisher a vendor is. */
-  publisher: string | null;
-  /** The name an unverified app gives its publisher: shown as unverified only. */
-  unverifiedPublisher: string | null;
-  verified: boolean;
-  /** ISO 8601. */
-  firstSeen: string;
-  lastSeen: string;
-  /** People who granted it access for themselves, as last seen: a count only. */
-  people: number;
-  /** Whether an admin consented to it for everyone, as last seen. */
-  adminConsented: boolean;
-  /** What it was granted, by anyone, as last seen. */
-  scopes: string[];
-  signals: LandscapeSignal[];
-}
-
-/** One person who granted an app access, for admins only. */
-export interface LandscapePerson {
-  /** Their ID at the provider. */
-  personId: string;
-  name: string | null;
-  /** Their Grasp user, when they sign in to Grasp with that account. */
-  userId: string | null;
-  scopes: string[];
-  firstSeen: string;
-  lastSeen: string;
-}
-
-/** A landscape connection's last sync, for admins. */
-export interface LandscapeSyncStatus {
-  connectionId: string;
-  /** Whether the connection is read, or needs an admin to connect it again. */
-  connection: "active" | "needs_reauth";
-  state: "running" | "done" | "partial" | "failed" | null;
-  reason: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
-  /**
-   * When the last sync that read everything started: how fresh what the
-   * landscape counts is. Null before any did.
-   */
-  wholeAt: string | null;
-}
-
-/** The application landscape, over `/rpc`. */
-export interface LandscapeApi {
-  /** Every app the landscape knows: anyone in the organization. */
-  apps: () => Promise<LandscapeAppSummary[]>;
-  /** Who granted one app access: admins only, and audited. */
-  people: (connectionId: string, appId: string) => Promise<LandscapePerson[]>;
-  /**
-   * The landscape connections whose last sync stopped at its limit or
-   * failed, so the apps found through them may be incomplete: anyone, by
-   * connection ID only (as `apps` names them), never why.
-   */
-  incomplete: () => Promise<string[]>;
-  /** The landscape connections' syncs: admins only. */
-  status: () => Promise<LandscapeSyncStatus[]>;
-  /**
-   * Starts connecting the landscape's Microsoft connection: the provider
-   * URL to send the admin's browser to. Admins only.
-   */
-  connect: (request: { returnTo?: string }) => Promise<{ url: string }>;
-}
 
 /** Why a landscape read didn't answer. */
 export const landscapeErrors = defineErrorFamily({

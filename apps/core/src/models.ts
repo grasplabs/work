@@ -555,13 +555,6 @@ const sessionShape = {
        */
       z.strictObject({ platform: z.literal("brain_recall") }),
       /**
-       * Core's own reading of a policy the company uploaded (policies.ts):
-       * its text, judged as onboarding's is, as carrying sensitive data,
-       * made for the admin who uploaded it, on their budget. Only core's
-       * own code makes such a call.
-       */
-      z.strictObject({ platform: z.literal("policy_reading") }),
-      /**
        * Core's own sorting of a request someone made of Stephen in a chat
        * app (channels/request-sorting.ts), from their words and his
        * answer, into the company's topics; and its proposals for what an

@@ -191,6 +191,18 @@ const transient = (owner: string, note?: string): StateEntry => ({
   ...(note === undefined ? {} : { note }),
 });
 
+/**
+ * A table of a removed feature (Policies, the Landscape), kept only until
+ * the release that drops it: nothing reads or writes it, and the export
+ * leaves it behind.
+ */
+const retired: StateEntry = {
+  owner: `${core}db/core/schema.ts`,
+  kind: "derived",
+  export: "cache",
+  note: "A removed feature's table, kept only until the release that drops it.",
+};
+
 const cache = (owner: string, note?: string): StateEntry => ({
   owner,
   kind: "derived",
@@ -243,9 +255,9 @@ const coreDb: D1State = {
     ),
     organizations: exported(auth),
     org_settings: exported(`${core}org-settings.ts`),
-    policy_documents: exported(`${core}policies.ts`),
-    policy_rules: exported(`${core}policies.ts`),
-    policy_exceptions: exported(`${core}policies.ts`),
+    policy_documents: retired,
+    policy_rules: retired,
+    policy_exceptions: retired,
     members: exported(auth),
     member_removals: exported(`${core}organization.ts`),
     channel_accounts: exported(`${core}channels/accounts.ts`),
@@ -440,14 +452,11 @@ const coreDb: D1State = {
     app_workflow_bindings: exported(`${core}app-workflow-bindings.ts`),
     workflow_candidate_runs: exported(`${core}workflows/candidate-runs.ts`),
     workflow_item_tests: exported(`${core}workflows/item-tests.ts`),
-    landscape_syncs: transient(`${core}landscape.ts`),
-    landscape_apps: cache(
-      `${core}landscape.ts`,
-      "As last read from the tenant; the next sync reads it again."
-    ),
-    landscape_app_people: cache(`${core}landscape.ts`),
-    landscape_staged_apps: transient(`${core}landscape.ts`),
-    landscape_staged_people: transient(`${core}landscape.ts`),
+    landscape_syncs: retired,
+    landscape_apps: retired,
+    landscape_app_people: retired,
+    landscape_staged_apps: retired,
+    landscape_staged_people: retired,
     brain_records: exported(`${core}brain-records.ts`, brainPending),
     brain_gap_states: exported(`${core}brain-gaps.ts`),
     brain_team_groups: exported(`${core}brain-team-groups.ts`),

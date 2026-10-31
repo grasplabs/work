@@ -57,11 +57,10 @@ const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "Everything", context: "inbox filter" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
   brain: msg({ message: "Brain", context: "inbox filter" }),
-  policies: msg({ message: "Policies", context: "inbox filter" }),
   apps: msg({ message: "Apps and connections", context: "inbox filter" }),
 };
 
-const groups = ["all", "workflows", "brain", "policies", "apps"] as const;
+const groups = ["all", "workflows", "brain", "apps"] as const;
 
 const sortLabel: Record<Sort, MessageDescriptor> = {
   urgent: msg({

@@ -20,10 +20,6 @@ export const formatDate = (value: string | number | Date): string =>
     new Date(value)
   );
 
-/** Alternatives as the page's language joins them: "a, b or c", "a, b oder c". */
-export const formatOrList = (items: readonly string[]): string =>
-  new Intl.ListFormat(i18n.locale, { type: "disjunction" }).format(items);
-
 /**
  * A calendar day kept as an ISO date ("2026-10-03"), as the page's language
  * writes it: the same day wherever the reader is, since the day carries no

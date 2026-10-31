@@ -5,7 +5,6 @@ import type {
   Gap,
   Goal,
   LandscapeApp,
-  PolicyDocument,
   ProcessId,
   Role,
   SeenThrough,
@@ -80,8 +79,6 @@ export interface NoteRef {
   to?: string;
   /** The workflow it points to, outside the brain on the Workflows page. */
   workflowId?: string;
-  /** The policy it points to, outside the brain in the policy manager. */
-  policyId?: string;
   /** The statement it points at, highlighted in the source `to`. */
   statement?: string;
 }
@@ -517,10 +514,6 @@ const interviewedOf = (done: number, invited: number): string => {
     other: `Stakeholders of ${interviewed} of # invited teams`,
   });
 };
-
-/** "4 rules in use". */
-const rulesInUse = (count: number): string =>
-  plural(count, { one: "# rule in use", other: "# rules in use" });
 
 /** "33 employees interviewed", besides the teams' stakeholders. */
 const employeesInterviewed = (count: number): string =>
@@ -1752,29 +1745,15 @@ const gapDraft = (cx: Context, gap: Gap): Draft => {
   };
 };
 
-/** The policies the client uploaded to the policy manager are documents in the brain as well; their rules stay in Policies. */
-const policyDocumentsIn = (ws: Workspace): PolicyDocument[] =>
-  ws.policies.filter(
-    (policy) => policy.status === "published" || policy.status === "review"
-  );
-
 /** Each source folder is a page, like the Vision page: what this way of collecting adds, and what came in. */
 const channelDraft = (
   cx: Context,
   folder: ChannelFolder,
   folderOf: Map<string, SourceFolder>
 ): Draft => {
-  const filed: Pick<Source, "id" | "title" | "date" | "who" | "how">[] = [
-    ...cx.brainSources.filter((source) => folderOf.get(source.id) === folder),
-    ...(folder === "Documents"
-      ? policyDocumentsIn(cx.ws).map((policy) => ({
-          id: policy.id,
-          title: policy.title,
-          date: policy.uploadedAt.slice(0, 10),
-          how: t`Uploaded to Policies`,
-        }))
-      : []),
-  ];
+  const filed = cx.brainSources.filter(
+    (source) => folderOf.get(source.id) === folder
+  );
   return {
     id: channelId(folder),
     kind: "channel",
@@ -1798,7 +1777,7 @@ const channelDraft = (
   };
 };
 
-/** A source's points: the policy it became, what it added, and the teams and workflows it spoke about. */
+/** A source's points: what it added, and the teams and workflows it spoke about. */
 const sourcePoints = (
   cx: Context,
   source: Source,
@@ -1810,18 +1789,7 @@ const sourcePoints = (
     contents && said.length === 0
       ? importedText(contents)
       : addedText(said.length, saidText(said));
-  const policyId = given(source.policyId) ? source.policyId : undefined;
   return points(
-    policyId === undefined
-      ? undefined
-      : point(t`Became`, [
-          {
-            label:
-              ws.policies.find((policy) => policy.id === policyId)?.title ??
-              policyId,
-            to: policyId,
-          },
-        ]),
     said.length > 0 || contents
       ? point(
           t({
@@ -1908,7 +1876,6 @@ const sourceDraft = (
     article: source.article,
     // A source links straight to what its statements are about.
     links: [
-      ...(given(source.policyId) ? [source.policyId] : []),
       ...(source.teamIds ?? []),
       ...said.flatMap((statement) => [
         ...statement.teamIds,
@@ -1916,66 +1883,6 @@ const sourceDraft = (
         ...(given(statement.candidateId) ? [statement.candidateId] : []),
       ]),
     ],
-    sourceIds: [],
-    workflowIds: [],
-    terms: [],
-  };
-};
-
-/** A policy uploaded to the policy manager, as a document in the brain. */
-const policyDraft = (cx: Context, policy: PolicyDocument): Draft => {
-  const date = policy.uploadedAt.slice(0, 10);
-  const rules = policy.proposals.filter(
-    (proposal) => proposal.decision === "accepted"
-  ).length;
-  const earlier = cx.brainSources.filter(
-    (source) => source.policyId === policy.id
-  );
-  return {
-    id: policy.id,
-    kind: "source",
-    title: policy.title,
-    path: ["Sources", "Documents"],
-    step: 2,
-    tags: ["source", "document", "policy"],
-    summary: `${t`Uploaded to Policies`} · ${formatDay(date)}.`,
-    points: points(
-      point(t`In Policies`, [
-        {
-          label:
-            policy.status === "published"
-              ? rulesInUse(rules)
-              : t`Rules waiting for a decision`,
-          policyId: policy.id,
-        },
-      ]),
-      earlier.length > 0
-        ? point(
-            t`Draft`,
-            earlier.map((source) => ({ label: source.title, to: source.id }))
-          )
-        : undefined
-    ),
-    timeline: [
-      event(date, t`Uploaded to Policies`, { own: true }),
-      ...(given(policy.publishedAt)
-        ? [
-            event(policy.publishedAt.slice(0, 10), t`Rules published`, {
-              detail: rulesInUse(rules),
-            }),
-          ]
-        : []),
-    ],
-    open: [],
-    // What the policy says, in its own words: its summary and the passages its rules come from.
-    article: [
-      ...(given(policy.summary) ? [policy.summary] : []),
-      ...unique([
-        ...policy.proposals.map((proposal) => proposal.excerpt),
-        ...policy.unchecked.map((each) => each.excerpt),
-      ]),
-    ],
-    links: earlier.map((source) => source.id),
     sourceIds: [],
     workflowIds: [],
     terms: [],
@@ -1998,7 +1905,6 @@ const sourceDrafts = (cx: Context): Draft[] => {
     ...cx.brainSources
       .toSorted((a, b) => rank(a) - rank(b) || a.date.localeCompare(b.date))
       .map((source) => sourceDraft(cx, source, folderOf)),
-    ...policyDocumentsIn(cx.ws).map((policy) => policyDraft(cx, policy)),
   ];
 };
 

@@ -8,11 +8,6 @@ import type {
   BlueprintWorkflow,
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
-import type {
-  RuleCondition,
-  RuleProposal,
-  UncheckedRequirement,
-} from "@grasp-os/shared/policies";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -4841,8 +4836,13 @@ export const workflowResourceProcesses = sqliteTable(
   }
 );
 
+// The Landscape's tables, below, and the Policies' further down: their
+// features were removed (2026-10-31) and no code reads or writes them.
+// They stay only until the release that drops them, for code still running
+// during a rollout (expand, then contract). Don't use them.
+
 /**
- * The application landscape's syncs (src/landscape.ts), one row per
+ * Kept only until the drop. The application landscape's syncs, one row per
  * landscape connection: the sync under way, or the last one. A sync reads
  * the connection's grants a page at a time, `cursor` the next page's,
  * each page written with the cursor that follows it, so a sync that
@@ -4874,7 +4874,8 @@ export const landscapeSyncs = sqliteTable("landscape_syncs", {
 });
 
 /**
- * Each app a landscape connection's tenant granted access, as last seen:
+ * Kept only until the drop. Each app a landscape connection's tenant
+ * granted access, as last seen:
  * its name and publisher as the provider says (data, never an identifier:
  * `app_id`, its client ID, is), and when an admin's consent for everyone
  * was last seen, with its scopes.
@@ -4903,8 +4904,7 @@ export const landscapeApps = sqliteTable(
 
 /**
  * Each person who granted an app access for themselves, by their ID at
- * the provider, as last seen: dropped once not seen for the landscape's
- * retention (src/landscape.ts).
+ * the provider, as last seen. Kept only until the drop.
  */
 export const landscapeAppPeople = sqliteTable(
   "landscape_app_people",
@@ -4926,7 +4926,7 @@ export const landscapeAppPeople = sqliteTable(
 );
 
 /**
- * The apps a landscape sync under way has read so far (src/landscape.ts):
+ * Kept only until the drop. The apps a landscape sync under way had read:
  * kept apart, by the sync's start, and published to `landscape_apps` all
  * at once only when the sync has read everything, so a sync that stops
  * part way changes nothing anyone sees.
@@ -4950,7 +4950,7 @@ export const landscapeStagedApps = sqliteTable(
   ]
 );
 
-/** The people a landscape sync under way has read so far, published with its apps. */
+/** Kept only until the drop. The people a landscape sync under way had read. */
 export const landscapeStagedPeople = sqliteTable(
   "landscape_staged_people",
   {
@@ -5277,10 +5277,10 @@ export const knowledgeSignalDismissals = sqliteTable(
   ]
 );
 
-/**
- * The company's policy documents (policies.ts): its own text, as uploaded,
- * so its rules can be drawn from it.
- */
+// The Policies feature's tables: kept only until the release that drops
+// them (see the Landscape's above). Nothing reads or writes them.
+
+/** Kept only until the drop. The company's policy documents, as uploaded. */
 export const policyDocuments = sqliteTable("policy_documents", {
   id: text().primaryKey(),
   title: text().notNull(),
@@ -5292,7 +5292,7 @@ export const policyDocuments = sqliteTable("policy_documents", {
   uploadedBy: text("uploaded_by").notNull(),
   uploadedAt: timestamp("uploaded_at").notNull(),
   publishedAt: timestamp("published_at"),
-  /** When Grasp last started reading it (policy-reading.ts); null before. */
+  /** When Grasp last started reading it; null before. */
   readAt: timestamp("read_at"),
   /** Why reading it failed. */
   error: text({
@@ -5302,24 +5302,24 @@ export const policyDocuments = sqliteTable("policy_documents", {
   summary: text(),
   /** The rules Grasp proposed from it, each with its decision. */
   proposals: text({ mode: "json" })
-    .$type<RuleProposal[]>()
+    .$type<unknown[]>()
     .notNull()
     .default(sql`'[]'`),
   /** Its requirements no rule can check. */
   unchecked: text({ mode: "json" })
-    .$type<UncheckedRequirement[]>()
+    .$type<unknown[]>()
     .notNull()
     .default(sql`'[]'`),
 });
 
-/** The rules the company set for the apps its people use (policies.ts). */
+/** Kept only until the drop. The rules the company set for its apps. */
 export const policyRules = sqliteTable(
   "policy_rules",
   {
     id: text().primaryKey(),
     name: text().notNull(),
     description: text().notNull(),
-    conditions: text({ mode: "json" }).$type<RuleCondition[]>().notNull(),
+    conditions: text({ mode: "json" }).$type<unknown[]>().notNull(),
     effect: text({ enum: ["flag", "block"] }).notNull(),
     status: text({ enum: ["watching", "active", "paused"] }).notNull(),
     /** The policy it comes from; null for a rule made by hand, or once its policy is removed. */
@@ -5330,14 +5330,14 @@ export const policyRules = sqliteTable(
     updatedAt: timestamp("updated_at").notNull(),
     /**
      * 1 when made, one more with each change: a write names the revision
-     * its page read, and is refused once the rule changed since (policies.ts).
+     * its page read, and is refused once the rule changed since.
      */
     revision: integer().notNull().default(1),
   },
   (table) => [index("policy_rules_policy_idx").on(table.policyId)]
 );
 
-/** An app allowed to break one rule until a day (policies.ts): one per rule and app. */
+/** Kept only until the drop. An app allowed to break one rule until a day. */
 export const policyExceptions = sqliteTable(
   "policy_exceptions",
   {

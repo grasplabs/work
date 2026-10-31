@@ -48,17 +48,6 @@ export const googleConnectClient = clients.google;
 /** Grasp's Entra app for the application landscape, as set on connect. */
 export const landscapeClient = clients.microsoftLandscape;
 
-/**
- * Where tests set what Graph holds of the tenant's grants, for the
- * landscape's reads: POST `{ grants, apps, people }` as Graph has them
- * (`oauth2PermissionGrants`, `servicePrincipals`, `users`), or
- * `{ throttle: seconds }` to have every grants read throttled until
- * `{ throttle: null }`, or
- * `{ failing: "all" }` to have every grants read fail, or `"later"` every
- * page but the first, until `false`.
- */
-export const landscapeControlUrl = "https://graph-control.test/landscape";
-
 /** Grasp's Entra app for the directory's connection, as set on connect. */
 export const directoryClient = clients.microsoftDirectory;
 
@@ -470,7 +459,6 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const landscape = { grants: [], apps: [], people: [], throttle: null, failing: false };
 const directory = { users: [] };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
@@ -516,38 +504,6 @@ const documentsGraph = (url) => {
   }
   return undefined;
 };
-const landscapeIds = (url) =>
-  [...(url.searchParams.get("$filter") ?? "").matchAll(/'([^']*)'/gu)].map((match) => match[1]);
-/** Graph's grants of the tenant, a page at a time, with their apps and people. */
-const landscapeGraph = (url) => {
-  if (url.pathname === "/v1.0/oauth2PermissionGrants") {
-    if (landscape.failing === "all" || (landscape.failing === "later" && url.searchParams.has("$skiptoken"))) {
-      return new Response("Unavailable", { status: 500 });
-    }
-    if (landscape.throttle !== null) {
-      const seconds = landscape.throttle;
-      return new Response("Slow down", { status: 429, headers: { "retry-after": String(seconds) } });
-    }
-    const top = Number(url.searchParams.get("$top") ?? "100");
-    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
-    const next = from + top;
-    return Response.json({
-      value: landscape.grants.slice(from, next),
-      ...(next < landscape.grants.length
-        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$top=" + top + "&$skiptoken=" + next }
-        : {}),
-    });
-  }
-  if (url.pathname === "/v1.0/servicePrincipals") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.apps.filter(({ id }) => ids.includes(id)) });
-  }
-  if (url.pathname === "/v1.0/users") {
-    const ids = landscapeIds(url);
-    return Response.json({ value: landscape.people.filter(({ id }) => ids.includes(id)) });
-  }
-  return undefined;
-};
 const osv = (${osvFake.toString()})();
 const aiProviders = (${aiProvidersFake.toString()})();
 
@@ -565,10 +521,6 @@ export default {
     }
     if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
       return await mailServer(request, url);
-    }
-    if (request.method === "POST" && url.href === ${JSON.stringify(landscapeControlUrl)}) {
-      Object.assign(landscape, await request.json());
-      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(directoryControlUrl)}) {
       Object.assign(directory, await request.json());
@@ -613,12 +565,6 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
       return directoryGraph(url);
-    }
-    if (url.hostname === "graph.microsoft.com" && request.method === "GET") {
-      const answered = landscapeGraph(url);
-      if (answered !== undefined) {
-        return answered;
-      }
     }
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending

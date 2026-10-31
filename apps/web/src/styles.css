@@ -1203,14 +1203,6 @@
 }
 
 /*
- * From the prototype's Landscape (components/landscape/insight.tsx): what
- * Grasp read about a value, as labels and values side by side.
- */
-@utility grid-label-value {
-  grid-template-columns: auto 1fr;
-}
-
-/*
  * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
  * class (rehype-highlight): coloured from the theme's tokens, so it follows
  * light and dark, and set without any inline style the CSP would refuse.
