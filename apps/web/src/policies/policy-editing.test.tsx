@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import {
   exceptionInputSchema,
+  ruleEffectSchema,
   ruleInputSchema,
   ruleStatusSchema,
 } from "@grasp-os/shared/policies";
@@ -84,7 +85,7 @@ const chatGpt: LandscapeApp = {
 const fakePolicies = () => {
   const sent: {
     updated: RuleInput[];
-    turned: [string, string][];
+    turned: [string, string, string][];
     granted: ExceptionInput[];
   } = {
     updated: [],
@@ -106,10 +107,11 @@ const fakePolicies = () => {
     },
     setRuleStatus: async (
       ruleId: string,
-      status: string
+      status: string,
+      effect: string
     ): Promise<PolicyRule> => {
       const parsed = ruleStatusSchema.parse(status);
-      sent.turned.push([ruleId, parsed]);
+      sent.turned.push([ruleId, parsed, ruleEffectSchema.parse(effect)]);
       const rule = { ...(book.rules[0] ?? outsideEu), status: parsed };
       book = { ...book, rules: [rule] };
       return await Promise.resolve(rule);
@@ -354,7 +356,7 @@ describe("changing the policies", () => {
     });
   });
 
-  it("turns a rule that blocks on from its page once it is confirmed, sending core its status alone", async () => {
+  it("turns a rule that blocks on from its page once it is confirmed, sending core its status alone and the effect it showed", async () => {
     const { sent, policies } = fakePolicies();
     await opened(policies);
 
@@ -377,7 +379,7 @@ describe("changing the policies", () => {
       asked: { shown: "watching", confirms: true },
       shown: "active",
       updated: [],
-      turned: [[outsideEu.id, "active"]],
+      turned: [[outsideEu.id, "active", "block"]],
     });
   });
 

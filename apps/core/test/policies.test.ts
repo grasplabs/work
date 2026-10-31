@@ -299,7 +299,7 @@ describe("the company's policies", () => {
     });
   });
 
-  it("turn a rule's status alone, keeping an edit another admin made since the page read it", async () => {
+  it("turn a rule's status alone, keeping an edit another admin made since the page read it, and only while it has the effect the page showed", async () => {
     const admin = await signedInApi(idp, "admin");
     const rule = await admin.api.policies.createRule(outsideEu);
     // Another admin renames it meanwhile; the first turns it on from a
@@ -308,22 +308,54 @@ describe("the company's policies", () => {
       ...outsideEu,
       name: "Renamed meanwhile",
     });
-    const turned = await admin.api.policies.setRuleStatus(rule.id, "active");
-    const again = await admin.api.policies.setRuleStatus(rule.id, "active");
+    const turned = await admin.api.policies.setRuleStatus(
+      rule.id,
+      "active",
+      "block"
+    );
+    const again = await admin.api.policies.setRuleStatus(
+      rule.id,
+      "active",
+      "block"
+    );
+
+    // Another admin makes it flag; a page that still shows it blocking
+    // can't pause it, and a page showing it flagging can't turn it on
+    // believing it only flags once it blocks again.
+    await admin.api.policies.updateRule(rule.id, {
+      ...outsideEu,
+      name: "Renamed meanwhile",
+      effect: "flag",
+      status: "active",
+    });
+    const stale = await outcome(
+      admin.api.policies.setRuleStatus(rule.id, "paused", "block")
+    );
+    const { rules } = await admin.api.policies.book();
 
     expect({
       turned: { name: turned.name, status: turned.status },
       again: again.status,
+      stale: { refused: stale, kept: rules.map(({ status }) => status) },
       refused: await Promise.all([
-        // SAFETY: invalid on purpose: anything a client can send, as
-        // Cap'n Web checks no types, so core must.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        outcome(admin.api.policies.setRuleStatus(rule.id, "on" as never)),
-        outcome(admin.api.policies.setRuleStatus("no-such-rule", "paused")),
+        outcome(
+          admin.api.policies.setRuleStatus(
+            rule.id,
+            // SAFETY: invalid on purpose: anything a client can send, as
+            // Cap'n Web checks no types, so core must.
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            "on" as never,
+            "block"
+          )
+        ),
+        outcome(
+          admin.api.policies.setRuleStatus("no-such-rule", "paused", "block")
+        ),
       ]),
     }).toStrictEqual({
       turned: { name: "Renamed meanwhile", status: "active" },
       again: "active",
+      stale: { refused: "policy.conflict", kept: ["active"] },
       refused: ["policy.invalid", "policy.not_found"],
     });
   });
@@ -343,7 +375,7 @@ describe("the company's policies", () => {
         outcome(
           api.policies.updateRule(rule.id, { ...outsideEu, status: "paused" })
         ),
-        outcome(api.policies.setRuleStatus(rule.id, "active")),
+        outcome(api.policies.setRuleStatus(rule.id, "active", "block")),
         outcome(api.policies.removeRule(rule.id)),
         outcome(
           api.policies.grantException({
@@ -601,8 +633,12 @@ describe("the company's policies", () => {
         effect: "flag",
         status: "active",
       });
-      await admin.api.policies.setRuleStatus(ruleId, "paused");
-      await admin.api.policies.setRuleStatus(ruleId, "paused");
+      await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
+      await admin.api.policies.setRuleStatus(ruleId, "paused", "flag");
+      // From a page that still shows it blocking: refused, nothing recorded.
+      await outcome(
+        admin.api.policies.setRuleStatus(ruleId, "watching", "block")
+      );
       await admin.api.policies.grantException({
         ruleId,
         appId: "app-chatgpt",

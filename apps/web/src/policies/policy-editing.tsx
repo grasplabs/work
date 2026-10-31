@@ -873,7 +873,10 @@ export const RuleStatusControl = ({ rule }: { rule: PolicyRule }) => {
   const turn = async (status: RuleStatus): Promise<void> => {
     await run(async (session) => {
       await changeThenRefresh(
-        async () => await session.policies.setRuleStatus(rule.id, status),
+        // The effect this page shows: core turns it only while the rule
+        // still has it, so the warning above was for the rule as it is.
+        async () =>
+          await session.policies.setRuleStatus(rule.id, status, rule.effect),
         async () => {
           await router.invalidate();
         }

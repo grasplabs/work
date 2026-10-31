@@ -377,9 +377,15 @@ export interface PoliciesApi {
   updateRule: (ruleId: string, rule: RuleInput) => Promise<PolicyRule>;
   /**
    * Turns a rule to watching, active or paused, leaving everything else it
-   * says as core has it now. The organization's own admins only; audited.
+   * says as core has it now; only while it still has `effect`, the effect
+   * the admin's page showed, else refused as `policy.conflict`. The
+   * organization's own admins only; audited.
    */
-  setRuleStatus: (ruleId: string, status: RuleStatus) => Promise<PolicyRule>;
+  setRuleStatus: (
+    ruleId: string,
+    status: RuleStatus,
+    effect: RuleEffect
+  ) => Promise<PolicyRule>;
   /** Removes a rule and its exceptions. The organization's own admins only; audited. */
   removeRule: (ruleId: string) => Promise<void>;
   /**

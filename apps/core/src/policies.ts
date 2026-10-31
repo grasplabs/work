@@ -4,6 +4,7 @@ import {
   exceptionInputSchema,
   policyErrors,
   policyUploadSchema,
+  ruleEffectSchema,
   ruleInputSchema,
   ruleStatusSchema,
 } from "@grasp-os/shared/policies";
@@ -17,6 +18,7 @@ import type {
   PolicyRule,
   PolicyUpload,
   RuleInput,
+  RuleEffect,
   RuleProposal,
   RuleStatus,
 } from "@grasp-os/shared/policies";
@@ -459,16 +461,22 @@ const sameFieldsOf = (
  * Turns a rule on, off or to watching, and nothing else: whatever else
  * the rule says stays as it is now, however long ago the admin's page
  * read it, so a status turned there never undoes another admin's edit.
+ * The admin sends the effect their page showed (`effect`): the turn
+ * applies only while the rule still has it, so nobody turns on a rule
+ * that blocks believing it only flags, and the event records the effect
+ * the rule had as it turned. Otherwise it is refused as changed meanwhile,
+ * and the page reads the rule again.
  */
 const setRuleStatus = async (
   env: Env,
   by: Identity,
   id: string,
-  input: unknown
+  input: unknown,
+  shown: unknown
 ): Promise<PolicyRule> => {
   requireOwnAdmin(by, "setRuleStatus");
   const status = parsed(ruleStatusSchema, input);
-  const before = (await readRule(env, id)) ?? notFound();
+  const effect = parsed(ruleEffectSchema, shown);
   const db = drizzle(env.DB);
   const [written] = await auditedBatch(env, db, [
     db
@@ -479,10 +487,7 @@ const setRuleStatus = async (
           eq(policyRules.id, id),
           // Only when it differs: the same turn twice records one change.
           ne(policyRules.status, status),
-          // Only while the effect is the one read, so the event records
-          // the effect the rule has as it turns, never one another admin
-          // replaced meanwhile: then it is refused as changed meanwhile.
-          eq(policyRules.effect, before.effect),
+          eq(policyRules.effect, effect),
           stillAdmin(by)
         )
       ),
@@ -490,11 +495,11 @@ const setRuleStatus = async (
       actor: actorOf(by),
       action: "policy.rule.updated",
       target: target("policy_rule", id),
-      detail: { effect: before.effect, status },
+      detail: { effect, status },
     }),
   ]);
   const found = (await readRule(env, id)) ?? notFound();
-  const unchanged = found.status === status && found.effect === before.effect;
+  const unchanged = found.status === status && found.effect === effect;
   if (written.meta.changes === 0 && !unchanged) {
     return await unwritten(env, by, () => {
       throw policyErrors.create("policy.conflict");
@@ -933,10 +938,15 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
     );
   }
 
-  async setRuleStatus(ruleId: string, status: RuleStatus): Promise<PolicyRule> {
+  async setRuleStatus(
+    ruleId: string,
+    status: RuleStatus,
+    effect: RuleEffect
+  ): Promise<PolicyRule> {
     return await withPerson(
       this.#check,
-      async (by) => await setRuleStatus(this.#env, by, idOf(ruleId), status)
+      async (by) =>
+        await setRuleStatus(this.#env, by, idOf(ruleId), status, effect)
     );
   }
 
