@@ -334,7 +334,8 @@ const answeringWith = async <T>(
 
 /**
  * A reply naming the purged word for the first request only, the drawing
- * already under way as the purge lands; `clean` for every one after. Any
+ * already under way as the purge lands (chosen as each request arrives,
+ * before it waits on the purge); `clean` for every one after. Any
  * drawing after the purge (the store's own alarm, which the purge arms,
  * may draw again while the test still answers the provider) reads what the
  * purge left, so a model would never give the word back: answering it
@@ -851,8 +852,11 @@ const writers: Writer[] = [
       );
       await answeringWith(
         async () => {
+          // Chosen as the request arrives, before the purge it waits on:
+          // only the drawing already under way is answered with the word.
+          const answer = reply();
           await landing.once();
-          return reply();
+          return answer;
         },
         async () => await onboardingStore(env).drawNext()
       );
@@ -874,8 +878,11 @@ const writers: Writer[] = [
       );
       await answeringWith(
         async () => {
+          // Chosen as the request arrives, before the purge it waits on:
+          // only the drawing already under way is answered with the word.
+          const answer = reply();
           await landing.once();
-          return reply();
+          return answer;
         },
         async () => await store.drawNext()
       );
@@ -922,6 +929,11 @@ describe(
   "a writer under way as a content purge lands",
   { timeout: 60_000 },
   () => {
+    // Each writer runs as the alarm would: the store's own alarm, which
+    // agreeing and the purge set, would otherwise draw beside it, after
+    // the purge, and race it for the provider's replies (`holdAlarm`).
+    beforeEach(holdAlarm);
+
     it.each(writers)("keeps nothing purged: $name", async ({ run }) => {
       const word = sentinelOf();
       const landing = purgeOnce(word);
