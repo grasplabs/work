@@ -29,6 +29,7 @@ const at = "2026-10-22T10:00:00.000Z";
 const everyCode: Readonly<Record<ModelErrorCode, true>> = {
   "model.invalid_call": true,
   "model.unconfigured": true,
+  "model.no_provider": true,
   "model.not_allowed": true,
   "model.eu_only": true,
   "model.sensitive_data": true,

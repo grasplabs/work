@@ -10,7 +10,7 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
-import { gatewaySettings, modelForRole, models } from "./models.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 import type { ModelsEnv } from "./models.ts";
 
 // The company's own groups of teams (GRA-1273): the brain's regions, the
@@ -222,7 +222,7 @@ const modelProposal = async (
   unplaced: readonly Team[],
   confirmed: readonly TeamGroup[]
 ): Promise<z.infer<typeof answerSchema>> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {
