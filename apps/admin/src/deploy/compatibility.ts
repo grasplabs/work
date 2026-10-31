@@ -3,7 +3,7 @@
  * by what each release declares its code works with
  * (`releaseCompatibilitySchema`, spec 40.3 and 40.4). A client's Workers
  * switch one at a time, so after each switch every Worker that calls
- * another must call the version that one serves: a deploy that stops
+ * another must call a version that one serves: a deploy that stops
  * halfway leaves the client in one of those states. And the release
  * must read every workflow journal, and run every App release, the code
  * it replaces may have left, and its code must run on each database's
@@ -40,7 +40,27 @@ const covers = (outer: Range, inner: Range): boolean =>
 const describe = ({ min, max }: Range): string =>
   min === max ? String(min) : `${min}–${max}`;
 
-/** The first call in `running` a caller makes of a version it doesn't call. */
+/**
+ * The versions of its interface `app` of `release` serves: from
+ * `servesFrom` to `serves`, or exactly `serves` for a release built
+ * before `servesFrom` was declared. Null when it serves none.
+ */
+const servedRange = (release: ReleaseManifest, app: string): Range | null => {
+  const declared = release.compatibility?.interfaces[app];
+  if (declared?.serves === undefined) {
+    return null;
+  }
+  return { min: declared.servesFrom ?? declared.serves, max: declared.serves };
+};
+
+const overlaps = (a: Range, b: Range): boolean =>
+  a.min <= b.max && b.min <= a.max;
+
+/**
+ * The first call in `running` a caller makes of a version it doesn't
+ * call: one whose range of versions it calls shares none with the range
+ * the callee serves.
+ */
 const brokenCall = (
   running: ReadonlyMap<string, ReleaseManifest | null>
 ): string | null => {
@@ -52,9 +72,9 @@ const brokenCall = (
       if (served?.compatibility === undefined) {
         continue;
       }
-      const version = served.compatibility.interfaces[callee]?.serves;
-      if (version === undefined || version < range.min || version > range.max) {
-        return `${caller} of ${release?.releaseId ?? ""} calls ${callee} ${describe(range)}, but ${callee} of ${served.releaseId} serves ${version ?? "none"}`;
+      const versions = servedRange(served, callee);
+      if (versions === null || !overlaps(range, versions)) {
+        return `${caller} of ${release?.releaseId ?? ""} calls ${callee} ${describe(range)}, but ${callee} of ${served.releaseId} serves ${versions === null ? "none" : describe(versions)}`;
       }
     }
   }

@@ -45,7 +45,9 @@ const RunPage = () => {
   return (
     <>
       <SiteHeader crumbs={crumbs} />
-      <Page>
+      {/* As wide as its workflow's page, whose Traces it is one of: the
+          prototype opens a run there, at that page's width. */}
+      <Page wide>
         <PageHeading
           meta={
             <>

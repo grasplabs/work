@@ -339,15 +339,17 @@ const DockQuestions = ({ slot }: { slot: ChatSlot }) => {
 // One tree in every mode, so the box, and the draft in it, stays as the
 // dock opens, grows or folds away. As in the prototype's corner chat
 // (`components/chat/corner-chat.tsx`): the bar 320 pixels wide at rest and
-// 416 typed in, 28 pixels off the window's corner; the frame 442 wide,
-// kept 16 pixels off every edge of the window and rising out of the bar
-// as it opens; the drawer as wide as its edge was dragged. Each is a
-// white card on `shadow-lifted`, with no glow, blur or ring round it.
+// 402 typed in, 36 pixels off the window's corner (its 28 inside the
+// page's 8-pixel margin), so it sits where it sits in the frame; the frame
+// 442 wide, kept 16 pixels off every edge of the window, a card with a
+// hairline and the larger rounding, rising out of the bar as it opens;
+// the drawer as wide as its edge was dragged. Each is a white card on
+// `shadow-lifted`, with no glow, blur or ring round it.
 const dockLook = (mode: DockMode): { place: string; look: string } => {
   let place =
-    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
+    "pointer-events-none fixed inset-x-9 bottom-9 z-40 flex justify-end";
   let look =
-    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-104 motion-reduce:transition-none";
+    "bg-card shadow-lifted pointer-events-auto w-80 max-w-full rounded-xl text-sm transition-[width] duration-300 focus-within:w-100.5 motion-reduce:transition-none";
   if (mode === "drawer") {
     place =
       "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
@@ -356,9 +358,23 @@ const dockLook = (mode: DockMode): { place: string; look: string } => {
   } else if (mode === "frame") {
     place = "pointer-events-none fixed inset-4 z-40 flex items-end justify-end";
     look =
-      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-xl text-sm duration-300 motion-reduce:animate-none";
+      "bg-card shadow-lifted animate-in fade-in-0 zoom-in-97 slide-in-from-bottom-4 pointer-events-auto flex h-136 max-h-full w-(--dock-width) max-w-full origin-bottom-right flex-col overflow-hidden rounded-2xl border text-sm duration-300 motion-reduce:animate-none";
   }
   return { place, look };
+};
+
+/**
+ * Where the box stands in the open dock: in the frame 19 pixels inside its
+ * hairline, so it stays where the bar stood, 36 pixels off the window's
+ * corner and 402 wide; in the drawer 20 pixels off its edges.
+ */
+const footLook = (mode: DockMode): string | undefined => {
+  if (mode === "frame") {
+    return "flex flex-none flex-col gap-1 px-4.75 pt-2 pb-4.75";
+  }
+  return mode === "drawer"
+    ? "flex flex-none flex-col gap-1 px-5 pt-2 pb-5"
+    : undefined;
 };
 
 /** The chat of App `app` the person changes it in, made the first time. */
@@ -569,11 +585,7 @@ const Dock = ({
           />
         ) : null}
         {open ? <DockQuestions slot={slot} /> : null}
-        <div
-          className={
-            open ? "flex flex-none flex-col gap-1 px-5 pt-2 pb-5" : undefined
-          }
-        >
+        <div className={footLook(mode)}>
           {box}
           <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (

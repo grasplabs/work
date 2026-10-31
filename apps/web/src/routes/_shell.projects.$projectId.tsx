@@ -571,6 +571,7 @@ const Project = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
               }
+              actionAt="start"
               description={goal === "" ? undefined : goal}
               title={name}
             />
@@ -579,11 +580,11 @@ const Project = () => {
               aria-labelledby="project-chats"
               className="flex flex-col gap-1"
             >
-              <h2 className="pb-1 font-medium" id="project-chats">
+              <h2 className="pb-1 text-sm font-medium" id="project-chats">
                 <Trans>Chats</Trans>
               </h2>
               {inside.length === 0 ? (
-                <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-6 text-center">
+                <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-6 text-center text-sm">
                   <Trans>
                     No chats yet. What is asked above starts one, and it stays
                     in this project.

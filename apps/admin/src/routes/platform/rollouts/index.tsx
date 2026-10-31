@@ -1,5 +1,18 @@
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/ui/components/radio-group";
 import {
   Select,
   SelectContent,
@@ -49,9 +62,12 @@ const scopes: { value: ScopeKind; label: string }[] = [
   { value: "all", label: "Every client, ring by ring" },
 ];
 
-/** What a rollout takes to clients, as the form offers it. */
+/**
+ * What a rollout takes to clients, as the form offers it: named apart from
+ * the Release field under it, so neither is heard as the other.
+ */
 const kinds: { value: RolloutKind; label: string }[] = [
-  { value: "release", label: "A release" },
+  { value: "release", label: "A new version of Grasp" },
   { value: "secrets", label: "Secrets only" },
 ];
 
@@ -116,150 +132,152 @@ const StartRollout = ({ options }: { options: RolloutOptions }) => {
         event.preventDefault();
         start(new FormData(event.currentTarget));
       }}
-      className="flex flex-col gap-4 border-t px-5 py-4"
+      className="border-t px-5 py-4"
     >
-      <fieldset className="flex flex-col gap-1">
-        <legend className="font-medium">What</legend>
-        <div className="flex flex-wrap gap-2">
-          {kinds.map((each) => (
-            <Button
-              key={each.value}
-              type="button"
-              size="sm"
-              variant={what === each.value ? "default" : "outline"}
-              aria-pressed={what === each.value}
-              onClick={() => {
-                setWhat(each.value);
+      {/* The kit's fields, as the admin's other forms and the workspace's lay them out. */}
+      <FieldGroup>
+        <FieldSet>
+          <FieldLegend variant="label">What</FieldLegend>
+          <RadioGroup
+            onValueChange={(value) => {
+              const chosen = kinds.find((each) => each.value === value);
+              if (chosen !== undefined) {
+                setWhat(chosen.value);
+              }
+            }}
+            value={what}
+          >
+            {kinds.map((each) => (
+              <Field key={each.value} orientation="horizontal">
+                {/* Apart from the fields' own ids: `rollout-release` is the Release field's. */}
+                <RadioGroupItem
+                  id={`rollout-what-${each.value}`}
+                  value={each.value}
+                />
+                <FieldLabel htmlFor={`rollout-what-${each.value}`}>
+                  {each.label}
+                </FieldLabel>
+              </Field>
+            ))}
+          </RadioGroup>
+          {what === "secrets" ? (
+            <FieldDescription>
+              Each client gets the shared secrets in Secrets Store now, on the
+              release it runs, all traffic at once. Copy a rotated secret there
+              first with the Deploy platform workflow, secrets only.
+            </FieldDescription>
+          ) : null}
+        </FieldSet>
+        {what === "secrets" ? null : (
+          <Field>
+            <FieldLabel htmlFor="rollout-release">Release</FieldLabel>
+            <Input
+              id="rollout-release"
+              name="releaseId"
+              list="release-ids"
+              required
+              defaultValue={newest.id}
+            />
+            <datalist id="release-ids">
+              {options.releases.map((release) => (
+                <option key={release.id} value={release.id}>
+                  {releaseName(release)}
+                </option>
+              ))}
+            </datalist>
+          </Field>
+        )}
+        {later.length === 0 ? (
+          <FieldDescription>
+            {`Only ${ringWords(options.firstRing)} has active clients, so this reaches only our own deployments.`}
+          </FieldDescription>
+        ) : (
+          <Field>
+            <FieldLabel id="rollout-scope">Then</FieldLabel>
+            <Select
+              items={scopes}
+              value={kind}
+              onValueChange={(value: ScopeKind | null) => {
+                if (value !== null) {
+                  setKind(value);
+                }
               }}
             >
-              {each.label}
-            </Button>
-          ))}
-        </div>
-      </fieldset>
-      {what === "secrets" ? (
-        <p className="text-muted-foreground">
-          Each client gets the shared secrets in Secrets Store now, on the
-          release it runs, all traffic at once. Copy a rotated secret there
-          first with the Deploy platform workflow, secrets only.
-        </p>
-      ) : (
-        <label htmlFor="rollout-release" className="flex flex-col gap-1">
-          <span className="font-medium">Release</span>
-          <Input
-            id="rollout-release"
-            name="releaseId"
-            list="release-ids"
-            required
-            defaultValue={newest.id}
-          />
-          <datalist id="release-ids">
-            {options.releases.map((release) => (
-              <option key={release.id} value={release.id}>
-                {releaseName(release)}
-              </option>
-            ))}
-          </datalist>
-        </label>
-      )}
-      {later.length === 0 ? (
-        <p className="text-muted-foreground">
-          {`Only ${ringWords(options.firstRing)} has active clients, so this reaches only our own deployments.`}
-        </p>
-      ) : (
-        <div className="flex flex-col gap-1">
-          <span id="rollout-scope" className="font-medium">
-            Then
-          </span>
-          <Select
-            items={scopes}
-            value={kind}
-            onValueChange={(value: ScopeKind | null) => {
-              if (value !== null) {
-                setKind(value);
-              }
-            }}
-          >
-            <SelectTrigger aria-labelledby="rollout-scope">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {scopes.map((scope) => (
-                <SelectItem key={scope.value} value={scope.value}>
-                  {scope.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-muted-foreground">
-            {`${ringWords(options.firstRing)} comes first, then this once you approve it.`}
-          </span>
-        </div>
-      )}
-      {later.length > 0 && kind === "all" ? (
-        <ul className="text-muted-foreground flex flex-col gap-1">
-          {options.rings.map((each) => (
-            <li key={each.ring}>
-              {`${ringWords(each.ring)}: ${clientsOf(each.clients)}`}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {later.length > 0 && kind === "ring" ? (
-        <div className="flex flex-col gap-1">
-          <span id="rollout-ring" className="font-medium">
-            Ring
-          </span>
-          <Select
-            items={ringItems}
-            value={chosenRing}
-            onValueChange={(value: number | null) => {
-              if (value !== null) {
-                setRing(value);
-              }
-            }}
-          >
-            <SelectTrigger aria-labelledby="rollout-ring">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ringItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
-      {later.length > 0 && kind === "client" ? (
-        <label htmlFor="rollout-client" className="flex flex-col gap-1">
-          <span className="font-medium">Client</span>
-          <Input
-            id="rollout-client"
-            name="clientId"
-            list="client-ids"
-            required
-          />
-          <datalist id="client-ids">
-            {options.clientIds.map((clientId) => (
-              <option key={clientId} value={clientId}>
-                {names.get(clientId) ?? clientId}
-              </option>
-            ))}
-          </datalist>
-        </label>
-      ) : null}
-      <div className="flex items-center gap-4">
-        <Button type="submit" size="sm" disabled={busy}>
-          Start rollout
-        </Button>
-        {failure === null ? null : (
-          <p role="alert" className="text-destructive">
-            {failure}
-          </p>
+              <SelectTrigger aria-labelledby="rollout-scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {scopes.map((scope) => (
+                  <SelectItem key={scope.value} value={scope.value}>
+                    {scope.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription>
+              {`${ringWords(options.firstRing)} comes first, then this once you approve it.`}
+            </FieldDescription>
+          </Field>
         )}
-      </div>
+        {later.length > 0 && kind === "all" ? (
+          <ul className="text-muted-foreground flex flex-col gap-1">
+            {options.rings.map((each) => (
+              <li key={each.ring}>
+                {`${ringWords(each.ring)}: ${clientsOf(each.clients)}`}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {later.length > 0 && kind === "ring" ? (
+          <Field>
+            <FieldLabel id="rollout-ring">Ring</FieldLabel>
+            <Select
+              items={ringItems}
+              value={chosenRing}
+              onValueChange={(value: number | null) => {
+                if (value !== null) {
+                  setRing(value);
+                }
+              }}
+            >
+              <SelectTrigger aria-labelledby="rollout-ring">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ringItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
+        {later.length > 0 && kind === "client" ? (
+          <Field>
+            <FieldLabel htmlFor="rollout-client">Client</FieldLabel>
+            <Input
+              id="rollout-client"
+              name="clientId"
+              list="client-ids"
+              required
+            />
+            <datalist id="client-ids">
+              {options.clientIds.map((clientId) => (
+                <option key={clientId} value={clientId}>
+                  {names.get(clientId) ?? clientId}
+                </option>
+              ))}
+            </datalist>
+          </Field>
+        ) : null}
+        <Field orientation="horizontal">
+          <Button type="submit" size="sm" disabled={busy}>
+            Start rollout
+          </Button>
+          {failure === null ? null : <FieldError>{failure}</FieldError>}
+        </Field>
+      </FieldGroup>
     </form>
   );
 };

@@ -60,14 +60,25 @@ import type { Theme } from "./theme.ts";
 // and, for admins, the workspace's settings are, their onboarding, the
 // language, the theme, Stephen's tour once more and signing out.
 
-/** Up to two letters of `name`, for the avatar. */
-export const initials = (name: string): string =>
-  name
-    .split(/\s+/u)
-    .filter((part) => part !== "")
+const nameParts = /\s+/u;
+
+/**
+ * Up to two letters of `name`, for the avatar, as the prototype's
+ * (`lib/format.ts`): of the parts written with a capital, so a particle
+ * such as "de" or "van" is passed over ("Sanne de Wit" is SW). A name
+ * written all in small letters keeps its first two parts.
+ */
+export const initials = (name: string): string => {
+  const parts = name.split(nameParts).filter((part) => part !== "");
+  const capitalised = parts.filter((part) => {
+    const first = part.charAt(0);
+    return first !== first.toLocaleLowerCase();
+  });
+  return (capitalised.length > 0 ? capitalised : parts)
     .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
+    .map((part) => part.charAt(0).toLocaleUpperCase())
     .join("");
+};
 
 /**
  * The person on the menu's button, as the prototype's: their initials and
@@ -86,15 +97,23 @@ const Who = ({ identity }: { identity: Identity }) => (
   </>
 );
 
-/** Who is signed in, atop the menu: their address and their role. */
+/**
+ * Who is signed in, atop the menu, as the prototype's: their initials and
+ * their name, as on the menu's button; under the name, their role.
+ */
 const SignedIn = ({ identity }: { identity: Identity }) => {
   const { t } = useLingui();
   const role = roleLabel(identity.role);
   return (
-    <DropdownMenuLabel>
-      <span className="grid min-w-0 leading-tight">
-        <span className="truncate">{identity.email}</span>
-        <span className="truncate">
+    <DropdownMenuLabel variant="person">
+      <Avatar shape="square">
+        <AvatarFallback aria-hidden="true">
+          {initials(identity.name)}
+        </AvatarFallback>
+      </Avatar>
+      <span className="grid min-w-0 flex-1 leading-tight">
+        <span className="truncate font-medium">{identity.name}</span>
+        <span className="truncate text-xs">
           {identity.staff ? t`${role}, Grasp staff` : role}
         </span>
       </span>

@@ -150,7 +150,7 @@ const PhaseBar = ({ phase }: { phase: InterviewPhase }) => {
 };
 
 /** A screen of the interview with whoever holds it over what it says: after it, or instead of it. */
-export const Said = ({
+const Said = ({
   room,
   sign = null,
   fill = 0.35,
@@ -176,7 +176,7 @@ export const Said = ({
 };
 
 /** The frame of every screen of the link: as little as possible around the stage. */
-export const InterviewFrame = ({
+const InterviewFrame = ({
   top,
   bottom,
   left,
@@ -237,9 +237,6 @@ export const InterviewFrame = ({
     </footer>
   </div>
 );
-
-/** Room over the stage for a screen without the box. */
-export const useQuietRoom = () => useStageRoom(16);
 
 /** They stopped for now: their place is kept. */
 const Stopped = ({

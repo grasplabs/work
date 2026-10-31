@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { cn } from "@grasp-os/ui/lib/utils";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
@@ -54,7 +55,16 @@ export const SettingsSection = ({
         {description === undefined ? null : (
           <CardDescription>{description}</CardDescription>
         )}
-        {action === undefined ? null : <CardAction>{action}</CardAction>}
+        {action === undefined ? null : (
+          // Beside a picture and no description, in line with the title, as in the prototype's Stephen card.
+          <CardAction
+            className={cn(
+              media !== undefined && description === undefined && "self-center"
+            )}
+          >
+            {action}
+          </CardAction>
+        )}
       </CardHeader>
       {children}
     </Card>

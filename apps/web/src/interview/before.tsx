@@ -47,22 +47,19 @@ const Line = ({
   heading?: boolean;
 }) => {
   const said = useSaidOf(text);
-  const className =
-    "type-display animate-in fade-in slide-in-from-bottom-2 motion-reduce:animate-none max-w-lg duration-500";
   return (
     <div
       aria-live="polite"
       className="flex min-h-16 w-full items-start justify-center"
     >
-      {heading ? (
-        <h1 className={className} key={text}>
+      <div
+        className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
+        key={text}
+      >
+        <PageHeaderTitle render={heading ? undefined : <p />}>
           <SpokenText said={said} text={text} />
-        </h1>
-      ) : (
-        <p className={className} key={text}>
-          <SpokenText said={said} text={text} />
-        </p>
-      )}
+        </PageHeaderTitle>
+      </div>
     </div>
   );
 };
