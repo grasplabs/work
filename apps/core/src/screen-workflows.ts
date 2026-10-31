@@ -46,6 +46,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { screenStartFiles } from "./screen-start-files.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appSendHoldsSql, appStartHoldsSql } from "./workflow-starts.ts";
+import { aiWaitsOf } from "./workflows/ai-waits.ts";
 import { runEngine } from "./workflows/engine.ts";
 import {
   applyCancel,
@@ -748,6 +749,24 @@ const waitsOf = async (
       )
     : [];
 
+/**
+ * A run's status as its snapshot shows it: a running run held for its AI
+ * provider (ai-waits.ts) shows queued, as its summary does, since it goes
+ * on by itself once calls work; never with a wait open (`openWaits`),
+ * which a queued run has none of.
+ */
+const shownStatus = async (
+  env: Env,
+  row: RunRow,
+  openWaits: number
+): Promise<(typeof statusOf)[keyof typeof statusOf]> => {
+  if (row.status !== "running" || openWaits > 0) {
+    return statusOf[row.status];
+  }
+  const held = await aiWaitsOf(drizzle(env.DB), [row.id]);
+  return held.has(row.id) ? "queued" : "running";
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -769,7 +788,6 @@ const runSnapshot = async (
   const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
-  const status = statusOf[row.status];
   // Read after the row: a wait opened or closed since moves its revision on.
   const waits = await waitsOf(
     env,
@@ -777,6 +795,7 @@ const runSnapshot = async (
     resolved,
     !ended && (await holds(env, maySendSql(asking, resolved.alias, pin)))
   );
+  const status = await shownStatus(env, row, waits.length);
   const contract = await startedContract(
     env,
     asking,
@@ -805,7 +824,7 @@ const runSnapshot = async (
     manifestHash: row.manifestHash,
     fingerprint: contract.fingerprint,
     status,
-    startedAt: status === "queued" ? null : row.createdAt.getTime(),
+    startedAt: row.status === "starting" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
     waits,
     control: {

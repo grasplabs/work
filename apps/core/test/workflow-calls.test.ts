@@ -78,6 +78,7 @@ import { quotaPolicy } from "../src/workflows/quotas.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
+import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import {
   resourceRunFor,
   terminateResourceRun,
@@ -1095,6 +1096,20 @@ const greetingWorkflow = async (
 
 const answer = (text: string) => ({ text, inputTokens: 100, outputTokens: 20 });
 
+/** What run `runId` of workflow `id` says it waits for, once it waits for its AI provider. */
+const providerWaitOf = async (by: Identity, id: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, id, runId);
+      if (run.aiProvider === undefined) {
+        throw new Error(`Run ${runId} isn't waiting for its provider yet`);
+      }
+      const { provider, trouble } = run.aiProvider;
+      return { provider, trouble };
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+
 describe("grasp.model calls of JSON workflows", () => {
   beforeAll(chooseModel);
   afterEach(() => {
@@ -1146,19 +1161,97 @@ describe("grasp.model calls of JSON workflows", () => {
     }).toStrictEqual({ status: "failed", requests: 1 });
   });
 
-  it("sends a model call's request once, never again after the provider refuses it for a moment", async () => {
+  it("waits while the provider refuses the key, provably billing nothing, and goes on once an admin replaces it, its call made again in a step of its own", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    // Timed tries a minute apart: only the replacement's wake can resume
+    // the run within the test.
+    const before = env.WORKFLOW_OFF_WAIT_MS;
+    env.WORKFLOW_OFF_WAIT_MS = "59000";
+    try {
+      const provider = { working: false };
+      const fake = await answeringProvider(
+        () =>
+          provider.working
+            ? answer('{"line":"Hello Ada"}')
+            : { status: 401, errorType: "authentication_error" },
+        { models: [allowedModel] }
+      );
+      const runId = await started(ada, workflow.id);
+      const held = await providerWaitOf(ada, workflow.id, runId);
+      // Its trace says so too, for what follows it (the run sheet).
+      const tracedHeld = await resourceRunTrace(env, ada, workflow.id, runId);
+      provider.working = true;
+      const { api } = await signedInApi(idp, "admin");
+      // The admin replaces the key (the provider's fake knows it by its
+      // value, so it stays the same).
+      await api.aiProviders.add({ provider: "mistral", key: fake.key });
+      const run = await ended(ada, workflow.id, runId);
+      const tracedEnd = await resourceRunTrace(env, ada, workflow.id, runId);
+      expect({
+        held,
+        traced: [tracedHeld.aiProvider?.trouble, tracedEnd.aiProvider],
+        end: endOf(run),
+        shown: run.aiProvider,
+        requests: fake.requests.length,
+      }).toStrictEqual({
+        held: { provider: "mistral", trouble: "refused" },
+        traced: ["refused", undefined],
+        end: { status: "completed", output: { status: "Hello Ada" } },
+        shown: undefined,
+        requests: 2,
+      });
+    } finally {
+      env.WORKFLOW_OFF_WAIT_MS = before;
+    }
+  });
+
+  it("waits while the provider fails its call with a 5xx and no answer, and goes on by itself once calls work again", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    const provider = { working: false };
+    const fake = await answeringProvider(
+      () =>
+        provider.working
+          ? answer('{"line":"Hello Ada"}')
+          : { status: 503, errorType: "overloaded_error" },
+      { models: [allowedModel] }
+    );
+    const runId = await started(ada, workflow.id);
+    const held = await providerWaitOf(ada, workflow.id, runId);
+    // The outage ends: nobody touches Grasp.
+    provider.working = true;
+    const run = await ended(ada, workflow.id, runId);
+    expect({
+      held,
+      end: endOf(run),
+      // One request per try, each sent once.
+      tries: fake.requests.length >= 2,
+    }).toStrictEqual({
+      held: { provider: "mistral", trouble: "not_answering" },
+      end: { status: "completed", output: { status: "Hello Ada" } },
+      tries: true,
+    });
+  });
+
+  it("fails with the clear code, never sending again, once the provider's answer broke off partway", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
     const provider = await providerAnswering(
-      { status: 503, errorType: "overloaded_error" },
-      answer('{"line":"Hello, Ada!"}')
+      { ...answer('{"line":"Hello Ada"}'), cut: 5 },
+      answer('{"line":"Never sent"}')
     );
     const run = await ended(ada, workflow.id, await started(ada, workflow.id));
     expect({
-      status: run.status,
+      end: endOf(run),
       requests: provider.requests.length,
-    }).toStrictEqual({ status: "failed", requests: 1 });
+    }).toStrictEqual({
+      end: { status: "failed", code: "model.provider_unavailable" },
+      requests: 1,
+    });
   });
 
   it("refuses the next call once the grant its start was admitted on is revoked: a trigger's, an App's or an agent's", async () => {
@@ -2712,7 +2805,8 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     });
     const runId = await started(ada, workflow.id);
     const provider = await providerAnswering(
-      { status: 503, errorType: "overloaded_error" },
+      // An answer that broke off: its outcome unknown.
+      { ...answer('{"line":"Hello Ada"}'), cut: 5 },
       answer('{"line":"Never sent"}')
     );
     const runKey = unique();
@@ -2767,7 +2861,8 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     });
     const runId = await started(ada, workflow.id);
     const provider = await providerAnswering(
-      { status: 503, errorType: "overloaded_error" },
+      // An answer that broke off: its outcome unknown.
+      { ...answer('{"line":"Hello Ada"}'), cut: 5 },
       answer('{"line":"Never sent"}')
     );
     const runKey = unique();
@@ -2822,9 +2917,12 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       ran,
       requests: provider.requests.length,
     }).toStrictEqual({
-      refused: { name: "Error", code: "model.failed" },
+      refused: { name: "Error", code: "model.provider_unavailable" },
       // As the attempt that ran failed, and never tried again after it.
-      retried: { name: "NonRetryableError", code: "model.failed" },
+      retried: {
+        name: "NonRetryableError",
+        code: "model.provider_unavailable",
+      },
       leftOpen: {
         name: "NonRetryableError",
         code: "operation.deadline_exceeded",
@@ -3406,12 +3504,20 @@ describe("a workflow's own limits", () => {
       { timeout: 5000, interval: 100 }
     );
     expect({
-      status: run.status,
+      // Its outcome unknown, sent and never answered: it fails, saying the
+      // provider isn't answering, and is never sent again.
+      end: endOf(run),
+      requests: provider.requests.length,
       // Its task's two seconds, not the host's minute.
       early:
         Date.parse(run.endedAt ?? "") - startedAt < maxAttemptTimeoutMs / 2,
       cutOff,
-    }).toStrictEqual({ status: "failed", early: true, cutOff: true });
+    }).toStrictEqual({
+      end: { status: "failed", code: "model.provider_unavailable" },
+      requests: 1,
+      early: true,
+      cutOff: true,
+    });
   });
 
   it("refuses to lower an active time nothing holds yet, by pointer", async () => {

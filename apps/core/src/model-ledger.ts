@@ -1,3 +1,4 @@
+import { providerTroubles } from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditDetailMaxKeys,
@@ -452,6 +453,8 @@ export interface ProviderHealth {
   lastFailedAt: number | null;
   lastFailure: string | null;
   lastStatus: number | null;
+  failingClass: string | null;
+  failingSince: number | null;
 }
 
 /** What one model was charged for one feature on Grasp's keys in one month. */
@@ -591,9 +594,20 @@ const tokensSchema = z.strictObject({
   cacheWrite: microsSchema,
 });
 
+/**
+ * What each way a request fails shows of its provider, by the HTTP class
+ * seen (`ProviderTrouble`); none for a refusal of the request itself.
+ */
+const troubleClasses: Readonly<Record<string, string | undefined>> = {
+  auth: "refused",
+  quota: "limiting",
+  rate_limited: "limiting",
+  provider_down: "not_answering",
+};
+
 /** How a refused or failed request failed, for its provider's status. */
 const failureSchema = z.strictObject({
-  kind: z.enum(["auth", "rate_limited", "refused", "provider_down"]),
+  kind: z.enum(["auth", "quota", "rate_limited", "refused", "provider_down"]),
   status: z.int().min(100).max(599).optional(),
 });
 
@@ -609,13 +623,21 @@ const settlementSchema = z.discriminatedUnion("by", [
   z.strictObject({ by: z.literal("unsent") }),
   /**
    * Its caller cut it off mid-answer: what it is known to have used by
-   * then, partly estimated (models.ts).
+   * then, partly estimated (models.ts). `shows`: what it showed of its
+   * provider, when the provider was why (its deadline passed with the
+   * answer still out), for the provider's status only, never its charge.
    */
-  z.strictObject({ by: z.literal("cut"), tokens: tokensSchema }),
+  z.strictObject({
+    by: z.literal("cut"),
+    tokens: tokensSchema,
+    shows: z.enum(providerTroubles).optional(),
+  }),
   /** It was sent, and what it used can't be known. */
   z.strictObject({
     by: z.literal("unknown"),
     failure: failureSchema.optional(),
+    /** What it showed of its provider, as for `cut`: an answer that broke off. */
+    shows: z.enum(providerTroubles).optional(),
   }),
 ]);
 
@@ -1511,8 +1533,31 @@ export class ModelLedger extends DurableObject<Env> {
     const now = Date.now();
     let noted: Partial<typeof providerHealth.$inferInsert> | undefined =
       undefined;
-    if (settlement.by === "usage" || settlement.by === "cut") {
+    // What the provider shows: nothing once a request worked; for a
+    // failure, its class, since the first failure of that class after the
+    // last that worked. A refusal of the request itself (another 4xx)
+    // says nothing of the provider, and leaves it as it was.
+    let failing:
+      | { failingClass: string | null; failingSince: SQL | number | null }
+      | undefined = undefined;
+    let inserted: { failingClass: string | null; failingSince: number | null } =
+      { failingClass: null, failingSince: null };
+    const shows =
+      (settlement.by === "cut" || settlement.by === "unknown") &&
+      settlement.shows !== undefined
+        ? settlement.shows
+        : undefined;
+    if (shows !== undefined) {
+      // The provider stopped answering, whatever the request is charged.
+      noted = { lastFailedAt: now, lastFailure: "provider_down" };
+      failing = {
+        failingClass: shows,
+        failingSince: sql`CASE WHEN ${providerHealth.failingClass} = ${shows} THEN coalesce(${providerHealth.failingSince}, ${now}) ELSE ${now} END`,
+      };
+      inserted = { failingClass: shows, failingSince: now };
+    } else if (settlement.by === "usage" || settlement.by === "cut") {
       noted = { lastOkAt: now };
+      failing = { failingClass: null, failingSince: null };
     } else if (
       (settlement.by === "refused" || settlement.by === "unknown") &&
       settlement.failure !== undefined
@@ -1522,17 +1567,44 @@ export class ModelLedger extends DurableObject<Env> {
         lastFailure: settlement.failure.kind,
         lastStatus: settlement.failure.status ?? null,
       };
+      const trouble = troubleClasses[settlement.failure.kind];
+      if (trouble !== undefined) {
+        failing = {
+          failingClass: trouble,
+          failingSince: sql`CASE WHEN ${providerHealth.failingClass} = ${trouble} THEN coalesce(${providerHealth.failingSince}, ${now}) ELSE ${now} END`,
+        };
+        inserted = { failingClass: trouble, failingSince: now };
+      }
     }
     if (noted === undefined) {
       return;
     }
     this.#db
       .insert(providerHealth)
-      .values({ provider, credential, ...noted })
+      .values({ provider, credential, ...noted, ...inserted })
       .onConflictDoUpdate({
         target: [providerHealth.provider, providerHealth.credential],
-        set: noted,
+        set: { ...noted, ...failing },
       })
+      .run();
+  }
+
+  /**
+   * Notes that the organization replaced `provider`'s key: its run of
+   * failures, which the old key's refusals made, is over until a request
+   * with the new key fails. When the last one failed stays.
+   */
+  async keyReplaced(provider: string): Promise<void> {
+    await Promise.resolve();
+    this.#db
+      .update(providerHealth)
+      .set({ failingClass: null, failingSince: null })
+      .where(
+        and(
+          eq(providerHealth.provider, provider),
+          eq(providerHealth.credential, "organization")
+        )
+      )
       .run();
   }
 

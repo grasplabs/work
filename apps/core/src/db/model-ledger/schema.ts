@@ -361,6 +361,15 @@ export const providerHealth = sqliteTable(
     lastFailure: text("last_failure"),
     /** The HTTP status it last failed with, if it answered. */
     lastStatus: integer("last_status"),
+    /**
+     * What its failing requests show, by the HTTP class seen: `refused`,
+     * `not_answering` or `limiting` (`ProviderTrouble`); null while the
+     * last one worked, and once the organization replaced the key
+     * (`ModelLedger.keyReplaced`).
+     */
+    failingClass: text("failing_class"),
+    /** Since when: the first failure of that kind after the last that worked. */
+    failingSince: integer("failing_since"),
   },
   (table) => [primaryKey({ columns: [table.provider, table.credential] })]
 );

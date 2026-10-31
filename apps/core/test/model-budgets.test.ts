@@ -1193,7 +1193,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         async () => await failedLate.call(ada),
         async () => await refused.call(ben),
       ])
-    ).resolves.toStrictEqual(["model.failed", "ok"]);
+    ).resolves.toStrictEqual(["model.provider_unavailable", "ok"]);
     const [adas, bens] = await Promise.all([
       ledgerOf(failedLate.month, userOf(ada)),
       ledgerOf(refused.month, userOf(ben)),
@@ -1233,7 +1233,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         async () => await retried.call(ada),
         async () => await failed.call(ben),
       ])
-    ).resolves.toStrictEqual(["ok", "model.failed"]);
+    ).resolves.toStrictEqual(["ok", "model.provider_unavailable"]);
     const [adas, bens] = await Promise.all([
       ledgerOf(retried.month, userOf(ada)),
       ledgerOf(failed.month, userOf(ben)),

@@ -56,6 +56,17 @@ export type TracesPart = "runs" | "activity";
 const followMs = 1500;
 
 /** Ended, or nothing more of it is shown: no need to read it again. */
+/**
+ * Where a run is, as a read of its trace says it, for what follows it (the
+ * run sheet's facts, run-detail.tsx): its status, and, while a step waits
+ * for its AI provider, that wait. A wait begun or ended moves it, as its
+ * status, still running, doesn't.
+ */
+export const followedState = (trace: WorkflowRunTrace): string =>
+  trace.aiProvider === undefined
+    ? trace.status
+    : `${trace.status}:${trace.aiProvider.trouble}:${trace.aiProvider.since}`;
+
 const settled = (trace: WorkflowRunTrace): boolean =>
   trace.status === "completed" ||
   trace.status === "failed" ||
@@ -122,7 +133,7 @@ const RunTraceDetail = ({
 }: {
   workflow: string;
   runId: string;
-  /** The run's status, as each read of its trace says it. */
+  /** Where the run is, as each read of its trace says it (`followedState`). */
   onStatus: (status: string) => void;
 }) => {
   const core = useCore();
@@ -151,7 +162,7 @@ const RunTraceDetail = ({
         drawn = followed.diagram;
         setTrace(followed);
         setFailure(undefined);
-        told(read.status);
+        told(followedState(read));
         if (!settled(read)) {
           timer = setTimeout(() => {
             void follow();

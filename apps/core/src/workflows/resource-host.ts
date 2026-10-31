@@ -43,6 +43,8 @@ import type {
   SealedTask,
   SealedTemplate,
 } from "../workflow-builds.ts";
+import { aiWaitEnded, aiWaitStarted } from "./ai-waits.ts";
+import type { AiWait } from "./ai-waits.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled, StepError } from "./code.ts";
 import { emitEvent } from "./emitted-events.ts";
@@ -66,6 +68,11 @@ import {
 } from "./fixture-decisions.ts";
 import {
   busyMarker,
+  keyMarkerOf,
+  keyRound,
+  keyTimedOut,
+  keyWaitStart,
+  unbilledAiWaitOf,
   loadRound,
   busyOf,
   cpuLimitKill,
@@ -85,7 +92,7 @@ import {
   waitMsOf,
   waitStep,
 } from "./host.ts";
-import type { Busy, LoadWait, RunStep } from "./host.ts";
+import type { Busy, CoreMarker, KeyWait, LoadWait, RunStep } from "./host.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
@@ -974,6 +981,21 @@ const boundedJson = (
  * a record (`recordSchema` takes no such object), so it can't be taken
  * for one, fresh or replayed.
  */
+/**
+ * `marker` as the busy marker it must be here: a held one has its own
+ * marker (`heldMarker`) and a wait for the provider its own branch, so
+ * any other is one the host can't have recorded.
+ */
+const busyOnly = (
+  stepName: string,
+  marker: CoreMarker
+): Extract<CoreMarker, { kind: "busy" }> => {
+  if (marker.kind !== "busy") {
+    throw new Error(`Step "${stepName}" recorded a hold it can't have`);
+  }
+  return marker;
+};
+
 const heldMarker = { held: true } as const;
 const heldMarkerSchema = z.strictObject({ held: z.literal(true) });
 
@@ -1251,6 +1273,13 @@ interface StepAttempt {
   hostError: StepError | undefined;
   /** What its call failed with, once failed: the step's failure, first. */
   callError: StepError | undefined;
+  /**
+   * What its model call's provider showed, when the call failed on the
+   * organization's own key provably before anything could be billed
+   * (`unbilledAiWaitOf`): the step then waits for the provider and runs
+   * again, rather than fail (`keyMarkerOf`).
+   */
+  aiWait?: AiWait;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -2020,61 +2049,7 @@ export class ResourceRunHost
       engineConfigOf(step),
       attemptStep
     );
-    // Refused for load: the step runs again after a durable sleep, in
-    // steps of core's own outside the run's step allowance, as an App
-    // run's does (host.ts, `RunHost.do`), until it has waited as long
-    // as a step may. Held for its person: waited for, then run again
-    // under a step of its own, its call under the same key, so connect
-    // answers what they decided. Fresh or replayed alike, each round
-    // as recorded.
-    const waitKey = await waitKeyOf(stepName);
-    for (
-      let marker = markerOf(recorded), round = 1;
-      marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
-      marker = markerOf(recorded), round += 1
-    ) {
-      if (marker === undefined) {
-        // Only a connector call is held for its person, and connect
-        // answers its rerun what the person decided, under the same
-        // key: the attempt that was held took the host calls of its
-        // call and of everything it evaluated, and the rerun repeats
-        // that work only to collect the outcome, sending nothing new.
-        // So its attempts take none (GRA-570): a lineage that ran out
-        // while the person decided still gets the effect they let out.
-        // The wait's own checks and sleeps stay steps of the run's.
-        run.collecting =
-          step.task?.kind === "call" &&
-          step.task.call.name === "grasp.connector";
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await this.#waitWhileHeld(stepName, round);
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await this.#requirePerson();
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        recorded = await this.#step.do(
-          `${stepName}:held:${round}:run`,
-          engineConfigOf(step),
-          attemptStep
-        );
-        continue;
-      }
-      // Only the host records a marker, and only a busy one.
-      if (marker.kind !== "busy") {
-        throw new Error(`Step "${stepName}" recorded a hold it can't have`);
-      }
-      run.wait = loadWaitAfter(run.wait, marker);
-      if (run.wait.sleepMs <= 0) {
-        throw toStepError(queueTimedOut(stepName, marker.maxWaitMs));
-      }
-      const prefix = waitStep(waitKey, "busy", round);
-      // oxlint-disable-next-line no-await-in-loop -- one round at a time
-      await loadRound(this.#step, prefix, stepName, marker, run.wait.sleepMs);
-      // oxlint-disable-next-line no-await-in-loop -- one round at a time
-      recorded = await this.#step.do(
-        `${prefix}:run`,
-        engineConfigOf(step),
-        attemptStep
-      );
-    }
+    recorded = await this.#rounds(run, recorded, attemptStep);
     let outcome = entering ? this.#entered(step, recorded) : recorded;
     if (step.kind === "catch") {
       outcome = this.#noteCatch(step, recorded);
@@ -2085,6 +2060,169 @@ export class ResourceRunHost
     // Fresh or replayed alike: what the run has reached, in order.
     this.#noteRecorded(step, outcome);
     return outcome;
+  }
+
+  /**
+   * Refused for load: the step runs again after a durable sleep, in
+   * steps of core's own outside the run's step allowance, as an App
+   * run's does (host.ts, `RunHost.do`), until it has waited as long
+   * as a step may. Held for its person: waited for, then run again
+   * under a step of its own, its call under the same key, so connect
+   * answers what they decided. Fresh or replayed alike, each round
+   * as recorded.
+   * A run again after a wait for its AI provider that throws still ends
+   * that wait, whatever the run does with its failure.
+   */
+  async #rounds(
+    run: StepRun,
+    first: unknown,
+    attemptStep: (context: unknown) => Promise<unknown>
+  ): Promise<unknown> {
+    const { name: stepName, step } = run;
+    let recorded = first;
+    const waitKey = await waitKeyOf(stepName);
+    // Its wait for its AI provider, over its rounds in a row.
+    let keyWait: KeyWait = keyWaitStart();
+    try {
+      for (
+        let marker = markerOf(recorded), round = 1;
+        marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
+        marker = markerOf(recorded), round += 1
+      ) {
+        if (marker === undefined) {
+          // Only a connector call is held for its person, and connect
+          // answers its rerun what the person decided, under the same
+          // key: the attempt that was held took the host calls of its
+          // call and of everything it evaluated, and the rerun repeats
+          // that work only to collect the outcome, sending nothing new.
+          // So its attempts take none (GRA-570): a lineage that ran out
+          // while the person decided still gets the effect they let out.
+          // The wait's own checks and sleeps stay steps of the run's.
+          run.collecting =
+            step.task?.kind === "call" &&
+            step.task.call.name === "grasp.connector";
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          await this.#waitWhileHeld(stepName, round);
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          await this.#requirePerson();
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          recorded = await this.#step.do(
+            `${stepName}:held:${round}:run`,
+            engineConfigOf(step),
+            attemptStep
+          );
+          continue;
+        }
+        if (marker.kind === "key") {
+          // oxlint-disable-next-line no-await-in-loop -- one round at a time
+          recorded = await this.#waitForProvider(run, marker, keyWait, {
+            prefix: waitStep(waitKey, "key", round),
+            attemptStep,
+          });
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- once per wait
+        keyWait = await this.#providerWaitOver(stepName, keyWait);
+        const busy = busyOnly(stepName, marker);
+        run.wait = loadWaitAfter(run.wait, busy);
+        if (run.wait.sleepMs <= 0) {
+          throw toStepError(queueTimedOut(stepName, busy.maxWaitMs));
+        }
+        const prefix = waitStep(waitKey, "busy", round);
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        await loadRound(this.#step, prefix, stepName, busy, run.wait.sleepMs);
+        // oxlint-disable-next-line no-await-in-loop -- one round at a time
+        recorded = await this.#step.do(
+          `${prefix}:run`,
+          engineConfigOf(step),
+          attemptStep
+        );
+      }
+    } catch (error) {
+      await this.#providerWaitOverQuietly(stepName, keyWait);
+      throw error;
+    }
+    await this.#providerWaitOver(stepName, keyWait);
+    return recorded;
+  }
+
+  /**
+   * `#providerWaitOver` for a step ending in a throw: never in the way of
+   * the step's own error, which is what the run sees.
+   */
+  async #providerWaitOverQuietly(
+    stepName: string,
+    wait: KeyWait
+  ): Promise<void> {
+    try {
+      await this.#providerWaitOver(stepName, wait);
+    } catch (error) {
+      log.error("workflow.ai_wait_end_failed", {
+        runId: this.#run.runId,
+        ...errorFields(error),
+      });
+    }
+  }
+
+  /**
+   * Round `prefix` of step `run`'s wait for its AI provider, its attempt
+   * having answered `marker` (`keyRound`, host.ts): past its hold, the
+   * step fails with what the provider showed; else, once the wait ends,
+   * the step runs again in a step of its own, whose call is tried once
+   * anew, and what it recorded is answered.
+   */
+  async #waitForProvider(
+    run: StepRun,
+    marker: Extract<CoreMarker, { kind: "key" }>,
+    wait: KeyWait,
+    {
+      prefix,
+      attemptStep,
+    }: { prefix: string; attemptStep: (context: unknown) => Promise<unknown> }
+  ): Promise<unknown> {
+    const { name: stepName, step } = run;
+    const ended = await keyRound(
+      this.#step,
+      this.#env,
+      prefix,
+      marker,
+      wait,
+      async (since, aiWait) => {
+        await aiWaitStarted(
+          this.#env,
+          { kind: "resource", runId: this.#run.runId },
+          stepName,
+          aiWait,
+          since
+        );
+      }
+    );
+    if (ended === "timed_out") {
+      // Its wait ends with the throw (`#rounds`).
+      throw toStepError(keyTimedOut(stepName, marker.trouble));
+    }
+    await this.#requirePerson();
+    return await this.#step.do(
+      `${prefix}:run`,
+      engineConfigOf(step),
+      attemptStep
+    );
+  }
+
+  /**
+   * Ends step `stepName`'s wait for its AI provider, if it waits, recorded
+   * once in a step named after its last round (ai-waits.ts): a wait no
+   * more.
+   */
+  async #providerWaitOver(stepName: string, wait: KeyWait): Promise<KeyWait> {
+    if (wait.since === undefined) {
+      return wait;
+    }
+    await this.#step.do(`${wait.prefix}:ended`, {}, async () => {
+      await aiWaitEnded(this.#env, this.#run.runId, stepName);
+      return null;
+    });
+    return keyWaitStart();
   }
 
   /**
@@ -2148,6 +2286,12 @@ export class ResourceRunHost
   ): unknown {
     if (attempt?.held === true) {
       return heldMarker;
+    }
+    // Its model call provably billed nothing, and its provider refused it
+    // or didn't answer it: the step waits for the provider (`keyRound`),
+    // then runs again in a step of its own, whose call is tried once anew.
+    if (attempt?.aiWait !== undefined) {
+      return keyMarkerOf(Date.now(), attempt.aiWait);
     }
     if (!result.ok) {
       // The host's own word for why, never the isolate's: a module may
@@ -3875,6 +4019,15 @@ export class ResourceRunHost
         attempt.held ||=
           task.call.name === "grasp.connector" &&
           connectErrors.codeOf(error) === "connect.held";
+        // A model call the gateway saw bill nothing, as its provider
+        // refused it or failed it with no answer begun, may run again,
+        // though tried once: nothing of it was taken on to go out twice.
+        // Any other failure, its outcome unknown (no answer at all, a
+        // deadline passed with it out, an answer broken partway), fails
+        // the step as before.
+        if (task.call.name === "grasp.model") {
+          attempt.aiWait = unbilledAiWaitOf(error);
+        }
         throw error;
       }
     });

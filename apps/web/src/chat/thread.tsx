@@ -57,6 +57,7 @@ import {
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
+import { useCanReplaceKey } from "../frame/ai-key-banner.tsx";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
@@ -550,6 +551,29 @@ const needsProvider: ReadonlySet<unknown> = new Set([
   "model.unconfigured",
 ]);
 
+/**
+ * An answer that failed because the organization's AI provider refuses
+ * its key: its admins get the way to check or replace it, everyone else
+ * who to ask.
+ */
+const KeyFailed = () => {
+  const { i18n } = useLingui();
+  if (!useCanReplaceKey()) {
+    return failureMessage("model.provider_key_failed", i18n);
+  }
+  return (
+    <>
+      <Trans>Your AI provider is refusing your key.</Trans>{" "}
+      <Link
+        className="underline underline-offset-4"
+        to="/settings/ai-providers"
+      >
+        <Trans>Check or replace it in Settings › AI providers</Trans>
+      </Link>
+    </>
+  );
+};
+
 /** Asking a failed answer's question again, without typing it again. */
 const TryAgain = ({ onRetry }: { onRetry: (() => void) | undefined }) =>
   onRetry === undefined ? null : (
@@ -586,7 +610,13 @@ const Failed = ({
     // to ask again under what went wrong.
     <Alert variant="destructive">
       <TriangleAlertIcon />
-      <AlertTitle>{failureMessage(failure, i18n)}</AlertTitle>
+      <AlertTitle>
+        {failure === "model.provider_key_failed" ? (
+          <KeyFailed />
+        ) : (
+          failureMessage(failure, i18n)
+        )}
+      </AlertTitle>
       {onRetry === undefined ? null : (
         <AlertDescription>
           <div className="pt-2">

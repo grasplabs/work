@@ -1,6 +1,7 @@
 import { Cron } from "croner";
 import { z } from "zod";
 
+import type { ProviderTrouble } from "./ai-providers.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, RunId, WorkflowId } from "./ids.ts";
@@ -497,6 +498,8 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.server_unavailable",
   "connect.call_in_progress",
   "model.failed",
+  // A provider that didn't answer: what `model.failed` said of it before.
+  "model.provider_unavailable",
   "model.budget_busy",
   // Nothing was sent; a share of the model requests in flight comes back
   // as they end, and a provider's rate as its window passes.
@@ -623,6 +626,13 @@ export interface RunSummary {
    * again at the latest. Throttling, not a fault of the workflow.
    */
   queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
+  /**
+   * While it is `queued` because a model call of it failed on the
+   * organization's own AI provider key: the provider, what it showed (it
+   * refuses the key, isn't answering, or is limiting requests), and since
+   * when. It goes on by itself once calls work.
+   */
+  aiProvider?: { since: number; provider: string; trouble: ProviderTrouble };
   /**
    * What the person asking may do now, as the host would admit it, and a
    * control the host admitted that the engine is still applying.
@@ -815,6 +825,19 @@ export interface RunQueue {
   retryAt: string;
 }
 
+/**
+ * What a `queued` run waits for when a model call of it failed on the
+ * organization's own AI provider key: the provider, what it showed, by
+ * the HTTP class seen (it refuses the key, isn't answering, or is limiting
+ * requests), and since when (ISO 8601). It goes on by itself once calls
+ * work; an admin can replace a key.
+ */
+export interface RunAiProviderWait {
+  since: string;
+  provider: string;
+  trouble: ProviderTrouble;
+}
+
 /** One run of a workflow. */
 export interface WorkflowRun {
   id: RunId;
@@ -827,6 +850,8 @@ export interface WorkflowRun {
   status: RunStatus;
   /** While it is `queued`: the share it waits for, and when it asks again. */
   queued?: RunQueue;
+  /** While it is `queued` for its AI provider: which, what it showed, and since when. */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
   /**
@@ -1249,6 +1274,8 @@ export interface WorkflowSummary {
     status: RunStatus;
     /** While it is `queued`: the share it waits for. */
     queued?: RunQueue;
+    /** While it is `queued` for its AI provider: which, what it showed, and since when. */
+    aiProvider?: RunAiProviderWait;
     createdAt: string;
   } | null;
   /** Its runs waiting for a decision now. */

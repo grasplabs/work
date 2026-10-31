@@ -71,6 +71,13 @@
       "when": 1793462860819,
       "tag": "0009_platform_spend",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793463341140,
+      "tag": "0010_provider_failing_since",
+      "breakpoints": true
     }
   ]
 }
