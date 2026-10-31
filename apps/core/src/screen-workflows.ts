@@ -1016,7 +1016,7 @@ const runSnapshot = async (
   if (row.principalId !== asking.by.userId) {
     return {
       value: watchedSnapshot(row, contract.fingerprint, waits, pending),
-      revision: revisionOf(generation, row),
+      revision: revisionOf(generation, row, appRestricted),
     };
   }
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
