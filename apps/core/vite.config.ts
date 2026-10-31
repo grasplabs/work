@@ -9,7 +9,7 @@ import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
 import { testComposioKey } from "../connect/test/provider-config.ts";
-import { testBlueprintsModule } from "./build-blueprints.ts";
+import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";
 import { testVersionModule } from "./test/compiler-version.ts";
 import {
@@ -22,6 +22,7 @@ import {
   gmailPush,
   googleConnectClient,
   landscapeClient,
+  platformOpenAiKey,
   slackApp,
   teamsBot,
   telegramBot,
@@ -213,6 +214,10 @@ export const coreProject = (
     resolve: {
       alias: [
         { find: /^#blueprints$/u, replacement: testBlueprintsModule },
+        {
+          find: /^#blueprints-digest$/u,
+          replacement: digestModuleOf(testBlueprintsModule),
+        },
         { find: /^#version$/u, replacement: testVersionModule },
       ],
     },
@@ -366,6 +371,9 @@ export const coreProject = (
                 WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
                 WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
                 TELEGRAM_BOT_TOKEN: telegramBot.token,
+                // Grasp's own key at OpenAI for platform features, which
+                // the fake OpenAI there takes once a test plans for it.
+                OPENAI_API_KEY: platformOpenAiKey,
                 // Stephen's Gmail mailbox, which the fake Google there knows.
                 GMAIL_MAILBOX: gmailAccount.mailbox,
                 GMAIL_CLIENT_ID: gmailAccount.clientId,
@@ -389,6 +397,8 @@ export const coreProject = (
               modules: true,
               script: connectProvidersScript,
               compatibilityDate: "2026-09-15",
+              // So a fake provider sees its sender drop a request.
+              compatibilityFlags: ["enable_request_signal"],
             },
           ],
         },
