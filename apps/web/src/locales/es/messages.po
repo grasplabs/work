@@ -14746,10 +14746,6 @@ msgstr "Stephen fuera de Grasp"
 msgid "Stephen talks to nobody until you pick the day the interviews start."
 msgstr "Stephen no habla con nadie hasta que elijas el día en que empiezan las entrevistas."
 
-#: src/routes/interview.tsx
-msgid "Stephen, drawn in dots."
-msgstr "Stephen, en puntos."
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
 msgstr "Solicitudes a Stephen"

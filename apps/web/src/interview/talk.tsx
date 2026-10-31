@@ -1,6 +1,7 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
@@ -65,9 +66,9 @@ export const Talk = ({
             className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500 motion-reduce:animate-none"
             key={loop.saying}
           >
-            <p className="type-display">
+            <PageHeaderTitle render={<p />}>
               <SpokenText said={said} text={title} />
-            </p>
+            </PageHeaderTitle>
             {rest === "" ? null : (
               <p className="text-muted-foreground text-balance">
                 <SpokenText from={title.length + 1} said={said} text={rest} />

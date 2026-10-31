@@ -187,9 +187,13 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
       <Button type="submit">
         <Trans>Filter</Trans>
       </Button>
-      <Link className="text-sm underline" search={{}} to="/settings/audit">
+      <Button
+        nativeButton={false}
+        render={<Link search={{}} to="/settings/audit" />}
+        variant="ghost"
+      >
         <Trans>Clear</Trans>
-      </Link>
+      </Button>
     </form>
   );
 };
