@@ -36,7 +36,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime, formatNumber } from "../format.ts";
-import { ProcessHint, ProcessTile } from "./business-process.tsx";
+import { ProcessHint } from "./business-process.tsx";
 import { handledOf, listsOf } from "./lists.ts";
 import { WorkflowOwnerPicker } from "./owner-picker.tsx";
 import { RunResult } from "./runs.tsx";
@@ -165,7 +165,7 @@ const Lead = ({
           />
         }
       >
-        {process === null ? <EngineIcon /> : <ProcessTile process={process} />}
+        <EngineIcon process={process} />
         {workflow.waiting === 0 ? null : (
           <span
             aria-hidden="true"
@@ -433,6 +433,36 @@ const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
 );
 
 /**
+ * `rows` in the overview's two lists, without the numbers over them: at
+ * work, those that have run, the ones waiting on a person first; on the
+ * way, those that haven't run yet. Needs you shows its workflows so, as
+ * the prototype's does.
+ */
+export const WorkflowLists = ({
+  rows,
+  processes,
+}: {
+  rows: WorkflowSummary[];
+  processes?: AppProcesses;
+}) => {
+  const { atWork, onTheWay } = listsOf(rows);
+  return (
+    <>
+      <List
+        processes={processes}
+        rows={atWork}
+        title={<Trans>At work</Trans>}
+      />
+      <List
+        processes={processes}
+        rows={onTheWay}
+        title={<Trans>On the way</Trans>}
+      />
+    </>
+  );
+};
+
+/**
  * The Workflows page's list, as the prototype tells it
  * (`components/workflows-overview.tsx`): made for many workflows, its
  * numbers on top, then two lists. At work, those that have run, the ones
@@ -448,22 +478,12 @@ export const WorkflowsOverview = ({
   if (rows.length === 0) {
     return <WorkflowsTable rows={rows} />;
   }
-  const { atWork, onTheWay } = listsOf(rows);
   return (
     // The container for the numbers' columns: a container query never
     // applies to the element that is the container.
     <div className="@container flex flex-col gap-8">
       <Numbers rows={rows} />
-      <List
-        processes={processes}
-        rows={atWork}
-        title={<Trans>At work</Trans>}
-      />
-      <List
-        processes={processes}
-        rows={onTheWay}
-        title={<Trans>On the way</Trans>}
-      />
+      <WorkflowLists processes={processes} rows={rows} />
     </div>
   );
 };

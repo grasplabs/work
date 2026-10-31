@@ -177,19 +177,19 @@ const PauseQuestion = ({
   );
 };
 
-/** The dot beside the status word: agreed while live, attention while paused. */
-const dotClass: Readonly<Record<StatusView["shows"], string | null>> = {
-  stage: null,
+/**
+ * The dot beside the status word, as the prototype has it: ink for a
+ * stage before it went live, agreed while live, attention while paused.
+ */
+const dotClass: Readonly<Record<StatusView["shows"], string>> = {
+  stage: "bg-foreground size-1.5 rounded-full",
   live: "bg-status-agreed size-1.5 rounded-full",
   paused: "bg-status-attention size-1.5 rounded-full",
 };
 
-const StatusDot = ({ shows }: { shows: StatusView["shows"] }) => {
-  const className = dotClass[shows];
-  return className === null ? null : (
-    <span aria-hidden="true" className={className} />
-  );
-};
+const StatusDot = ({ shows }: { shows: StatusView["shows"] }) => (
+  <span aria-hidden="true" className={dotClass[shows]} />
+);
 
 /** The status word, and the menu of what the reader may change, if anything. */
 const StatusMenu = ({

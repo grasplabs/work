@@ -124,10 +124,13 @@ const useAside = (canManage: boolean) => {
   return { aside, reread };
 };
 
-/** The page's one line in a card, where the table would be. */
+/**
+ * The page's one line in a card, where the table would be: in the
+ * prototype's room around it, the card's own and `sm` together.
+ */
 const Note = ({ children }: { children: string }) => (
   <Card>
-    <Empty>
+    <Empty size="sm">
       <EmptyHeader>
         <EmptyDescription>{children}</EmptyDescription>
       </EmptyHeader>

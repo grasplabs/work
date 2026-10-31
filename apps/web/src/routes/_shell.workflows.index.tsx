@@ -13,6 +13,10 @@ import type {
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
 import {
+  ButtonGroup,
+  ButtonGroupText,
+} from "@grasp-os/ui/components/button-group";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -72,9 +76,10 @@ import {
 import { runFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { TodayLanes } from "../workflows/today-lanes.tsx";
+import type { LaneProcesses } from "../workflows/today-lanes.tsx";
 import {
   WorkflowsOverview,
-  WorkflowsTable,
+  WorkflowLists,
 } from "../workflows/workflows-table.tsx";
 import type { AppProcesses } from "../workflows/workflows-table.tsx";
 
@@ -159,7 +164,10 @@ interface Option {
   label: string;
 }
 
-/** One filter of the Runs tab, with "All" first. */
+/**
+ * One filter of the Runs tab, with "All" first, as the prototype draws a
+ * filter (Requests' "Place is All"): what it filters, then what it is.
+ */
 const Filter = ({
   label,
   options,
@@ -176,25 +184,30 @@ const Filter = ({
   const { t } = useLingui();
   const items = [{ value: all, label: t`All` }, ...options];
   return (
-    <Select
-      disabled={disabled}
-      items={items}
-      onValueChange={(chosen: string | null) => {
-        onChange(chosen === null || chosen === all ? undefined : chosen);
-      }}
-      value={value ?? all}
-    >
-      <SelectTrigger aria-label={label} className="min-w-40">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {items.map((item) => (
-          <SelectItem key={item.value} value={item.value}>
-            {item.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <ButtonGroup>
+      <ButtonGroupText aria-hidden="true">
+        {t({ message: `${label} is`, context: 'filter: "Place is All"' })}
+      </ButtonGroupText>
+      <Select
+        disabled={disabled}
+        items={items}
+        onValueChange={(chosen: string | null) => {
+          onChange(chosen === null || chosen === all ? undefined : chosen);
+        }}
+        value={value ?? all}
+      >
+        <SelectTrigger aria-label={label} size="sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </ButtonGroup>
   );
 };
 
@@ -401,7 +414,7 @@ const NeedsAttention = ({
     rows.length === 0 &&
     waiting.length === 0;
   return (
-    <div className="mt-6 flex flex-col gap-8">
+    <div className="mt-4 flex flex-col gap-8">
       {nothing ? (
         <EmptyCard>
           <Trans>
@@ -415,7 +428,7 @@ const NeedsAttention = ({
         <NotLoadedState page={apps} />
       ) : null}
       {domainsGone || rows.length === 0 ? null : (
-        <WorkflowsTable processes={processes} rows={rows} />
+        <WorkflowLists processes={processes} rows={rows} />
       )}
       {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
       {goLives.state === "ready" && domainsUnchecked(independent, process) ? (
@@ -820,7 +833,7 @@ const Workflows = () => {
           </div>
           <TabsContent value="workflows">
             {page.tab === "workflows" ? (
-              <div className="mt-6 flex flex-col gap-8">
+              <div className="mt-4 flex flex-col gap-8">
                 {lists.workflows.state === "ready" ? (
                   <AppWorkflows
                     apps={lists.apps}
@@ -854,9 +867,12 @@ const Workflows = () => {
                 them, as the prototype has it. Only while the tab shows:
                 the lanes read again every so often only then. */}
             {page.tab === "runs" ? (
-              <div className="mt-6 flex flex-col gap-8">
+              <div className="mt-4 flex flex-col gap-8">
                 {page.today.state === "ready" ? (
-                  <TodayLanes today={page.today.data} />
+                  <TodayLanes
+                    processes={laneProcessesOf(lists)}
+                    today={page.today.data}
+                  />
                 ) : (
                   <NotLoadedState page={page.today} />
                 )}
@@ -870,6 +886,22 @@ const Workflows = () => {
     </>
   );
 };
+
+/**
+ * The processes Today's lanes serve, from what the lists read: a domain
+ * workflow its domain's, an independent one its own.
+ */
+const laneProcessesOf = (lists: Lists): LaneProcesses => ({
+  apps: lists.processes,
+  independent: new Map(
+    lists.independent.state === "ready"
+      ? lists.independent.data.map((workflow) => [
+          workflow.id,
+          workflow.process,
+        ])
+      : []
+  ),
+});
 
 /** The business process each App serves, by its ID. */
 const processesOf = (apps: Loaded<App[]>): AppProcesses =>

@@ -1,3 +1,4 @@
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type {
   DecisionAnswerInput,
   DecisionView,
@@ -22,6 +23,7 @@ import { formatTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
+import { ProcessGlyph } from "./business-process.tsx";
 import {
   handovers,
   hoursOf,
@@ -51,6 +53,9 @@ const laneHeight = 44;
 
 /** How long an answer can be taken back before it is given, in seconds. */
 const graceSeconds = 5;
+
+/** How far along the day an hour may stand and still leave room for "now" at its end. */
+const nowRoom = 0.94;
 
 /** Sets the `--x` a dot, a trail or an hour is placed by: its share of the day. */
 const placedAt = (share: number) => cssVars({ "--x": `${share * 100}%` });
@@ -205,6 +210,38 @@ const Dot = ({
   );
 };
 
+/** The business processes the lanes' workflows serve, for their marks. */
+export interface LaneProcesses {
+  /** By domain: the process each domain serves. */
+  apps: ReadonlyMap<string, BusinessProcess | null>;
+  /** By independent workflow: the process each serves. */
+  independent: ReadonlyMap<string, BusinessProcess | null>;
+}
+
+/** None known: lanes without their marks. */
+const noProcesses: LaneProcesses = { apps: new Map(), independent: new Map() };
+
+/** The process `of`'s workflow serves, by `processes`. */
+const processOfLane = (
+  processes: LaneProcesses,
+  of: Lane["of"]
+): BusinessProcess | undefined =>
+  (of.kind === "app"
+    ? processes.apps.get(of.app)
+    : processes.independent.get(of.id)) ?? undefined;
+
+/** A lane's process, by its mark, before its name, as the prototype has it. */
+const LaneMark = ({
+  lane,
+  processes,
+}: {
+  lane: Lane;
+  processes: LaneProcesses;
+}) => {
+  const process = processOfLane(processes, lane.of);
+  return process === undefined ? null : <ProcessGlyph process={process} />;
+};
+
 /** A lane's name, opening its workflow. */
 const LaneLink = ({ lane, className }: { lane: Lane; className: string }) =>
   lane.of.kind === "app" ? (
@@ -302,7 +339,9 @@ const Lanes = ({
   lit,
   chosen,
   onChoose,
+  processes,
 }: {
+  processes: LaneProcesses;
   day: LaneDay;
   lit: ReadonlySet<string>;
   chosen: string | null;
@@ -315,7 +354,8 @@ const Lanes = ({
     <div className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-6">
       <ul className="flex flex-col">
         {day.lanes.map((lane) => (
-          <li className="flex h-11 items-center" key={lane.key}>
+          <li className="flex h-11 items-center gap-2" key={lane.key}>
+            <LaneMark lane={lane} processes={processes} />
             <LaneLink
               className="min-w-0 leading-tight text-pretty hover:underline"
               lane={lane}
@@ -365,16 +405,19 @@ const Lanes = ({
       </div>
       <span />
       <div className="text-muted-foreground relative h-5 text-xs tabular-nums">
-        {hoursOf(day).map((hour) => (
-          <span
-            className="absolute left-(--x) -translate-x-1/2"
-            key={hour}
-            ref={placedAt(placeOf(hour, day))}
-          >
-            {formatTime(hour)}
-          </span>
-        ))}
-        <span className="text-foreground absolute right-0 translate-x-1/2">
+        {/* An hour as close to the end as "now" would sit on it: left out. */}
+        {hoursOf(day)
+          .filter((hour) => placeOf(hour, day) < nowRoom)
+          .map((hour) => (
+            <span
+              className="absolute left-(--x) -translate-x-1/2 whitespace-nowrap"
+              key={hour}
+              ref={placedAt(placeOf(hour, day))}
+            >
+              {formatTime(hour)}
+            </span>
+          ))}
+        <span className="text-foreground absolute right-0 translate-x-1/2 whitespace-nowrap">
           {t({
             message: "now",
             context: "the end of a time line: this moment",
@@ -416,13 +459,16 @@ const ListLane = ({
   lane,
   chosen,
   onChoose,
+  processes,
 }: {
+  processes: LaneProcesses;
   lane: Lane;
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) => (
   <li className="flex flex-col gap-1.5 py-3">
     <span className="flex items-center gap-2">
+      <LaneMark lane={lane} processes={processes} />
       <LaneLink
         className="min-w-0 flex-1 truncate font-medium hover:underline"
         lane={lane}
@@ -668,7 +714,14 @@ const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
   return laterDay(loaded, read);
 };
 
-export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
+export const TodayLanes = ({
+  today: loaded,
+  processes = noProcesses,
+}: {
+  today: WorkflowsToday;
+  /** The process each lane's workflow serves, for its mark. */
+  processes?: LaneProcesses;
+}) => {
   const today = useLatestToday(loaded);
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
@@ -697,7 +750,13 @@ export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
       {day.lanes.length === 0 ? null : (
         <>
           <div className="hidden @2xl:block">
-            <Lanes chosen={chosen} day={day} lit={lit} onChoose={setChosen} />
+            <Lanes
+              chosen={chosen}
+              day={day}
+              lit={lit}
+              onChoose={setChosen}
+              processes={processes}
+            />
           </div>
           <ul className="flex flex-col divide-y @2xl:hidden">
             {day.lanes.map((lane) => (
@@ -706,6 +765,7 @@ export const TodayLanes = ({ today: loaded }: { today: WorkflowsToday }) => {
                 key={lane.key}
                 lane={lane}
                 onChoose={setChosen}
+                processes={processes}
               />
             ))}
           </ul>
