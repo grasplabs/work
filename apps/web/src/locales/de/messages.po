@@ -779,10 +779,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} von {workflows} Workflows bekannt"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -4164,10 +4160,6 @@ msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die 
 msgid "Case {name}, when it holds"
 msgstr "Fall {name}, wenn er zutrifft"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Kategorien"
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Category"
@@ -4893,6 +4885,11 @@ msgid "Connected"
 msgstr "Verbunden"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Verbunden"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Verbunden"
@@ -4935,6 +4932,10 @@ msgstr "Verbundene Anbieter"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Verbunden, direkt"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow you can open"
+msgstr "Verbunden, von keinem Workflow genutzt, den Sie öffnen können"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6227,6 +6228,10 @@ msgstr "Jeden Montagmorgen, an Sie"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Jeden Montag: Stunden, Läufe und was wartet."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Alle anderen Apps, die Grasp verbinden kann."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6395,10 +6400,6 @@ msgstr "Ausnahmen"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Ausnahmen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Filter ausklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6624,11 +6625,6 @@ msgstr "Integrationen filtern"
 msgid "Filters"
 msgstr "Filter"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filter"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Finanzen"
@@ -6752,10 +6748,6 @@ msgstr "Markiert oder blockiert die Apps, die gegen sie verstoßen."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Chat einklappen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Filter einklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -9197,6 +9189,7 @@ msgstr "Mitglieder von {name}"
 #: src/brain/brain-nav.tsx
 #: src/brain/memory-page.tsx
 #: src/labels.ts
+#: src/routes/_shell.brain.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Memory"
 msgstr "Gedächtnis"
@@ -9322,6 +9315,11 @@ msgstr "Mehr über diese Verbindungen"
 #: src/onboarding/setup-steps.tsx
 msgid "More about this connection"
 msgstr "Mehr über diese Verbindung"
+
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Weitere Apps"
 
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
@@ -9558,6 +9556,7 @@ msgstr "Erneute Anmeldung nötig"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Jemand muss sich erneut anmelden"
@@ -17067,6 +17066,10 @@ msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speiche
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "Up to {upTo} minutes"
 msgstr "Bis {upTo} Minuten"
+
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Updated {when}"
+msgstr "Aktualisiert {when}"
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

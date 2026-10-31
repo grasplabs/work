@@ -55,7 +55,6 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { whenShort } from "../chat/chat-history.ts";
 import {
   ChatMenu,
   chatTitleMaxLength,
@@ -72,6 +71,7 @@ import { DeleteChatDialog } from "../chat/delete-chat-dialog.tsx";
 import { ProjectDialog } from "../chat/project-dialog.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatDaysAgo } from "../format.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -420,6 +420,8 @@ const ProjectChat = ({
   onDelete: () => void;
 }) => {
   const { t, i18n } = useLingui();
+  // As the prototype says it: "Updated yesterday", "Updated 4 days ago".
+  const when = formatDaysAgo(chat.lastAt, new Date(), i18n.locale);
   const [renaming, setRenaming] = useState(false);
   const { row, ended } = useRenameFocus<HTMLAnchorElement>(renaming);
   const { failure, rename, move } = useChatChanges(chat);
@@ -449,7 +451,7 @@ const ProjectChat = ({
       >
         <span className="truncate text-sm font-medium">{chat.title}</span>
         <span className="text-muted-foreground text-xs">
-          {whenShort(chat.lastAt, new Date(), i18n.locale)}
+          <Trans>Updated {when}</Trans>
         </span>
       </Link>
       <ChatMenu
