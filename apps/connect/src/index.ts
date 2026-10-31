@@ -61,10 +61,6 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import type { HrConnection, HrRead } from "@grasp-os/shared/hr";
-import type {
-  LandscapeConnection,
-  LandscapeRead,
-} from "@grasp-os/shared/landscape";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   NpmAdvisories,
@@ -120,7 +116,6 @@ import {
   takeConnectorEvents,
 } from "./events.ts";
 import { hrConnections, readHr } from "./hr.ts";
-import { landscapeConnections, readLandscape } from "./landscape.ts";
 import { catalogLogo } from "./logos.ts";
 import {
   npmAdvisories,
@@ -516,16 +511,6 @@ export default class Connect
 
   async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
     return await catalogLogo(this.env, request);
-  }
-
-  // The application landscape (src/landscape.ts): for core's sync only.
-
-  async landscapeConnections(): Promise<LandscapeConnection[]> {
-    return await landscapeConnections(this.env);
-  }
-
-  async readLandscape(request: unknown): Promise<LandscapeRead> {
-    return await readLandscape(this.env, request);
   }
 
   // The directory (src/directory.ts): for the onboarding, and to know the

@@ -303,9 +303,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   // The documents' Entra app (connect's providers.ts).
   "MICROSOFT_DOCUMENTS_CLIENT_ID",
   "MICROSOFT_DOCUMENTS_CLIENT_SECRET",
-  // The landscape's Entra app (connect's providers.ts).
-  "MICROSOFT_LANDSCAPE_CLIENT_ID",
-  "MICROSOFT_LANDSCAPE_CLIENT_SECRET",
   // The periods model budgets count in, which tests set (core's
   // src/model-budgets.ts).
   "MODEL_BUDGET_DAY",

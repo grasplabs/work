@@ -139,10 +139,7 @@ describe("a consent", () => {
   it("keeps their own scopes for the admin connections that share a suite's sign-in, whatever the classes", async () => {
     const admin = someone("admin");
     const scopesOf = async (
-      provider:
-        | "google-documents"
-        | "microsoft-documents"
-        | "microsoft-landscape",
+      provider: "google-documents" | "microsoft-documents",
       classes?: CompanyToolClass[]
     ) => {
       const url = await startAs(admin, {
@@ -153,11 +150,7 @@ describe("a consent", () => {
       });
       return url.searchParams.get("scope");
     };
-    const others = [
-      "google-documents",
-      "microsoft-documents",
-      "microsoft-landscape",
-    ] as const;
+    const others = ["google-documents", "microsoft-documents"] as const;
     const withClasses = await Promise.all(
       others.map(
         async (provider) =>

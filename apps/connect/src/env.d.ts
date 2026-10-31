@@ -16,13 +16,6 @@ interface __BaseEnv_Env {
   MICROSOFT_CLIENT_ID?: string;
   MICROSOFT_CLIENT_SECRET?: string;
   /**
-   * Grasp's multi-tenant Entra app for the application landscape's
-   * read-only admin connection (src/providers.ts), registered apart from
-   * the one above so its tokens can never carry mail, calendar or files.
-   */
-  MICROSOFT_LANDSCAPE_CLIENT_ID?: string;
-  MICROSOFT_LANDSCAPE_CLIENT_SECRET?: string;
-  /**
    * Grasp's multi-tenant Entra app for the directory's read-only admin
    * connection (src/providers.ts), apart for the same reason.
    */
