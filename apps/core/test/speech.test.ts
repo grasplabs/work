@@ -4,36 +4,41 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
-import { gatewaySettings, models } from "../src/models.ts";
+import { models } from "../src/models.ts";
 import type { ModelsEnv } from "../src/models.ts";
-import { gatewaySpeech } from "../src/speech.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import { platformSpeech } from "../src/speech.ts";
+import { speechBytesPerChar } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
+import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome } from "./sign-in.ts";
 
-// Speech through the model gateway: a voice model says a line, judged by
-// the deployment's rules, charged per character against its budgets and
-// audited like any model call. AI Gateway, and ElevenLabs behind it, is
-// the outside system: a fake behind the AI binding. The rules, the ledger
-// and the audit log are real.
+// Speech through the model gateway: Grasp's own speech feature
+// (@grasp-os/shared/platform-ai), ElevenLabs', says a line, judged by the
+// deployment's rules, charged per character against its budgets and
+// audited like any model call, through connect with Grasp's own key.
+// ElevenLabs is the outside system: a fake behind connect's fetch
+// (test/ai-providers-fake.ts), which says each character in 25 ms.
+// Connect, the rules, the ledger and the audit log are real.
 
-const voiceModel = "elevenlabs/eleven_v4";
-const quickVoice = "elevenlabs/eleven_v4_turbo";
+const speechModel = "elevenlabs/eleven_v4";
+const quickModel = "elevenlabs/eleven_v4_turbo";
 const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
-/** Stephen's voice in the prototype: an ElevenLabs voice ID. */
+/** Stephen's voice by default: an ElevenLabs voice ID. */
 const voice = "s3TPKV1kjDlVtZbl4Ksh";
 
-const said: GatewayReply = { speech: { audio: "mp3 bytes" } };
+/** What a line of `characters` costs at Eleven v4's $0.08 per 1,000: 80 micros each. */
+const lineMicrosOf = (characters: number): number => characters * 80;
 
-/** The deployment's AI Gateway token, a Worker secret. */
-const gatewayToken = "aig-token-for-tests-only";
+/**
+ * A line of 18 characters no other test says, so what reached the
+ * provider with it is this test's.
+ */
+const newLine = (): string =>
+  `Hello there, ${crypto.randomUUID().slice(0, 4)}.`;
 
-/** The EU host's custom provider, as the gateway config names it. */
-const euHost = { voice: { provider: "custom-elevenlabs-eu" } };
-
-const busy: GatewayReply = { status: 429, headers: { "retry-after": "7" } };
+const busy = { status: 429, headers: { "retry-after": "7" } };
 
 /** What `promise` threw, or `undefined` if it didn't. */
 const thrown = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -45,10 +50,6 @@ const thrown = async (promise: Promise<unknown>): Promise<unknown> => {
   }
 };
 
-/** 17 characters: at Eleven v4's $0.08 per 1,000, 80 micros each. */
-const line = "Hello there, Ada.";
-const lineMicros = 17 * 80;
-
 let monthsUsed = 0;
 
 /** A month no other test counts budgets in: from 2700, clear of other files. */
@@ -57,24 +58,19 @@ const newMonth = (): string => {
   return `${2700 + Math.floor(monthsUsed / 12)}-${String((monthsUsed % 12) + 1).padStart(2, "0")}`;
 };
 
-/** Core's env with the fake gateway answering `replies`, under `config`. */
-const withGateway = (
-  replies: GatewayReply[],
-  config: Record<string, unknown> = {}
-) => {
-  const gateway = fakeGateway(...replies);
+/** Core's env under the gateway config `config`, budgets counted in a month of its own. */
+const withGateway = (config: Record<string, unknown> = {}) => {
   const month = newMonth();
   const gatewayEnv: ModelsEnv = {
     ...env,
-    AI: gateway.binding,
     MODEL_GATEWAY: {
       gateway: "grasp-os-test",
-      models: [textModel, voiceModel, quickVoice],
+      models: [textModel],
       ...config,
     },
     MODEL_BUDGET_MONTH: month,
   };
-  return { gateway, gatewayEnv, month };
+  return { gatewayEnv, month };
 };
 
 /** A person no other test uses, so their audit events are this test's. */
@@ -86,7 +82,7 @@ const stephen = (
   gatewayEnv: ModelsEnv,
   trigger: ReturnType<typeof newPerson>
 ) =>
-  gatewaySpeech(gatewayEnv, {
+  platformSpeech(gatewayEnv, {
     purpose: "onboarding.speech",
     trigger,
     work: { onboarding: true },
@@ -123,127 +119,157 @@ const spentBy = async (month: string, userId: string) => {
   );
 };
 
+/** A request's body, read as JSON. */
+const jsonOf = (body: string): unknown => JSON.parse(body);
+
+/** The requests that reached the provider with `line`, as JSON bodies. */
+const sentWith = async (line: string) => {
+  const carried = await carrying(line);
+  return carried.map(({ host, path, body }) => ({
+    host,
+    path,
+    body: jsonOf(body),
+  }));
+};
+
 // A test waits up to 10 seconds for a line's audit events (`auditedFor`).
 describe("speech through the model gateway", { timeout: 30_000 }, () => {
-  it("says a line, with when each word is said, grouped from the characters' timing", async () => {
-    const { gateway, gatewayEnv } = withGateway([said]);
+  it("says a line as MP3, with when each word is said, grouped from the characters' timing", async () => {
+    const { gatewayEnv } = withGateway();
+    const line = newLine();
 
     const speech = await stephen(gatewayEnv, newPerson()).speak({
       text: line,
       voice,
       language: "en",
-      model: voiceModel,
     });
 
-    expect({
-      audio: new TextDecoder().decode(speech.audio),
-      mime: speech.mime,
-    }).toStrictEqual({ audio: "mp3 bytes", mime: "audio/mpeg" });
-    // Each character takes the fake 100 ms; punctuation stays with its word.
+    expect({ bytes: speech.audio.byteLength, mime: speech.mime }).toStrictEqual(
+      { bytes: line.length * speechBytesPerChar, mime: "audio/mpeg" }
+    );
+    // Each character takes the fake 25 ms; punctuation stays with its word.
+    const last = line.split(" ").at(-1);
     expect(speech.words).toStrictEqual([
-      { text: "Hello", startMs: 0, endMs: 500 },
-      { text: "there,", startMs: 600, endMs: 1200 },
-      { text: "Ada.", startMs: 1300, endMs: 1700 },
+      { text: "Hello", startMs: 0, endMs: 125 },
+      { text: "there,", startMs: 150, endMs: 300 },
+      { text: last, startMs: 325, endMs: 450 },
     ]);
-    const sent = gateway.requests.map(({ url, body }) => {
-      const { origin, pathname } = new URL(url);
-      return { route: `${origin}${pathname}`, body };
-    });
-    expect(sent).toMatchObject([
+    // ElevenLabs keeps neither the line nor the audio.
+    await expect(sentWith(line)).resolves.toStrictEqual([
       {
-        route: `https://workers-binding.ai/ai-gateway/gateways/grasp-os-test/elevenlabs/v1/text-to-speech/${voice}/with-timestamps`,
-        body: { text: line, model_id: "eleven_v4", language_code: "en" },
+        host: "api.eu.residency.elevenlabs.io",
+        path: `/v1/text-to-speech/${voice}/with-timestamps?enable_logging=false&output_format=mp3_44100_128`,
+        body: {
+          text: line,
+          model_id: "eleven_v4",
+          language_code: "en",
+          seed: 7,
+          voice_settings: { stability: 0.7, similarity_boost: 0.8 },
+        },
       },
     ]);
   });
 
-  it("sends no provider key, and asks ElevenLabs to keep nothing", async () => {
-    const { gateway, gatewayEnv } = withGateway([said]);
+  it("says a quick line in Eleven v4 Turbo, at half the price", async () => {
+    const { gatewayEnv, month } = withGateway({
+      budgets: { user: { limit: 10 } },
+    });
+    const person = newPerson();
+    const line = newLine();
 
-    await stephen(gatewayEnv, newPerson()).speak({
+    await stephen(gatewayEnv, person).speak({
       text: line,
       voice,
-      language: "nl",
+      language: "en",
+      model: quickModel,
     });
 
-    const [request] = gateway.requests;
-    expect(new URL(request?.url ?? "").searchParams.get("enable_logging")).toBe(
-      "false"
-    );
-    const headers = request?.headers ?? new Headers();
-    expect(headers.get("xi-api-key")).toBeNull();
-    expect(headers.get("authorization")).toBeNull();
-    // Only the binding's placeholder, which the gateway strips.
-    expect(headers.get("cf-aig-authorization")).toBe(
-      "Bearer cloudflare-gateway-binding"
-    );
-    expect(headers.get("cf-aig-collect-log-payload")).toBe("false");
+    await expect(sentWith(line)).resolves.toMatchObject([
+      { body: { model_id: "eleven_v4_turbo" } },
+    ]);
+    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+      spentMicros: lineMicrosOf(line.length) / 2,
+    });
   });
 
-  it.each([
-    ["ElevenLabs natively", {}, "elevenlabs"],
-    ["ElevenLabs's EU host", euHost, "custom-elevenlabs-eu"],
-  ])(
-    "reaches %s through the gateway, every request with the gateway token and no ElevenLabs key",
-    async (_, config, path) => {
-      const { gateway, gatewayEnv } = withGateway([busy, said], config);
+  it("refuses a voice the speech model doesn't have, charging nothing", async () => {
+    const { gatewayEnv, month } = withGateway({
+      budgets: { user: { limit: 10 } },
+    });
+    const person = newPerson();
+    const line = newLine();
 
-      await stephen(
-        { ...gatewayEnv, AI_GATEWAY_TOKEN: gatewayToken },
-        newPerson()
-      ).speak({ text: line, voice, language: "de" });
+    await expect(
+      outcome(
+        stephen(gatewayEnv, person).speak({
+          text: line,
+          voice: "NotAVoiceOfGrasps0001",
+          language: "en",
+        })
+      )
+    ).resolves.toBe("model.failed");
+    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+      spentMicros: 0,
+      reservedMicros: 0,
+    });
+  });
 
-      // Asked once more after the busy answer: both requests alike.
-      const sent = gateway.requests.map(({ url, headers }) => ({
-        route: new URL(url).pathname,
-        token: headers.get("cf-aig-authorization"),
-        keys: [headers.get("xi-api-key"), headers.get("authorization")],
-      }));
-      const request = {
-        route: `/ai-gateway/gateways/grasp-os-test/${path}/v1/text-to-speech/${voice}/with-timestamps`,
-        token: `Bearer ${gatewayToken}`,
-        keys: [null, null],
-      };
-      expect(sent).toStrictEqual([request, request]);
-    }
-  );
-
-  it("never logs the gateway token, nor hands it back, however a line ends", async () => {
+  it("sends Grasp's key only from connect, once, to ElevenLabs alone, and never logs or hands it back", async () => {
     const lines: string[] = [];
     for (const level of ["info", "warn", "error"] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
         lines.push(JSON.stringify(args));
       });
     }
-    const { gatewayEnv } = withGateway([said, busy, busy], euHost);
-    const tokenEnv = { ...gatewayEnv, AI_GATEWAY_TOKEN: gatewayToken };
+    const { gatewayEnv } = withGateway();
     const person = newPerson();
-    const request = { text: line, voice, language: "en" };
+    const said = newLine();
+    const refused = newLine();
 
-    const speech = await stephen(tokenEnv, person).speak(request);
-    const failed = await thrown(stephen(tokenEnv, person).speak(request));
+    const speech = await stephen(gatewayEnv, person).speak({
+      text: said,
+      voice,
+      language: "nl",
+    });
+    await plan(platformElevenLabsKey, [busy, busy]);
+    const failed = await thrown(
+      stephen(gatewayEnv, person).speak({
+        text: refused,
+        voice,
+        language: "nl",
+      })
+    );
 
     const events = await auditedFor(person.userId, 2);
+    await expect(keyPlaces(said, platformElevenLabsKey)).resolves.toStrictEqual(
+      {
+        hosts: ["api.eu.residency.elevenlabs.io"],
+        headers: ["xi-api-key"],
+        inBody: false,
+        placeholder: false,
+      }
+    );
     const seen = JSON.stringify([speech.words, failed, String(failed), events]);
     expect({
-      // The failed line was logged, without the token.
       logged: lines.some((logged) => logged.includes("model.failed")),
-      inLogs: lines.some((logged) => logged.includes(gatewayToken)),
-      handedBack: seen.includes(gatewayToken),
+      inLogs: lines.some((logged) => logged.includes(platformElevenLabsKey)),
+      handedBack: seen.includes(platformElevenLabsKey),
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the line's characters against the budgets, and audits it as a model call", async () => {
-    const { gatewayEnv, month } = withGateway([said], {
+  it("charges the line's characters, and audits it as a platform call", async () => {
+    const { gatewayEnv, month } = withGateway({
       budgets: { user: { limit: 10 } },
     });
     const person = newPerson();
+    const line = newLine();
+    const lineMicros = lineMicrosOf(line.length);
 
     await stephen(gatewayEnv, person).speak({
       text: line,
       voice,
       language: "en",
-      model: voiceModel,
+      model: speechModel,
     });
 
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
@@ -259,32 +285,32 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         purpose: "onboarding.speech",
         outcome: "answered",
         characters: line.length,
+        transport: "connect",
+        credential: "platform",
+        region: "eu",
         ledger: "settled",
         ledgerRequests: 1,
         ledgerCharged: lineMicros / 1_000_000,
       },
     });
     // Never the line itself.
-    expect(JSON.stringify(event)).not.toContain("Ada");
+    expect(JSON.stringify(event)).not.toContain(line);
   });
 
   it("refuses a line its budget has no room for, sending nothing", async () => {
     // A cent: less than a line of 600 characters costs at Eleven v4 (4.8¢).
-    const { gateway, gatewayEnv } = withGateway([said], {
+    const { gatewayEnv } = withGateway({
       budgets: { user: { limit: 0.01 } },
     });
     const person = newPerson();
+    const line = `${newLine()} ${"a".repeat(maxSpeechChars - 19)}`;
 
     await expect(
       outcome(
-        stephen(gatewayEnv, person).speak({
-          text: "a".repeat(maxSpeechChars),
-          voice,
-          language: "en",
-        })
+        stephen(gatewayEnv, person).speak({ text: line, voice, language: "en" })
       )
     ).resolves.toBe("model.over_budget");
-    expect(gateway.requests).toStrictEqual([]);
+    await expect(carrying(line)).resolves.toStrictEqual([]);
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
       action: "model.refused",
@@ -292,10 +318,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
   });
 
-  it("refuses a voice model the deployment doesn't allow, and a text model for speech, sending nothing", async () => {
-    const { gateway, gatewayEnv } = withGateway([said], {
-      models: [textModel, quickVoice],
-    });
+  it("refuses a model that isn't a speech model of the gateway's, and a speech model for a text call, sending nothing", async () => {
+    const { gatewayEnv } = withGateway();
+    const line = newLine();
     const speak = async (model: string) =>
       await stephen(gatewayEnv, newPerson()).speak({
         text: line,
@@ -304,43 +329,25 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         model,
       });
 
-    // A voice model the gateway offers, but not this deployment.
-    await expect(outcome(speak(voiceModel))).resolves.toBe("model.not_allowed");
-    // One it doesn't offer at all.
+    // One the gateway doesn't offer.
     await expect(outcome(speak("elevenlabs/eleven_v9"))).resolves.toBe(
       "model.not_allowed"
     );
     // A text model the deployment allows can't say a line.
     await expect(outcome(speak(textModel))).resolves.toBe("model.not_allowed");
-    expect(gateway.requests).toStrictEqual([]);
-  });
-
-  it("refuses a voice model for a text call, sending nothing", async () => {
-    const { gateway, gatewayEnv } = withGateway([said]);
-
+    // Nor can a speech model answer a text call.
     await expect(
       outcome(
         models(gatewayEnv).call({
-          model: voiceModel,
-          input: "Say hello.",
+          model: speechModel,
+          input: line,
           purpose: "onboarding.kickoff",
           trigger: newPerson(),
           work: { onboarding: true },
         })
       )
     ).resolves.toBe("model.not_allowed");
-    expect(gateway.requests).toStrictEqual([]);
-  });
-
-  it("offers voice models apart from text models, so nothing that picks a text model gets one", () => {
-    const { gatewayEnv } = withGateway([], {
-      models: [voiceModel, textModel],
-    });
-
-    expect(gatewaySettings(gatewayEnv)).toMatchObject({
-      models: [textModel],
-      voices: [voiceModel],
-    });
+    await expect(carrying(line)).resolves.toStrictEqual([]);
   });
 
   it.each([
@@ -350,15 +357,24 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       "model.sensitive_data",
     ],
     [
-      "the deployment must stay in the EU and it isn't hosted there",
-      { eu: { models: [textModel], deployment: true } },
+      "the deployment must stay in the EU and Grasp's project is in the US, whatever its EU models list",
+      {
+        models: [textModel, speechModel],
+        eu: { models: [textModel, speechModel], deployment: true },
+      },
       "model.eu_only",
+      { region: "us" },
     ],
   ])(
     "refuses an onboarding line when %s, sending nothing",
-    async (_, rules, code) => {
-      const { gateway, gatewayEnv } = withGateway([said], rules);
+    async (_, rules, code, platform?: unknown) => {
+      const { gatewayEnv: rulesEnv } = withGateway(rules);
+      const gatewayEnv: ModelsEnv =
+        platform === undefined
+          ? rulesEnv
+          : { ...rulesEnv, PLATFORM_AI: platform };
       const person = newPerson();
+      const line = newLine();
 
       await expect(
         outcome(
@@ -366,68 +382,54 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
             text: line,
             voice,
             language: "de",
-            model: voiceModel,
           })
         )
       ).resolves.toBe(code);
-      expect(gateway.requests).toStrictEqual([]);
+      await expect(carrying(line)).resolves.toStrictEqual([]);
       const [event] = await auditedFor(person.userId, 1);
       expect(event).toMatchObject({
         action: "model.refused",
-        detail: { reason: code, model: voiceModel },
+        detail: { reason: code, model: speechModel },
       });
     }
   );
 
-  it("says an onboarding line in a voice model the rules list for sensitive data and the EU, at ElevenLabs's EU host", async () => {
-    const { gateway, gatewayEnv } = withGateway([said], {
-      ...euHost,
-      sensitive: { models: [voiceModel] },
-      eu: { models: [voiceModel], deployment: true },
+  it("says an EU-only deployment's line at ElevenLabs's EU residency host, where Grasp's account keeps its data, whatever its EU models list", async () => {
+    const { gatewayEnv } = withGateway({
+      models: [textModel, speechModel],
+      sensitive: { models: [speechModel] },
+      eu: { models: [textModel], deployment: true },
     });
     const person = newPerson();
+    const line = newLine();
 
     await stephen(gatewayEnv, person).speak({
       text: line,
       voice,
       language: "fr",
-      model: voiceModel,
     });
 
-    expect(
-      gateway.requests.map(({ url }) => new URL(url).pathname.split("/")[4])
-    ).toStrictEqual(["custom-elevenlabs-eu"]);
+    const sent = await carrying(line);
+    expect(sent.map(({ host }) => host)).toStrictEqual([
+      "api.eu.residency.elevenlabs.io",
+    ]);
     const [event] = await auditedFor(person.userId, 1);
     expect(event?.detail).toMatchObject({
       euOnly: "deployment",
       sensitive: "restricted",
+      region: "eu",
     });
-  });
-
-  it("says nothing while the rules list a voice model for the EU that the gateway reaches at ElevenLabs's native host", async () => {
-    const { gateway, gatewayEnv } = withGateway([said], {
-      eu: { models: [voiceModel], deployment: true },
-    });
-
-    await expect(
-      outcome(
-        stephen(gatewayEnv, newPerson()).speak({
-          text: line,
-          voice,
-          language: "fr",
-          model: voiceModel,
-        })
-      )
-    ).resolves.toBe("model.unconfigured");
-    expect(gateway.requests).toStrictEqual([]);
   });
 
   it("asks once more when the provider is busy, charging only the line it said", async () => {
-    const { gateway, gatewayEnv, month } = withGateway(
-      [{ status: 429, errorType: "too_many_concurrent_requests" }, said],
-      { budgets: { user: { limit: 10 } } }
-    );
+    const { gatewayEnv, month } = withGateway({
+      budgets: { user: { limit: 10 } },
+    });
     const person = newPerson();
+    const line = newLine();
+    await plan(platformElevenLabsKey, [
+      { status: 429, body: { error: { type: "too_many_requests" } } },
+    ]);
 
     const speech = await stephen(gatewayEnv, person).speak({
       text: line,
@@ -436,9 +438,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     });
 
     expect(speech.words).toHaveLength(3);
-    expect(gateway.requests).toHaveLength(2);
+    await expect(carrying(line)).resolves.toHaveLength(2);
     await expect(spentBy(month, person.userId)).resolves.toMatchObject({
-      spentMicros: lineMicros,
+      spentMicros: lineMicrosOf(line.length),
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
@@ -449,7 +451,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   });
 
   it("gives up after asking once more, and says when to try again", async () => {
-    const { gateway, gatewayEnv } = withGateway([busy, busy, said]);
+    const { gatewayEnv } = withGateway();
+    const line = newLine();
+    await plan(platformElevenLabsKey, [busy, busy]);
 
     await expect(
       stephen(gatewayEnv, newPerson()).speak({
@@ -461,36 +465,53 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       code: "model.rate_limited",
       details: { retryAfterSeconds: 7 },
     });
-    expect(gateway.requests).toHaveLength(2);
+    await expect(carrying(line)).resolves.toHaveLength(2);
   });
 
-  it("fails closed on plain workerd, with no AI binding", async () => {
-    const { gatewayEnv } = withGateway([said]);
+  it("says a line on plain workerd, with no AI binding, as on-prem", async () => {
+    const { gatewayEnv } = withGateway();
     const { AI: _binding, ...onPrem } = gatewayEnv;
+
+    const speech = await stephen(onPrem, newPerson()).speak({
+      text: newLine(),
+      voice,
+      language: "en",
+    });
+
+    expect(speech.mime).toBe("audio/mpeg");
+  });
+
+  it("fails closed while the platform's AI settings don't parse, sending nothing", async () => {
+    const { gatewayEnv } = withGateway();
+    const line = newLine();
 
     await expect(
       outcome(
-        stephen(onPrem, newPerson()).speak({
+        stephen(
+          {
+            ...gatewayEnv,
+            PLATFORM_AI: { speech: { provider: "openai" } },
+          },
+          newPerson()
+        ).speak({ text: line, voice, language: "en" })
+      )
+    ).resolves.toBe("model.unconfigured");
+    await expect(carrying(line)).resolves.toStrictEqual([]);
+  });
+
+  it("refuses a line longer than one request may have said", async () => {
+    const { gatewayEnv } = withGateway();
+    const line = `${newLine()}${"a".repeat(maxSpeechChars)}`;
+
+    await expect(
+      outcome(
+        stephen(gatewayEnv, newPerson()).speak({
           text: line,
           voice,
           language: "en",
         })
       )
-    ).resolves.toBe("model.unconfigured");
-  });
-
-  it("refuses a line longer than one request may have said", async () => {
-    const { gateway, gatewayEnv } = withGateway([said]);
-
-    await expect(
-      outcome(
-        stephen(gatewayEnv, newPerson()).speak({
-          text: "a".repeat(maxSpeechChars + 1),
-          voice,
-          language: "en",
-        })
-      )
     ).resolves.toBe("model.invalid_call");
-    expect(gateway.requests).toStrictEqual([]);
+    await expect(carrying(line)).resolves.toStrictEqual([]);
   });
 });

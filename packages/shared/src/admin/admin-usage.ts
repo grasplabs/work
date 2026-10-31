@@ -49,7 +49,7 @@ export const MODEL_NAMES: Record<Model, string> = {
   sonnet: "Claude Sonnet 5.5",
   haiku: "Claude Haiku 4.5",
   voice: "ElevenLabs v4",
-  ears: "ElevenLabs Scribe",
+  ears: "OpenAI GPT-4o Transcribe",
   other: "Other models (not priced)",
 };
 
@@ -65,7 +65,10 @@ export const PRICES: Record<
   sonnet: { tokensIn: 3, tokensOut: 15, minute: 0 },
   haiku: { tokensIn: 1, tokensOut: 5, minute: 0 },
   voice: { tokensIn: 0, tokensOut: 0, minute: 0.15 },
-  ears: { tokensIn: 0, tokensOut: 0, minute: 0.01 },
+  // OpenAI's list price (developers.openai.com/api/docs/pricing, October 2026). gpt-4o-transcribe:
+  // $6 a million audio tokens in ($2.50 a million text tokens in), $10 a million text tokens out,
+  // estimated on that page at $0.006 a minute.
+  ears: { tokensIn: 0, tokensOut: 0, minute: 0.006 },
   // Not known: its tokens count, its spend stays out of the total.
   other: { tokensIn: 0, tokensOut: 0, minute: 0 },
 };

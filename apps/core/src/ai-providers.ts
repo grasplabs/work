@@ -3,12 +3,13 @@ import {
   aiModelChoiceSchema,
   aiProviderAddSchema,
   aiProviderErrors,
-  aiProviderIdSchema,
-  aiProviderIds,
+  organizationProviderIdSchema,
+  organizationProviderIds,
   aiProviders,
 } from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoiceNow,
+  AiPlatformUse,
   AiProviderAdd,
   AiProviderId,
   AiProviderKey,
@@ -47,7 +48,8 @@ import { orgSettings } from "./db/core/schema.ts";
 import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
-import { models } from "./models.ts";
+import { deploymentStaysInEu, models } from "./models.ts";
+import { platformAi, platformRouteFor } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -170,6 +172,68 @@ const refusalOf = (error: unknown): Error => {
   return aiProviderErrors.create("ai_provider.failed");
 };
 
+/**
+ * `provider` as the listing names it, on Grasp's own key: its name, and
+ * where its project's region sends the requests (`platformRouteFor`).
+ */
+const platformProvider = (
+  env: Env,
+  provider: AiProviderId
+): NonNullable<AiPlatformUse["provider"]> => ({
+  id: provider,
+  label: aiProviders[provider].label,
+  whereItRuns:
+    platformRouteFor(env, provider)?.whereItRuns ??
+    aiProviders[provider].whereItRuns,
+});
+
+/**
+ * Whether a platform feature on `provider` is off for this deployment: it
+ * keeps everything in the EU, and Grasp's project for the provider isn't
+ * there (models.ts refuses such a call as `model.eu_only`).
+ */
+const offOutsideEu = (env: Env, provider: AiProviderId): boolean =>
+  deploymentStaysInEu(env) && platformRouteFor(env, provider)?.region !== "eu";
+
+/**
+ * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
+ * on Grasp's keys whatever the organization connected: its admins can't
+ * switch them off here, but they see where that data goes, and which are
+ * off because the deployment keeps everything in the EU and Grasp's
+ * project isn't there. Document conversion stays on the deployment where
+ * knowledge/extract.ts keeps it there (`local`, or an EU-only deployment
+ * whose conversion provider isn't in the EU); none at all while the
+ * settings don't parse, as every feature is then off.
+ */
+const platformUses = (env: Env): AiPlatformUse[] => {
+  const settings = platformAi(env);
+  if (settings === undefined) {
+    return [];
+  }
+  const { conversion, transcription, speech } = settings;
+  return [
+    {
+      feature: "conversion",
+      provider:
+        conversion.provider === "local" ||
+        offOutsideEu(env, conversion.provider)
+          ? null
+          : platformProvider(env, conversion.provider),
+      off: false,
+    },
+    {
+      feature: "transcription",
+      provider: platformProvider(env, transcription.provider),
+      off: offOutsideEu(env, transcription.provider),
+    },
+    {
+      feature: "speech",
+      provider: platformProvider(env, speech.provider),
+      off: offOutsideEu(env, speech.provider),
+    },
+  ];
+};
+
 /** The organization's providers, as its admins see them. */
 const listing = async (env: Env): Promise<AiProvidersListing> => {
   const [keys, health, choice] = await Promise.all([
@@ -179,7 +243,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
   ]);
   return {
     providers: keys.map((key) => listed(key, health)),
-    offered: aiProviderIds.map((provider) => ({
+    offered: organizationProviderIds.map((provider) => ({
       provider,
       label: aiProviders[provider].label,
       whereItRuns: aiProviders[provider].whereItRuns,
@@ -189,8 +253,7 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       keys.map(({ provider }) => provider),
       choice
     ),
-    // Grasp's own features don't go through a provider of their own yet.
-    platform: [],
+    platform: platformUses(env),
   };
 };
 
@@ -239,7 +302,7 @@ const testProvider = async (
   model: unknown
 ): Promise<AiProviderTest> => {
   requireOwnAdmin(by);
-  const parsedProvider = aiProviderIdSchema.safeParse(provider);
+  const parsedProvider = organizationProviderIdSchema.safeParse(provider);
   if (
     !parsedProvider.success ||
     (model !== undefined && typeof model !== "string")
@@ -447,7 +510,7 @@ const removeProvider = async (
   provider: unknown
 ): Promise<void> => {
   await requireOwnAdminNow(env, by);
-  const parsed = aiProviderIdSchema.safeParse(provider);
+  const parsed = organizationProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiProviderErrors.create("ai_provider.invalid");
   }

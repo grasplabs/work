@@ -308,21 +308,26 @@ const wordFile = (document: string, styles: string): Uint8Array => {
 // Vitest's default five seconds on a loaded runner. Sixty fits the
 // longest, with room for signing in.
 describe("uploads", { timeout: 60_000 }, () => {
-  // Every test here runs as a deployment whose config keeps everything in
-  // the EU, so each file is extracted in the sandbox, whatever its
-  // collection. Which extractor a file gets is upload-routing.test.ts's.
+  // Every test here runs as a deployment whose platform settings read
+  // every file locally (as on-prem), so each file is extracted in the
+  // sandbox, whatever its collection. Which extractor a file gets is
+  // upload-routing.test.ts's.
   let gatewayBefore: unknown;
+  let platformBefore: unknown;
   beforeAll(() => {
     gatewayBefore = env.MODEL_GATEWAY;
+    platformBefore = env.PLATFORM_AI;
     env.MODEL_GATEWAY = {
       gateway: "grasp-os-test",
       models: [testModel],
       eu: { models: [testModel], deployment: true },
     };
+    env.PLATFORM_AI = { conversion: { provider: "local" } };
   });
 
   afterAll(() => {
     env.MODEL_GATEWAY = gatewayBefore;
+    env.PLATFORM_AI = platformBefore;
   });
 
   it("make a PDF, a Word file and a workbook searchable by section", async () => {

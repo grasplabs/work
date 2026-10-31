@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { randomToken, toBase64 } from "@grasp-os/shared/encoding";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
@@ -11,11 +10,17 @@ import { z } from "zod";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { transcriptionModel } from "../src/onboarding/transcription.ts";
+import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, participate } from "./interview-link.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
+import {
+  actOnRealtime,
+  newestSocket,
+  realtimeSockets,
+} from "./platform-providers.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -28,11 +33,13 @@ import {
 
 // What someone says, written down as they say it, relayed through core
 // over a WebSocket on the page's own origin (src/onboarding/
-// transcription.ts). ElevenLabs's realtime transcription, behind AI
-// Gateway, is the outside system: a fake behind the AI binding that
-// answers each chunk of audio with a partial transcript, and each commit
-// with a final one. The store, the link checks and the audit log are
-// real. The ways it can fail, tried here (GRA-361, C4 and A1):
+// transcription.ts). OpenAI's realtime transcription, Grasp's own by
+// default (@grasp-os/shared/platform-ai), reached through connect, is the
+// outside system: a fake behind connect's fetch that answers the first
+// audio of a stretch with a delta, and each commit with a transcript
+// (test/ai-providers-fake.ts). Connect, the store, the link checks and the
+// audit log are real. The ways it can fail, tried here (GRA-361, C4 and
+// A1):
 //
 // - A socket on a link that isn't one, on another person's link, on the
 //   link of someone who didn't agree to take part (GRA-329, T1), for
@@ -45,8 +52,8 @@ import {
 //   taken off the list, the onboarding paused, the person withdrawing
 //   (GRA-329, T5), the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
-// - Listening past the deployment's own budgets, or with a model its
-//   allowlist or its rules don't let it use (GRA-1064).
+// - Listening past the deployment's own budgets, or with a model the
+//   gateway or the rules don't let it use (GRA-1064).
 
 const idp = mockIdp();
 
@@ -54,105 +61,24 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-const voiceModel = "elevenlabs/eleven_v4";
+/** The transcription model sockets listen with, the platform's default. */
+const transcriptionModel = "openai/gpt-4o-transcribe";
 
-/** The deployment's gateway, allowing the transcription model: transcription may run. */
+const textModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+/** The deployment's gateway: no voice model needs allowing. */
 const gatewayConfig = {
   gateway: "grasp-os-test",
-  models: [voiceModel, transcriptionModel],
+  models: [textModel],
 };
 
 /** What a session answers, as far as these tests read it: the device's key. */
 const sessionKey = z.object({ key: z.string().optional() });
 
-/** A chunk core sent the upstream, as Scribe takes it. */
-const chunkSchema = z.object({
-  message_type: z.literal("input_audio_chunk"),
-  audio_base_64: z.string(),
-  commit: z.boolean(),
-  sample_rate: z.number(),
-});
-
-/** What the fake upstream settles every commit as. */
-const settled = {
-  text: "Hello there",
-  words: [
-    { text: "Hello", start: 0, end: 0.4, type: "word" },
-    { text: " ", start: 0.4, end: 0.5, type: "spacing" },
-    { text: "there", start: 0.5, end: 0.9, type: "word" },
-  ],
-};
-
-/** A request core made to open the upstream, as far as these tests read it. */
-interface UpstreamOpened {
-  url: URL;
-  upgrade: string | null;
-  authorization: string | null;
-  apiKey: string | null;
+/** The realtime sockets OpenAI's fake took while `run` ran, as they are now. */
+interface Upstream {
+  opened: RealtimeSocket[];
 }
-
-/**
- * ElevenLabs's realtime transcription behind the gateway: a partial for
- * each chunk with audio, a final for each commit, and the audio it got.
- */
-const fakeUpstream = () => {
-  const opened: UpstreamOpened[] = [];
-  const audio: Uint8Array[] = [];
-  const sockets: WebSocket[] = [];
-  const closed = Promise.withResolvers<number>();
-  const answer = (socket: WebSocket, data: unknown): void => {
-    const chunk = chunkSchema.parse(JSON.parse(String(data)));
-    if (chunk.audio_base_64 !== "") {
-      audio.push(
-        Uint8Array.from(atob(chunk.audio_base_64), (c) => c.codePointAt(0) ?? 0)
-      );
-      socket.send(
-        JSON.stringify({ message_type: "partial_transcript", text: "Hello" })
-      );
-    }
-    if (chunk.commit) {
-      socket.send(
-        JSON.stringify({
-          message_type: "committed_transcript",
-          text: settled.text,
-        })
-      );
-      socket.send(
-        JSON.stringify({
-          message_type: "committed_transcript_with_timestamps",
-          ...settled,
-        })
-      );
-    }
-  };
-  const fetch = async (
-    input: Request | string | URL,
-    init?: RequestInit
-  ): Promise<Response> => {
-    const request = new Request(input, init);
-    opened.push({
-      url: new URL(request.url),
-      upgrade: request.headers.get("upgrade"),
-      authorization: request.headers.get("cf-aig-authorization"),
-      apiKey: request.headers.get("xi-api-key"),
-    });
-    const { 0: core, 1: upstream } = new WebSocketPair();
-    upstream.accept();
-    sockets.push(upstream);
-    upstream.addEventListener("message", (event) => {
-      answer(upstream, event.data);
-    });
-    upstream.addEventListener("close", (event) => {
-      closed.resolve(event.code);
-    });
-    return await Promise.resolve(
-      new Response(null, { status: 101, webSocket: core })
-    );
-  };
-  return { fetch, opened, audio, sockets, closed: closed.promise };
-};
-
-type Upstream = ReturnType<typeof fakeUpstream>;
 
 let monthsUsed = 0;
 
@@ -163,32 +89,52 @@ const newMonth = (): string => {
 };
 
 /**
- * What `run` returns while the fake upstream stands behind the gateway,
- * under `config` over the gateway's, budgets counted in `month`.
+ * What `run` returns under `config` over the gateway's and the platform's
+ * AI settings `platform`, budgets counted in `month`, and the realtime
+ * sockets OpenAI's fake took meanwhile.
  */
 const relaying = async <T>(
-  run: (upstream: Upstream) => Promise<T>,
-  { config = {}, month }: { config?: object; month?: string } = {}
-) => {
+  run: () => Promise<T>,
+  {
+    config = {},
+    platform,
+    month,
+  }: { config?: object; platform?: unknown; month?: string } = {}
+): Promise<{ upstream: Upstream; result: T }> => {
   const before = {
     gateway: env.MODEL_GATEWAY,
+    platform: env.PLATFORM_AI,
     month: env.MODEL_BUDGET_MONTH,
   };
-  const upstream = fakeUpstream();
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(upstream.fetch);
+  const { length: known } = await realtimeSockets();
   env.MODEL_GATEWAY = { ...gatewayConfig, ...config };
+  Reflect.set(env, "PLATFORM_AI", platform);
   if (month !== undefined) {
     env.MODEL_BUDGET_MONTH = month;
   }
   try {
-    return { upstream, result: await run(upstream) };
+    const result = await run();
+    const sockets = await realtimeSockets();
+    return { upstream: { opened: sockets.slice(known) }, result };
   } finally {
     env.MODEL_GATEWAY = before.gateway;
+    env.PLATFORM_AI = before.platform;
     env.MODEL_BUDGET_MONTH = before.month;
-    spy.mockRestore();
   }
 };
+
+/** How the newest realtime socket closed, once it did. */
+const upstreamClosed = async (): Promise<number | null> =>
+  await vi.waitFor(
+    async () => {
+      const last = await newestSocket();
+      if (last?.closed === null || last === undefined) {
+        throw new Error("The upstream is still open");
+      }
+      return last.closed;
+    },
+    { timeout: 10_000, interval: 50 }
+  );
 
 /**
  * An onboarding running since yesterday with two people in Ops, each
@@ -335,10 +281,10 @@ const slowStart = (link: { secret: string; key: string }) =>
   ({ type: "start", language: "en", sampleRate: 8000, link }) as const;
 
 /**
- * Scribe realtime's price, with keyterms, as the ledger pins it: micros
- * per million seconds, rounded up ($0.47 an hour).
+ * GPT-4o Transcribe's price as the ledger pins it: micros per million
+ * seconds, rounded up ($0.60 an hour).
  */
-const microsPerMillionSeconds = Math.ceil((0.47 / 3600) * 1e12);
+const microsPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
 
 /** What `seconds` heard cost, in micros, as the ledger charges them. */
 const heardMicros = (seconds: number): number =>
@@ -414,7 +360,7 @@ const everythingStored = async (): Promise<string> => {
 };
 
 describe("live transcription relayed through core", { timeout: 60_000 }, () => {
-  it("relays a link's audio and hears it back as partial and final transcripts, asking the gateway to keep nothing", async () => {
+  it("relays a link's audio, resampled for the session, and hears it back as partial and final transcripts", async () => {
     const { ada } = await openedTwo();
     const before = await heardCounted("interviews");
 
@@ -436,51 +382,148 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
 
     const [opened] = upstream.opened;
+    const session = z
+      .object({
+        type: z.string(),
+        audio: z.object({
+          input: z.object({
+            format: z.unknown(),
+            transcription: z.object({
+              model: z.string(),
+              language: z.string(),
+              prompt: z.string(),
+            }),
+            turn_detection: z.unknown(),
+          }),
+        }),
+      })
+      .parse(opened?.session);
     expect({
       ...result,
-      path: opened?.url.pathname,
-      query: Object.fromEntries(
-        [...(opened?.url.searchParams ?? [])].filter(
-          ([name]) => name !== "keyterms"
-        )
-      ),
+      path: opened?.path,
+      authorization: opened?.authorization,
+      type: session.type,
+      format: session.audio.input.format,
+      model: session.audio.input.transcription.model,
+      language: session.audio.input.transcription.language,
       // What to listen out for is the store's: the team, and its people.
       keyterms: ["Ops", "Person"].every((term) =>
-        (opened?.url.searchParams.getAll("keyterms") ?? []).includes(term)
+        session.audio.input.transcription.prompt.includes(term)
       ),
-      upgrade: opened?.upgrade,
-      apiKey: opened?.apiKey,
-      audio: upstream.audio.map((bytes) => bytes.length),
+      turns: session.audio.input.turn_detection,
+      events: opened?.events,
+      // A tenth of a second at 16 kHz, as 24 kHz: 2,400 samples but the one
+      // after the last, which waits for more; each as sent.
+      audio: opened?.audioBytes,
+      samples: opened?.firstSamples,
     }).toStrictEqual({
       ready: "ready",
       partial: { type: "partial", text: "Hello" },
-      final: {
-        type: "final",
-        text: "Hello there",
-        words: [
-          { text: "Hello", startMs: 0, endMs: 400 },
-          { text: "there", startMs: 500, endMs: 900 },
-        ],
-      },
-      path: "/ai-gateway/gateways/grasp-os-test/elevenlabs/v1/speech-to-text/realtime",
-      query: {
-        model_id: "scribe_v2_realtime",
-        language_code: "nl",
-        audio_format: "pcm_16000",
-        commit_strategy: "vad",
-        include_timestamps: "true",
-        enable_logging: "false",
-      },
+      // The session times no words.
+      final: { type: "final", text: "Hello there", words: [] },
+      path: "/v1/realtime?intent=transcription",
+      // Grasp's key, which connect added: core sent none.
+      authorization: `Bearer ${platformOpenAiKey}`,
+      type: "transcription",
+      format: { type: "audio/pcm", rate: 24_000 },
+      model: "gpt-4o-transcribe",
+      language: "nl",
       keyterms: true,
-      upgrade: "websocket",
-      apiKey: null,
-      audio: [3200],
+      turns: { type: "server_vad" },
+      events: [
+        "session.update",
+        "input_audio_buffer.append",
+        "input_audio_buffer.commit",
+      ],
+      audio: 4798,
+      samples: Array.from({ length: 8 }, () => 0x07_07),
     });
     // A tenth of a second heard, counted once the socket closed.
     await vi.waitFor(async () => {
       await expect(heardCounted("interviews")).resolves.toBeCloseTo(
         before + 0.1
       );
+    });
+  });
+
+  it("answers a commit the session already settled at a pause with an empty final, in its place", async () => {
+    const { ada } = await openedTwo();
+
+    const { upstream, result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      await page.next();
+      page.socket.send(tenthOfASecond());
+      await page.next();
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      // Nothing sent since: nothing to settle.
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const finals = [await page.next(), await page.next()];
+      page.socket.close(1000, "Done");
+      return finals;
+    });
+
+    expect({
+      finals: result,
+      commits: upstream.opened[0]?.events.filter(
+        (type) => type === "input_audio_buffer.commit"
+      ).length,
+    }).toStrictEqual({
+      finals: [
+        { type: "final", text: "Hello there", words: [] },
+        { type: "final", text: "", words: [] },
+      ],
+      commits: 2,
+    });
+  });
+
+  it("sends one final for a stretch the session split at a pause, its first part's words written down after the page's commit", async () => {
+    const { ada } = await openedTwo();
+
+    const { result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      await page.next();
+      page.socket.send(tenthOfASecond());
+      const first = await page.next();
+      // The person pauses: the session settles what they said so far, and
+      // writes it down only after the rest.
+      await actOnRealtime({ pause: true });
+      await vi.waitFor(async () => {
+        const socket = await newestSocket();
+        expect(socket?.paused).toBe(1);
+      });
+      page.socket.send(tenthOfASecond());
+      const both = await page.next();
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const final = await page.next();
+      // Nothing said since: this commit's own final, empty.
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const next = await page.next();
+      page.socket.close(1000, "Done");
+      return { first, both, final, next };
+    });
+
+    expect(result).toStrictEqual({
+      first: { type: "partial", text: "Hello" },
+      // The stretch so far: the part before the pause, then this one.
+      both: { type: "partial", text: "Hello Hello" },
+      final: {
+        type: "final",
+        text: "Before the pause Hello there",
+        words: [],
+      },
+      next: { type: "final", text: "", words: [] },
     });
   });
 
@@ -572,7 +615,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
   ] as const)("closes both sides when %s", async (_, side, closes) => {
     const { ada } = await openedTwo();
 
-    const { result } = await relaying(async (upstream) => {
+    const { result } = await relaying(async () => {
       const page = await listen();
       page.start({
         type: "start",
@@ -581,14 +624,13 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         link: ada,
       });
       await page.next();
-      const [socket] = upstream.sockets;
       if (side === "page") {
         page.socket.close(1000, "Done");
       } else {
-        socket?.close(side === "upstream" ? 1000 : 1011, "Gone");
+        await actOnRealtime({ close: side === "upstream" ? 1000 : 1011 });
       }
       const [upstreamCode, ended] = await Promise.all([
-        upstream.closed,
+        upstreamClosed(),
         page.ended(),
       ]);
       return {
@@ -671,7 +713,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       const store = onboardingStore(env);
       const by = { type: "system" } as const;
 
-      const { result } = await relaying(async (upstream) => {
+      const { result } = await relaying(async () => {
         const page = await listen(
           admin === undefined ? {} : { cookie: admin.session }
         );
@@ -699,7 +741,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         }
         const [ended, upstreamCode] = await Promise.all([
           refusalOf(page),
-          upstream.closed,
+          upstreamClosed(),
         ]);
         return { ...ended, upstream: upstreamCode };
       });
@@ -856,8 +898,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         return { ready: ready?.type, held, spent };
       },
       {
-        // A cent: a minute of Scribe realtime (0.78¢) fits, two don't.
-        config: { budgets: { deployment: { limit: 0.01 } } },
+        // 1.5 cents: a minute of GPT-4o Transcribe (1¢) fits, two don't.
+        config: { budgets: { deployment: { limit: 0.015 } } },
         month,
       }
     );
@@ -918,8 +960,8 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           action: "model.call",
           actor: { type: "system" },
           model: {
-            provider: "elevenlabs",
-            model: "scribe_v2_realtime",
+            provider: "openai",
+            model: "gpt-4o-transcribe",
             inputTokens: 0,
             outputTokens: 0,
           },
@@ -946,26 +988,32 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
 
   it.each([
     [
-      "the allowlist names only a voice model",
-      { models: [voiceModel] },
+      "the platform's settings name a model the gateway doesn't offer",
+      {},
+      { transcription: { provider: "openai", model: "gpt-9-transcribe" } },
       "model.not_allowed",
+      "openai/gpt-9-transcribe",
     ],
     [
       "the sensitive-data rule doesn't name it",
-      { sensitive: { models: [voiceModel] } },
+      { sensitive: { models: [textModel] } },
+      undefined,
       "model.sensitive_data",
+      transcriptionModel,
     ],
     [
-      "the deployment stays in the EU, and the EU rule doesn't name it",
+      "the deployment stays in the EU and Grasp's project is in the US, whatever its EU models list",
       {
-        eu: { deployment: true, models: [voiceModel] },
-        voice: { provider: "custom-elevenlabs-eu" },
+        models: [textModel, transcriptionModel],
+        eu: { deployment: true, models: [textModel, transcriptionModel] },
       },
+      { region: "us" },
       "model.eu_only",
+      transcriptionModel,
     ],
   ] as const)(
     "refuses a socket when %s, opening nothing upstream, audited as a refused model call",
-    async (_, config, reason) => {
+    async (_, config, platform, reason, model) => {
       const { ada } = await openedTwo();
       const head = await logHead();
 
@@ -980,7 +1028,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           });
           return await refusalOf(page);
         },
-        { config }
+        { config, platform }
       );
 
       const events = await eventsAfter(head);
@@ -993,12 +1041,36 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         errors: ["transcription.unavailable"],
         code: 1011,
         upstream: 0,
-        refused: [[reason, transcriptionModel]],
+        refused: [[reason, model]],
       });
     }
   );
 
-  it("listens at ElevenLabs's EU host when the deployment stays in the EU and its EU rule names the model", async () => {
+  it("refuses a socket while the platform's AI settings don't parse, opening nothing upstream", async () => {
+    const { ada } = await openedTwo();
+
+    const { upstream, result } = await relaying(
+      async () => {
+        const page = await listen();
+        page.start({
+          type: "start",
+          language: "en",
+          sampleRate: 16_000,
+          link: ada,
+        });
+        return await refusalOf(page);
+      },
+      { platform: { transcription: { provider: "elevenlabs" } } }
+    );
+
+    expect({ ...result, upstream: upstream.opened.length }).toStrictEqual({
+      errors: ["transcription.unavailable"],
+      code: 1011,
+      upstream: 0,
+    });
+  });
+
+  it("listens for an EU-only deployment at OpenAI's EU host, where Grasp's project keeps its data, whatever its EU models list", async () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(
@@ -1016,15 +1088,20 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       },
       {
         config: {
-          eu: { deployment: true, models: [transcriptionModel] },
-          voice: { provider: "custom-elevenlabs-eu" },
+          models: [textModel, transcriptionModel],
+          eu: { deployment: true, models: [textModel] },
         },
       }
     );
 
-    expect([result, upstream.opened[0]?.url.pathname]).toStrictEqual([
+    expect([
+      result,
+      upstream.opened[0]?.host,
+      upstream.opened[0]?.path,
+    ]).toStrictEqual([
       "ready",
-      "/ai-gateway/gateways/grasp-os-test/custom-elevenlabs-eu/v1/speech-to-text/realtime",
+      "eu.api.openai.com",
+      "/v1/realtime?intent=transcription",
     ]);
   });
 });

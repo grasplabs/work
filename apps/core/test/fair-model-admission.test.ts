@@ -366,7 +366,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       AI: fake.binding,
       MODEL_GATEWAY: {
         gateway,
-        models: [workersAi, "elevenlabs/scribe_v2_realtime"],
+        models: [workersAi],
       },
       QUOTA_LIMITS: policy,
     };
@@ -376,7 +376,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         { length: policy.limits.modelClientRequests },
         async () =>
           await models(coreEnv).listen({
-            model: "elevenlabs/scribe_v2_realtime",
+            model: "openai/gpt-4o-transcribe",
             seconds: 900,
             openMs: 30 * 60_000,
             purpose: "onboarding.transcription",

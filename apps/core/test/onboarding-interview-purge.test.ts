@@ -7,6 +7,7 @@ import {
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -15,7 +16,6 @@ import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { staffTextErasure } from "../src/onboarding/staff-text-erasure.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keepLine, keptLine } from "../src/speech-cache.ts";
@@ -31,6 +31,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 // the record it keeps; the device's older copy saving them back; the
 // audit log naming them.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = "elevenlabs/eleven_v4";
 const idp = mockIdp();
 
 /** An interview in which `term` was said, marked and read back. */
@@ -105,9 +107,10 @@ const talking = async (term: string, does = "") => {
 
 /** A line as Stephen says it in English, as the speech cache keeps it. */
 const spokenKey = (text: string): SpokenKey => ({
+  text,
   spoken: `[warm] ${text}`,
-  voice: speakerVoices.stephen,
-  model: voiceModels.said,
+  voice: defaultPlatformAi.speech.voices.stephen,
+  model: speechModel,
   language: "en",
 });
 

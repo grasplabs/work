@@ -3,7 +3,7 @@ import type {
   AiModelChoice,
   AiModelChoiceNow,
   AiPlatformUse,
-  AiProviderId,
+  OrganizationProviderId,
   AiProviderListed,
   AiProvidersListing,
   AiProviderStatus,
@@ -307,7 +307,7 @@ const AddProvider = ({
   offered: AiProvidersListing["offered"];
   busy: boolean;
   onAdd: (
-    provider: AiProviderId,
+    provider: OrganizationProviderId,
     key: string,
     baseUrl: string
   ) => Promise<boolean>;
@@ -316,7 +316,7 @@ const AddProvider = ({
   const providerId = useId();
   const keyId = useId();
   const baseUrlId = useId();
-  const [chosen, setChosen] = useState<AiProviderId | undefined>();
+  const [chosen, setChosen] = useState<OrganizationProviderId | undefined>();
   const [key, setKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const provider =
@@ -710,7 +710,7 @@ const RemoveDialog = ({
 }: {
   provider: AiProviderListed | null;
   busy: boolean;
-  onRemove: (provider: AiProviderId) => void;
+  onRemove: (provider: OrganizationProviderId) => void;
   onClose: () => void;
 }) => {
   const label = provider?.label ?? "";
@@ -755,7 +755,7 @@ const RemoveDialog = ({
 
 /** The model a test of `provider` asks: its own test model, or for a custom endpoint the first of its models chosen; null when it has none yet. */
 const testModelOf = (
-  provider: AiProviderId,
+  provider: OrganizationProviderId,
   choice: AiModelChoiceNow | null
 ): string | undefined | null => {
   if (provider !== "openai-compatible") {
@@ -769,11 +769,16 @@ const testModelOf = (
 /** One of Grasp's own features, and who handles it, in a sentence. */
 const useUsageLine = () => {
   const { t } = useLingui();
-  return ({ feature, provider }: AiPlatformUse): string => {
+  return ({ feature, provider, off }: AiPlatformUse): string => {
     if (provider === null) {
       return t`Grasp converts uploaded documents on this deployment: nothing is sent out.`;
     }
     const { whereItRuns } = provider;
+    if (off) {
+      return feature === "transcription"
+        ? t`Interviews aren't transcribed: this deployment keeps everything in the EU, and ${whereItRuns} isn't.`
+        : t`The interview's questions aren't read aloud: this deployment keeps everything in the EU, and ${whereItRuns} isn't.`;
+    }
     if (feature === "conversion") {
       return t`Grasp converts uploaded PDFs with ${whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out.`;
     }
@@ -816,7 +821,7 @@ export const AiProvidersSettings = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [tests, setTests] = useState<
-    Partial<Record<AiProviderId, AiProviderTest>>
+    Partial<Record<OrganizationProviderId, AiProviderTest>>
   >({});
   const [removing, setRemoving] = useState<AiProviderListed | null>(null);
   const { providers, offered, choice, platform } = listing;

@@ -1,11 +1,14 @@
 import {
   aiCredentialPlaceholder,
+  aiGrantHeader,
   aiKeyErrors,
   aiProviderHost,
-  aiProviderIdSchema,
+  platformHostsOf,
   aiProviderIds,
   aiProviderKeySaveSchema,
   aiProviders,
+  organizationProviderIdSchema,
+  organizationProviderIds,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
 import type {
@@ -60,10 +63,11 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 // - A key sent somewhere else: only to its provider's own host, or the
 //   organization's registered base URL for a custom endpoint (checked by
 //   src/ai-endpoint-guard.ts when it is saved and again on every request),
-//   over HTTPS, and only to the provider's model paths, never its files,
-//   fine-tuning or account endpoints. The grant names the host too, so a
-//   request core didn't decide for that host is refused. Redirects are
-//   never followed (one would take the key along).
+//   over HTTPS, and only to the provider's model paths, with no query but
+//   one it names, never its files, fine-tuning or account endpoints. The
+//   grant names the host too, so a request core didn't decide for that
+//   host is refused. Redirects are never followed (one would take the key
+//   along).
 // - The key in more than one place, or core's own: the request must carry
 //   `aiCredentialPlaceholder` exactly where the key goes, or it is refused
 //   before anything is sent; nothing else of core's headers goes on but
@@ -88,6 +92,13 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   limit's wait.
 // - A request that streams forever: the grant names the call's deadline,
 //   which cuts the provider's request off here too.
+// - A realtime socket (`modelSocket`, Grasp's live listening): the same
+//   grant, placeholder, host and credential checks as a request, only to
+//   the provider's realtime paths with their one query, and only on
+//   Grasp's own key (an organization's key never opens one). Connect holds
+//   both ends and passes each message on as it comes, keeping and logging
+//   none; when either end closes, so does the other, and both close at the
+//   grant's deadline.
 
 /** The vault context a provider's key is sealed under: its row and destination. */
 const contextOf = (provider: AiProviderId, baseUrl: string | null): string =>
@@ -133,7 +144,7 @@ const baseUrlOf = (
 
 /** A row as core may see it: never the key. */
 const keyOf = (row: typeof aiProviderKeys.$inferSelect): AiProviderKey => ({
-  provider: aiProviderIdSchema.parse(row.provider),
+  provider: organizationProviderIdSchema.parse(row.provider),
   mask: row.mask,
   baseUrl: row.baseUrl,
   addedAt: row.createdAt.getTime(),
@@ -281,7 +292,7 @@ export const removeAiProviderKey = async (
   provider: unknown,
   by: unknown
 ): Promise<boolean> => {
-  const parsed = aiProviderIdSchema.safeParse(provider);
+  const parsed = organizationProviderIdSchema.safeParse(provider);
   if (!parsed.success) {
     throw aiKeyErrors.create("ai_key.invalid");
   }
@@ -315,12 +326,14 @@ export const listAiProviderKeys = async (
 ): Promise<AiProviderKey[]> => {
   const rows = await drizzle(env.DB).select().from(aiProviderKeys);
   return rows
-    .filter((row) => aiProviderIdSchema.safeParse(row.provider).success)
+    .filter(
+      (row) => organizationProviderIdSchema.safeParse(row.provider).success
+    )
     .map(keyOf)
     .toSorted(
       (one, other) =>
-        aiProviderIds.indexOf(one.provider) -
-        aiProviderIds.indexOf(other.provider)
+        organizationProviderIds.indexOf(one.provider) -
+        organizationProviderIds.indexOf(other.provider)
     );
 };
 
@@ -413,11 +426,29 @@ const answeredHeaders = [
 const carriesPlaceholder = (
   request: Request,
   provider: AiProviderId
-): boolean =>
-  aiProviders[provider].keyHeader === "x-api-key"
-    ? request.headers.get("x-api-key") === aiCredentialPlaceholder
-    : request.headers.get("authorization") ===
-      `Bearer ${aiCredentialPlaceholder}`;
+): boolean => {
+  const { keyHeader } = aiProviders[provider];
+  return keyHeader === "authorization"
+    ? request.headers.get("authorization") ===
+        `Bearer ${aiCredentialPlaceholder}`
+    : request.headers.get(keyHeader) === aiCredentialPlaceholder;
+};
+
+/** One ID a `*` path segment stands for: letters and digits, nothing else. */
+const idSegment = /^[A-Za-z0-9]{1,64}$/u;
+
+/** Whether `pathname` is `path`, each `*` segment of it one ID. */
+const matchesPath = (pathname: string, path: string): boolean => {
+  const asked = pathname.split("/");
+  const allowed = path.split("/");
+  return (
+    asked.length === allowed.length &&
+    allowed.every((segment, index) => {
+      const given = asked[index] ?? "";
+      return segment === "*" ? idSegment.test(given) : segment === given;
+    })
+  );
+};
 
 /** Whether `url` is one of the provider's model endpoints, at `base`. */
 const isModelEndpoint = (
@@ -429,8 +460,8 @@ const isModelEndpoint = (
   // A fixed provider's paths are whole; a custom endpoint's sit below its
   // base URL's own path.
   const custom = provider === "openai-compatible";
-  return aiProviders[provider].paths.some(
-    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
+  return aiProviders[provider].paths.some((path) =>
+    matchesPath(url.pathname, custom ? `${prefix}${path}` : path)
   );
 };
 
@@ -443,11 +474,16 @@ interface Destination {
 /** The key and where it may go, for `claims`; none when there is no key. */
 const destinationOf = async (
   env: Env,
-  { provider, credential }: ModelGrantClaims
+  { provider, credential, host: granted }: ModelGrantClaims
 ): Promise<Destination | undefined> => {
   if (credential === "platform") {
+    // Grasp's own key goes to the host core's grant names, its project's
+    // region's (`platformRouteOf`), only when it is one of that provider's
+    // own hosts: OpenAI's EU or US host. Any other leaves the provider's
+    // first, which the request's own host then fails as `endpoint`.
     const key = platformKeyOf(env, provider);
-    const host = aiProviderHost(provider);
+    const hosts = platformHostsOf(provider);
+    const host = hosts.includes(granted) ? granted : hosts[0];
     return key === undefined || host === undefined
       ? undefined
       : { key, base: new URL(`https://${host}`) };
@@ -466,25 +502,31 @@ const destinationOf = async (
 };
 
 /**
- * The query a model request may carry: none, or the one Anthropic's SDK
- * puts on its beta Messages API (`?beta=true`), which names no data.
- */
-const allowedQueries: ReadonlySet<string> = new Set(["", "?beta=true"]);
-
-/**
  * How long past the call's deadline connect still lets a request run: core
  * cuts it off at its deadline itself; this is the backstop should core's
  * cut never reach here.
  */
 const deadlineBackstopMs = 5000;
 
+/** The longest a provider may take to accept a realtime socket. */
+const socketOpenMs = 10_000;
+
 /** Whether `url` may be sent to, `base`'s origin, checked again as it is sent. */
-const sendsToBase = (url: URL, base: URL, policy: EndpointPolicy): boolean => {
+const sendsToBase = (
+  url: URL,
+  base: URL,
+  provider: AiProviderId,
+  policy: EndpointPolicy
+): boolean => {
   const checked = checkEndpoint(url.href, policy);
+  // The query a model request may carry: exactly one its provider names
+  // (`queries`), none only where it names `""`. ElevenLabs's must be its
+  // own, so a line is never sent with logging left on.
+  const query = aiProviders[provider].queries.includes(url.search);
   return (
     !("refused" in checked) &&
     url.origin === base.origin &&
-    allowedQueries.has(url.search) &&
+    query &&
     url.hash === ""
   );
 };
@@ -502,11 +544,8 @@ const headersFor = (
       headers.set(name, value);
     }
   }
-  if (aiProviders[provider].keyHeader === "x-api-key") {
-    headers.set("x-api-key", key);
-  } else {
-    headers.set("authorization", `Bearer ${key}`);
-  }
+  const { keyHeader } = aiProviders[provider];
+  headers.set(keyHeader, keyHeader === "authorization" ? `Bearer ${key}` : key);
   return headers;
 };
 
@@ -655,7 +694,10 @@ export const modelFetch = async (
   const { key, base } = destination;
   // A Request's URL is always absolute and parsed.
   const url = new URL(request.url);
-  if (url.hostname !== claims.host || !sendsToBase(url, base, policyOf(env))) {
+  if (
+    url.hostname !== claims.host ||
+    !sendsToBase(url, base, claims.provider, policyOf(env))
+  ) {
     return refused("endpoint", claims);
   }
   if (!isModelEndpoint(url, claims.provider, base)) {
@@ -721,6 +763,152 @@ export const modelFetch = async (
   return passedBack(answered);
 };
 
+/** Passes a message's `data` on to `to` while it is open; a closed socket drops it. */
+const passOn = (to: WebSocket, data: unknown): void => {
+  if (!(typeof data === "string" || data instanceof ArrayBuffer)) {
+    return;
+  }
+  try {
+    to.send(data);
+  } catch {
+    // Closed meanwhile: its close ends the other end too.
+  }
+};
+
+/** Closes `socket` with `code`, if it is still open. */
+const closeEnd = (socket: WebSocket, code: number): void => {
+  try {
+    // 1005 and 1006 are reported, never sent.
+    socket.close(code === 1005 || code === 1006 ? 1011 : code, "");
+  } catch {
+    // Closed already.
+  }
+};
+
+/**
+ * Opens a realtime WebSocket of a model call core's gateway decided (a
+ * listening, core's models.ts) to the provider, with Grasp's key, and
+ * relays it: the upgrade carries its grant (`aiGrantHeader`) and the
+ * placeholder where the key goes, to the provider's own realtime URL.
+ * Its client end, or connect's refusal (`aiRefusedHeader`).
+ */
+export const modelSocket = async (
+  env: Env,
+  signingKeys: readonly string[],
+  request: Request
+): Promise<Response> => {
+  let claims: ModelGrantClaims;
+  try {
+    claims = await verifyModelGrant(
+      signingKeys,
+      request.headers.get(aiGrantHeader)
+    );
+  } catch {
+    return refused("grant");
+  }
+  if (
+    request.method !== "GET" ||
+    request.headers.get("upgrade")?.toLowerCase() !== "websocket"
+  ) {
+    return refused("method", claims);
+  }
+  // Only Grasp's own key opens a socket: no organization's is ever held
+  // open for minutes on end.
+  if (claims.credential !== "platform") {
+    return refused("no_credential", claims);
+  }
+  if (!carriesPlaceholder(request, claims.provider)) {
+    return refused("credential_header", claims);
+  }
+  const destination = await destinationOf(env, claims);
+  if (destination === undefined) {
+    return refused("no_credential", claims);
+  }
+  const url = new URL(request.url);
+  const { base, key } = destination;
+  const checked = checkEndpoint(url.href, policyOf(env));
+  if (
+    url.hostname !== claims.host ||
+    "refused" in checked ||
+    url.origin !== base.origin ||
+    url.hash !== ""
+  ) {
+    return refused("endpoint", claims);
+  }
+  if (
+    !aiProviders[claims.provider].realtime.some(
+      ({ path, query }) => url.pathname === path && url.search === query
+    )
+  ) {
+    return refused("path", claims);
+  }
+  const startedAt = Date.now();
+  let answered: Response;
+  try {
+    answered = await fetch(url, {
+      headers: { upgrade: "websocket", authorization: `Bearer ${key}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(socketOpenMs),
+    });
+  } catch (error) {
+    log.warn("ai.unanswered", {
+      provider: claims.provider,
+      credential: claims.credential,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return refused("unreachable", claims);
+  }
+  const upstream = answered.webSocket;
+  if (upstream === null) {
+    log.warn("ai.socket_refused", {
+      provider: claims.provider,
+      status: answered.status,
+    });
+    await answered.body?.cancel();
+    return refused("upgrade", claims);
+  }
+  upstream.accept();
+  const { 0: client, 1: server } = new WebSocketPair();
+  server.accept();
+  log.info("ai.socket", {
+    provider: claims.provider,
+    credential: claims.credential,
+    request: claims.request,
+    ms: Date.now() - startedAt,
+  });
+  const ending = setTimeout(
+    () => {
+      closeEnd(upstream, 1000);
+      closeEnd(server, 1000);
+    },
+    Math.max(1, claims.notAfter - startedAt + deadlineBackstopMs)
+  );
+  const end = (code: number): void => {
+    clearTimeout(ending);
+    closeEnd(upstream, code);
+    closeEnd(server, code);
+  };
+  server.addEventListener("message", (event) => {
+    passOn(upstream, event.data);
+  });
+  upstream.addEventListener("message", (event) => {
+    passOn(server, event.data);
+  });
+  server.addEventListener("close", ({ code }) => {
+    end(code);
+  });
+  upstream.addEventListener("close", ({ code }) => {
+    end(code);
+  });
+  server.addEventListener("error", () => {
+    end(1011);
+  });
+  upstream.addEventListener("error", () => {
+    end(1011);
+  });
+  return new Response(null, { status: 101, webSocket: client });
+};
+
 /**
  * Seals again, with the current key, the organization's AI keys the
  * previous key sealed, a batch at a time (src/clock.ts).
@@ -737,7 +925,7 @@ export const resealAiProviderKeys = async (env: Env): Promise<void> => {
     .where(like(aiProviderKeys.sealed, vault.sealedWithPrevious))
     .limit(resealBatchSize);
   for (const row of rows) {
-    const parsed = aiProviderIdSchema.safeParse(row.provider);
+    const parsed = organizationProviderIdSchema.safeParse(row.provider);
     if (!parsed.success) {
       continue;
     }
