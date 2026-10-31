@@ -9,6 +9,7 @@
  * the missing-table warning (platform-updates.test.ts), which only that
  * file may trip.
  */
+import { compileExpression } from "@grasp-os/workflow-expressions/evaluate";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterAll, afterEach, vi } from "vite-plus/test";
@@ -25,30 +26,64 @@ import { closeOpenSockets } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
-// What core loads on first use rather than at startup (models.ts,
-// auth/auth.ts, channels/teams.ts, clock.ts, workflows/kept-email.ts),
-// loaded here up front: Vite transforms a module the first time a test
-// imports it, seconds for these, which would land in the middle of a
-// test's timing.
+// Every module core loads on first use rather than at startup (each
+// `await import(` under src, and jq in @grasp-os/workflow-expressions),
+// loaded here up front, for two reasons. A core module that adds one adds
+// it here.
 //
-// And a module whose first import starts inside a Durable Object can
-// never load at all. The clock's alarm imports the Gmail channel for its
-// quarter-hour tasks as soon as a test arms it, and a workflow step
-// imports postal-mime to read a kept message. The module runner keeps
-// that import's promise for every later import of the module in this
-// runtime, but the next file's reset (reset-storage.ts) aborts the object
-// mid-import, so the promise never settles: each later import, such as a
-// test running the quarter-hour tasks itself (maintenance.ts), waited
-// until its test timed out. Loaded here, in the runner's own context and
-// before any object runs, they are already evaluated when one asks.
+// Transform time: Vite transforms a module the first time a test imports
+// it, seconds for some, which would land in the middle of a test's timing.
+// On a laptop the agent loop took 1.6 s at a chat's first turn and the
+// channels' door 0.3 s at their first message; on loaded CI runners,
+// together, long enough that a streamed answer's first words missed their
+// 15 s (channels-stream.test.ts).
+//
+// Imports cut off mid-load: a module whose first import starts inside a
+// Durable Object can never load at all. The clock's alarm imports the
+// Gmail channel for its quarter-hour tasks as soon as a test arms it, a
+// workflow step imports postal-mime or jq, a workspace imports the agent
+// loop at a chat's first turn. The module runner keeps that import's
+// promise for every later import of the module in this runtime, but the
+// next file's reset (reset-storage.ts) aborts the object mid-import, so
+// the promise never settles: each later import, such as a test running
+// the quarter-hour tasks itself (maintenance.ts), waited until its test
+// timed out. Loaded here, in the runner's own context and before any
+// object runs, they are already evaluated when one asks.
 await Promise.all([
+  // models.ts (model-catalog.ts)
   import("@earendil-works/pi-ai/api/anthropic-messages"),
   import("@earendil-works/pi-ai/api/openai-responses"),
   import("@earendil-works/pi-ai/api/openai-completions"),
+  // auth/auth.ts
   import("@better-auth/sso"),
+  // channels/teams.ts
   import("../src/channels/teams-adapter.ts"),
+  // entry.ts, clock.ts, agent-workflows.ts
+  import("../src/channels/door.ts"),
+  import("../src/channels/answer.ts"),
   import("../src/channels/gmail.ts"),
+  import("../src/channels/workflow-offers.ts"),
+  // workflows/kept-email.ts
   import("postal-mime"),
+  // workspace.ts
+  import("../src/agent.ts"),
+  import("../src/agent-thinking.ts"),
+  // builtins.ts
+  import("#blueprints"),
+  // apps.ts, lazy because these modules import it back
+  import("../src/app-candidates.ts"),
+  import("../src/migration-evidence.ts"),
+  import("../src/app-tests.ts"),
+  import("../src/app-activation.ts"),
+  import("../src/app-releases.ts"),
+  import("../src/screen-references.ts"),
+  // jq (workflow-expressions' jq.ts), which only a compile or run loads:
+  // compiling a literal no test uses loads its runtime and WebAssembly.
+  compileExpression('"start-each-file"', {
+    stage: "taskDefinition",
+    scope: [],
+    pointer: "",
+  }),
 ]);
 
 /** Migrations, read by vite.config.ts into bindings. */

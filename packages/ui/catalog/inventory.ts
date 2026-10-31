@@ -756,6 +756,8 @@ export const shadcnComponents = {
       "TableHeader",
       "TableRow",
     ],
+    changes:
+      "Adds the `card` variant: the table in a card of its own, as a page's lists stand.",
   },
   tabs: {
     status: "supported",

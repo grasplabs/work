@@ -304,6 +304,10 @@ msgstr "{category} ({vendor}), avec IA intégrée"
 msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 msgstr "{caught, plural, one {Concernerait # application aujourd’hui.} other {Concernerait # applications aujourd’hui.}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{chosen} (no longer in this domain)"
+msgstr "{chosen} (ne fait plus partie de ce domaine)"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Ce sera donc en {chosen}. Cela prend environ {minutes} minutes. On commence ?"
@@ -472,6 +476,10 @@ msgstr "{count, plural, one {# souhait} other {# souhaits}}"
 #: src/brain/goals-editor.tsx
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# workflow le sert} other {# workflows le servent}}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{count, plural, one {# workflow} other {# workflows}}"
+msgstr "{count, plural, one {# workflow} other {# workflows}}"
 
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
@@ -2858,11 +2866,6 @@ msgstr "Toutes les factures"
 #: src/workflows/requests/request-filters.tsx
 msgid "All places"
 msgstr "Tous les lieux"
-
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "the log of every run"
-msgid "All runs"
-msgstr "Toutes les exécutions"
 
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -9486,7 +9489,6 @@ msgstr "Micro coupé"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
-#: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Nom"
 
@@ -9588,11 +9590,6 @@ msgctxt "Pulse status"
 msgid "Needs attention"
 msgstr "Attention requise"
 
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing the workflows that need a person"
-msgid "Needs attention"
-msgstr "Demande de l’attention"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "Needs help: {cost} a month current cost, nothing redesigned yet"
 msgstr "A besoin d’aide : {cost} par mois de coût actuel, rien de repensé"
@@ -9614,6 +9611,11 @@ msgstr "Quelqu’un doit se reconnecter"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
+msgid "Needs you"
+msgstr "Vous attend"
+
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Vous attend"
 
@@ -10302,10 +10304,6 @@ msgstr "Pas encore de workflow avec des heures comptées ici."
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "Pas encore de workflow"
-
-#: src/workflows/today-lanes.tsx
-msgid "No workflow you can see has worked today yet."
-msgstr "Aucun workflow que vous pouvez voir n’a encore travaillé aujourd’hui."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -14176,6 +14174,10 @@ msgstr "Afficher les paquets pour {domain}"
 msgid "Show the page for {title}"
 msgstr "Afficher la page de {title}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "Show workflows"
+msgstr "Afficher les workflows"
+
 #: src/landscape/audit-trail.tsx
 msgid "Showing {showing} of {shownCount}"
 msgstr "{showing} affichés sur {shownCount}"
@@ -16811,7 +16813,6 @@ msgctxt "chats from today"
 msgid "Today"
 msgstr "Aujourd’hui"
 
-#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/today-lanes.tsx
 msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
@@ -18143,10 +18144,6 @@ msgstr "Ce qu’il faut retenir"
 msgid "What to remove"
 msgstr "Ce qu’il faut supprimer"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "What to show of the runs"
-msgstr "Ce qu’il faut montrer des exécutions"
-
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Ce qu’il faut montrer des traces"
@@ -18735,6 +18732,7 @@ msgstr "A déterminé ce qui pourrait être amélioré"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
+#: src/workflows/independent-workflows.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"
