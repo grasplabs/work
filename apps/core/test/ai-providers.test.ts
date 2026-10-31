@@ -476,6 +476,101 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
     });
 
+    it("drops a removed provider's models from the choice for good, its default none until an admin chooses another", async () => {
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: anthropicCase.model,
+        fallbacks: [openaiCase.model],
+      });
+
+      const choiceNow = async () => {
+        const { choice } = await by.api.aiProviders.list();
+        return choice;
+      };
+      await by.api.aiProviders.remove("openai");
+      const fallbackGone = await choiceNow();
+      await by.api.aiProviders.remove("anthropic");
+      const defaultGone = await choiceNow();
+      // Connected again, neither comes back: the choice was changed, not
+      // only read without them.
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      const reconnected = await choiceNow();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+
+      expect({ fallbackGone, defaultGone, reconnected }).toStrictEqual({
+        fallbackGone: { defaultModel: anthropicCase.model, fallbacks: [] },
+        defaultGone: { defaultModel: null, fallbacks: [] },
+        reconnected: { defaultModel: null, fallbacks: [] },
+      });
+      await expect(choiceNow()).resolves.toStrictEqual({
+        defaultModel: openaiCase.model,
+        fallbacks: [],
+      });
+    });
+
+    it("prunes a removed provider's models from a choice another admin saved meanwhile, never overwriting it", async () => {
+      const mistralCase = providerCases.find(
+        ({ provider }) => provider === "mistral"
+      );
+      if (mistralCase === undefined) {
+        throw new TypeError("Expected Mistral's case");
+      }
+      await added(openaiCase, newKey());
+      await added(anthropicCase, newKey());
+      await added(mistralCase, newKey());
+      const { admin: by } = await admin();
+      await by.api.aiProviders.setModels({
+        defaultModel: openaiCase.model,
+        fallbacks: [anthropicCase.model],
+      });
+      const other = await signedInApi(idp, "admin");
+      const saved = {
+        defaultModel: anthropicCase.model,
+        fallbacks: [mistralCase.model],
+      };
+      // The other admin saves after the removal read the choice and
+      // before it wrote: as it asks connect which providers are left.
+      const real = env.CONNECT;
+      let between = true;
+      env.CONNECT = new Proxy(real, {
+        get: (target, name) => {
+          if (name === "aiProviderRoutes") {
+            return async () => {
+              if (between) {
+                between = false;
+                await other.api.aiProviders.setModels(saved);
+              }
+              return await real.aiProviderRoutes();
+            };
+          }
+          // Any other method as connect has it: an RPC stub binds nothing.
+          const method: unknown = Reflect.get(target, name);
+          if (typeof method !== "function") {
+            return method;
+          }
+          return async (...args: unknown[]): Promise<unknown> =>
+            await Reflect.apply(method, target, args);
+        },
+      });
+      try {
+        await by.api.aiProviders.remove("openai");
+      } finally {
+        env.CONNECT = real;
+      }
+
+      const { choice } = await by.api.aiProviders.list();
+      expect({ interleaved: !between, choice }).toStrictEqual({
+        interleaved: true,
+        choice: saved,
+      });
+    });
+
     it("adds, tests, uses, replaces and removes a key", async () => {
       const { admin: by } = await admin();
       const first = newKey();
@@ -535,9 +630,10 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await by.api.aiProviders.add({ provider: "anthropic", key: newKey() });
       await by.api.aiProviders.remove("anthropic");
 
-      const events = await auditedFor(by.userId, 6);
+      const events = await auditedFor(by.userId, 7);
       // Connect records a key's changes in its own outbox, core the rest
-      // in its: the log has them all, each in its own outbox's order.
+      // in its: the log has them all, each in its own outbox's order. The
+      // removal took its model out of the choice too: a change of its own.
       expect(
         events
           .filter(({ action }) => action.startsWith("ai_provider."))
@@ -547,6 +643,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         "connect ai_provider.added",
         "connect ai_provider.removed",
         "connect ai_provider.replaced",
+        "core ai_provider.models_set",
         "core ai_provider.models_set",
         "core ai_provider.tested",
       ]);
@@ -571,6 +668,37 @@ describe("AI providers", { timeout: 60_000 }, () => {
         },
       });
       expect(JSON.stringify(events)).not.toContain(key);
+    });
+
+    it("offers each connected provider's models to choose from, and takes any of them as the default", async () => {
+      const { admin: by } = await admin();
+      await added(openaiCase, newKey());
+      await added(compatibleCase, newKey());
+
+      const { providers } = await by.api.aiProviders.list();
+      const offered = Object.fromEntries(
+        providers.map(({ provider, models: each }) => [provider, each])
+      );
+      const openai = offered.openai ?? [];
+      const last = openai.at(-1)?.model ?? "";
+      await by.api.aiProviders.setModels({
+        defaultModel: last,
+        fallbacks: [openaiCase.model],
+      });
+      const { choice } = await by.api.aiProviders.list();
+
+      expect(openai.map(({ model }) => model)).toContain(openaiCase.model);
+      expect(
+        openai.filter(
+          ({ model, name }) => !model.startsWith("openai/") || name === ""
+        )
+      ).toStrictEqual([]);
+      // A custom endpoint's models are named by the organization.
+      expect(offered["openai-compatible"]).toStrictEqual([]);
+      expect(choice).toStrictEqual({
+        defaultModel: last,
+        fallbacks: last === openaiCase.model ? [] : [openaiCase.model],
+      });
     });
 
     it("lets only the organization's admins read its providers, and its own admins change them", async () => {

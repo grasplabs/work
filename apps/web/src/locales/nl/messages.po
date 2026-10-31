@@ -2072,6 +2072,10 @@ msgstr "Een modelbudget heeft de meldgrens bereikt of is op"
 msgid "A model call was refused"
 msgstr "Een modelaanroep is geweigerd"
 
+#: src/settings/ai-providers.tsx
+msgid "A model your endpoint serves"
+msgstr "Een model dat je endpoint aanbiedt"
+
 #: src/dashboard/standard-widgets.tsx
 msgctxt "under an amount on a dashboard chart"
 msgid "a month"
@@ -2341,6 +2345,7 @@ msgid "Account"
 msgstr "Account"
 
 #: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Action"
 msgstr "Actie"
 
@@ -2420,6 +2425,7 @@ msgstr "Actor-ID"
 
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.settings.pulse.tsx
+#: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Toevoegen"
@@ -2435,6 +2441,10 @@ msgstr "Voorwaarde toevoegen"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Add a domain for a second brand or an old one."
 msgstr "Voeg een domein toe voor een tweede merk of een oud domein."
+
+#: src/settings/ai-providers.tsx
+msgid "Add a fallback"
+msgstr "Reservemodel toevoegen"
 
 #: src/brain/goals-editor.tsx
 msgid "Add a goal"
@@ -2457,6 +2467,10 @@ msgstr "Persoon toevoegen"
 #: src/settings/stephen-settings.tsx
 msgid "Add a place"
 msgstr "Plek toevoegen"
+
+#: src/settings/ai-providers.tsx
+msgid "Add a provider"
+msgstr "Aanbieder toevoegen"
 
 #: src/onboarding/organization-dialogs.tsx
 #: src/routes/_shell.onboarding.organization.index.tsx
@@ -2691,6 +2705,12 @@ msgstr "AI is een functie binnen een grotere app, zoals suggesties, copilots of 
 msgid "AI is a primary function of this app. It generates, decides or acts on data."
 msgstr "AI is een hoofdfunctie van deze app. Het genereert, beslist of handelt op basis van data."
 
+#: src/routes/_shell.settings.ai-providers.tsx
+#: src/routes/_shell.settings.tsx
+#: src/settings/ai-providers.tsx
+msgid "AI providers"
+msgstr "AI-aanbieders"
+
 #: src/routes/_shell.settings.spend.tsx
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
@@ -2794,7 +2814,7 @@ msgstr "Alle aanroepen"
 msgid "All calls together"
 msgstr "Alle aanroepen samen"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "All chats"
 msgstr "Alle chats"
 
@@ -3399,6 +3419,10 @@ msgstr "Zoals de lijst van het bedrijf ze hoort te hebben. Hun link blijft dezel
 msgid "As the kickoff suggests"
 msgstr "Zoals de kick-off voorstelt"
 
+#: src/settings/ai-providers.tsx
+msgid "As your endpoint names it, such as llama-3.3-70b."
+msgstr "Zoals je endpoint het noemt, bijvoorbeeld llama-3.3-70b."
+
 #: src/settings/stephen-card.tsx
 msgid "Ask"
 msgstr "Vragen"
@@ -3484,6 +3508,10 @@ msgstr "Vraag de leverancier vóór je akkoord waar data wordt opgeslagen en ver
 #: src/workflows/workflow-status.tsx
 msgid "Ask to go live with version {askable}"
 msgstr "Vragen om versie {askable} live te zetten"
+
+#: src/frame/connect-ai-provider.tsx
+msgid "Ask your admin to connect an AI provider."
+msgstr "Vraag je beheerder een AI-aanbieder te koppelen."
 
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
@@ -3693,6 +3721,10 @@ msgstr "Terug naar gebruikers"
 #: src/onboarding/work-record.tsx
 msgid "Back to what is still missing"
 msgstr "Terug naar wat nog ontbreekt"
+
+#: src/settings/ai-providers.tsx
+msgid "Base URL"
+msgstr "Basis-URL"
 
 #: src/brain/brain.ts
 msgid "Became"
@@ -4374,7 +4406,7 @@ msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sen
 msgstr "Chat-apps waarin Grasp weet dat jij het bent. Stuur Grasp daar een bericht, en het stuurt je een link om je account hier te koppelen. Ontkoppel er een die je niet meer gebruikt."
 
 #: src/chat/chat-more.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chat name"
 msgstr "Naam van de chat"
@@ -4384,6 +4416,7 @@ msgid "Chat width"
 msgstr "Breedte van de chat"
 
 #: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
 msgstr "Chats"
@@ -4443,6 +4476,10 @@ msgstr "China"
 #: src/engines/resource-bindings.tsx
 msgid "Choose a collection"
 msgstr "Kies een collectie"
+
+#: src/settings/ai-providers.tsx
+msgid "Choose a model"
+msgstr "Kies een model"
 
 #: src/settings/person-limits.tsx
 msgid "Choose a person or a team"
@@ -4754,7 +4791,7 @@ msgstr "Berekeningen"
 msgid "Condition {position}"
 msgstr "Voorwaarde {position}"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Configuration"
 msgstr "Configuratie"
 
@@ -4813,6 +4850,10 @@ msgstr "{app} koppelen"
 msgid "Connect {name}"
 msgstr "{name} koppelen"
 
+#: src/onboarding/review-parts.tsx
+msgid "Connect a provider"
+msgstr "Aanbieder koppelen"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Eigen accounts koppelen"
@@ -4820,6 +4861,11 @@ msgstr "Eigen accounts koppelen"
 #: src/onboarding/place-picker.tsx
 msgid "Connect again"
 msgstr "Opnieuw koppelen"
+
+#: src/frame/connect-ai-provider.tsx
+#: src/onboarding/review-parts.tsx
+msgid "Connect an AI provider"
+msgstr "Koppel een AI-aanbieder"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
@@ -4869,6 +4915,10 @@ msgstr "Verbonden in Integraties, via de eigen connector van Grasp."
 msgid "Connected on"
 msgstr "Gekoppeld op"
 
+#: src/settings/ai-providers.tsx
+msgid "Connected providers"
+msgstr "Gekoppelde aanbieders"
+
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Gekoppeld, direct"
@@ -4876,6 +4926,10 @@ msgstr "Gekoppeld, direct"
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
 msgstr "Gekoppeld, via Composio"
+
+#: src/onboarding/review-parts.tsx
+msgid "Connected: {names}"
+msgstr "Gekoppeld: {names}"
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5299,7 +5353,7 @@ msgstr "Beslissen"
 msgid "Decided on a held action"
 msgstr "Over een tegengehouden actie beslist"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -5331,6 +5385,10 @@ msgstr "Standaard"
 #: src/settings/person-limits.tsx
 msgid "Default limit"
 msgstr "Standaardlimiet"
+
+#: src/settings/ai-providers.tsx
+msgid "Default model"
+msgstr "Standaardmodel"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -5941,7 +5999,7 @@ msgstr "Elke workflowrun, met de runs die hij start"
 msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
 msgstr "Elke workflowrun mag, met de runs die hij start, hooguit 100 modelverzoeken doen, nieuwe pogingen meegeteld."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Eerder"
@@ -6463,6 +6521,14 @@ msgstr "Mislukt: {0}"
 msgid "Failed: {failed}"
 msgstr "Mislukt: {failed}"
 
+#: src/settings/ai-providers.tsx
+msgid "Fallbacks"
+msgstr "Reservemodellen"
+
+#: src/settings/ai-providers.tsx
+msgid "Fallbacks, in order"
+msgstr "Reservemodellen, op volgorde"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
 msgstr "Minder dan {least} van {of}"
@@ -6903,6 +6969,10 @@ msgstr "Livegang"
 msgid "Go on without sound"
 msgstr "Verder zonder geluid"
 
+#: src/frame/connect-ai-provider.tsx
+msgid "Go to AI providers"
+msgstr "Naar AI-aanbieders"
+
 #: src/frame/page-states.tsx
 msgid "Go to Chat"
 msgstr "Naar Chat"
@@ -7003,6 +7073,14 @@ msgstr "Grasp heeft een widget op je dashboard gewijzigd."
 msgctxt "“Requested” is the name of a section on the Integrations page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp zoekt uit wat er nodig is om hem te koppelen. Je vindt hem onder Aangevraagd."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp converts uploaded documents on this deployment: nothing is sent out."
+msgstr "Grasp zet geüploade documenten op deze omgeving zelf om: er wordt niets naar buiten gestuurd."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. Files in sensitive collections are converted on this deployment and never sent out."
+msgstr "Grasp zet geüploade pdf's om met {whereItRuns}, met de eigen sleutel van Grasp. Bestanden in gevoelige collecties worden op deze omgeving zelf omgezet en nooit naar buiten gestuurd."
 
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
@@ -7122,6 +7200,10 @@ msgstr "Grasp gaat binnenkort voor iedereen open, zodra Stephen met de teams hee
 msgid "Grasp proposes"
 msgstr "Grasp stelt voor"
 
+#: src/settings/ai-providers.tsx
+msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
+msgstr "Grasp leest de vragen van het interview voor met {whereItRuns}, met de eigen sleutel van Grasp."
+
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Grasp reads these in every chat of the project."
 msgstr "Grasp leest ze in elke chat van het project."
@@ -7147,10 +7229,6 @@ msgstr "Grasp stuurde deze link naar dat account in {app}. Koppel het alleen als
 msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 msgstr "Grasp heeft dit verstuurd, maar het antwoord ging verloren: niemand weet of het effect had. Controleer het op {connection} voordat je antwoordt."
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
-msgstr "Grasp stelt deze in voor je organisatie, zoals met je afgesproken. Neem contact op met Grasp om ze te wijzigen."
-
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/staff-access.tsx
 msgid "Grasp staff access"
@@ -7173,6 +7251,10 @@ msgstr "Grasp-medewerkers kunnen hier geen accounts koppelen of wijzigen wat wor
 msgid "Grasp staff signed in"
 msgstr "Grasp-medewerkers hebben zich aangemeld"
 
+#: src/settings/ai-providers.tsx
+msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
+msgstr "Grasp schrijft interviews uit met {whereItRuns}, met de eigen sleutel van Grasp."
+
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp is bijgewerkt terwijl deze pagina open stond. Probeer het opnieuw om de nieuwe versie te laden."
@@ -7184,6 +7266,22 @@ msgstr "Grasp toont hier een pad zodra het een MCP, native connector of OAuth-to
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp voert niet uit wat {about} nodig heeft: {requirement}"
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters."
+msgstr "De AI van Grasp roept modellen aan met de eigen sleutels van je organisatie. Sleutels worden verzegeld opgeslagen: niemand kan ze teruglezen, alleen de laatste vier tekens."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's AI uses the default model. When its provider refuses a call before anything was billed, the fallbacks are tried in order."
+msgstr "De AI van Grasp gebruikt het standaardmodel. Weigert de aanbieder een aanroep voordat er iets is gefactureerd, dan worden de reservemodellen op volgorde geprobeerd."
+
+#: src/onboarding/review-parts.tsx
+msgid "Grasp’s AI works with your organization’s own AI provider key, such as Anthropic, OpenAI or Mistral AI. Connect one and choose a model, then come back here."
+msgstr "De AI van Grasp werkt met de eigen sleutel van een AI-aanbieder van je organisatie, zoals Anthropic, OpenAI of Mistral AI. Koppel er een, kies een model en kom dan hier terug."
+
+#: src/frame/connect-ai-provider.tsx
+msgid "Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start."
+msgstr "De AI van Grasp werkt met de eigen sleutel van een AI-aanbieder van je organisatie. Koppel er een en kies een model om te beginnen."
 
 #: src/settings/person-limits.tsx
 msgid "Grasp's budget allows at most {most} a month for one person, so no limit can be above it. Ask Grasp to raise the budget first."
@@ -7200,6 +7298,10 @@ msgstr "De chat van Grasp"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Grasp's go was taken back: only the admins and Grasp's staff come in until it is given again."
 msgstr "Het startsein van Grasp is ingetrokken: tot het opnieuw wordt gegeven, komen alleen de beheerders en de medewerkers van Grasp binnen."
+
+#: src/settings/ai-providers.tsx
+msgid "Grasp's own AI features"
+msgstr "De eigen AI-functies van Grasp"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Grasp’s proposal counts once you confirm it."
@@ -7783,7 +7885,7 @@ msgstr "Invoer"
 msgid "Instructions"
 msgstr "Instructies"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Instructions and files"
 msgstr "Instructies en bestanden"
 
@@ -7965,7 +8067,7 @@ msgstr "Het is gebeurd"
 msgid "It happened: {who}"
 msgstr "Het is gebeurd: {who}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Er zijn wijzigingen die niet zijn opgeslagen, of een wijziging waarop nog geen antwoord is. Bij verlaten gaan niet-opgeslagen wijzigingen verloren; wat al is opgeslagen of loopt, blijft."
 
@@ -8121,6 +8223,10 @@ msgstr "Het ging vandaag door geen andere workflow."
 msgid "It works in no app."
 msgstr "Hij werkt in geen enkele app."
 
+#: src/settings/ai-providers.tsx
+msgid "It works: {model} answered the test."
+msgstr "Het werkt: {model} heeft de test beantwoord."
+
 #: src/onboarding/review-parts.tsx
 msgid "It’s done"
 msgstr "Gedaan"
@@ -8180,6 +8286,10 @@ msgstr "De uitzonderingen verdwijnen mee. Dit kan niet ongedaan worden gemaakt."
 #: src/chat/chat-menus.tsx
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Het doel en de documenten worden verwijderd. De chats blijven, terug bij de chats op datum."
+
+#: src/settings/ai-providers.tsx
+msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
+msgstr "De sleutel wordt verwijderd en aanroepen gebruiken hem meteen niet meer. Modellen van deze aanbieder worden niet meer gebruikt, ook niet als reservemodel."
 
 #: src/policies/policy-editing.tsx
 msgid "Its last day: the rule catches the app again after it."
@@ -8390,6 +8500,14 @@ msgstr "De toegang bij de provider behouden voor een opnieuw gekoppeld account"
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Iets wat de chat niet meer kan lezen, voor het model weggehouden"
 
+#: src/settings/ai-providers.tsx
+msgid "Key"
+msgstr "Sleutel"
+
+#: src/settings/ai-providers.tsx
+msgid "Key: <0>{mask}</0>"
+msgstr "Sleutel: <0>{mask}</0>"
+
 #: src/landscape/landscape.ts
 msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
 msgstr "Sleutels, tokens, secrets, inloggegevens of runbooks die toegang kunnen geven."
@@ -8492,7 +8610,7 @@ msgstr "Talen waarin hij interviewt"
 msgid "Last"
 msgstr "Laatst"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Afgelopen 7 dagen"
@@ -8572,7 +8690,7 @@ msgstr "Teamleiders krijgen hun link {when}. Alle anderen direct nadat hun teaml
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads gesproken: {count} van {of}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Verlaten"
 
@@ -8601,7 +8719,7 @@ msgstr "Weglaten"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Laat personeelsdossiers en alles over één persoon weg."
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave this app?"
 msgstr "Deze app verlaten?"
 
@@ -8834,6 +8952,7 @@ msgid "Loading"
 msgstr "Laden"
 
 #: src/activity/audit-log.tsx
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -9107,7 +9226,7 @@ msgstr "Ontbreekt"
 msgid "Model"
 msgstr "Model"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Modelaanroep"
 
@@ -9129,16 +9248,13 @@ msgstr "Model: {name}. Model wijzigen"
 
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.tsx
+#: src/settings/ai-providers.tsx
 msgid "Models"
 msgstr "Modellen"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
-msgstr "Er zijn nog geen modellen ingesteld voor deze omgeving, dus er kan geen model worden aangeroepen. Grasp stelt ze in."
-
 #: src/chat/failure.ts
-msgid "Models aren't set up yet. Ask your admin to have Grasp set them up."
-msgstr "Er zijn nog geen modellen ingesteld. Vraag je beheerder om Grasp ze te laten instellen."
+msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
+msgstr "Er zijn nog geen modellen ingesteld. Vraag je beheerder om een AI-aanbieder te koppelen in Instellingen › AI-aanbieders."
 
 #: src/chat/composer.tsx
 msgid "Models for your organization"
@@ -9247,6 +9363,14 @@ msgstr "Verplaatsen"
 msgid "Move {label}, use the arrow keys"
 msgstr "{label} verplaatsen, gebruik de pijltjestoetsen"
 
+#: src/settings/ai-providers.tsx
+msgid "Move {name} down"
+msgstr "{name} omlaag zetten"
+
+#: src/settings/ai-providers.tsx
+msgid "Move {name} up"
+msgstr "{name} omhoog zetten"
+
 #: src/dashboard/widget-board.tsx
 msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "{title} verplaatsen: sleep, of gebruik de pijltjestoetsen"
@@ -9298,6 +9422,10 @@ msgstr "Naam"
 msgctxt "the name of a policy rule"
 msgid "Name"
 msgstr "Naam"
+
+#: src/settings/ai-providers.tsx
+msgid "Name a model this endpoint serves below and choose it, then test it."
+msgstr "Geef hieronder een model op dat dit endpoint aanbiedt, kies het en test het dan."
 
 #: src/workflows/independent-workflows.tsx
 msgid "Name of a new workflow"
@@ -9444,12 +9572,12 @@ msgid "New board goal"
 msgstr "Nieuw doel van de directie"
 
 #: src/chat/chat-dock.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nieuwe chat"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "New chat in {projectName}"
 msgstr "Nieuwe chat in {projectName}"
 
@@ -9473,11 +9601,15 @@ msgstr "nieuwe feiten in de laatste interviews"
 msgid "New group"
 msgstr "Nieuwe groep"
 
+#: src/settings/ai-providers.tsx
+msgid "New key for {label}"
+msgstr "Nieuwe sleutel voor {label}"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "New note"
 msgstr "Nieuwe notitie"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-dialog.tsx
 #: src/chat/project-shelf.tsx
 msgid "New project"
@@ -9580,6 +9712,14 @@ msgstr "Geen AI"
 msgid "No AI capabilities found in this app."
 msgstr "Geen AI-functies gevonden in deze app."
 
+#: src/settings/ai-providers.tsx
+msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
+msgstr "Er is nog geen AI-aanbieder gekoppeld, dus de AI-functies van Grasp kunnen niet antwoorden."
+
+#: src/settings/ai-providers.tsx
+msgid "No AI provider is connected yet, so Grasp's AI features can't answer. Add one below."
+msgstr "Er is nog geen AI-aanbieder gekoppeld, dus de AI-functies van Grasp kunnen niet antwoorden. Voeg er hieronder een toe."
+
 #: src/chat/failure.ts
 msgid "No AI provider is connected yet. Ask your admin to connect one."
 msgstr "Er is nog geen AI-aanbieder gekoppeld. Vraag je beheerder er een te koppelen."
@@ -9654,11 +9794,11 @@ msgstr "Geen certificeringen vastgelegd"
 msgid "No chat app accounts are linked."
 msgstr "Er zijn geen chat-app-accounts gekoppeld."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chat has that."
 msgstr "Geen chat bevat dat."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chats here yet."
 msgstr "Hier zijn nog geen chats."
 
@@ -9843,8 +9983,14 @@ msgstr "Er zijn nog geen geheugenbestanden geschreven."
 msgid "No Microsoft or Google? A staff list works too."
 msgstr "Geen Microsoft of Google? Een personeelslijst werkt ook."
 
-#: src/chat/chat-dock.tsx
-#: src/chat/composer.tsx
+#: src/routes/_shell.settings.models.tsx
+msgid "No model is chosen for your organization yet, so no model call can be made."
+msgstr "Er is nog geen model gekozen voor je organisatie, dus er kan geen model worden aangeroepen."
+
+#: src/settings/ai-providers.tsx
+msgid "No model is chosen yet."
+msgstr "Er is nog geen model gekozen."
+
 #: src/workflows/requests/request-needs.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Er is nog geen model ingesteld voor deze omgeving."
@@ -10238,6 +10384,7 @@ msgid "none"
 msgstr "geen"
 
 #: src/routes/_shell.workflows.$workflow.tsx
+#: src/settings/ai-providers.tsx
 msgid "None"
 msgstr "Geen"
 
@@ -10310,9 +10457,17 @@ msgstr "Geen wacht op een beheerder."
 msgid "None yet"
 msgstr "Nog geen"
 
+#: src/settings/ai-providers.tsx
+msgid "None yet."
+msgstr "Nog geen."
+
 #: src/onboarding/work-list.tsx
 msgid "None yet. A team's work shows up here once its lead has named it."
 msgstr "Nog geen. Het werk van een team verschijnt hier zodra de teamleider het heeft genoemd."
+
+#: src/settings/ai-providers.tsx
+msgid "None: its provider was removed."
+msgstr "Geen: de provider ervan is verwijderd."
 
 #: src/connections/connection-list.tsx
 msgid "None."
@@ -10539,9 +10694,17 @@ msgstr "Niet hetzelfde bij {team}"
 msgid "Not used in the last 30 days"
 msgstr "Niet gebruikt in de afgelopen 30 dagen"
 
+#: src/settings/ai-providers.tsx
+msgid "Not used yet."
+msgstr "Nog niet gebruikt."
+
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Niet geverifieerd"
+
+#: src/settings/ai-providers.tsx
+msgid "Not working: the last call, {when}, failed because {why}."
+msgstr "Werkt niet: de laatste aanroep, {when}, mislukte omdat {why}."
 
 #: src/workflows/run-detail.tsx
 msgctxt "a run that hasn't ended"
@@ -11584,6 +11747,10 @@ msgstr "Doorgeven"
 msgid "Past the alert"
 msgstr "Voorbij de waarschuwing"
 
+#: src/settings/ai-providers.tsx
+msgid "Paste the key from your provider's console. It is stored sealed and never shown again: only its first and last characters."
+msgstr "Plak de sleutel uit de console van je aanbieder. Hij wordt verzegeld opgeslagen en nooit meer getoond: alleen de eerste en laatste tekens."
+
 #: src/knowledge/document.tsx
 msgid "Path"
 msgstr "Pad"
@@ -11818,7 +11985,7 @@ msgstr "Per verzoek"
 msgid "Per request, in US dollars"
 msgstr "Per verzoek, in Amerikaanse dollars"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Toestemming"
 
@@ -11910,7 +12077,7 @@ msgstr "Platformmetingen"
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 msgstr "Platformstatistieken. Dit domein kan aantallen runs en signalen van elk domein lezen en die tonen aan iedereen die het gebruikt"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Platform update"
 msgstr "Platformupdate"
 
@@ -12028,7 +12195,7 @@ msgstr "Profiel"
 msgid "Project"
 msgstr "Project"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-shelf.tsx
 msgid "Projects"
 msgstr "Projecten"
@@ -12088,6 +12255,10 @@ msgstr "Voorgestelde regels"
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
+
+#: src/settings/ai-providers.tsx
+msgid "Provider"
+msgstr "Aanbieder"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
@@ -12277,7 +12448,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "read"
 msgstr "lezen"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Lezen"
 
@@ -12573,6 +12744,7 @@ msgstr "Herinnerd op {date}"
 
 #: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
 #: src/settings/person-limits.tsx
 msgid "Remove"
@@ -12591,6 +12763,18 @@ msgstr "{domain} verwijderen"
 #: src/workflows/module-files.tsx
 msgid "Remove {file}"
 msgstr "{file} verwijderen"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {label}"
+msgstr "{label} verwijderen"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {label}?"
+msgstr "{label} verwijderen?"
+
+#: src/settings/ai-providers.tsx
+msgid "Remove {name} from the fallbacks"
+msgstr "{name} uit de reservemodellen halen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
@@ -12695,9 +12879,17 @@ msgstr "Herhaalt, {items}:"
 msgid "Repeats, once per item:"
 msgstr "Herhaalt, één keer per item:"
 
+#: src/settings/ai-providers.tsx
+msgid "Replace key"
+msgstr "Sleutel vervangen"
+
 #: src/engines/resource-bindings.tsx
 msgid "Replace the binding of {alias}"
 msgstr "Koppeling van {alias} vervangen"
+
+#: src/settings/ai-providers.tsx
+msgid "Replace the key for {label}"
+msgstr "Sleutel voor {label} vervangen"
 
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
@@ -13216,6 +13408,10 @@ msgstr "Runs per week"
 msgid "runs a week by these workflows"
 msgstr "runs per week door deze workflows"
 
+#: src/settings/ai-providers.tsx
+msgid "Runs at: {whereItRuns}"
+msgstr "Draait bij: {whereItRuns}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Runs per dag waarop ze startten"
@@ -13325,6 +13521,10 @@ msgstr "Eerst opslaan"
 msgid "Save instructions"
 msgstr "Instructies opslaan"
 
+#: src/settings/ai-providers.tsx
+msgid "Save key"
+msgstr "Sleutel opslaan"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
 msgstr "Afspraken opslaan"
@@ -13419,7 +13619,7 @@ msgstr "Zoeken op naam"
 msgid "Search by name or kind"
 msgstr "Zoeken op naam of soort"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search chats and projects"
 msgstr "Chats en projecten doorzoeken"
 
@@ -13465,7 +13665,7 @@ msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of
 msgid "Search the transcript"
 msgstr "Zoek in het transcript"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Doorzoek je chats en projecten, en open er een."
 
@@ -14088,6 +14288,10 @@ msgstr "Iets anders"
 msgid "Something new is marked"
 msgstr "Er is iets nieuws gemarkeerd"
 
+#: src/settings/ai-providers.tsx
+msgid "something went wrong"
+msgstr "er iets misging"
+
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Er ging iets mis."
@@ -14294,7 +14498,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Blijven"
 
@@ -14859,8 +15063,13 @@ msgid "Terms and conditions"
 msgstr "Algemene voorwaarden"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/settings/ai-providers.tsx
 msgid "Test"
 msgstr "Testen"
+
+#: src/settings/ai-providers.tsx
+msgid "Test {label}"
+msgstr "{label} testen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test of {workflow}"
@@ -15195,6 +15404,10 @@ msgstr "de deadline"
 #: src/settings/person-limits.tsx
 msgid "The default"
 msgstr "De standaard"
+
+#: src/settings/ai-providers.tsx
+msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
+msgstr "De provider van het standaardmodel is verwijderd. Kies een nieuw standaardmodel om de reservemodellen te wijzigen."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -15556,6 +15769,22 @@ msgstr "Het platform staat open voor iedereen in het bedrijf: het is nooit geslo
 msgid "The policy's text"
 msgstr "Tekst van het beleid"
 
+#: src/settings/ai-providers.tsx
+msgid "the provider didn't answer"
+msgstr "de aanbieder niet antwoordde"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider refused the call"
+msgstr "de aanbieder de aanroep weigerde"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider refused the key"
+msgstr "de aanbieder de sleutel weigerde"
+
+#: src/settings/ai-providers.tsx
+msgid "the provider was too busy and asked to wait"
+msgstr "de aanbieder het te druk had en vroeg te wachten"
+
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "De snelste manier is je {signIn}-login koppelen. Ik zie alleen namen, teams en rollen. Je e-mail, chats en agenda’s blijven dicht."
@@ -15698,6 +15927,10 @@ msgstr "Het werk van het team, en wie je het vraagt"
 msgctxt "kickoff field"
 msgid "The teams"
 msgstr "De teams"
+
+#: src/settings/ai-providers.tsx
+msgid "The test didn't work. {model} didn't answer: {why}"
+msgstr "De test werkte niet. {model} antwoordde niet: {why}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "The text each interview ran on"
@@ -15890,6 +16123,10 @@ msgstr "Er staat niemand in deze lijst."
 #: src/tour/tour-script.ts
 msgid "These are your domains. Each one is a part of your business, with its workflows, apps and integrations together."
 msgstr "Dit zijn jullie domeinen. Elk domein is een deel van het bedrijf, met zijn workflows, apps en integraties bij elkaar."
+
+#: src/settings/ai-providers.tsx
+msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
+msgstr "Deze functies gebruiken altijd de eigen sleutels van Grasp, welke providers je hierboven ook koppelt."
 
 #: src/engines/store-changes.tsx
 msgid "These fields stay reserved with their current meaning: {reserved}."
@@ -16343,6 +16580,14 @@ msgstr "tot"
 msgid "To"
 msgstr "Tot"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "To change them, ask your admin."
+msgstr "Vraag je beheerder om ze te wijzigen."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "To change them, go to <0>Settings › AI providers</0>."
+msgstr "Ga naar <0>Instellingen › AI-aanbieders</0> om ze te wijzigen."
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
@@ -16389,7 +16634,7 @@ msgstr "Om ze weer te gebruiken, beoordeelt iemand die pakketten goedkeurt ze op
 msgid "Today"
 msgstr "Vandaag"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Vandaag"
@@ -18442,6 +18687,10 @@ msgstr "Mee bezig"
 msgid "Working on it since {date}"
 msgstr "Mee bezig sinds {date}"
 
+#: src/settings/ai-providers.tsx
+msgid "Working. Last used {when}."
+msgstr "Werkt. Laatst gebruikt op {when}."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Works council"
 msgstr "Ondernemingsraad"
@@ -18729,6 +18978,10 @@ msgstr "Het btw-nummer van je bedrijf, zoals het op facturen staat."
 msgid "Your decision changed nothing."
 msgstr "Je besluit heeft niets veranderd."
 
+#: src/settings/ai-providers.tsx
+msgid "Your endpoint's public HTTPS address, such as https://models.example.com/v1."
+msgstr "Het openbare HTTPS-adres van je endpoint, bijvoorbeeld https://models.example.com/v1."
+
 #: src/routes/guest.tsx
 msgid "Your message"
 msgstr "Je bericht"
@@ -18740,6 +18993,10 @@ msgstr "Jouw onboarding"
 #: src/dashboard/signals.tsx
 msgid "your organization"
 msgstr "je organisatie"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Your organization chooses these with its own AI provider keys."
+msgstr "Je organisatie kiest deze met haar eigen sleutels van AI-aanbieders."
 
 #: src/chat/failure.ts
 msgid "Your organization doesn't allow this model. Pick another one."
