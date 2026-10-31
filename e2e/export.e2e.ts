@@ -151,7 +151,8 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^28px "Newsreader Variable"/u);
+    // A page title's own size (PageHeaderTitle's text-3xl).
+    .toMatch(/^30px "Newsreader Variable"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Who" })
