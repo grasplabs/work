@@ -687,6 +687,47 @@ describe("a screen's typed send", { timeout: 180_000 }, () => {
     });
   });
 
+  it("shows a screen following a run that it may send it nothing once the App is restricted, under a revision of its own", async () => {
+    const { builder, app, reference } = await invoicesApp([
+      ["start"],
+      ["send"],
+    ]);
+    const lease = await screenOf(builder, app);
+    const runId = await startedRun(builder, app, lease, reference);
+    /** The run's snapshot as its screen follows it, once it waits. */
+    const followed = async () =>
+      await vi.waitFor(
+        async () => {
+          const { value, revision } = await readWorkflowWatch(
+            env,
+            builder.acting,
+            app,
+            {
+              workflow: { ...wireOf(reference), kind: "workflow" },
+              watch: "run",
+              runId,
+            }
+          );
+          const [wait] = z
+            .object({ waits: z.array(z.object({ canSend: z.boolean() })) })
+            .parse(value).waits;
+          expect(wait).toBeDefined();
+          return { canSend: wait?.canSend, revision };
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+    const open = await followed();
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    const restricted = await followed();
+
+    expect({
+      open: open.canSend,
+      restricted: restricted.canSend,
+      // A revision of its own: pushed to the screen, never the same one.
+      movedOn: (restricted.revision ?? 0) > (open.revision ?? 0),
+    }).toStrictEqual({ open: true, restricted: false, movedOn: true });
+  });
+
   it("sends nothing from an App in restricted mode to a run that isn't restricted, and sends to one started restricted", async () => {
     const { builder, app, reference } = await invoicesApp([
       ["start"],

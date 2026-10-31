@@ -549,10 +549,15 @@ const runAndPending = async (
  * run (an App grant revoked or given again) is a revision of its own,
  * never a change under the same one. Everything else a snapshot holds is
  * the gate's to keep current (the person's role, the build's trust). One
- * more, so the first is 1.
+ * more, so the first is 1; and one more again once the App is in
+ * restricted mode (`appRestricted`), which is for good: what it may send
+ * the run changes with it, so a screen following the run is pushed it.
  */
-const revisionOf = (generation: number, row: RunRow): number =>
-  generation + row.summaryRevision + 1;
+const revisionOf = (
+  generation: number,
+  row: RunRow,
+  appRestricted = false
+): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
 
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
@@ -863,7 +868,7 @@ const runSnapshot = async (
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
   };
-  return { value, revision: revisionOf(generation, row) };
+  return { value, revision: revisionOf(generation, row, appRestricted) };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */
