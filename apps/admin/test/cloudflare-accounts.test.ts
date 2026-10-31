@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
-  ensureAiGateway,
   ensureD1Database,
   ensureR2Bucket,
   getAccount,
@@ -78,7 +77,6 @@ describe("EU resources", () => {
       await Promise.all([
         ensureD1Database(api, account.id, "grasp-os-core"),
         ensureR2Bucket(api, account.id, "grasp-os-files"),
-        ensureAiGateway(api, account.id, "grasp-os"),
       ]);
 
     const first = await provision();
@@ -88,61 +86,7 @@ describe("EU resources", () => {
     expect(account).toMatchObject({
       d1: [{ name: "grasp-os-core", jurisdiction: "eu" }],
       buckets: [{ name: "grasp-os-files", jurisdiction: "eu" }],
-      gateways: [
-        {
-          id: "grasp-os",
-          authentication: true,
-          collect_logs: true,
-          cache_ttl: 0,
-        },
-      ],
     });
-  });
-
-  it("switches authentication on for a gateway that has it off, keeping its settings", async () => {
-    const account = cloudflare.addAccount();
-    const settings = {
-      cache_invalidate_on_update: true,
-      cache_ttl: 60,
-      collect_logs: true,
-      rate_limiting_interval: 60,
-      rate_limiting_limit: 100,
-      rate_limiting_technique: "sliding",
-      // BYOK's key store and a log export: an update that dropped them would
-      // cut the client off its own provider keys.
-      store_id: "byok-store-1",
-      logpush: true,
-      logpush_public_key: "public-key",
-    };
-    account.gateways.push({
-      id: "grasp-os",
-      authentication: false,
-      created_at: "2026-09-01T00:00:00Z",
-      modified_at: "2026-09-01T00:00:00Z",
-      ...settings,
-    });
-
-    await expect(
-      ensureAiGateway(api, account.id, "grasp-os")
-    ).resolves.toStrictEqual({
-      id: "grasp-os",
-      authentication: true,
-      ...settings,
-    });
-    // The update sent every setting back, and no read-only field.
-    const update = cloudflare.calls.find(({ method }) => method === "PUT");
-    expect(update?.body).toStrictEqual({ ...settings, authentication: true });
-    expect(account.gateways).toStrictEqual([
-      { id: "grasp-os", authentication: true, ...settings },
-    ]);
-
-    // Once on, it's left alone.
-    await ensureAiGateway(api, account.id, "grasp-os");
-    expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
-      "GET",
-      "PUT",
-      "GET",
-    ]);
   });
 
   it("finds a D1 database by its exact name", async () => {
@@ -298,16 +242,10 @@ describe("retries", () => {
     await expect(
       ensureR2Bucket(api, account.id, "grasp-os-files")
     ).resolves.toMatchObject({ name: "grasp-os-files" });
-    cloudflare.failCall(2, "network");
-    await expect(
-      ensureAiGateway(api, account.id, "grasp-os")
-    ).rejects.toMatchObject({ status: 0 });
     expect(cloudflare.calls.map(({ method }) => method)).toStrictEqual([
       "GET",
       "POST",
       "GET",
-      "GET",
-      "POST",
       "GET",
       "POST",
     ]);

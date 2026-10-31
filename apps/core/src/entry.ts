@@ -1,6 +1,7 @@
 import { adminAskPath } from "@grasp-os/shared/admin-ask";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
+import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
@@ -19,7 +20,6 @@ import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
-import { modelSpendReportPath } from "@grasp-os/shared/model-spend-report";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import {
@@ -33,6 +33,7 @@ import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 import { adminAskResponse } from "./admin-ask.ts";
 import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
+import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
@@ -57,7 +58,6 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
-import { modelSpendReportResponse } from "./model-spend-report.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
@@ -344,7 +344,7 @@ const pathHandlers: ReadonlyMap<
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [quotaPolicyReportPath, quotaPolicyReportResponse],
-  [modelSpendReportPath, modelSpendReportResponse],
+  [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminAskPath, adminAskResponse],
   [adminKickoffPath, adminKickoffResponse],

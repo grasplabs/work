@@ -77,7 +77,7 @@ const proposalOf = (
   },
   pins: {
     baseline: "skill@3",
-    model: "workers-ai/test",
+    model: "mistral/test",
     environment: "sandbox@1",
     policy: "learning@1",
   },

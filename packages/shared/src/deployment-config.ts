@@ -328,7 +328,7 @@ export const inboundMailDomainSchema = domainSchema
 /**
  * `MAIL_FROM`: who the mail core sends is from, `"<name>" <<address>>`:
  * an address on the deployment's sending domain, set up for Email Sending
- * outside core (the admin's src/deploy/resources.ts, which also locks
+ * outside core (the admin's src/hosting/operation.ts, which also locks
  * the `EMAIL` binding to that address), and the name shown with it. The name is one line with no
  * quotes or angle brackets, so it can't change the header it goes in.
  * Unset, core sends no mail: each one fails, and says why.
@@ -345,8 +345,8 @@ export const mailFromSchema = z.strictObject({
 export type MailFrom = z.infer<typeof mailFromSchema>;
 
 /**
- * The names of the deployment config vars above, the only settings the
- * admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
+ * The names of the deployment config vars above, and `PLATFORM_AI`
+ * (./platform-ai.ts), the only settings the admin sets on core as vars. `PLATFORM_CHANGE` is the admin's own, set
  * on every version it deploys, never a setting.
  */
 export const deploymentConfigVars = [
@@ -359,4 +359,5 @@ export const deploymentConfigVars = [
   "QUOTA_LIMITS",
   "INBOUND_MAIL_DOMAIN",
   "MAIL_FROM",
+  "PLATFORM_AI",
 ] as const;

@@ -1,8 +1,6 @@
 /**
  * The deployment config every deploy derives for a client's core:
- * `MODEL_GATEWAY`, naming the AI Gateway the deploy's resources step
- * ensures in the client's account (src/deploy/resources.ts) with the
- * models a new deployment allows, `SIGN_IN`, from the client's record,
+ * `SIGN_IN`, from the client's record,
  * and `MAIL_FROM`, Grasp's onboarding sender at the client's sending
  * domain (`onboardingSender`), each replaced by a client setting of the
  * same name, if it has one (src/deploy/deploy.ts), a `MAIL_FROM` only by
@@ -33,50 +31,11 @@ import { memoryLimitsSchema } from "@grasp-os/shared/memory";
 import { clientDomain } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
 import { oauthRelayOrigin } from "@grasp-os/shared/oauth-relay";
+import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
-
-/**
- * The AI Gateway in every client's account: one per account, so one name
- * serves them all, and a run that ensures it again finds it.
- */
-export const clientGatewayId = "grasp-os";
-
-// Kept here, as they were in @grasp-os/shared, only until the admin stops
-// provisioning AI Gateway: core reads no `gateway`, `models` or `roles`
-// from `MODEL_GATEWAY` any more (it ignores them), only its rules.
-
-/** The models a new deployment allowed at its AI Gateway. */
-export const defaultGatewayModels = [
-  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
-  "workers-ai/@cf/zai-org/glm-5.3-flash",
-] as const;
-
-/** An AI Gateway ID: lowercase letters, digits and dashes. */
-const gatewayIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
-
-/** The allowlist's part of `MODEL_GATEWAY`, as the admin still sets it. */
-const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
-  z
-    .object({
-      gateway: z.string().regex(gatewayIdPattern),
-      models: z.array(modelRef).min(1),
-      roles: z
-        .strictObject({
-          quick: modelRef.optional(),
-          careful: modelRef.optional(),
-        })
-        .optional(),
-    })
-    .refine(
-      ({ models: allowed, roles }) =>
-        Object.values(roles ?? {}).every(
-          (ref) => ref === undefined || allowed.includes(ref)
-        ),
-      { message: "A role's model is an allowed model", path: ["roles"] }
-    );
 
 /**
  * The runtime every client's core runs on: Cloudflare, where the isolates
@@ -89,7 +48,7 @@ export const clientRuntimeProfile = "cloudflare";
  * The client's sending domain: `mail.<id>.<domain>`, a zone of its own in
  * the client's account, below the client's hostname (`<id>.<domain>`)
  * rather than at it, so delegating it never takes the hostname the router
- * serves away from the router (src/deploy/resources.ts ensures it).
+ * serves away from the router (src/hosting/operation.ts ensures it).
  */
 export const clientMailDomain = (clientId: string, domain: string): string =>
   `mail.${clientId}.${domain}`;
@@ -325,14 +284,12 @@ const modelRefShape = z.string().regex(/^[^/\s]+\/\S+$/u);
 
 /**
  * What core parses each deployment config var with, `SIGN_IN` apart
- * (`checkDeployedSignIn`): `MODEL_GATEWAY` both as its allowlist and as its
- * rules, which core reads apart.
+ * (`checkDeployedSignIn`): `MODEL_GATEWAY` as the client's model rules,
+ * `PLATFORM_AI` as the platform's AI settings.
  */
 const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
-  MODEL_GATEWAY: [
-    modelGatewayConfigSchema(modelRefShape),
-    modelRulesConfigSchema(modelRefShape),
-  ],
+  MODEL_GATEWAY: [modelRulesConfigSchema(modelRefShape)],
+  PLATFORM_AI: [platformAiSchema],
   MEMORY_LIMITS: [memoryLimitsSchema],
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],
@@ -433,8 +390,10 @@ export interface CoreConfigInputs {
 
 /**
  * The deployment config vars a deploy derives for a client's core:
- * `MODEL_GATEWAY`, `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM`
- * (`onboardingSender`) always, `SIGN_IN` when its record has sign-in.
+ * `RUNTIME_PROFILE`, `CLIENT_ID` and `MAIL_FROM` (`onboardingSender`)
+ * always, `SIGN_IN` when its record has sign-in. Core's model rules
+ * (`MODEL_GATEWAY`) are the client's own setting, if it has one; every
+ * model key is its connect's.
  * `CLIENT_ID` is what core answers the provisioning probe with
  * (src/hosting/probe.ts); like `RUNTIME_PROFILE`, it's no deployment
  * config var, so no client setting can name it.
@@ -448,7 +407,6 @@ export const derivedCoreConfig = ({
 }: CoreConfigInputs): Record<string, unknown> => {
   const config = signInOf(clientId, signIn, domain, apps, oauthRelay);
   return {
-    MODEL_GATEWAY: { gateway: clientGatewayId, models: defaultGatewayModels },
     RUNTIME_PROFILE: clientRuntimeProfile,
     CLIENT_ID: clientId,
     MAIL_FROM: onboardingSender(clientId, domain),

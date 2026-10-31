@@ -1,10 +1,11 @@
+import type { AiProviderId } from "@grasp-os/shared/ai-providers";
 import { clientDomain, stages } from "@grasp-os/shared/names";
+import { platformAiSchema } from "@grasp-os/shared/platform-ai";
 import { env } from "cloudflare:workers";
-import { and, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { setModelSpendCeiling } from "../src/clients/settings.ts";
 import { auditEvents, clients, settings } from "../src/db/schema.ts";
 import { oauthRelayOf, signInApps } from "../src/deploy/context.ts";
 import {
@@ -12,6 +13,8 @@ import {
   onboardingSender,
 } from "../src/deploy/core-config.ts";
 import { configuredCoreVars } from "../src/deploy/core-vars.ts";
+import { errorCode } from "../src/deploy/errors.ts";
+import { platformAiOf, setPlatformAi } from "../src/platform-ai.ts";
 import { db, staff } from "./hosting.ts";
 
 // A placed client's core vars (src/deploy/core-vars.ts), as its operation
@@ -21,7 +24,11 @@ import { db, staff } from "./hosting.ts";
 // wrong, each tried below: a name that isn't a deployment config var (one
 // replacing a binding, or taking core's Durable Objects out of the EU),
 // a value that isn't JSON, one core wouldn't take, and a MAIL_FROM at an
-// address its EMAIL binding won't send from.
+// address its EMAIL binding won't send from. And the platform's AI
+// settings, which staff choose once for every client: audited, given to
+// each core as `PLATFORM_AI`, and deployed whether or not Grasp has the
+// key yet. No spend ceiling of the platform's: a client controls its
+// spend at its own provider, and its own budgets are its settings.
 
 const domain = "grasp.test";
 
@@ -78,37 +85,62 @@ const varsOf = async (clientId: string) =>
     onboardingSender(clientId, domain).address
   );
 
-/** Why reading `clientId`'s core vars was refused: its code. */
+/** Why reading `clientId`'s core vars was refused: its code, as a deploy records it. */
 const refusalOf = async (clientId: string): Promise<unknown> => {
   try {
     await varsOf(clientId);
   } catch (error) {
-    return error instanceof Error && "code" in error ? error.code : "thrown";
+    return errorCode(error);
   }
   return "taken";
 };
 
 describe("a placed client's settings, as core's vars", () => {
   it("gives core its settings as vars, each replacing what the admin derives of the same name, with the change it records", async () => {
-    const gateway = {
-      gateway: "grasp-os",
-      models: ["anthropic/claude-sonnet-4-5"],
+    // The client's own model rules, its budgets among them, as set: no
+    // ceiling of the platform's is laid over them.
+    const rules = {
+      budgets: {
+        deployment: { limit: 5000, alertAt: 90 },
+        user: { limit: 20 },
+      },
     };
     const clientId = await clientWith({
       AUDIT_RETENTION_DAYS: JSON.stringify(90),
       // Where the client receives mail, for its email triggers' addresses.
       INBOUND_MAIL_DOMAIN: JSON.stringify("mail.acme.test"),
-      // One the admin derives too: the setting goes out in its place.
-      MODEL_GATEWAY: JSON.stringify(gateway),
+      MODEL_GATEWAY: JSON.stringify(rules),
+      // One the admin derives too (the platform's): the setting goes out
+      // in its place.
+      PLATFORM_AI: JSON.stringify({ conversion: { provider: "local" } }),
     });
 
-    await expect(varsOf(clientId)).resolves.toMatchObject({
+    const vars = await varsOf(clientId);
+
+    expect(vars).toMatchObject({
       AUDIT_RETENTION_DAYS: 90,
       INBOUND_MAIL_DOMAIN: "mail.acme.test",
-      MODEL_GATEWAY: gateway,
+      MODEL_GATEWAY: rules,
+      // As set: core fills in the defaults for what it leaves out.
+      PLATFORM_AI: { conversion: { provider: "local" } },
       CLIENT_ID: clientId,
       PLATFORM_CHANGE: change,
     });
+  });
+
+  it("gives a client without model rules none: no allowlist, gateway or budget of the platform's", async () => {
+    const clientId = await clientWith({});
+
+    const vars = await varsOf(clientId);
+
+    expect(Object.keys(vars).toSorted()).toStrictEqual([
+      "CLIENT_ID",
+      "MAIL_FROM",
+      "PLATFORM_AI",
+      "PLATFORM_CHANGE",
+      "RUNTIME_PROFILE",
+      "SIGN_IN",
+    ]);
   });
 
   it.each([
@@ -127,16 +159,21 @@ describe("a placed client's settings, as core's vars", () => {
 
   it("refuses a setting that isn't JSON, or one core wouldn't take", async () => {
     const notJson = await clientWith({ AUDIT_RETENTION_DAYS: "ninety" });
-    const noModels = await clientWith({
-      MODEL_GATEWAY: JSON.stringify({ gateway: "grasp-os", models: [] }),
+    const noBudget = await clientWith({
+      MODEL_GATEWAY: JSON.stringify({ budgets: { user: { limit: 0 } } }),
+    });
+    const noPlatformAi = await clientWith({
+      PLATFORM_AI: JSON.stringify({ speech: { provider: "openai" } }),
     });
 
     expect({
       notJson: await refusalOf(notJson),
-      noModels: await refusalOf(noModels),
+      noBudget: await refusalOf(noBudget),
+      noPlatformAi: await refusalOf(noPlatformAi),
     }).toStrictEqual({
       notJson: "setting_invalid",
-      noModels: "setting_invalid",
+      noBudget: "setting_invalid",
+      noPlatformAi: "setting_invalid",
     });
   });
 
@@ -238,137 +275,213 @@ describe("a hosted client's sign-in, in relay mode", () => {
   });
 });
 
-describe("a client's model spend ceiling, as its gateway's budget", () => {
-  it("holds every client's core to €250 a month unless staff set another, audited, and no setting raises it", async () => {
-    const fresh = await clientWith({});
-    const raised = await clientWith({
-      MODEL_GATEWAY: JSON.stringify({
-        gateway: "grasp-os",
-        models: ["anthropic/claude-sonnet-4-5"],
-        budgets: {
-          deployment: { limit: 5000, alertAt: 90 },
-          user: { limit: 20 },
-        },
-      }),
-    });
-    const lowered = await clientWith({
-      MODEL_GATEWAY: JSON.stringify({
-        gateway: "grasp-os",
-        models: ["anthropic/claude-sonnet-4-5"],
-        budgets: { deployment: { limit: 100 } },
-      }),
-    });
-    const before = await varsOf(fresh);
-    const raisedVars = await varsOf(raised);
-    const loweredVars = await varsOf(lowered);
+/** The platform AI changes the audit log has recorded, oldest first. */
+const platformAiEvents = async () =>
+  await db
+    .select({ actor: auditEvents.actor, detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(eq(auditEvents.action, "platform.ai"))
+    .orderBy(auditEvents.at);
 
-    const changed = await setModelSpendCeiling(env, staff, {
-      clientId: fresh,
-      euros: 1200,
+/** Grasp's AI settings with conversion on `provider`'s `model`, the rest the defaults. */
+const converting = (provider: string, model: string) => ({
+  ...platformAiSchema.parse({}),
+  conversion: { provider, model },
+});
+
+/** How many platform AI changes the audit log has recorded. */
+const platformAiCount = async (): Promise<number> => {
+  const events = await platformAiEvents();
+  return events.length;
+};
+
+/** Grasp's AI settings as a save records them. */
+const words = (chosen: unknown): string =>
+  JSON.stringify(platformAiSchema.parse(chosen));
+
+/**
+ * `db`, with `cross` run once, right after the first read of a save: as
+ * another save landing between that save's read and its write.
+ */
+const crossedBy = (
+  database: typeof db,
+  cross: () => Promise<unknown>
+): typeof db => {
+  let crossed = false;
+  const chain = (built: object): object =>
+    new Proxy(built, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property, target);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return (...args: unknown[]): unknown => {
+          const result: unknown = Reflect.apply(value, target, args);
+          if (property === "get" && !crossed) {
+            crossed = true;
+            return (async () => {
+              const read: unknown = await result;
+              await cross();
+              return read;
+            })();
+          }
+          return typeof result === "object" && result !== null
+            ? chain(result)
+            : result;
+        };
+      },
     });
-    const again = await setModelSpendCeiling(env, staff, {
-      clientId: fresh,
-      euros: 1200,
+  return new Proxy(database, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === "select" && typeof value === "function") {
+        return (...args: unknown[]): unknown => {
+          const built: unknown = Reflect.apply(value, target, args);
+          return typeof built === "object" && built !== null
+            ? chain(built)
+            : built;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+};
+
+describe("the platform's AI settings, as every core's PLATFORM_AI", () => {
+  it("records two saves that cross as one after the other, never both a change from the same settings", async () => {
+    const keyed: ReadonlySet<AiProviderId> = new Set([
+      "openai",
+      "anthropic",
+      "openrouter",
+    ]);
+    const defaults = platformAiSchema.parse({});
+    await setPlatformAi(db, staff, defaults, keyed);
+    const earlier = await platformAiCount();
+    const mine = converting("anthropic", "claude-haiku-4-5");
+    const theirs = converting("openrouter", "openai/gpt-5-mini");
+
+    // Theirs lands between my save's read and its write.
+    const saved = await setPlatformAi(
+      crossedBy(db, async () => await setPlatformAi(db, staff, theirs, keyed)),
+      staff,
+      mine,
+      keyed
+    );
+    const after = await platformAiOf(db);
+    const events = await platformAiEvents();
+    await setPlatformAi(db, staff, defaults, keyed);
+
+    const changeSchema = z.object({ from: z.string(), to: z.string() });
+    const changes = events
+      .slice(earlier)
+      .map(({ detail }) => changeSchema.parse(JSON.parse(detail ?? "null")))
+      .map(({ from, to }) => `${from} -> ${to}`)
+      .toSorted();
+    expect({ saved, after, changes }).toStrictEqual({
+      saved: { refused: null, changed: true },
+      // Mine read again after theirs, and went on from it.
+      after: platformAiSchema.parse(mine),
+      changes: [
+        `${words(defaults)} -> ${words(theirs)}`,
+        `${words(theirs)} -> ${words(mine)}`,
+      ].toSorted(),
     });
-    const audited = await db
-      .select({ actor: auditEvents.actor, detail: auditEvents.detail })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.clientId, fresh),
-          eq(auditEvents.action, "client.model_spend_ceiling")
-        )
-      );
+  });
+
+  it("gives every core the defaults until staff choose, then their choice, audited with what it replaced and marking each client for its next deploy", async () => {
+    const clientId = await clientWith({});
+    const before = await varsOf(clientId);
+    const earlier = await platformAiCount();
+    // No ElevenLabs key: speech stays on it, waiting, while conversion moves.
+    const keyed: ReadonlySet<AiProviderId> = new Set(["openai", "anthropic"]);
+    const chosen = converting("anthropic", "claude-haiku-4-5");
+
+    const changed = await setPlatformAi(db, staff, chosen, keyed);
+    const again = await setPlatformAi(db, staff, chosen, keyed);
+    const after = await varsOf(clientId);
+    const events = await platformAiEvents();
+    const audited = events.slice(earlier);
     const [record] = await db
       .select({ configChangedAt: clients.configChangedAt })
       .from(clients)
-      .where(eq(clients.id, fresh));
-    const after = await varsOf(fresh);
+      .where(eq(clients.id, clientId));
+    // Back to the defaults, for the other tests.
+    await setPlatformAi(db, staff, platformAiSchema.parse({}), keyed);
 
+    const detail: unknown = JSON.parse(audited.at(-1)?.detail ?? "null");
     expect({
-      before: before.MODEL_GATEWAY,
-      after: after.MODEL_GATEWAY,
-      raised: raisedVars.MODEL_GATEWAY,
-      lowered: loweredVars.MODEL_GATEWAY,
+      before: before.PLATFORM_AI,
+      after: after.PLATFORM_AI,
       changed,
       again,
-      audited: audited.map(({ detail }): unknown =>
-        JSON.parse(detail ?? "null")
-      ),
+      audited: audited.length,
+      actor: audited.at(-1)?.actor,
+      detail,
       marked: record?.configChangedAt instanceof Date,
-    }).toMatchObject({
-      before: { budgets: { deployment: { limit: 250, alertAt: 80 } } },
-      after: { budgets: { deployment: { limit: 1200, alertAt: 80 } } },
-      // The setting's own budgets stay, its deployment one held to the ceiling.
-      raised: {
-        budgets: {
-          deployment: { limit: 250, alertAt: 90 },
-          user: { limit: 20 },
-        },
+    }).toStrictEqual({
+      before: platformAiSchema.parse({}),
+      after: chosen,
+      changed: { refused: null, changed: true },
+      again: { refused: null, changed: false },
+      audited: 1,
+      actor: staff.email,
+      detail: {
+        from: JSON.stringify(platformAiSchema.parse({})),
+        to: JSON.stringify(chosen),
       },
-      lowered: { budgets: { deployment: { limit: 100, alertAt: 80 } } },
-      changed: true,
-      again: false,
-      audited: [{ from: 250, to: 1200 }],
       marked: true,
     });
   });
 
-  it("audits two saves that overlap each as what it replaced, the second from the first's ceiling", async () => {
-    const clientId = await clientWith({});
+  it("refuses a feature on a provider Grasp has no key for, and settings core wouldn't take, changing nothing", async () => {
+    const keyed: ReadonlySet<AiProviderId> = new Set(["openai"]);
+    const earlier = await platformAiCount();
 
-    const saved = await Promise.all([
-      setModelSpendCeiling(env, staff, { clientId, euros: 300 }),
-      setModelSpendCeiling(env, staff, { clientId, euros: 400 }),
-    ]);
-    const audited = await db
-      .select({ detail: auditEvents.detail })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.clientId, clientId),
-          eq(auditEvents.action, "client.model_spend_ceiling")
-        )
-      )
-      .orderBy(auditEvents.at, sql`rowid`);
-    const changes = audited.map(({ detail }) =>
-      z
-        .object({ from: z.number(), to: z.number() })
-        .parse(JSON.parse(detail ?? "null"))
-    );
-    const [first, second] = changes;
-    const [record] = await db
-      .select({ ceiling: clients.modelSpendCeiling })
-      .from(clients)
-      .where(eq(clients.id, clientId));
+    const refused = {
+      unkeyed: await setPlatformAi(
+        db,
+        staff,
+        converting("anthropic", "claude-haiku-4-5"),
+        keyed
+      ),
+      invalid: await setPlatformAi(
+        db,
+        staff,
+        { speech: { provider: "openai" } },
+        keyed
+      ),
+    };
+    const audited = (await platformAiCount()) - earlier;
 
-    expect({
-      saved,
-      count: changes.length,
-      chained: [first?.from, second?.from === first?.to],
-      ends: record?.ceiling === second?.to,
-      both: [first?.to ?? 0, second?.to ?? 0].toSorted((a, b) => a - b),
-    }).toStrictEqual({
-      saved: [true, true],
-      count: 2,
-      chained: [250, true],
-      ends: true,
-      both: [300, 400],
+    expect({ refused, audited }).toStrictEqual({
+      refused: {
+        unkeyed: { refused: "key_missing", changed: false },
+        invalid: { refused: "invalid", changed: false },
+      },
+      audited: 0,
     });
   });
 
-  it.each([0, 1.5, 100_001])(
-    "refuses a ceiling of %s euros, changing nothing",
-    async (euros) => {
-      const clientId = await clientWith({});
+  it("deploys whatever provider platform AI names, Grasp's key or not, so a missing key never stops a deploy", async () => {
+    const clientId = await clientWith({});
+    const onAnthropic = await clientWith({
+      PLATFORM_AI: JSON.stringify(converting("anthropic", "claude-haiku-4-5")),
+    });
 
-      await expect(
-        setModelSpendCeiling(env, staff, { clientId, euros })
-      ).rejects.toThrow(/euros/u);
-      const vars = await varsOf(clientId);
-      expect(vars.MODEL_GATEWAY).toMatchObject({
-        budgets: { deployment: { limit: 250 } },
-      });
-    }
-  );
+    // Whether Grasp has the key is connect's business: without it the
+    // feature answers "not configured" in core, and everything else works.
+    const defaults = await varsOf(clientId);
+    const anthropic = await varsOf(onAnthropic);
+    expect({
+      defaults: defaults.PLATFORM_AI,
+      onAnthropic: anthropic.PLATFORM_AI,
+    }).toStrictEqual({
+      defaults: platformAiSchema.parse({}),
+      onAnthropic: platformAiSchema.parse(
+        converting("anthropic", "claude-haiku-4-5")
+      ),
+    });
+  });
 });

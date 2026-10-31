@@ -1,4 +1,5 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
 import { env } from "cloudflare:workers";
 import { eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -118,8 +119,9 @@ describe("an organization's Setup", () => {
         "Connect",
         "grasp-os-core",
         "grasp-os-files",
-        "AI Gateway",
       ].map((text) => howItRuns.includes(text)),
+      // No AI Gateway runs for it any more: its AI is its own provider's.
+      gateway: howItRuns.includes("AI Gateway"),
       // Deployed by the admin, and the contract not held by core yet.
       checklist: [
         "Its own platform is deployed",
@@ -163,7 +165,8 @@ describe("an organization's Setup", () => {
       needs: false,
       numbers: [true, true],
       quotaPolicy: [true, true, true],
-      howItRuns: [true, true, true, true, true, true],
+      howItRuns: [true, true, true, true, true],
+      gateway: false,
       checklist: [true, true, true],
       deployed: true,
       history: { kept: true, settingUp: false },
@@ -232,6 +235,66 @@ describe("an organization's Setup", () => {
       created: false,
       secretsLive: true,
       waiting: true,
+    });
+  });
+
+  it("says its AI in one line from what its core reports: connected and working, not answering since it failed, or not connected", async () => {
+    const now = Date.now();
+    const status = (
+      lastOkAt: number | null,
+      lastFailedAt: number | null
+    ): AiStatusReport => ({
+      providers: [
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt,
+          lastFailedAt,
+          lastFailure: lastFailedAt === null ? null : "server",
+        },
+        // Grasp's own key's calls say nothing of the company's AI.
+        {
+          provider: "anthropic",
+          kind: "platform",
+          lastOkAt: now,
+          lastFailedAt: null,
+          lastFailure: null,
+        },
+      ],
+    });
+    const failedAt = now - 1000;
+    const working = await liveClient(emptyAdminSnapshot("Acme"));
+    working.account.ai = status(now - 5 * 60 * 1000 - 10 * 1000, null);
+    const failing = await liveClient(emptyAdminSnapshot("Acme"));
+    failing.account.ai = status(now - 60 * 60 * 1000, failedAt);
+    const unconnected = await liveClient(emptyAdminSnapshot("Acme"));
+
+    const sectionFor = async (clientId: string): Promise<string> => {
+      const { html } = await page(`/organizations/${clientId}/setup`);
+      return sectionOf(html, "AI");
+    };
+    const sections = [
+      await sectionFor(working.clientId),
+      await sectionFor(failing.clientId),
+      await sectionFor(unconnected.clientId),
+    ];
+    const [workingLine, failingLine, unconnectedLine] = sections.map(textOf);
+
+    expect({
+      working: workingLine?.includes(
+        "AI: OpenAI connected · working · last used 5 min ago"
+      ),
+      failing: failingLine?.includes(
+        `AI: OpenAI connected · not answering since ${new Date(failedAt).toISOString().slice(11, 16)} UTC`
+      ),
+      unconnected: unconnectedLine?.includes("AI: not connected yet"),
+      // Read only: nothing to press.
+      buttons: sections.some((html) => html.includes("<button")),
+    }).toStrictEqual({
+      working: true,
+      failing: true,
+      unconnected: true,
+      buttons: false,
     });
   });
 
