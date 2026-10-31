@@ -40,6 +40,11 @@ import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 export const transportKinds = [
   /** Cloudflare AI Gateway, over the AI binding (model-transport-cloudflare.ts). */
   "cloudflare-ai-gateway",
+  /**
+   * The provider's own API, through connect, which holds the key
+   * (model-transport-connect.ts).
+   */
+  "connect",
 ] as const;
 export type TransportKind = (typeof transportKinds)[number];
 
@@ -92,10 +97,15 @@ export interface TransportRoute {
   fetch: FetchFunction;
   /** The request's body as the endpoint takes it, where it differs from pi's. */
   onPayload?: (payload: unknown) => unknown;
-  /** `init` tagged with the provider request's ID, for the endpoint's own logs. */
+  /**
+   * `init` tagged with the provider request's ID, for the endpoint's own
+   * logs, and the call's deadline (ms since the epoch), for a transport
+   * that must cut the request off on its own side too.
+   */
   tagged: (
     init: RequestInit | undefined,
-    providerRequest: string
+    providerRequest: string,
+    endsAt: number
   ) => RequestInit;
   /** The ID the endpoint logged the request under, from its response's headers. */
   logIdOf: (headers: Record<string, string>) => string | undefined;

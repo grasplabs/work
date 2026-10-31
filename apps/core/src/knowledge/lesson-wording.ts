@@ -3,7 +3,7 @@ import { brainErrors } from "@grasp-os/brain/contract";
 import { modelErrors } from "@grasp-os/shared/models";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 
 // Core's side of the Brain's `wordLesson` port (packages/brain's
@@ -44,7 +44,7 @@ export const wordLesson = async (
   env: ModelsEnv,
   facts: LessonFacts
 ): Promise<string> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {
