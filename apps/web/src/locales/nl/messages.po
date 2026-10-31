@@ -2485,9 +2485,17 @@ msgstr "Een widget toevoegen"
 msgid "Add a word"
 msgstr "Een woord toevoegen"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "Een app toevoegen"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Uitzondering toevoegen"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "App toevoegen"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3469,6 +3477,10 @@ msgstr "Vraag het Grasp"
 #: src/dashboard/widget-board.tsx
 msgid "Ask Grasp for a widget"
 msgstr "Vraag Grasp om een widget"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Grasp vragen „{typed}” toe te voegen"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
@@ -6907,6 +6919,10 @@ msgstr "Uit Google Drive. Ik lees alleen de bestanden die je toevoegt."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Uit SharePoint of OneDrive. Ik lees alleen de bestanden die je toevoegt."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Uit de catalogus"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -10586,6 +10602,10 @@ msgstr "Niet goed"
 msgid "Not in a domain yet"
 msgstr "Nog in geen domein"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Niet in de catalogus"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Nog niet geïnterviewd."
@@ -10824,6 +10844,10 @@ msgstr "Niets hier past bij het filter."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Hier staat nog niets."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Niets in de catalogus komt overeen met „{typed}”."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12140,6 +12164,10 @@ msgstr "Beleid"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Beleid niet gevonden"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Populair in de catalogus"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13678,6 +13706,10 @@ msgstr "Mensen en teams zoeken"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of minder."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Zoeken in de catalogus"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -18259,6 +18291,10 @@ msgstr "Of mensen van Grasp kunnen inloggen om te helpen met deze werkruimte. Ze
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Welke AI-tools gebruiken mensen?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Welke app moet Grasp gaan volgen? Grasp kent een app zodra die verbonden is, dus een app uit de catalogus opent waar u hem verbindt."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"

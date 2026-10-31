@@ -104,6 +104,8 @@ export interface LandscapeData {
   book: Loaded<PolicyBook>;
   /** Which apps the rules catch, as core works it out. */
   found: Loaded<PolicyFindings>;
+  /** Every integration, the catalog's too: Add app picks from them. */
+  integrations: Integration[];
 }
 
 /**
@@ -120,14 +122,15 @@ export const loadLandscape = async (
     readPolicyBook(core),
     readPolicyFindings(core),
   ]);
-  if (connections.state !== "ready") {
-    return { apps: connections, book, found };
-  }
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
-    connections.data
+    connections.state === "ready" ? connections.data : []
   );
+  if (connections.state !== "ready") {
+    return { apps: connections, book, found, integrations };
+  }
   return {
+    integrations,
     apps: {
       state: "ready",
       data: landscapeAppsOf(

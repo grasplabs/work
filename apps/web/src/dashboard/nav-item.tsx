@@ -56,7 +56,7 @@ export const DashboardItem = () => {
         </span>
         {/* Inside the link, so its name says how many wait. */}
         {shown ? (
-          <SidebarMenuBadge className="top-1.5">
+          <SidebarMenuBadge placement="inside">
             <span aria-hidden="true">{waiting}</span>
             <span className="sr-only">
               <Plural
