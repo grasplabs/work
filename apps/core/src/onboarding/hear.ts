@@ -18,7 +18,7 @@ import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
-import { heardBudgets } from "./transcription.ts";
+import { heardBudgets, transcriptionModelOf } from "./transcription.ts";
 
 // `POST /api/interview/hear` (`@grasp-os/shared/interview-hear`): a
 // stretch of what someone said on their interview link, written down from
@@ -27,14 +27,14 @@ import { heardBudgets } from "./transcription.ts";
 // Ported from the prototype (grasplabs/prototype, packages/grasp:
 // worker/interview.ts, `hear`).
 //
-// Written down by ElevenLabs's Scribe through the deployment's AI Gateway,
-// on the path live transcription and speech take, with the key the
-// gateway stores: core sends none, and asks ElevenLabs to keep nothing
-// (`enable_logging=false`). Only once the model gateway admitted it
-// (models.ts, `models(env).listen`): the allowlist and the rules judge it,
-// and the deployment's budgets hold its seconds, before anything is sent;
-// the way to the upstream is the one its admission hands over. The words
-// to listen out for are the store's (`listeningTerms`), never the page's.
+// Written down by the transcription model the platform's settings name
+// (@grasp-os/shared/platform-ai), OpenAI's by default, the one live
+// transcription takes, through connect with Grasp's own key: core sends
+// none. Only once the model gateway admitted it (models.ts,
+// `models(env).listen`): the rules judge it, and the deployment's budgets
+// hold its seconds, before anything is sent; the way to the upstream is
+// the one its admission hands over. The words to listen out for are the
+// store's (`listeningTerms`), never the page's.
 //
 // What it must not do, and what stops it:
 //
@@ -52,13 +52,6 @@ import { heardBudgets } from "./transcription.ts";
 //   day the live line has (`heardBudgets`) stay a second bound, below the
 //   budgets; the router limits the endpoint per address, as every link
 //   endpoint.
-
-/**
- * The model a recording is written down by, as the gateway's allowlist
- * names it: ElevenLabs's Scribe v2, for whole recordings. The deployment
- * must list it, as it lists the live line's.
- */
-export const hearingModel = "elevenlabs/scribe_v2";
 
 /** What the gateway is told every recording is for. */
 const purpose = "onboarding.hear";
@@ -80,7 +73,36 @@ const gatewayRefusals: Partial<Record<string, readonly [number, HearCode]>> = {
   "model.unpriced": [503, "hear.unavailable"],
 };
 
-/** Scribe's answer, as far as it is read: the words, as one text. */
+/**
+ * The file name a recording goes to the provider under, by its media type:
+ * OpenAI tells the audio's format by the name's extension alone, and
+ * refuses a file without one it takes (flac, m4a, mp3, mp4, mpeg, mpga,
+ * oga, ogg, wav, webm). What browsers record: WebM or Ogg with Opus
+ * (Chrome, Firefox), MP4/M4A with AAC (Safari), WAV.
+ */
+const recordingExtensions: Readonly<Record<string, string>> = {
+  "audio/webm": "webm",
+  "video/webm": "webm",
+  "audio/ogg": "ogg",
+  "audio/mp4": "mp4",
+  "video/mp4": "mp4",
+  "audio/m4a": "m4a",
+  "audio/x-m4a": "m4a",
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/wave": "wav",
+  "audio/x-wav": "wav",
+  "audio/flac": "flac",
+};
+
+/** The name `audio` is sent under; `undefined` for a type it can't be sent as. */
+export const recordingName = (audio: Blob): string | undefined => {
+  const [type = ""] = audio.type.toLowerCase().split(";");
+  const extension = recordingExtensions[type.trim()];
+  return extension === undefined ? undefined : `stretch.${extension}`;
+};
+
+/** The provider's answer, as far as it is read: the words, as one text. */
 const writtenSchema = z.object({ text: z.string() });
 
 /** An answer of this endpoint: never a referrer, never kept by a browser. */
@@ -102,6 +124,8 @@ const refused = (
 /** The page's form, read no further than it may be: its fields, and the recording. */
 interface Asked extends z.output<typeof hearFieldsSchema> {
   audio: File;
+  /** The name it goes to the provider under (`recordingName`). */
+  name: string;
 }
 
 const formOf = async (request: Request): Promise<Asked | null> => {
@@ -131,34 +155,33 @@ const formOf = async (request: Request): Promise<Asked | null> => {
   if (!fields.success || !(audio instanceof File) || audio.size === 0) {
     return null;
   }
-  return { ...fields.data, audio };
+  // A recording of a type the provider can't take is refused here, before
+  // anything is admitted or sent.
+  const name = recordingName(audio);
+  return name === undefined ? null : { ...fields.data, audio, name };
 };
 
 /** What the upstream wrote down, or why not: `undefined` when it failed. */
 const writtenDown = async (
-  { route, modelId }: Listening,
+  listening: Listening,
   asked: Asked,
   keyterms: readonly string[],
   requestId: string
 ): Promise<string | undefined> => {
   const sent = new FormData();
-  sent.set("model_id", modelId);
-  sent.set("language_code", asked.locale);
-  sent.set("tag_audio_events", "false");
-  for (const term of keyterms) {
-    sent.append("keyterms", term);
+  sent.set("model", listening.modelId);
+  sent.set("language", asked.locale);
+  sent.set("response_format", "json");
+  if (keyterms.length > 0) {
+    sent.set("prompt", `Names and terms: ${keyterms.join(", ")}.`);
   }
-  sent.set("file", asked.audio, "stretch");
+  sent.set("file", asked.audio, asked.name);
   let answer: Response;
   try {
-    answer = await route.transport(
-      `${route.base}/v1/speech-to-text?enable_logging=false`,
-      {
-        method: "POST",
-        headers: route.headers,
-        body: sent,
-        signal: AbortSignal.timeout(hearTimeoutMs),
-      }
+    answer = await listening.send(
+      "/v1/audio/transcriptions",
+      { headers: {}, body: sent },
+      AbortSignal.timeout(hearTimeoutMs)
     );
   } catch {
     log.warn("hear.failed", { requestId });
@@ -192,8 +215,12 @@ const admitted = async (
   requestId: string
 ): Promise<Listening | Response> => {
   try {
+    const model = transcriptionModelOf(env);
+    if (model === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
     return await models(env).listen({
-      model: hearingModel,
+      model,
       seconds,
       // Admitted within half of it at most, written down in the rest.
       openMs: 2 * hearTimeoutMs,

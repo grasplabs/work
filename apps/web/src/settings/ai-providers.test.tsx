@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
-import { aiProviderIds, aiProviders } from "@grasp-os/shared/ai-providers";
+import {
+  organizationProviderIds,
+  aiProviders,
+} from "@grasp-os/shared/ai-providers";
 import type {
   AiModelChoice,
   AiModelChoiceNow,
   AiPlatformUse,
   AiProviderAdd,
-  AiProviderId,
+  OrganizationProviderId,
   AiProviderListed,
   AiProvidersListing,
   AiProviderStatus,
@@ -37,7 +40,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const pastedKey = "sk-test-0123456789abcdefa3f2";
 
 /** Each provider's catalog, as core offers it. */
-const catalogs: Record<AiProviderId, AiProviderListed["models"]> = {
+const catalogs: Record<OrganizationProviderId, AiProviderListed["models"]> = {
   anthropic: [
     { model: "anthropic/claude-haiku-4-5", name: "Claude Haiku 4.5" },
   ],
@@ -58,14 +61,14 @@ const fakeAiProviders = ({
   tested = { ok: true, model: "openai/gpt-5-mini" },
   platform = [],
 }: {
-  connected?: { provider: AiProviderId; status?: AiProviderStatus }[];
+  connected?: { provider: OrganizationProviderId; status?: AiProviderStatus }[];
   choice?: AiModelChoiceNow | null;
   tested?: AiProviderTest;
   platform?: AiPlatformUse[];
 } = {}) => {
   const asked: unknown[][] = [];
   const listed = (
-    provider: AiProviderId,
+    provider: OrganizationProviderId,
     key: string,
     baseUrl: string | null,
     status: AiProviderStatus | null = null
@@ -89,7 +92,7 @@ const fakeAiProviders = ({
       await Promise.resolve();
       return {
         providers,
-        offered: aiProviderIds.map((provider) => ({
+        offered: organizationProviderIds.map((provider) => ({
           provider,
           label: aiProviders[provider].label,
           whereItRuns: aiProviders[provider].whereItRuns,
@@ -113,7 +116,7 @@ const fakeAiProviders = ({
       return added;
     },
     test: async (
-      provider: AiProviderId,
+      provider: OrganizationProviderId,
       model?: string
     ): Promise<AiProviderTest> => {
       await Promise.resolve();
@@ -125,7 +128,7 @@ const fakeAiProviders = ({
       asked.push(["models", next]);
       choice = next;
     },
-    remove: async (provider: AiProviderId): Promise<void> => {
+    remove: async (provider: OrganizationProviderId): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", provider]);
       providers = providers.filter((each) => each.provider !== provider);
@@ -598,12 +601,17 @@ describe("Settings › AI providers", () => {
       label: aiProviders.openai.label,
       whereItRuns: aiProviders.openai.whereItRuns,
     } as const;
+    const elevenLabs = {
+      id: "elevenlabs",
+      label: aiProviders.elevenlabs.label,
+      whereItRuns: "ElevenLabs, European Union",
+    } as const;
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
-        { feature: "conversion", provider: openai },
-        { feature: "transcription", provider: openai },
-        { feature: "speech", provider: openai },
+        { feature: "conversion", provider: openai, off: false },
+        { feature: "transcription", provider: openai, off: false },
+        { feature: "speech", provider: elevenLabs, off: false },
       ],
     });
     await shown(api);
@@ -619,15 +627,43 @@ describe("Settings › AI providers", () => {
       "Grasp transcribes interviews with OpenAI, United States, using Grasp's own key."
     );
     expect(text()).toContain(
-      "Grasp reads the interview's questions aloud with OpenAI, United States, using Grasp's own key."
+      "Grasp reads the interview's questions aloud with ElevenLabs, European Union, using Grasp's own key."
     );
     expect(section?.querySelectorAll("input, select, button")).toHaveLength(0);
     expect(section?.textContent).toContain("Grasp's own provider keys");
   });
 
+  it("says which of Grasp's own features are off where the deployment keeps everything in the EU and Grasp's project isn't there", async () => {
+    const openai = {
+      id: "openai",
+      label: aiProviders.openai.label,
+      whereItRuns: "OpenAI, United States",
+    } as const;
+    const elevenLabs = {
+      id: "elevenlabs",
+      label: aiProviders.elevenlabs.label,
+      whereItRuns: "ElevenLabs, United States",
+    } as const;
+    const { api } = fakeAiProviders({
+      platform: [
+        { feature: "conversion", provider: null, off: false },
+        { feature: "transcription", provider: openai, off: true },
+        { feature: "speech", provider: elevenLabs, off: true },
+      ],
+    });
+    await shown(api);
+
+    expect(text()).toContain(
+      "Interviews aren't transcribed: this deployment keeps everything in the EU, and OpenAI, United States isn't."
+    );
+    expect(text()).toContain(
+      "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and ElevenLabs, United States isn't."
+    );
+  });
+
   it("says when documents are converted on the deployment itself", async () => {
     const { api } = fakeAiProviders({
-      platform: [{ feature: "conversion", provider: null }],
+      platform: [{ feature: "conversion", provider: null, off: false }],
     });
     await shown(api);
 

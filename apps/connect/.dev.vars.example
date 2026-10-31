@@ -16,6 +16,8 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 MISTRAL_API_KEY=
 OPENROUTER_API_KEY=
+# Grasp's ElevenLabs key, for speech alone: unset, nothing is said aloud.
+ELEVENLABS_API_KEY=
 # On-prem only (RUNTIME_PROFILE=workerd): the private hosts an organization's
 # OpenAI-compatible endpoint may be at, comma-separated, exactly as their URLs
 # name them, e.g. `models.acme.lan,10.0.0.8`. Open workerd's network to each

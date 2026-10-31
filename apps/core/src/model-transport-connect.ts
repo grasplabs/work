@@ -5,12 +5,15 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
   aiCredentialPlaceholder,
+  aiGrantHeader,
+  aiProviderHost,
   aiProviders,
   aiRefusedHeader,
 } from "@grasp-os/shared/ai-providers";
 import type {
   AiCredentialSource,
   AiProviderId,
+  PlatformRoute,
 } from "@grasp-os/shared/ai-providers";
 import { signModelGrant } from "@grasp-os/shared/capability";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
@@ -41,6 +44,11 @@ export interface ConnectTarget {
   provider: AiProviderId;
   /** For an OpenAI-compatible endpoint, the base URL its key goes to. */
   baseUrl: string | null;
+  /**
+   * For Grasp's own key: where its project's region sends the requests
+   * (`platformRouteOf`), in place of the provider's own host.
+   */
+  platform?: PlatformRoute;
 }
 
 /**
@@ -65,19 +73,32 @@ const baseUrlOf = (
     return target.baseUrl ?? undefined;
   }
   const { api } = ref.catalog;
-  return isRouteApi(api)
+  const base = isRouteApi(api)
     ? aiProviders[target.provider].baseUrls[api]
     : undefined;
+  if (base === undefined || target.platform === undefined) {
+    return base;
+  }
+  const regional = new URL(base);
+  regional.hostname = target.platform.host;
+  return regional.href.replace(/\/+$/u, "");
 };
 
 /**
  * The headers every request carries: the placeholder where the key goes,
  * in the one header the provider takes it in, and no SDK's own.
  */
-const placeholderHeaders = (provider: AiProviderId): ProviderHeaders =>
-  aiProviders[provider].keyHeader === "x-api-key"
-    ? { "x-api-key": aiCredentialPlaceholder, Authorization: null }
-    : { Authorization: `Bearer ${aiCredentialPlaceholder}`, "x-api-key": null };
+const placeholderHeaders = (provider: AiProviderId): ProviderHeaders => {
+  const { keyHeader } = aiProviders[provider];
+  const none: ProviderHeaders = {
+    Authorization: null,
+    "x-api-key": null,
+    "xi-api-key": null,
+  };
+  return keyHeader === "authorization"
+    ? { ...none, Authorization: `Bearer ${aiCredentialPlaceholder}` }
+    : { ...none, [keyHeader]: aiCredentialPlaceholder };
+};
 
 /** The core env a connect route needs. */
 type ConnectEnv = Pick<Env, "CONNECT" | "CAPABILITY_SIGNING_KEY">;
@@ -147,6 +168,165 @@ const cancelLate = async (sent: Promise<Response>): Promise<void> => {
 };
 
 /**
+ * Hands one admitted request to connect with its grant, until `endsAt`,
+ * which connect cuts it off at too, or until `signal` is aborted, when
+ * connect is told to stop it, so a provider still thinking bills nothing
+ * more, and its answer, should one come anyway, is cancelled unread. A
+ * request connect couldn't
+ * get an answer for throws; one it refused before sending comes back as
+ * its refusal.
+ */
+const sendThroughConnect = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  host: string,
+  request: Request,
+  { ledgerRequest, endsAt, signal }: SentBy
+): Promise<Response> => {
+  const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
+    credential: target.credential,
+    provider: target.provider,
+    host,
+    request: ledgerRequest,
+    notAfter: endsAt,
+    body: await sha256HexOfBytes(await request.clone().arrayBuffer()),
+  });
+  signal?.throwIfAborted();
+  const line = stopLine();
+  const sent = env.CONNECT.modelFetch(request, grant, line.stop);
+  const aborted = Promise.withResolvers<never>();
+  const stop = () => {
+    line.cancel();
+    aborted.reject(signal?.reason);
+  };
+  signal?.addEventListener("abort", stop, { once: true });
+  let answered: Response;
+  try {
+    answered = await Promise.race([sent, aborted.promise]);
+  } catch (error) {
+    line.cancel();
+    void cancelLate(sent);
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
+  line.close();
+  if (answered.headers.get(aiRefusedHeader) === "unreachable") {
+    await answered.body?.cancel();
+    throw new ConnectUnansweredError();
+  }
+  return answered;
+};
+
+/** What one request through connect is admitted as: the ledger's ID, the deadline. */
+export interface SentBy {
+  ledgerRequest: string;
+  endsAt: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * The URL of `path` at `target`'s provider, for a platform feature's
+ * request of its own (speech, a recording written down): the host its
+ * project's region sends to (`platformRouteOf`). None for a provider
+ * without a fixed one.
+ */
+const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
+  const host = target.platform?.host ?? aiProviderHost(target.provider);
+  return host === undefined ? undefined : new URL(path, `https://${host}`);
+};
+
+/**
+ * Sends one request of a platform feature (speech, a recording written
+ * down) to `path` at `target`'s provider through connect, as the ledger
+ * admitted it: the placeholder where the key goes, which connect replaces
+ * with Grasp's key, and only the headers given.
+ */
+export const connectRequest = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  path: string,
+  init: { headers: Record<string, string>; body: BodyInit },
+  sentBy: SentBy
+): Promise<Response> => {
+  const url = platformUrl(target, path);
+  if (url === undefined) {
+    throw new Error("The provider has no host of its own");
+  }
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(
+    placeholderHeaders(target.provider)
+  )) {
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  headers.set("x-request-id", sentBy.ledgerRequest);
+  // Read whole first, a form's boundary in its content type, as a body
+  // that streams can't cross the service binding with the request.
+  const asked = new Request(url, { method: "POST", headers, body: init.body });
+  const request = new Request(url, {
+    method: "POST",
+    headers: asked.headers,
+    body: await asked.arrayBuffer(),
+  });
+  return await sendThroughConnect(
+    env,
+    target,
+    url.hostname.toLowerCase(),
+    request,
+    sentBy
+  );
+};
+
+/**
+ * Opens a realtime WebSocket of a platform feature (live listening) to
+ * `pathAndQuery` at `target`'s provider through connect, which holds the
+ * key and relays the socket (connect's `modelSocket`): an upgrade can't
+ * go over RPC, so it goes over the service binding's `fetch`, with the
+ * grant in its own header. Throws when it won't open.
+ */
+export const connectSocket = async (
+  env: ConnectEnv,
+  target: ConnectTarget,
+  pathAndQuery: string,
+  { ledgerRequest, endsAt, signal }: SentBy
+): Promise<WebSocket> => {
+  const url = platformUrl(target, pathAndQuery);
+  if (url === undefined) {
+    throw new Error("The provider has no host of its own");
+  }
+  const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
+    credential: target.credential,
+    provider: target.provider,
+    host: url.hostname.toLowerCase(),
+    request: ledgerRequest,
+    notAfter: endsAt,
+    // An upgrade has no body: what it sends goes over the socket.
+    body: await sha256HexOfBytes(new ArrayBuffer(0)),
+  });
+  const headers = new Headers({ upgrade: "websocket", [aiGrantHeader]: grant });
+  for (const [name, value] of Object.entries(
+    placeholderHeaders(target.provider)
+  )) {
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
+  const answered = await env.CONNECT.fetch(url, {
+    headers,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  const socket = answered.webSocket;
+  if (socket === null) {
+    await answered.body?.cancel();
+    throw new ConnectUnansweredError();
+  }
+  socket.accept();
+  return socket;
+};
+
+/**
  * The fetch that hands each request to connect, with its grant; until
  * the call's deadline (`tagged`), which connect cuts it off at too. A
  * request connect couldn't get an answer for throws, as a fetch that got
@@ -174,43 +354,11 @@ const connectFetch =
       headers,
       body,
     });
-    const { signal } = asked;
-    const grant = await signModelGrant(env.CAPABILITY_SIGNING_KEY, {
-      credential: target.credential,
-      provider: target.provider,
-      host,
-      request: ledgerRequest,
-      notAfter: endsAt,
-      body: await sha256HexOfBytes(body ?? new ArrayBuffer(0)),
+    return await sendThroughConnect(env, target, host, request, {
+      ledgerRequest,
+      endsAt,
+      signal: asked.signal,
     });
-    // A request cut off here stops being waited for at once, connect is
-    // told to stop it, so a provider still thinking bills nothing more,
-    // and its answer, should one come anyway, is cancelled unread.
-    signal.throwIfAborted();
-    const line = stopLine();
-    const sent = env.CONNECT.modelFetch(request, grant, line.stop);
-    const aborted = Promise.withResolvers<never>();
-    const stop = () => {
-      line.cancel();
-      aborted.reject(signal.reason);
-    };
-    signal.addEventListener("abort", stop, { once: true });
-    let answered: Response;
-    try {
-      answered = await Promise.race([sent, aborted.promise]);
-    } catch (error) {
-      line.cancel();
-      void cancelLate(sent);
-      throw error;
-    } finally {
-      signal.removeEventListener("abort", stop);
-    }
-    line.close();
-    if (answered.headers.get(aiRefusedHeader) === "unreachable") {
-      await answered.body?.cancel();
-      throw new ConnectUnansweredError();
-    }
-    return answered;
   };
 
 /**
@@ -224,10 +372,10 @@ export const connectTransport = (
 ): ModelTransport => ({
   kind: "connect",
   capabilities: {
-    providers: [target.provider],
+    // ElevenLabs speaks no text API: it says lines (`connectRequest`).
+    providers: target.provider === "elevenlabs" ? [] : [target.provider],
     payloadLoggingOff: true,
     sharedCacheOff: true,
-    voice: false,
     sdkRetries: false,
   },
   route: (ref): TransportRoute | undefined => {

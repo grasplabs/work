@@ -24,7 +24,8 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 //
 // They apply whenever they are configured. The rule that keeps the whole
 // deployment in the EU also keeps uploads' text extraction in the Worker,
-// off Workers AI (knowledge/extract.ts): it is what the client agreed to.
+// never sent out to be converted (knowledge/extract.ts): it is what the
+// client agreed to.
 //
 // "Hosted in the EU" is the config's word for a model: the client's
 // provider serves it in the EU (its EU data residency, with the keys AI
@@ -71,7 +72,8 @@ export interface RulesInput {
           | "brain_recall"
           | "policy_reading"
           | "stephen_requests"
-          | "provider_test";
+          | "provider_test"
+          | "document_conversion";
       };
 }
 
@@ -254,7 +256,14 @@ const restrictedWork = async (
 export const judgeCall = async (
   env: RestrictedEnv & Pick<Env, "KNOWLEDGE">,
   rules: ModelRules,
-  input: RulesInput
+  input: RulesInput,
+  /**
+   * For a platform feature on Grasp's own key: whether its route goes to
+   * the EU (`platformRouteOf`). Where it goes decides whether an EU-only
+   * call may take it, never the deployment's EU models, which name the
+   * models of its own providers.
+   */
+  platformInEu?: boolean
 ): Promise<{ ok: true; judged: Judged } | ({ ok: false } & Refusal)> => {
   const restricted = await restrictedWork(env, input);
   if (restricted === undefined) {
@@ -262,7 +271,8 @@ export const judgeCall = async (
   }
   const { eu, sensitive: dataRule } = rules;
   const euOnly = eu === undefined ? undefined : euOnlyBecause(eu, input);
-  if (euOnly !== undefined && eu?.models.includes(input.model) !== true) {
+  const staysInEu = platformInEu ?? eu?.models.includes(input.model) === true;
+  if (euOnly !== undefined && !staysInEu) {
     return { ok: false, code: "model.eu_only", because: euOnly };
   }
   const sensitive =

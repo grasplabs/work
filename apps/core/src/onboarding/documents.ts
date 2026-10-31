@@ -199,8 +199,8 @@ const keep = async (
 const readingTimeoutMs = 60_000;
 
 /**
- * Shares a document: its text read in the extractor's sandbox (never
- * through Workers AI: it stays in the Worker) and read through the model
+ * Shares a document: its text read in the extractor's sandbox (never sent
+ * out to be converted: it stays in the Worker) and read through the model
  * gateway as the onboarding's, which the rules judge as sensitive; then,
  * once read, kept in Knowledge. Counted as reading.
  */

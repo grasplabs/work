@@ -7,6 +7,7 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
@@ -18,15 +19,20 @@ import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
 import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed, gatewayConfig } from "./interview-link.ts";
 import { intakeAlike } from "./onboarding-team.ts";
+import {
+  carrying,
+  plan as planReplies,
+  release,
+} from "./platform-providers.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
@@ -47,6 +53,8 @@ import { wordFile } from "./word-file.ts";
 // - A reading holding a purged term of a document the purge doesn't name.
 // - A drawing under way as the document goes, kept as it ends.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = "elevenlabs/eleven_v4";
 const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -894,33 +902,26 @@ const writers: Writer[] = [
       const told = fact("l1", "work", `Tickets arrive in ${word}.`);
       const link = await openLink(ids.lea);
       await agree(ids.lea, [told], link);
-      const gateway = answeringGateway(async () => {
-        await landing.once();
-        return { speech: { audio: "mp3 bytes" } };
+      // OpenAI says the line once the purge has landed meanwhile.
+      const held = `line-${unique()}`;
+      await planReplies(platformOpenAiKey, [{ release: held }]);
+      const saying = routed(speechPath, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: told.text, language: "en", link }),
       });
-      const before = env.MODEL_GATEWAY;
-      const ai: AiBinding = env.AI;
-      const spy = vi
-        .spyOn(ai, "fetch")
-        .mockImplementation(gateway.binding.fetch);
-      env.MODEL_GATEWAY = {
-        gateway: "grasp-os-test",
-        models: [voiceModels.said, voiceModels.quick],
-      };
-      try {
-        await routed(speechPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: told.text, language: "en", link }),
-        });
-      } finally {
-        env.MODEL_GATEWAY = before;
-        spy.mockRestore();
-      }
+      await vi.waitFor(async () => {
+        await expect(carrying(told.text)).resolves.toHaveLength(1);
+      });
+      await landing.once();
+      await release(held);
+      const said = await saying;
+      await said.body?.cancel();
       const kept = await keptLine(env, {
+        text: told.text,
         spoken: told.text,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: defaultPlatformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       });
       return kept === undefined ? [] : ["speech cache"];

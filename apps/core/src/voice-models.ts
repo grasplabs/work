@@ -1,20 +1,22 @@
-import { voiceModelProvider } from "@grasp-os/shared/deployment-config";
+import {
+  speechProviders,
+  transcriptionProviders,
+} from "@grasp-os/shared/platform-ai";
+import type { SpeechModel } from "@grasp-os/shared/platform-ai";
 import type { SpokenWord } from "@grasp-os/shared/voice";
 
 import type { ListPrices } from "./model-prices.ts";
 
-// The voice models the model gateway offers (models.ts), beside the text
+// The voice models the model gateway offers (models.ts) for Grasp's own
+// speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each is priced per character it is asked to say, which is how
-// ElevenLabs bills speech; and the transcription models, priced per
-// second they hear, which is how ElevenLabs bills speech to text.
-
-/**
- * The provider of the gateway's voice models, as the allowlist names
- * them. The gateway path that reaches it is the deployment's
- * (`voiceGatewayProviders` in @grasp-os/shared/deployment-config).
- */
-export const voiceProvider = voiceModelProvider;
+// models. Each speech model is ElevenLabs's, priced per character it is
+// asked to say, which is how ElevenLabs bills speech: what the ledger
+// reserves for a line is what it charges. Each transcription model is
+// OpenAI's, priced per second it hears, at a price never below what the
+// provider bills for it. Grasp pays for these on its own keys: no
+// organization's budget holds them, but the ledger records what each
+// cost, for the spend overview.
 
 /**
  * ElevenLabs's API prices for text to speech, in US dollars per 1,000
@@ -31,24 +33,28 @@ const dollarsPer1000Chars = {
   eleven_v4_turbo: 0.04,
   eleven_v3: 0.08,
   eleven_flash_v2_5: 0.04,
-} as const;
+} as const satisfies Record<SpeechModel, number>;
 
-/** A voice model the gateway offers. */
+/** A speech model the gateway offers. */
 export interface VoiceRef {
-  provider: typeof voiceProvider;
+  provider: (typeof speechProviders)[number];
   id: keyof typeof dollarsPer1000Chars;
 }
 
 const isVoiceModel = (id: string): id is VoiceRef["id"] =>
   Object.hasOwn(dollarsPer1000Chars, id);
 
+const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
+  speechProviders.some((one) => one === provider);
+
 /**
- * A voice model as the gateway names it, `elevenlabs/<model>`, such as
+ * A speech model as the gateway names it, `<provider>/<model>`, such as
  * `elevenlabs/eleven_v4`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  return provider === voiceProvider &&
+  return provider !== undefined &&
+    isSpeechProvider(provider) &&
     id !== undefined &&
     rest.length === 0 &&
     isVoiceModel(id)
@@ -57,7 +63,7 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
 };
 
 /**
- * A voice model's prices in the shape the ledger pins: per million
+ * A speech model's prices in the shape the ledger pins: per million
  * characters, as the input a request sends. Its answer, the audio, is
  * what the characters pay for, so a request counts no output: it is
  * priced the same, and never charged.
@@ -68,39 +74,44 @@ export const voicePricesOf = ({ id }: VoiceRef): ListPrices => {
 };
 
 /**
- * ElevenLabs's API prices for speech to text, in US dollars per hour of
- * audio, with keyterm prompting added, which is billed on top whenever
- * the request names words to listen out for: so what a transcription is
- * charged is never below what it is billed, keyterms or not.
- *
- * Source: ElevenLabs's API pricing page (https://elevenlabs.io/pricing/api),
- * read on 2026-10-24: Scribe at $0.22 an hour and Scribe realtime at $0.39,
- * keyterm prompting $0.05 and $0.08 an hour more.
+ * OpenAI's prices for speech to text, in US dollars per hour of audio.
+ * Whisper is billed per minute, $0.006. The GPT-4o transcription models
+ * are billed per token: audio in ($6 a million, about $0.006 a minute; $3
+ * for mini) and the text written out ($10 a million; $5 for mini), live
+ * over the realtime socket as from a recording (OpenAI's pricing page,
+ * read on 2026-10-29). A minute of speech writes out at most 300 tokens,
+ * $0.003 (mini $0.0015): charged $0.01 a minute ($0.005 for mini), above
+ * both together, and the prompt of words to listen out for with them.
  */
 const dollarsPerHour = {
-  /** Scribe v2 realtime: live transcription (transcription.ts). */
-  scribe_v2_realtime: 0.39 + 0.08,
-  /** Scribe v2: a recording written down whole. */
-  scribe_v2: 0.22 + 0.05,
+  "gpt-4o-transcribe": 0.6,
+  "gpt-4o-mini-transcribe": 0.3,
+  "whisper-1": 0.36,
 } as const;
 
 /** A transcription model the gateway offers. */
 export interface HearingRef {
-  provider: typeof voiceProvider;
+  provider: (typeof transcriptionProviders)[number];
   id: keyof typeof dollarsPerHour;
 }
 
 const isHearingModel = (id: string): id is HearingRef["id"] =>
   Object.hasOwn(dollarsPerHour, id);
 
+const isTranscriptionProvider = (
+  provider: string
+): provider is HearingRef["provider"] =>
+  transcriptionProviders.some((one) => one === provider);
+
 /**
- * A transcription model as the gateway names it, `elevenlabs/<model>`,
- * such as `elevenlabs/scribe_v2_realtime`; `undefined` for any other, a
- * voice model too: each takes calls of its own kind only.
+ * A transcription model as the gateway names it, `<provider>/<model>`,
+ * such as `openai/gpt-4o-transcribe`; `undefined` for any other, a speech
+ * model too: each takes calls of its own kind only.
  */
 export const parseHearingRef = (ref: string): HearingRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  return provider === voiceProvider &&
+  return provider !== undefined &&
+    isTranscriptionProvider(provider) &&
     id !== undefined &&
     rest.length === 0 &&
     isHearingModel(id)

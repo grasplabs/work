@@ -19,7 +19,7 @@ import {
   aiCredentialPlaceholder,
   aiProviderErrors,
 } from "@grasp-os/shared/ai-providers";
-import type { AiProviderId } from "@grasp-os/shared/ai-providers";
+import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
@@ -178,7 +178,7 @@ const callOf = async (
 
 /** Where each provider's route goes, and how it takes its key. */
 interface ProviderCase {
-  provider: AiProviderId;
+  provider: OrganizationProviderId;
   model: string;
   api: Parameters<typeof streamText>[0];
   host: string;
@@ -1053,6 +1053,48 @@ describe("AI providers", { timeout: 60_000 }, () => {
   });
 
   describe("Grasp's own keys, for platform features", () => {
+    it("tells the organization's admins which provider handles each of Grasp's own features, and where it runs", async () => {
+      const { admin: by } = await admin();
+      const uses = async (platform?: unknown) => {
+        const before = env.PLATFORM_AI;
+        env.PLATFORM_AI = platform;
+        try {
+          const listing = await by.api.aiProviders.list();
+          return listing.platform.map(
+            ({ feature, provider }) =>
+              `${feature}: ${provider === null ? "here" : provider.whereItRuns}`
+          );
+        } finally {
+          env.PLATFORM_AI = before;
+        }
+      };
+
+      // Grasp's OpenAI project and ElevenLabs account keep their data in
+      // the EU unless set.
+      await expect(uses()).resolves.toStrictEqual([
+        "conversion: OpenAI, European Union",
+        "transcription: OpenAI, European Union",
+        "speech: ElevenLabs, European Union",
+      ]);
+      await expect(
+        uses({ conversion: { provider: "local" }, region: "us" })
+      ).resolves.toStrictEqual([
+        "conversion: here",
+        "transcription: OpenAI, United States",
+        "speech: ElevenLabs, United States",
+      ]);
+      // Set but broken: every feature off, never the defaults' provider.
+      for (const broken of [
+        { speech: { provider: "openai" } },
+        '{"conversion": {"provider": "local"',
+        "null",
+        null,
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one setting at a time
+        await expect(uses(broken)).resolves.toStrictEqual([]);
+      }
+    });
+
     it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {
       await plan(platformOpenAiKey, [
         answered("openai-responses", "Converted."),
@@ -1067,13 +1109,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect(answer.text).toBe("Converted.");
+      // At OpenAI's EU host: Grasp's project keeps its data there.
       await expect(placesOf(platformOpenAiKey)).resolves.toStrictEqual(
-        onlyAt(openaiCase)
+        onlyAt({ ...openaiCase, host: "eu.api.openai.com" })
       );
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({
         transport: "connect",
         credential: "platform",
+        region: "eu",
         platform: "brain_upkeep",
       });
     });
@@ -1082,7 +1126,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const { platform } = await env.CONNECT.aiProviderRoutes();
       const noKey = await outcome(
         models(env).platformCall(
-          await callOf(anthropicCase.model, {
+          await callOf("mistral/mistral-small-latest", {
             work: { platform: "brain_upkeep" },
           })
         )
@@ -1092,7 +1136,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect({ platform, noKey, notPlatform }).toStrictEqual({
-        platform: ["openai"],
+        platform: ["anthropic", "openai", "elevenlabs"],
         noKey: "model.not_allowed",
         notPlatform: "model.invalid_call",
       });

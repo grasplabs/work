@@ -10,10 +10,6 @@ import type {
   TranscriptContext,
   Usage,
 } from "@earendil-works/pi-ai";
-import {
-  CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
-  createAiBindingFetch,
-} from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 // From Pi's `models` entry, not its index: the index brings TypeBox and
 // every other part of Pi, which core would otherwise load as it starts.
@@ -24,7 +20,10 @@ import {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderRoutes } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderRoutes,
+  PlatformRoute,
+} from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -102,6 +101,12 @@ import {
   parseModelRef,
 } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
+import {
+  documentPartTypes,
+  takesDocuments,
+  withDocument,
+} from "./model-documents.ts";
+import type { ModelDocument } from "./model-documents.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   Admitted as LedgerAdmitted,
@@ -123,13 +128,12 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import { cloudflareAiGateway } from "./model-transport-cloudflare.ts";
 import {
-  cloudflareAiGateway,
-  gatewayBase,
-  gatewayHeaders,
-  withRequestId,
-} from "./model-transport-cloudflare.ts";
-import { connectTransport } from "./model-transport-connect.ts";
+  connectRequest,
+  connectSocket,
+  connectTransport,
+} from "./model-transport-connect.ts";
 import type { ConnectTarget } from "./model-transport-connect.ts";
 import { failureOfResponse, streamRoute } from "./model-transport.ts";
 import type {
@@ -138,6 +142,7 @@ import type {
   TransportFailure,
   TransportRoute,
 } from "./model-transport.ts";
+import { platformRouteFor } from "./platform-ai.ts";
 import {
   charactersOf,
   hearingPricesOf,
@@ -233,11 +238,12 @@ const maxTimeoutMs = 15 * 60_000;
 const maxRetries = 2;
 
 /**
- * A model the gateway offers: a text model of pi's catalog, a voice model
+ * A model the gateway offers: a text model of pi's catalog, a speech model
  * of our own (voice-models.ts), which only speech takes
  * (`models(env).speak`), or a transcription model of our own, which only
- * listening takes (`models(env).listen`). Each check stays its own, so no
- * call of one kind can name a model of another.
+ * listening takes (`models(env).listen`), so the rules can name each.
+ * Each check stays its own, so no call of one kind can name a model of
+ * another.
  */
 const modelRefSchema = z
   .string()
@@ -319,14 +325,13 @@ export const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 
 /**
  * The deployment's allowlist and rules, before the organization's own
- * providers: what {@link modelSettings} starts from, and the voices. A
- * feature never picks a text model from it; it picks through
- * `modelSettings`, which the gateway checks every call against. The
- * allowed text models, none while the config doesn't
- * parse, and apart from them the allowed voice models, which only speech
- * takes, so nothing that picks a model for text (a chat, a binding, the
- * kickoff's reading) is offered one; and the rules, `undefined` when they
- * don't parse.
+ * providers: what {@link modelSettings} starts from. A feature never
+ * picks a model from it; it picks through `modelSettings`, which the
+ * gateway checks every call against. The allowed text models, none while
+ * the config doesn't parse, never a voice model the rules may name, so
+ * nothing that picks a model for text (a chat, a binding, the kickoff's
+ * reading) is offered one; and the rules, `undefined` when they don't
+ * parse.
  */
 export const gatewaySettings = (
   env: ModelsEnv
@@ -334,7 +339,6 @@ export const gatewaySettings = (
   /** The deployment's AI Gateway; `undefined` while the config doesn't parse. */
   gateway: string | undefined;
   models: string[];
-  voices: string[];
   roles: Partial<Record<ModelRole, string>>;
   rules: ModelRules | undefined;
 } => {
@@ -343,7 +347,6 @@ export const gatewaySettings = (
   return {
     gateway: config?.gateway,
     models: allowed.filter((ref) => parseModelRef(ref) !== undefined),
-    voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
     roles: config?.roles ?? {},
     rules: modelRules(env),
   };
@@ -355,7 +358,7 @@ export const gatewaySettings = (
  * connected an AI provider of its own, the models its admins chose, every
  * role played by its default (none until they chose); until then the
  * deployment's allowlist (`gatewaySettings`). The rules are the
- * deployment's either way; voices are only ever the allowlist's.
+ * deployment's either way.
  */
 export const modelSettings = async (
   env: ModelsEnv
@@ -455,9 +458,9 @@ export const modelEffortsOf = (ref: string): ModelEfforts => {
 
 /**
  * Whether the deployment's config keeps every call in the EU
- * (`eu.deployment`): for what sends data out of the Worker without being a model call,
- * such as Workers AI's document conversion (knowledge/extract.ts), which
- * then stays in the Worker. A config whose rules don't parse keeps it
+ * (`eu.deployment`): for what is routed before any model call is made,
+ * such as an upload's text (knowledge/extract.ts), which then stays in
+ * the Worker. A config whose rules don't parse keeps it
  * there too: it fails closed. The default config has no EU rule.
  */
 export const deploymentStaysInEu = (env: ModelsEnv): boolean => {
@@ -574,6 +577,13 @@ const sessionShape = {
        * Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("provider_test") }),
+      /**
+       * Core's own conversion of a PDF uploaded to the Brain into its text
+       * (knowledge/extract.ts), on Grasp's key: the company's own words,
+       * judged as onboarding's are, made for the person who uploaded it,
+       * on their budget. Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("document_conversion") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -704,6 +714,12 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * call.
    */
   onText?: (text: string) => void;
+  /**
+   * A document the model reads as it is, beside `input`: a PDF, sent as
+   * its provider's own document part (model-documents.ts). Only for a
+   * platform feature (`platformCall`): Grasp's own conversion of uploads.
+   */
+  document?: ModelDocument;
   /**
    * Whether a request the provider refused for a moment (429 or 5xx), or
    * that didn't connect, is sent again (the default, `maxRetries`). False
@@ -1505,6 +1521,32 @@ const textBound = (
     return { held: { code: "model.ledger_unavailable" } };
   }
   return { inputTokens: bytes + promptAllowanceTokens, outputTokens };
+};
+
+/**
+ * The most a request carrying a document may use: its prompt bounded by
+ * the model's whole context window, as a document's pages are billed by
+ * what they hold rather than their bytes, and the provider refuses a
+ * prompt beyond the window unbilled; its answer as a text request's.
+ * Anything else the bound can't cover is refused as for any request.
+ */
+const documentBound = (
+  call: Session,
+  model: Model<Api>,
+  body: unknown,
+  part: string
+): RequestBound | { held: Refusal } => {
+  const unbounded = unboundedBy(body, new Set([part]));
+  if (unbounded !== undefined) {
+    log.error("model.unbounded_request", { model: call.model, unbounded });
+    return { held: { code: "model.unpriced" } };
+  }
+  const outputTokens = outputCapOf(body) ?? model.maxTokens;
+  if (!(model.contextWindow > 0 && outputTokens > 0)) {
+    // A model without a window can't be bounded with a document.
+    return { held: { code: "model.unpriced" } };
+  }
+  return { inputTokens: model.contextWindow, outputTokens };
 };
 
 /**
@@ -2756,7 +2798,7 @@ const connectRouting = async (
     way: {
       transport: endpoint.transport,
       provider: target.provider,
-      region: aiProviders[target.provider].region,
+      region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
     },
     fallbacks,
@@ -2854,7 +2896,16 @@ const routingOf = async (
         because: "platform",
       });
     }
-    const target = { credential: "platform", provider, baseUrl: null } as const;
+    const platform = platformRouteFor(env, provider);
+    if (platform === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    const target = {
+      credential: "platform",
+      provider,
+      baseUrl: null,
+      platform,
+    } as const;
     return { ref, routing: await connectRouting(env, call, ref, target, []) };
   }
   const connected = routes.organization.find(
@@ -2935,7 +2986,16 @@ const admit = async (
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
-  const verdict = await judgeCall(env, rules, call);
+  // A platform feature's route decides whether an EU-only call may take
+  // it (`judgeCall`): its region, never a list of models.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    routing.way.credential === "platform"
+      ? routing.way.region === "eu"
+      : undefined
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -3219,6 +3279,40 @@ const answerCall = async <Output>(
   throw modelErrors.create("model.invalid_output");
 };
 
+/**
+ * A platform call's route with its document (model-documents.ts): added
+ * to each request's body as its API takes one, and bounded by the
+ * model's window. Refused, and audited, for a model whose API takes none.
+ */
+const withDocumentRoute = async (
+  route: Route,
+  document: ModelDocument
+): Promise<Pick<Route, "endpoint" | "bound">> => {
+  const { endpoint, env, call, model } = route;
+  const { api } = endpoint;
+  if (!takesDocuments(api)) {
+    return await refuse(env, call, {
+      code: "model.not_allowed",
+      because: "document",
+    });
+  }
+  return {
+    endpoint: {
+      ...endpoint,
+      onPayload: (payload) => {
+        const shaped = endpoint.onPayload?.(payload) ?? payload;
+        const attached = withDocument(api, shaped, document);
+        if (attached === undefined) {
+          // Never expected: pi's body always has the user's message.
+          throw new Error("The document couldn't be added to the request");
+        }
+        return attached;
+      },
+    },
+    bound: (body) => documentBound(call, model, body, documentPartTypes[api]),
+  };
+};
+
 const callModel = async <Output>(
   env: ModelsEnv,
   {
@@ -3230,21 +3324,28 @@ const callModel = async <Output>(
     onText,
     signal,
     providerRetries = true,
+    document,
     ...fields
   }: ModelCall<Output>,
   via: Via = chosenVia
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
   // Grasp's own key only for core's own platform features, never for work
-  // of an App's, a person's or an agent's.
+  // of an App's, a person's or an agent's; and a document only for one.
   if (
-    via.kind === "platform" &&
-    (call.work === undefined || !("platform" in call.work))
+    (via.kind === "platform" || document !== undefined) &&
+    (via.kind !== "platform" ||
+      call.work === undefined ||
+      !("platform" in call.work))
   ) {
     throw modelErrors.create("model.invalid_call");
   }
+  const admitted = await admit(env, call, via);
   const route: Route = {
-    ...(await admit(env, call, via)),
+    ...admitted,
+    ...(document === undefined
+      ? {}
+      : await withDocumentRoute(admitted, document)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
@@ -3511,15 +3612,18 @@ const relayOrFail = async (
   }
 };
 
-// Speech: a voice model says a line (voice-models.ts). It goes through the
-// gateway like any model call, as the lines carry interview content: the
-// allowlist and the rules judge it, the ledger admits each provider
-// request against the budgets, at its price per character, and the audit
-// log records it, never the line. ElevenLabs is reached through AI Gateway
-// over the AI binding, with the key AI Gateway stores: core sends none.
-// The gateway reaches it at the path the deployment's config names
-// (`voice.provider`): ElevenLabs's native host, or its EU host through a
-// custom provider. Nothing reaches ElevenLabs but through the gateway.
+// Speech and listening: Grasp's own voice features, which Grasp pays for
+// (@grasp-os/shared/platform-ai). A speech model says a line, and a
+// transcription model writes down what someone says (voice-models.ts),
+// each the one the platform's settings name. They go through the gateway
+// like any model call, as what is said and heard is interview content:
+// the rules judge it, the ledger admits each provider request against the
+// budgets, at its price per character or per second, and the audit log
+// records it, never anything said or heard. They go to the provider's own
+// API through connect, with Grasp's own key for it, which connect holds
+// (`platformSecret` in @grasp-os/shared/ai-providers): core holds no key,
+// and a provider Grasp has no key for is refused (`model.not_allowed`,
+// because `platform`), never served by another.
 
 /** Text without anything a URL's path would read apart: a voice's ID. */
 const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
@@ -3543,7 +3647,7 @@ const speechSchema = z.strictObject({
 });
 type SpeechSession = z.output<typeof speechSchema>;
 
-/** One line for a voice model to say. */
+/** One line for a speech model to say. */
 export type SpeechCall = z.input<typeof speechSchema> & {
   /** Where the call works: required, so no caller can leave it out. */
   work: NonNullable<z.input<typeof speechSchema>["work"]>;
@@ -3597,6 +3701,8 @@ const bytesOf = (base64: string): Uint8Array | undefined => {
 interface SpeechRecord {
   /** Characters charged; 0 when the provider said nothing. */
   characters: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   logId: string | undefined;
   outcome: Outcome;
@@ -3604,6 +3710,17 @@ interface SpeechRecord {
   errorType: string | undefined;
   ledger: Ledgered;
 }
+
+/** The way a platform voice feature goes, as the ledger and the audit log record it. */
+const platformWay = (
+  provider: ConnectTarget["provider"],
+  platform: PlatformRoute
+): LedgerRoute => ({
+  transport: "connect",
+  provider,
+  region: platform.region,
+  credential: "platform",
+});
 
 /** A line's audit entry: a `model.call`, as any model call's. */
 const speechEntry = (
@@ -3618,7 +3735,7 @@ const speechEntry = (
     action: "model.call",
     requestId: call.requestId,
     provenance,
-    // A voice model counts characters, not tokens (`characters`).
+    // A speech model counts characters, not tokens (`characters`).
     model: {
       provider: ref.provider,
       model: ref.id,
@@ -3639,6 +3756,9 @@ const speechEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      transport: "connect",
+      region: recorded.region,
+      credential: "platform",
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
@@ -3655,6 +3775,7 @@ const speechEntry = (
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
+  region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
   outcome: "invalid_output",
@@ -3663,44 +3784,58 @@ const largestSpeech: SpeechRecord = {
   ledger: largestRecord.ledger,
 };
 
-/** The gateway path to ElevenLabs's native host, unless the config names another. */
-const nativeVoiceProvider = "elevenlabs";
-
-/** A line's way to the voice model at the deployment's gateway. */
+/** A line's way to the speech model, through connect. */
 interface SpeechRoute extends Admitting {
   call: SpeechSession;
   ref: VoiceRef;
   judged: Judged;
   price: PinnedPrice;
-  transport: FetchFunction;
-  url: string;
-  body: string;
-  /** What the line is charged as (`charactersOf`). */
+  /** Sends the line once, as the ledger admitted it (`id`). */
+  send: (id: string, limit: Deadline) => Promise<Response>;
+  /** What the line's text is charged as (`charactersOf`). */
   characters: number;
+  /** Where its requests go on Grasp's own key (`platformRouteOf`). */
+  platform: PlatformRoute;
 }
 
 /**
- * Checks a line against the deployment's config and rules, as `admit`
- * does a text model's call, before anything is sent: a voice model the
- * allowlist or the rules don't let it use is refused, and audited.
+ * Where a platform voice feature goes: Grasp's own key for `provider`,
+ * through connect; refused, and audited, when Grasp has no key for it.
+ */
+const platformTarget = async (
+  env: ModelsEnv,
+  call: Session,
+  provider: ConnectTarget["provider"]
+): Promise<ConnectTarget & { platform: PlatformRoute }> => {
+  const routes = await routesOrFailed(env);
+  if (!routes.platform.includes(provider)) {
+    return await refuse(env, call, {
+      code: "model.not_allowed",
+      because: "platform",
+    });
+  }
+  const platform = platformRouteFor(env, provider);
+  if (platform === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  return { credential: "platform", provider, baseUrl: null, platform };
+};
+
+/**
+ * Checks a line against the deployment's rules, as `admit` does a text
+ * model's call, before anything is sent: a model that isn't a speech
+ * model of the gateway's, one the rules don't let it use, or one whose
+ * provider Grasp has no key for is refused, and audited.
  */
 const admitSpeech = async (
   env: ModelsEnv,
   call: SpeechSession
 ): Promise<SpeechRoute> => {
-  const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  // Plain workerd (on-prem) has no AI binding, so no voice either.
-  if (
-    config === undefined ||
-    rules === undefined ||
-    typeof env.AI?.fetch !== "function"
-  ) {
+  if (rules === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
-  const ref = config.models.includes(call.model)
-    ? parseVoiceRef(call.model)
-    : undefined;
+  const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
@@ -3713,7 +3848,14 @@ const admitSpeech = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Its route's region decides whether an EU-only line may be said.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    target.platform.region === "eu"
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -3729,22 +3871,37 @@ const admitSpeech = async (
     enable_logging: "false",
     output_format: speechFormat.query,
   });
+  const path = `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`;
+  const body = JSON.stringify({
+    text: call.text,
+    model_id: ref.id,
+    language_code: call.language,
+    seed: voiceSeed,
+    voice_settings: voiceSettings,
+  });
   return {
     env,
     call,
     ref,
     judged: verdict.judged,
     price,
-    transport: createAiBindingFetch(env.AI),
-    url: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
-    body: JSON.stringify({
-      text: call.text,
-      model_id: ref.id,
-      language_code: call.language,
-      seed: voiceSeed,
-      voice_settings: voiceSettings,
-    }),
+    way: platformWay(ref.provider, target.platform),
+    send: async (id, limit) =>
+      await connectRequest(
+        env,
+        target,
+        path,
+        {
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body,
+        },
+        { ledgerRequest: id, endsAt: limit.endsAt, signal: limit.signal }
+      ),
     characters,
+    platform: target.platform,
     // The line's characters are all it is billed for, known before it is
     // sent: what the ledger reserves is what it charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
@@ -3756,42 +3913,6 @@ const admitSpeech = async (
     notes: Promise.resolve(),
     place,
   };
-};
-
-/**
- * The provider request for a line, as the ledger admitted it (`id`). It
- * carries the deployment's gateway token where one is set
- * (`AI_GATEWAY_TOKEN`) in place of the binding's placeholder: an
- * authenticated gateway asks for it on a realtime WebSocket, which
- * doesn't go over the AI binding, and strips it from the binding's
- * requests, which need none. Never logged.
- */
-const speechRequest = (
-  route: SpeechRoute,
-  id: string,
-  signal: AbortSignal
-): RequestInit => {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json",
-  };
-  // The gateway's own headers, without the auth placeholders pi's SDKs
-  // need dropped: this request has none of theirs.
-  for (const [name, value] of Object.entries(
-    gatewayHeaders(metadataOf(route.call))
-  )) {
-    if (value !== null) {
-      headers[name] = value;
-    }
-  }
-  const token = route.env.AI_GATEWAY_TOKEN;
-  if (token !== undefined && token !== "") {
-    headers["cf-aig-authorization"] = `Bearer ${token}`;
-  }
-  return withRequestId(
-    { method: "POST", headers, body: route.body, signal },
-    id
-  );
 };
 
 /** What one line's provider requests came to. */
@@ -3815,7 +3936,7 @@ const sendSpeechOnce = async (
   limit: Deadline,
   sent: SpeechSent
 ): Promise<"again" | "done"> => {
-  const admitted = await admitWaiting(route, route.body, limit);
+  const admitted = await admitWaiting(route, null, limit);
   if ("held" in admitted) {
     sent.held = admitted.held;
     return "done";
@@ -3827,10 +3948,7 @@ const sendSpeechOnce = async (
   }
   let answered: Response | undefined = undefined;
   try {
-    answered = await route.transport(
-      route.url,
-      speechRequest(route, admitted.id, limit.signal)
-    );
+    answered = await route.send(admitted.id, limit);
   } catch {
     sent.settled.push(await settleAdmitted(route, admitted, { by: "unknown" }));
     return "done";
@@ -3908,8 +4026,8 @@ const characterCounts = (characters: number): TokenCounts => ({
 
 /**
  * The line the provider answered with, read, and its provider request
- * settled: charged the line's characters, which ElevenLabs bills once it
- * answered, whether its answer could be read or not.
+ * settled: charged the line's characters, which the provider bills once
+ * it answered, whether its answer could be read or not.
  */
 const heardSpeech = async (
   route: SpeechRoute,
@@ -3946,6 +4064,10 @@ const speechOutcome = (
   // Said, but not as a line can be read.
   return said && stopped === undefined ? "invalid_output" : "failed";
 };
+
+/** The provider's own ID for a request, as its log names it. */
+const providerLogIdOf = (headers: Headers | undefined): string | undefined =>
+  headers?.get("x-request-id") ?? headers?.get("request-id") ?? undefined;
 
 /** Records a line that was sent in the audit log, however it ended. */
 const recordSpeech = async (
@@ -3984,8 +4106,9 @@ const recordSpeech = async (
     drizzle(env.DB),
     speechEntry(call, route.ref, route.judged, {
       characters,
+      region: route.platform.region,
       cost: costDollars(route.price, characterCounts(characters)),
-      logId: sent.answered?.headers.get("cf-aig-log-id") ?? undefined,
+      logId: providerLogIdOf(sent.answered?.headers),
       outcome,
       status,
       errorType,
@@ -3995,15 +4118,15 @@ const recordSpeech = async (
 };
 
 // Listening: a transcription model writes down what someone says
-// (voice-models.ts), live over a socket (transcription.ts), or from a
-// recording. It goes through the gateway as speech does, as what is heard
-// is interview content: the allowlist and the rules judge it before
-// anything is sent, failing closed; the ledger admits it against the
-// budgets at its price per second, for the most it may hear, before the
-// upstream is opened; and the audit log records it once it ended, with
-// the seconds heard and what they cost, never anything heard. The caller
-// reaches the provider only through the route its admission hands it
-// (`Listening.route`), and is held to the seconds admitted.
+// (voice-models.ts), live over the provider's realtime socket
+// (transcription.ts), or from a recording (onboarding/hear.ts). The rules
+// judge it before anything is sent, failing closed; the ledger admits it
+// against the budgets at its price per second, for the most it may hear,
+// before anything is opened; and the audit log records it once it ended,
+// with the seconds heard and what they cost, never anything heard. The
+// caller reaches the provider only through what its admission hands it
+// (`Listening.send`, `Listening.socket`), each through connect with
+// Grasp's key, and is held to the seconds admitted.
 //
 // One provider request a listening, whatever its length: its reservation
 // is all it may hear, charged what it heard once it ended (`heard`), or
@@ -4011,42 +4134,8 @@ const recordSpeech = async (
 // text model's request it holds no share of the requests in flight while
 // it is open (`listeningLeaseMs`): a socket open for minutes would
 // otherwise keep Stephen's own turns, and every chat, from the client's
-// share. ElevenLabs's own limit on sockets at once, the relay's per link,
-// and the router's per address bound how many are open.
-
-/** How the gateway reaches the voice provider, for a request of one's own. */
-export interface VoiceGatewayRoute {
-  /** `https://workers-binding.ai/ai-gateway/gateways/<gateway>/<provider>`. */
-  base: string;
-  transport: FetchFunction;
-  /** The gateway's own headers: its token where one is set. Never logged. */
-  headers: Record<string, string>;
-}
-
-/**
- * Where a listening the gateway admitted reaches ElevenLabs at the
- * deployment's gateway: the path speech takes (`voice.provider`), over
- * the AI binding, with the gateway's token where one is set
- * (`speechRequest`).
- */
-const voiceGatewayRoute = (
-  env: ModelsEnv,
-  ai: AiBinding,
-  config: ModelGatewayConfig
-): VoiceGatewayRoute => {
-  const token = env.AI_GATEWAY_TOKEN;
-  return {
-    base: `${gatewayBase(config.gateway)}/${config.voice?.provider ?? nativeVoiceProvider}`,
-    transport: createAiBindingFetch(ai),
-    headers: {
-      "cf-aig-authorization": `Bearer ${
-        token === undefined || token === ""
-          ? CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL
-          : token
-      }`,
-    },
-  };
-};
+// share. The provider's own limit on sockets at once, the relay's per
+// link, and the router's per address bound how many are open.
 
 /** The most seconds one listening may hear: above any socket's or recording's. */
 const maxListeningSeconds = 60 * 60;
@@ -4090,9 +4179,24 @@ export type ListeningOutcome = "answered" | "failed" | "cancelled";
 
 /** A listening the gateway admitted: the way to the provider, and how it is charged. */
 export interface Listening {
-  /** The model as its provider's API names it, such as `scribe_v2_realtime`. */
+  /** The model as its provider's API names it, such as `gpt-4o-transcribe`. */
   modelId: string;
-  route: VoiceGatewayRoute;
+  /**
+   * Sends one request of it to `path` at the provider (a recording to
+   * write down), through connect with Grasp's key, until it may no longer
+   * be open. Throws when no answer came.
+   */
+  send: (
+    path: string,
+    init: { headers: Record<string, string>; body: BodyInit },
+    signal?: AbortSignal
+  ) => Promise<Response>;
+  /**
+   * Opens its realtime socket to `pathAndQuery` at the provider, through
+   * connect, which relays it with Grasp's key until it may no longer be
+   * open. Throws when it won't open.
+   */
+  socket: (pathAndQuery: string, signal?: AbortSignal) => Promise<WebSocket>;
   /** The seconds admitted: the most it may hear. */
   seconds: number;
   /**
@@ -4108,6 +4212,8 @@ export interface Listening {
 interface HeardRecord {
   /** Seconds charged. */
   seconds: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   outcome: Outcome;
   ledger: Ledgered;
@@ -4142,6 +4248,9 @@ const listeningEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      transport: "connect",
+      region: recorded.region,
+      credential: "platform",
       euOnly: judged.euOnly ?? null,
       sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
@@ -4153,6 +4262,7 @@ const listeningEntry = (
 /** The most a listening can add to its audit event (`largestRecord`). */
 const largestHeard: HeardRecord = {
   seconds: maxListeningSeconds,
+  region: "custom",
   cost: Number.MAX_VALUE,
   outcome: "invalid_output",
   ledger: largestRecord.ledger,
@@ -4171,13 +4281,13 @@ const chargedSeconds = (heard: number, most: number): number =>
   Number.isFinite(heard) ? Math.min(most, Math.ceil(Math.max(0, heard))) : most;
 
 /**
- * Checks a listening against the deployment's config and rules, as
- * `admitSpeech` does a line, and has the ledger admit it for the most it
- * may hear, before anything is sent. A transcription model the allowlist
- * doesn't list (or a voice model, or a text model), one the rules don't
- * let it use, or a budget with no room refuses it, audited as a refused
- * model call. Fails closed: a config or rules that don't parse, or no AI
- * binding (plain workerd), send nothing.
+ * Checks a listening against the deployment's rules, as `admitSpeech`
+ * does a line, and has the ledger admit it for the most it may hear,
+ * before anything is sent. A model that isn't a transcription model of
+ * the gateway's (a speech model, or a text model), one the rules don't
+ * let it use, one whose provider Grasp has no key for, or a budget with
+ * no room refuses it, audited as a refused model call. Fails closed:
+ * rules that don't parse send nothing.
  */
 const listenThrough = async (
   env: ModelsEnv,
@@ -4185,20 +4295,11 @@ const listenThrough = async (
   signal: AbortSignal | undefined
 ): Promise<Listening> => {
   const call = parseCall(listeningSchema, fields);
-  const config = modelGatewayConfig(env);
   const rules = modelRules(env);
-  const ai = env.AI;
-  if (
-    config === undefined ||
-    rules === undefined ||
-    ai === undefined ||
-    typeof ai.fetch !== "function"
-  ) {
+  if (rules === undefined) {
     throw modelErrors.create("model.unconfigured");
   }
-  const ref = config.models.includes(call.model)
-    ? parseHearingRef(call.model)
-    : undefined;
+  const ref = parseHearingRef(call.model);
   if (ref === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
@@ -4211,19 +4312,16 @@ const listenThrough = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Its route's region decides whether an EU-only listening may open.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    target.platform.region === "eu"
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
-  }
-  // The config already keeps an EU model off ElevenLabs's native host
-  // (deployment-config.ts); a call that must stay in the EU never reaches
-  // it either, whatever the config says.
-  const { euOnly } = verdict.judged;
-  if (
-    euOnly !== undefined &&
-    (config.voice?.provider ?? nativeVoiceProvider) === nativeVoiceProvider
-  ) {
-    return await refuse(env, call, { code: "model.eu_only", because: euOnly });
   }
   const price = await pinnedPrice(hearingPricesOf(ref));
   if (price === undefined) {
@@ -4235,6 +4333,7 @@ const listenThrough = async (
     env,
     call,
     price,
+    way: platformWay(ref.provider, target.platform),
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
@@ -4246,17 +4345,26 @@ const listenThrough = async (
     place,
     leaseMs: listeningLeaseMs,
   };
+  const endsAt = Date.now() + call.openMs;
   const admitted = await admitWaiting(admitting, null, {
-    endsAt: Date.now() + call.openMs,
+    endsAt,
     signal: signal ?? new AbortController().signal,
   });
   if ("held" in admitted) {
     return await refuse(env, call, admitted.held);
   }
+  const sentBy = (stop: AbortSignal | undefined) => ({
+    ledgerRequest: admitted.id,
+    endsAt,
+    ...(stop === undefined ? {} : { signal: stop }),
+  });
   let ended = false;
   return {
     modelId: ref.id,
-    route: voiceGatewayRoute(env, ai, config),
+    send: async (path, init, stop) =>
+      await connectRequest(env, target, path, init, sentBy(stop)),
+    socket: async (pathAndQuery, stop) =>
+      await connectSocket(env, target, pathAndQuery, sentBy(stop)),
     seconds: call.seconds,
     heard: async (heard, outcome) => {
       if (ended) {
@@ -4274,6 +4382,7 @@ const listenThrough = async (
           drizzle(env.DB),
           listeningEntry(call, ref, verdict.judged, {
             seconds,
+            region: target.platform.region,
             cost: costDollars(price, secondCounts(seconds)),
             outcome,
             ledger: ledgerOf([settled]),
@@ -4288,7 +4397,7 @@ const listenThrough = async (
 
 /**
  * Says a line through the gateway: refused, audited, before anything is
- * sent when the allowlist, the rules or a budget don't let it through;
+ * sent when the rules, Grasp's keys or a budget don't let it through;
  * otherwise sent, charged its characters and audited, however it ended.
  */
 const speakLine = async (
@@ -4403,16 +4512,18 @@ const agentModel = async (
  * by then, the budgets), sent and audited like a call's.
  *
  * `await models(env).speak({ model, text, voice, language, purpose,
- * trigger, work }, signal)` has a voice model say a line: judged by the
- * same rules, charged per character against the same budgets, and
- * audited like a call. It returns the audio and when each word is said.
+ * trigger, work }, signal)` has a speech model say a line, with Grasp's
+ * key for its provider: judged by the same rules, charged per character
+ * against the same budgets, and audited like a call. It returns the audio
+ * and when each word is said.
  *
  * `await models(env).listen({ model, seconds, openMs, purpose, trigger,
  * work }, signal)` admits a transcription model to hear at most `seconds`
- * of audio: judged by the same rules, reserved per second against the
- * same budgets, refused and audited like a call when they don't let it
- * through. It returns the way to the provider, and `heard`, which charges
- * what was heard and audits it once it ended.
+ * of audio, with Grasp's key for its provider: judged by the same rules,
+ * reserved per second against the same budgets, refused and audited like
+ * a call when they don't let it through. It returns the way to the
+ * provider, and `heard`, which charges what was heard and audits it once
+ * it ended.
  */
 export const models = (env: ModelsEnv) => ({
   call: async <Output = undefined>(
@@ -4424,7 +4535,7 @@ export const models = (env: ModelsEnv) => ({
    * provider, which connect holds (`OPENAI_API_KEY` and the like): judged
    * by the rules, admitted against the budgets and audited like any call,
    * never falling back. Refused as `model.not_allowed` when Grasp has no
-   * key for the provider.
+   * key for the provider. Only a platform call may carry a `document`.
    */
   platformCall: async <Output = undefined>(
     call: ModelCall<Output>
