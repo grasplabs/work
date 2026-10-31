@@ -451,6 +451,14 @@ msgstr "{count, plural, one {Zähle die Stunden von # Workflow zusammen} other {
 msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
 msgstr "{count, plural, one {Antworten stützen sich auf # Quelle} other {Antworten stützen sich auf # Quellen}}"
 
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
+msgstr "{count, plural, one {Hat dir eine Frage gestellt} other {Hat dir # Fragen gestellt}}"
+
+#: src/chat/asked-questions.tsx
+msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
+msgstr "{count, plural, one {Zurück zur Frage} other {Zurück zu den # Fragen}}"
+
 #: src/chat/builds-state.ts
 msgid "{count, plural, one {once} other {# times}}"
 msgstr "{count, plural, one {einmal} other {#-mal}}"
@@ -3408,6 +3416,7 @@ msgstr "In diesen Wochen abwesend. Nichts wartet auf {first}."
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/chat/asked-questions.tsx
 #: src/onboarding/setup-frame.tsx
 #: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -5242,7 +5251,7 @@ msgstr "Domäne"
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Domain"
-msgstr "Domäne"
+msgstr "Domain"
 
 #: src/chat/studio.tsx
 msgctxt "the domain being built, beside its chat"
@@ -6413,6 +6422,14 @@ msgstr "Grasp-Zugriff"
 #: src/chat/thread.tsx
 msgid "Grasp added a widget to your dashboard."
 msgstr "Grasp hat Ihrem Dashboard ein Widget hinzugefügt."
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks"
+msgstr "Grasp fragt"
+
+#: src/chat/asked-questions.tsx
+msgid "Grasp asks, {number} of {total}"
+msgstr "Grasp fragt, {number} von {total}"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/cited-note.tsx
@@ -8807,6 +8824,7 @@ msgstr "Neueste zuerst"
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Neuestes Element zuerst. Nichts wurde gesendet oder geändert: Jeder Aufruf wurde mit deinen Angaben beantwortet."
 
+#: src/chat/asked-questions.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Weiter"
@@ -12487,6 +12505,7 @@ msgstr "Selbst freigegeben"
 msgid "Self-approved: nobody else could approve it"
 msgstr "Selbst freigegeben: Niemand sonst konnte sie freigeben"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Send"
 msgstr "Senden"
@@ -13004,6 +13023,7 @@ msgstr "Jemand, der nicht mehr zu deiner Organisation gehört"
 msgid "Someone's own work"
 msgstr "Die eigene Arbeit einer Person"
 
+#: src/chat/asked-questions.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Etwas anderes"
@@ -15429,6 +15449,7 @@ msgstr "Zwei Antworten"
 msgid "Type"
 msgstr "Typ"
 
+#: src/chat/asked-questions.tsx
 #: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Lieber tippen"
@@ -17369,6 +17390,7 @@ msgstr "Ihr KI-Anbieter lehnt Ihren Schlüssel ab. Bitten Sie Ihren Admin, ihn u
 msgid "Your AI provider isn't answering. This is usually an outage on their side; try again in a while."
 msgstr "Ihr KI-Anbieter antwortet nicht. Meist ist das eine Störung bei ihm; versuchen Sie es später erneut."
 
+#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"

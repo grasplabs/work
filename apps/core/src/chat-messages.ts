@@ -4,8 +4,13 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
-import { chatCitationsMax, citedQuoteMax } from "@grasp-os/shared/chat";
+import {
+  chatAskSchema,
+  chatCitationsMax,
+  citedQuoteMax,
+} from "@grasp-os/shared/chat";
 import type {
+  ChatAsked,
   ChatCitation,
   ChatCode,
   ChatMessage,
@@ -64,6 +69,23 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
     const { code } = part.arguments;
     return [{ callId: part.id, code: typeof code === "string" ? code : "" }];
   });
+
+/**
+ * The questions a response asked the person (`askQuestions`), as the tool
+ * took them: its first call the tool took; none when it asked none, or
+ * only in shapes the tool refused (the model was told why).
+ */
+const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "askQuestions") {
+      const ask = chatAskSchema.safeParse(part.arguments);
+      if (ask.success) {
+        return { callId: part.id, ...ask.data };
+      }
+    }
+  }
+  return undefined;
+};
 
 /**
  * What a response thought, as far as it has streamed in: each thinking
@@ -428,14 +450,18 @@ export const noteLinksOf = (
  * A stored message as the person reads it; `undefined` for a system one.
  * An answer cites the notes `given` holds (`citedIn`): the documents its
  * chat's code was given before it; it thought for `thinkingMs`, as core
- * kept it.
+ * kept it. It asks the person questions only in a chat whose agent is
+ * offered `askQuestions` (`asking`, Grasp's own app): one a chat app's
+ * model calls anyway was never offered, so it shows as the failed call it
+ * is, never as questions.
  */
 export const chatMessageOf = (
   id: number,
   message: Message,
   createdAt: Date,
   given: (documentId: string) => boolean = givenNothing,
-  thinkingMs: number | null = null
+  thinkingMs: number | null = null,
+  asking = false
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -445,6 +471,7 @@ export const chatMessageOf = (
     const usage = usageOf(message);
     const { text, citations } = citedIn(textOf(message.content), given);
     const reasoning = reasoningOf(message, thinkingMs);
+    const asked = asking ? askedOf(message) : undefined;
     return {
       id,
       role: "assistant",
@@ -452,6 +479,7 @@ export const chatMessageOf = (
       citations,
       code: codeOf(message),
       ...(reasoning === undefined ? {} : { reasoning }),
+      ...(asked === undefined ? {} : { asked }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error"
         ? { failure: modelFailureOf(message.errorMessage) }
