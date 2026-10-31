@@ -35,7 +35,7 @@ import {
   localExtractor,
 } from "../knowledge/extract.ts";
 import type { LocalExtractorEnv } from "../knowledge/extract.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 
@@ -489,8 +489,8 @@ export const transcriptOf = async (
  * must be let take sensitive data (and keep in the EU, where every call
  * must stay there).
  */
-const readingModel = (env: ModelsEnv): string | undefined =>
-  modelForRole(gatewaySettings(env), "careful", { sensitive: true });
+const readingModel = async (env: ModelsEnv): Promise<string | undefined> =>
+  modelForRole(await modelSettings(env), "careful", { sensitive: true });
 
 /** How long a reading may take: a long conversation, read once. */
 const readingTimeoutMs = 120_000;
@@ -506,7 +506,7 @@ export const readKickoff = async (
   locale: InterviewLocale,
   by: AuditActor
 ): Promise<KickoffReading> => {
-  const model = readingModel(env);
+  const model = await readingModel(env);
   if (model === undefined) {
     throw kickoffErrors.create("kickoff.not_read");
   }

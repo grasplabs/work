@@ -9598,6 +9598,10 @@ msgstr "Pas d’IA"
 msgid "No AI capabilities found in this app."
 msgstr "Aucune fonction d’IA détectée dans cette application."
 
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "Aucun fournisseur d'IA n'est encore connecté. Demandez à votre admin d'en connecter un."
+
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."
 msgstr "Aucune application n’enfreint une règle active."

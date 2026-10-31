@@ -9598,6 +9598,10 @@ msgstr "Keine KI"
 msgid "No AI capabilities found in this app."
 msgstr "In dieser App wurden keine KI-Funktionen gefunden."
 
+#: src/chat/failure.ts
+msgid "No AI provider is connected yet. Ask your admin to connect one."
+msgstr "Es ist noch kein KI-Anbieter verbunden. Bitten Sie Ihren Admin, einen zu verbinden."
+
 #: src/routes/_shell.policies.index.tsx
 msgid "No app breaks an active rule."
 msgstr "Keine App verstößt gegen eine aktive Regel."
