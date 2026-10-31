@@ -26,7 +26,7 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -124,7 +124,7 @@ const ProcessMark = ({ process }: { process: BusinessProcess }) => {
   const { i18n } = useLingui();
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className="flex-none" />}>
+      <TooltipTrigger render={<span className="relative z-10 flex-none" />}>
         <ProcessGlyph
           className="text-muted-foreground size-4"
           process={process}
@@ -169,18 +169,26 @@ export const IndependentWorkflows = ({
             <TableRow>
               <TableHead variant="card">{t`Workflow`}</TableHead>
               <TableHead variant="card">{t`Current version`}</TableHead>
+              <TableHead className="w-9" variant="card">
+                <span className="sr-only">
+                  <Trans context="column: a link that opens the workflow">
+                    Open
+                  </Trans>
+                </span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
+            {/* As the lists above: the whole row opens the workflow. */}
             {workflows.map((workflow) => (
-              <TableRow key={workflow.id}>
+              <TableRow className="relative" key={workflow.id}>
                 <TableCell variant="roomy">
                   <span className="flex items-center gap-2">
                     {workflow.process === null ? null : (
                       <ProcessMark process={workflow.process} />
                     )}
                     <Link
-                      className="font-medium hover:underline"
+                      className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
                       params={{ workflow: workflow.id }}
                       to="/workflows/$workflow"
                     >
@@ -190,6 +198,12 @@ export const IndependentWorkflows = ({
                 </TableCell>
                 <TableCell variant="roomy">
                   {workflow.currentVersion ?? t`Not published`}
+                </TableCell>
+                <TableCell>
+                  <ChevronRightIcon
+                    aria-hidden="true"
+                    className="text-muted-foreground mx-auto size-4"
+                  />
                 </TableCell>
               </TableRow>
             ))}
