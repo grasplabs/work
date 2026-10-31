@@ -17063,6 +17063,10 @@ msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speiche
 msgid "Up to {upTo} minutes"
 msgstr "Bis {upTo} Minuten"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Updated {when}"
+msgstr "Aktualisiert {when}"
+
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
 msgstr "Grasp aktualisiert"
