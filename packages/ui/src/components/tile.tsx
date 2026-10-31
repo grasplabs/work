@@ -157,23 +157,8 @@ function TileMeta({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-/**
- * Beside the words, top right: a menu of what else to do with it. It
- * stands above the title's press area, which covers the whole tile.
- */
-function TileActions({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="tile-actions"
-      className={cn("relative z-10 flex flex-none items-center", className)}
-      {...props}
-    />
-  );
-}
-
 export {
   Tile,
-  TileActions,
   TileContent,
   TileDescription,
   TileField,

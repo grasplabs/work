@@ -78,7 +78,7 @@ const moveOf = async (
  * Asks before archiving: it takes the domain offline and stops its runs,
  * which a restore doesn't start again.
  */
-export const ArchiveDialog = ({
+const ArchiveDialog = ({
   name,
   open,
   onOpenChange,

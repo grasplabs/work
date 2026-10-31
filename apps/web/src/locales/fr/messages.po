@@ -215,10 +215,6 @@ msgstr "{approvals, plural, one {Cela met fin à # approbation de ces paquets.} 
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# application} other {# applications}}"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "{apps, plural, one {Its # app is archived with it.} other {Its # apps are archived with it.}}"
-msgstr "{apps, plural, one {Sa # app est archivée avec lui.} other {Ses # apps sont archivées avec lui.}}"
-
 #: src/engines/package-approvals.tsx
 msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
 msgstr "{artifacts, plural, one {# build déjà fait ({targets}) continue de fonctionner. Rien de nouveau n’est construit avec ces paquets.} other {# builds déjà faits ({targets}) continuent de fonctionner. Rien de nouveau n’est construit avec ces paquets.} =0 {Rien n’a encore été construit avec ces paquets, et rien de nouveau ne le sera.}}"
@@ -3405,21 +3401,12 @@ msgid "Apps to approve"
 msgstr "Applications à approuver"
 
 #: src/engines/app-status.tsx
-#: src/routes/_shell.apps.index.tsx
 msgid "Archive"
 msgstr "Archiver"
-
-#: src/routes/_shell.apps.index.tsx
-msgid "Archive {domain}?"
-msgstr "Archiver {domain} ?"
 
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "Archiver {name} ?"
-
-#: src/routes/_shell.apps.index.tsx
-msgid "Archive domain"
-msgstr "Archiver le domaine"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
@@ -4150,7 +4137,6 @@ msgstr "Illisible"
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
@@ -9381,10 +9367,6 @@ msgctxt "the catalog's apps nobody connected"
 msgid "More apps"
 msgstr "Plus d’apps"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "More for {screen}"
-msgstr "Plus pour {screen}"
-
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Plus pour {title}"
@@ -13094,10 +13076,6 @@ msgstr "Ressources"
 msgid "Restore"
 msgstr "Restaurer"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "Restore domain"
-msgstr "Restaurer le domaine"
-
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restaurer la version {number}"
@@ -14033,7 +14011,6 @@ msgstr "Défini. Saisissez une nouvelle valeur pour la remplacer."
 
 #: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"

@@ -229,26 +229,6 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   ).toBeVisible();
   await expect(tiles).toHaveCount(0);
   expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
-
-  // Who builds a domain archives it from its app's "…" menu, once they
-  // confirmed, the confirmation naming the domain and the apps that go
-  // with it: the app stays, marked archived, and Restore domain from the
-  // same menu takes it back.
-  await search.fill(`legalapp${run}`);
-  const legal = tiles.filter({ hasText: `legalapp${run}` });
-  const legalMenu = legal.getByRole("button", {
-    name: `More for legalapp${run}`,
-  });
-  await legalMenu.click();
-  await page.getByRole("menuitem", { name: "Archive domain" }).click();
-  const confirm = page.getByRole("alertdialog");
-  await expect(confirm).toContainText(`Archive legal ${run}?`);
-  await expect(confirm).toContainText("Its 1 app is archived with it.");
-  await confirm.getByRole("button", { name: "Archive" }).click();
-  await expect(legal.getByText("Archived", { exact: true })).toBeVisible();
-  await legalMenu.click();
-  await page.getByRole("menuitem", { name: "Restore domain" }).click();
-  await expect(legal.getByText("Archived", { exact: true })).toHaveCount(0);
   await search.fill("");
 
   // On the Apps page its app is a tile, under its domain's name, which
