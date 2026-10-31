@@ -759,16 +759,18 @@ export const shadcnComponents = {
   },
   tabs: {
     status: "supported",
-    summary: "Views of one area, one at a time, picked by tab.",
+    summary:
+      "Views of one area, one at a time, picked by tab, each tab with how many it holds when that helps (TabsCount).",
     exports: [
       "Tabs",
       "TabsContent",
+      "TabsCount",
       "TabsList",
       "TabsTrigger",
       "tabsListVariants",
     ],
     changes:
-      "The default list is the brand book's pill bar: a card with a hairline, the open tab an ink thumb that glides between tabs on the house curve.",
+      "The default list is the brand book's pill bar: a card with a hairline, the open tab an ink thumb that glides between tabs on the house curve. TabsCount puts a quiet count after a tab's name, read out as the words the page passes.",
   },
   textarea: {
     status: "supported",

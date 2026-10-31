@@ -940,6 +940,18 @@ export const maxLiveCandidateRuns = 5;
 export const maxKeptCandidateRuns = 100;
 
 /**
+ * The most runs a workflow's list of runs answers: the newest. A page
+ * that counts them says "50+" when it has this many.
+ */
+export const workflowRunsListed = 50;
+
+/**
+ * The most files, or activity entries, a read of a workflow's answers:
+ * the newest. A page that counts them says "100+" when it has this many.
+ */
+export const workflowOwnListed = 100;
+
+/**
  * The longest a test run may wait or sleep, from its start: a wait past it
  * fails the run (`workflow.candidate_wait_limit`).
  */
