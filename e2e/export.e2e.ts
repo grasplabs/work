@@ -132,7 +132,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
 
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
-  // own stylesheets: the title (a page's title, 30 px) and the text's
+  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
   // headings in Newsreader (Markdown's serif headings), the text in Geist.
   await countPrints(page);
   await choose(page, "Export", "PDF");
@@ -151,7 +151,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^30px "Newsreader Variable"/u);
+    .toMatch(/^28px "Newsreader Variable"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Who" })
