@@ -615,7 +615,7 @@ describe("AI providers in connect", () => {
       });
     });
 
-    it("refuses anything else of ElevenLabs's: another path, voice, query or host, the key in another header, an organization's key, or no key of Grasp's", async () => {
+    it("refuses anything else of ElevenLabs's: another path, voice or host, no query or another, the key in another header, an organization's key, or no key of Grasp's", async () => {
       const voice = "s3TPKV1kjDlVtZbl4Ksh";
       const line = `/v1/text-to-speech/${voice}/with-timestamps${speechQuery}`;
       const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
@@ -623,13 +623,13 @@ describe("AI providers in connect", () => {
       const outcomes = {
         voices: refusalOf(
           await withKey.modelFetch(
-            lineRequest("/v1/voices"),
+            lineRequest(`/v1/voices${speechQuery}`),
             await elevenLabsGrant()
           )
         ),
         history: refusalOf(
           await withKey.modelFetch(
-            lineRequest("/v1/history"),
+            lineRequest(`/v1/history${speechQuery}`),
             await elevenLabsGrant()
           )
         ),
@@ -645,6 +645,20 @@ describe("AI providers in connect", () => {
           await withKey.modelFetch(
             lineRequest(
               `/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`
+            ),
+            await elevenLabsGrant()
+          )
+        ),
+        noQuery: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(`/v1/text-to-speech/${voice}/with-timestamps`),
+            await elevenLabsGrant()
+          )
+        ),
+        otherQuery: refusalOf(
+          await withKey.modelFetch(
+            lineRequest(
+              `/v1/text-to-speech/${voice}/with-timestamps?enable_logging=true&output_format=mp3_44100_128`
             ),
             await elevenLabsGrant()
           )
@@ -679,6 +693,8 @@ describe("AI providers in connect", () => {
         history: "path",
         traversal: "path",
         logging: "endpoint",
+        noQuery: "endpoint",
+        otherQuery: "endpoint",
         host: "endpoint",
         bearer: "credential_header",
         organization: "no_credential",

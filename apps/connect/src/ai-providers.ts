@@ -519,10 +519,10 @@ const sendsToBase = (
   policy: EndpointPolicy
 ): boolean => {
   const checked = checkEndpoint(url.href, policy);
-  // The query a model request may carry: none, or one its provider names
-  // exactly (`queries`), as Anthropic's SDK's `?beta=true`: none names data.
-  const query =
-    url.search === "" || aiProviders[provider].queries.includes(url.search);
+  // The query a model request may carry: exactly one its provider names
+  // (`queries`), none only where it names `""`. ElevenLabs's must be its
+  // own, so a line is never sent with logging left on.
+  const query = aiProviders[provider].queries.includes(url.search);
   return (
     !("refused" in checked) &&
     url.origin === base.origin &&

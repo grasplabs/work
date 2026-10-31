@@ -70,8 +70,9 @@ export interface AiProviderSpec {
    */
   paths: readonly string[];
   /**
-   * The queries a model request may carry: none, or one of these exactly,
-   * each naming no data.
+   * The queries a model request may carry, each exactly and naming no
+   * data; `""` where it may carry none. ElevenLabs's has no `""`: a line
+   * without `enable_logging=false` would be kept by ElevenLabs.
    */
   queries: readonly string[];
   /**
@@ -118,7 +119,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     baseUrls: { "anthropic-messages": "https://api.anthropic.com" },
     paths: ["/v1/messages"],
     // Anthropic's SDK asks its beta Messages API, which names no data.
-    queries: ["?beta=true"],
+    queries: ["", "?beta=true"],
     realtime: [],
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
@@ -140,7 +141,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "/v1/chat/completions",
       "/v1/audio/transcriptions",
     ],
-    queries: [],
+    queries: [""],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
@@ -153,7 +154,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
     paths: ["/v1/chat/completions"],
-    queries: [],
+    queries: [""],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
@@ -169,7 +170,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
       "openai-completions": "https://openrouter.ai/api/v1",
     },
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
-    queries: [],
+    queries: [""],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns:
@@ -183,7 +184,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     label: "OpenAI-compatible endpoint",
     baseUrls: {},
     paths: ["/chat/completions"],
-    queries: [],
+    queries: [""],
     realtime: [],
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
