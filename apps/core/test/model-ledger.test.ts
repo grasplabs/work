@@ -1,6 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Admission, LedgerScope } from "../src/model-ledger.ts";
 import { allEvents } from "./audit-events.ts";
@@ -181,6 +181,89 @@ const spendOf = async (ledger: ReturnType<typeof newLedger>, key = "ada") => {
 };
 
 describe("the model ledger", () => {
+  it("releases exactly what a request reserved on each scope, as recorded when admitted, whatever rule it settles under", async () => {
+    const ledger = newLedger();
+    const platform: LedgerScope = {
+      scope: "platform",
+      key: "platform",
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    };
+    const route = {
+      transport: "connect",
+      provider: "openai",
+      region: "eu",
+      credential: "platform",
+      feature: "conversion",
+    } as const;
+    const now = admission(50, [platform, lineageOf("root")], { route });
+    const before = admission(50, [platform, lineageOf("root")], {
+      route,
+      period: "2400-02",
+    });
+    await ledger.admit(now);
+    await ledger.admit(before);
+    // As an earlier release admitted `before`: its whole reservation held
+    // on the organization's run too, and nothing recorded per scope.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE request_scopes SET reserved_micros = NULL WHERE request_id = ?",
+        before.id
+      );
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = reserved_micros + 50 WHERE scope = 'run' AND key = 'root'"
+      );
+    });
+    const used = { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+    await ledger.settle(now.id, { by: "usage", tokens: used });
+    await ledger.settle(before.id, { by: "usage", tokens: used });
+
+    const run = await ledger.spendOf("2400-01", ["run"], 10);
+    const grasp = await ledger.spendOf("2400-01", ["platform"], 10);
+    const graspBefore = await ledger.spendOf("2400-02", ["platform"], 10);
+    expect({
+      // Nothing left held on the run, and none of Grasp's money spent there.
+      run: run.run?.map(({ spentMicros, reservedMicros }) => ({
+        spentMicros,
+        reservedMicros,
+      })),
+      grasp: [...(grasp.platform ?? []), ...(graspBefore.platform ?? [])].map(
+        ({ spentMicros, reservedMicros }) => ({ spentMicros, reservedMicros })
+      ),
+    }).toStrictEqual({
+      run: [{ spentMicros: 0, reservedMicros: 0 }],
+      grasp: [
+        { spentMicros: 30, reservedMicros: 0 },
+        { spentMicros: 30, reservedMicros: 0 },
+      ],
+    });
+  });
+
+  it("sums what Grasp's own features cost by an index of its requests' months, never a scan of every request kept", async () => {
+    const ledger = newLedger();
+
+    const plan = await runInDurableObject(ledger, async (instance, state) => {
+      const exec = vi.spyOn(state.storage.sql, "exec");
+      await instance.platformSpend(["2400-01", "2399-12"]);
+      const [query = "", ...rest] = exec.mock.calls.at(-1) ?? [];
+      const values: unknown[] = rest;
+      exec.mockRestore();
+      return state.storage.sql
+        .exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, ...values)
+        .toArray()
+        .map(({ detail }) => detail);
+    });
+
+    expect({
+      scansRequests: plan.some((step) => /^SCAN requests\b/u.test(step)),
+      byIndex: plan.some((step) =>
+        step.includes("USING INDEX requests_credential_period")
+      ),
+    }).toStrictEqual({ scansRequests: false, byIndex: true });
+  });
+
   it("admits concurrent requests only while their reservations fit every scope together, and refuses the rest whole", async () => {
     const ledger = newLedger();
     const team = {

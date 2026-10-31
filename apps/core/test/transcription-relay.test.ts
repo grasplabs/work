@@ -52,8 +52,9 @@ import {
 //   taken off the list, the onboarding paused, the person withdrawing
 //   (GRA-329, T5), the admin made a member.
 // - Sockets opened side by side on one link, each hearing a day's budget.
-// - Listening past the deployment's own budgets, or with a model the
-//   gateway or the rules don't let it use (GRA-1064).
+// - Listening with a model the gateway or the rules don't let it use
+//   (GRA-1064). The deployment's own budgets don't limit it: it is
+//   charged to Grasp's own key.
 
 const idp = mockIdp();
 
@@ -289,6 +290,13 @@ const heardMicros = (seconds: number): number =>
 const deploymentSpend = async (month: string) => {
   const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
   const [row] = spent.deployment ?? [];
+  return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
+};
+
+/** What Grasp's own key spent and holds in `month`: transcription counts there. */
+const graspSpend = async (month: string) => {
+  const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
+  const [row] = spent.platform ?? [];
   return { spent: row?.spentMicros ?? 0, held: row?.reservedMicros ?? 0 };
 };
 
@@ -846,7 +854,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     }).toStrictEqual({ noted: [true, true], kept: [] });
   });
 
-  it("spends the deployment's budget through transcription, refuses the next socket once it is spent, and shows staff what it heard by purpose", async () => {
+  it("charges transcription to Grasp's own key, never to the deployment's budget, which stops no socket, and shows staff what it heard by purpose", async () => {
     const { ada, bo, roster } = await openedTwo();
     const [adaPerson, boPerson] = roster.people.map(({ id }) => id);
     // A minute left on each link today: each socket holds a minute.
@@ -863,46 +871,44 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         const first = await listen();
         first.start(slowStart(ada));
         const ready = await first.next();
-        // While Ada's minute is held, Bo's doesn't fit beside it.
-        const busy = await listen();
-        busy.start(slowStart(bo));
-        const held = await refusalOf(busy);
-        // Ada talks for her whole minute, and leaves.
+        // Bo's minute opens beside Ada's: the budget has room for neither.
+        const second = await listen();
+        second.start(slowStart(bo));
+        const alsoReady = await second.next();
+        // Ada talks for her whole minute, and leaves; Bo leaves saying nothing.
         for (let frame = 0; frame < 30; frame += 1) {
           first.socket.send(twoSeconds());
         }
         first.socket.close(1000, "Done");
         await first.ended();
-        await vi.waitFor(
+        second.socket.close(1000, "Done");
+        await second.ended();
+        const charged = await vi.waitFor(
           async () => {
-            await expect(deploymentSpend(month)).resolves.toStrictEqual({
-              spent: minute,
-              held: 0,
-            });
-            // And Bo's minute back on his link, from the socket refused.
-            await expect(
-              onboardingStore(env).voiceSaid(`link:${boPerson}:heard`)
-            ).resolves.toBe(59 * 60);
+            const grasp = await graspSpend(month);
+            expect(grasp).toStrictEqual({ spent: minute, held: 0 });
+            return grasp;
           },
           { timeout: 10_000 }
         );
-        // Spent: what is left is less than Bo's minute.
-        const next = await listen();
-        next.start(slowStart(bo));
-        const spent = await refusalOf(next);
-        return { ready: ready?.type, held, spent };
+        return {
+          ready: ready?.type,
+          alsoReady: alsoReady?.type,
+          charged,
+          deployment: await deploymentSpend(month),
+        };
       },
       {
-        // 1.5 cents: a minute of GPT-4o Transcribe (1¢) fits, two don't.
-        config: { budgets: { deployment: { limit: 0.015 } } },
+        // A cent: a minute of GPT-4o Transcribe (1¢) fits, two held don't.
+        config: { budgets: { deployment: { limit: 0.01 } } },
         month,
       }
     );
 
     const events = await eventsAfter(head);
-    const gateway = events.filter(
+    const refused = events.filter(
       ({ action, detail }) =>
-        action.startsWith("model.") &&
+        action === "model.refused" &&
         detail?.purpose === "onboarding.transcription"
     );
     const numbers = await core.authenticate();
@@ -927,56 +933,15 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     expect({
       ...result,
       upstreams: upstream.opened.length,
-      gateway: gateway.map(({ action, actor, model, cost, detail }) => ({
-        action,
-        actor,
-        model,
-        cost,
-        seconds: detail?.seconds,
-        reason: detail?.reason,
-      })),
+      refused: refused.length,
       heard,
     }).toStrictEqual({
       ready: "ready",
-      held: { errors: ["transcription.busy"], code: 1008 },
-      spent: { errors: ["transcription.over_budget"], code: 1008 },
-      // Only Ada's socket reached the upstream.
-      upstreams: 1,
-      gateway: [
-        {
-          action: "model.refused",
-          actor: { type: "system" },
-          model: undefined,
-          cost: undefined,
-          seconds: undefined,
-          reason: "model.budget_busy",
-        },
-        {
-          action: "model.call",
-          actor: { type: "system" },
-          model: {
-            provider: "openai",
-            model: "gpt-4o-transcribe",
-            inputTokens: 0,
-            outputTokens: 0,
-          },
-          // Before the ledger rounds it up to a micro.
-          cost: {
-            amount: (60 * microsPerMillionSeconds) / 1e12,
-            currency: "USD",
-          },
-          seconds: 60,
-          reason: undefined,
-        },
-        {
-          action: "model.refused",
-          actor: { type: "system" },
-          model: undefined,
-          cost: undefined,
-          seconds: undefined,
-          reason: "model.over_budget",
-        },
-      ],
+      alsoReady: "ready",
+      charged: { spent: minute, held: 0 },
+      deployment: { spent: 0, held: 0 },
+      upstreams: 2,
+      refused: 0,
       heard: 60,
     });
   });

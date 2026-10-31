@@ -1,13 +1,15 @@
 import { z } from "zod";
 
 import { aiProviderIdSchema } from "./ai-providers.ts";
+import { platformAiFeatures } from "./platform-ai.ts";
 
 // What the admin reads of a client's AI (core's ai-status-report.ts), for
 // its Setup: the providers its organization connected, its default
 // model's first, and how each one's calls last fared, as the model
 // ledger noted them from real calls (`providerHealth`); and how Grasp's
-// own keys fared for its platform features. Never a key, a mask or a base
-// URL: provider ids and times only. Only the admin reads it: the request
+// own keys fared for its platform features; and what those features cost
+// on Grasp's keys this month and last, from the ledger's charges. Never a
+// key, a mask or a base URL: provider ids, models, times and amounts only. Only the admin reads it: the request
 // is signed with a key both derive from the client's auth secret for this
 // purpose alone, as the quota policy report is (`quota-policy-report.ts`).
 
@@ -48,6 +50,28 @@ export const aiProviderStatusSchema = z.strictObject({
 });
 export type AiProviderStatus = z.infer<typeof aiProviderStatusSchema>;
 
+/**
+ * What one model cost for one of Grasp's own features in a month, on
+ * Grasp's keys: the model ledger's charges at list prices, in millionths
+ * of a US dollar. `feature` is null for a call on Grasp's key whose
+ * feature wasn't recorded.
+ */
+export const platformSpendRowSchema = z.strictObject({
+  feature: z.enum(platformAiFeatures).nullable(),
+  /** `<provider>/<model>`, as the ledger records it. */
+  model: z.string().min(1).max(256),
+  micros: z.int().min(0),
+});
+export type PlatformSpendRow = z.infer<typeof platformSpendRowSchema>;
+
+/** What Grasp's own features cost in one UTC month, model by model. */
+export const platformMonthSpendSchema = z.strictObject({
+  /** The UTC month, such as `2026-10`. */
+  period: z.string().regex(/^\d{4}-(?:0[1-9]|1[0-2])$/u),
+  rows: z.array(platformSpendRowSchema).max(64),
+});
+export type PlatformMonthSpend = z.infer<typeof platformMonthSpendSchema>;
+
 /** The client's AI, as core answers the admin. */
 export const aiStatusReportSchema = z.strictObject({
   /**
@@ -56,5 +80,17 @@ export const aiStatusReportSchema = z.strictObject({
    * then every provider Grasp's own key was used with (`platform`).
    */
   providers: z.array(aiProviderStatusSchema).max(16),
+  /**
+   * What Grasp's own features cost on its keys, this month and last.
+   * Optional: a core on an earlier release reports its providers only,
+   * and the admin and the cores roll out on their own, so its AI status
+   * still reads, its spend shown as not reported by its release.
+   */
+  platformSpend: z
+    .strictObject({
+      thisMonth: platformMonthSpendSchema,
+      lastMonth: platformMonthSpendSchema,
+    })
+    .optional(),
 });
 export type AiStatusReport = z.infer<typeof aiStatusReportSchema>;

@@ -13,6 +13,7 @@ import type {
   PersonLimitFrom,
   PersonLimitSubject,
 } from "@grasp-os/shared/models";
+import { platformAiFeatures } from "@grasp-os/shared/platform-ai";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -227,6 +228,10 @@ const scopeNames = [
   "binding",
   "binding_day",
   "person",
+  // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
+  // counted, never limited, and apart from every scope of the
+  // organization's own.
+  "platform",
 ] as const;
 
 /**
@@ -415,6 +420,8 @@ const routeSchema = z.strictObject({
   provider: z.string().min(1).max(32),
   region: z.string().min(1).max(32),
   credential: z.enum(["organization", "platform"]).optional(),
+  /** Which of Grasp's own features a request on its key is for. */
+  feature: z.enum(platformAiFeatures).optional(),
 });
 
 /** The way a request goes, as recorded with it. */
@@ -428,11 +435,13 @@ const routeColumns = (
   provider: string | null;
   region: string | null;
   credential: string | null;
+  feature: string | null;
 } => ({
   transport: route?.transport ?? null,
   provider: route?.provider ?? null,
   region: route?.region ?? null,
   credential: route?.credential ?? null,
+  feature: route?.feature ?? null,
 });
 
 /** How a provider's requests fared last, by whose key: times in ms since the epoch. */
@@ -443,6 +452,15 @@ export interface ProviderHealth {
   lastFailedAt: number | null;
   lastFailure: string | null;
   lastStatus: number | null;
+}
+
+/** What one model was charged for one feature on Grasp's keys in one month. */
+export interface PlatformSpendByPeriod {
+  period: string;
+  /** The feature as recorded; null for a request without one. */
+  feature: string | null;
+  model: string;
+  micros: number;
 }
 
 /** What an admin's limit came to: set, or refused as above Grasp's budget. */
@@ -461,12 +479,13 @@ const admissionSchema = z
      * deployment, the workflow, the person, the run, a model binding's
      * month and day): a bound that also keeps a decision's audit event
      * within its detail limit. The person's limit is one more, which the
-     * ledger adds itself (`person`).
+     * ledger adds itself (`person`). Grasp's own (`platform`) goes only
+     * with a run's, never beside the organization's.
      */
     scopes: z
       .array(scopeSchema)
       .min(1)
-      .max(scopeNames.length - 1)
+      .max(scopeNames.length - 2)
       .refine(
         (all) =>
           new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
@@ -657,6 +676,34 @@ export interface ScopeSpend {
 /** A request as its row stores it. */
 type RequestRow = typeof requests.$inferSelect;
 
+/**
+ * Whether a request on `credential` holds and spends its money on `scope`:
+ * every scope it counts in, but for a call on Grasp's own key (one of
+ * Grasp's features), whose money is Grasp's alone. Such a call still
+ * counts as a request in the organization's run scope (a lineage's limit
+ * of requests, which bounds every call), but never as money there, so a
+ * platform call leaves an organization-funded budget as it was.
+ */
+const holdsMoney = (
+  scope: LedgerScopeName,
+  credential: string | null
+): boolean => credential !== "platform" || scope === "platform";
+
+/**
+ * What a request reserved on one of its scopes, as recorded when it was
+ * admitted (`request_scopes.reserved_micros`); its whole reservation for
+ * one admitted before that was recorded, as every scope then held it.
+ * What settling releases and a rebuild sums: never worked out again from
+ * a rule, which may have changed since.
+ */
+const reservedOn = (
+  kept: { reservedMicros: number | null },
+  row: { reservedMicros: number }
+): number => kept.reservedMicros ?? row.reservedMicros;
+
+/** `reservedOn` in SQL, for a request joined with one of its scopes. */
+const reservedOnSql = sql<number>`coalesce(${requestScopes.reservedMicros}, ${requests.reservedMicros})`;
+
 const storedScopesSchema = z.array(scopeSchema);
 
 /** The two thresholds a budget alerts at. */
@@ -767,6 +814,7 @@ export class ModelLedger extends DurableObject<Env> {
     const fingerprint = await fingerprintOf(admission);
     const actor = JSON.stringify(admission.actor);
     const now = Date.now();
+    const credential = admission.route?.credential ?? null;
     const { admitted } = this.ctx.storage.transactionSync(() => {
       const existing = this.#db
         .select({ fingerprint: requests.fingerprint, state: requests.state })
@@ -904,6 +952,9 @@ export class ModelLedger extends DurableObject<Env> {
         limitRequests,
         names,
       } of scopes) {
+        const held = holdsMoney(scope, credential)
+          ? admission.reservedMicros
+          : 0;
         this.#db
           .insert(requestScopes)
           .values({
@@ -915,6 +966,7 @@ export class ModelLedger extends DurableObject<Env> {
             names: JSON.stringify(names),
             period: periodOf(scope, admission.period),
             limitRequests: limitRequests ?? null,
+            reservedMicros: held,
           })
           .run();
         this.#db
@@ -923,7 +975,7 @@ export class ModelLedger extends DurableObject<Env> {
             scope,
             key,
             period: periodOf(scope, admission.period),
-            reservedMicros: admission.reservedMicros,
+            reservedMicros: held,
             requests: 1,
           })
           .onConflictDoUpdate({
@@ -1005,7 +1057,7 @@ export class ModelLedger extends DurableObject<Env> {
       return;
     }
     const open = this.#db
-      .select({ id: requests.id })
+      .select({ id: requests.id, reserved: reservedOnSql })
       .from(requests)
       .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
       .where(
@@ -1017,7 +1069,7 @@ export class ModelLedger extends DurableObject<Env> {
         )
       )
       .all();
-    for (const { id } of open) {
+    for (const { id, reserved } of open) {
       this.#db
         .insert(requestScopes)
         .values({
@@ -1029,6 +1081,8 @@ export class ModelLedger extends DurableObject<Env> {
           names: JSON.stringify({ user: person }),
           period: personPeriod,
           limitRequests: null,
+          // What it holds on the user scope, carried over with it.
+          reservedMicros: reserved,
         })
         .run();
     }
@@ -1482,6 +1536,38 @@ export class ModelLedger extends DurableObject<Env> {
       .run();
   }
 
+  /**
+   * What Grasp's own features were charged on its keys in each of
+   * `periods`, by feature and model: settled requests only, at what the
+   * ledger charged them (list prices), none that came to nothing. Settled
+   * requests are kept 90 days, past the month before this one.
+   */
+  async platformSpend(
+    periods: readonly string[]
+  ): Promise<PlatformSpendByPeriod[]> {
+    await Promise.resolve();
+    const charged = sql<number>`sum(${requests.chargedMicros})`;
+    return this.#db
+      .select({
+        period: requests.period,
+        feature: requests.feature,
+        model: requests.model,
+        micros: charged,
+      })
+      .from(requests)
+      .where(
+        and(
+          eq(requests.credential, "platform"),
+          eq(requests.state, "settled"),
+          gt(requests.chargedMicros, 0),
+          inArray(requests.period, [...periods])
+        )
+      )
+      .groupBy(requests.period, requests.feature, requests.model)
+      .orderBy(desc(charged))
+      .all();
+  }
+
   /** How each provider's requests fared last, by whose key (`providerHealth`). */
   async providerHealth(): Promise<ProviderHealth[]> {
     await Promise.resolve();
@@ -1634,11 +1720,12 @@ export class ModelLedger extends DurableObject<Env> {
     charged: number,
     actor: AuditActor
   ): void {
+    const money = holdsMoney(kept.scope, row.credential);
     const after = this.#db
       .update(spend)
       .set({
-        reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
-        spentMicros: sql`${spend.spentMicros} + ${charged}`,
+        reservedMicros: sql`${spend.reservedMicros} - ${reservedOn(kept, row)}`,
+        spentMicros: sql`${spend.spentMicros} + ${money ? charged : 0}`,
       })
       .where(
         and(
@@ -1650,7 +1737,7 @@ export class ModelLedger extends DurableObject<Env> {
       .returning({ spentMicros: spend.spentMicros })
       .get();
     // A charge counts towards its budgets' alerts, as any spend does.
-    if (after !== undefined && charged > 0) {
+    if (after !== undefined && money && charged > 0) {
       this.#alert(
         {
           scope: kept.scope,
@@ -1774,7 +1861,7 @@ export class ModelLedger extends DurableObject<Env> {
         return {
           kept,
           holds,
-          damaged: holds === undefined || holds < row.reservedMicros,
+          damaged: holds === undefined || holds < reservedOn(kept, row),
         };
       });
   }
@@ -1793,7 +1880,7 @@ export class ModelLedger extends DurableObject<Env> {
     return (
       this.#db
         .select({
-          reserved: sql<number>`coalesce(sum(${requests.reservedMicros}), 0)`,
+          reserved: sql<number>`coalesce(sum(${reservedOnSql}), 0)`,
         })
         .from(requests)
         .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
@@ -2133,7 +2220,7 @@ export class ModelLedger extends DurableObject<Env> {
     for (const { scope, row } of full) {
       const underWay = this.#db
         .select({
-          releasable: sql<number>`coalesce(sum(${requests.reservedMicros}), 0)`,
+          releasable: sql<number>`coalesce(sum(${reservedOnSql}), 0)`,
           soonest: sql<number | null>`min(${requests.deadline})`,
         })
         .from(requests)
@@ -2243,11 +2330,12 @@ export class ModelLedger extends DurableObject<Env> {
     const actor = actorOf(row);
     let alerted = 0;
     for (const scope of kept) {
+      const money = holdsMoney(scope.scope, row.credential);
       const after = this.#db
         .update(spend)
         .set({
-          reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
-          spentMicros: sql`${spend.spentMicros} + ${charged}`,
+          reservedMicros: sql`${spend.reservedMicros} - ${reservedOn(scope, row)}`,
+          spentMicros: sql`${spend.spentMicros} + ${money ? charged : 0}`,
           // A request never sent wasn't made: its count comes back.
           ...(by === "unsent"
             ? { requests: sql`max(${spend.requests} - 1, 0)` }
