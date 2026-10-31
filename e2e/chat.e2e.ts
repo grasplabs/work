@@ -133,9 +133,10 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // No model answers here: the answer says so once the turn ends.
+  // The local stack's provider refuses every key (e2e/model-fake.ts): the
+  // answer says so once the turn ends, and who can put it right.
   await expect(messages.getByRole("alert")).toContainText(
-    "The model couldn't answer. Try again.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   // It is the first chat in the window, named after the question.
@@ -154,8 +155,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     messages.getByRole("listitem").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
-  await expect(messages.getByRole("alert")).toContainText(
-    "The model couldn't answer. Try again.",
+  // The first try's failure stays where it was; the new one is last.
+  await expect(messages.getByRole("alert").last()).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   await box.fill("");
@@ -434,14 +436,14 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
-  // The turn has ended (the local stack reaches no model), so nothing
-  // else is on its way when the connection drops.
+  // The turn has ended (the local stack's provider refuses every key), so
+  // nothing else is on its way when the connection drops.
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`
   );
   await expect(messages.getByRole("alert")).toContainText(
-    "The model couldn't answer. Try again.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -600,7 +602,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   await expect(messages.getByRole("alert")).toContainText(
-    "The model couldn't answer. Try again.",
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   // The page stayed where it was.
