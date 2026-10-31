@@ -61,7 +61,7 @@ import type { ResourceControlRow, RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { AdmittedEvent } from "./workflows/run-events.ts";
-import { runWaits } from "./workflows/run-waits.ts";
+import { runWaits, withRespond } from "./workflows/run-waits.ts";
 
 // What an App's screen asks of the workflows its App binds, through the
 // typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
@@ -300,7 +300,8 @@ const aliasPattern = /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
 
 /** Who asks, and through which App's current release. */
 interface Asking {
-  readonly by: Pick<Identity, "userId" | "role" | "teams">;
+  readonly by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>;
   readonly app: AppId;
   readonly version: number;
   readonly release: Release;
@@ -548,10 +549,15 @@ const runAndPending = async (
  * run (an App grant revoked or given again) is a revision of its own,
  * never a change under the same one. Everything else a snapshot holds is
  * the gate's to keep current (the person's role, the build's trust). One
- * more, so the first is 1.
+ * more, so the first is 1; and one more again once the App is in
+ * restricted mode (`appRestricted`), which is for good: what it may send
+ * the run changes with it, so a screen following the run is pushed it.
  */
-const revisionOf = (generation: number, row: RunRow): number =>
-  generation + row.summaryRevision + 1;
+const revisionOf = (
+  generation: number,
+  row: RunRow,
+  appRestricted = false
+): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
 
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
@@ -767,6 +773,36 @@ const shownStatus = async (
   return held.has(row.id) ? "queued" : "running";
 };
 
+/**
+ * What run `row` waits on, as `asking` is shown it in its snapshot: its
+ * events sendable while they may send it one, and never from a restricted
+ * App into a run that isn't restricted itself, as a send refuses it
+ * (`permission.restricted`); its decisions answerable as they may answer
+ * them there (`withRespond`).
+ */
+const snapshotWaits = async (
+  env: Env,
+  asking: Asking,
+  resolved: Resolved,
+  row: RunRow,
+  appRestricted: boolean
+): Promise<Json[]> => {
+  const canSend =
+    !isEnded(row.status) &&
+    !(appRestricted && !row.restricted) &&
+    (await holds(env, maySendSql(asking, resolved.alias, pinOf(resolved))));
+  return await withRespond(
+    env,
+    row.id,
+    await waitsOf(env, row, resolved, canSend),
+    {
+      userId: asking.by.userId,
+      ...(asking.by.staff === true ? { staff: true } : {}),
+      sameRestriction: row.restricted === appRestricted,
+    }
+  );
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -788,13 +824,9 @@ const runSnapshot = async (
   const [row, pending] = await runAndPending(env, seen.row);
   const ended = isEnded(row.status);
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
+  const appRestricted = await appHost(env, asking.app).isRestricted();
   // Read after the row: a wait opened or closed since moves its revision on.
-  const waits = await waitsOf(
-    env,
-    row,
-    resolved,
-    !ended && (await holds(env, maySendSql(asking, resolved.alias, pin)))
-  );
+  const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
   const status = await shownStatus(env, row, waits.length);
   const contract = await startedContract(
     env,
@@ -803,11 +835,7 @@ const runSnapshot = async (
     originAppVersion
   );
   const returned = row.status === "completed" || row.status === "failed";
-  if (
-    returned &&
-    row.restricted &&
-    !(await appHost(env, asking.app).isRestricted())
-  ) {
+  if (returned && row.restricted && !appRestricted) {
     // What a restricted run returned, or why it failed, only to an App in
     // restricted mode itself: never out through one that isn't.
     throw permissionErrors.create("permission.restricted");
@@ -840,7 +868,7 @@ const runSnapshot = async (
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
   };
-  return { value, revision: revisionOf(generation, row) };
+  return { value, revision: revisionOf(generation, row, appRestricted) };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */

@@ -177,9 +177,18 @@ export class App extends DurableObject<Env> {
     return (await this.ctx.storage.get(restrictedKey)) === true;
   }
 
-  /** Puts the App in restricted mode, for good. */
+  /**
+   * Puts the App in restricted mode, for good, and tells every connection
+   * following its live queries, the first time: a run's snapshot says what
+   * the App may send the run (screen-workflows.ts, `canSend`), which the
+   * App's restricted mode decides, so its screens read it again.
+   */
   async restrict(): Promise<void> {
+    if (await this.isRestricted()) {
+      return;
+    }
     await this.ctx.storage.put(restrictedKey, true);
+    this.workflowPolicyChanged();
   }
 
   /**

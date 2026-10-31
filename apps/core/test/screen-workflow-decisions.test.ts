@@ -31,6 +31,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { withRespond } from "../src/workflows/run-waits.ts";
 import {
   confirmScreenDecision,
   decideScreenRun,
@@ -885,6 +886,82 @@ describe(
             )
         )
       ).resolves.toBe("decision.not_found");
+    });
+
+    it("say a run's decision wait is answerable only by whom it asks, never staff, and only where the run's restricted mode is the App's", async () => {
+      const { fixture, opened, reviewer, starter, outsider, runAsking } =
+        await decisionInbox();
+      const asked = await runAsking(fixture.app, opened);
+      const decisionWait = {
+        kind: "decision",
+        id: asked.decisionId,
+        taskId: "ask",
+        key: "approval",
+        title: "ask",
+        openedAt: opened,
+        deadline: opened + 86_400_000,
+        canRespond: false,
+      };
+      // A timer beside it, which nothing of this changes.
+      const timer = { kind: "timer", id: "wait-1", purpose: "sleep" };
+      const respond = async (
+        viewer: Parameters<typeof withRespond>[3]
+      ): Promise<unknown[]> => {
+        const waits = await withRespond(
+          env,
+          asked.runId,
+          [decisionWait, timer],
+          viewer
+        );
+        return waits.map(
+          (wait) =>
+            z.object({ canRespond: z.boolean() }).safeParse(wait).data
+              ?.canRespond
+        );
+      };
+      const shown = {
+        reviewer: await respond({
+          userId: reviewer.userId,
+          sameRestriction: true,
+        }),
+        starter: await respond({
+          userId: starter.userId,
+          sameRestriction: true,
+        }),
+        outsider: await respond({
+          userId: outsider.userId,
+          sameRestriction: true,
+        }),
+        staff: await respond({
+          userId: reviewer.userId,
+          staff: true,
+          sameRestriction: true,
+        }),
+        otherRestriction: await respond({
+          userId: reviewer.userId,
+          sameRestriction: false,
+        }),
+      };
+      await env.DB.prepare(
+        "UPDATE workflow_decisions SET status = 'approved' WHERE id = ?"
+      )
+        .bind(asked.decisionId)
+        .run();
+
+      expect({
+        ...shown,
+        answered: await respond({
+          userId: reviewer.userId,
+          sameRestriction: true,
+        }),
+      }).toStrictEqual({
+        reviewer: [true, undefined],
+        starter: [false, undefined],
+        outsider: [false, undefined],
+        staff: [false, undefined],
+        otherRestriction: [false, undefined],
+        answered: [false, undefined],
+      });
     });
 
     it("follow the App's bindings in a draft, and fail a screen's type check on a decision the workflow doesn't have", async () => {
