@@ -22,7 +22,10 @@ function Tile({
     props: mergeProps<"article">(
       {
         className: cn(
-          "group/tile relative flex min-w-0 flex-col gap-3.5",
+          // The title's press area is the whole tile, so the tile shows the
+          // title's keyboard focus: a ring round the tile itself, as a
+          // focused control has, not on a pseudo-element of the title.
+          "group/tile has-[:focus-visible]:ring-ring/50 relative flex min-w-0 flex-col gap-3.5 rounded-xl transition-shadow has-[:focus-visible]:ring-3",
           className
         ),
       },
@@ -115,7 +118,7 @@ function TileTitle({
     props: mergeProps<"a">(
       {
         className: cn(
-          "focus-visible:after:ring-ring/50 truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-3",
+          "truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl",
           className
         ),
       },
