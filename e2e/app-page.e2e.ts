@@ -5,8 +5,9 @@ import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
-// An App's own page at /apps/<id>: its bar with its name, status, screens
-// as tabs, settings, Edit and the Publish menu; its screen under the bar;
+// An App's own page at /apps/<id>: its bar with its name, screens as
+// tabs, settings and the Publish menu, which says whether it is published;
+// its screen under the bar;
 // that it is only described while it has no screen; and, once archived,
 // a notice with Restore. Only its builders edit, publish or restore it,
 // and a draft is theirs alone.
@@ -106,7 +107,6 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   await page.getByRole("button", { name: "Published" }).click();
   await page.getByRole("menuitem", { name: /^Unpublish/u }).click();
   await expect(page.getByRole("button", { name: "Publish" })).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Publish" }).click();
   await page.getByRole("menuitem", { name: /^Publish/u }).click();
   await expect(page.getByRole("button", { name: "Published" })).toBeVisible();
@@ -141,7 +141,6 @@ test("an App with no screen yet is only described, and its builder designs it in
   await page.goto(`/apps/${app}`);
 
   await expect(page.getByText("Only described")).toBeVisible();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   // Nothing to publish before it has a version.
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
   await page.getByRole("button", { name: "Design it in the chat" }).click();
@@ -184,7 +183,6 @@ test("an archived App says so under its bar, opens no screen, and its builder re
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
 
   await page.getByRole("button", { name: "Restore" }).click();
-  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
   await expect(page.getByText("This app is archived.")).toHaveCount(0);
   await screenShowing(page, "board", "The board");
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();

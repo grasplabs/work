@@ -94,7 +94,7 @@ const CoverageBar = ({
   return (
     <svg
       aria-hidden="true"
-      className="h-2.5 w-full overflow-hidden rounded-full"
+      className="bg-muted h-2.5 w-full overflow-hidden rounded-full"
       preserveAspectRatio="none"
     >
       {parts.map(({ status, x, share }) => (

@@ -88,6 +88,9 @@ const Counts = ({ contents }: { contents: AppContents }) => {
  */
 const EngineCard = ({ app, contents }: AppOverview) => {
   const { i18n } = useLingui();
+  // Not said twice: a domain named after its process has no line over it.
+  const processName =
+    app.process === null ? null : i18n._(processNames[app.process]);
   return (
     <li className="relative">
       <Card className="h-full" size="sm">
@@ -95,9 +98,9 @@ const EngineCard = ({ app, contents }: AppOverview) => {
           <div className="flex items-start gap-3">
             <EngineIcon process={app.process} />
             <div className="flex min-w-0 flex-col gap-0.5">
-              {app.process === null ? null : (
+              {processName === null || processName === app.name ? null : (
                 <span className="text-muted-foreground text-xs">
-                  {i18n._(processNames[app.process])}
+                  {processName}
                 </span>
               )}
               <Link

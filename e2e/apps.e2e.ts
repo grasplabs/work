@@ -232,11 +232,11 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   await search.fill("");
 
   // On the Apps page its app is a tile, under its domain's name, which
-  // opens the app in its domain.
+  // opens the app on its App's page.
   const tile = tiles.filter({ hasText: name });
   await tile.getByRole("link", { name: "counter" }).click();
   await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
+    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
   );
   await counterScreen(page);
 

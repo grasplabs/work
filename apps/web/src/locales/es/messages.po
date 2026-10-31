@@ -3058,7 +3058,9 @@ msgstr "Responsable de aprobar herramientas nombrado"
 
 #: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -3967,10 +3969,6 @@ msgstr "Cambiado: actúa en nombre de quien use el dominio, con todo lo que el d
 msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
 msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Changes"
-msgstr "Cambia"
-
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 msgstr "Cambios que Grasp envió por alguien cuya respuesta se perdió, así que nadie sabe si surtieron efecto. Solo esa persona puede decir qué pasó, en su panel; haz el seguimiento con ella."
@@ -4730,6 +4728,11 @@ msgstr "Contadas sobre los flujos de trabajo de los dominios que puede abrir; aq
 msgid "Create"
 msgstr "Crear"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Create and change"
+msgstr "Crear y cambiar"
+
 #: src/knowledge/new-collection.tsx
 msgid "Create collection"
 msgstr "Crear colección"
@@ -5224,8 +5227,6 @@ msgstr "Accesos directos de dominios"
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -8376,6 +8377,10 @@ msgstr "Más opciones del proyecto {name}"
 msgid "More for this chat"
 msgstr "Más opciones de este chat"
 
+#: src/engines/app-status.tsx
+msgid "More for this domain"
+msgstr "Más sobre este dominio"
+
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "Más pasos."
@@ -11181,6 +11186,11 @@ msgctxt "a document, done reading"
 msgid "Read"
 msgstr "Leído"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgctxt "permission group"
+msgid "Read"
+msgstr "Leer"
+
 #: src/connections/connect-dialog.tsx
 msgctxt "what a tool may do"
 msgid "Read"
@@ -11300,10 +11310,6 @@ msgstr "Leyendo quién puede ser responsable…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Leyendo tu lista de personal"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Reads"
-msgstr "Lee"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
@@ -13156,10 +13162,6 @@ msgstr "Stephen fuera de Grasp"
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "Stephen talks to nobody until you pick the day the interviews start."
 msgstr "Stephen no habla con nadie hasta que elijas el día en que empiezan las entrevistas."
-
-#: src/routes/interview.tsx
-msgid "Stephen, drawn in dots."
-msgstr "Stephen, en puntos."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stephen’s requests"
