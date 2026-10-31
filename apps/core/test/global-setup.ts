@@ -63,12 +63,17 @@ declare global {
  * Before any test of a project: embeds the built-in blueprints, writes
  * the test assets and bundles the connect Worker, which the project's config reads when its pool starts.
  * After the run, removes what it wrote for itself; Vitest tears down only
- * once every project's tests are done.
+ * once every project's tests are done. A watch run whose config changed
+ * tears down and sets up again in this process: forgetting the setup then
+ * makes it build again, rather than find its directory gone.
  */
 const setup = async (): Promise<() => void> => {
   globalThis.coreTestSetup ??= prepare();
   await globalThis.coreTestSetup;
-  return removeTestRun;
+  return () => {
+    globalThis.coreTestSetup = undefined;
+    removeTestRun();
+  };
 };
 
 export default setup;
