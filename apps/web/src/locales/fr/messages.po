@@ -2485,9 +2485,17 @@ msgstr "Ajouter un widget"
 msgid "Add a word"
 msgstr "Ajouter un mot"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "Ajouter une app"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ajouter une exception"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "Ajouter une app"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3469,6 +3477,10 @@ msgstr "Demander à Grasp"
 #: src/dashboard/widget-board.tsx
 msgid "Ask Grasp for a widget"
 msgstr "Demander un widget à Grasp"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Demander à Grasp d’ajouter « {typed} »"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
@@ -6907,6 +6919,10 @@ msgstr "Depuis Google Drive. Je ne lis que les fichiers que vous ajoutez."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Depuis SharePoint ou OneDrive. Je ne lis que les fichiers que vous ajoutez."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Du catalogue"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -10590,6 +10606,10 @@ msgstr "Pas bien"
 msgid "Not in a domain yet"
 msgstr "Pas encore dans un domaine"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Absente du catalogue"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Pas encore interviewée."
@@ -10828,6 +10848,10 @@ msgstr "Rien ici ne correspond au filtre."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Rien ici pour l’instant."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Rien dans le catalogue ne correspond à « {typed} »."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12144,6 +12168,10 @@ msgstr "Politique"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Politique introuvable"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Populaires dans le catalogue"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13682,6 +13710,10 @@ msgstr "Rechercher des personnes et des équipes"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Rechercher dans le catalogue"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -18263,6 +18295,10 @@ msgstr "Si des personnes de Grasp peuvent se connecter pour aider sur cet espace
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Quels outils d’IA les gens utilisent-ils ?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Quelle app Grasp doit-il commencer à suivre ? Grasp connaît une app dès qu’elle est connectée : une app du catalogue s’ouvre donc là où vous la connectez."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
