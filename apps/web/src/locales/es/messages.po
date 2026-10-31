@@ -799,6 +799,7 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} de {workflows} flujos de trabajo conocidos"
 
+#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -11387,6 +11388,7 @@ msgctxt "column: a link that opens the rule"
 msgid "Open"
 msgstr "Abrir"
 
+#: src/workflows/independent-workflows.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
 msgid "Open"

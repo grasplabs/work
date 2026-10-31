@@ -7,7 +7,7 @@ import {
   PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
   ActivityIcon,
   BrainIcon,
@@ -334,6 +334,12 @@ export const BrainNav = ({
   const [revealed, setRevealed] = useState<string | undefined>();
   const company = brain.notes.find((candidate) => candidate.kind === "company");
   const activityLabel = t({ message: "Activity", context: "the brain's log" });
+  // Which of the brain's own pages is open, for the folded rail: the open
+  // panel's links mark themselves, a rail button is told.
+  const matchRoute = useMatchRoute();
+  const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
+  const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
+  const onBrain = Boolean(matchRoute({ to: "/brain" }));
   let here = new Set<string>();
   if (note) {
     here = new Set(wayTo(note, atlas));
@@ -394,19 +400,21 @@ export const BrainNav = ({
           </PageSidebarRailButton>
         ) : null}
         <PageSidebarRailButton
-          active={!note && shownRegion === undefined}
+          active={onBrain && shownRegion === undefined}
           label={t`Brain`}
           render={<Link activeOptions={{ exact: true }} to="/brain" />}
         >
           <BrainIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
+          active={onActivity}
           label={activityLabel}
           render={<Link to="/brain/activity" />}
         >
           <ActivityIcon />
         </PageSidebarRailButton>
         <PageSidebarRailButton
+          active={onMemory}
           label={t`Memory`}
           render={<Link to="/brain/memory" />}
         >

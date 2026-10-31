@@ -87,6 +87,35 @@ test("a person opens a region from the brain's navigation, and a note in it", as
   ).toContainText("Board");
 });
 
+test("a person folds the brain's navigation to a rail, which marks the page they are on", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("brain");
+  const page = await pageOf(member);
+  await page.goto("/brain");
+
+  const nav = page.getByRole("complementary", { name: "The brain" });
+  await nav
+    .getByRole("button", { name: "Fold the navigation" })
+    .click(brainRead);
+  const here = (name: string) => nav.getByRole("link", { name, exact: true });
+
+  // On the brain itself, the brain is where you are.
+  await expect(here("Brain")).toHaveAttribute("aria-current", "page");
+
+  // On its log, the log is, and the brain no longer.
+  await here("Activity").click();
+  await expect(page).toHaveURL(/\/brain\/activity$/u);
+  await expect(here("Activity")).toHaveAttribute("aria-current", "page");
+  await expect(here("Brain")).not.toHaveAttribute("aria-current", "page");
+
+  // And on the memory records, they are.
+  await here("Memory").click();
+  await expect(page).toHaveURL(/\/brain\/memory$/u);
+  await expect(here("Memory")).toHaveAttribute("aria-current", "page");
+  await expect(here("Activity")).not.toHaveAttribute("aria-current", "page");
+});
+
 test("a person asks the brain on its atlas, in a chat of its own apart from the one the dock carries elsewhere", async ({
   pageOf,
 }) => {
