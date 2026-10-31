@@ -32,8 +32,9 @@ import { Await, Link } from "@tanstack/react-router";
 import { ArrowDownUpIcon, InboxIcon, ListFilterIcon } from "lucide-react";
 import { useState } from "react";
 
-import { actorOf, typeLabels } from "../activity/audit-log.tsx";
+import { actorOf } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
+import { typeLabels } from "../activity/type-labels.ts";
 import type { LatestActivity } from "../dashboard/activity.tsx";
 import type { Directory } from "../directory.ts";
 import { formatDateTime, formatDayMonth } from "../format.ts";

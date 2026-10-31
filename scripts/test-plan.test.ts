@@ -20,7 +20,9 @@ import {
   affectedProjects,
   packageOf,
   packagesSelected,
+  filesImporting,
   reachSince,
+  reachedPackages,
 } from "./test-plan.ts";
 
 const root = "/repo";
@@ -203,5 +205,170 @@ describe("following a pull request's changes from its base", () => {
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+});
+
+describe("leaving out what no Vitest test sees", () => {
+  it("sets journey files apart from the root's own, for the tests that import them", () => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      mkdirSync(path.join(repo, "e2e"));
+      change("e2e/apps.e2e.ts");
+      change("playwright.config.ts");
+      const reach = reachSince(base, repo);
+
+      expect(reach.all).toBeFalsy();
+      expect(reach.all ? ["all"] : [...reach.affected]).toStrictEqual([]);
+      expect(reach.all ? [] : relativeTo(repo, reach.journeys)).toStrictEqual([
+        "e2e/apps.e2e.ts",
+        "playwright.config.ts",
+      ]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A repository shaped like this one where it matters: the Playwright
+   * config imports a journey helper, and a script its test imports reads
+   * the config, as scripts/e2e-parts.ts does.
+   */
+  const importing = (changed: string, { deleted = false } = {}): string[] => {
+    const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "importers-")));
+    try {
+      const sources: Record<string, string> = {
+        "e2e/stack.ts": "export const port = 1;\n",
+        "e2e/apps.e2e.ts": 'import { port } from "./stack.ts";\n',
+        "playwright.config.ts":
+          'import { port } from "./e2e/stack.ts";\nexport const journeys = port;\n',
+        "scripts/parts.ts":
+          'import { journeys } from "../playwright.config.ts";\nexport const parts = journeys;\n',
+        // A `.js` specifier for its TypeScript source.
+        "scripts/parts.test.ts": 'import { parts } from "./parts.js";\n',
+        "scripts/other.test.ts": "export const other = 1;\n",
+        // A re-export, with no extension, out of a package.
+        "packages/lib/src/helper.ts":
+          'export { port } from "../../../e2e/stack";\n',
+        // An import by an expression, naming the helper.
+        "scripts/loose.test.ts":
+          'const name = "../e2e/stack.ts";\nawait import(name);\n',
+      };
+      for (const [file, content] of Object.entries(sources)) {
+        mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+        writeFileSync(path.join(repo, file), content);
+      }
+      execFileSync("git", ["init", "--quiet"], { cwd: repo });
+      if (deleted) {
+        rmSync(path.join(repo, changed));
+      }
+      return relativeTo(repo, filesImporting([path.join(repo, changed)], repo));
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  };
+
+  it("reaches the tests that import playwright.config.ts through a script", () => {
+    expect(importing("playwright.config.ts")).toStrictEqual([
+      "playwright.config.ts",
+      "scripts/parts.test.ts",
+      "scripts/parts.ts",
+    ]);
+  });
+
+  it("reaches the scripts project's test when a helper the config imports is deleted", () => {
+    expect(
+      importing("e2e/stack.ts", { deleted: true }).filter((file) =>
+        file.startsWith("scripts/")
+      )
+    ).toContain("scripts/parts.test.ts");
+  });
+
+  it("reaches no test when only a journey changes", () => {
+    expect(importing("e2e/apps.e2e.ts")).toStrictEqual(["e2e/apps.e2e.ts"]);
+  });
+
+  it("reaches every importer of a helper, a package's file and an import it can't read included", () => {
+    expect(importing("e2e/stack.ts")).toStrictEqual([
+      "e2e/apps.e2e.ts",
+      "e2e/stack.ts",
+      "packages/lib/src/helper.ts",
+      "playwright.config.ts",
+      "scripts/loose.test.ts",
+      "scripts/parts.test.ts",
+      "scripts/parts.ts",
+    ]);
+  });
+
+  it("doesn't reach a package through a dependency on another's build alone", () => {
+    const { repo, base, change } = workspaceWithBase();
+    try {
+      change("packages/lib/index.ts");
+      const reach = reachSince(base, repo, new Map([["app", ["lib"]]]));
+
+      expect(reach.all ? [] : relativeTo(repo, reach.affected)).toStrictEqual([
+        "packages/lib",
+      ]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+/** The workspace's shape where it matters: core uses ui, and web's build. */
+const workspace = [
+  { name: "grasp-os", dir: root, dependsOn: ["/repo/packages/shared"] },
+  { name: "@grasp-os/shared", dir: "/repo/packages/shared", dependsOn: [] },
+  {
+    name: "@grasp-os/ui",
+    dir: "/repo/packages/ui",
+    dependsOn: ["/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/web",
+    dir: "/repo/apps/web",
+    dependsOn: ["/repo/packages/ui", "/repo/packages/shared"],
+  },
+  {
+    name: "@grasp-os/core",
+    dir: "/repo/apps/core",
+    dependsOn: ["/repo/apps/web", "/repo/packages/ui"],
+  },
+  {
+    name: "@grasp-os/admin",
+    dir: "/repo/apps/admin",
+    dependsOn: ["/repo/packages/ui"],
+  },
+];
+
+describe("following a change through Grasp's workspace", () => {
+  it("reaches every package that depends on a changed one, directly or not", () => {
+    expect(reachedPackages(workspace, ["/repo/packages/shared"])).toStrictEqual(
+      new Set([
+        "/repo/packages/shared",
+        root,
+        "/repo/packages/ui",
+        "/repo/apps/web",
+        "/repo/apps/core",
+        "/repo/apps/admin",
+      ])
+    );
+  });
+
+  it("doesn't reach core from web, whose build is all core takes", () => {
+    expect(reachedPackages(workspace, ["/repo/apps/web"])).toStrictEqual(
+      new Set(["/repo/apps/web"])
+    );
+  });
+
+  it("still reaches core from what web and core both use", () => {
+    expect(reachedPackages(workspace, ["/repo/packages/ui"])).toContain(
+      "/repo/apps/core"
+    );
+  });
+
+  it("follows every dependency when none is build-only", () => {
+    expect(
+      reachedPackages(workspace, ["/repo/apps/web"], new Map())
+    ).toStrictEqual(new Set(["/repo/apps/web", "/repo/apps/core"]));
   });
 });
