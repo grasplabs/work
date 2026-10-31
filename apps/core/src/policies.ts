@@ -479,6 +479,10 @@ const setRuleStatus = async (
           eq(policyRules.id, id),
           // Only when it differs: the same turn twice records one change.
           ne(policyRules.status, status),
+          // Only while the effect is the one read, so the event records
+          // the effect the rule has as it turns, never one another admin
+          // replaced meanwhile: then it is refused as changed meanwhile.
+          eq(policyRules.effect, before.effect),
           stillAdmin(by)
         )
       ),
@@ -490,7 +494,8 @@ const setRuleStatus = async (
     }),
   ]);
   const found = (await readRule(env, id)) ?? notFound();
-  if (written.meta.changes === 0 && found.status !== status) {
+  const unchanged = found.status === status && found.effect === before.effect;
+  if (written.meta.changes === 0 && !unchanged) {
     return await unwritten(env, by, () => {
       throw policyErrors.create("policy.conflict");
     });

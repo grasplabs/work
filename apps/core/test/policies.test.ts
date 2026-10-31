@@ -594,6 +594,15 @@ describe("the company's policies", () => {
         ...outsideEu,
         status: "active",
       });
+      // The effect changes; a status turned after it records the effect
+      // the rule has as it turns, and the same turn again nothing.
+      await admin.api.policies.updateRule(ruleId, {
+        ...outsideEu,
+        effect: "flag",
+        status: "active",
+      });
+      await admin.api.policies.setRuleStatus(ruleId, "paused");
+      await admin.api.policies.setRuleStatus(ruleId, "paused");
       await admin.api.policies.grantException({
         ruleId,
         appId: "app-chatgpt",
@@ -645,6 +654,18 @@ describe("the company's policies", () => {
         by: actor,
         target: { type: "policy_rule", id: ruleId },
         detail: { effect: "block", status: "active" },
+      },
+      {
+        action: "policy.rule.updated",
+        by: actor,
+        target: { type: "policy_rule", id: ruleId },
+        detail: { effect: "flag", status: "active" },
+      },
+      {
+        action: "policy.rule.updated",
+        by: actor,
+        target: { type: "policy_rule", id: ruleId },
+        detail: { effect: "flag", status: "paused" },
       },
       {
         action: "policy.exception.granted",
