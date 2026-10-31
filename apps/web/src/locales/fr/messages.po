@@ -17062,6 +17062,10 @@ msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables d
 msgid "Up to {upTo} minutes"
 msgstr "Jusqu’à {upTo} minutes"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Updated {when}"
+msgstr "Mis à jour {when}"
+
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
 msgstr "A mis à jour Grasp"
