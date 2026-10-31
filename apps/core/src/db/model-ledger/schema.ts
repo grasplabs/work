@@ -24,6 +24,10 @@ const scopes = [
   "binding",
   "binding_day",
   "person",
+  // Grasp's own AI features on Grasp's key (models.ts, `platformScopes`):
+  // counted, never limited, and apart from every scope of the
+  // organization's own.
+  "platform",
 ] as const;
 
 /**
@@ -123,6 +127,12 @@ export const requests = sqliteTable(
     region: text(),
     /** Whose key it went with: `organization` or `platform`; null without one. */
     credential: text(),
+    /**
+     * Which of Grasp's own AI features it was for, on Grasp's key
+     * (@grasp-os/shared/platform-ai): `conversion`, `transcription` or
+     * `speech`; null for any other request.
+     */
+    feature: text(),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -136,6 +146,9 @@ export const requests = sqliteTable(
     index("requests_settled_at").on(table.settledAt),
     // The leases held: requests in flight, by when they end.
     index("requests_leases").on(table.state, table.leaseEndsAt),
+    // Grasp's own features' requests, month by month: what the admin's
+    // spend overview sums (`platformSpend`), never a scan of them all.
+    index("requests_credential_period").on(table.credential, table.period),
   ]
 );
 

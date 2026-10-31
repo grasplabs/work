@@ -14,9 +14,10 @@ import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome } from "./sign-in.ts";
 
 // Speech through the model gateway: Grasp's own speech feature
-// (@grasp-os/shared/platform-ai), ElevenLabs', says a line, judged by the
-// deployment's rules, charged per character against its budgets and
-// audited like any model call, through connect with Grasp's own key.
+// (@grasp-os/shared/platform-ai), ElevenLabs's, says a line, judged by
+// the deployment's rules, charged per character to Grasp's own key (never
+// the organization's budgets, which limit its own keys only) and audited
+// like any model call, through connect with Grasp's own key.
 // ElevenLabs is the outside system: a fake behind connect's fetch
 // (test/ai-providers-fake.ts), which says each character in 25 ms.
 // Connect, the rules, the ledger and the audit log are real.
@@ -113,6 +114,16 @@ const spentBy = async (month: string, userId: string) => {
   );
 };
 
+/**
+ * What Grasp's own key spent and holds in `month`: a line is charged
+ * there, never against the organization's budgets.
+ */
+const graspSpent = async (month: string) => {
+  const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
+  const [row] = spent.platform ?? [];
+  return row ?? { spentMicros: 0, reservedMicros: 0 };
+};
+
 /** A request's body, read as JSON. */
 const jsonOf = (body: string): unknown => JSON.parse(body);
 
@@ -181,7 +192,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await expect(sentWith(line)).resolves.toMatchObject([
       { body: { model_id: "eleven_v4_turbo" } },
     ]);
-    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+    await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: lineMicrosOf(line.length) / 2,
     });
   });
@@ -202,7 +213,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         })
       )
     ).resolves.toBe("model.failed");
-    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+    await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: 0,
       reservedMicros: 0,
     });
@@ -251,7 +262,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the line's characters, and audits it as a platform call", async () => {
+  it("charges the line's characters to Grasp's own key, never to the organization's budgets, and audits it as a platform call", async () => {
     const { rulesEnv, month } = withRules({
       budgets: { user: { limit: 10 } },
     });
@@ -266,8 +277,12 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       model: speechModel,
     });
 
-    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+    await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: lineMicros,
+      reservedMicros: 0,
+    });
+    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+      spentMicros: 0,
       reservedMicros: 0,
     });
     const [event] = await auditedFor(person.userId, 1);
@@ -291,24 +306,28 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     expect(JSON.stringify(event)).not.toContain(line);
   });
 
-  it("refuses a line its budget has no room for, sending nothing", async () => {
+  it("says a line however little room the organization's budgets have: they limit its own keys, not Grasp's", async () => {
     // A cent: less than a line of 600 characters costs at Eleven v4 (4.8¢).
-    const { rulesEnv } = withRules({
-      budgets: { user: { limit: 0.01 } },
+    const { rulesEnv, month } = withRules({
+      budgets: { deployment: { limit: 0.01 }, user: { limit: 0.01 } },
     });
     const person = newPerson();
     const line = `${newLine()} ${"a".repeat(maxSpeechChars - 19)}`;
 
-    await expect(
-      outcome(
-        stephen(rulesEnv, person).speak({ text: line, voice, language: "en" })
-      )
-    ).resolves.toBe("model.over_budget");
-    await expect(carrying(line)).resolves.toStrictEqual([]);
+    await stephen(rulesEnv, person).speak({
+      text: line,
+      voice,
+      language: "en",
+    });
+
+    await expect(carrying(line)).resolves.toHaveLength(1);
+    await expect(graspSpent(month)).resolves.toMatchObject({
+      spentMicros: lineMicrosOf(line.length),
+    });
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
-      action: "model.refused",
-      detail: { reason: "model.over_budget", purpose: "onboarding.speech" },
+      action: "model.call",
+      detail: { outcome: "answered", purpose: "onboarding.speech" },
     });
   });
 
@@ -432,7 +451,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
     expect(speech.words).toHaveLength(3);
     await expect(carrying(line)).resolves.toHaveLength(2);
-    await expect(spentBy(month, person.userId)).resolves.toMatchObject({
+    await expect(graspSpent(month)).resolves.toMatchObject({
       spentMicros: lineMicrosOf(line.length),
       reservedMicros: 0,
     });

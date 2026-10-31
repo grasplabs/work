@@ -34,6 +34,10 @@ import {
   aiStatusReportPurpose,
   aiStatusReportRequestSchema,
 } from "@grasp-os/shared/ai-status-report";
+import type {
+  AiStatusReport,
+  PlatformSpendRow,
+} from "@grasp-os/shared/ai-status-report";
 import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { gatewayScriptOf } from "@grasp-os/shared/connect-gateway";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -388,6 +392,38 @@ const answerSummary = async (
   return Response.json(account.onboarding ?? noOnboarding);
 };
 
+/** The UTC month `monthsBack` before this one, such as `2026-09`. */
+export const monthBack = (monthsBack: number): string => {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1)
+  )
+    .toISOString()
+    .slice(0, 7);
+};
+
+/**
+ * A core's AI status report: `providers`, and what Grasp's own features
+ * cost on its keys this month and last (none unless given), or no spend
+ * at all (`unreported`), as a core on a release before it was reported
+ * answers.
+ */
+export const aiStatusOf = (
+  providers: AiStatusReport["providers"] = [],
+  spend:
+    | { thisMonth?: PlatformSpendRow[]; lastMonth?: PlatformSpendRow[] }
+    | "unreported" = {}
+): AiStatusReport =>
+  spend === "unreported"
+    ? { providers }
+    : {
+        providers,
+        platformSpend: {
+          thisMonth: { period: monthBack(0), rows: spend.thisMonth ?? [] },
+          lastMonth: { period: monthBack(1), rows: spend.lastMonth ?? [] },
+        },
+      };
+
 /**
  * What a client's core answers the admin's AI status request with, as
  * core does (core's src/ai-status-report.ts): the account's report once
@@ -417,7 +453,7 @@ const answerAiStatus = async (
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  return Response.json(account.ai ?? { providers: [] });
+  return Response.json(account.ai ?? aiStatusOf());
 };
 
 /** The `QUOTA_LIMITS` a version was deployed with, if one core takes. */

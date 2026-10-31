@@ -21,7 +21,7 @@ import {
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { keptLine } from "../src/speech-cache.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformOpenAiKey } from "./connect-providers.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -891,9 +891,9 @@ const writers: Writer[] = [
       const told = fact("l1", "work", `Tickets arrive in ${word}.`);
       const link = await openLink(ids.lea);
       await agree(ids.lea, [told], link);
-      // OpenAI says the line once the purge has landed meanwhile.
+      // ElevenLabs says the line once the purge has landed meanwhile.
       const held = `line-${unique()}`;
-      await planReplies(platformOpenAiKey, [{ release: held }]);
+      await planReplies(platformElevenLabsKey, [{ release: held }]);
       const saying = routed(speechPath, {
         method: "POST",
         headers: { "content-type": "application/json" },

@@ -1,12 +1,14 @@
 /**
  * Platform → AI's server functions (src/platform-ai.ts): reading the
  * platform's AI settings, and choosing them, as the staff member Access
- * vouches for.
+ * vouches for; and what the features cost Grasp in all
+ * (src/clients/platform-spend.ts).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { platformSpend } from "./clients/platform-spend.ts";
 import { adminDatabase } from "./db/act.ts";
 import { platformKeyProviders } from "./deploy/context.ts";
 import { platformAiView, setPlatformAi } from "./platform-ai.ts";
@@ -28,3 +30,8 @@ export const setPlatformAiFn = createServerFn({ method: "POST" })
         await platformKeyProviders(env)
       )
   );
+
+/** What Grasp's own AI features cost in all, read from every active organization's core now. */
+export const fetchPlatformSpend = createServerFn({ method: "GET" }).handler(
+  async () => await platformSpend(env)
+);

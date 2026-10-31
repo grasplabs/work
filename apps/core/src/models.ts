@@ -59,6 +59,7 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
+import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
@@ -87,6 +88,7 @@ import {
   hasBudget,
   limitedPersonOf,
   lineageModelRequests,
+  platformScopes,
   scopesFor,
 } from "./model-budgets.ts";
 import { catalogWindowOf, parseModelRef } from "./model-catalog.ts";
@@ -2114,6 +2116,20 @@ const workflowRunOf = ({
 const platformOf = ({ work }: Session): { platform: string } | object =>
   work !== undefined && "platform" in work ? { platform: work.platform } : {};
 
+/**
+ * Which of Grasp's own features a text call on Grasp's key is for, as the
+ * ledger records it, so what each costs Grasp is told apart: converting a
+ * document is the only one today.
+ */
+const platformFeatureOf = ({
+  work,
+}: Session): { feature: PlatformAiFeature } | object =>
+  work !== undefined &&
+  "platform" in work &&
+  work.platform === "document_conversion"
+    ? { feature: "conversion" }
+    : {};
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -2515,7 +2531,9 @@ const scopesNowOf = (
   env: Env,
   call: Session,
   place: string,
-  scopesOn: (day: string, lineageRequests: number) => LedgerScope[]
+  scopesOn:
+    | ((day: string, lineageRequests: number) => LedgerScope[])
+    | "platform"
 ): Route["scopesNow"] => {
   const { subject, resource } = shareIdentity(call);
   return async () => {
@@ -2534,13 +2552,20 @@ const scopesNowOf = (
     // The person's teams as core's records have them now, so a person
     // moved between teams is held to the right limit from their next
     // request.
-    const person = await limitedPersonOf(env, budgetPersonOf(call));
+    const lineageRequests =
+      lineage?.limits.lineageModelRequests ?? lineageModelRequests;
+    // A call on Grasp's own key counts against none of the organization's
+    // budgets, a person's limit included (`platformScopes`).
+    const person =
+      scopesOn === "platform"
+        ? undefined
+        : await limitedPersonOf(env, budgetPersonOf(call));
     return {
       period: month,
-      scopes: scopesOn(
-        day,
-        lineage?.limits.lineageModelRequests ?? lineageModelRequests
-      ),
+      scopes:
+        scopesOn === "platform"
+          ? platformScopes(call, lineageRequests)
+          : scopesOn(day, lineageRequests),
       // The generation of the policy its shares come from, a fallback's
       // too (the last read's, or the platform's own, 0), so the ledger
       // refuses shares from a policy older than one it saw
@@ -2602,6 +2627,7 @@ const connectRouting = async (
       provider: target.provider,
       region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
+      ...(target.credential === "platform" ? platformFeatureOf(call) : {}),
     },
     fallbacks,
   };
@@ -2793,7 +2819,13 @@ const admit = async (
     place,
     disclose,
     notes: Promise.resolve(),
-    scopesNow: scopesNowOf(env, call, place, scopesOn),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(
+      env,
+      call,
+      place,
+      routing.way.credential === "platform" ? "platform" : scopesOn
+    ),
     perRequest:
       requestMicros === undefined
         ? undefined
@@ -3468,12 +3500,14 @@ interface SpeechRecord {
 /** The way a platform voice feature goes, as the ledger and the audit log record it. */
 const platformWay = (
   provider: ConnectTarget["provider"],
-  platform: PlatformRoute
+  platform: PlatformRoute,
+  feature: PlatformAiFeature
 ): LedgerRoute => ({
   transport: "connect",
   provider,
   region: platform.region,
   credential: "platform",
+  feature,
 });
 
 /** A line's audit entry: a `model.call`, as any model call's. */
@@ -3639,7 +3673,7 @@ const admitSpeech = async (
     ref,
     judged: verdict.judged,
     price,
-    way: platformWay(ref.provider, target.platform),
+    way: platformWay(ref.provider, target.platform, "speech"),
     send: async (id, limit) =>
       await connectRequest(
         env,
@@ -3660,9 +3694,8 @@ const admitSpeech = async (
     // sent: what the ledger reserves is what it charges.
     bound: () => ({ inputTokens: characters, outputTokens: 0 }),
     perRequest: undefined,
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,
@@ -4087,13 +4120,12 @@ const listenThrough = async (
     env,
     call,
     price,
-    way: platformWay(ref.provider, target.platform),
+    way: platformWay(ref.provider, target.platform, "transcription"),
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
-    scopesNow: scopesNowOf(env, call, place, (_day, lineageRequests) =>
-      scopesFor(rules.budgets, call, lineageRequests)
-    ),
+    // Grasp's own key: none of the organization's budgets (`platformScopes`).
+    scopesNow: scopesNowOf(env, call, place, "platform"),
     disclose: shareIdentity(call).disclose,
     notes: Promise.resolve(),
     place,
