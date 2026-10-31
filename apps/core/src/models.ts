@@ -23,6 +23,8 @@ import {
 } from "@earendil-works/pi-ai/models";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import type { AiProviderRoutes } from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -72,6 +74,11 @@ import type { Speech } from "@grasp-os/shared/voice";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import {
+  aiRoutesOf,
+  chosenModels,
+  readModelChoice,
+} from "./ai-model-choice.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   maxAskAgainSeconds,
@@ -98,6 +105,7 @@ import type { ModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   Admitted as LedgerAdmitted,
+  LedgerRoute,
   LedgerScope,
   LedgerScopeName,
   LimitedPerson,
@@ -121,10 +129,13 @@ import {
   gatewayHeaders,
   withRequestId,
 } from "./model-transport-cloudflare.ts";
-import { streamRoute } from "./model-transport.ts";
+import { connectTransport } from "./model-transport-connect.ts";
+import type { ConnectTarget } from "./model-transport-connect.ts";
+import { failureOfResponse, streamRoute } from "./model-transport.ts";
 import type {
   ModelTransport,
   RouteMetadata,
+  TransportFailure,
   TransportRoute,
 } from "./model-transport.ts";
 import {
@@ -140,10 +151,18 @@ import { askAgainMs } from "./workflows/admission.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here,
-// and from here through the deployment's model transport
-// (model-transport.ts), never straight to a provider. Cloudflare AI Gateway
-// over the AI binding is the transport now (model-transport-cloudflare.ts):
-// core holds no provider key. Every request is audited as metadata only:
+// and from here through a model transport (model-transport.ts), never
+// straight to a provider. Once the organization connected an AI provider
+// of its own (ai-model-choice.ts), its calls go to the provider's own API
+// through connect, which holds the key (model-transport-connect.ts), and
+// may use only the models its admins chose: its default, then its
+// fallbacks, tried in turn when a provider refuses a call before anything
+// could be billed. Platform features may go the same way with Grasp's own
+// key (`models(env).platformCall`). Until it connected one, a deployment
+// with Cloudflare AI Gateway over the AI binding still reaches its
+// allowlist's models there (model-transport-cloudflare.ts), and one
+// without fails every call as `model.no_provider`. Either way core holds
+// no provider key. Every request is audited as metadata only:
 // who or what asked, why, the model, tokens and cost, never the prompt or
 // the answer. The event goes through the audit outbox, so a request that
 // was answered (and paid for) is recorded even when the audit log can't
@@ -287,7 +306,7 @@ const modelGatewayConfig = (env: ModelsEnv): ModelGatewayConfig | undefined => {
  * The deployment's rules. `undefined` for rules that don't parse: every
  * call then fails closed.
  */
-const modelRules = (env: ModelsEnv): ModelRules | undefined => {
+export const modelRules = (env: ModelsEnv): ModelRules | undefined => {
   const parsed = modelRulesConfigSchema.safeParse(gatewayVar(env));
   if (!parsed.success) {
     log.error("model.rules_invalid", {
@@ -299,8 +318,11 @@ const modelRules = (env: ModelsEnv): ModelRules | undefined => {
 };
 
 /**
- * The allowlist and the rules as they apply now, for admins to read
- * (models-rpc.ts): the allowed text models, none while the config doesn't
+ * The deployment's allowlist and rules, before the organization's own
+ * providers: what {@link modelSettings} starts from, and the voices. A
+ * feature never picks a text model from it; it picks through
+ * `modelSettings`, which the gateway checks every call against. The
+ * allowed text models, none while the config doesn't
  * parse, and apart from them the allowed voice models, which only speech
  * takes, so nothing that picks a model for text (a chat, a binding, the
  * kickoff's reading) is offered one; and the rules, `undefined` when they
@@ -324,6 +346,35 @@ export const gatewaySettings = (
     voices: allowed.filter((ref) => parseVoiceRef(ref) !== undefined),
     roles: config?.roles ?? {},
     rules: modelRules(env),
+  };
+};
+
+/**
+ * The models the organization's calls may use now, for whatever picks one
+ * (a role's model, a chat's choices, a binding's approval): once it
+ * connected an AI provider of its own, the models its admins chose, every
+ * role played by its default (none until they chose); until then the
+ * deployment's allowlist (`gatewaySettings`). The rules are the
+ * deployment's either way; voices are only ever the allowlist's.
+ */
+export const modelSettings = async (
+  env: ModelsEnv
+): Promise<ReturnType<typeof gatewaySettings>> => {
+  const settings = gatewaySettings(env);
+  const routes = await aiRoutesOf(env);
+  if (routes.organization.length === 0) {
+    return settings;
+  }
+  const chosen = chosenModels(routes, await readModelChoice(env));
+  const [defaultModel] = chosen;
+  return {
+    ...settings,
+    gateway: undefined,
+    models: chosen,
+    roles:
+      defaultModel === undefined
+        ? {}
+        : { quick: defaultModel, careful: defaultModel },
   };
 };
 
@@ -516,6 +567,13 @@ const sessionShape = {
        * for. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("stephen_requests") }),
+      /**
+       * An admin's test of an AI provider the organization connected
+       * (ai-providers.ts): one fixed line of no one's data, judged as
+       * onboarding's is all the same, made for the admin, on their budget.
+       * Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("provider_test") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
@@ -816,6 +874,8 @@ interface Admitted {
   call: Session;
   ref: ModelRef;
   judged: Judged;
+  /** The way it goes, as the ledger and the audit log record it. */
+  way: LedgerRoute;
 }
 
 /** An admitted request's way to the model, through the deployment's transport. */
@@ -825,6 +885,23 @@ interface Route extends Admitted {
   endpoint: TransportRoute;
   /** Whether the transport's provider SDKs retry a refused request themselves. */
   sdkRetries: boolean;
+  /**
+   * How the call was let through (`Via`), which a fallback's admission
+   * keeps.
+   */
+  via: Via;
+  /**
+   * The organization's models to try, in order, should the provider refuse
+   * this one before anything could be billed (`fallbackOf`); none for a
+   * call that may not fall back.
+   */
+  fallbacks: readonly string[];
+  /**
+   * Whether a provider request of this call may already have been billed
+   * (an answer came, or a request's fate is unknown): from then on the
+   * call never falls back (`fallbackOf`). Set as its requests end.
+   */
+  billed?: boolean;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
   /**
@@ -894,21 +971,22 @@ interface RequestBound {
  * What admitting a provider request takes of its route: a text model's
  * (`Route`), or a voice model's (`speak`).
  */
-type Admitting = Pick<
-  Route,
-  | "env"
-  | "call"
-  | "price"
-  | "perRequest"
-  | "scopesNow"
-  | "disclose"
-  | "beforeSend"
-  | "onQueued"
-  | "notes"
-  | "place"
-  | "bound"
-  | "leaseMs"
->;
+type Admitting = Partial<Pick<Route, "way">> &
+  Pick<
+    Route,
+    | "env"
+    | "call"
+    | "price"
+    | "perRequest"
+    | "scopesNow"
+    | "disclose"
+    | "beforeSend"
+    | "onQueued"
+    | "notes"
+    | "place"
+    | "bound"
+    | "leaseMs"
+  >;
 
 interface Request extends Route {
   /** Ends the call when it takes too long, retries included. */
@@ -945,6 +1023,8 @@ interface GatewayResponse {
    * the last refusal was something else.
    */
   rateLimited: number | undefined;
+  /** How the last provider request failed, if it did (model-transport.ts). */
+  failure: TransportFailure | undefined;
 }
 
 /** A provider request the ledger admitted: its ID, and what it reserved. */
@@ -1484,6 +1564,7 @@ const admitRequest = async (
       ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
       ...(person === undefined ? {} : { person }),
+      ...(route.way === undefined ? {} : { route: route.way }),
     });
     if ("policyBehind" in admitted) {
       if (!retried) {
@@ -1659,6 +1740,31 @@ const admitWaiting = async (
   }
 };
 
+/** The host a fetch is asked for, lowercase; none for a URL that isn't one. */
+const hostOf = (input: Parameters<FetchFunction>[0]): string | undefined => {
+  let href = "";
+  if (typeof input === "string") {
+    href = input;
+  } else {
+    href = input instanceof URL ? input.href : input.url;
+  }
+  return URL.parse(href)?.hostname.toLowerCase();
+};
+
+/** A failure as the ledger notes it for the provider's status. */
+const notedFailure = (
+  failure: TransportFailure
+):
+  | { kind: Exclude<TransportFailure["kind"], "budget">; status?: number }
+  | undefined => {
+  if (failure.kind === "budget") {
+    return undefined;
+  }
+  return failure.status === undefined
+    ? { kind: failure.kind }
+    : { kind: failure.kind, status: failure.status };
+};
+
 /**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
@@ -1669,7 +1775,7 @@ const open = async (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { endpoint } = route;
+  const { endpoint, call } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -1679,6 +1785,7 @@ const open = async (
     pending: undefined,
     settled: [],
     rateLimited: undefined,
+    failure: undefined,
   };
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
@@ -1689,7 +1796,17 @@ const open = async (
   // what a refusal's body says went wrong, which the provider SDKs drop
   // when it isn't in their provider's shape (Workers AI's has no `error`,
   // so OpenAI's SDK reports "400 status code (no body)").
-  const measured: FetchFunction = async (input, init) => {
+  const sendOnce: FetchFunction = async (input, init) => {
+    // Only to the route's own host, whatever asks: a request anywhere
+    // else, after a redirect an SDK took or a base URL gone wrong, is
+    // never admitted or sent (a key's one destination).
+    if (hostOf(input) !== endpoint.host) {
+      log.error("model.route_host_mismatch", {
+        model: call.model,
+        transport: endpoint.transport,
+      });
+      throw new Error("The model request's host isn't its route's");
+    }
     const admitted = await admitWaiting(route, init?.body, { endsAt, signal });
     if ("held" in admitted) {
       response.held = admitted.held;
@@ -1717,11 +1834,20 @@ const open = async (
       response.rateLimited = undefined;
       answered = await endpoint.fetch(
         input,
-        endpoint.tagged(init, admitted.id)
+        endpoint.tagged(init, admitted.id, endsAt)
       );
     } catch (error) {
+      // Not answered at all: down, unless its caller cut it off.
+      const failure: TransportFailure = {
+        kind: "provider_down",
+        status: undefined,
+      };
+      response.failure = signal.aborted ? undefined : failure;
       response.settled.push(
-        await settleAdmitted(route, admitted, { by: "unknown" })
+        await settleAdmitted(route, admitted, {
+          by: "unknown",
+          ...(signal.aborted ? {} : { failure: { kind: failure.kind } }),
+        })
       );
       throw error;
     }
@@ -1731,16 +1857,24 @@ const open = async (
         ? rateLimitedSeconds(answered.headers)
         : undefined;
     if (!answered.ok) {
+      const failure = failureOfResponse(
+        answered.status,
+        response.rateLimited ?? 0
+      );
+      response.failure = failure;
+      const noted = notedFailure(failure);
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
       response.settled.push(
         await settleAdmitted(route, admitted, {
           by: answered.status < 500 ? "refused" : "unknown",
+          ...(noted === undefined ? {} : { failure: noted }),
         })
       );
       response.refusal = refusalOf(await answered.clone().text());
       return answered;
     }
+    response.failure = undefined;
     if (response.pending !== undefined) {
       response.settled.push(
         await settleAdmitted(route, response.pending, { by: "unknown" })
@@ -1749,7 +1883,34 @@ const open = async (
     response.pending = admitted;
     return answered;
   };
-  const { model, call } = route;
+  // Where the transport's SDKs don't retry (`sdkRetries`), the gateway
+  // retries only a rate limit's refusal, which the provider made before
+  // taking anything on, after the wait it asked for, and only while that
+  // wait ends before the call's deadline. Never a server error or a
+  // request that got no answer: those may have been taken on, and billed.
+  // Each retry is admitted by the ledger on its own.
+  const measured: FetchFunction = async (input, init) => {
+    let answered = await sendOnce(input, init);
+    for (
+      let retry = 0;
+      retry < maxRetries &&
+      !route.sdkRetries &&
+      route.providerRetries !== false &&
+      answered.status === 429 &&
+      response.rateLimited !== undefined &&
+      Date.now() + response.rateLimited * 1000 < endsAt;
+      retry += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another, as asked
+      await answered.body?.cancel();
+      // oxlint-disable-next-line no-await-in-loop -- the wait the provider asked for
+      await pause(response.rateLimited * 1000, signal);
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      answered = await sendOnce(input, init);
+    }
+    return answered;
+  };
+  const { model } = route;
   const events = await streamRoute(endpoint, context, {
     fetch: measured,
     maxTokens: answerTokens(call, model),
@@ -2127,7 +2288,7 @@ const bindingOf = ({
     : { binding: binding.alias, bindingApp: binding.app };
 
 const auditEntry = (
-  { call, ref, judged }: Admitted,
+  { call, ref, judged, way }: Admitted,
   recorded: Recorded
 ): AuditEntry => {
   const { logId } = recorded;
@@ -2156,6 +2317,11 @@ const auditEntry = (
       ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
+      // The way it went: its transport, the provider's region, and whose
+      // key (the organization's own, or Grasp's for a platform feature).
+      transport: way.transport,
+      region: way.region,
+      credential: way.credential ?? null,
       // Never an ID so long that the event would be refused.
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -2197,6 +2363,14 @@ const largestRecord: Recorded = {
     charged: Number.MAX_VALUE,
     held: Number.MAX_VALUE,
   },
+};
+
+/** The longest way a call's audit event can name. */
+const largestWay: LedgerRoute = {
+  transport: "x".repeat(64),
+  provider: "x".repeat(32),
+  region: "x".repeat(32),
+  credential: "organization",
 };
 
 /** The most the rules can add to a call's audit event. */
@@ -2534,17 +2708,81 @@ const modelTransport = (
     : undefined;
 
 /**
- * Checks a request against the deployment's config and rules, before
- * anything is sent, and routes it to the model through the deployment's
- * transport.
+ * How a call is let through to a model:
+ * - `chosen`: an ordinary call, to one of the models the organization's
+ *   admins chose, once it connected an AI provider of its own, with its
+ *   key; until then to one of the deployment's allowlist at its AI
+ *   Gateway, where it has one.
+ * - `test`: an admin's test of a provider the organization connected
+ *   (ai-providers.ts): any of that provider's models, with its key.
+ * - `platform`: a platform feature of core's own: any model of a provider
+ *   Grasp has a key for, with Grasp's key (`models(env).platformCall`).
  */
-const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
+type Via =
+  | { kind: "chosen" }
+  | { kind: "test"; provider: ConnectTarget["provider"] }
+  | { kind: "platform" };
+
+const chosenVia: Via = { kind: "chosen" };
+
+/** Where an admitted call goes, and how. */
+interface Routing {
+  endpoint: TransportRoute;
+  sdkRetries: boolean;
+  way: LedgerRoute;
+  /** The models to fall back to, in order (`Route.fallbacks`). */
+  fallbacks: readonly string[];
+}
+
+/**
+ * The route to `ref` through connect, on `target`'s key; refused as not
+ * allowed when the provider's API isn't one a route may speak.
+ */
+const connectRouting = async (
+  env: ModelsEnv,
+  call: Session,
+  ref: ModelRef,
+  target: ConnectTarget,
+  fallbacks: readonly string[]
+): Promise<Routing> => {
+  const transport = connectTransport(env, target);
+  const endpoint = transport.route(ref, metadataOf(call));
+  if (endpoint === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  return {
+    endpoint,
+    sdkRetries: transport.capabilities.sdkRetries,
+    way: {
+      transport: endpoint.transport,
+      provider: target.provider,
+      region: aiProviders[target.provider].region,
+      credential: target.credential,
+    },
+    fallbacks,
+  };
+};
+
+/**
+ * The deployment's AI Gateway route to a model of its allowlist, for an
+ * organization that connected no AI provider of its own. None without an
+ * AI binding (plain workerd, or a deployment without AI Gateway):
+ * `model.no_provider`.
+ */
+const gatewayRouting = async (
+  env: ModelsEnv,
+  call: Session
+): Promise<{ ref: ModelRef; routing: Routing }> => {
   const config = modelGatewayConfig(env);
-  const rules = modelRules(env);
-  const transport =
-    config === undefined ? undefined : modelTransport(env, config);
-  if (config === undefined || rules === undefined || transport === undefined) {
+  if (config === undefined) {
     throw modelErrors.create("model.unconfigured");
+  }
+  const transport = modelTransport(env, config);
+  if (transport === undefined) {
+    return await refuse(env, call, {
+      code: "model.no_provider",
+      because: "provider",
+    });
   }
   const ref = config.models.includes(call.model)
     ? parseModelRef(call.model)
@@ -2554,9 +2792,133 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   if (ref === undefined || endpoint === undefined) {
     return await refuse(env, call, { code: "model.not_allowed" });
   }
+  return {
+    ref,
+    routing: {
+      endpoint,
+      sdkRetries: transport.capabilities.sdkRetries,
+      way: {
+        transport: endpoint.transport,
+        provider: ref.provider,
+        region: ref.provider === "bedrock-eu" ? "eu" : "unknown",
+      },
+      fallbacks: [],
+    },
+  };
+};
+
+/**
+ * Whether `call` may fall back to the organization's other models: only a
+ * call that names no model of its own approval, the organization's own
+ * chats, agents and core's features, which use whichever of its chosen
+ * models answers. A call through an App's model binding, or an App's or a
+ * workflow's own, goes to the model it was approved for, and to no other:
+ * its prompt never reaches a provider its approval didn't name.
+ */
+const mayFallBack = ({ binding, trigger }: Session): boolean =>
+  binding === undefined &&
+  trigger.type !== "app" &&
+  trigger.type !== "workflow";
+
+/** The organization's providers and Grasp's, from connect; failed when unread. */
+const routesOrFailed = async (env: ModelsEnv): Promise<AiProviderRoutes> => {
+  try {
+    return await aiRoutesOf(env);
+  } catch (error) {
+    // Never a guess: without connect's word, no key is known to use.
+    log.error("model.routes_unreadable", errorFields(error));
+    throw modelErrors.create("model.failed");
+  }
+};
+
+/**
+ * Where `call` goes, as `via` lets it through (`Via`), or its refusal,
+ * audited: a model of a provider with no key for it is never routed.
+ */
+const routingOf = async (
+  env: ModelsEnv,
+  call: Session,
+  via: Via
+): Promise<{ ref: ModelRef; routing: Routing }> => {
+  const routes = await routesOrFailed(env);
+  const ref = parseModelRef(call.model);
+  const provider = aiProviderIdSchema.safeParse(ref?.provider).data;
+  if (via.kind === "platform") {
+    if (
+      ref === undefined ||
+      provider === undefined ||
+      !routes.platform.includes(provider)
+    ) {
+      return await refuse(env, call, {
+        code: "model.not_allowed",
+        because: "platform",
+      });
+    }
+    const target = { credential: "platform", provider, baseUrl: null } as const;
+    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+  }
+  const connected = routes.organization.find(
+    (route) => route.provider === provider
+  );
+  if (via.kind === "test") {
+    if (
+      ref === undefined ||
+      connected === undefined ||
+      connected.provider !== via.provider
+    ) {
+      return await refuse(env, call, { code: "model.not_allowed" });
+    }
+    const target = { credential: "organization" as const, ...connected };
+    return { ref, routing: await connectRouting(env, call, ref, target, []) };
+  }
+  if (routes.organization.length === 0) {
+    return await gatewayRouting(env, call);
+  }
+  const chosen = chosenModels(routes, await readModelChoice(env));
+  if (chosen.length === 0) {
+    return await refuse(env, call, {
+      code: "model.no_provider",
+      because: "model",
+    });
+  }
+  const at = chosen.indexOf(call.model);
+  if (at === -1 || ref === undefined || connected === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  const target = { credential: "organization" as const, ...connected };
+  return {
+    ref,
+    routing: await connectRouting(
+      env,
+      call,
+      ref,
+      target,
+      mayFallBack(call) ? chosen.slice(at + 1) : []
+    ),
+  };
+};
+
+/**
+ * Checks a request against the deployment's rules and the organization's
+ * providers, before anything is sent, and routes it to the model.
+ */
+const admit = async (
+  env: ModelsEnv,
+  call: Session,
+  via: Via = chosenVia
+): Promise<Route> => {
+  const rules = modelRules(env);
+  if (rules === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  const { ref, routing } = await routingOf(env, call, via);
+  const { endpoint } = routing;
   try {
     createAuditEvent(
-      auditEntry({ call, ref, judged: largestJudged }, largestRecord),
+      auditEntry(
+        { call, ref, judged: largestJudged, way: largestWay },
+        largestRecord
+      ),
       "core"
     );
   } catch {
@@ -2606,9 +2968,12 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     call,
     ref,
     judged: verdict.judged,
+    way: routing.way,
     model,
     endpoint,
-    sdkRetries: transport.capabilities.sdkRetries,
+    sdkRetries: routing.sdkRetries,
+    via,
+    fallbacks: routing.fallbacks,
     bound: (body) => textBound(call, model, body),
     price,
     place,
@@ -2621,6 +2986,146 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
         : { limitMicros: requestMicros, heldMicros: 0 },
     env,
   };
+};
+
+/**
+ * Whether any provider request `response` covers may have been billed: one
+ * whose answer streams, or one settled at a charge or of unknown fate.
+ * Refusals and requests never sent can't have been.
+ */
+const mayHaveBilled = ({ pending, settled }: GatewayResponse): boolean =>
+  pending !== undefined ||
+  settled.some(
+    ({ settled: state }) =>
+      state?.state === "unknown" ||
+      state?.state === "quarantined" ||
+      (state?.state === "settled" && state.chargedMicros > 0)
+  );
+
+/**
+ * The route of the organization's next model for a call the provider
+ * refused (`Route.fallbacks`), admitted afresh by the rules, or none:
+ * only once the provider refused it before anything could be billed (its
+ * credentials, or a rate limit its retries didn't outlast), never after a
+ * server error, no answer or an answer begun, never past its deadline or
+ * once its caller cancelled it, never once a request of the call may have
+ * been billed, never for a call that allows one provider request only
+ * (`providerRetries: false`), and never for a call bound to the model it
+ * was approved for (`mayFallBack`). A fallback model the rules refuse is
+ * audited as refused, and the call fails as the first did.
+ */
+const fallbackOf = async (
+  env: ModelsEnv,
+  route: Route,
+  response: GatewayResponse,
+  stopped: Stopped | undefined
+): Promise<Route | undefined> => {
+  const { failure } = response;
+  const [next] = route.fallbacks;
+  if (
+    next === undefined ||
+    // A caller that allows no request beyond its first (a workflow step:
+    // one step, one provider request) gets no other model either.
+    route.providerRetries === false ||
+    !mayFallBack(route.call) ||
+    route.billed === true ||
+    mayHaveBilled(response) ||
+    failure === undefined ||
+    stopped !== undefined ||
+    response.held !== undefined ||
+    response.pending !== undefined ||
+    (failure.kind !== "auth" && failure.kind !== "rate_limited")
+  ) {
+    return undefined;
+  }
+  let admitted: Route;
+  try {
+    admitted = await admit(env, { ...route.call, model: next }, route.via);
+  } catch (error) {
+    if (
+      modelErrors.codeOf(error) === undefined &&
+      permissionErrors.codeOf(error) === undefined
+    ) {
+      throw error;
+    }
+    return undefined;
+  }
+  // The same call, on another model: it keeps what its requests already
+  // hold under its binding's cap per request, never a fresh count.
+  return { ...route, ...admitted, perRequest: route.perRequest };
+};
+
+/** Records that `from` fell back to `to`'s model, and why. Metadata only. */
+const auditFallback = async (
+  env: ModelsEnv,
+  from: Route,
+  to: Route,
+  failure: TransportFailure | undefined
+): Promise<void> => {
+  const why = failure?.kind ?? "failed";
+  log.warn("model.fallback", {
+    from: from.call.model,
+    to: to.call.model,
+    why,
+  });
+  await keepAuditEvent(env, drizzle(env.DB), {
+    actor: from.call.trigger,
+    action: "model.fallback",
+    requestId: from.call.requestId,
+    detail: {
+      purpose: from.call.purpose,
+      from:
+        from.call.model.length <= auditIdentifierMaxLength
+          ? from.call.model
+          : null,
+      to:
+        to.call.model.length <= auditIdentifierMaxLength ? to.call.model : null,
+      why,
+      status:
+        failure !== undefined && "status" in failure
+          ? (failure.status ?? null)
+          : null,
+      chat: chatOf(from.call),
+      ...workflowRunOf(from.call),
+      ...platformOf(from.call),
+    },
+  });
+};
+
+/**
+ * Sends `request`, and again to each of the organization's fallback
+ * models while the provider refuses it before anything could be billed
+ * (`fallbackOf`), each refused request recorded as `attempt`.
+ */
+const sendFallingBack = async (
+  env: ModelsEnv,
+  request: Request,
+  limit: Deadline,
+  attempt: number
+): Promise<Sent> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one model after another
+    const sent = await send(request);
+    if (!hasFailed(sent.answer) || sent.held !== undefined) {
+      // Answered: whatever the call asks next (a second try at its
+      // schema) comes after a request that was billed.
+      request.billed = request.billed === true || mayHaveBilled(sent);
+      return sent;
+    }
+    const stopped = limit.stopped();
+    // oxlint-disable-next-line no-await-in-loop -- one model after another
+    const next = await fallbackOf(env, request, sent, stopped);
+    if (next === undefined) {
+      return sent;
+    }
+    const failure = failureOf(sent, stopped);
+    log.warn("model.failed", failureFields(request.call.model, sent, failure));
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await record(env, request, sent, attempt, "failed", failure);
+    // oxlint-disable-next-line no-await-in-loop -- in order
+    await auditFallback(env, request, next, sent.failure);
+    Object.assign(request, next);
+  }
 };
 
 /** A call's requests: one, or a second when the answer doesn't fit its schema. */
@@ -2646,7 +3151,7 @@ const answerCall = async <Output>(
     // provider requests is admitted by the ledger, in the month it is
     // sent in: one the ledger held back was never sent.
     // oxlint-disable-next-line no-await-in-loop
-    const sent = await send(request);
+    const sent = await sendFallingBack(env, request, limit, attempt);
     if (sent.held !== undefined) {
       // oxlint-disable-next-line no-await-in-loop
       await refuse(env, call, sent.held);
@@ -2726,11 +3231,20 @@ const callModel = async <Output>(
     signal,
     providerRetries = true,
     ...fields
-  }: ModelCall<Output>
+  }: ModelCall<Output>,
+  via: Via = chosenVia
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
+  // Grasp's own key only for core's own platform features, never for work
+  // of an App's, a person's or an agent's.
+  if (
+    via.kind === "platform" &&
+    (call.work === undefined || !("platform" in call.work))
+  ) {
+    throw modelErrors.create("model.invalid_call");
+  }
   const route: Route = {
-    ...(await admit(env, call)),
+    ...(await admit(env, call, via)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
     ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
@@ -2826,7 +3340,7 @@ const relayEvents = async (
   { events, response }: Awaited<ReturnType<typeof open>>,
   out: AssistantMessageEventStream,
   limit: Deadline
-): Promise<void> => {
+): Promise<Route | undefined> => {
   // The answer as far as it came, as the adapter's last event had it.
   let partial: AssistantMessage | undefined = undefined;
   for await (const event of events) {
@@ -2844,7 +3358,7 @@ const relayEvents = async (
               : `The model call was refused (${code}). Try again in ${retryAfter} seconds.`,
         },
       });
-      return;
+      return undefined;
     }
     if (event.type === "error") {
       const sent: Sent = { answer: event.error, ...response };
@@ -2859,6 +3373,16 @@ const relayEvents = async (
         stopped === "cancelled" ? "cancelled" : "failed",
         failure
       );
+      // Refused before anything streamed: the loop never saw it, so it
+      // may go to the organization's next model.
+      const next =
+        partial === undefined
+          ? await fallbackOf(env, route, response, stopped)
+          : undefined;
+      if (next !== undefined) {
+        await auditFallback(env, route, next, response.failure);
+        return next;
+      }
       const rateLimited =
         response.rateLimited === undefined || stopped !== undefined
           ? undefined
@@ -2870,7 +3394,7 @@ const relayEvents = async (
           errorMessage: rateLimited ?? failureMessage(failure),
         },
       });
-      return;
+      return undefined;
     }
     if (event.type === "done") {
       const sent: Sent = { answer: event.message, ...response };
@@ -2882,7 +3406,7 @@ const relayEvents = async (
         event.reason === "length" ? "truncated" : "answered"
       );
       out.push({ ...event, message: chargedAnswer(route, sent) });
-      return;
+      return undefined;
     }
     ({ partial } = event);
     out.push(event);
@@ -2902,6 +3426,7 @@ const relayEvents = async (
     reason: "error",
     error: chargedAnswer(route, sent),
   });
+  return undefined;
 };
 
 /**
@@ -2943,13 +3468,19 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(
-      env,
-      route,
-      await open(route, context, limit),
-      out,
-      limit
-    );
+    let current: Route | undefined = route;
+    while (current !== undefined) {
+      // One model after another, as the call falls back.
+      // oxlint-disable-next-line no-await-in-loop
+      current = await relayEvents(
+        env,
+        current,
+        // oxlint-disable-next-line no-await-in-loop
+        await open(current, context, limit),
+        out,
+        limit
+      );
+    }
   } finally {
     limit.clear();
   }
@@ -3857,8 +4388,11 @@ const agentModel = async (
 
 /**
  * The model gateway for core: `await models(env).call({ model, input,
- * purpose, trigger })`. Refuses a model the deployment doesn't allow or
- * its rules don't let the call use, sends the call through AI Gateway, and
+ * purpose, trigger })`. Refuses a model the organization didn't choose
+ * (or, until it connected a provider, the deployment doesn't allow) or its
+ * rules don't let the call use, sends the call to the provider through
+ * connect (or AI Gateway), falling back to the organization's next model
+ * when the provider refuses it before anything could be billed, and
  * records every request it makes, and every refusal, in the audit log. With a `schema`, the answer is JSON that matches it.
  *
  * `await models(env).agent({ model, purpose, trigger, work }, provenance)`
@@ -3884,6 +4418,28 @@ export const models = (env: ModelsEnv) => ({
   call: async <Output = undefined>(
     call: ModelCall<Output>
   ): Promise<ModelAnswer<Output>> => await callModel(env, call),
+  /**
+   * A call of one of core's own platform features (its `work` names the
+   * feature), to `<provider>/<model>` with Grasp's own key for the
+   * provider, which connect holds (`OPENAI_API_KEY` and the like): judged
+   * by the rules, admitted against the budgets and audited like any call,
+   * never falling back. Refused as `model.not_allowed` when Grasp has no
+   * key for the provider.
+   */
+  platformCall: async <Output = undefined>(
+    call: ModelCall<Output>
+  ): Promise<ModelAnswer<Output>> =>
+    await callModel(env, call, { kind: "platform" }),
+  /**
+   * An admin's test of a provider the organization connected: a call to
+   * any of its models with the organization's key, whether or not chosen,
+   * metered and audited like any (ai-providers.ts).
+   */
+  providerTest: async (
+    call: ModelCall<undefined>,
+    provider: ConnectTarget["provider"]
+  ): Promise<ModelAnswer<undefined>> =>
+    await callModel(env, call, { kind: "test", provider }),
   agent: async (
     session: AgentSession,
     provenance: () => readonly string[] = () => []

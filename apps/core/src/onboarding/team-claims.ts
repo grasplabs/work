@@ -3,7 +3,7 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { statementKinds, withoutNames } from "./brain-intake.ts";
 import { allowed, hidden, terminal } from "./plain-text.ts";
 import type { Took } from "./store.ts";
@@ -293,7 +293,7 @@ export const check = async (
   }
   checks.left -= 1;
   const { env, count } = checks;
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {
@@ -376,7 +376,7 @@ export const teamClaims = async (
   if (facts.length === 0) {
     return [];
   }
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

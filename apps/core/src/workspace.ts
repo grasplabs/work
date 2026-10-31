@@ -200,7 +200,7 @@ import { cited } from "./knowledge/citations.ts";
 import { forContext } from "./knowledge/memory.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { hasBrainGrant } from "./knowledge/recall-grants.ts";
-import { gatewaySettings, models } from "./models.ts";
+import { modelSettings, models } from "./models.ts";
 import { personRole } from "./permissions.ts";
 import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
@@ -1242,15 +1242,16 @@ export class Workspace extends DurableObject<Env> {
    * `fix`), made only if the deployment allows `model`, which its question
    * will name: a refused model leaves no chat without a question.
    */
-  createFixChat(
+  async createFixChat(
     title: string,
     personId: string,
     agentId: string,
     by: AuditActor,
     fix: RunToFix,
     model: string
-  ): Chat {
-    if (!gatewaySettings(this.env).models.includes(model)) {
+  ): Promise<Chat> {
+    const { models: allowed } = await modelSettings(this.env);
+    if (!allowed.includes(model)) {
       throw modelErrors.create("model.not_allowed");
     }
     return this.createChat(title, personId, agentId, by, fix);
@@ -1588,7 +1589,9 @@ export class Workspace extends DurableObject<Env> {
         platform,
         where?.thread
       );
-    const [model] = gatewaySettings(this.env).models;
+    const {
+      models: [model],
+    } = await modelSettings(this.env);
     if (model === undefined) {
       throw modelErrors.create("model.unconfigured");
     }

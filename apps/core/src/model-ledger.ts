@@ -39,6 +39,7 @@ import {
   auditOutbox,
   personLimits,
   policy,
+  providerHealth,
   queue,
   requestScopes,
   requests,
@@ -405,6 +406,45 @@ const storedLimitSchema = z.strictObject({
   messagesAnHour: z.int().positive().nullable(),
 });
 
+/**
+ * The way a request goes, as recorded with it (models.ts): its transport,
+ * the provider, the provider's region and whose key; identifiers only.
+ */
+const routeSchema = z.strictObject({
+  transport: z.string().min(1).max(64),
+  provider: z.string().min(1).max(32),
+  region: z.string().min(1).max(32),
+  credential: z.enum(["organization", "platform"]).optional(),
+});
+
+/** The way a request goes, as recorded with it. */
+export type LedgerRoute = z.input<typeof routeSchema>;
+
+/** A request's route as its row keeps it: nulls for one with none. */
+const routeColumns = (
+  route: z.output<typeof routeSchema> | undefined
+): {
+  transport: string | null;
+  provider: string | null;
+  region: string | null;
+  credential: string | null;
+} => ({
+  transport: route?.transport ?? null,
+  provider: route?.provider ?? null,
+  region: route?.region ?? null,
+  credential: route?.credential ?? null,
+});
+
+/** How a provider's requests fared last, by whose key: times in ms since the epoch. */
+export interface ProviderHealth {
+  provider: string;
+  credential: string;
+  lastOkAt: number | null;
+  lastFailedAt: number | null;
+  lastFailure: string | null;
+  lastStatus: number | null;
+}
+
 /** What an admin's limit came to: set, or refused as above Grasp's budget. */
 export type PersonLimitSetting =
   | { state: "set" }
@@ -464,6 +504,8 @@ const admissionSchema = z
      * as the `person` scope; none for a call made for nobody.
      */
     person: limitedPersonSchema.optional(),
+    /** The way it goes (`routeSchema`); none for a voice model's. */
+    route: routeSchema.optional(),
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
@@ -530,11 +572,20 @@ const tokensSchema = z.strictObject({
   cacheWrite: microsSchema,
 });
 
+/** How a refused or failed request failed, for its provider's status. */
+const failureSchema = z.strictObject({
+  kind: z.enum(["auth", "rate_limited", "refused", "provider_down"]),
+  status: z.int().min(100).max(599).optional(),
+});
+
 const settlementSchema = z.discriminatedUnion("by", [
   /** It ended, with the provider's whole count of what it used. */
   z.strictObject({ by: z.literal("usage"), tokens: tokensSchema }),
   /** The provider answered with a refusal before taking it on. */
-  z.strictObject({ by: z.literal("refused") }),
+  z.strictObject({
+    by: z.literal("refused"),
+    failure: failureSchema.optional(),
+  }),
   /** It was never sent. */
   z.strictObject({ by: z.literal("unsent") }),
   /**
@@ -543,7 +594,10 @@ const settlementSchema = z.discriminatedUnion("by", [
    */
   z.strictObject({ by: z.literal("cut"), tokens: tokensSchema }),
   /** It was sent, and what it used can't be known. */
-  z.strictObject({ by: z.literal("unknown") }),
+  z.strictObject({
+    by: z.literal("unknown"),
+    failure: failureSchema.optional(),
+  }),
 ]);
 
 /** How a provider request ended, as far as the gateway knows. */
@@ -839,6 +893,7 @@ export class ModelLedger extends DurableObject<Env> {
             admission.deadline,
             now + (admission.leaseMs ?? maxLeaseMs)
           ),
+          ...routeColumns(admission.route),
         })
         .run();
       for (const {
@@ -1328,6 +1383,7 @@ export class ModelLedger extends DurableObject<Env> {
       if (row.state === "unknown") {
         return { settled: { state: "unknown" } as const, alerted: 0 };
       }
+      this.#noteProvider(row, settlement);
       if (settlement.by === "unknown") {
         this.#db
           .update(requests)
@@ -1382,6 +1438,60 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /** The requests set aside because they couldn't be read, oldest first, at most `limit`. */
+  /**
+   * Notes how a request of a provider ended, as it settles, by whose key:
+   * worked once it ended with a count, failed once it was refused or
+   * failed with a failure named. Nothing for one never sent, or with no
+   * key of a provider's (an AI Gateway request's).
+   */
+  #noteProvider(
+    {
+      provider,
+      credential,
+    }: { provider: string | null; credential: string | null },
+    settlement: z.output<typeof settlementSchema>
+  ): void {
+    if (provider === null || credential === null) {
+      return;
+    }
+    const now = Date.now();
+    let noted: Partial<typeof providerHealth.$inferInsert> | undefined =
+      undefined;
+    if (settlement.by === "usage" || settlement.by === "cut") {
+      noted = { lastOkAt: now };
+    } else if (
+      (settlement.by === "refused" || settlement.by === "unknown") &&
+      settlement.failure !== undefined
+    ) {
+      noted = {
+        lastFailedAt: now,
+        lastFailure: settlement.failure.kind,
+        lastStatus: settlement.failure.status ?? null,
+      };
+    }
+    if (noted === undefined) {
+      return;
+    }
+    this.#db
+      .insert(providerHealth)
+      .values({ provider, credential, ...noted })
+      .onConflictDoUpdate({
+        target: [providerHealth.provider, providerHealth.credential],
+        set: noted,
+      })
+      .run();
+  }
+
+  /** How each provider's requests fared last, by whose key (`providerHealth`). */
+  async providerHealth(): Promise<ProviderHealth[]> {
+    await Promise.resolve();
+    return this.#db
+      .select()
+      .from(providerHealth)
+      .orderBy(asc(providerHealth.provider), asc(providerHealth.credential))
+      .all();
+  }
+
   async quarantined(limit: number): Promise<QuarantinedRequest[]> {
     const rows = this.#db
       .select({

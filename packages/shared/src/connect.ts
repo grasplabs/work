@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AiProviderConnectApi } from "./ai-providers.ts";
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
@@ -32,14 +33,15 @@ import { eventTypeSchema } from "./workflows.ts";
  * version, with the range below moved to say which cores work with
  * which connects; a release declares both (scripts/release).
  */
-export const connectInterfaceVersion = 2;
+export const connectInterfaceVersion = 3;
 
 /**
  * The versions of connect's interface this core calls correctly. 2: a
  * relay-mode `startConnection` carries `callbackOrigin`, which connect 1's
- * strict schema refuses.
+ * strict schema refuses. 3: core reaches every model through connect
+ * (`modelFetch`, `aiProviderRoutes`), which connect 2 doesn't serve.
  */
-export const connectInterfacesCoreCalls = { min: 2, max: 2 } as const;
+export const connectInterfacesCoreCalls = { min: 3, max: 3 } as const;
 
 /**
  * One call from core to connect, over the service binding: an action on a
@@ -1685,7 +1687,8 @@ export interface ChannelApi {
  * npm registry among the rest (`PackageRegistryApi`), and the chat
  * platforms (`ChannelApi`).
  */
-export interface ConnectApi extends PackageRegistryApi, ChannelApi {
+export interface ConnectApi
+  extends PackageRegistryApi, ChannelApi, AiProviderConnectApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;
