@@ -8,6 +8,7 @@ import { quotaPolicy } from "../src/workflows/quotas.ts";
 import { mockIdp } from "./idp.ts";
 import {
   allAtOnce,
+  inTurn,
   appWith,
   callFor,
   cheapAnswer,
@@ -282,7 +283,7 @@ describe("run lineages", { timeout: 90_000 }, () => {
       [...times(100, cheapAnswer), dearTotal],
       async () => {
         // The victim's lineage used all of its requests.
-        const used = await allAtOnce(times(100, victimActor), work);
+        const used = await inTurn(times(100, victimActor), work);
         const forged = await builder.api.workflows.start(app, "reader", {
           rootRunId: victim,
           root: victim,

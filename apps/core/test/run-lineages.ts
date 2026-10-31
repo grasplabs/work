@@ -440,6 +440,25 @@ export const allAtOnce = async (
     triggers.map(async (trigger) => await callUntilServed(work, trigger))
   );
 
+/**
+ * The outcomes of calls for each of `triggers`, one after another: a
+ * lineage's requests used up before what a test is about. All at once,
+ * a person's share of requests in flight (four) admits them four a round,
+ * each round five seconds on, as the provider behind connect answers in
+ * its own time: a hundred took longer than a test may.
+ */
+export const inTurn = async (
+  triggers: readonly AuditActor[],
+  work: Work
+): Promise<string[]> => {
+  const outcomes: string[] = [];
+  for (const trigger of triggers) {
+    // oxlint-disable-next-line no-await-in-loop -- one call after another
+    outcomes.push(await callFor(work, trigger));
+  }
+  return outcomes;
+};
+
 /** How many of `outcomes` are `outcome`. */
 export const countOf = (outcomes: readonly string[], one: string): number =>
   outcomes.filter((each) => each === one).length;
