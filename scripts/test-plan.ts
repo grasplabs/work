@@ -241,11 +241,14 @@ const sourceFile = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 /**
  * What a relative specifier in `importer` resolves to, as TypeScript and
  * Node resolve one: the path itself, a `.js`-style extension written for
- * its TypeScript source, an added extension, or a folder's index.
+ * its TypeScript source, an added extension, or a folder's index. A
+ * `changed` path counts as there even when the change deleted it, so an
+ * import of a deleted file still reaches it.
  */
 const resolveRelative = (
   importer: string,
-  specifier: string
+  specifier: string,
+  changed: ReadonlySet<string>
 ): string | undefined => {
   // Without a query (`?raw`), which names how, not what.
   const [file = specifier] = specifier.split("?");
@@ -256,18 +259,23 @@ const resolveRelative = (
     base,
     ...extensions.map((extension) => `${stem}${extension}`),
     ...extensions.map((extension) => path.join(base, `index${extension}`)),
-  ].find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+  ].find(
+    (candidate) =>
+      changed.has(candidate) ||
+      (existsSync(candidate) && statSync(candidate).isFile())
+  );
 };
 
 /**
  * The files `file` imports by a relative specifier, statically,
  * dynamically or by re-export, parsed by oxc (Vite+'s `parseSync`), or
  * `undefined` when that can't be known: it doesn't parse, or imports by an
- * expression.
+ * expression. `changed` paths resolve whether or not they're still there.
  */
 const relativeImportsOf = (
   file: string,
-  source: string
+  source: string,
+  changed: ReadonlySet<string>
 ): Set<string> | undefined => {
   const { errors, module } = parseSync(file, source);
   if (errors.length > 0) {
@@ -293,7 +301,7 @@ const relativeImportsOf = (
   return new Set(
     specifiers
       .filter((specifier) => specifier.startsWith("."))
-      .map((specifier) => resolveRelative(file, specifier))
+      .map((specifier) => resolveRelative(file, specifier, changed))
       .filter((resolved) => resolved !== undefined)
   );
 };
@@ -319,6 +327,8 @@ export const filesImporting = (
   if (changed.length === 0) {
     return reached;
   }
+  // Deleted ones included: what still imports a deleted file breaks.
+  const changedPaths = new Set(changed);
   const sources = execFileSync(
     "git",
     ["ls-files", "--cached", "--others", "--exclude-standard"],
@@ -340,7 +350,7 @@ export const filesImporting = (
         continue;
       }
       if (!imports.has(file)) {
-        imports.set(file, relativeImportsOf(file, source));
+        imports.set(file, relativeImportsOf(file, source, changedPaths));
       }
       const resolved = imports.get(file);
       if (resolved === undefined || resolved.has(target)) {

@@ -233,7 +233,7 @@ describe("leaving out what no Vitest test sees", () => {
    * config imports a journey helper, and a script its test imports reads
    * the config, as scripts/e2e-parts.ts does.
    */
-  const importing = (changed: string): string[] => {
+  const importing = (changed: string, { deleted = false } = {}): string[] => {
     const repo = realpathSync(mkdtempSync(path.join(tmpdir(), "importers-")));
     try {
       const sources: Record<string, string> = {
@@ -258,6 +258,9 @@ describe("leaving out what no Vitest test sees", () => {
         writeFileSync(path.join(repo, file), content);
       }
       execFileSync("git", ["init", "--quiet"], { cwd: repo });
+      if (deleted) {
+        rmSync(path.join(repo, changed));
+      }
       return relativeTo(repo, filesImporting([path.join(repo, changed)], repo));
     } finally {
       rmSync(repo, { recursive: true, force: true });
@@ -270,6 +273,14 @@ describe("leaving out what no Vitest test sees", () => {
       "scripts/parts.test.ts",
       "scripts/parts.ts",
     ]);
+  });
+
+  it("reaches the scripts project's test when a helper the config imports is deleted", () => {
+    expect(
+      importing("e2e/stack.ts", { deleted: true }).filter((file) =>
+        file.startsWith("scripts/")
+      )
+    ).toContain("scripts/parts.test.ts");
   });
 
   it("reaches no test when only a journey changes", () => {
