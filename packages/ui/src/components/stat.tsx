@@ -9,7 +9,10 @@ import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
 const statVariants = cva(
-  "fill-current font-serif leading-none font-light tracking-[-0.03em] lining-nums tabular-nums",
+  // The line height goes with each size (`/none`): a `leading-none` here
+  // was dropped by `cn` the moment a size's `text-…` followed it, which
+  // left every figure at the text's line height, 40px instead of 28px.
+  "fill-current font-serif font-light tracking-[-0.03em] lining-nums tabular-nums",
   {
     variants: {
       variant: {
@@ -20,11 +23,11 @@ const statVariants = cva(
         attention: "text-status-attention",
       },
       size: {
-        default: "text-[1.75rem]",
+        default: "text-[1.75rem]/none",
         // In a narrow container, such as a small ring of a dashboard
         // block: the product's size, and the figure's own from the
         // container's `@sm` on.
-        compact: "text-sm @sm:text-[1.75rem]",
+        compact: "text-sm/none @sm:text-[1.75rem]/none",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
