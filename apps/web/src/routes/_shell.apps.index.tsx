@@ -1,7 +1,13 @@
 import type { AppStatus, ListedScreen } from "@grasp-os/shared/apps";
 import { canBuild } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -18,6 +24,7 @@ import type { Painting, Pattern } from "@grasp-os/ui/components/painted-field";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import {
   Tile,
+  TileActions,
   TileContent,
   TileField,
   TileMeta,
@@ -26,17 +33,28 @@ import {
   TileTitle,
 } from "@grasp-os/ui/components/tile";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   CogIcon,
+  EllipsisIcon,
   GlobeIcon,
   LayoutGridIcon,
   PlusIcon,
   SearchIcon,
+  SettingsIcon,
 } from "lucide-react";
 import { useState } from "react";
 
-import { statusLabel } from "../engines/app-status.tsx";
+import { buildsApp } from "../engines/app-role.ts";
+import {
+  ArchiveDialog,
+  statusLabel,
+  useStatusMove,
+} from "../engines/app-status.tsx";
+import type { Transition } from "../engines/app-status.tsx";
+import { ErrorText } from "../error-text.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -44,21 +62,26 @@ import { loadFromCore } from "../load-from-core.tsx";
 
 // The Apps page (grasplabs/prototype `components/apps/apps-overview.tsx`):
 // the apps of every domain the person can open, each a tile on a painted
-// field that opens the app in its domain (/domains/$engine/apps/$screen).
-// An app is what people read for one of a domain's screens; the domains
-// themselves are the Domains page's. The newest domain's apps come first.
-// Split by where their domain stands (published, draft) only when both
-// hold apps, and searchable once there are enough to need it; the tabs
-// count what the search leaves. An archived domain's apps aren't listed:
-// nobody works in them until it is restored. New app starts one in the
-// chat, for who builds.
+// field that opens the app on its App's page (/apps/$app), as the
+// prototype's tile does. An app is what people read for one of a domain's
+// screens; the domains themselves are the Domains page's. The newest
+// domain's apps come first. Split by where their domain stands
+// (published, draft, archived) only when more than one holds apps, and
+// searchable once there are enough to need it; the tabs count what the
+// search leaves. New app starts one in the chat, for who builds.
 //
-// One read lists them all (`apps.screens`): core finds the domains as it
-// lists them and reads each one's screens from its current version's row.
+// A tile's "…" menu, for who builds its domain, holds what core does to
+// the domain the app belongs to: its settings (the domain's page), and
+// archiving or restoring it, which takes all of its apps along.
+//
+// Two reads: `apps.screens` lists the apps, core reading each domain's
+// screens from its current version's row; `apps.list` says which domains
+// the person builds.
 //
 // Not as the prototype: a tile shows the app's bar, not a picture of its
 // screen (screens are built and run sandboxed when opened), and has no
-// menu, owner or time edited, which core keeps per domain, not per app.
+// owner or time edited, nor a rename, which core keeps per domain, not
+// per app (GRA-1251).
 
 /** From this many apps on the page it offers a search: with fewer, every name is in view anyway. */
 const searchFrom = 7;
@@ -76,30 +99,34 @@ const fields = [
   { painting: "stone", pattern: "rows" },
 ] as const satisfies readonly { painting: Painting; pattern: Pattern }[];
 
-/** The tabs after All, in the prototype's order; an archived domain's apps aren't listed. */
-const statuses = ["published", "draft"] as const satisfies readonly AppStatus[];
-type Listed = (typeof statuses)[number];
+/** The tabs after All, in the prototype's order. */
+const statuses = [
+  "published",
+  "draft",
+  "archived",
+] as const satisfies readonly AppStatus[];
 
 /** Every app at once, as the page opens. */
 const everyApp = "all";
-type Shown = Listed | typeof everyApp;
+type Shown = AppStatus | typeof everyApp;
 
-/** One app: a screen of a domain that isn't archived. */
+/** One app: a screen of a domain, and whether the person builds that domain. */
 interface DomainApp {
-  domain: ListedScreen["app"] & { status: Listed };
+  domain: ListedScreen["app"];
   screen: string;
+  builds: boolean;
 }
 
-const isListed = (
-  domain: ListedScreen["app"]
-): domain is ListedScreen["app"] & { status: Listed } =>
-  domain.status !== "archived";
-
-/** The screens core lists, in its order (the newest domain's first), but an archived domain's. */
-const appsOf = (screens: readonly ListedScreen[]): DomainApp[] =>
-  screens.flatMap(({ app, screen }) =>
-    isListed(app) ? [{ domain: app, screen }] : []
-  );
+/** The screens core lists, in its order (the newest domain's first). */
+const appsOf = (
+  screens: readonly ListedScreen[],
+  built: ReadonlySet<string>
+): DomainApp[] =>
+  screens.map(({ app, screen }) => ({
+    domain: app,
+    screen,
+    builds: built.has(app.id),
+  }));
 
 /** New app, in lime: the page's one action. */
 const NewAppLink = ({ size }: { size?: "lg" }) => (
@@ -132,44 +159,138 @@ const FirstApp = ({ builds }: { builds: boolean }) => (
   </PaintedField>
 );
 
+/**
+ * A tile's "…" menu: what core does to the app's domain, for who builds
+ * it. Settings opens the domain's page; Archive asks first, as archiving
+ * takes every app of the domain offline; Restore takes it back as a draft.
+ */
+const TileMenu = ({
+  app: { domain, screen },
+  busy,
+  move,
+}: {
+  app: DomainApp;
+  busy: boolean;
+  move: (transition: Transition) => void;
+}) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const [archiving, setArchiving] = useState(false);
+  return (
+    <TileActions>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={busy}
+          render={
+            <Button
+              aria-label={t`More for ${screen}`}
+              size="icon-xs"
+              variant="ghost"
+            />
+          }
+        >
+          <EllipsisIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem
+            onClick={() => {
+              void navigate({
+                to: "/domains/$engine",
+                params: { engine: domain.id },
+              });
+            }}
+          >
+            <SettingsIcon />
+            <Trans>Settings</Trans>
+          </DropdownMenuItem>
+          {domain.status === "archived" ? (
+            <DropdownMenuItem
+              onClick={() => {
+                move("restore");
+              }}
+            >
+              <ArchiveRestoreIcon />
+              <Trans>Restore</Trans>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() => {
+                setArchiving(true);
+              }}
+            >
+              <ArchiveIcon />
+              {domain.status === "published" ? (
+                <Trans>Archive and take offline</Trans>
+              ) : (
+                <Trans>Archive</Trans>
+              )}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ArchiveDialog
+        name={domain.name}
+        onArchive={() => {
+          setArchiving(false);
+          move("archive");
+        }}
+        onOpenChange={setArchiving}
+        open={archiving}
+      />
+    </TileActions>
+  );
+};
+
 /** One app: its bar on a painted field, then its name, which opens it, and its domain. */
 const AppTile = ({
-  app: { domain, screen },
+  app,
   field,
 }: {
   app: DomainApp;
   field: (typeof fields)[number];
-}) => (
-  <Tile>
-    <TileField painting={field.painting} pattern={field.pattern}>
-      {domain.status === "published" ? (
-        <Badge variant="passed">
-          <GlobeIcon data-icon="inline-start" />
-          {statusLabel(domain.status)}
-        </Badge>
-      ) : null}
-      <TileSheet>
-        <TileSheetBar icon={<LayoutGridIcon />}>{screen}</TileSheetBar>
-      </TileSheet>
-    </TileField>
-    <TileContent>
-      <TileTitle
-        render={
-          <Link
-            params={{ engine: domain.id, screen }}
-            to="/domains/$engine/apps/$screen"
-          />
-        }
-      >
-        {screen}
-      </TileTitle>
-      <TileMeta>
-        <CogIcon aria-hidden="true" />
-        <span className="truncate">{domain.name}</span>
-      </TileMeta>
-    </TileContent>
-  </Tile>
-);
+}) => {
+  const { domain, screen, builds } = app;
+  const { busy, failure, move } = useStatusMove(domain.id);
+  return (
+    <Tile>
+      <TileField painting={field.painting} pattern={field.pattern}>
+        {domain.status === "published" ? (
+          <Badge variant="passed">
+            <GlobeIcon data-icon="inline-start" />
+            {statusLabel(domain.status)}
+          </Badge>
+        ) : null}
+        {domain.status === "archived" ? (
+          <Badge>{statusLabel(domain.status)}</Badge>
+        ) : null}
+        <TileSheet>
+          <TileSheetBar icon={<LayoutGridIcon />}>{screen}</TileSheetBar>
+        </TileSheet>
+      </TileField>
+      <div className="flex items-start gap-3">
+        <TileContent className="flex-1">
+          <TileTitle
+            render={
+              <Link
+                params={{ app: domain.id }}
+                search={{ screen }}
+                to="/apps/$app"
+              />
+            }
+          >
+            {screen}
+          </TileTitle>
+          <TileMeta>
+            <CogIcon aria-hidden="true" />
+            <span className="truncate">{domain.name}</span>
+          </TileMeta>
+        </TileContent>
+        {builds ? <TileMenu app={app} busy={busy} move={move} /> : null}
+      </div>
+      <ErrorText>{failure}</ErrorText>
+    </Tile>
+  );
+};
 
 const AppsOverview = () => {
   const { t } = useLingui();
@@ -180,7 +301,7 @@ const AppsOverview = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Apps` }]} page={page} />;
   }
-  const apps = appsOf(page.data);
+  const apps = appsOf(page.data.screens, page.data.built);
   const builds = canBuild(identity.role);
   const holding = statuses.filter((status) =>
     apps.some(({ domain }) => domain.status === status)
@@ -303,6 +424,19 @@ const AppsOverview = () => {
 export const Route = createFileRoute("/_shell/apps/")({
   pendingComponent: PageLoading,
   component: AppsOverview,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => await session.apps.screens()),
+  loader: async ({ context: { core, identity } }) =>
+    await loadFromCore(core, async (session) => {
+      const [screens, domains] = await Promise.all([
+        session.apps.screens(),
+        session.apps.list(),
+      ]);
+      // The domains the person may change: by their role in each, never
+      // Grasp staff's (app-role.ts).
+      const built = new Set<string>(
+        domains.flatMap((domain) =>
+          buildsApp(domain, identity) ? [domain.id] : []
+        )
+      );
+      return { screens, built };
+    }),
 });

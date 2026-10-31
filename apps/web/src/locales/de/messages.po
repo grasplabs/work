@@ -3352,7 +3352,9 @@ msgstr "Freigabe für neue Tools benannt"
 
 #: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -3399,12 +3401,17 @@ msgid "Apps to approve"
 msgstr "Zu genehmigende Apps"
 
 #: src/engines/app-status.tsx
+#: src/routes/_shell.apps.index.tsx
 msgid "Archive"
 msgstr "Archivieren"
 
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "{name} archivieren?"
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Archive and take offline"
+msgstr "Archivieren und offline nehmen"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
@@ -5822,8 +5829,6 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -9367,6 +9372,10 @@ msgctxt "the catalog's apps nobody connected"
 msgid "More apps"
 msgstr "Weitere Apps"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "More for {screen}"
+msgstr "Mehr zu {screen}"
+
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Mehr zu {title}"
@@ -9378,6 +9387,10 @@ msgstr "Mehr zum Projekt {name}"
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
 msgstr "Mehr zu diesem Chat"
+
+#: src/engines/app-status.tsx
+msgid "More for this domain"
+msgstr "Mehr zu dieser Domäne"
 
 #: src/policies/policy-editing.tsx
 msgid "More for this policy"
@@ -13069,6 +13082,7 @@ msgstr "Ressourcen"
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.apps.index.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
 
@@ -14007,6 +14021,7 @@ msgstr "Festgelegt. Geben Sie einen neuen Wert ein, um ihn zu ersetzen."
 
 #: src/engines/app-page.tsx
 #: src/frame/person-menu.tsx
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"

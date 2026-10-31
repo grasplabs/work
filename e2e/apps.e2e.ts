@@ -229,14 +229,33 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   ).toBeVisible();
   await expect(tiles).toHaveCount(0);
   expect(await counts()).toStrictEqual(["All0", "Published0", "Draft0"]);
+
+  // Who builds a domain archives it from its app's "…" menu, once they
+  // confirmed: the app stays, marked archived, and Restore from the same
+  // menu takes it back.
+  await search.fill(`legalapp${run}`);
+  const legal = tiles.filter({ hasText: `legalapp${run}` });
+  const legalMenu = legal.getByRole("button", {
+    name: `More for legalapp${run}`,
+  });
+  await legalMenu.click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive" })
+    .click();
+  await expect(legal.getByText("Archived", { exact: true })).toBeVisible();
+  await legalMenu.click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
+  await expect(legal.getByText("Archived", { exact: true })).toHaveCount(0);
   await search.fill("");
 
   // On the Apps page its app is a tile, under its domain's name, which
-  // opens the app in its domain.
+  // opens the app on its App's page.
   const tile = tiles.filter({ hasText: name });
   await tile.getByRole("link", { name: "counter" }).click();
   await expect(page).toHaveURL(
-    new RegExp(`/domains/${app}/apps/counter$`, "u")
+    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
   );
   await counterScreen(page);
 
