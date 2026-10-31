@@ -380,6 +380,10 @@ msgstr "{count, plural, one {# document toegevoegd. Ik lees het nu.} other {# do
 msgid "{count, plural, one {# employee interviewed} other {# employees interviewed}}"
 msgstr "{count, plural, one {# medewerker geïnterviewd} other {# medewerkers geïnterviewd}}"
 
+#: src/workflows/listed-count.tsx
+msgid "{count, plural, one {# entry} other {# entries}}"
+msgstr "{count, plural, one {# regel} other {# regels}}"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# bestand} other {# bestanden}}"
@@ -440,6 +444,10 @@ msgstr "{count, plural, one {# regel in gebruik} other {# regels in gebruik}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# rule} other {# rules}}"
 msgstr "{count, plural, one {# regel} other {# regels}}"
+
+#: src/workflows/listed-count.tsx
+msgid "{count, plural, one {# run} other {# runs}}"
+msgstr "{count, plural, one {# run} other {# runs}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
@@ -1444,6 +1452,14 @@ msgstr "{shared, plural, one {# document werd gedeeld of gevonden, en gelezen.} 
 #: src/routes/_shell.integrations.index.tsx
 msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
+
+#: src/workflows/listed-count.tsx
+msgid "{shown} entries or more"
+msgstr "{shown} regels of meer"
+
+#: src/workflows/listed-count.tsx
+msgid "{shown} runs or more"
+msgstr "{shown} runs of meer"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{signIn} is connected. I can see {people} people in {teams} teams."

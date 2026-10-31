@@ -8,7 +8,7 @@ import {
   PageLoading,
   PageNotLoaded,
 } from "../frame/page-states.tsx";
-import { PageHeading } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { historyPageSize, RunHistory } from "../workflows/history-view.tsx";
@@ -45,7 +45,7 @@ const RunPage = () => {
   return (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6 text-sm">
+      <Page>
         <PageHeading
           meta={
             <>
@@ -76,7 +76,7 @@ const RunPage = () => {
         {!summary.detailsRemoved && history.state !== "ready" ? (
           <NotLoadedState heading="h2" page={history} />
         ) : null}
-      </div>
+      </Page>
     </>
   );
 };

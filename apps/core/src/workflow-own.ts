@@ -1,6 +1,9 @@
 import { collections } from "@grasp-os/brain/schema";
 import { isAdmin } from "@grasp-os/shared/roles";
-import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowBindingTargetSchema,
+  workflowOwnListed,
+} from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowActivity,
   WorkflowFile,
@@ -39,7 +42,7 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   one only its owner or only admins read, which no workflow may bind.
 
 /** The most files and activity entries a read answers: the newest. */
-const pageSize = 100;
+const pageSize = workflowOwnListed;
 
 /** The actions a permission row allows. */
 const actionsOf = (json: string): string[] => {
