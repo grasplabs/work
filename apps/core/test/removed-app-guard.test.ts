@@ -23,10 +23,6 @@ const leftOpen = new Set([
   "sdk_release_pins",
   "sdk_release_tombstones",
   "dependency_approvers",
-  "landscape_apps",
-  "landscape_app_people",
-  "landscape_staged_apps",
-  "landscape_staged_people",
 ]);
 
 /**
