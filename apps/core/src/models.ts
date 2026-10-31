@@ -2388,14 +2388,66 @@ const cutTokens = (
 const settlementOf = (
   pending: Admission,
   answer: AssistantMessage,
-  failure: Failure | undefined
+  failure: Failure | undefined,
+  shows: ProviderTrouble | undefined
 ): Settlement => {
+  // What it showed of its provider goes with it, for the provider's
+  // status alone: never what it is charged.
+  const seen = shows === undefined ? {} : { shows };
   if (failure?.stopped !== undefined) {
     const tokens = cutTokens(pending, answer);
-    return tokens === undefined ? { by: "unknown" } : { by: "cut", tokens };
+    return tokens === undefined
+      ? { by: "unknown", ...seen }
+      : { by: "cut", tokens, ...seen };
   }
   const tokens = hasFailed(answer) ? undefined : countedTokens(answer.usage);
-  return tokens === undefined ? { by: "unknown" } : { by: "usage", tokens };
+  return tokens === undefined
+    ? { by: "unknown", ...seen }
+    : { by: "usage", tokens };
+};
+
+/** What each way a request fails shows of its provider; none for the request's own fault. */
+const failureTroubles: Readonly<
+  Record<TransportFailure["kind"], ProviderTrouble | undefined>
+> = {
+  auth: "refused",
+  quota: "limiting",
+  rate_limited: "limiting",
+  provider_down: "not_answering",
+  refused: undefined,
+  budget: undefined,
+};
+
+/**
+ * What a failed request on the organization's own key showed of its
+ * provider, by the HTTP class seen, never a guess at why
+ * (`ProviderTrouble`): it refused the key (401, 403); it limited the
+ * request (429, an account's rate or spending limit); or it didn't answer
+ * (5xx, no answer, an answer that broke off, or the call's deadline
+ * passed with a request out).
+ * None for a call its caller cancelled, a refusal of the request itself,
+ * or one on Grasp's key, whose features say so in their own words.
+ */
+const troubleOf = (
+  route: Route,
+  { failure, settled, pending }: GatewayResponse,
+  stopped: Stopped | undefined
+): ProviderTrouble | undefined => {
+  if (route.way.credential !== "organization" || stopped === "cancelled") {
+    return undefined;
+  }
+  if (stopped === "timeout") {
+    // Only once a request went out: a call held back by the ledger till
+    // its deadline never reached the provider.
+    return settled.length > 0 || pending !== undefined
+      ? "not_answering"
+      : undefined;
+  }
+  if (failure === undefined) {
+    // An answer begun that broke off: the provider stopped answering.
+    return pending === undefined ? undefined : "not_answering";
+  }
+  return failureTroubles[failure.kind];
 };
 
 /**
@@ -2418,10 +2470,20 @@ const record = async (
   const { pending, logId, status } = sent;
   let settled: Settled | undefined = undefined;
   if (pending !== undefined) {
+    // A request that broke off or ran out of time with its answer out
+    // shows its provider stopped answering (`troubleOf`): noted in the
+    // provider's status, so its admins are told, whatever it is charged.
+    // A refusal of the provider's own (a key refused, a limit) is noted
+    // where it is settled as refused, with what it said.
+    const trouble =
+      outcome === "failed"
+        ? troubleOf(admitted, sent, failure?.stopped)
+        : undefined;
+    const shows = trouble === "not_answering" ? trouble : undefined;
     ({ settled } = await settleAdmitted(
       admitted,
       pending,
-      settlementOf(pending, sent.answer, failure)
+      settlementOf(pending, sent.answer, failure, shows)
     ));
   }
   const used = usedBy(admitted, sent);
@@ -2955,50 +3017,6 @@ const fallbackOf = async (
   // The same call, on another model: it keeps what its requests already
   // hold under its binding's cap per request, never a fresh count.
   return { ...route, ...admitted, perRequest: route.perRequest };
-};
-
-/** What each way a request fails shows of its provider; none for the request's own fault. */
-const failureTroubles: Readonly<
-  Record<TransportFailure["kind"], ProviderTrouble | undefined>
-> = {
-  auth: "refused",
-  quota: "limiting",
-  rate_limited: "limiting",
-  provider_down: "not_answering",
-  refused: undefined,
-  budget: undefined,
-};
-
-/**
- * What a failed request on the organization's own key showed of its
- * provider, by the HTTP class seen, never a guess at why
- * (`ProviderTrouble`): it refused the key (401, 403); it limited the
- * request (429, an account's rate or spending limit); or it didn't answer
- * (5xx, no answer, an answer that broke off, or the call's deadline
- * passed with a request out).
- * None for a call its caller cancelled, a refusal of the request itself,
- * or one on Grasp's key, whose features say so in their own words.
- */
-const troubleOf = (
-  route: Route,
-  { failure, settled, pending }: GatewayResponse,
-  stopped: Stopped | undefined
-): ProviderTrouble | undefined => {
-  if (route.way.credential !== "organization" || stopped === "cancelled") {
-    return undefined;
-  }
-  if (stopped === "timeout") {
-    // Only once a request went out: a call held back by the ledger till
-    // its deadline never reached the provider.
-    return settled.length > 0 || pending !== undefined
-      ? "not_answering"
-      : undefined;
-  }
-  if (failure === undefined) {
-    // An answer begun that broke off: the provider stopped answering.
-    return pending === undefined ? undefined : "not_answering";
-  }
-  return failureTroubles[failure.kind];
 };
 
 /** The code a call fails with for what its provider showed. */

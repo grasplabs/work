@@ -51,10 +51,11 @@ export const aiProviderStatusSchema = z.strictObject({
    * What its calls show now, by the HTTP class seen (`ProviderTrouble`),
    * and since when: the first failure of that kind after the last call
    * that worked. Null while the last call worked, or once the key was
-   * replaced.
+   * replaced. Missing from a core on an earlier release, which the admin
+   * reads as null: the admin and the cores roll out on their own.
    */
-  failingClass: z.enum(providerTroubles).nullable(),
-  failingSince: at,
+  failingClass: z.enum(providerTroubles).nullable().default(null),
+  failingSince: at.default(null),
 });
 export type AiProviderStatus = z.infer<typeof aiProviderStatusSchema>;
 

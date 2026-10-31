@@ -323,6 +323,29 @@ describe("an organization's Setup", () => {
     });
   });
 
+  it("reads the AI of a core on an earlier release, whose report says nothing of failing calls, as working", async () => {
+    const now = Date.now();
+    const client = await liveClient(emptyAdminSnapshot("Acme"));
+    // As that release answers: no `failingClass` or `failingSince`.
+    client.account.ai = {
+      providers: [
+        {
+          provider: "openai",
+          kind: "organization",
+          lastOkAt: now - 5 * 60 * 1000 - 10 * 1000,
+          lastFailedAt: null,
+          lastFailure: null,
+        },
+      ],
+    };
+
+    const { html } = await page(`/organizations/${client.clientId}/setup`);
+
+    expect(textOf(sectionOf(html, "AI"))).toContain(
+      "AI: OpenAI connected · working · last used 5 min ago"
+    );
+  });
+
   it("opens on how it stands for a tab it doesn't have, and has no Setup for a client the admin doesn't know", async () => {
     const acme = await liveClient(emptyAdminSnapshot("Acme"));
     const base = `/organizations/${acme.clientId}/setup`;

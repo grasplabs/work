@@ -16,6 +16,7 @@ import { formatDateTime } from "../format.ts";
 import { useCore } from "../use-core.ts";
 import type { Names } from "./activity-bar.tsx";
 import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { WaitingForAiProvider } from "./runs.tsx";
 
 // One run of an independent workflow, opened beside the page (prototype
 // `workflow-inside/inside-traces.tsx` `Detail`): when it ran, how it
@@ -52,6 +53,30 @@ const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
 );
 
 /** What an ended run returned, or why it failed, as far as the reader may see. */
+/**
+ * An opened run's status, and, while a step of it waits for its AI
+ * provider, what for: as the runs table says it (`WaitingForAiProvider`).
+ */
+export const RunStatusFact = ({ run }: { run: WorkflowResourceRun }) => {
+  const { t } = useLingui();
+  return (
+    <Fact label={t`Status`}>
+      <output className="inline-flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
+        />
+        {t(runStatusLabels[run.status])}
+      </output>
+      {run.aiProvider === undefined ? null : (
+        <span className="text-muted-foreground block text-xs">
+          <WaitingForAiProvider wait={run.aiProvider} />
+        </span>
+      )}
+    </Fact>
+  );
+};
+
 export const RunResultView = ({
   run,
   seesResult,
@@ -166,15 +191,7 @@ const RunFacts = ({
     <div className="flex flex-col gap-6">
       <ErrorText>{failure}</ErrorText>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
-        <Fact label={t`Status`}>
-          <output className="inline-flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-            />
-            {t(runStatusLabels[run.status])}
-          </output>
-        </Fact>
+        <RunStatusFact run={run} />
         <Fact label={t`Started by`}>
           {run.principal === names.me
             ? t`You`

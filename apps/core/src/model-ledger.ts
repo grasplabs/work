@@ -1,3 +1,4 @@
+import { providerTroubles } from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditDetailMaxKeys,
@@ -622,13 +623,21 @@ const settlementSchema = z.discriminatedUnion("by", [
   z.strictObject({ by: z.literal("unsent") }),
   /**
    * Its caller cut it off mid-answer: what it is known to have used by
-   * then, partly estimated (models.ts).
+   * then, partly estimated (models.ts). `shows`: what it showed of its
+   * provider, when the provider was why (its deadline passed with the
+   * answer still out), for the provider's status only, never its charge.
    */
-  z.strictObject({ by: z.literal("cut"), tokens: tokensSchema }),
+  z.strictObject({
+    by: z.literal("cut"),
+    tokens: tokensSchema,
+    shows: z.enum(providerTroubles).optional(),
+  }),
   /** It was sent, and what it used can't be known. */
   z.strictObject({
     by: z.literal("unknown"),
     failure: failureSchema.optional(),
+    /** What it showed of its provider, as for `cut`: an answer that broke off. */
+    shows: z.enum(providerTroubles).optional(),
   }),
 ]);
 
@@ -1533,7 +1542,20 @@ export class ModelLedger extends DurableObject<Env> {
       | undefined = undefined;
     let inserted: { failingClass: string | null; failingSince: number | null } =
       { failingClass: null, failingSince: null };
-    if (settlement.by === "usage" || settlement.by === "cut") {
+    const shows =
+      (settlement.by === "cut" || settlement.by === "unknown") &&
+      settlement.shows !== undefined
+        ? settlement.shows
+        : undefined;
+    if (shows !== undefined) {
+      // The provider stopped answering, whatever the request is charged.
+      noted = { lastFailedAt: now, lastFailure: "provider_down" };
+      failing = {
+        failingClass: shows,
+        failingSince: sql`CASE WHEN ${providerHealth.failingClass} = ${shows} THEN coalesce(${providerHealth.failingSince}, ${now}) ELSE ${now} END`,
+      };
+      inserted = { failingClass: shows, failingSince: now };
+    } else if (settlement.by === "usage" || settlement.by === "cut") {
       noted = { lastOkAt: now };
       failing = { failingClass: null, failingSince: null };
     } else if (

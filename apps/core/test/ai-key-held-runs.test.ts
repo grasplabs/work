@@ -3,6 +3,7 @@ import { runActorOf } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { wakeAiWaits } from "../src/workflows/ai-waits.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -174,6 +175,112 @@ describe(
         waited: ["refused"],
       });
       expect(result.done).not.toHaveProperty("aiProvider");
+    });
+
+    it("stops showing the run as waiting once its step, run again after the wait, fails and the workflow takes the failure", async () => {
+      const result = await withEnv(
+        "WORKFLOW_OFF_WAIT_MS",
+        "59000",
+        async () => {
+          const builder = await signedInApi(idp, "builder");
+          const app = await appWith(
+            builder,
+            workflowFiles(
+              "reader",
+              `  try {
+${llm("")}
+  } catch {
+    // Takes the failure, and goes on: the run is still under way.
+    await step.sleep("rest", { description: "Rest", duration: "1 day" });
+    return { caught: true };
+  }`,
+              { extract: { total: 1234 } }
+            )
+          );
+          const provider = { working: false };
+          // Run again, the call answers, but nothing the step's schema
+          // takes: the step fails for good.
+          const unreadable: ProviderReply = {
+            text: "No total here.",
+            inputTokens: 10,
+            outputTokens: 5,
+          };
+          const fake = await answeringProvider(
+            () => (provider.working ? unreadable : failures.refused),
+            { models: [anthropic] }
+          );
+          await bindModel(app, "reader", anthropic);
+          const run = await builder.api.workflows.start(app, "reader");
+          const held = await waitingFor(builder, run.id);
+          provider.working = true;
+          const admin = await signedInApi(idp, "admin");
+          await admin.api.aiProviders.add({
+            provider: "anthropic",
+            key: fake.key,
+          });
+          // Once the step took its failure, the run rests, still under way.
+          await vi.waitFor(
+            () => {
+              expect(fake.requests.length).toBeGreaterThanOrEqual(2);
+            },
+            { timeout: 20_000, interval: 200 }
+          );
+          await vi.waitFor(
+            async () => {
+              const { status } = await builder.api.workflows.status(run.id);
+              expect(status).not.toBe("queued");
+            },
+            { timeout: 20_000, interval: 200 }
+          );
+          return { held, after: await builder.api.workflows.status(run.id) };
+        }
+      );
+
+      expect({
+        held: result.held,
+        status: result.after.status,
+        waitingFor: result.after.aiProvider,
+      }).toStrictEqual({
+        held: { status: "queued", provider: "anthropic", trouble: "refused" },
+        // Resting, as its workflow said: not waiting for the provider.
+        status: "waiting",
+        waitingFor: undefined,
+      });
+    });
+
+    it("wakes every held run once a key is replaced, however many, reading them a page at a time", async () => {
+      const result = await withEnv(
+        "WORKFLOW_OFF_WAIT_MS",
+        "59000",
+        async () => {
+          const provider = { working: false, asked: 0 };
+          const { builder, app, run } = await heldRun(provider, "refused");
+          const more = [
+            await builder.api.workflows.start(app, "reader"),
+            await builder.api.workflows.start(app, "reader"),
+          ];
+          const runs = [run, ...more];
+          for (const each of runs) {
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await waitingFor(builder, each.id);
+          }
+          provider.working = true;
+          // Two held runs a page: three of them take two pages.
+          await wakeAiWaits(env, 2);
+          for (const each of runs) {
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await finished(each.id, 30_000);
+          }
+          return await Promise.all(
+            runs.map(async ({ id }) => {
+              const { status } = await builder.api.workflows.status(id);
+              return status;
+            })
+          );
+        }
+      );
+
+      expect(result).toStrictEqual(["completed", "completed", "completed"]);
     });
 
     it.each(["not_answering", "limiting"] as const)(

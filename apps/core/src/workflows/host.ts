@@ -2001,6 +2001,24 @@ export class RunHost extends RpcTarget {
     });
   }
 
+  /**
+   * `#keyWaitEnded` for a step that is ending in a throw, when it waited:
+   * never in the way of the step's own error, which is what the run sees.
+   */
+  async #keyWaitEndedQuietly(step: string, wait: KeyWait): Promise<void> {
+    if (wait.since === undefined) {
+      return;
+    }
+    try {
+      await this.#keyWaitEnded(step, wait);
+    } catch (error) {
+      log.error("workflow.ai_wait_end_failed", {
+        runId: this.#run.runId,
+        ...errorFields(error),
+      });
+    }
+  }
+
   /** Records, once in step `step`, that the run waits, and why. */
   async #recordWaiting(step: string, why: WaitReason): Promise<void> {
     try {
@@ -2170,6 +2188,9 @@ export class RunHost extends RpcTarget {
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
+    // Its wait for its AI provider, over its rounds in a row: ended however
+    // the step ends, a throw included, so no run reads as waiting on.
+    let keyWait = keyWaitStart();
     const stepDone = Promise.withResolvers<null>();
     try {
       this.#requireUntampered();
@@ -2336,8 +2357,6 @@ export class RunHost extends RpcTarget {
       // same steps.
       // When the step was first held on its current unknown outcome.
       const unknown: { since?: number } = {};
-      // Its wait for its AI provider, over its rounds in a row.
-      let keyWait = keyWaitStart();
       const keyWaitStarted = async (
         since: number,
         aiWait: AiWait
@@ -2385,6 +2404,7 @@ export class RunHost extends RpcTarget {
           if (ended === "timed_out") {
             // oxlint-disable-next-line no-await-in-loop -- once
             await this.#keyWaitEnded(step, keyWait);
+            keyWait = keyWaitStart();
             failed = keyTimedOut(step, marker.trouble);
             throw toStepError(failed);
           }
@@ -2414,9 +2434,12 @@ export class RunHost extends RpcTarget {
       }
       if (keyWait.since !== undefined) {
         await this.#keyWaitEnded(step, keyWait);
+        keyWait = keyWaitStart();
       }
       return { ok: true, value };
     } catch (error) {
+      // The step ran again after its wait and threw: it waits no more.
+      await this.#keyWaitEndedQuietly(step, keyWait);
       const reported = failed ?? forIsolate(error);
       if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });

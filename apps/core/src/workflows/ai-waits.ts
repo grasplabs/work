@@ -5,7 +5,9 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { RunAiProviderWait } from "@grasp-os/shared/workflows";
 import {
   and,
+  asc,
   desc,
+  gt,
   eq,
   inArray,
   isNotNull,
@@ -62,8 +64,8 @@ export const aiWakeType = "grasp-ai-provider";
 /** The most held runs one key replacement wakes at once; the repair sends the rest. */
 const wakesAtOnce = 50;
 
-/** The most held runs one key replacement owes a wake to. */
-const wakesOwed = 1000;
+/** Held runs read at a time as a key replacement owes each a wake: all of them, a page at a time. */
+const wakePage = 1000;
 
 /** Wakes owed in one batch of statements. */
 const owedPerBatch = 100;
@@ -195,13 +197,32 @@ export const aiWaitsOf = async (
   );
 };
 
+/** Owes each of `wakes` to its run, a batch of statements at a time. */
+const owe = async (
+  db: DrizzleD1Database,
+  wakes: readonly (Wake & AiWaitRun)[]
+): Promise<void> => {
+  const owed = wakes.map((wake) => oweWake(db, wake, goesOn(wake)));
+  for (let at = 0; at < owed.length; at += owedPerBatch) {
+    const [first, ...rest] = owed.slice(at, at + owedPerBatch);
+    if (first !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+      await db.batch([first, ...rest]);
+    }
+  }
+};
+
 /**
  * Wakes every run held for its AI provider key that hasn't ended, as the
- * organization replaced a key: each is owed a wake (wakes.ts), the first
- * {@link wakesAtOnce} sent now, the rest by the per-minute repair. Never
- * throws: a run not woken tries again at its next timed try.
+ * organization replaced a key: each is owed a wake (wakes.ts), however
+ * many, read `pageSize` at a time; the first {@link wakesAtOnce} sent now,
+ * the rest by the per-minute repair. Never throws: a run not woken tries
+ * again at its next timed try.
  */
-export const wakeAiWaits = async (env: Env): Promise<void> => {
+export const wakeAiWaits = async (
+  env: Env,
+  pageSize = wakePage
+): Promise<void> => {
   try {
     const db = drizzle(env.DB);
     const ended = (kind: AiWaitRun["kind"]) =>
@@ -221,29 +242,38 @@ export const wakeAiWaits = async (env: Env): Promise<void> => {
         )
       );
     await db.delete(workflowAiWaits).where(or(ended("app"), ended("resource")));
-    const held = await db
-      .selectDistinct({
-        runId: workflowAiWaits.runId,
-        kind: workflowAiWaits.runKind,
-      })
-      .from(workflowAiWaits)
-      .limit(wakesOwed);
-    const wakes: (Wake & AiWaitRun)[] = held.map(({ runId, kind }) => ({
-      id: `ai:${crypto.randomUUID()}`,
-      runId,
-      kind: kind === "resource" ? "resource" : "app",
-      type: aiWakeType,
-    }));
-    const owed = wakes.map((wake) => oweWake(db, wake, goesOn(wake)));
-    for (let at = 0; at < owed.length; at += owedPerBatch) {
-      const [first, ...rest] = owed.slice(at, at + owedPerBatch);
-      if (first !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one batch at a time
-        await db.batch([first, ...rest]);
+    const sendNow: string[] = [];
+    // Every held run, in pages by run ID: none left out however many.
+    for (let after = ""; ;) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      const held = await db
+        .selectDistinct({
+          runId: workflowAiWaits.runId,
+          kind: workflowAiWaits.runKind,
+        })
+        .from(workflowAiWaits)
+        .where(gt(workflowAiWaits.runId, after))
+        .orderBy(asc(workflowAiWaits.runId))
+        .limit(pageSize);
+      const wakes: (Wake & AiWaitRun)[] = held.map(({ runId, kind }) => ({
+        id: `ai:${crypto.randomUUID()}`,
+        runId,
+        kind: kind === "resource" ? "resource" : "app",
+        type: aiWakeType,
+      }));
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await owe(db, wakes);
+      sendNow.push(
+        ...wakes.slice(0, wakesAtOnce - sendNow.length).map(({ id }) => id)
+      );
+      const last = held.at(-1);
+      if (last === undefined || held.length < pageSize) {
+        break;
       }
+      after = last.runId;
     }
     await Promise.all(
-      wakes.slice(0, wakesAtOnce).map(async ({ id }) => {
+      sendNow.map(async (id) => {
         await sendWake(env, id);
       })
     );

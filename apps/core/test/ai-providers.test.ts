@@ -1216,6 +1216,42 @@ describe("AI providers", { timeout: 60_000 }, () => {
         workingAgain: null,
       });
     });
+
+    it("reads as not answering once an answer breaks off or its deadline passes with it still out, whatever the request is charged", async () => {
+      const key = await connected(anthropicCase);
+      const whole = answered("anthropic-messages", "Fine.");
+      const sse = "sse" in whole ? whole.sse : "";
+      await plan(key, [
+        whole,
+        // The answer begins, and stops partway.
+        { sse: sse.slice(0, Math.floor(sse.length / 2)) },
+        answered("anthropic-messages", "Fine again."),
+        { hang: true },
+      ]);
+      const { admin: by } = await admin();
+      const showsNow = async () => {
+        const { providers } = await by.api.aiProviders.list();
+        return providers[0]?.status?.failingClass ?? null;
+      };
+
+      await models(env).call(await callOf(anthropicCase.model));
+      const broke = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
+      );
+      const afterBreak = await showsNow();
+      await models(env).call(await callOf(anthropicCase.model));
+      const late = await outcome(
+        models(env).call(await callOf(anthropicCase.model, { timeoutMs: 500 }))
+      );
+      const afterTimeout = await showsNow();
+
+      expect({ broke, afterBreak, late, afterTimeout }).toStrictEqual({
+        broke: "model.provider_unavailable",
+        afterBreak: "not_answering",
+        late: "model.provider_unavailable",
+        afterTimeout: "not_answering",
+      });
+    });
   });
 
   describe("Grasp's own keys, for platform features", () => {
