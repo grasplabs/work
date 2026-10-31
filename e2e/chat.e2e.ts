@@ -134,7 +134,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
   // No model answers here: the answer says so once the turn ends.
-  await expect(messages.getByRole("alert")).toHaveText(
+  await expect(messages.getByRole("alert")).toContainText(
     "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
@@ -154,7 +154,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     messages.getByRole("listitem").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
-  await expect(messages.getByRole("alert")).toHaveText(
+  await expect(messages.getByRole("alert")).toContainText(
     "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
@@ -440,7 +440,7 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`
   );
-  await expect(messages.getByRole("alert")).toHaveText(
+  await expect(messages.getByRole("alert")).toContainText(
     "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );
@@ -596,7 +596,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  await expect(messages.getByRole("alert")).toHaveText(
+  await expect(messages.getByRole("alert")).toContainText(
     "The model couldn't answer. Try again.",
     { timeout: 30_000 }
   );

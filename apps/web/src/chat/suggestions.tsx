@@ -6,7 +6,8 @@ import { useLingui } from "@lingui/react/macro";
 // Under the box on an empty chat, a few questions to start from
 // (grasplabs/prototype `components/chat/suggestions.tsx`): what people
 // start with most, each asked with one click. Quiet rows of text rather
-// than bordered chips, so the box stays what the page is about.
+// than bordered chips (the kit's quiet Item, touching as the prototype's
+// do), so the box stays what the page is about.
 
 const suggestions: readonly MessageDescriptor[] = [
   msg`Where does the most time still go?`,
@@ -28,7 +29,7 @@ export const StartingQuestions = ({
     <ItemGroup
       aria-label={t`Questions to start with`}
       render={<ul />}
-      spacing="tight"
+      spacing="none"
     >
       {suggestions.map((suggestion) => {
         const question = i18n._(suggestion);
@@ -48,7 +49,8 @@ export const StartingQuestions = ({
               size="sm"
               variant="quiet"
             >
-              {question}
+              {/* A long one ends in an ellipsis on a phone. */}
+              <span className="min-w-0 truncate">{question}</span>
             </Item>
           </li>
         );

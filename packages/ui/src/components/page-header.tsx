@@ -8,11 +8,25 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
-function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
+/*
+ * `align`: where its actions stand beside the title. At the foot of the
+ * heading by default, as buttons a page is for; `start` at the title's own
+ * line, as a record's three dots (the prototype's project page).
+ */
+function PageHeader({
+  className,
+  align = "end",
+  ...props
+}: React.ComponentProps<"header"> & { align?: "end" | "start" }) {
   return (
     <header
       data-slot="page-header"
-      className={cn("flex min-w-0 flex-wrap items-end gap-3", className)}
+      data-align={align}
+      className={cn(
+        "flex min-w-0 flex-wrap gap-3",
+        align === "end" ? "items-end" : "items-start",
+        className
+      )}
       {...props}
     />
   );

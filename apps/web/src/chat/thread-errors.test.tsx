@@ -154,8 +154,10 @@ const cleared = (): void => {
 /** What the thread says about each failed answer in `messages`, in order. */
 const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
   await showThread(messages);
+  // What each alert says went wrong, apart from the way to ask again under it.
   const said = [...document.querySelectorAll('[role="alert"]')].map(
-    (alert) => alert.textContent ?? ""
+    (alert) =>
+      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
   );
   cleared();
   return said;
