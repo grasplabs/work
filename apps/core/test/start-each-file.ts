@@ -26,15 +26,29 @@ import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // What core loads on first use rather than at startup (models.ts,
-// auth/auth.ts, channels/teams.ts), loaded here up front: Vite transforms
-// a module the first time a test imports it, seconds for these, which
-// would land in the middle of a test's timing.
+// auth/auth.ts, channels/teams.ts, clock.ts, workflows/kept-email.ts),
+// loaded here up front: Vite transforms a module the first time a test
+// imports it, seconds for these, which would land in the middle of a
+// test's timing.
+//
+// And a module whose first import starts inside a Durable Object can
+// never load at all. The clock's alarm imports the Gmail channel for its
+// quarter-hour tasks as soon as a test arms it, and a workflow step
+// imports postal-mime to read a kept message. The module runner keeps
+// that import's promise for every later import of the module in this
+// runtime, but the next file's reset (reset-storage.ts) aborts the object
+// mid-import, so the promise never settles: each later import, such as a
+// test running the quarter-hour tasks itself (maintenance.ts), waited
+// until its test timed out. Loaded here, in the runner's own context and
+// before any object runs, they are already evaluated when one asks.
 await Promise.all([
   import("@earendil-works/pi-ai/api/anthropic-messages"),
   import("@earendil-works/pi-ai/api/openai-responses"),
   import("@earendil-works/pi-ai/api/openai-completions"),
   import("@better-auth/sso"),
   import("../src/channels/teams-adapter.ts"),
+  import("../src/channels/gmail.ts"),
+  import("postal-mime"),
 ]);
 
 /** Migrations, read by vite.config.ts into bindings. */
