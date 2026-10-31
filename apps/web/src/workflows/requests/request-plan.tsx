@@ -36,6 +36,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -46,7 +47,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 
-import { formatDay, formatMonth, formatNumber } from "../../format.ts";
+import { formatIsoDayMonth, formatMonth, formatNumber } from "../../format.ts";
 
 // The plan in one picture, as the prototype's `request-plan.tsx`: the
 // billed requests of the month climbing day by day toward the line of what
@@ -122,7 +123,9 @@ const Saved = ({
   const { t, i18n } = useLingui();
   return (
     <Popover>
-      <PopoverTrigger render={<Button size="xs" variant="link" />}>
+      <PopoverTrigger
+        render={<Button className="self-start" size="inline" variant="hint" />}
+      >
         {t`Time saved`}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72">
@@ -195,7 +198,9 @@ export const RequestPlan = ({
   );
   const of = included === null ? "" : formatNumber(included);
   const ahead = pace === null ? "" : formatNumber(pace);
-  const end = formatDay(report.to);
+  // Days of this month or last, so without their year, as the prototype
+  // writes them: "31 Oct".
+  const end = formatIsoDayMonth(report.to);
   const over =
     range === "month" && included !== null && pace !== null && pace > included;
   const config: ChartConfig = {
@@ -204,7 +209,8 @@ export const RequestPlan = ({
     billed: { label: t`Billed`, color: "chart-1" },
   };
   const daily = report.by === "day";
-  const format = (at: string) => (daily ? formatDay(at) : formatMonth(at));
+  const format = (at: string) =>
+    daily ? formatIsoDayMonth(at) : formatMonth(at);
   const data: {
     at: string;
     total?: number | null;
@@ -227,12 +233,13 @@ export const RequestPlan = ({
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-6">
         <div className="flex flex-wrap gap-x-12 gap-y-3">
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-3xl font-medium tracking-tight tabular-nums">
+            {/* Key figures, in the serif, as the prototype has them. */}
+            <Stat>
               {billed}
               {included !== null && range !== "year" ? (
                 <span className="text-muted-foreground"> / {of}</span>
               ) : null}
-            </span>
+            </Stat>
             {range === "month" && pace !== null ? (
               <span
                 className={cn(
@@ -245,9 +252,7 @@ export const RequestPlan = ({
             ) : null}
           </div>
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-3xl font-medium tracking-tight tabular-nums">
-              {t({ message: `${hours} h`, context: "hours, short" })}
-            </span>
+            <Stat>{t({ message: `${hours} h`, context: "hours, short" })}</Stat>
             <Saved canSet={canSet} onSet={onSetMinutes} settings={settings} />
           </div>
         </div>

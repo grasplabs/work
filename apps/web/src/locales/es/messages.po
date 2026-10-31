@@ -2489,9 +2489,17 @@ msgstr "Añadir un widget"
 msgid "Add a word"
 msgstr "Añadir una palabra"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "Añadir una app"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Añadir una excepción"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "Añadir app"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3484,6 +3492,10 @@ msgstr "Pregunta a Grasp"
 msgid "Ask Grasp for a widget"
 msgstr "Pide un widget a Grasp"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Pedir a Grasp que añada «{typed}»"
+
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 msgstr "Pide a Grasp que cree uno. Mientras trabaja, el dominio aparece junto al chat, para previsualizarlo antes de proponerlo."
@@ -4090,6 +4102,7 @@ msgstr "No se puede leer"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5977,8 +5990,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Cada documento puede tener hasta {maxKb} KB."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Cada dominio gestiona una parte del negocio: sus flujos de trabajo, aplicaciones y conexiones."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Cada dominio es una parte del negocio: sus flujos de trabajo, aplicaciones y conexiones."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6799,6 +6812,10 @@ msgstr "Para {0}, a quien ya se preguntó"
 msgid "For {person}"
 msgstr "Para {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Para una parte del negocio, como una línea de productos o una oficina. Empieza vacío: lo que Grasp construye en él trae sus flujos de trabajo, aplicaciones e integraciones."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Para un administrador"
@@ -6820,6 +6837,10 @@ msgstr "por todas las llamadas a modelos este mes"
 msgid "For everyone"
 msgstr "Para todos"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Por ejemplo, Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Por ejemplo Personio o Twinfield"
@@ -6827,6 +6848,10 @@ msgstr "Por ejemplo Personio o Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Por ejemplo: responde a las preguntas de los clientes"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Por ejemplo: todo lo relacionado con los contratos de leasing, desde la solicitud hasta la renovación"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -6910,6 +6935,10 @@ msgstr "De Google Drive. Solo leo los archivos que añadas."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Del catálogo"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -9072,6 +9101,10 @@ msgstr "Convertirlo en un flujo de trabajo"
 msgid "Make admin"
 msgstr "Hacer administrador"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Crear dominio"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Hacer actual la versión {version}"
@@ -9418,6 +9451,7 @@ msgid "Muted"
 msgstr "En silencio"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9615,6 +9649,11 @@ msgstr "Nueva colección"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "Nuevo documento"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Nuevo dominio"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -10592,6 +10631,10 @@ msgstr "Nada bien"
 msgid "Not in a domain yet"
 msgstr "Aún sin dominio"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "No está en el catálogo"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Aún sin entrevista."
@@ -10830,6 +10873,10 @@ msgstr "Nada aquí coincide con el filtro."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Aquí aún no hay nada."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Nada en el catálogo coincide con «{typed}»."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12151,6 +12198,10 @@ msgstr "Política"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Política no encontrada"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Populares en el catálogo"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13701,6 +13752,10 @@ msgstr "Buscar personas y equipos"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras palabras, o con menos."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Buscar en el catálogo"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -16153,6 +16208,10 @@ msgstr "Aún no hay colecciones que puedas leer."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Aún no hay dominios que puedas abrir. Los dominios se crean en el chat: describe una parte de tu trabajo y Grasp construye sus flujos de trabajo y aplicaciones."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Aún no hay dominios que puedas abrir. Crea uno con «Nuevo dominio», o describe una parte de tu trabajo en el chat y Grasp construye sus flujos de trabajo y aplicaciones."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Aún no hay flujos de trabajo que vincular."
@@ -17676,6 +17735,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Qué cuenta como éxito"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "¿Qué gestiona?"
+
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
 msgstr "¿Qué quiere lograr el consejo?"
@@ -18286,6 +18349,10 @@ msgstr "Si las personas de Grasp pueden iniciar sesión para ayudar con este esp
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "¿Qué herramientas de IA usa la gente?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "¿Qué app debe empezar a seguir Grasp? Grasp conoce una app en cuanto está conectada, así que una del catálogo se abre donde la conecta."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"

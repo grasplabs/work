@@ -2489,9 +2489,17 @@ msgstr "Widget hinzufügen"
 msgid "Add a word"
 msgstr "Ein Wort hinzufügen"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Add an app"
+msgstr "App hinzufügen"
+
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Ausnahme hinzufügen"
+
+#: src/routes/_shell.landscape.index.tsx
+msgid "Add app"
+msgstr "App hinzufügen"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -3484,6 +3492,10 @@ msgstr "Grasp fragen"
 msgid "Ask Grasp for a widget"
 msgstr "Grasp um ein Widget bitten"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Ask Grasp to add “{typed}”"
+msgstr "Grasp bitten, „{typed}“ hinzuzufügen"
+
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht die Domäne neben dem Chat zur Vorschau, bevor sie vorgeschlagen wird."
@@ -4090,6 +4102,7 @@ msgstr "Nicht lesbar"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-status.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
@@ -5977,8 +5990,8 @@ msgid "Each document holds up to {maxKb} KB."
 msgstr "Jedes Dokument darf bis zu {maxKb} KB groß sein."
 
 #: src/routes/_shell.domains.index.tsx
-msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Jede Domäne steuert einen Teil des Geschäfts: ihre Workflows, Apps und Verbindungen."
+msgid "Each domain is one part of the business: its workflows, apps and connections."
+msgstr "Jede Domäne ist ein Teil des Geschäfts: ihre Workflows, Apps und Verbindungen."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -6799,6 +6812,10 @@ msgstr "Für {0}, die oder der gefragt wurde"
 msgid "For {person}"
 msgstr "Für {person}"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For a part of the business, such as a product line or an office. It starts empty: what Grasp builds in it brings its workflows, apps and integrations."
+msgstr "Für einen Teil des Geschäfts, etwa eine Produktlinie oder einen Standort. Sie beginnt leer: Was Grasp darin baut, bringt ihre Workflows, Apps und Integrationen mit."
+
 #: src/inbox/item-detail.tsx
 msgid "For an admin"
 msgstr "Für Admins"
@@ -6820,6 +6837,10 @@ msgstr "für alle Modellaufrufe diesen Monat"
 msgid "For everyone"
 msgstr "Für alle"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "For example Leasing"
+msgstr "Zum Beispiel Leasing"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Zum Beispiel Personio oder Twinfield"
@@ -6827,6 +6848,10 @@ msgstr "Zum Beispiel Personio oder Twinfield"
 #: src/onboarding/organization-dialogs.tsx
 msgid "For example: answers customers' questions"
 msgstr "Zum Beispiel: beantwortet Fragen von Kunden"
+
+#: src/engines/new-domain-dialog.tsx
+msgid "For example: everything around lease contracts, from request to renewal"
+msgstr "Zum Beispiel: alles rund um Leasingverträge, von der Anfrage bis zur Verlängerung"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
@@ -6910,6 +6935,10 @@ msgstr "Aus Google Drive. Ich lese nur die Dateien, die Sie hinzufügen."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Aus SharePoint oder OneDrive. Ich lese nur die Dateien, die Sie hinzufügen."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "From the catalog"
+msgstr "Aus dem Katalog"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -9072,6 +9101,10 @@ msgstr "Einen Workflow daraus machen"
 msgid "Make admin"
 msgstr "Zum Admin machen"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "Make domain"
+msgstr "Domäne anlegen"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Version {version} aktuell machen"
@@ -9418,6 +9451,7 @@ msgid "Muted"
 msgstr "Stumm"
 
 #: src/chat/project-dialog.tsx
+#: src/engines/new-domain-dialog.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9615,6 +9649,11 @@ msgstr "Neue Sammlung"
 #: src/knowledge/new-document.tsx
 msgid "New document"
 msgstr "Neues Dokument"
+
+#: src/engines/new-domain-dialog.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "New domain"
+msgstr "Neue Domäne"
 
 #: src/onboarding/work-record.tsx
 msgid "new facts in the last interviews"
@@ -10592,6 +10631,10 @@ msgstr "Nicht gut"
 msgid "Not in a domain yet"
 msgstr "Noch in keiner Domäne"
 
+#: src/landscape/add-app-dialog.tsx
+msgid "Not in the catalog"
+msgstr "Nicht im Katalog"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Noch nicht interviewt."
@@ -10830,6 +10873,10 @@ msgstr "Hier passt nichts zum Filter."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Hier ist noch nichts."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Nothing in the catalog matches “{typed}”."
+msgstr "Nichts im Katalog passt zu „{typed}“."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -12151,6 +12198,10 @@ msgstr "Richtlinie"
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Policy not found"
 msgstr "Richtlinie nicht gefunden"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Popular in the catalog"
+msgstr "Beliebt im Katalog"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -13701,6 +13752,10 @@ msgstr "Personen und Teams suchen"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Die Suche durchsucht jede Sammlung, die Sie lesen dürfen. Versuchen Sie andere oder weniger Wörter."
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Search the catalog"
+msgstr "Katalog durchsuchen"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -16153,6 +16208,10 @@ msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Domänen entstehen im Chat: Beschreiben Sie einen Teil Ihrer Arbeit, und Grasp baut die Workflows und Apps dazu."
 
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Make one with New domain, or describe a part of your work in chat, and Grasp builds its workflows and apps."
+msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Legen Sie eine mit „Neue Domäne“ an, oder beschreiben Sie im Chat einen Teil Ihrer Arbeit, und Grasp baut ihre Workflows und Apps."
+
 #: src/brain/goals-editor.tsx
 msgid "There are no workflows to link yet."
 msgstr "Es gibt noch keine Workflows zum Verknüpfen."
@@ -17676,6 +17735,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Was als Erfolg zählt"
 
+#: src/engines/new-domain-dialog.tsx
+msgid "What does it run?"
+msgstr "Was läuft darin?"
+
 #: src/brain/goals-editor.tsx
 msgid "What does the board want to reach?"
 msgstr "Was will die Geschäftsführung erreichen?"
@@ -18286,6 +18349,10 @@ msgstr "Ob sich Personen von Grasp anmelden können, um bei diesem Workspace zu 
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Welche KI-Tools nutzen die Leute?"
+
+#: src/landscape/add-app-dialog.tsx
+msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
+msgstr "Welche App soll Grasp künftig erfassen? Grasp kennt eine App, sobald sie verbunden ist. Eine App aus dem Katalog öffnet sich daher dort, wo Sie sie verbinden."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
