@@ -618,3 +618,20 @@ export const erasedPeople = sqliteTable("erased_people", {
   userId: text("user_id").primaryKey(),
   beganAt: timestamp("began_at").notNull(),
 });
+
+/**
+ * The organization's own key for each AI provider (ai-providers.ts),
+ * sealed with the vault, bound to its provider and, for an
+ * OpenAI-compatible endpoint, the base URL it goes to: a key moved to
+ * another row, or a base URL changed in the database, doesn't open. Never
+ * read back to core: only its mask, its first and last characters.
+ */
+export const aiProviderKeys = sqliteTable("ai_provider_keys", {
+  provider: text().primaryKey(),
+  sealed: text().notNull(),
+  mask: text().notNull(),
+  /** Only for an OpenAI-compatible endpoint: the base URL its key goes to. */
+  baseUrl: text("base_url"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});

@@ -13,7 +13,7 @@ import type {
 } from "@grasp-os/shared/policies";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "./models.ts";
+import { modelSettings, modelForRole, models } from "./models.ts";
 
 // Grasp reading a policy the company uploaded (GRA-1213), as the
 // prototype's policy manager does (`lib/policy-reader.ts`): a model reads
@@ -153,6 +153,7 @@ export const readingOf = (
 const problemOf = (error: unknown): PolicyReadingProblem => {
   switch (modelErrors.codeOf(error)) {
     case "model.unconfigured":
+    case "model.no_provider":
     case "model.not_allowed":
     case "model.eu_only":
     case "model.sensitive_data": {
@@ -194,7 +195,7 @@ export const readPolicy = async (
   by: AuditActor,
   requestId: string
 ): Promise<PolicyReading> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {
