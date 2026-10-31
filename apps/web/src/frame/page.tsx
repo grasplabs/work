@@ -1,3 +1,9 @@
+import { Card } from "@grasp-os/ui/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
 import {
   PageHeader,
   PageHeaderActions,
@@ -67,6 +73,17 @@ export const PageHeading = ({
       <PageHeaderActions>{action}</PageHeaderActions>
     )}
   </PageHeader>
+);
+
+/** A list with nothing in it: one quiet line in a card, where the list would be. */
+export const EmptyCard = ({ children }: { children: ReactNode }) => (
+  <Card>
+    <Empty size="xs">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  </Card>
 );
 
 /**

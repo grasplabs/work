@@ -304,6 +304,10 @@ msgstr "{category} van {vendor}, met ingebouwde AI"
 msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 msgstr "{caught, plural, one {Zou vandaag # app treffen.} other {Zou vandaag # apps treffen.}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{chosen} (no longer in this domain)"
+msgstr "{chosen} (niet meer in dit domein)"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Dan wordt het {chosen}. Dit duurt ongeveer {minutes} minuten. Zullen we beginnen?"
@@ -472,6 +476,10 @@ msgstr "{count, plural, one {# wens} other {# wensen}}"
 #: src/brain/goals-editor.tsx
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# workflow dient het} other {# workflows dienen het}}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{count, plural, one {# workflow} other {# workflows}}"
+msgstr "{count, plural, one {# workflow} other {# workflows}}"
 
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
@@ -2854,11 +2862,6 @@ msgstr "Alle facturen"
 #: src/workflows/requests/request-filters.tsx
 msgid "All places"
 msgstr "Alle plekken"
-
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "the log of every run"
-msgid "All runs"
-msgstr "Alle runs"
 
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -9454,7 +9457,6 @@ msgstr "Gedempt"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
-#: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Naam"
 
@@ -9556,11 +9558,6 @@ msgctxt "Pulse status"
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
 
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing the workflows that need a person"
-msgid "Needs attention"
-msgstr "Vraagt aandacht"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "Needs help: {cost} a month current cost, nothing redesigned yet"
 msgstr "Hulp nodig: {cost} per maand huidige kosten, nog niets herontworpen"
@@ -9582,6 +9579,11 @@ msgstr "Iemand moet opnieuw aanmelden"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
+msgid "Needs you"
+msgstr "Heeft je nodig"
+
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Heeft je nodig"
 
@@ -10269,10 +10271,6 @@ msgstr "Hier nog geen workflow met getelde uren."
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "Nog geen workflow"
-
-#: src/workflows/today-lanes.tsx
-msgid "No workflow you can see has worked today yet."
-msgstr "Geen workflow die je kunt zien heeft vandaag al gewerkt."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -14126,6 +14124,10 @@ msgstr "De pakketten voor {domain} tonen"
 msgid "Show the page for {title}"
 msgstr "Pagina voor {title} tonen"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "Show workflows"
+msgstr "Workflows tonen"
+
 #: src/landscape/audit-trail.tsx
 msgid "Showing {showing} of {shownCount}"
 msgstr "{showing} van {shownCount} getoond"
@@ -16737,7 +16739,6 @@ msgctxt "chats from today"
 msgid "Today"
 msgstr "Vandaag"
 
-#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/today-lanes.tsx
 msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
@@ -18073,10 +18074,6 @@ msgstr "Wat te onthouden"
 msgid "What to remove"
 msgstr "Wat te verwijderen"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "What to show of the runs"
-msgstr "Wat van de runs te tonen"
-
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "Wat van de sporen te tonen"
@@ -18665,6 +18662,7 @@ msgstr "Bepaald wat er beter kan"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
+#: src/workflows/independent-workflows.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"

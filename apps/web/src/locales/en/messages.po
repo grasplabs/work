@@ -304,6 +304,10 @@ msgstr "{category} by {vendor}, with AI built in"
 msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 msgstr "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{chosen} (no longer in this domain)"
+msgstr "{chosen} (no longer in this domain)"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
@@ -472,6 +476,10 @@ msgstr "{count, plural, one {# wish} other {# wishes}}"
 #: src/brain/goals-editor.tsx
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{count, plural, one {# workflow} other {# workflows}}"
+msgstr "{count, plural, one {# workflow} other {# workflows}}"
 
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
@@ -2854,11 +2862,6 @@ msgstr "All invoices"
 #: src/workflows/requests/request-filters.tsx
 msgid "All places"
 msgstr "All places"
-
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "the log of every run"
-msgid "All runs"
-msgstr "All runs"
 
 #: src/onboarding/work-list.tsx
 #: src/routes/_shell.onboarding.organization.$team.tsx
@@ -9454,7 +9457,6 @@ msgstr "Muted"
 #: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
-#: src/workflows/independent-workflows.tsx
 msgid "Name"
 msgstr "Name"
 
@@ -9556,11 +9558,6 @@ msgctxt "Pulse status"
 msgid "Needs attention"
 msgstr "Needs attention"
 
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing the workflows that need a person"
-msgid "Needs attention"
-msgstr "Needs attention"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "Needs help: {cost} a month current cost, nothing redesigned yet"
 msgstr "Needs help: {cost} a month current cost, nothing redesigned yet"
@@ -9582,6 +9579,11 @@ msgstr "Needs someone to sign in again"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
+msgid "Needs you"
+msgstr "Needs you"
+
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Needs you"
 
@@ -10269,10 +10271,6 @@ msgstr "No workflow with counted hours here yet."
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "No workflow yet"
-
-#: src/workflows/today-lanes.tsx
-msgid "No workflow you can see has worked today yet."
-msgstr "No workflow you can see has worked today yet."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -14126,6 +14124,10 @@ msgstr "Show the packages for {domain}"
 msgid "Show the page for {title}"
 msgstr "Show the page for {title}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "Show workflows"
+msgstr "Show workflows"
+
 #: src/landscape/audit-trail.tsx
 msgid "Showing {showing} of {shownCount}"
 msgstr "Showing {showing} of {shownCount}"
@@ -16737,7 +16739,6 @@ msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"
 
-#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/today-lanes.tsx
 msgctxt "the workflows' runs of today, laid out in time"
 msgid "Today"
@@ -18073,10 +18074,6 @@ msgstr "What to remember"
 msgid "What to remove"
 msgstr "What to remove"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "What to show of the runs"
-msgstr "What to show of the runs"
-
 #: src/workflows/traces.tsx
 msgid "What to show of the traces"
 msgstr "What to show of the traces"
@@ -18665,6 +18662,7 @@ msgstr "Worked out what could be improved"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
+#: src/workflows/independent-workflows.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"

@@ -6,7 +6,12 @@ import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
 import type { WorkflowGoLiveWaiting } from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
+import type {
+  RunActivity,
+  RunFilter,
+  RunsPage,
+  WorkflowSummary,
+} from "@grasp-os/shared/workflows";
 import {
   Select,
   SelectContent,
@@ -17,6 +22,7 @@ import {
 import {
   Tabs,
   TabsContent,
+  TabsCount,
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
@@ -31,14 +37,16 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { listedOrNone, readPeople } from "../directory.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { readPeople } from "../directory.ts";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { EmptyCard } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -50,7 +58,10 @@ import {
 } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
-import { IndependentWorkflows } from "../workflows/independent-workflows.tsx";
+import {
+  IndependentWorkflows,
+  NewWorkflow,
+} from "../workflows/independent-workflows.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
 import {
   listRuns,
@@ -70,20 +81,17 @@ import type { AppProcesses } from "../workflows/workflows-table.tsx";
 // Everything that runs on its own, in one place: every workflow of every
 // App the person can open, at work and on the way; those that need a
 // person now, with the independent workflows waiting for the reader to
-// let them go live; and, on the Runs tab, the figures core counted over
-// the last days and their runs, waiting ones first, filtered by App,
-// workflow and status. The lists filter by the business process their
-// workflows serve, once they serve more than one. The tab and the filters
-// are in the address, so a link can open the runs it means. Each tab
-// reads only what it shows: changing a filter reads the runs again, never
-// the list of workflows.
+// let them go live; and, on the Runs tab, today's runs in time, the
+// figures core counted over the last days and their runs, waiting ones
+// first, filtered by App, workflow and status. The lists filter by the
+// business process their workflows serve, once they serve more than one.
+// The tab and the filters are in the address, so a link can open the runs
+// it means. A new workflow is the page's action, in the bar above it.
 
 interface WorkflowsSearch {
   tab?: "needs" | "runs";
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
-  /** On the Runs tab: the day's lanes, rather than the log. */
-  view?: "today";
   app?: string;
   workflow?: string;
   status?: RunFilterStatus;
@@ -194,13 +202,38 @@ const Filter = ({
  * The Runs tab's filters: an App, then one of its workflows (none to pick
  * before an App is), and a status.
  */
-const RunFilters = ({ options }: { options: FilterOptions }) => {
+const RunFilters = ({
+  options,
+  settled,
+}: {
+  options: FilterOptions;
+  /**
+   * Whether `options` are the chosen domain's: while another domain's
+   * workflows are on their way, the Workflow filter offers none.
+   */
+  settled: boolean;
+}) => {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/workflows/" });
   const filterBy = (change: Partial<WorkflowsSearch>): void => {
     void navigate({ search: (previous) => ({ ...previous, ...change }) });
   };
   const { t } = useLingui();
+  const listed = settled ? (options.workflows ?? []) : [];
+  const chosen = search.workflow;
+  // A workflow the address filters by that the domain's current version
+  // doesn't list (renamed or removed since): core still filters its kept
+  // runs by that name, so it stays, offered under the name it has, said
+  // to be no longer the domain's once the domain's workflows are known.
+  const kept =
+    chosen === undefined || listed.includes(chosen)
+      ? []
+      : [
+          {
+            value: chosen,
+            label: settled ? t`${chosen} (no longer in this domain)` : chosen,
+          },
+        ];
   return (
     <div className="flex flex-wrap gap-2">
       <Filter
@@ -213,16 +246,17 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
         value={search.app}
       />
       <Filter
-        // Nothing to pick from while the App's workflows can't be read.
-        disabled={options.workflows === null}
+        // Nothing to pick from while the App's workflows can't be read,
+        // or while the chosen one's are still on their way.
+        disabled={!settled || options.workflows === null}
         label={t`Workflow`}
         onChange={(workflow) => {
           filterBy({ workflow });
         }}
-        options={(options.workflows ?? []).map((name) => ({
-          value: name,
-          label: name,
-        }))}
+        options={[
+          ...listed.map((name) => ({ value: name, label: name })),
+          ...kept,
+        ]}
         value={search.workflow}
       />
       <Filter
@@ -236,7 +270,7 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
         }))}
         value={search.status}
       />
-      {options.workflows === null ? (
+      {settled && options.workflows === null ? (
         <p className="text-destructive self-center text-sm">
           <Trans>Couldn&apos;t load this domain&apos;s workflows.</Trans>
         </p>
@@ -248,16 +282,13 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
 /** The independent workflows serving `process`, or why they couldn't be read. */
 const Independent = ({
   page,
-  canCreate,
   process,
 }: {
   page: Loaded<WorkflowResource[]>;
-  canCreate: boolean;
   process: BusinessProcess | undefined;
 }) =>
   page.state === "ready" ? (
     <IndependentWorkflows
-      canCreate={canCreate}
       filtered={process !== undefined}
       workflows={page.data.filter((workflow) =>
         showsUnder(process, workflow.process)
@@ -288,22 +319,28 @@ const offeredOf = (
 /** The App workflows serving `process`, at work and on the way. */
 const AppWorkflows = ({
   rows,
+  apps,
   processes,
   process,
 }: {
   rows: WorkflowSummary[];
+  apps: Loaded<App[]>;
   processes: AppProcesses;
   process: BusinessProcess | undefined;
 }) => {
+  // Which serve the chosen process can't be told: said, not shown fewer.
+  if (domainsUnchecked(apps, process)) {
+    return <NotLoadedState page={apps} />;
+  }
   const shown = rows.filter((row) =>
     showsUnder(process, processes.get(row.app) ?? null)
   );
   // Filtered to nothing: no invitation to make a first one.
   if (process !== undefined && shown.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+      <EmptyCard>
         <Trans>No workflow of a domain serves this process.</Trans>
-      </p>
+      </EmptyCard>
     );
   }
   return <WorkflowsOverview processes={processes} rows={shown} />;
@@ -317,6 +354,7 @@ const AppWorkflows = ({
 const NeedsAttention = ({
   workflows,
   independent,
+  apps,
   goLives,
   processes,
   process,
@@ -325,6 +363,7 @@ const NeedsAttention = ({
 }: {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
+  apps: Loaded<App[]>;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
   processes: AppProcesses;
   process: BusinessProcess | undefined;
@@ -350,94 +389,74 @@ const NeedsAttention = ({
           showsUnder(process, served.get(each.workflowId) ?? null)
         )
       : [];
+  // Under a process, a list whose processes couldn't be read says so
+  // rather than showing fewer.
+  const domainsGone = domainsUnchecked(apps, process);
+  const independentGone = domainsUnchecked(independent, process);
   const nothing =
     workflows.state === "ready" &&
     goLives.state === "ready" &&
+    !domainsGone &&
+    !independentGone &&
     rows.length === 0 &&
     waiting.length === 0;
   return (
-    <div className="mt-4 flex flex-col gap-8">
+    <div className="mt-6 flex flex-col gap-8">
       {nothing ? (
-        <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+        <EmptyCard>
           <Trans>
             No workflow needs attention: nothing waits for a decision or to go
             live, nothing failed lately.
           </Trans>
-        </p>
+        </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
-      {rows.length === 0 ? null : (
+      {workflows.state === "ready" && domainsUnchecked(apps, process) ? (
+        <NotLoadedState page={apps} />
+      ) : null}
+      {domainsGone || rows.length === 0 ? null : (
         <WorkflowsTable processes={processes} rows={rows} />
       )}
-      {goLives.state === "ready" ? (
+      {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
+      {goLives.state === "ready" && domainsUnchecked(independent, process) ? (
+        <NotLoadedState page={independent} />
+      ) : null}
+      {goLives.state !== "ready" || independentGone ? null : (
         <GoLivesWaiting names={{ people, me }} waiting={waiting} />
-      ) : (
-        <NotLoadedState page={goLives} />
       )}
     </div>
   );
 };
 
 /**
- * The figures over the runs, where core counted them for the person: read
- * once while the Runs tab shows, as they count a window of days whatever
- * the log's filters or the view, which never read them again.
+ * The figures over the runs, where core counted them for the person. The
+ * loader starts their read on every run of it (the page opened, "Try
+ * again", a decision answered in the lanes), beside its other reads, so
+ * they count the same moment as the lanes; they count a window of days
+ * whatever the log's filters, which never read them again.
  */
-const Figures = () => {
-  const core = useCore();
-  const [activity, setActivity] = useState<Loaded<RunActivity | null>>();
+const Figures = ({
+  activity,
+}: {
+  activity: Promise<Loaded<RunActivity | null>>;
+}) => {
+  const [read, setRead] = useState<Loaded<RunActivity | null>>();
   useEffect(() => {
-    const left = new AbortController();
-    const read = async (): Promise<void> => {
-      const loaded = await loadFromCore(core, readActivity, left.signal);
-      if (!left.signal.aborted) {
-        setActivity(loaded);
+    let current = true;
+    const settle = async (): Promise<void> => {
+      const loaded = await activity;
+      if (current) {
+        setRead(loaded);
       }
     };
-    void read();
+    void settle();
     return () => {
-      left.abort();
+      current = false;
     };
-  }, [core]);
-  return activity?.state === "ready" && activity.data !== null ? (
-    <RunFiguresView figures={runFiguresOf(activity.data)} scope="all" />
+  }, [activity]);
+  return read?.state === "ready" && read.data !== null ? (
+    <RunFiguresView figures={runFiguresOf(read.data)} scope="all" />
   ) : null;
-};
-
-/** Today's lanes, or the log of every run, on the Runs tab. */
-const RunsView = () => {
-  const { t } = useLingui();
-  const search = Route.useSearch();
-  const navigate = useNavigate({ from: "/workflows/" });
-  return (
-    <ToggleGroup
-      aria-label={t`What to show of the runs`}
-      onValueChange={(value: unknown[]) => {
-        const [next] = value;
-        if (next === "today" || next === "log") {
-          void navigate({
-            // The log's filters are its own: Today takes none.
-            search:
-              next === "today"
-                ? { tab: "runs", view: "today" }
-                : { tab: "runs" },
-          });
-        }
-      }}
-      value={[search.view ?? "log"]}
-      variant="outline"
-    >
-      <ToggleGroupItem value="today">
-        {t({
-          message: "Today",
-          context: "the workflows' runs of today, laid out in time",
-        })}
-      </ToggleGroupItem>
-      <ToggleGroupItem value="log">
-        {t({ message: "All runs", context: "the log of every run" })}
-      </ToggleGroupItem>
-    </ToggleGroup>
-  );
 };
 
 /**
@@ -504,20 +523,261 @@ const ProcessFilter = ({ offered }: { offered: BusinessProcess[] }) => {
   );
 };
 
+/** How many workflows a tab holds, beside its name, once they are read. */
+const WorkflowCount = ({ count }: { count: number | undefined }) => {
+  const { t } = useLingui();
+  return count === undefined ? null : (
+    <TabsCount
+      label={t`${plural(count, { one: "# workflow", other: "# workflows" })}`}
+    >
+      {count}
+    </TabsCount>
+  );
+};
+
+/**
+ * Whether `read`, which says which process each workflow serves, failed
+ * while a process is chosen: then which serve it can't be told.
+ */
+const domainsUnchecked = (
+  read: Loaded<unknown>,
+  process: BusinessProcess | undefined
+): read is Exclude<Loaded<unknown>, { state: "ready" }> =>
+  process !== undefined && read.state !== "ready";
+
+/**
+ * Every workflow the lists show under `process`: the domains' and the
+ * independent ones.
+ */
+const countAll = (
+  lists: Lists,
+  process: BusinessProcess | undefined
+): number | undefined =>
+  lists.workflows.state === "ready" &&
+  lists.independent.state === "ready" &&
+  !domainsUnchecked(lists.apps, process)
+    ? lists.workflows.data.filter((row) =>
+        showsUnder(process, lists.processes.get(row.app) ?? null)
+      ).length +
+      lists.independent.data.filter((workflow) =>
+        showsUnder(process, workflow.process)
+      ).length
+    : undefined;
+
+/**
+ * What needs a person under `process`: the domains' workflows that do,
+ * and the go-lives waiting.
+ */
+const countNeeds = (
+  lists: Lists,
+  process: BusinessProcess | undefined
+): number | undefined => {
+  if (lists.workflows.state !== "ready" || lists.goLives.state !== "ready") {
+    return undefined;
+  }
+  // Under a process, which go-live serves it is read off the independent
+  // workflows, and which domain workflow serves it off the domains:
+  // without either it can't be told, so no count rather than one that
+  // leaves some out.
+  if (
+    domainsUnchecked(lists.independent, process) ||
+    domainsUnchecked(lists.apps, process)
+  ) {
+    return undefined;
+  }
+  const served = new Map(
+    lists.independent.state === "ready"
+      ? lists.independent.data.map((workflow) => [
+          workflow.id,
+          workflow.process,
+        ])
+      : []
+  );
+  return (
+    lists.workflows.data.filter(
+      (row) =>
+        needsAttention(row) &&
+        showsUnder(process, lists.processes.get(row.app) ?? null)
+    ).length +
+    lists.goLives.data.filter((each) =>
+      showsUnder(process, served.get(each.workflowId) ?? null)
+    ).length
+  );
+};
+
+/** What the Runs tab's log shows: its runs, its filters' options, and the model a fix asks with. */
+interface RunsRead {
+  runs: Loaded<RunsPage>;
+  filters: Loaded<FilterOptions>;
+  model: string | undefined;
+}
+
+/** Reads the runs `filter` lets through, with what the filters offer. */
+const readRuns = async (
+  core: CoreConnection,
+  filter: RunFilter,
+  left?: AbortSignal
+): Promise<RunsRead> => {
+  const [runs, filters, models] = await Promise.all([
+    loadFromCore(
+      core,
+      async (session) => await listRuns(session, filter),
+      left
+    ),
+    loadFromCore(
+      core,
+      async (session) => await filterOptions(session, filter.app),
+      left
+    ),
+    // The model a fix in chat asks with; without one, none is offered.
+    loadFromCore(core, async (session) => await session.chats.models(), left),
+  ]);
+  return {
+    runs,
+    filters,
+    model: models.state === "ready" ? models.data[0] : undefined,
+  };
+};
+
+/** The run filters `search` sets: what the log reads. */
+const filterOf = ({
+  app,
+  workflow,
+  status,
+}: Pick<WorkflowsSearch, "app" | "workflow" | "status">): RunFilter => ({
+  ...(app === undefined ? {} : { app }),
+  ...(workflow === undefined ? {} : { workflow }),
+  ...(status === undefined ? {} : { status }),
+});
+
+/**
+ * What of the address's run filters isn't on offer once the filters'
+ * options are read, to drop, or null: a domain the Domain filter doesn't
+ * offer (one the reader can't open, or that is gone), with its workflow,
+ * as it would filter the log by a domain the filter can't show. A
+ * workflow the domain's current version doesn't list stays: core still
+ * filters kept runs by that name, and the Workflow filter shows it.
+ */
+const strayOf = (
+  app: string | undefined,
+  read: { data: RunsRead } | undefined
+): { app: undefined; workflow: undefined } | null =>
+  app !== undefined &&
+  read?.data.filters.state === "ready" &&
+  !read.data.filters.data.apps.some(({ value }) => value === app)
+    ? { app: undefined, workflow: undefined }
+    : null;
+
+/** One read of the log: the filters it was read for, and what it answers. */
+interface LogRead {
+  key: string;
+  read: Promise<RunsRead>;
+}
+
+/**
+ * The log of runs under its filters. The page's loader starts its read
+ * beside the lists and today's lanes, and again on every refresh ("Try
+ * again", a decision answered in the lanes), so the log never waits for
+ * them and never stays stale. A filter changed here reads the log alone,
+ * never the lists, the lanes or the figures. What was read stays while
+ * the next read comes; before the first, its lines are loading.
+ */
+const RunsLogRead = ({ log }: { log: LogRead }) => {
+  const core = useCore();
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  const { app, workflow, status } = Route.useSearch();
+  const key = JSON.stringify(filterOf({ app, workflow, status }));
+  // The loader's read is taken once, on the first read after that loader
+  // run: a later change of filters, back to these too, reads again, as
+  // the runs may have moved on since.
+  const taken = useRef<LogRead | null>(null);
+  const navigate = useNavigate({ from: "/workflows/" });
+  const [read, setRead] = useState<{
+    key: string;
+    /** The domain whose workflows its filter options are. */
+    app: string | undefined;
+    data: RunsRead;
+  }>();
+  useEffect(() => {
+    const left = new AbortController();
+    const filter = filterOf({ app, workflow, status });
+    const fresh = taken.current !== log;
+    taken.current = log;
+    const load = async (): Promise<void> => {
+      const shown = JSON.stringify(filter);
+      const data =
+        fresh && shown === log.key
+          ? await log.read
+          : await readRuns(core, filter, left.signal);
+      if (!left.signal.aborted) {
+        setRead({ key: shown, app: filter.app, data });
+      }
+    };
+    void load();
+    return () => {
+      left.abort();
+    };
+  }, [core, log, app, workflow, status]);
+  const stray = strayOf(app, read);
+  useEffect(() => {
+    if (stray !== null) {
+      void navigate({
+        replace: true,
+        search: (previous) => ({ ...previous, ...stray }),
+      });
+    }
+  }, [stray, navigate]);
+  if (read === undefined) {
+    return <LoadingLines lines={4} />;
+  }
+  // Read for other filters than those now chosen: the filters stay, and
+  // the log is loading rather than showing runs the filters don't say.
+  const current = read.key === key;
+  const filtered =
+    app !== undefined || workflow !== undefined || status !== undefined;
+  return (
+    <div className="flex flex-col gap-4">
+      <RunFilters
+        options={
+          read.data.filters.state === "ready"
+            ? read.data.filters.data
+            : { apps: [], workflows: [] }
+        }
+        settled={read.app === app}
+      />
+      {current ? null : <LoadingLines lines={4} />}
+      {current && read.data.runs.state === "ready" ? (
+        <RunsLog
+          empty={filtered ? t`No runs match these filters.` : undefined}
+          me={identity.userId}
+          model={read.data.model}
+          more={read.data.runs.data.more}
+          runs={read.data.runs.data.runs}
+        />
+      ) : null}
+      {current && read.data.runs.state !== "ready" ? (
+        <NotLoadedState page={read.data.runs} />
+      ) : null}
+    </div>
+  );
+};
+
 const Workflows = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const search = Route.useSearch();
   const { identity } = Route.useRouteContext();
   const navigate = useNavigate({ from: "/workflows/" });
-  const filtered =
-    search.app !== undefined ||
-    search.workflow !== undefined ||
-    search.status !== undefined;
   const { process } = search;
+  const { lists } = page;
   return (
     <>
-      <SiteHeader crumbs={[{ label: t`Workflows` }]} />
+      <SiteHeader
+        // The page's one action, in the bar above it.
+        actions={canBuild(identity.role) ? <NewWorkflow /> : undefined}
+        crumbs={[{ label: t`Workflows` }]}
+      />
       <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
         <h1 className="sr-only">
           <Trans>Workflows</Trans>
@@ -533,102 +793,75 @@ const Workflows = () => {
           value={search.tab ?? "workflows"}
         >
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-            <TabsList variant="line">
+            <TabsList aria-label={t`Show workflows`} variant="line">
               <TabsTrigger value="workflows">
                 <Trans context="tab listing every workflow">All</Trans>
+                <WorkflowCount count={countAll(lists, process)} />
               </TabsTrigger>
               <TabsTrigger value="needs">
                 <Trans context="tab listing the workflows that need a person">
-                  Needs attention
+                  Needs you
                 </Trans>
+                <WorkflowCount count={countNeeds(lists, process)} />
               </TabsTrigger>
               <TabsTrigger value="runs">
                 <Trans context="tab listing the runs of workflows">Runs</Trans>
               </TabsTrigger>
             </TabsList>
-            {page.tab === "workflows" || page.tab === "needs" ? (
+            {page.tab === "runs" ? null : (
               <ProcessFilter
                 offered={offeredOf(
-                  page.workflows,
-                  page.independent,
-                  page.processes
+                  lists.workflows,
+                  lists.independent,
+                  lists.processes
                 )}
               />
-            ) : null}
+            )}
           </div>
           <TabsContent value="workflows">
             {page.tab === "workflows" ? (
-              <div className="mt-4 flex flex-col gap-4">
-                {page.workflows.state === "ready" ? (
+              <div className="mt-6 flex flex-col gap-8">
+                {lists.workflows.state === "ready" ? (
                   <AppWorkflows
+                    apps={lists.apps}
                     process={process}
-                    processes={page.processes}
-                    rows={page.workflows.data}
+                    processes={lists.processes}
+                    rows={lists.workflows.data}
                   />
                 ) : (
-                  <NotLoadedState page={page.workflows} />
+                  <NotLoadedState page={lists.workflows} />
                 )}
-                <Independent
-                  canCreate={canBuild(identity.role)}
-                  page={page.independent}
-                  process={process}
-                />
+                <Independent page={lists.independent} process={process} />
               </div>
             ) : null}
           </TabsContent>
           <TabsContent value="needs">
             {page.tab === "needs" ? (
               <NeedsAttention
-                goLives={page.goLives}
-                independent={page.independent}
+                apps={lists.apps}
+                goLives={lists.goLives}
+                independent={lists.independent}
                 me={identity.userId}
                 people={page.people}
                 process={process}
-                processes={page.processes}
-                workflows={page.workflows}
+                processes={lists.processes}
+                workflows={lists.workflows}
               />
             ) : null}
           </TabsContent>
           <TabsContent value="runs">
-            {page.tab === "today" || page.tab === "runs" ? (
-              <div className="mt-4">
-                <Figures />
-              </div>
-            ) : null}
-            <div className="mt-6">
-              <RunsView />
-            </div>
-            {page.tab === "today" ? (
-              <div className="mt-4 flex flex-col gap-4">
+            {/* Today's runs in time, over the figures and the log of
+                them, as the prototype has it. Only while the tab shows:
+                the lanes read again every so often only then. */}
+            {page.tab === "runs" ? (
+              <div className="mt-6 flex flex-col gap-8">
                 {page.today.state === "ready" ? (
                   <TodayLanes today={page.today.data} />
                 ) : (
                   <NotLoadedState page={page.today} />
                 )}
-              </div>
-            ) : null}
-            {page.tab === "runs" ? (
-              <div className="mt-4 flex flex-col gap-4">
-                <RunFilters
-                  options={
-                    page.filters.state === "ready"
-                      ? page.filters.data
-                      : { apps: [], workflows: [] }
-                  }
-                />
-                {page.runs.state === "ready" ? (
-                  <RunsLog
-                    empty={
-                      filtered ? t`No runs match these filters.` : undefined
-                    }
-                    me={identity.userId}
-                    model={page.model}
-                    more={page.runs.data.more}
-                    runs={page.runs.data.runs}
-                  />
-                ) : (
-                  <NotLoadedState page={page.runs} />
-                )}
+                <Figures activity={page.activity} />
+                <RunsLogRead log={page.log} />
               </div>
             ) : null}
           </TabsContent>
@@ -646,108 +879,96 @@ const processesOf = (apps: Loaded<App[]>): AppProcesses =>
       : []
   );
 
+/**
+ * What the lists show, read on every tab, as the tabs count them: the
+ * domains' workflows, the independent ones, the processes the domains
+ * serve, and the go-lives waiting for the reader.
+ */
+interface Lists {
+  workflows: Loaded<WorkflowSummary[]>;
+  independent: Loaded<WorkflowResource[]>;
+  /** The domains, read for the processes they serve (`processes`). */
+  apps: Loaded<App[]>;
+  processes: AppProcesses;
+  goLives: Loaded<WorkflowGoLiveWaiting[]>;
+}
+
+const readLists = async (core: CoreConnection): Promise<Lists> => {
+  const [workflows, independent, apps, goLives] = await Promise.all([
+    loadFromCore(core, listWorkflows),
+    loadFromCore(
+      core,
+      async (session) => await session.workflowResources.list()
+    ),
+    // For the processes the domains serve: read like the rest, so a list
+    // filtered by a process can tell when it couldn't check them.
+    loadFromCore(core, async (session) => await session.apps.list()),
+    loadFromCore(
+      core,
+      async (session) => await session.workflowResources.lifecycle.waiting()
+    ),
+  ]);
+  return {
+    workflows,
+    independent,
+    apps,
+    processes: processesOf(apps),
+    goLives,
+  };
+};
+
+/** What the address says the page shows, as far as it is valid. */
+const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
+  ...(search.tab === "runs" || search.tab === "needs"
+    ? { tab: search.tab }
+    : {}),
+  ...(search.tab !== "runs" && isProcess(search.process)
+    ? { process: search.process }
+    : {}),
+  ...(typeof search.app === "string" ? { app: search.app } : {}),
+  ...(typeof search.workflow === "string" ? { workflow: search.workflow } : {}),
+  ...(isStatus(search.status) ? { status: search.status } : {}),
+});
+
 export const Route = createFileRoute("/_shell/workflows/")({
-  validateSearch: (search: Record<string, unknown>): WorkflowsSearch => ({
-    ...(search.tab === "runs" || search.tab === "needs"
-      ? { tab: search.tab }
-      : {}),
-    ...(search.tab !== "runs" && isProcess(search.process)
-      ? { process: search.process }
-      : {}),
-    ...(typeof search.app === "string" ? { app: search.app } : {}),
-    ...(typeof search.workflow === "string"
-      ? { workflow: search.workflow }
-      : {}),
-    ...(isStatus(search.status) ? { status: search.status } : {}),
-    ...(search.tab === "runs" && search.view === "today"
-      ? { view: "today" as const }
-      : {}),
-  }),
-  // The process filters what was read: choosing one reads nothing again.
-  loaderDeps: ({ search: { tab, view, app, workflow, status } }) => ({
-    tab,
-    view,
-    app,
-    workflow,
-    status,
-  }),
-  // Each tab reads only what it shows, and each read says on its own why
-  // it failed.
-  loader: async ({
-    context: { core },
-    deps: { tab, app, workflow, status, view },
-  }) => {
-    if (tab === "runs" && view === "today") {
-      const today = await loadFromCore(
-        core,
-        async (session) => await session.workflows.today()
-      );
-      return { tab: "today" as const, today };
-    }
+  validateSearch: searchOf,
+  // The tab alone: the process filters what was read, and a run filter
+  // changed on the page reads the log on its own (RunsLogRead), so
+  // choosing either reads neither the lists nor today's lanes again. A
+  // refresh runs the loader, which reads the log for the address's
+  // filters again too.
+  loaderDeps: ({ search: { tab } }) => ({ tab }),
+  // Every tab reads the lists, as the tabs count them; besides, each tab
+  // reads only what it shows, and each read says on its own why it failed.
+  loader: async ({ context: { core }, deps: { tab }, location }) => {
     if (tab !== "runs") {
-      const needs = tab === "needs";
-      const [workflows, independent, apps, goLives, people] = await Promise.all(
-        [
-          loadFromCore(core, listWorkflows),
-          // On both lists: where needs shows them, for the process each
-          // waiting to go live serves.
-          loadFromCore(
-            core,
-            async (session) => await session.workflowResources.list()
-          ),
-          // For their processes only: a mark, none where they can't be
-          // listed in time.
-          loadFromCore(
-            core,
-            async (session) => await listedOrNone(session.apps.list())
-          ),
-          needs
-            ? loadFromCore(
-                core,
-                async (session) =>
-                  await session.workflowResources.lifecycle.waiting()
-              )
-            : undefined,
-          // Names only: IDs stand in for anyone not listed in time.
-          needs ? loadFromCore(core, readPeople) : undefined,
-        ]
-      );
-      const lists = {
-        workflows,
-        independent,
-        processes: processesOf(apps),
+      const [lists, people] = await Promise.all([
+        readLists(core),
+        // Names only, on Needs you: IDs stand in for anyone not listed in
+        // time.
+        tab === "needs" ? loadFromCore(core, readPeople) : undefined,
+      ]);
+      return {
+        tab: tab === "needs" ? ("needs" as const) : ("workflows" as const),
+        lists,
+        people:
+          people?.state === "ready" ? people.data : new Map<string, string>(),
       };
-      if (needs && goLives !== undefined) {
-        return {
-          tab: "needs" as const,
-          ...lists,
-          goLives,
-          people:
-            people?.state === "ready" ? people.data : new Map<string, string>(),
-        };
-      }
-      return { tab: "workflows" as const, ...lists };
     }
-    const [runs, filters, models] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) =>
-          await listRuns(session, {
-            ...(app === undefined ? {} : { app }),
-            ...(workflow === undefined ? {} : { workflow }),
-            ...(status === undefined ? {} : { status }),
-          })
-      ),
-      loadFromCore(core, async (session) => await filterOptions(session, app)),
-      // The model a fix in chat asks with; without one, none is offered.
-      loadFromCore(core, async (session) => await session.chats.models()),
-    ]);
-    return {
-      tab: "runs" as const,
-      runs,
-      filters,
-      model: models.state === "ready" ? models.data[0] : undefined,
+    // The log's read starts now, beside the others, and isn't waited for:
+    // for the filters in the address as the page loads or refreshes.
+    const filter = filterOf(searchOf(location.search));
+    const log: LogRead = {
+      key: JSON.stringify(filter),
+      read: readRuns(core, filter),
     };
+    // The figures likewise: started now, taken by the page once.
+    const activity = loadFromCore(core, readActivity);
+    const [lists, today] = await Promise.all([
+      readLists(core),
+      loadFromCore(core, async (session) => await session.workflows.today()),
+    ]);
+    return { tab: "runs" as const, lists, today, log, activity };
   },
   component: Workflows,
 });
