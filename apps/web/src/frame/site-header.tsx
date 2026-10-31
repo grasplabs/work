@@ -95,19 +95,23 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
 /**
  * The bar above every signed-in page (`SiteHeader` in the kit, the same
  * as the admin's): the sidebar's trigger, then where the page is, and on
- * the right any page action.
+ * the right any page action. `phoneCrumbs` says which crumbs a phone
+ * keeps (the kit's `phoneCrumbs`).
  */
 export const SiteHeader = ({
   crumbs,
   actions,
+  phoneCrumbs,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
   return (
     <SiteHeaderBar
       actions={actions}
+      phoneCrumbs={phoneCrumbs}
       breadcrumbLabel={t`Breadcrumb`}
       crumbs={crumbs.map((crumb) =>
         "to" in crumb
