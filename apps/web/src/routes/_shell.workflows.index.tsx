@@ -44,7 +44,7 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { listedOrNone, readPeople } from "../directory.ts";
+import { readPeople } from "../directory.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { EmptyCard } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -293,13 +293,19 @@ const offeredOf = (
 /** The App workflows serving `process`, at work and on the way. */
 const AppWorkflows = ({
   rows,
+  apps,
   processes,
   process,
 }: {
   rows: WorkflowSummary[];
+  apps: Loaded<App[]>;
   processes: AppProcesses;
   process: BusinessProcess | undefined;
 }) => {
+  // Which serve the chosen process can't be told: said, not shown fewer.
+  if (domainsUnchecked(apps, process)) {
+    return <NotLoadedState page={apps} />;
+  }
   const shown = rows.filter((row) =>
     showsUnder(process, processes.get(row.app) ?? null)
   );
@@ -322,6 +328,7 @@ const AppWorkflows = ({
 const NeedsAttention = ({
   workflows,
   independent,
+  apps,
   goLives,
   processes,
   process,
@@ -330,6 +337,7 @@ const NeedsAttention = ({
 }: {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
+  apps: Loaded<App[]>;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
   processes: AppProcesses;
   process: BusinessProcess | undefined;
@@ -355,9 +363,15 @@ const NeedsAttention = ({
           showsUnder(process, served.get(each.workflowId) ?? null)
         )
       : [];
+  // Under a process, a list whose processes couldn't be read says so
+  // rather than showing fewer.
+  const domainsGone = domainsUnchecked(apps, process);
+  const independentGone = domainsUnchecked(independent, process);
   const nothing =
     workflows.state === "ready" &&
     goLives.state === "ready" &&
+    !domainsGone &&
+    !independentGone &&
     rows.length === 0 &&
     waiting.length === 0;
   return (
@@ -371,13 +385,18 @@ const NeedsAttention = ({
         </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
-      {rows.length === 0 ? null : (
+      {workflows.state === "ready" && domainsUnchecked(apps, process) ? (
+        <NotLoadedState page={apps} />
+      ) : null}
+      {domainsGone || rows.length === 0 ? null : (
         <WorkflowsTable processes={processes} rows={rows} />
       )}
-      {goLives.state === "ready" ? (
+      {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
+      {goLives.state === "ready" && domainsUnchecked(independent, process) ? (
+        <NotLoadedState page={independent} />
+      ) : null}
+      {goLives.state !== "ready" || independentGone ? null : (
         <GoLivesWaiting names={{ people, me }} waiting={waiting} />
-      ) : (
-        <NotLoadedState page={goLives} />
       )}
     </div>
   );
@@ -486,6 +505,16 @@ const WorkflowCount = ({ count }: { count: number | undefined }) => {
 };
 
 /**
+ * Whether `read`, which says which process each workflow serves, failed
+ * while a process is chosen: then which serve it can't be told.
+ */
+const domainsUnchecked = (
+  read: Loaded<unknown>,
+  process: BusinessProcess | undefined
+): read is Exclude<Loaded<unknown>, { state: "ready" }> =>
+  process !== undefined && read.state !== "ready";
+
+/**
  * Every workflow the lists show under `process`: the domains' and the
  * independent ones.
  */
@@ -493,7 +522,9 @@ const countAll = (
   lists: Lists,
   process: BusinessProcess | undefined
 ): number | undefined =>
-  lists.workflows.state === "ready" && lists.independent.state === "ready"
+  lists.workflows.state === "ready" &&
+  lists.independent.state === "ready" &&
+  !domainsUnchecked(lists.apps, process)
     ? lists.workflows.data.filter((row) =>
         showsUnder(process, lists.processes.get(row.app) ?? null)
       ).length +
@@ -514,9 +545,13 @@ const countNeeds = (
     return undefined;
   }
   // Under a process, which go-live serves it is read off the independent
-  // workflows: without them it can't be told, so no count rather than a
-  // count that leaves the go-lives out.
-  if (process !== undefined && lists.independent.state !== "ready") {
+  // workflows, and which domain workflow serves it off the domains:
+  // without either it can't be told, so no count rather than one that
+  // leaves some out.
+  if (
+    domainsUnchecked(lists.independent, process) ||
+    domainsUnchecked(lists.apps, process)
+  ) {
     return undefined;
   }
   const served = new Map(
@@ -711,6 +746,7 @@ const Workflows = () => {
               <div className="mt-6 flex flex-col gap-8">
                 {lists.workflows.state === "ready" ? (
                   <AppWorkflows
+                    apps={lists.apps}
                     process={process}
                     processes={lists.processes}
                     rows={lists.workflows.data}
@@ -725,6 +761,7 @@ const Workflows = () => {
           <TabsContent value="needs">
             {page.tab === "needs" ? (
               <NeedsAttention
+                apps={lists.apps}
                 goLives={lists.goLives}
                 independent={lists.independent}
                 me={identity.userId}
@@ -773,6 +810,8 @@ const processesOf = (apps: Loaded<App[]>): AppProcesses =>
 interface Lists {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
+  /** The domains, read for the processes they serve (`processes`). */
+  apps: Loaded<App[]>;
   processes: AppProcesses;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
 }
@@ -784,18 +823,21 @@ const readLists = async (core: CoreConnection): Promise<Lists> => {
       core,
       async (session) => await session.workflowResources.list()
     ),
-    // For their processes only: a mark, none where they can't be listed
-    // in time.
-    loadFromCore(
-      core,
-      async (session) => await listedOrNone(session.apps.list())
-    ),
+    // For the processes the domains serve: read like the rest, so a list
+    // filtered by a process can tell when it couldn't check them.
+    loadFromCore(core, async (session) => await session.apps.list()),
     loadFromCore(
       core,
       async (session) => await session.workflowResources.lifecycle.waiting()
     ),
   ]);
-  return { workflows, independent, processes: processesOf(apps), goLives };
+  return {
+    workflows,
+    independent,
+    apps,
+    processes: processesOf(apps),
+    goLives,
+  };
 };
 
 /** What the address says the page shows, as far as it is valid. */
