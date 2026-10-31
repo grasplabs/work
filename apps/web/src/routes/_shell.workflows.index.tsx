@@ -45,7 +45,7 @@ import { useEffect, useState } from "react";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone, readPeople } from "../directory.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { EmptyCard } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -544,7 +544,7 @@ interface RunsRead {
 const readRuns = async (
   core: CoreConnection,
   filter: RunFilter,
-  left: AbortSignal
+  left?: AbortSignal
 ): Promise<RunsRead> => {
   const [runs, filters, models] = await Promise.all([
     loadFromCore(
@@ -567,12 +567,32 @@ const readRuns = async (
   };
 };
 
+/** The run filters `search` sets: what the log reads. */
+const filterOf = ({
+  app,
+  workflow,
+  status,
+}: Pick<WorkflowsSearch, "app" | "workflow" | "status">): RunFilter => ({
+  ...(app === undefined ? {} : { app }),
+  ...(workflow === undefined ? {} : { workflow }),
+  ...(status === undefined ? {} : { status }),
+});
+
+/** One read of the log: the filters it was read for, and what it answers. */
+interface LogRead {
+  key: string;
+  read: Promise<RunsRead>;
+}
+
 /**
- * The log of runs under its filters, read here rather than by the page:
- * changing a filter reads the runs again, never the lists, today's lanes
- * or the figures. What was read stays while the next read comes.
+ * The log of runs under its filters. The page's loader starts its read
+ * beside the lists and today's lanes, and again on every refresh ("Try
+ * again", a decision answered in the lanes), so the log never waits for
+ * them and never stays stale. A filter changed here reads the log alone,
+ * never the lists, the lanes or the figures. What was read stays while
+ * the next read comes; before the first, its lines are loading.
  */
-const RunsLogRead = () => {
+const RunsLogRead = ({ log }: { log: LogRead }) => {
   const core = useCore();
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
@@ -580,16 +600,13 @@ const RunsLogRead = () => {
   const [read, setRead] = useState<RunsRead>();
   useEffect(() => {
     const left = new AbortController();
+    const filter = filterOf({ app, workflow, status });
     const load = async (): Promise<void> => {
-      const loaded = await readRuns(
-        core,
-        {
-          ...(app === undefined ? {} : { app }),
-          ...(workflow === undefined ? {} : { workflow }),
-          ...(status === undefined ? {} : { status }),
-        },
-        left.signal
-      );
+      // The loader's read where it is for these filters; else this one's.
+      const loaded =
+        JSON.stringify(filter) === log.key
+          ? await log.read
+          : await readRuns(core, filter, left.signal);
       if (!left.signal.aborted) {
         setRead(loaded);
       }
@@ -598,9 +615,9 @@ const RunsLogRead = () => {
     return () => {
       left.abort();
     };
-  }, [core, app, workflow, status]);
+  }, [core, log, app, workflow, status]);
   if (read === undefined) {
-    return null;
+    return <LoadingLines lines={4} />;
   }
   const filtered =
     app !== undefined || workflow !== undefined || status !== undefined;
@@ -724,7 +741,7 @@ const Workflows = () => {
                   <NotLoadedState page={page.today} />
                 )}
                 <Figures />
-                <RunsLogRead />
+                <RunsLogRead log={page.log} />
               </div>
             ) : null}
           </TabsContent>
@@ -775,27 +792,30 @@ const readLists = async (core: CoreConnection): Promise<Lists> => {
   return { workflows, independent, processes: processesOf(apps), goLives };
 };
 
+/** What the address says the page shows, as far as it is valid. */
+const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
+  ...(search.tab === "runs" || search.tab === "needs"
+    ? { tab: search.tab }
+    : {}),
+  ...(search.tab !== "runs" && isProcess(search.process)
+    ? { process: search.process }
+    : {}),
+  ...(typeof search.app === "string" ? { app: search.app } : {}),
+  ...(typeof search.workflow === "string" ? { workflow: search.workflow } : {}),
+  ...(isStatus(search.status) ? { status: search.status } : {}),
+});
+
 export const Route = createFileRoute("/_shell/workflows/")({
-  validateSearch: (search: Record<string, unknown>): WorkflowsSearch => ({
-    ...(search.tab === "runs" || search.tab === "needs"
-      ? { tab: search.tab }
-      : {}),
-    ...(search.tab !== "runs" && isProcess(search.process)
-      ? { process: search.process }
-      : {}),
-    ...(typeof search.app === "string" ? { app: search.app } : {}),
-    ...(typeof search.workflow === "string"
-      ? { workflow: search.workflow }
-      : {}),
-    ...(isStatus(search.status) ? { status: search.status } : {}),
-  }),
-  // The tab alone: the process filters what was read, and the Runs tab's
-  // filters read its log on their own (RunsLogRead), so choosing either
-  // reads neither the lists nor today's lanes again.
+  validateSearch: searchOf,
+  // The tab alone: the process filters what was read, and a run filter
+  // changed on the page reads the log on its own (RunsLogRead), so
+  // choosing either reads neither the lists nor today's lanes again. A
+  // refresh runs the loader, which reads the log for the address's
+  // filters again too.
   loaderDeps: ({ search: { tab } }) => ({ tab }),
   // Every tab reads the lists, as the tabs count them; besides, each tab
   // reads only what it shows, and each read says on its own why it failed.
-  loader: async ({ context: { core }, deps: { tab } }) => {
+  loader: async ({ context: { core }, deps: { tab }, location }) => {
     if (tab !== "runs") {
       const [lists, people] = await Promise.all([
         readLists(core),
@@ -810,11 +830,18 @@ export const Route = createFileRoute("/_shell/workflows/")({
           people?.state === "ready" ? people.data : new Map<string, string>(),
       };
     }
+    // The log's read starts now, beside the others, and isn't waited for:
+    // for the filters in the address as the page loads or refreshes.
+    const filter = filterOf(searchOf(location.search));
+    const log: LogRead = {
+      key: JSON.stringify(filter),
+      read: readRuns(core, filter),
+    };
     const [lists, today] = await Promise.all([
       readLists(core),
       loadFromCore(core, async (session) => await session.workflows.today()),
     ]);
-    return { tab: "runs" as const, lists, today };
+    return { tab: "runs" as const, lists, today, log };
   },
   component: Workflows,
 });

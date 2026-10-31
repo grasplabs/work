@@ -316,6 +316,30 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   // Above the invoice's total now: nobody is asked, and it books.
   await expect(report).toContainText('- book {"total":800000}');
   await expect(report).not.toContainText("review#ask");
+
+  // Back on Runs, the waiting run approved in today's lanes: once its
+  // five seconds to undo are over, the log under them says how it stands
+  // now, without the page being opened again.
+  await page.goto("/workflows?tab=runs");
+  const lanes = page.getByRole("region", { name: "Today" });
+  const waitingRow = page
+    .getByRole("row")
+    .filter({ hasText: name })
+    .filter({ has: page.getByRole("link", { name: "approval", exact: true }) });
+  await expect(waitingRow).toContainText("Waiting for a decision", pageRead);
+  await lanes
+    .getByRole("button", { name: /waits on/u })
+    .first()
+    .click();
+  await lanes.getByRole("button", { name: "Approve", exact: true }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Confirm" })
+    .click();
+  await expect(lanes.getByText(/^Approved in \d+ s$/u)).toBeVisible();
+  await expect(waitingRow).not.toContainText("Waiting for a decision", {
+    timeout: 30_000,
+  });
 });
 
 test("someone an App is shared with reads its workflow, with nothing to change or test", async ({
