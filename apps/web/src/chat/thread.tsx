@@ -45,6 +45,7 @@ import {
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import {
   SeeInBrain,
   ThinkingLine,
@@ -503,6 +504,57 @@ const ReplySteps = ({
   );
 };
 
+/**
+ * The codes that mean no model can be reached until an AI provider is
+ * connected: models not set up at all, or none connected yet.
+ */
+const needsProvider: ReadonlySet<unknown> = new Set([
+  "model.no_provider",
+  "model.unconfigured",
+]);
+
+/** Asking a failed answer's question again, without typing it again. */
+const TryAgain = ({ onRetry }: { onRetry: (() => void) | undefined }) =>
+  onRetry === undefined ? null : (
+    <Button onClick={onRetry} size="sm" variant="outline">
+      <RefreshCcwIcon data-icon="inline-start" />
+      <Trans>Try again</Trans>
+    </Button>
+  );
+
+/**
+ * Why an answer failed, in people's words, and the way to ask again; with
+ * no AI provider to call, the way to connect one (to Settings › AI
+ * providers for the organization's admins), never an error, and still the
+ * way to ask again once one is.
+ */
+const Failed = ({
+  failure,
+  onRetry,
+}: {
+  failure: Answer["failure"];
+  onRetry: (() => void) | undefined;
+}) => {
+  const { i18n } = useLingui();
+  if (needsProvider.has(failure)) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ConnectAiProvider size="xs" />
+        <TryAgain onRetry={onRetry} />
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
+      <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
+      <p className="flex-1" role="alert">
+        {failureMessage(failure, i18n)}
+      </p>
+      <TryAgain onRetry={onRetry} />
+    </div>
+  );
+};
+
 /** One response of the agent's, stored or being written. */
 const Reply = ({
   reply,
@@ -540,7 +592,7 @@ const Reply = ({
   /** A stored answer that cites documents: its chat and message, so its row of actions can open them. */
   cited?: { chatId: string; messageId: number };
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const answer = reply.text.trim();
   const quiet = writing || sign !== undefined;
   const shown = (
@@ -575,18 +627,7 @@ const Reply = ({
             </p>
           ) : null}
           {reply.end === "failed" ? (
-            <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
-              <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
-              <p className="flex-1" role="alert">
-                {failureMessage(reply.failure, i18n)}
-              </p>
-              {onRetry === undefined ? null : (
-                <Button onClick={onRetry} size="sm" variant="outline">
-                  <RefreshCcwIcon data-icon="inline-start" />
-                  <Trans>Try again</Trans>
-                </Button>
-              )}
-            </div>
+            <Failed failure={reply.failure} onRetry={onRetry} />
           ) : null}
         </MessageContent>
         {sign === undefined ? null : (
