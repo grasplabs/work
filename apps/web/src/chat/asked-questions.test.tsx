@@ -2,6 +2,12 @@
 import type { ChatAsked, ChatMessage } from "@grasp-os/shared/chat";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -66,6 +72,46 @@ const shown = () => {
   return { sent, typed };
 };
 
+/**
+ * The panel in the app's frame while the organization has no model to
+ * answer (`model` empty, none to pick), recording what it sent.
+ */
+const shownWithoutModel = async () => {
+  const sent: string[] = [];
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
+        <AskedQuestions
+          asked={asked}
+          busy={false}
+          failure={undefined}
+          model=""
+          models={[]}
+          onSend={(text) => {
+            sent.push(text);
+          }}
+          onType={() => {
+            // Answered here, not typed.
+          }}
+        />
+      ),
+    }),
+    history: createMemoryHistory(),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+  return { sent };
+};
+
 /** The button named `name`. */
 const button = (name: string): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
@@ -103,7 +149,7 @@ const click = (element: HTMLElement): void => {
 describe("questions with choices in place of the box", () => {
   afterEach(unmount);
 
-  it("goes one question at a time, sends nothing on a pick, and sends only the answers, numbered, once the last has one", () => {
+  it("goes one question at a time, sends nothing on a pick, and sends each answer after its question once the last has one", () => {
     const { sent } = shown();
     const nextAtFirst = button("Next").disabled;
     pick("Weekly");
@@ -125,10 +171,25 @@ describe("questions with choices in place of the box", () => {
       nextOnceAnswered: false,
       sendAtLast: true,
       sentBeforeSend: 0,
-      // Only what the person picked: never the model's questions, which
-      // would be words they never saw composed, sent as theirs.
-      sent: ["1. Weekly\n2. My team"],
+      // Each answer after the question it answers, so the message reads
+      // right wherever it is read again, such as a chat opened later.
+      sent: ["1. How often? — Weekly\n2. To whom? — My team"],
     });
+  });
+
+  it("sends nothing while there is no model to answer, and shows how to connect an AI provider", async () => {
+    const { sent } = await shownWithoutModel();
+    pick("Weekly");
+    click(button("Next"));
+    pick("My team");
+    const sendDisabled = button("Send").disabled;
+    click(button("Send"));
+
+    expect({
+      sendDisabled,
+      sent,
+      connect: document.body.textContent?.includes("Connect an AI provider"),
+    }).toStrictEqual({ sendDisabled: true, sent: [], connect: true });
   });
 
   it("gives the box back when the person types instead", () => {

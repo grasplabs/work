@@ -13,7 +13,7 @@ import { useId, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
-import { Composer } from "./composer.tsx";
+import { Composer, lacksModel, NoModelNotice, noModels } from "./composer.tsx";
 
 // Questions the chat's agent asked the person with choices (GRA-1001; the
 // prototype's `components/chat/questions-dock.tsx`), in place of the box
@@ -75,10 +75,10 @@ const answerOf = ({ choice, own }: Answer): string =>
 
 /**
  * The answers as the person's message: the one answer alone to a single
- * question; otherwise each answer numbered as its question, one a line.
- * Only what the person picked or wrote: a question is the model's text,
- * so sending it would put words they never saw composed in their mouth,
- * into the transcript, their memory and the brain.
+ * question, which answers what was just asked; otherwise each numbered,
+ * one a line, after the question it answers, quoted as they saw it, so
+ * the message reads as it was meant wherever it is read again: a chat
+ * opened later, the transcript, their memory and the brain.
  */
 export const answersText = (
   asked: ChatAsked,
@@ -88,8 +88,8 @@ export const answersText = (
     ? answerOf(answers[0] ?? unanswered)
     : asked.questions
         .map(
-          (_question, index) =>
-            `${index + 1}. ${answerOf(answers[index] ?? unanswered)}`
+          ({ question }, index) =>
+            `${index + 1}. ${question} — ${answerOf(answers[index] ?? unanswered)}`
         )
         .join("\n");
 
@@ -102,6 +102,8 @@ export const AskedQuestions = ({
   busy,
   children,
   failure,
+  model,
+  models = noModels,
   onProgress,
   onSend,
   onType,
@@ -112,6 +114,13 @@ export const AskedQuestions = ({
   /** More of the place's own controls, beside Type instead. */
   children?: ReactNode;
   failure: string | undefined;
+  /**
+   * The model the answers go to and those it may be, as the box to ask
+   * in names them: with none, nothing is sent and the way to connect an
+   * AI provider shows instead.
+   */
+  model?: string;
+  models?: readonly string[];
   /** Keeps how far the person got; their own state without it. */
   onProgress?: (next: AskProgress) => void;
   onSend: (text: string) => void;
@@ -196,6 +205,7 @@ export const AskedQuestions = ({
           />
         ) : null}
       </div>
+      <NoModelNotice model={model} models={models} />
       <ErrorText>{failure}</ErrorText>
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={onType} size="sm" variant="ghost">
@@ -216,7 +226,7 @@ export const AskedQuestions = ({
           )}
           {last ? (
             <Button
-              disabled={!answered || busy}
+              disabled={!answered || busy || lacksModel(model)}
               onClick={() => {
                 onSend(answersText(asked, answers));
               }}
@@ -297,6 +307,8 @@ export const AskOrCompose = ({
         busy={composer.busy}
         failure={composer.failure}
         key={asking.callId}
+        model={composer.model}
+        models={composer.models}
         onProgress={setProgress}
         onSend={onAnswer}
         onType={() => {
