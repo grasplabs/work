@@ -23,7 +23,10 @@ import { ArchiveIcon, ArrowLeftIcon, LayoutGridIcon } from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { listedOrNone, readPeople } from "../directory.ts";
+import { timeoutMs, withTimeout } from "../core.ts";
+import type { Session } from "../core.ts";
+import { readPeople } from "../directory.ts";
+import { AppOwner } from "../engines/app-owner.tsx";
 import { buildsApp } from "../engines/app-role.ts";
 import {
   ArchiveDialog,
@@ -35,7 +38,6 @@ import { formatDateTime } from "../format.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { PersonPicker } from "../people/person-picker.tsx";
 import {
   SettingsBody,
   SettingsRow,
@@ -166,6 +168,22 @@ const PuttingAway = ({ app }: { app: App }) => {
   );
 };
 
+/**
+ * Who may answer for App `app`, as read in time; null when it couldn't be
+ * (refused, failed or slow), so the picker says so rather than offer
+ * nobody else.
+ */
+const answerersOrFailed = async (
+  session: Session,
+  app: string
+): Promise<AppAnswerer[] | null> => {
+  try {
+    return await withTimeout(session.apps.answerers(app), timeoutMs);
+  } catch {
+    return null;
+  }
+};
+
 const AppSettings = ({
   app,
   members,
@@ -176,8 +194,11 @@ const AppSettings = ({
   app: ViewedApp;
   members: readonly AppMember[];
   people: ReadonlyMap<string, string>;
-  /** Who may answer for it, as core decides (`apps.answerers`). */
-  eligible: readonly AppAnswerer[];
+  /**
+   * Who may answer for it, as core decides (`apps.answerers`); null while
+   * that couldn't be read.
+   */
+  eligible: readonly AppAnswerer[] | null;
   builds: boolean;
 }) => {
   const { t } = useLingui();
@@ -201,21 +222,13 @@ const AppSettings = ({
       names.set(member.id, member.name);
     }
   }
-  for (const { id, name } of eligible) {
+  for (const { id, name } of eligible ?? []) {
     names.set(id, name);
   }
   const personName = (userId: string): string => names.get(userId) ?? userId;
   const nameOf = (member: AppMember): string =>
     member.name ??
     (member.type === "person" ? personName(member.id) : member.id);
-  // Who may answer for it, as core decides: those it is shared with
-  // through a team too. Whoever answers now stays on the list.
-  const answerers = [
-    ...new Map([
-      ...eligible.map(({ id, name }) => [id, name] as const),
-      [app.responsible, personName(app.responsible)] as const,
-    ]),
-  ].map(([id, name]) => ({ id, name }));
   // Whom it may be made for: a person or team it is shared with.
   const current = app.audience === null ? nobody : refValue(app.audience);
   const audiences = [
@@ -352,18 +365,23 @@ const AppSettings = ({
       >
         {/* The platform's one owner control, as a workflow's line has it. */}
         <SettingsBody>
-          <div className="-ml-2.5">
-            <PersonPicker
-              align="start"
-              disabled={disabled}
-              onPick={(picked) => {
-                change({ responsible: picked.id });
-              }}
-              owner={personName(app.responsible)}
-              ownerId={app.responsible}
-              people={answerers}
-            />
-          </div>
+          <AppOwner
+            // Who may answer for it, as core decides: those it is shared
+            // with through a team too. Not read for someone who doesn't
+            // build it, who only looks.
+            answerers={builds ? eligible : (eligible ?? [])}
+            disabled={disabled}
+            onPick={(responsible) => {
+              change({ responsible });
+            }}
+            onRetry={() => {
+              void router.invalidate();
+            }}
+            owner={{
+              id: app.responsible,
+              name: personName(app.responsible),
+            }}
+          />
         </SettingsBody>
       </SettingsSection>
       {builds ? (
@@ -429,8 +447,9 @@ export const Route = createFileRoute("/_shell/apps/$app_/settings")({
         isAdmin(identity.role)
           ? readPeople(session)
           : Promise.resolve(new Map<string, string>()),
-        // Who may answer for it, for its builders: none for anyone else.
-        listedOrNone(session.apps.answerers(params.app)),
+        // Who may answer for it, for its builders; null when that couldn't
+        // be read in time, never an empty list mistaken for nobody else.
+        answerersOrFailed(session, params.app),
       ]);
       return { app, members, people, answerers };
     }),

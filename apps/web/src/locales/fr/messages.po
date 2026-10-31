@@ -4737,6 +4737,10 @@ msgstr "Impossible de changer l’équipe de {named}"
 msgid "Couldn't load this domain's workflows."
 msgstr "Impossible de charger les workflows de ce domaine."
 
+#: src/engines/app-owner.tsx
+msgid "Couldn't load who may answer for it."
+msgstr "Impossible de charger qui peut en répondre."
+
 #: src/workflows/owner-picker.tsx
 msgid "Couldn't make {chosen} the owner of {named}"
 msgstr "Impossible de faire de {chosen} le responsable de {named}"
@@ -15361,6 +15365,7 @@ msgstr "Essayer"
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-owner.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx

@@ -4737,6 +4737,10 @@ msgstr "Het team van {named} kon niet worden gewijzigd"
 msgid "Couldn't load this domain's workflows."
 msgstr "De workflows van dit domein konden niet worden geladen."
 
+#: src/engines/app-owner.tsx
+msgid "Couldn't load who may answer for it."
+msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
+
 #: src/workflows/owner-picker.tsx
 msgid "Couldn't make {chosen} the owner of {named}"
 msgstr "{chosen} kon geen eigenaar van {named} worden"
@@ -15361,6 +15365,7 @@ msgstr "Proberen"
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-owner.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
 #: src/routes/_shell.index.tsx
