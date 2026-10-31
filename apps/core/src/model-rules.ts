@@ -70,7 +70,8 @@ export interface RulesInput {
           | "dashboard_widgets"
           | "brain_recall"
           | "policy_reading"
-          | "stephen_requests";
+          | "stephen_requests"
+          | "provider_test";
       };
 }
 
@@ -176,6 +177,7 @@ const sensitiveBecause = async (
 /** Why the gateway refused a call: the code, and which rule said so. */
 export interface Refusal {
   code:
+    | "model.no_provider"
     | "model.not_allowed"
     | "model.eu_only"
     | "model.sensitive_data"
