@@ -779,10 +779,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} van {workflows} workflows bekend"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -4164,10 +4160,6 @@ msgstr "Ga daar verder. Heb je dat apparaat niet meer? Vraag degene die je de li
 msgid "Case {name}, when it holds"
 msgstr "Geval {name}, als het geldt"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Categorieën"
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Category"
@@ -4893,6 +4885,11 @@ msgid "Connected"
 msgstr "Gekoppeld"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Verbonden"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Gekoppeld"
@@ -4935,6 +4932,10 @@ msgstr "Gekoppelde aanbieders"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Gekoppeld, direct"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow you can open"
+msgstr "Verbonden, door geen workflow gebruikt die u kunt openen"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6227,6 +6228,10 @@ msgstr "Elke maandagochtend, naar jou"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Elke maandag: uren, runs en wat er wacht."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Alle andere apps die Grasp kan verbinden."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6395,10 +6400,6 @@ msgstr "Uitzonderingen"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Uitzonderingen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Filters uitklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6624,11 +6625,6 @@ msgstr "Integraties filteren"
 msgid "Filters"
 msgstr "Filters"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filters"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Financiën"
@@ -6752,10 +6748,6 @@ msgstr "Markeert of blokkeert de apps die de regel overtreden."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Chat inklappen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Filters inklappen"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -9319,6 +9311,11 @@ msgstr "Meer over deze koppelingen"
 msgid "More about this connection"
 msgstr "Meer over deze koppeling"
 
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Meer apps"
+
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Meer voor {title}"
@@ -9554,6 +9551,7 @@ msgstr "Opnieuw aanmelden nodig"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
