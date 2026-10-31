@@ -17063,6 +17063,10 @@ msgstr "Until this is resolved, no release that changes this store's tables can 
 msgid "Up to {upTo} minutes"
 msgstr "Up to {upTo} minutes"
 
+#: src/routes/_shell.projects.$projectId.tsx
+msgid "Updated {when}"
+msgstr "Updated {when}"
+
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
 msgstr "Updated Grasp"
