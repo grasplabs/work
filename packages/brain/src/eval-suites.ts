@@ -258,23 +258,47 @@ const codeUnitOrder = (a: string, b: string): number => {
   return a < b ? -1 : 1;
 };
 
+/** The capabilities the host grants `reader` on suite `suiteId`, as granted. */
+const grantedOf = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string
+): Promise<ReadonlySet<EvalCapability>> => {
+  const capabilities = brain.ports.evaluation?.capabilities;
+  return new Set<EvalCapability>(
+    capabilities === undefined ? undefined : await capabilities(reader, suiteId)
+  );
+};
+
 /**
  * What `reader` may do with suite `suiteId`, the optimizer's never with
- * the designer's or evaluator's: refused whole when held together.
+ * the designer's or evaluator's: refused whole when held together. What
+ * the optimizer's capability forbids (`optimizes`) holds all the same.
  */
 const capabilitiesOf = async <C>(
   brain: Brain<C>,
   reader: C,
   suiteId: string
 ): Promise<ReadonlySet<EvalCapability>> => {
-  const capabilities = brain.ports.evaluation?.capabilities;
-  const granted = new Set<EvalCapability>(
-    capabilities === undefined ? undefined : await capabilities(reader, suiteId)
-  );
+  const granted = await grantedOf(brain, reader, suiteId);
   const mixed =
     granted.has("optimizer") &&
     (granted.has("designer") || granted.has("evaluator"));
   return mixed ? new Set() : granted;
+};
+
+/**
+ * Whether `reader` is granted the optimizer's capability on suite
+ * `suiteId`, whatever else they hold: its restrictions win, so holding
+ * another one too never lifts them.
+ */
+const optimizes = async <C>(
+  brain: Brain<C>,
+  reader: C,
+  suiteId: string
+): Promise<boolean> => {
+  const granted = await grantedOf(brain, reader, suiteId);
+  return granted.has("optimizer");
 };
 
 /** Refuses `by` unless it names the same person as `reader`. */
@@ -475,11 +499,12 @@ export const moveSuiteVersion = async <C>(
   }
   const current = await versionOf(brain, suiteId, version);
   const held = await capabilitiesOf(brain, reader, suiteId);
-  // Never one who optimizes against it, though they own it.
+  // Never one who optimizes against it, though they own it, whatever
+  // else they hold.
   const owns =
     current.ownerId === by.userId &&
     current.proposedBy !== by.userId &&
-    !held.has("optimizer");
+    !(await optimizes(brain, reader, suiteId));
   const evaluates = to === "retired" && held.has("evaluator");
   if (to !== "calibrated" && !owns && !evaluates) {
     throw knowledgeErrors.create("knowledge.not_found");

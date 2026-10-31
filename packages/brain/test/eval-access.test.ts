@@ -272,7 +272,7 @@ describe("who may do what with a learning suite", () => {
     });
   });
 
-  it("never lets an owner who optimizes against a suite accept it", async () => {
+  it("never lets an owner who optimizes against a suite accept or retire it, whatever else they hold", async () => {
     const { brain } = testHost();
     const suiteId = `suite-${crypto.randomUUID()}`;
     const proposed = await proposeSuiteVersion(
@@ -290,18 +290,43 @@ describe("who may do what with a learning suite", () => {
       "calibrated",
       proposed.revision
     );
-    const owningOptimizer = callerOf("owner", ["optimizer"]);
-    const accepted = await codeOf(
-      moveSuiteVersion(
-        brain,
-        owningOptimizer,
-        writerOf("owner"),
-        suiteId,
-        1,
-        "accepted",
-        calibrated.revision
-      )
-    );
-    expect(accepted).toBe("knowledge.not_found");
+    /** What the owner holding `evaluation` gets moving the version `to`. */
+    const ownerMoves = async (
+      evaluation: readonly EvalCapability[],
+      to: "accepted" | "retired"
+    ) =>
+      await codeOf(
+        moveSuiteVersion(
+          brain,
+          callerOf("owner", evaluation),
+          writerOf("owner"),
+          suiteId,
+          1,
+          to,
+          calibrated.revision
+        )
+      );
+
+    expect({
+      optimizer: await ownerMoves(["optimizer"], "accepted"),
+      // Holding the optimizer's capability with another refuses that
+      // other one, never the optimizer's restriction: it still holds.
+      withDesigner: await ownerMoves(["optimizer", "designer"], "accepted"),
+      withEvaluator: await ownerMoves(["optimizer", "evaluator"], "accepted"),
+      retiresWithDesigner: await ownerMoves(
+        ["optimizer", "designer"],
+        "retired"
+      ),
+      retiresWithEvaluator: await ownerMoves(
+        ["optimizer", "evaluator"],
+        "retired"
+      ),
+    }).toStrictEqual({
+      optimizer: "knowledge.not_found",
+      withDesigner: "knowledge.not_found",
+      withEvaluator: "knowledge.not_found",
+      retiresWithDesigner: "knowledge.not_found",
+      retiresWithEvaluator: "knowledge.not_found",
+    });
   });
 });
