@@ -562,6 +562,12 @@ export interface AppMember extends AppMemberRef {
   addedAt: string;
 }
 
+/** Someone who may answer for an App (`AppsApi.answerers`). */
+export interface AppAnswerer {
+  id: string;
+  name: string;
+}
+
 /**
  * Whom an App is shared with. Apps are private: open to their owner
  * (always a builder, and not listed here), to the organization's admins,
@@ -769,6 +775,13 @@ export interface AppsApi {
    * and bindings end. Afterwards it is answered as an App that isn't there.
    */
   remove: (app: string) => Promise<void>;
+  /**
+   * Who may answer for the App now, by ID and name (no email): each current
+   * member of the organization core would accept as `responsible`, those
+   * it is shared with through a team too. For whoever may name them: its
+   * builders, never Grasp staff.
+   */
+  answerers: (app: string) => Promise<AppAnswerer[]>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;

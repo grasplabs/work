@@ -126,9 +126,87 @@ test("a builder opens an App's page, moves between its screens, unpublishes and 
   );
   await appChat.getByRole("button", { name: "Fold the chat away" }).click();
 
-  // Its settings are its domain's page.
+  // Its settings are a page of its own.
   await page.getByRole("link", { name: `Settings of ${name}` }).click();
-  await expect(page).toHaveURL(new RegExp(`/domains/${app}$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/settings$`, "u"));
+});
+
+test("a builder renames an App and says what it is for in its settings, archives it there, and restores it", async ({
+  pageOf,
+}) => {
+  const { builder, user } = peopleIn("appPage");
+  const name = `Settings ${crypto.randomUUID()}`;
+  const renamed = `Renamed ${crypto.randomUUID()}`;
+  const app = await newApp(builder, name, twoScreens);
+  const page = await pageOf(builder);
+  await page.goto(`/apps/${app}/settings`);
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${name}` })
+  ).toBeVisible();
+  // Saved as the field is left, through core's audited update.
+  await page.getByLabel("Name").fill(renamed);
+  await page.getByLabel("Name").press("Enter");
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${renamed}` })
+  ).toBeVisible();
+  await page.getByLabel("What it is for").fill("Where the boards are kept.");
+  await page.getByLabel("What it is for").blur();
+  await expect(page.getByLabel("What it is for")).toHaveValue(
+    "Where the boards are kept."
+  );
+
+  // Archived only once asked, and restored as a draft.
+  await page.getByRole("button", { name: "Archive and take offline" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive" })
+    .click();
+  await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+
+  // Someone who only uses Apps reads nothing of a draft.
+  const other = await pageOf(user);
+  await other.goto(`/apps/${app}/settings`);
+  await expect(
+    other.getByRole("heading", { name: "Domain not found" })
+  ).toBeVisible();
+});
+
+test("someone an App is shared with as a user reads its settings and changes none of them, though they build in the organization", async ({
+  pageOf,
+}) => {
+  const { builder, colleague } = peopleIn("appPage");
+  const name = `Read ${crypto.randomUUID()}`;
+  const app = await newApp(builder, name, twoScreens);
+  const { core, api } = apiOf(builder);
+  try {
+    await api.apps.members.add(app, {
+      type: "person",
+      id: colleague.userId,
+      role: "user",
+    });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(colleague);
+  await page.goto(`/apps/${app}/settings`);
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: `Settings of ${name}` })
+  ).toBeVisible();
+  // Their role in this App decides, not their role in the organization.
+  await expect(page.getByLabel("Name")).toHaveAttribute("readonly", "");
+  await expect(page.getByLabel("What it is for")).toHaveAttribute(
+    "readonly",
+    ""
+  );
+  await expect(page.getByLabel("Made for")).toBeDisabled();
+  await expect(
+    page.getByText("Only its builders change these settings.")
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Archive/u })).toHaveCount(0);
 });
 
 test("an App with no screen yet is only described, and its builder designs it in the chat", async ({

@@ -67,6 +67,7 @@ import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.work
 import { Route as ShellWorkflowsRequestsRouteImport } from './routes/_shell.workflows.requests'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
+import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
@@ -378,6 +379,11 @@ const KitExamplesNameRoute = KitExamplesNameRouteImport.update({
   path: '/kit/examples/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShellAppsAppSettingsRoute = ShellAppsAppSettingsRouteImport.update({
+  id: '/apps/$app_/settings',
+  path: '/apps/$app/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellBrainSectionsSectionIdRoute =
   ShellBrainSectionsSectionIdRouteImport.update({
     id: '/sections/$sectionId',
@@ -525,6 +531,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/': typeof ShellOnboardingIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
+  '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
@@ -596,6 +603,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof ShellOnboardingIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
+  '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
@@ -672,6 +680,7 @@ export interface FileRoutesById {
   '/_shell/onboarding/': typeof ShellOnboardingIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
+  '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
   '/_shell/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
@@ -748,6 +757,7 @@ export interface FileRouteTypes {
     | '/onboarding/'
     | '/settings/'
     | '/workflows/'
+    | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/onboarding/interviews/$person'
@@ -819,6 +829,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/workflows'
+    | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
     | '/onboarding/interviews/$person'
@@ -894,6 +905,7 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
+    | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/links/$app/$surface'
     | '/_shell/onboarding/interviews/$person'
@@ -1333,6 +1345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KitExamplesNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_shell/apps/$app_/settings': {
+      id: '/_shell/apps/$app_/settings'
+      path: '/apps/$app/settings'
+      fullPath: '/apps/$app/settings'
+      preLoaderRoute: typeof ShellAppsAppSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/brain/sections/$sectionId': {
       id: '/_shell/brain/sections/$sectionId'
       path: '/sections/$sectionId'
@@ -1567,6 +1586,7 @@ interface ShellRouteChildren {
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
+  ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
   ShellDomainsEngineIndexRoute: typeof ShellDomainsEngineIndexRoute
@@ -1595,6 +1615,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
+  ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
   ShellDomainsEngineIndexRoute: ShellDomainsEngineIndexRoute,
