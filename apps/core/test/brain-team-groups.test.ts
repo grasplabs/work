@@ -4,8 +4,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { proposeTeamGroups } from "../src/brain-team-groups.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The company's own groups of teams, the brain's regions (core's
@@ -35,8 +35,6 @@ const rosterOf = (tag: string): RosterInput => ({
     },
   ],
 });
-
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 describe("the company's groups of teams", { timeout: 120_000 }, () => {
   it("are confirmed by an admin, read by every member and audited", async () => {
@@ -205,7 +203,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     ]);
     const { teams } = await admin.api.brain.read();
     // The model groups one team, invents another, and leaves Support out.
-    const gateway = fakeGateway({
+    const provider = await fakeProvider({
       text: JSON.stringify({
         groups: [
           { name: "Revenue", teamIds: [sales, `team-invented-${tag}`] },
@@ -230,15 +228,10 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       groups = await proposeTeamGroups(
         env,
         person,
-        async () => await Promise.resolve(teams),
-        {
-          ...env,
-          AI: gateway.binding,
-          MODEL_GATEWAY: { gateway: "grasp-os-test", models: [workersAi] },
-        }
+        async () => await Promise.resolve(teams)
       );
     });
-    const sent = JSON.stringify(gateway.requests.map(({ body }) => body));
+    const sent = JSON.stringify(provider.requests.map(({ body }) => body));
 
     expect({
       groups,

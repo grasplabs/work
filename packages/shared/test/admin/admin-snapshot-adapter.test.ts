@@ -647,8 +647,8 @@ describe("an organization from core's admin snapshot", () => {
   });
 
   it("counts the AI of a model it has no price for, with its spend unknown", () => {
-    // Core's default deployment reads with Workers AI's models.
-    const llama = adminOrgOf(
+    // An organization's own OpenAI-compatible endpoint has no list price.
+    const unpriced = adminOrgOf(
       {
         ...snapshot,
         usage: [
@@ -656,7 +656,7 @@ describe("an organization from core's admin snapshot", () => {
             day: "2026-10-05",
             use: {
               reading: {
-                "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+                "openai-compatible/llama-3.3-70b": {
                   ...metered,
                   calls: 2,
                   tokensIn: 9000,
@@ -669,7 +669,7 @@ describe("an organization from core's admin snapshot", () => {
       },
       client
     );
-    const { usage } = adminViewOf(llama.org, llama.state, "2026-10-14");
+    const { usage } = adminViewOf(unpriced.org, unpriced.state, "2026-10-14");
 
     expect({
       counted: usage.counted,

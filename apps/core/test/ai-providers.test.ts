@@ -36,16 +36,16 @@ import { z } from "zod";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { streamText } from "./ai-gateway.ts";
-import type { Answer } from "./ai-gateway.ts";
 import { aiProvidersControlUrl, compatibleHost } from "./ai-providers-fake.ts";
 import type { PlannedReply, ProviderRequest } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
+import { streamText } from "./model-provider.ts";
+import type { Answer } from "./model-provider.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
 import {
   openRpc,
@@ -103,12 +103,6 @@ const answered = (
     ...usage,
   }),
 });
-
-/** Core's env without the AI binding: no AI Gateway to fall back on. */
-const withoutGateway = (): ModelsEnv => {
-  const { AI: _, ...rest } = env;
-  return rest;
-};
 
 /** A person no other test uses, so their audit events are this test's. */
 const newPerson = () =>
@@ -445,11 +439,11 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
     it("fails every call as having no provider while none is connected, and while none of its models is chosen", async () => {
       const noProvider = await outcome(
-        models(withoutGateway()).call(await callOf(openaiCase.model))
+        models(env).call(await callOf(openaiCase.model))
       );
       await added(openaiCase, newKey());
       const noModel = await outcome(
-        models(withoutGateway()).call(await callOf(openaiCase.model))
+        models(env).call(await callOf(openaiCase.model))
       );
 
       expect({ noProvider, noModel }).toStrictEqual({
@@ -458,21 +452,19 @@ describe("AI providers", { timeout: 60_000 }, () => {
       });
     });
 
-    it("refuses a model the organization didn't choose once it connected a provider, the deployment's allowlist too", async () => {
+    it("refuses a model the organization didn't choose once it connected a provider, and one of a provider it didn't connect", async () => {
       await connected(openaiCase);
 
       const unchosen = await outcome(
         models(env).call(await callOf("openai/gpt-5-mini"))
       );
-      const allowlisted = await outcome(
-        models(env).call(
-          await callOf("workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-        )
+      const unconnected = await outcome(
+        models(env).call(await callOf(anthropicCase.model))
       );
 
-      expect({ unchosen, allowlisted }).toStrictEqual({
+      expect({ unchosen, unconnected }).toStrictEqual({
         unchosen: "model.not_allowed",
-        allowlisted: "model.not_allowed",
+        unconnected: "model.not_allowed",
       });
     });
 
@@ -592,7 +584,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       const { providers } = await by.api.aiProviders.list();
       await by.api.aiProviders.remove("anthropic");
       const removed = await outcome(
-        models(withoutGateway()).call(await callOf(anthropicCase.model))
+        models(env).call(await callOf(anthropicCase.model))
       );
       const kept = await connectDb()
         .prepare("SELECT * FROM ai_provider_keys")
@@ -1101,7 +1093,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       ]);
       const trigger = newPerson();
 
-      const answer = await models(withoutGateway()).platformCall(
+      const answer = await models(env).platformCall(
         await callOf("openai/gpt-5-mini", {
           trigger,
           work: { platform: "brain_upkeep" },
@@ -1317,13 +1309,9 @@ describe("AI providers", { timeout: 60_000 }, () => {
 
     it("sends nothing a budget can't hold", async () => {
       const key = await connected(each);
-      const budgeted: ModelsEnv = {
+      const budgeted: Env = {
         ...env,
-        MODEL_GATEWAY: {
-          gateway: "grasp-os-test",
-          models: ["workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
-          budgets: { user: { limit: 0.01 } },
-        },
+        MODEL_GATEWAY: { budgets: { user: { limit: 0.01 } } },
       };
 
       const held = await outcome(

@@ -54,8 +54,10 @@ const sameSiteFetches = new Set(["same-origin", "none"]);
 /** How the local core reaches its models, as the lab labels every result with it. */
 const viaOf = async (env: Env): Promise<LabVia> => {
   const settings = await modelSettings(env);
+  if (settings.models.length === 0) {
+    return { quick: null, careful: null };
+  }
   return {
-    gateway: settings.gateway ?? "",
     quick: modelForRole(settings, "quick", { sensitive: true }) ?? null,
     careful: modelForRole(settings, "careful", { sensitive: true }) ?? null,
   };
@@ -76,9 +78,15 @@ const ask = async (
   asked: Extract<LabRequest, { action: "ask" }>,
   requestId: string
 ): Promise<Response> => {
-  const model = modelForRole(await modelSettings(env), asked.role, {
-    sensitive: true,
-  });
+  const settings = await modelSettings(env);
+  if (settings.models.length === 0) {
+    return errorResponse(
+      503,
+      modelErrors.create("model.no_provider"),
+      requestId
+    );
+  }
+  const model = modelForRole(settings, asked.role, { sensitive: true });
   if (model === undefined) {
     return errorResponse(
       503,

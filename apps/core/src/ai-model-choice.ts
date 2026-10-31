@@ -15,12 +15,11 @@ import { parseModelRef } from "./model-catalog.ts";
 // them (models.ts): which providers it connected, from connect, which holds
 // their keys (`aiProviderRoutes`, never a key), and the models its admins
 // chose, its default and fallbacks, kept beside its other settings
-// (`org_settings`, kind `ai_models`). Once it connected a provider, these
-// models are the ones its calls may use, in place of the deployment's
-// allowlist (`MODEL_GATEWAY`). A provider's removal drops its models from
-// the choice (ai-providers.ts), and the choice is read as it stands, each
-// model of a provider still connected (`choiceNow`), so a removed one is
-// never offered, saved again or called.
+// (`org_settings`, kind `ai_models`): the only models its calls may use.
+// A provider's removal drops its models from the choice (ai-providers.ts),
+// and the choice is read as it stands, each model of a provider still
+// connected (`choiceNow`), so a removed one is never offered, saved again
+// or called.
 
 /** The setting's kind in `org_settings`. */
 export const aiModelsKind = "ai_models";

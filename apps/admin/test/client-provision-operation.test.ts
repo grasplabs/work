@@ -1951,12 +1951,12 @@ describe("provisioning a placed client", () => {
     const gateway = coreBindings.find(({ name }) => name === "MODEL_GATEWAY");
     expect({
       operation: await operationOf(clientId),
-      // Workers AI bound, as the real core binds it.
+      // No AI binding: the real core reaches models through connect only.
       ai: coreBindings
         .filter(({ type }) => type === "ai")
         .map(({ name }) => name),
-      // Through the destination's shared gateway, ensured before core went
-      // live, at the client's ceiling: €250 a month unless staff set another.
+      // No AI Gateway ensured for a release that binds none; the client's
+      // ceiling still reaches core: €250 a month unless staff set another.
       gateways: account.gateways.map(({ id }) => id),
       gateway: z.object({ json: z.unknown() }).loose().parse(gateway).json,
       // Its core goes live without `EMAIL`, so it sends nothing and says
@@ -1968,8 +1968,8 @@ describe("provisioning a placed client", () => {
       routed: await routed(clientId),
     }).toMatchObject({
       operation: { status: "done" },
-      ai: ["AI"],
-      gateways: [placedModelGateway("production")],
+      ai: [],
+      gateways: [],
       gateway: {
         gateway: placedModelGateway("production"),
         budgets: { deployment: { limit: 250, alertAt: 80 } },
@@ -1977,55 +1977,6 @@ describe("provisioning a placed client", () => {
       mail: [],
       zones: 0,
       routed: true,
-    });
-  });
-
-  it("takes two clients first provisioned into one shared account at once live, through the one gateway either of them made", async () => {
-    const real = await importRealRelease();
-    const first = await setUp(
-      "workers_for_platforms",
-      real,
-      clientDispatchNamespace
-    );
-    const second = await placedOperation(first.destinationId, real);
-    const wfp = {
-      ...context,
-      router: {
-        ...context.router,
-        namespace: clientDispatchNamespace,
-        dispatcher: cloudflare.dispatcher(
-          first.account.id,
-          clientDispatchNamespace
-        ),
-      },
-    };
-    const gateway = placedModelGateway("production");
-    // The first finds no gateway, and before it creates one the second
-    // provisions all the way, making it: the first's create is refused.
-    let secondRan: Promise<unknown> = Promise.resolve();
-    cloudflare.afterAnswering(
-      ({ method, path }) =>
-        method === "GET" && path.endsWith(`/ai-gateway/gateways/${gateway}`),
-      async () => {
-        secondRan = runClientProvision(wfp, second.held);
-        await secondRan;
-      }
-    );
-
-    await runClientProvision(wfp, first.held);
-    await secondRan;
-
-    expect({
-      first: await operationOf(first.clientId),
-      second: await operationOf(second.clientId),
-      gateways: first.account.gateways.map(({ id, authentication }) => ({
-        id,
-        authentication,
-      })),
-    }).toMatchObject({
-      first: { status: "done" },
-      second: { status: "done" },
-      gateways: [{ id: gateway, authentication: true }],
     });
   });
 

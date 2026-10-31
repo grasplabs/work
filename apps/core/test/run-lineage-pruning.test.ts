@@ -16,10 +16,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelsEnv } from "../src/models.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProviderFor } from "./model-provider.ts";
 import { finished, sleeping } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -27,16 +26,17 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 // The model ledger prunes what it keeps of a run lineage (its spend and
 // its alerts) once every run of it ended a retention ago, as core's own
 // records of the runs say, and no open request reserves against it.
-// AI Gateway is the outside system: a fake behind the AI binding. The
-// runs, the engine, D1 and the ledger are real; where a test needs runs
+// The model provider behind connect is the outside system
+// (test/model-provider.ts). The runs, the engine, D1 and the ledger are
+// real; where a test needs runs
 // that ended long ago, it moves their end back in core's records, as time
 // passing would.
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 
-/** Costs 519 micros from Llama 3.3: past a $0.01 lineage budget's 1% alert. */
+/** Costs 650 micros from Mistral Large: past a $0.01 lineage budget's 1% alert. */
 const pricedAnswer = { text: "Hi.", inputTokens: 1000, outputTokens: 100 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -84,15 +84,10 @@ const spendFor = async (
   person: string,
   triggers: readonly AuditActor[]
 ): Promise<string[]> => {
-  const fake = fakeGateway(...triggers.map(() => pricedAnswer));
-  const coreEnv: ModelsEnv = {
+  await fakeProviderFor([mistral], ...triggers.map(() => pricedAnswer));
+  const coreEnv: Env = {
     ...env,
-    AI: fake.binding,
-    MODEL_GATEWAY: {
-      gateway: "grasp-os-test",
-      models: [workersAi],
-      budgets: { run: { limit: 0.01, alertAt: 1 } },
-    },
+    MODEL_GATEWAY: { budgets: { run: { limit: 0.01, alertAt: 1 } } },
   };
   const appId = appIdSchema.parse(app);
   const outcomes: string[] = [];
@@ -101,7 +96,7 @@ const spendFor = async (
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await outcome(
         models(coreEnv).call({
-          model: workersAi,
+          model: mistral,
           maxTokens: 100,
           input: "Hello.",
           purpose: "workflow.step",
@@ -222,7 +217,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     const ledger = env.MODEL_LEDGER.getByName(crypto.randomUUID());
     await runInDurableObject(ledger, async (_instance, state) => {
       state.storage.sql.exec(
-        "INSERT INTO spend (scope, key, period, spent_micros, requests) VALUES ('run', ?, 'lineage', 519, 1)",
+        "INSERT INTO spend (scope, key, period, spent_micros, requests) VALUES ('run', ?, 'lineage', 650, 1)",
         root.id
       );
       state.storage.sql.exec(
@@ -352,7 +347,7 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
     await runInDurableObject(modelLedger(env), (_instance, state) => {
       state.storage.sql.exec(
         `INSERT INTO requests (id, fingerprint, period, scopes, model, price_version, prices, reserved_micros, state, actor, dispatched_at, deadline, reconcile_at)
-         VALUES (?, 'held', '2400-01', '[]', 'workers-ai/test', 'test', '{}', 0, 'quarantined', '{"type":"system"}', 0, 1, 1)`,
+         VALUES (?, 'held', '2400-01', '[]', 'mistral/test', 'test', '{}', 0, 'quarantined', '{"type":"system"}', 0, 1, 1)`,
         held
       );
       state.storage.sql.exec(

@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type {
@@ -33,7 +32,7 @@ import {
 } from "@grasp-os/shared/workflows";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
@@ -88,11 +87,16 @@ import {
   sweepRunDetails,
 } from "../src/workflows/retention.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
-import { answeringGateway, fakeGateway, loggedRunStep } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
+import {
+  answeringProvider,
+  connectModels,
+  fakeProviderFor,
+} from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { withQuotas } from "./quota-policies.ts";
 import {
   admittedFreely,
@@ -123,12 +127,19 @@ import { testBinding } from "./test-env.ts";
 // reaches connect as a binding argument and nothing the run records; and
 // a workflow's limits only ever lower the host's. Everything runs for
 // real, through the dispatcher, the engine, connect and the App's own
-// code; only the mail server behind connect and AI Gateway are faked.
+// code; only the mail server and the model provider behind connect are
+// faked.
 
 const idp = mockIdp();
 
-/** The model the test deployment's gateway allows (vite.config.ts). */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/** The model the organization chose, the one a binding may name. */
+const allowedModel = "mistral/mistral-large-latest";
+
+// Chosen before any binding to it is approved; each test's provider
+// answers for the same model.
+const chooseModel = async (): Promise<void> => {
+  await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
+};
 
 /** Whether `value` is a function, as host.ts's `modelCallLimitOf` is. */
 const isModelCallLimitOf = (value: unknown): value is typeof modelCallLimitOf =>
@@ -343,6 +354,8 @@ const pause = { pause: { wait: "PT1S" } };
 const hold = { hold: { wait: "PT1S" } };
 
 describe("time, randomness and deadlines of JSON workflows", () => {
+  beforeAll(chooseModel);
+
   it("records grasp.now and grasp.random, so a replay after a wait answers the same", async () => {
     const by = await person("builder");
     const { workflow, executable } = await published(by, {
@@ -625,6 +638,8 @@ const send = (subject: string) => ({
 });
 
 describe("grasp.connector calls of JSON workflows", () => {
+  beforeAll(chooseModel);
+
   it("sends once through connect, its sensitive parameter only as a binding argument, and a replay sends nothing again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1009,13 +1024,9 @@ describe("grasp.connector calls of JSON workflows", () => {
   });
 });
 
-/** AI Gateway answering `replies` in turn, behind the AI binding. */
-const gatewayAnswering = (...replies: Parameters<typeof fakeGateway>) => {
-  const gateway = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  return gateway;
-};
+/** The provider of the chosen model answering `replies` in turn. */
+const providerAnswering = async (...replies: ProviderReply[]) =>
+  await fakeProviderFor([allowedModel], ...replies);
 
 /** The name of the sleep run `run` is in, once it sleeps. */
 const sleepOf = async (run: string): Promise<string> =>
@@ -1085,6 +1096,7 @@ const greetingWorkflow = async (
 const answer = (text: string) => ({ text, inputTokens: 100, outputTokens: 20 });
 
 describe("grasp.model calls of JSON workflows", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -1093,23 +1105,19 @@ describe("grasp.model calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow, executable } = await greetingWorkflow(ada, admin);
-    const gateway = gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
     const runId = await started(ada, workflow.id);
     const run = await ended(ada, workflow.id, runId);
     expect({
       executable,
       end: endOf(run),
-      requests: gateway.requests.length,
-      logged: gateway.requests.map(loggedRunStep),
+      requests: provider.requests.length,
       receipts: await receiptsOf(runId),
       callEvents: await callEventsOf(runId),
     }).toStrictEqual({
       executable: true,
       end: { status: "completed", output: { status: "Hello Ada" } },
       requests: 1,
-      // The gateway's log names the run and the task the request came
-      // from, so a provider behind it counts each task's requests.
-      logged: [`${runId}/greet`],
       receipts: ["started", "done"].map((outcome) => ({
         call: "grasp.model",
         binding: "summary",
@@ -1127,14 +1135,14 @@ describe("grasp.model calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       answer("Hello, Ada!"),
       answer('{"line":"Never sent"}')
     );
     const run = await ended(ada, workflow.id, await started(ada, workflow.id));
     expect({
       status: run.status,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({ status: "failed", requests: 1 });
   });
 
@@ -1142,21 +1150,21 @@ describe("grasp.model calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       { status: 503, errorType: "overloaded_error" },
       answer('{"line":"Hello, Ada!"}')
     );
     const run = await ended(ada, workflow.id, await started(ada, workflow.id));
     expect({
       status: run.status,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({ status: "failed", requests: 1 });
   });
 
   it("refuses the next call once the grant its start was admitted on is revoked: a trigger's, an App's or an agent's", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const gateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const provider = await providerAnswering(answer('{"line":"Never sent"}'));
     const startOf = async (
       subject: PermissionRequest["subject"],
       id: string
@@ -1258,7 +1266,7 @@ describe("grasp.model calls of JSON workflows", () => {
       // oxlint-disable-next-line no-await-in-loop -- one run at a time
       ends.push(endOf(await ended(ada, workflow, run ?? "")));
     }
-    expect({ ends, requests: gateway.requests.length }).toStrictEqual({
+    expect({ ends, requests: provider.requests.length }).toStrictEqual({
       ends: Array.from({ length: 3 }, () => ({
         status: "failed",
         code: "workflow.call_denied",
@@ -1272,7 +1280,7 @@ describe("grasp.model calls of JSON workflows", () => {
     const ada = await person("builder");
     // Each run's call answered, if it is made.
     const hello = answer('{"line":"Hello Ada"}');
-    gatewayAnswering(hello, hello, hello, hello);
+    await providerAnswering(hello, hello, hello, hello);
     // A wait before its call that only the test ends, once the trigger
     // moved: the call can't come before the move.
     const waits = { hold: { wait: "P1D" } };
@@ -1362,7 +1370,7 @@ describe("grasp.model calls of JSON workflows", () => {
     const { workflow, approval } = await greetingWorkflow(ada, admin, {
       before: [hold],
     });
-    const gateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const provider = await providerAnswering(answer('{"line":"Never sent"}'));
     const run = await started(ada, workflow.id);
     // The approval is revoked as the ledger admits the request, after the
     // call was authorized.
@@ -1392,7 +1400,7 @@ describe("grasp.model calls of JSON workflows", () => {
     expect({
       raced: revoking.length,
       end,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       raced: 1,
       end: { status: "failed", code: "workflow.call_denied" },
@@ -1404,7 +1412,7 @@ describe("grasp.model calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    gatewayAnswering(
+    await providerAnswering(
       answer(
         JSON.stringify({ line: "x".repeat(platformLimits.stepPayloadBytes) })
       )
@@ -1420,7 +1428,7 @@ describe("grasp.model calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const revoked = await greetingWorkflow(ada, admin, { before: [hold] });
-    const gateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const provider = await providerAnswering(answer('{"line":"Never sent"}'));
     const revokedRun = await started(ada, revoked.workflow.id);
     await revokeWorkflowBinding(
       env,
@@ -1429,7 +1437,7 @@ describe("grasp.model calls of JSON workflows", () => {
       revoked.approval.id
     );
     const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
-    const revokedRequests = gateway.requests.length;
+    const revokedRequests = provider.requests.length;
     // Two model calls, and a limit of one: the second is never sent.
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
@@ -1458,7 +1466,7 @@ describe("grasp.model calls of JSON workflows", () => {
       target: { kind: "model", model: allowedModel },
       reviewed: { version: 1 },
     });
-    const limitedGateway = gatewayAnswering(
+    const limitedProvider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Never sent"}')
     );
@@ -1471,7 +1479,7 @@ describe("grasp.model calls of JSON workflows", () => {
       revoked: endOf(revokedEnd),
       revokedRequests,
       limited: endOf(limitedEnd),
-      limitedRequests: limitedGateway.requests.length,
+      limitedRequests: limitedProvider.requests.length,
     }).toStrictEqual({
       revoked: { status: "failed", code: "workflow.call_denied" },
       revokedRequests: 0,
@@ -1482,6 +1490,8 @@ describe("grasp.model calls of JSON workflows", () => {
 });
 
 describe("a JSON workflow's model call limit, when the quota policy can't be read as its run loads", () => {
+  beforeAll(chooseModel);
+
   it("holds the run to the limit this isolate last read, refusing a call past it", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1516,14 +1526,14 @@ describe("a JSON workflow's model call limit, when the quota policy can't be rea
     });
     // A run loaded under a policy of one model call a lineage: the limit
     // this isolate last read.
-    gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    await providerAnswering(answer('{"line":"Hello Ada"}'));
     const lowered = await withQuotas({ lineageModelRequests: 1 }, async () =>
       endOf(await ended(ada, workflow.id, await started(ada, workflow.id)))
     );
     // The deployment's own limit again, recorded first, so the next read
     // of it is one query: the load's, which fails.
     await quotaPolicy(env);
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Never sent"}')
     );
@@ -1537,7 +1547,7 @@ describe("a JSON workflow's model call limit, when the quota policy can't be rea
       lowered,
       failed,
       end: value,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       lowered: { status: "failed", code: "workflow.model_call_limit" },
       failed: true,
@@ -1590,7 +1600,7 @@ const newBudgetMonth = (): string => {
 };
 
 /**
- * What `run` returns, with `budgets` in the deployment's gateway config,
+ * What `run` returns, with `budgets` in the deployment's model rules,
  * counting in `month`: by default, one no other file counts in.
  */
 const withBudgets = async <Result>(
@@ -1600,11 +1610,7 @@ const withBudgets = async <Result>(
 ): Promise<Result> => {
   const { MODEL_GATEWAY: before, MODEL_BUDGET_MONTH: was } = env;
   try {
-    env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [allowedModel],
-      budgets,
-    };
+    env.MODEL_GATEWAY = { budgets };
     env.MODEL_BUDGET_MONTH = month;
     return await run();
   } finally {
@@ -1613,14 +1619,19 @@ const withBudgets = async <Result>(
   }
 };
 
-/** An answer of some $0.03: a $0.02 budget's room for a request, and no more. */
+/**
+ * An answer of some $1: a $0.50 budget holds the most one request may
+ * use, and nothing after this answer.
+ */
 const dearGreeting = {
   text: '{"line":"Hello Ada"}',
-  inputTokens: 100_000,
+  inputTokens: 2_000_000,
   outputTokens: 20,
 };
 
 describe("an independent workflow's model spend", () => {
+  beforeAll(chooseModel);
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -1629,7 +1640,7 @@ describe("an independent workflow's model spend", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    gatewayAnswering(
+    await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hello again"}')
     );
@@ -1683,7 +1694,7 @@ describe("an independent workflow's model spend", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    await providerAnswering(answer('{"line":"Hello Ada"}'));
     const read = await withBudgets(
       { workflow: { limit: 5 } },
       async () => {
@@ -1719,15 +1730,19 @@ describe("an independent workflow's model spend", () => {
     const ada = await person("builder");
     const spent = await greetingWorkflow(ada, admin);
     const other = await greetingWorkflow(ada, admin);
-    const gateway = gatewayAnswering(dearGreeting, dearGreeting, dearGreeting);
-    const ends = await withBudgets({ workflow: { limit: 0.02 } }, async () => {
+    const provider = await providerAnswering(
+      dearGreeting,
+      dearGreeting,
+      dearGreeting
+    );
+    const ends = await withBudgets({ workflow: { limit: 0.5 } }, async () => {
       const runOf = async (id: string) =>
         endOf(await ended(ada, id, await started(ada, id)));
       const first = await runOf(spent.workflow.id);
       const second = await runOf(spent.workflow.id);
       return { first, second, other: await runOf(other.workflow.id) };
     });
-    expect({ ...ends, sent: gateway.requests.length }).toStrictEqual({
+    expect({ ...ends, sent: provider.requests.length }).toStrictEqual({
       first: { status: "completed", output: { status: "Hello Ada" } },
       second: { status: "failed", code: "model.over_budget" },
       other: { status: "completed", output: { status: "Hello Ada" } },
@@ -1737,6 +1752,8 @@ describe("an independent workflow's model spend", () => {
 });
 
 describe("grasp.operation calls of JSON workflows", () => {
+  beforeAll(chooseModel);
+
   it("lowers no call whose arguments hold more entries than its build seals, and names where", async () => {
     const admin = await person("admin");
     const key = `bulk-${unique()}`;
@@ -1785,7 +1802,7 @@ describe("grasp.operation calls of JSON workflows", () => {
   });
 });
 
-/** A model the test gateway may be told takes sensitive data. */
+/** A model the organization also chose, which may take sensitive data. */
 const sensitiveModel = "anthropic/claude-sonnet-4-5";
 
 /**
@@ -1891,6 +1908,7 @@ const settledCode = async (promise: Promise<unknown>): Promise<unknown> => {
 };
 
 describe("runs started by a restricted App", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -2262,7 +2280,8 @@ describe("runs started by a restricted App", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow } = await greetingWorkflow(ada, admin);
-    const gateway = gatewayAnswering(
+    const provider = await fakeProviderFor(
+      [allowedModel, sensitiveModel],
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hello Ada"}')
     );
@@ -2272,8 +2291,6 @@ describe("runs started by a restricted App", () => {
     const { MODEL_GATEWAY: before } = env;
     // Only another model may take sensitive data.
     env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [allowedModel, sensitiveModel],
       sensitive: { models: [sensitiveModel], connections: [] },
     };
     let restricted: WorkflowResourceRun;
@@ -2289,7 +2306,7 @@ describe("runs started by a restricted App", () => {
     expect({
       restricted: endOf(restricted),
       own: endOf(own),
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       restricted: { status: "failed", code: "model.sensitive_data" },
       own: { status: "completed", output: { status: "Hello Ada" } },
@@ -2610,6 +2627,7 @@ const frozenSummary = (
   ]);
 
 describe("a JSON workflow's model call, once its isolate was stopped past its CPU time", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -2622,7 +2640,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     });
     // A run its activations are of, held asleep before its own call.
     const runId = await started(ada, workflow.id);
-    const gateway = gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
     const runKey = unique();
     const marks = keptMarks();
     const bindings = frozenSummary(approval);
@@ -2673,7 +2691,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     expect({
       parked,
       ran,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       // Retryable timeouts, as for attempts the Loader cut off: the
       // model call's parked for the next activation.
@@ -2693,7 +2711,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       before: [longHold],
     });
     const runId = await started(ada, workflow.id);
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       { status: 503, errorType: "overloaded_error" },
       answer('{"line":"Never sent"}')
     );
@@ -2727,7 +2745,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
     expect({
       retried,
       ran,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       // Nothing kept says attempt 1 never started: refused, as left open,
       // and never tried again: its call was tried. Still a timeout, which
@@ -2748,7 +2766,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       before: [longHold],
     });
     const runId = await started(ada, workflow.id);
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       { status: 503, errorType: "overloaded_error" },
       answer('{"line":"Never sent"}')
     );
@@ -2802,7 +2820,7 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
       retried,
       leftOpen,
       ran,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       refused: { name: "Error", code: "model.failed" },
       // As the attempt that ran failed, and never tried again after it.
@@ -2818,6 +2836,8 @@ describe("a JSON workflow's model call, once its isolate was stopped past its CP
 });
 
 describe("a run's host, against a forged module's calls", () => {
+  beforeAll(chooseModel);
+
   it("builds and makes a task's call itself, once, and through a binding its start froze only", async () => {
     const admin = await person("admin");
     const by = await person("builder");
@@ -3323,6 +3343,7 @@ describe("a run's host, against a forged module's calls", () => {
 });
 
 describe("a workflow's own limits", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -3373,13 +3394,13 @@ describe("a workflow's own limits", () => {
       reviewed: { version: 1 },
     });
     // The model never answers: only the attempt's timeout ends the call.
-    const gateway = gatewayAnswering({ hang: true });
+    const provider = await providerAnswering({ hang: true });
     const startedAt = Date.now();
     const run = await ended(by, workflow.id, await started(by, workflow.id));
     // Its request cut off with its attempt, never left running past it.
     const cutOff = await vi.waitFor(
       () => {
-        expect(gateway.requests[0]?.signal.aborted).toBeTruthy();
+        expect(provider.requests[0]?.signal.aborted).toBeTruthy();
         return true;
       },
       { timeout: 5000, interval: 100 }
@@ -3418,6 +3439,7 @@ describe("a workflow's own limits", () => {
 });
 
 describe("an activation's share of core's CPU, for calls tried once", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -3539,6 +3561,7 @@ const writeAgain = {
 };
 
 describe("model resources of a JSON workflow's own actions", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -3550,7 +3573,7 @@ describe("model resources of a JSON workflow's own actions", () => {
       tasks: [greetTask, pause],
       maxModelCalls: 2,
     });
-    const gateway = gatewayAnswering(
+    const provider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hi again"}')
     );
@@ -3577,7 +3600,7 @@ describe("model resources of a JSON workflow's own actions", () => {
       executable,
       end: endOf(run),
       // Two requests, though the run replayed after its pause.
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
       receipts: receipts.map(({ call, binding, outcome }) => ({
         call,
         binding,
@@ -3615,7 +3638,7 @@ describe("model resources of a JSON workflow's own actions", () => {
       ],
       maxModelCalls: 2,
     });
-    const replayGateway = gatewayAnswering(
+    const replayProvider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Hi again"}'),
       answer('{"line":"Never sent"}')
@@ -3625,14 +3648,14 @@ describe("model resources of a JSON workflow's own actions", () => {
       replayed.workflow.id,
       await started(ada, replayed.workflow.id)
     );
-    const replayRequests = replayGateway.requests.length;
+    const replayRequests = replayProvider.requests.length;
     vi.restoreAllMocks();
     // One call left for an action that asks twice: the second is never sent.
     const within = await writingWorkflow(ada, admin, {
       tasks: [greetTask],
       maxModelCalls: 1,
     });
-    const withinGateway = gatewayAnswering(
+    const withinProvider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Never sent"}')
     );
@@ -3655,7 +3678,7 @@ describe("model resources of a JSON workflow's own actions", () => {
       replayed: endOf(replayedEnd),
       replayRequests,
       within: endOf(withinEnd),
-      withinRequests: withinGateway.requests.length,
+      withinRequests: withinProvider.requests.length,
       refusedAtLimit,
     }).toStrictEqual({
       replayed: { status: "failed", code: "workflow.model_call_limit" },
@@ -3683,27 +3706,28 @@ describe("model resources of a JSON workflow's own actions", () => {
     // While the action's first request is out, another activation of the
     // run keeps a model call of its own: the action's second finds none
     // left.
-    const gateway = answeringGateway(async (requests) => {
-      if (requests.length === 1) {
-        await runInDurableObject(
-          runObject(await runIdOf.promise),
-          (_object, state) => {
-            state.storage.sql.exec(
-              "INSERT INTO grasp_action_model_calls (key) VALUES ('elsewhere')"
-            );
-          }
-        );
-      }
-      return answer('{"line":"Hello Ada"}');
-    });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    const provider = await answeringProvider(
+      async (requests) => {
+        if (requests.length === 1) {
+          await runInDurableObject(
+            runObject(await runIdOf.promise),
+            (_object, state) => {
+              state.storage.sql.exec(
+                "INSERT INTO grasp_action_model_calls (key) VALUES ('elsewhere')"
+              );
+            }
+          );
+        }
+        return answer('{"line":"Hello Ada"}');
+      },
+      { models: [allowedModel] }
+    );
     const runId = await started(ada, workflow.id);
     runIdOf.resolve(runId);
     const end = await ended(ada, workflow.id, runId);
     expect({
       end: endOf(end),
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       end: { status: "failed", code: "workflow.model_call_limit" },
       requests: 1,
@@ -3780,20 +3804,24 @@ export const greet = action({
       maxModelCalls: 2,
       asks: 1,
     });
-    const shapedGateway = gatewayAnswering(answer('{"other":"Hello Ada"}'));
+    const shapedProvider = await providerAnswering(
+      answer('{"other":"Hello Ada"}')
+    );
     const shapedEnd = await ended(
       ada,
       shaped.workflow.id,
       await started(ada, shaped.workflow.id)
     );
-    const shapedRequests = shapedGateway.requests.length;
+    const shapedRequests = shapedProvider.requests.length;
     vi.restoreAllMocks();
     const revoked = await writingWorkflow(ada, admin, {
       tasks: [hold, greetTask],
       maxModelCalls: 2,
       asks: 1,
     });
-    const revokedGateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const revokedProvider = await providerAnswering(
+      answer('{"line":"Never sent"}')
+    );
     const revokedRun = await started(ada, revoked.workflow.id);
     await revokeWorkflowBinding(
       env,
@@ -3806,7 +3834,7 @@ export const greet = action({
       shaped: endOf(shapedEnd),
       shapedRequests,
       revoked: endOf(revokedEnd),
-      revokedRequests: revokedGateway.requests.length,
+      revokedRequests: revokedProvider.requests.length,
     }).toStrictEqual({
       // The gateway's refusal of an answer outside the declared shape.
       shaped: { status: "failed", code: "model.invalid_output" },
@@ -3843,6 +3871,7 @@ const waiting = async (runId: string): Promise<void> => {
 };
 
 describe("runs started by a restricted App, waiting on a held call", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -4032,6 +4061,7 @@ const wakesOwed = async (runId: string): Promise<number> => {
 };
 
 describe("the wakes a held call's decision owes", () => {
+  beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });

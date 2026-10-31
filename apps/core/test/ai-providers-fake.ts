@@ -17,6 +17,11 @@
  * each commit that has audio, or OpenAI's error for one that has none.
  * Every socket's opening, events and close are kept (`realtimeControlUrl`).
  *
+ * A key can instead be bridged to the test (`bridgeUrl`): each request
+ * that carries it waits, unanswered, until the test takes it and says how
+ * to answer, one command at a time (`BridgeCommand`), so a test's own
+ * code decides every answer as the requests come (test/model-provider.ts).
+ *
  * Serialized into the providers Worker with `toString()`, so it closes
  * over nothing: what it needs is in its own body.
  */
@@ -90,6 +95,34 @@ export type PlannedReply =
 /** Where tests release a reply held by name: POST `{ release }`. */
 export const releaseUrl = "https://ai-providers-control.test/release";
 
+/**
+ * Where tests bridge a key (POST `{ key }`), take the requests that
+ * carried it since they last looked, with those whose caller went away
+ * (GET `?key=`), and answer one (POST `{ id, commands }`).
+ */
+export const bridgeUrl = "https://ai-providers-control.test/bridge";
+
+/**
+ * How the test answers a bridged request: a refusal (`status`), or a
+ * stream it opens, writes to and ends, as it likes, over as many posts as
+ * it likes. A request given no command waits until its caller goes away.
+ */
+export type BridgeCommand =
+  | { status: number; headers?: Record<string, string>; body?: unknown }
+  | { open: Record<string, string> }
+  | { write: string }
+  | { end: true };
+
+/** A bridged request, as the test takes it. */
+export interface BridgedRequest {
+  id: string;
+  host: string;
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
 /** One request a provider got, as it got it. */
 export interface ProviderRequest {
   host: string;
@@ -118,6 +151,21 @@ export const aiProvidersFake = () => {
   /** The held replies tests released, by name. */
   const released = new Set<string>();
   const seen: ProviderRequest[] = [];
+  /** The keys bridged to the test. */
+  const bridged = new Set<string>();
+  /** Each bridged request, by its ID: what it waits on and how it stands. */
+  const bridge = new Map<
+    string,
+    {
+      key: string;
+      request: BridgedRequest;
+      taken: boolean;
+      commands: BridgeCommand[];
+      /** Its caller went away; told to the test once (`told`). */
+      gone: boolean;
+      told: boolean;
+    }
+  >();
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: its source is embedded
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -466,6 +514,142 @@ export const aiProvidersFake = () => {
       },
     });
   };
+  /** Bridges a key, hands the test its requests, or takes its commands. */
+  const bridgeControl = async (
+    request: Request,
+    url: URL
+  ): Promise<Response> => {
+    if (request.method === "GET") {
+      const key = url.searchParams.get("key") ?? "";
+      const fresh: BridgedRequest[] = [];
+      const gone: string[] = [];
+      for (const [id, one] of bridge) {
+        if (one.key !== key) {
+          continue;
+        }
+        if (!one.taken) {
+          one.taken = true;
+          fresh.push(one.request);
+        }
+        if (one.gone && !one.told) {
+          one.told = true;
+          gone.push(id);
+        }
+      }
+      return Response.json({ requests: fresh, gone });
+    }
+    const asked: unknown = await request.json();
+    if (isRecord(asked) && typeof asked.key === "string") {
+      bridged.add(asked.key);
+      return new Response(null, { status: 204 });
+    }
+    if (
+      isRecord(asked) &&
+      typeof asked.id === "string" &&
+      Array.isArray(asked.commands)
+    ) {
+      const one = bridge.get(asked.id);
+      if (one === undefined) {
+        return new Response("No such request", { status: 404 });
+      }
+      for (const command of asked.commands) {
+        if (isRecord(command)) {
+          // SAFETY: the test's own commands, from test/model-provider.ts.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          one.commands.push(command as BridgeCommand);
+        }
+      }
+      return new Response(null, { status: 204 });
+    }
+    return new Response("Not a bridge request", { status: 400 });
+  };
+  /** Answers a bridged request as the test's commands say, as they come. */
+  const answerBridged = async (
+    request: Request,
+    url: URL,
+    key: string,
+    body: string
+  ): Promise<Response> => {
+    const id = crypto.randomUUID();
+    const commands: BridgeCommand[] = [];
+    const one = {
+      key,
+      request: {
+        id,
+        host: url.hostname,
+        method: request.method,
+        path: url.pathname + url.search,
+        headers: Object.fromEntries(request.headers),
+        body,
+      },
+      taken: false,
+      commands,
+      gone: false,
+      told: false,
+    };
+    bridge.set(id, one);
+    request.signal.addEventListener("abort", () => {
+      one.gone = true;
+    });
+    const nextCommand = async (): Promise<BridgeCommand | undefined> => {
+      while (one.commands.length === 0 && !one.gone) {
+        // oxlint-disable-next-line no-await-in-loop -- until the test says
+        await scheduler.wait(5);
+      }
+      return one.commands.shift();
+    };
+    const first = await nextCommand();
+    if (first === undefined) {
+      return new Response("Gone", { status: 499 });
+    }
+    if ("status" in first) {
+      return Response.json(first.body ?? refusal, {
+        status: first.status,
+        headers: first.headers ?? {},
+      });
+    }
+    if (!("open" in first)) {
+      return new Response("Not opened", { status: 500 });
+    }
+    const { readable, writable } = new TransformStream<Uint8Array>();
+    const writer = writable.getWriter();
+    const watchClosed = async (): Promise<void> => {
+      try {
+        await writer.closed;
+      } catch {
+        // Its reader went away.
+        one.gone = true;
+      }
+    };
+    void watchClosed();
+    const pump = async (): Promise<void> => {
+      try {
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- in order, as told
+          const command = await nextCommand();
+          if (command === undefined || "end" in command) {
+            break;
+          }
+          if ("write" in command) {
+            // oxlint-disable-next-line no-await-in-loop -- in order, as told
+            await writer.write(encoder.encode(command.write));
+          }
+        }
+        await writer.close();
+      } catch {
+        // Its reader went away: nobody reads the rest.
+        one.gone = true;
+      }
+    };
+    void pump();
+    return new Response(readable, {
+      headers: {
+        "content-type": "text/event-stream",
+        "request-id": `req-${id}`,
+        ...first.open,
+      },
+    });
+  };
   /** Plans replies (POST), or lists what reached the providers (GET). */
   const control = async (request: Request, url: URL): Promise<Response> => {
     if (request.method === "POST") {
@@ -502,6 +686,9 @@ export const aiProvidersFake = () => {
         }
         return new Response(null, { status: 204 });
       }
+      if (url.href.startsWith("https://ai-providers-control.test/bridge")) {
+        return await bridgeControl(request, url);
+      }
       if (url.hostname === "ai-providers-control.test") {
         return await control(request, url);
       }
@@ -516,6 +703,9 @@ export const aiProvidersFake = () => {
         key,
       };
       seen.push(seenAs);
+      if (key !== null && bridged.has(key)) {
+        return await answerBridged(request, url, key, body);
+      }
       const reply = key === null ? undefined : plans.get(key)?.shift();
       if (reply !== undefined && "release" in reply) {
         // Waited for on a timer of this request's own: nothing of another

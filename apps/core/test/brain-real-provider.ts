@@ -1,29 +1,48 @@
 /**
- * A real model behind the Brain baseline (GRA-676), for the opt-in run
- * only (brain-real-model.test.ts). The harness keeps its stand-in AI
- * Gateway, so it still sees every request core's model gateway sends; this
- * provider sends each one on to the real AI Gateway over the real AI
- * binding, as the model gateway built it, and hands the answer back for
- * the stand-in to stream to core. Core's gateway and ledger run as they
- * always do: the allowlist, the budget, the price and the charge are
- * theirs. Nothing here is a model client of its own.
+ * A real model behind the Brain baseline (GRA-676) and Stephen's eval, for
+ * their opt-in runs only (brain-real-model.test.ts and the others). The
+ * harness connects the provider of the model under test with a test key
+ * of its own and keeps its bridge (model-provider.ts), so it still sees
+ * every request core's model gateway sends through connect; this provider
+ * sends each one on, as the gateway built it, to the provider's own API
+ * with the real key the run was given, and hands the answer back for the
+ * bridge to stream to core. Core's gateway and ledger run as they always
+ * do: the rules, the budget, the price and the charge are theirs. Nothing
+ * here is a model client of its own.
  *
- * Chat completions, the wire format of Workers AI's models, which a
- * deployment's gateway allows by default, and Anthropic's Messages API.
- * The request goes without a stream and the answer comes back whole: the
- * stand-in streams it on. Anthropic's thinking goes back with its real
- * signature, which the next request of a tool loop must return unchanged.
+ * Chat completions (Mistral's, OpenRouter's) and Anthropic's Messages API;
+ * not OpenAI's Responses API, whose items the bridge streams back under
+ * ids of its own that OpenAI wouldn't take in the next request
+ * (`realProviderTakes`). The request goes without a stream and the answer
+ * comes back whole: the bridge streams it on. Anthropic's thinking goes
+ * back with its real signature, which the next request of a tool loop
+ * must return unchanged.
  */
+import { aiProviderIdSchema } from "@grasp-os/shared/ai-providers";
 import { z } from "zod";
 
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import type { BrainProvider } from "./brain-harness.ts";
 import type { StubTurn } from "./brain-stub-model.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 
-/** What the provider needs of the AI binding: its fetch passthrough. */
-export interface AiFetch {
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
-}
+/** The providers whose API this sends on to. */
+const takenProviders: ReadonlySet<string> = new Set([
+  "anthropic",
+  "mistral",
+  "openrouter",
+]);
+
+/**
+ * Whether a real run can reach `model` (`<provider>/<model>`): one of a
+ * provider whose API this speaks, which a run checks before it sends
+ * anything.
+ */
+export const realProviderTakes = (model: string): boolean => {
+  const provider = aiProviderIdSchema.safeParse(
+    model.slice(0, model.indexOf("/"))
+  );
+  return provider.success && takenProviders.has(provider.data);
+};
 
 /** What the model said to one request, for the run's log. */
 export interface ModelExchange {
@@ -93,7 +112,7 @@ const anthropicSchema = z.object({
         name: z.string(),
         input: z.record(z.string(), z.unknown()),
       }),
-      // Redacted thinking can't be handed on: the stand-in has no block
+      // Redacted thinking can't be handed on: the bridge has no block
       // for it. Refused below rather than dropped, which the next request
       // of a tool loop would be refused for.
       z.object({ type: z.literal("redacted_thinking") }).loose(),
@@ -144,12 +163,12 @@ const formatOf = (url: string): WireFormat => {
     return "anthropic-messages";
   }
   throw new TypeError(
-    `The real-model provider speaks chat completions and Anthropic's Messages API only, not ${url}`
+    `The real provider speaks chat completions and Anthropic's Messages API only, not ${url}`
   );
 };
 
 /** The request as sent on: whole, without a stream. */
-const unstreamed = (request: GatewayRequest): string => {
+const unstreamed = (request: SentRequest): string => {
   if (typeof request.body !== "object" || request.body === null) {
     throw new TypeError(`A request to ${request.url} without a JSON body`);
   }
@@ -160,10 +179,27 @@ const unstreamed = (request: GatewayRequest): string => {
 };
 
 interface Replied {
-  reply: GatewayReply;
+  reply: ProviderReply;
   text: string;
   calls: ModelExchange["calls"];
 }
+
+/**
+ * The request's headers with the real key where the test key was: in the
+ * header the provider takes its key in, as connect put it there.
+ */
+const withRealKey = (request: SentRequest, key: string): Headers => {
+  const headers = new Headers(request.headers);
+  headers.set("content-type", "application/json");
+  headers.delete("content-length");
+  headers.delete("host");
+  if (headers.has("x-api-key")) {
+    headers.set("x-api-key", key);
+  } else {
+    headers.set("authorization", `Bearer ${key}`);
+  }
+  return headers;
+};
 
 const callsOf = (
   calls: readonly { name: string; arguments: Record<string, unknown> }[]
@@ -185,16 +221,16 @@ const anthropicReply = (raw: unknown): Replied => {
   );
   if (parsed.content.some(({ type }) => type === "redacted_thinking")) {
     throw new TypeError(
-      "Anthropic redacted the model's thinking, which the stand-in can't hand on"
+      "Anthropic redacted the model's thinking, which the bridge can't hand on"
     );
   }
   const thinking = parsed.content.flatMap((block) =>
     block.type === "thinking" ? [block] : []
   );
-  // One block the stand-in streams, under the one signature it carries.
+  // One block the bridge streams, under the one signature it carries.
   if (thinking.length > 1) {
     throw new TypeError(
-      "The model thought in more than one block, which the stand-in streams as one"
+      "The model thought in more than one block, which the bridge streams as one"
     );
   }
   const [signed] = thinking;
@@ -275,11 +311,12 @@ const replyOf = async (
 };
 
 /**
- * The provider: each request the model gateway sends goes to the real AI
- * Gateway over `ai`, and what the model said to it goes to `log`.
+ * The provider: each request the model gateway sends goes on to the
+ * provider's own API with the real `key`, from the test's isolate, and
+ * what the model said to it goes to `log`.
  */
-export const gatewayProvider =
-  (ai: AiFetch, log: (exchange: ModelExchange) => void): BrainProvider =>
+export const realProvider =
+  (key: string, log: (exchange: ModelExchange) => void): BrainProvider =>
   (turn) =>
   async (requests) => {
     const request = requests.at(-1);
@@ -288,12 +325,9 @@ export const gatewayProvider =
     }
     const format = formatOf(request.url);
     const started = performance.now();
-    const headers = new Headers(request.headers);
-    headers.set("content-type", "application/json");
-    headers.delete("content-length");
-    const response = await ai.fetch(request.url, {
+    const response = await fetch(request.url, {
       method: "POST",
-      headers,
+      headers: withRealKey(request, key),
       body: unstreamed(request),
       signal: request.signal,
     });

@@ -24,7 +24,7 @@ import type { z } from "zod";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
-import type { Listening, ListeningOutcome, ModelsEnv } from "../models.ts";
+import type { Listening, ListeningOutcome } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
@@ -125,7 +125,7 @@ export const heardBudgets = { link: 60 * 60, admin: 30 * 60 } as const;
  * as the gateway names it: the one the platform's settings name;
  * `undefined` while they don't parse.
  */
-export const transcriptionModelOf = (env: ModelsEnv): string | undefined => {
+export const transcriptionModelOf = (env: Env): string | undefined => {
   const transcription = platformAi(env)?.transcription;
   return transcription === undefined
     ? undefined

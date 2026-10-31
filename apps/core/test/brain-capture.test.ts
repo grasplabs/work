@@ -14,11 +14,12 @@ import { workspace } from "../src/durable-objects.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
-import { model, pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { model, configureObject, says } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { workflowFiles, workflowsApp } from "./workflow-apps.ts";
@@ -516,10 +517,11 @@ describe("a workflow run's outcome", () => {
 });
 
 /** A member with their own chats, answered by `replies`. */
-const chatter = async (...replies: Parameters<typeof fakeGateway>) => {
+const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");
   const stub = workspace(env, personalWorkspaceId(person.userId));
-  await pointAtGateway(stub, fakeGateway(...replies));
+  await fakeProvider(...replies);
+  await configureObject(stub);
   const chat = await person.api.chats.create("Questions");
   const id = chatIdSchema.parse(chat.id);
   const ask = async () => await stub.ask(id, { text: "Hello?", model });
@@ -633,7 +635,8 @@ describe("a chat turn's outcome", () => {
     const dee = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     const stub = workspace(env, personalWorkspaceId(ann.userId));
-    await pointAtGateway(stub, fakeGateway(says("Floor 3."), says("Floor 4.")));
+    await fakeProvider(says("Floor 3."), says("Floor 4."));
+    await configureObject(stub);
     const agentId = crypto.randomUUID();
     /** Ann asks in the group, as its door does, with who is in it now. */
     const askInGroup = async (members: string[]) =>

@@ -169,81 +169,23 @@ export const staffWindowOpen = (
 
 // MODEL_GATEWAY (core's src/models.ts and src/model-rules.ts)
 //
-// Its model references are checked against the models the gateway offers,
-// which only core knows (its provider catalogs): each schema here takes
-// that check as `modelRef`.
-
-/** An AI Gateway ID: lowercase letters, digits and dashes. */
-const gatewayIdPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
-
-/**
- * The allowlist's part of the `MODEL_GATEWAY` var: the deployment's AI
- * Gateway, and the models it allows. `modelRef` checks one `<provider>/<model>` the gateway offers.
- */
-export const modelGatewayConfigSchema = (modelRef: z.ZodType<string>) =>
-  z
-    .object({
-      /** The deployment's AI Gateway, in the deployment's own account. */
-      gateway: z.string().regex(gatewayIdPattern),
-      /** The models this deployment allows; every other model is refused. */
-      models: z.array(modelRef).min(1),
-      /**
-       * The model that plays each role (`modelRoles`), one of the allowed
-       * models. A role left out goes to the first allowed model the
-       * call's rules let it use, as every call did before roles.
-       */
-      roles: z
-        .strictObject({
-          quick: modelRef.optional(),
-          careful: modelRef.optional(),
-        } satisfies Record<ModelRole, z.ZodType>)
-        .optional(),
-    })
-    .refine(
-      ({ models: allowed, roles }) =>
-        Object.values(roles ?? {}).every(
-          (ref) => ref === undefined || allowed.includes(ref)
-        ),
-      { message: "A role's model is an allowed model", path: ["roles"] }
-    );
+// The client's rules for model calls: which models may take a call kept
+// in the EU or one that carries sensitive data, and what calls may cost.
+// Which models a call may use at all is the organization's own choice,
+// among the providers it connected (core's src/ai-model-choice.ts), never
+// this var. Its model references are checked against the models the
+// gateway offers, which only core knows (its provider catalogs): each
+// schema here takes that check as `modelRef`.
 
 /**
  * What core's own features ask the gateway for, rather than a model:
  * `quick` for a line someone is waiting to hear, `careful` for reading and
- * writing that must be right. The deployment names the model for each in
- * `MODEL_GATEWAY`'s `roles`.
+ * writing that must be right. Each resolves against the organization's
+ * chosen models, its default first, then its fallbacks (core's
+ * `modelForRole`).
  */
 export const modelRoles = ["quick", "careful"] as const;
 export type ModelRole = (typeof modelRoles)[number];
-
-/**
- * The model a role gets on a deployment that names none for it, where its
- * allowlist has that model and the rules let the call use it; otherwise
- * the role takes the first allowed model the rules let it use. `quick`
- * defaults to GLM 5.3 Flash, which thinks at low effort, as quick lines
- * ask: DeepSeek V4.1 Flash, chat's default and the first allowed, thinks
- * at high at least, too slow for a line someone is waiting to hear.
- */
-export const defaultRoleModels: Readonly<Partial<Record<ModelRole, string>>> = {
-  quick: "workers-ai/@cf/zai-org/glm-5.3-flash",
-};
-
-/**
- * The models a new deployment allows until staff change its
- * `MODEL_GATEWAY`, and core allows while none is set: Workers AI's, which
- * AI Gateway runs on the client's own account with no provider key, so a
- * client can call a model on day one. The first is chat's default.
- *
- * Chosen on the Brain baseline's real-model runs: DeepSeek V4.1 Flash
- * answered best and followed the answer protocol, well within the cost
- * target; GLM 5.3 Flash is the cheapest to complete a task with. Both
- * search Knowledge with tools, which Llama 3.3, the earlier default, never
- * did.
- */
-export const defaultGatewayModels = [
-  "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
-  "workers-ai/@cf/zai-org/glm-5.3-flash",
-] as const;
 
 const budgetSchema = z.strictObject({
   /**
@@ -280,7 +222,7 @@ export const budgetsSchema = z
 const modelRulesShape = (modelRef: z.ZodType<string>) => ({
   eu: z
     .strictObject({
-      /** The allowed models hosted in the EU. */
+      /** The models hosted in the EU. */
       models: z.array(modelRef).min(1),
       /** Every call of the deployment must stay in the EU. */
       deployment: z.boolean().default(false),
@@ -294,7 +236,7 @@ const modelRulesShape = (modelRef: z.ZodType<string>) => ({
     .optional(),
   sensitive: z
     .strictObject({
-      /** The allowed models that may take sensitive data. */
+      /** The models that may take sensitive data. */
       models: z.array(modelRef).min(1),
       /** Connections whose data is sensitive. */
       connections: z.array(connectionIdSchema).default([]),
@@ -308,29 +250,11 @@ export type ModelRules = z.output<
 >;
 
 /**
- * The client's other rules, in the same var as the allowlist. Core parses
- * them apart from it: a rule that doesn't parse refuses every call.
+ * The `MODEL_GATEWAY` var: the client's rules. A rule that doesn't parse
+ * refuses every call (core's src/models.ts).
  */
 export const modelRulesConfigSchema = (modelRef: z.ZodType<string>) =>
-  z
-    .object({
-      models: z.array(z.string()),
-      ...modelRulesShape(modelRef),
-    })
-    .refine(
-      ({ models: allowed, eu }) =>
-        eu === undefined || eu.models.every((ref) => allowed.includes(ref)),
-      { message: "EU models are allowed models", path: ["eu", "models"] }
-    )
-    .refine(
-      ({ models: allowed, sensitive }) =>
-        sensitive === undefined ||
-        sensitive.models.every((ref) => allowed.includes(ref)),
-      {
-        message: "Models for sensitive data are allowed models",
-        path: ["sensitive", "models"],
-      }
-    );
+  z.object(modelRulesShape(modelRef));
 
 // AUDIT_RETENTION_DAYS and AUDIT_ARCHIVE_RETENTION_DAYS (core's
 // src/audit-log.ts)

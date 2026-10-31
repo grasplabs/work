@@ -2,6 +2,10 @@
 # Verifies the capability core signs for each call. The same value as in
 # apps/core/.dev.vars; at least 32 characters, e.g. `openssl rand -base64 32`.
 CAPABILITY_SIGNING_KEY=
+# Seals what connect keeps: OAuth tokens, and the AI provider keys an admin
+# adds in Settings, without which no model call can be made. 32 random
+# bytes, base64, e.g. `openssl rand -base64 32`.
+TOKEN_ENCRYPTION_KEY=
 # Optional: Stephen's own Gmail mailbox (src/channels.ts), and the Google
 # OAuth client and refresh token connect reads and sends its mail with.
 # Every Gmail request is refused until all four are set.

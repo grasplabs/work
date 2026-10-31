@@ -10,20 +10,18 @@ import {
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { release as nextVersion, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   appWith,
   llm,
   currentPastActivation,
-  workersAi,
+  mistral,
   anthropic,
   euModel,
-  gateway,
-  allowed,
   cheapAnswer,
   withRules,
   withDeploymentRules,
@@ -44,8 +42,9 @@ import {
 
 // The client's rules for model calls, checked on every call before
 // anything is sent: which models, where, for which data, and through
-// which binding. AI Gateway is the outside system: a fake behind the AI
-// binding. Everything else is real, down to the audit log and, for the
+// which binding. The model provider behind connect is the outside system
+// (test/model-provider.ts). Everything else is real, down to the audit
+// log and, for the
 // rules a workflow run meets, the run. The budgets' tests are in
 // model-rules-budgets.test.ts, to run apart from these.
 
@@ -62,8 +61,9 @@ const idp = mockIdp();
 describe("model rules", { timeout: 60_000 }, () => {
   const hello = callsInAnApp(idp);
 
-  it("keep every call of an EU-only deployment with a model hosted in the EU, still through AI Gateway, and audit each refusal", async () => {
-    const { fake, call } = withRules({
+  it("keep every call of an EU-only deployment with a model hosted in the EU, and audit each refusal", async () => {
+    // The rules say which models are hosted in the EU, not the provider.
+    const { fake, call } = await withRules({
       eu: { models: [euModel], deployment: true },
     });
     const refused = hello(anthropic, { provenance: ["doc-1"] });
@@ -76,13 +76,13 @@ describe("model rules", { timeout: 60_000 }, () => {
       details: { model: anthropic, because: "deployment" },
     });
     await expect(
-      Promise.all([outcome(call(hello(workersAi))), outcome(call(answered))])
+      Promise.all([outcome(call(hello(mistral))), outcome(call(answered))])
     ).resolves.toStrictEqual(["model.eu_only", "ok"]);
 
-    // Only the EU model's call was sent, to the deployment's gateway.
-    expect(fake.requests.map(({ url }) => new URL(url).pathname)).toStrictEqual(
-      [`/ai-gateway/gateways/${gateway}/openai/responses`]
-    );
+    // Only the EU model's call was sent, to its provider.
+    expect(fake.requests.map(({ url }) => url)).toStrictEqual([
+      "https://api.openai.com/v1/responses",
+    ]);
     await expect(eventsOf(refused.trigger)).resolves.toMatchObject([
       {
         action: "model.refused",
@@ -100,65 +100,12 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("send an EU-only deployment's Claude call to Claude in Amazon Bedrock's EU profile, through the gateway's custom provider, with no key, at Bedrock's regional prices", async () => {
-    const claude = "anthropic/claude-opus-5-5";
-    const euClaude = "bedrock-eu/claude-opus-5-5";
-    const { fake, call } = withRules(
-      {
-        models: [...allowed, claude, euClaude],
-        eu: { models: [euClaude], deployment: true },
-      },
-      { text: "Hallo.", inputTokens: 1000, outputTokens: 100 }
-    );
-    const answered = hello(euClaude);
-
-    await expect(outcome(call(hello(claude)))).resolves.toBe("model.eu_only");
-    await expect(call(answered)).resolves.toMatchObject({ text: "Hallo." });
-
-    // Only the EU call was sent: to the gateway's custom provider for
-    // Bedrock, as the EU profile, with no key (the gateway holds it).
-    expect(
-      fake.requests.map(({ url, body, headers }) => ({
-        path: new URL(url).pathname,
-        body,
-        key: headers.get("x-api-key"),
-        authorization: headers.get("authorization"),
-        logged: headers.get("cf-aig-collect-log-payload"),
-      }))
-    ).toMatchObject([
-      {
-        path: `/ai-gateway/gateways/${gateway}/custom-bedrock-eu/v1/messages`,
-        body: { model: "eu.anthropic.claude-opus-5-5" },
-        key: null,
-        authorization: null,
-        logged: "false",
-      },
-    ]);
-    // Opus 5.5 at Bedrock's regional prices: $4.40 and $22 a million.
-    const events = await eventsOf(answered.trigger);
-    expect(
-      events.map(({ action, model, detail, cost }) => ({
-        action,
-        model,
-        detail,
-        cents: Math.round((cost?.amount ?? 0) * 100 * 1e6) / 1e6,
-      }))
-    ).toMatchObject([
-      {
-        action: "model.call",
-        model: { provider: "bedrock-eu", model: "claude-opus-5-5" },
-        detail: { euOnly: "deployment" },
-        cents: 0.66,
-      },
-    ]);
-  });
-
   it("keep a listed workflow's AI steps in the EU, and no other caller's", async () => {
     const eu = {
       models: [euModel],
       workflows: [{ app: "app-1", workflow: "invoices" }],
     };
-    const { call } = withRules({ eu });
+    const { call } = await withRules({ eu });
     const step = async (
       model: string,
       trigger: ModelCall<undefined>["trigger"]
@@ -177,7 +124,7 @@ describe("model rules", { timeout: 60_000 }, () => {
   });
 
   it("keep a call in the EU when an EU-only connection's data fed it or may have", async () => {
-    const { call } = withRules({
+    const { call } = await withRules({
       eu: { models: [euModel], connections: ["connection-eu"] },
     });
 
@@ -198,8 +145,8 @@ describe("model rules", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual(["model.eu_only", "model.eu_only", "ok", "ok"]);
   });
 
-  it("audit a model the deployment doesn't allow as refused", async () => {
-    const { call } = withRules({});
+  it("audit a model the organization didn't choose as refused", async () => {
+    const { call } = await withRules({});
     const refused = hello("anthropic/claude-opus-4-1");
 
     await expect(outcome(call(refused))).resolves.toBe("model.not_allowed");
@@ -217,7 +164,7 @@ describe("model rules", { timeout: 60_000 }, () => {
   });
 
   it("record a refusal whose provenance is too large for the audit log, with as much of it as fits", async () => {
-    const { call } = withRules({});
+    const { call } = await withRules({});
     // A hundred identifiers of 256 three-byte characters: 77 KB.
     const provenance = Array.from({ length: 100 }, (_, index) =>
       `${index}`.padEnd(256, "€")
@@ -245,28 +192,13 @@ describe("model rules", { timeout: 60_000 }, () => {
     ["sensitive", { sensitive: { models: [euModel], connections: 7 } }],
     ["budgets", { budgets: { user: { limit: -5 } } }],
   ])("refuse every call while a %s rule is malformed", async (_, malformed) => {
-    const { fake, call } = withRules(malformed);
+    const { fake, call } = await withRules(malformed);
 
     await expect(outcome(call(hello(anthropic)))).resolves.toBe(
       "model.unconfigured"
     );
     expect(fake.requests).toStrictEqual([]);
   });
-
-  it.each([
-    ["an EU model", { eu: { models: [euModel], deployment: true } }],
-    ["a model for sensitive data", { sensitive: { models: [euModel] } }],
-  ])(
-    "refuse every call when %s isn't an allowed one: the config is invalid",
-    async (_, rules) => {
-      const { fake, call } = withRules({ models: [workersAi], ...rules });
-
-      await expect(outcome(call(hello(workersAi)))).resolves.toBe(
-        "model.unconfigured"
-      );
-      expect(fake.requests).toStrictEqual([]);
-    }
-  );
 
   it("send a prompt holding a sensitive collection's content only to a model the data rule lists, such as an EU one", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -280,7 +212,9 @@ describe("model rules", { timeout: 60_000 }, () => {
       }),
       collectionWithNote(admin.api, { name: "Handbook", access: "everyone" }),
     ]);
-    const { fake, call } = withRules({ sensitive: { models: [euModel] } });
+    const { fake, call } = await withRules({
+      sensitive: { models: [euModel] },
+    });
     const refused = hello(anthropic, {
       provenance: [handbook.noteId, payroll.collectionId],
     });
@@ -292,7 +226,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         // Named by one of its documents.
         outcome(call(hello(anthropic, { provenance: [payroll.noteId] }))),
         outcome(call(answered)),
-        // Nothing sensitive: any allowed model.
+        // Nothing sensitive: any chosen model.
         outcome(call(hello(anthropic, { provenance: [handbook.noteId] }))),
       ])
     ).resolves.toStrictEqual([
@@ -314,7 +248,7 @@ describe("model rules", { timeout: 60_000 }, () => {
   });
 
   it("send a sensitive connection's data only to a model the data rule lists", async () => {
-    const { call } = withRules({
+    const { call } = await withRules({
       sensitive: { models: [euModel], connections: ["connection-hr"] },
     });
 
@@ -348,7 +282,7 @@ describe("model rules", { timeout: 60_000 }, () => {
   ])(
     "refuse and audit a call that claims to work in another App's context, with %s",
     async (_, rules, connections) => {
-      const { fake, call } = withRules(rules);
+      const { fake, call } = await withRules(rules);
       const app = appIdSchema.parse(`app-${crypto.randomUUID()}`);
       const other = appIdSchema.parse(`app-${crypto.randomUUID()}`);
       const claimed = hello(anthropic, {
@@ -378,7 +312,7 @@ describe("model rules", { timeout: 60_000 }, () => {
   );
 
   it("refuse and audit a call that comes without a work context", async () => {
-    const { fake, call } = withRules({});
+    const { fake, call } = await withRules({});
     const { work: _, ...withoutWork } = hello(anthropic);
     // SAFETY: missing on purpose, as from a caller that isn't type-checked;
     // every typed caller must pass `work`.
@@ -417,14 +351,10 @@ describe("model rules", { timeout: 60_000 }, () => {
     await grantMail(idp, builder, app, mail.id);
 
     const { fake, result: run } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, euModel],
-        eu: { models: [euModel], connections: [mail.id] },
-      },
+      { eu: { models: [euModel], connections: [mail.id] } },
       [],
       async () => {
-        await bindModel(app, "anywhere", workersAi);
+        await bindModel(app, "anywhere", mistral);
         const started = await builder.api.workflows.start(app, "reader");
         await finished(started.id);
         return started;
@@ -489,14 +419,10 @@ describe("model rules", { timeout: 60_000 }, () => {
     );
 
     const { fake, result: runs } = await withDeploymentRules(
-      {
-        gateway,
-        models: [workersAi, euModel],
-        sensitive: { models: [euModel] },
-      },
+      { sensitive: { models: [euModel] } },
       [{ text: '{ "summary": "A note." }', inputTokens: 10, outputTokens: 5 }],
       async () => {
-        await bindModel(app, "anywhere", workersAi);
+        await bindModel(app, "anywhere", mistral);
         await bindModel(app, "eu", euModel);
         // One after another: the second starts restricted.
         const refused = await admin.api.workflows.start(app, "anywhere");
@@ -523,9 +449,9 @@ describe("model rules", { timeout: 60_000 }, () => {
       { status: "completed", output: { summary: "A note." } },
     ]);
     // Only the EU model's call was sent, and it held the note.
-    expect(fake.requests.map(({ url }) => new URL(url).pathname)).toStrictEqual(
-      [`/ai-gateway/gateways/${gateway}/openai/responses`]
-    );
+    expect(fake.requests.map(({ url }) => url)).toStrictEqual([
+      "https://api.openai.com/v1/responses",
+    ]);
     expect(JSON.stringify(fake.requests[0]?.body)).toContain("See [[note.md]]");
     // No provenance named the collection: the App's restricted mode did.
     const refusals = await eventsOf(
@@ -547,7 +473,7 @@ describe("model rules", { timeout: 60_000 }, () => {
       })
     );
     const { fake, result: runs } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [],
       async () => {
         const unbound = await builder.api.workflows.start(app, "reader");
@@ -583,7 +509,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         builder.api.workflows.status(runs.undeclared),
       ])
     ).resolves.toMatchObject([refused, refused]);
-    // Not retried, and nothing reached the gateway or its ledger.
+    // Not retried, and nothing reached the provider or the ledger.
     expect(fake.requests).toStrictEqual([]);
     const events = await eventsOf(
       runActorOf({ runId: runs.unbound, app, workflow: "reader" })
@@ -601,7 +527,7 @@ describe("model rules", { timeout: 60_000 }, () => {
     );
     // A million tokens in costs $3: well past the binding's dollar a day.
     const { fake, result: runs } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [{ text: '{ "total": 1234 }', inputTokens: 1_000_000, outputTokens: 10 }],
       async () => {
         await bindModel(app, "reader", anthropic, { perDay: 1 });
@@ -661,7 +587,7 @@ describe("model rules", { timeout: 60_000 }, () => {
     // Another call through the same binding holds most of its dollar a
     // day while it answers, until released.
     const { result } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [
         { ...cheapAnswer, pause: { at: 1, until: release.promise } },
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
@@ -756,7 +682,7 @@ export default app({
       }),
     });
     const { fake, result: run } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [],
       async () => {
         // Bound by an admin all the same: it serves the App's actions.
@@ -782,16 +708,12 @@ export default app({
         extract: { total: 1234 },
       })
     );
-    // Each attempt's first request fails as a server does, and the
-    // gateway's own retries with it: the step is tried again.
-    const failing: GatewayReply[] = [
-      { status: 500 },
-      { status: 500 },
-      { status: 500 },
-    ];
+    // Each attempt's request fails as a server does, which the gateway
+    // neither retries nor falls back from: the step is tried again.
+    const failing: ProviderReply[] = [{ status: 500 }];
     const attemptOnce = async (change: () => Promise<unknown>) =>
       await withDeploymentRules(
-        { gateway, models: [workersAi, anthropic, euModel] },
+        {},
         [
           ...failing,
           { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
@@ -799,7 +721,7 @@ export default app({
         async () => {
           await bindModel(app, "reader", anthropic);
           const run = await builder.api.workflows.start(app, "reader");
-          // The first attempt has failed, as the gateway recorded it: the
+          // The first attempt has failed, as the ledger recorded it: the
           // binding changes before the next.
           await vi.waitFor(
             async () => {
@@ -868,7 +790,7 @@ ${llm("retries: { limit: 2, delay: 1 },")}`,
       )
     );
     const { fake, result: run } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [],
       async () => {
         await bindModel(app, "reader", anthropic);
@@ -900,7 +822,7 @@ ${llm("retries: { limit: 2, delay: 1 },")}`,
     );
     // An attempt may cost some $0.25 (16,384 tokens at $15 a million).
     const { fake, result: run } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [],
       async () => {
         await bindModel(app, "reader", anthropic, { perRequest: 0.01 });
@@ -946,10 +868,10 @@ ${llm("retries: { limit: 2, delay: 1 },")}`,
     );
     const release = Promise.withResolvers<boolean>();
 
-    // The gateway answers the first attempt only after its second began;
+    // The provider answers the first attempt only after its second began;
     // the binding is revoked before it does.
     const { fake, result } = await withDeploymentRules(
-      { gateway, models: [workersAi, anthropic] },
+      {},
       [
         {
           text: '{ "total": 1234 }',

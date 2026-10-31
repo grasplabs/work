@@ -384,7 +384,7 @@ describe("a chat's skills", setUpTime, () => {
       ),
       ifVersion: 0,
     });
-    const { gateway, ask, agent } = await chatOf(
+    const { provider, ask, agent } = await chatOf(
       person.userId,
       calling(
         `env.brain.skillsRead({ documentId: "${skill.id}", version: 1 }).then(({ text }) => text)`
@@ -408,11 +408,11 @@ describe("a chat's skills", setUpTime, () => {
     // Words no section holds: the turn's own recall finds nothing to quote.
     await ask("Zebras?");
     await ask("Giraffes?");
-    const before = gateway.requests.length;
+    const before = provider.requests.length;
     await admin.api.permissions.revoke(grant);
     await ask("Okapis?");
 
-    const sent = gateway.requests.map(({ body }) => JSON.stringify(body));
+    const sent = provider.requests.map(({ body }) => JSON.stringify(body));
     expect({
       whileReadable: sent.slice(0, before).at(-1)?.includes(secret),
       afterRevoking: sent.slice(before).map((body) => ({
