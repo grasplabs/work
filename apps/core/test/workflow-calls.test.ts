@@ -78,6 +78,7 @@ import { quotaPolicy } from "../src/workflows/quotas.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
+import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import {
   resourceRunFor,
   terminateResourceRun,
@@ -1179,19 +1180,24 @@ describe("grasp.model calls of JSON workflows", () => {
       );
       const runId = await started(ada, workflow.id);
       const held = await providerWaitOf(ada, workflow.id, runId);
+      // Its trace says so too, for what follows it (the run sheet).
+      const tracedHeld = await resourceRunTrace(env, ada, workflow.id, runId);
       provider.working = true;
       const { api } = await signedInApi(idp, "admin");
       // The admin replaces the key (the provider's fake knows it by its
       // value, so it stays the same).
       await api.aiProviders.add({ provider: "mistral", key: fake.key });
       const run = await ended(ada, workflow.id, runId);
+      const tracedEnd = await resourceRunTrace(env, ada, workflow.id, runId);
       expect({
         held,
+        traced: [tracedHeld.aiProvider?.trouble, tracedEnd.aiProvider],
         end: endOf(run),
         shown: run.aiProvider,
         requests: fake.requests.length,
       }).toStrictEqual({
         held: { provider: "mistral", trouble: "refused" },
+        traced: ["refused", undefined],
         end: { status: "completed", output: { status: "Hello Ada" } },
         shown: undefined,
         requests: 2,

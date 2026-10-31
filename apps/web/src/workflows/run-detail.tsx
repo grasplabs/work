@@ -27,7 +27,9 @@ import { WaitingForAiProvider } from "./runs.tsx";
 // see what it returned or why it failed (it can hold what the run read for
 // them). Everyone else is told so, rather than shown nothing. Where its
 // steps show under it, they follow the run (`status`): the run is read
-// again only when its status moves, never on a second timer of its own.
+// again only when where it is moves (its status, or a wait for its AI
+// provider begun or ended, traces.tsx `followedState`), never on a second
+// timer of its own.
 
 /** How often a run still going is read again. */
 const followMs = 1500;
@@ -235,8 +237,9 @@ export const RunSheet = ({
   onClose: () => void;
   steps?: ReactNode;
   /**
-   * Where `steps` follow the run: its status as they last read it (null
-   * before they did), so the run's facts are not read on a timer too.
+   * Where `steps` follow the run: where it is as they last read it, its
+   * status and any wait for its AI provider (traces.tsx `followedState`;
+   * null before they did), so the run's facts are not read on a timer too.
    */
   status?: string | null;
 }) => {

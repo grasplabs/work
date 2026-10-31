@@ -242,5 +242,6 @@ export const resourceRunTrace = async (
     steps,
     complete,
     detailsRemoved: false,
+    ...(run.aiProvider === undefined ? {} : { aiProvider: run.aiProvider }),
   };
 };
