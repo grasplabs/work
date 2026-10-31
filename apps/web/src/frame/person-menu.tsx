@@ -60,21 +60,14 @@ import type { Theme } from "./theme.ts";
 // and, for admins, the workspace's settings are, their onboarding, the
 // language, the theme, Stephen's tour once more and signing out.
 
-/**
- * Up to two letters of `name`, for the avatar, as the prototype's: a
- * lowercase particle is skipped, so "Sanne de Wit" is "SW", not "SD".
- */
-export const initials = (name: string): string => {
-  const parts = name.split(/\s+/u).filter((part) => part !== "");
-  const named = parts.filter((part) => {
-    const first = part.charAt(0);
-    return first !== first.toLocaleLowerCase();
-  });
-  return (named.length === 0 ? parts : named)
+/** Up to two letters of `name`, for the avatar. */
+export const initials = (name: string): string =>
+  name
+    .split(/\s+/u)
+    .filter((part) => part !== "")
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
-};
 
 /**
  * The person on the menu's button, as the prototype's: their initials and
