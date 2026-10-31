@@ -58,6 +58,10 @@ export default app({
   "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
 };
 
+/** A screen that says `text`. */
+const screenSaying = (text: string): string =>
+  `export default () => <p>${text}</p>;\n`;
+
 /** The run each App `newApp` makes has: one that has ended. */
 const runOf = (app: string): string => `run-${app}`;
 
@@ -168,8 +172,17 @@ const asUser = {
 
 /** Whether `person` finds `app` among theirs. */
 const lists = async ({ api }: Person, app: string): Promise<boolean> => {
-  const apps = await api.apps.list();
-  return apps.some(({ id }) => id === app);
+  const [apps, screens] = await Promise.all([
+    api.apps.list(),
+    api.apps.screens(),
+  ]);
+  const listed = apps.some(({ id }) => id === app);
+  // Its screens are listed exactly when it is: someone who can't open the
+  // App never learns its screens, nor that it exists, from them.
+  expect(
+    screens.filter((each) => each.app.id === app).map(({ screen }) => screen)
+  ).toStrictEqual(listed ? ["desk"] : []);
+  return listed;
 };
 
 // Each test releases an App of its own and, through `callsOn`, makes some
@@ -320,6 +333,136 @@ describe("App roles", { timeout: 60_000 }, () => {
         outcome(ben.api.apps.files.read(app)),
       ])
     ).resolves.toStrictEqual(["role.forbidden", "ok", "ok"]);
+    // Ben, now in the team, finds its screens; someone in neither doesn't.
+    const outsider = await personApi("builder");
+    await expect(
+      Promise.all([lists(ben, app), lists(outsider, app)])
+    ).resolves.toStrictEqual([true, false]);
+  });
+
+  it("list a draft's screens to its builders only, and those of the version that is current", async () => {
+    const owner = await personApi("builder");
+    const [user, builder] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+    ]);
+    const { id: app } = await owner.api.apps.create({
+      name: `Desk ${unique()}`,
+    });
+    const { version } = await owner.api.apps.files.commit(app, files, "One");
+    await owner.api.apps.versions.setCurrent(app, version);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    // A version committed after the current one isn't listed: its screen
+    // opens for nobody yet.
+    await owner.api.apps.files.commit(
+      app,
+      { "screens/later.tsx": "export default () => <p>Later</p>;\n" },
+      "Later"
+    );
+
+    // A draft is its builders' alone, as opening it is.
+    await expect(
+      Promise.all([lists(user, app), lists(builder, app), lists(owner, app)])
+    ).resolves.toStrictEqual([false, true, true]);
+    await expect(outcome(user.api.apps.contents(app))).resolves.toBe(
+      "app.not_found"
+    );
+  });
+
+  it("list the screens of several Apps newest App first, each by name with its App's name, status and process", async () => {
+    const owner = await personApi("builder");
+    const names = {
+      oldest: `Oldest ${unique()}`,
+      middle: `Middle ${unique()}`,
+      newest: `Newest ${unique()}`,
+      empty: `Empty ${unique()}`,
+    };
+    const [oldest, middle, newest, empty] = await Promise.all(
+      [names.oldest, names.middle, names.newest, names.empty].map(
+        async (name) => {
+          const { id } = await owner.api.apps.create({ name });
+          return id;
+        }
+      )
+    );
+    if (
+      oldest === undefined ||
+      middle === undefined ||
+      newest === undefined ||
+      empty === undefined
+    ) {
+      throw new Error("Four Apps were made");
+    }
+    // Published, its screens committed out of their order.
+    await release(owner, oldest, {
+      ...files,
+      "screens/zeta.tsx": screenSaying("Zeta"),
+      "screens/alpha.tsx": screenSaying("Alpha"),
+    });
+    // A draft that serves a business process.
+    const { version } = await owner.api.apps.files.commit(
+      middle,
+      files,
+      "Draft"
+    );
+    await owner.api.apps.versions.setCurrent(middle, version);
+    await owner.api.apps.update(middle, { process: "o2c" });
+    // Published, then archived.
+    await release(owner, newest, files);
+    await owner.api.apps.archive(newest);
+    // Listed by when each was made, the newest first, whatever order the
+    // requests landed in. `empty`, the newest of all, has no current
+    // version, so no screens.
+    const start = Date.now() - 60_000;
+    await env.DB.batch(
+      [oldest, middle, newest, empty].map((id, index) =>
+        env.DB.prepare("UPDATE apps SET created_at = ? WHERE id = ?").bind(
+          start + index * 1000,
+          id
+        )
+      )
+    );
+
+    const listed = await owner.api.apps.screens();
+    const ours = new Set<string>([oldest, middle, newest, empty]);
+    expect(listed.filter(({ app }) => ours.has(app.id))).toStrictEqual([
+      {
+        app: {
+          id: newest,
+          name: names.newest,
+          status: "archived",
+          process: null,
+        },
+        screen: "desk",
+      },
+      {
+        app: {
+          id: middle,
+          name: names.middle,
+          status: "draft",
+          process: "o2c",
+        },
+        screen: "desk",
+      },
+      ...["alpha", "desk", "zeta"].map((screen) => ({
+        app: {
+          id: oldest,
+          name: names.oldest,
+          status: "published",
+          process: null,
+        },
+        screen,
+      })),
+    ]);
   });
 
   it("keep an App's permissions, and its workflows, to those with a role in it", async () => {
@@ -550,6 +693,8 @@ describe("App roles", { timeout: 60_000 }, () => {
     await expect(outcome(person.api.apps.get(app))).resolves.toBe(
       "app.not_found"
     );
+    // Nor are its screens listed to them any longer.
+    await expect(lists(person, app)).resolves.toBeFalsy();
     const target = { type: "app", id: app };
     const actor = { type: "person", userId: owner.userId };
     expect(
