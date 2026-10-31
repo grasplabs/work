@@ -46,8 +46,6 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { carryOnAfterConnecting } from "./channels/answer.ts";
-import { channelResponse } from "./channels/door.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
@@ -268,7 +266,13 @@ const connectionRouteResponse = async (
     // Someone who connected from a chat app is told there, and what they
     // asked is answered again, after the browser is sent on.
     return await handleConnectionCallback(request, env, (userId) => {
-      ctx.waitUntil(carryOnAfterConnecting(env, userId));
+      // The channel layer, and the Chat SDK with it, loads when first used,
+      // not as core starts (GRA-1349).
+      const carryOn = async (): Promise<void> => {
+        const { carryOnAfterConnecting } = await import("./channels/answer.ts");
+        await carryOnAfterConnecting(env, userId);
+      };
+      ctx.waitUntil(carryOn());
     });
   }
   if (isCatalogLogoPath(pathname)) {
@@ -426,6 +430,7 @@ const route = async (
   // platform's own signed requests get through.
   const platform = channelPlatformOf(pathname);
   if (platform !== undefined) {
+    const { channelResponse } = await import("./channels/door.ts");
     return await channelResponse(request, env, platform, requestId, ctx);
   }
   const appCall = await appCallResponse(pathname, request, env, requestId);

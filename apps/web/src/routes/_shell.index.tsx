@@ -411,6 +411,9 @@ const Chat = () => {
           </div>
         }
         crumbs={crumbsOf(t`Chat`, chat, projects)}
+        // On a phone, Chat alone beside the chat's four icons, as in the
+        // prototype; the project and the chat from sm up.
+        phoneCrumbs="first"
       />
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">

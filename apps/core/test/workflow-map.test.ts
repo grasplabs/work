@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { builtins, fingerprintOf, release } from "../src/builtins.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { mockIdp } from "./idp.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -125,7 +125,7 @@ const pageSchema = z.object({
 
 /** An admin's App created from the workflow map. */
 const mapOf = async (admin: Person): Promise<AppId> => {
-  await builtins(env).ensureInstalled(await fingerprintOf(release));
+  await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
   const made = await admin.api.apps.blueprints.create(workflowMap, {
     name: `Our map ${unique()}`,
   });

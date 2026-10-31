@@ -21,7 +21,13 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
   const page = await pageOf(admin);
   await page.goto("/settings/models");
 
-  await expect(page.getByText("To change them, contact Grasp.")).toBeVisible();
+  // The models are the organization's own choice: its admin is pointed
+  // to where they choose them.
+  await expect(
+    sectionOf(page, "Allowed models").getByRole("link", {
+      name: "Settings › AI providers",
+    })
+  ).toHaveAttribute("href", "/settings/ai-providers");
   const allowed = sectionOf(page, "Allowed models").getByRole("row", {
     name: /llama-3\.3-70b-instruct-fp8-fast/u,
   });
