@@ -28,7 +28,7 @@ export const StartingQuestions = ({
     <ItemGroup
       aria-label={t`Questions to start with`}
       render={<ul />}
-      spacing="tight"
+      spacing="flush"
     >
       {suggestions.map((suggestion) => {
         const question = i18n._(suggestion);
