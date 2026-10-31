@@ -232,8 +232,6 @@ export interface Source {
   connection?: "directory" | "signIn" | "pulse";
   /** For an interview: a team's stakeholder, or any other employee. */
   interviewee?: "stakeholder" | "employee";
-  /** For a document: the policy it became in the policy manager. */
-  policyId?: string;
   /** The teams this source speaks for: what makes a team interviewed. */
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
@@ -401,23 +399,6 @@ export interface LandscapeApp {
   permissions: string[];
 }
 
-/** A policy the company uploaded to the policy manager. */
-export interface PolicyDocument {
-  id: string;
-  title: string;
-  /** ISO minute. */
-  uploadedAt: string;
-  status: "reading" | "review" | "published" | "failed";
-  /** What the policy covers, in a sentence or two. */
-  summary?: string;
-  /** The rules proposed from it, each with the passage it comes from. */
-  proposals: { excerpt: string; decision: "open" | "accepted" | "rejected" }[];
-  /** Requirements no rule can check yet, each with its passage. */
-  unchecked: { excerpt: string }[];
-  /** ISO minute. */
-  publishedAt?: string;
-}
-
 /** Everything the brain is built from. */
 export interface Workspace {
   company: Company;
@@ -440,7 +421,6 @@ export interface Workspace {
   workflows: Workflow[];
   connections: Connection[];
   landscape: LandscapeApp[];
-  policies: PolicyDocument[];
 }
 
 /** Most statements one call takes out of the brain. */

@@ -119,8 +119,6 @@
     "./platform-change": "./src/platform-change.ts",
     "./platform-limits": "./src/platform-limits.ts",
     "./platform-measures": "./src/platform-measures.ts",
-    "./policies": "./src/policies.ts",
-    "./policy-engine": "./src/policy-engine.ts",
     "./portable": "./src/portable.ts",
     "./provision-probe": "./src/provision-probe.ts",
     "./quiet-isolate": "./src/quiet-isolate.ts",

@@ -7,21 +7,6 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
 
-#. Read after the column name by screen readers.
-#: src/landscape/app-table.tsx
-msgid ", not sorted"
-msgstr ", not sorted"
-
-#. Read after the column name by screen readers.
-#: src/landscape/app-table.tsx
-msgid ", sorted ascending"
-msgstr ", sorted ascending"
-
-#. Read after the column name by screen readers.
-#: src/landscape/app-table.tsx
-msgid ", sorted descending"
-msgstr ", sorted descending"
-
 #: src/workflows/requests/request-needs.tsx
 msgid "“{action}” doesn't exist yet"
 msgstr "“{action}” doesn't exist yet"
@@ -69,10 +54,8 @@ msgstr "{0, plural, one {# more finding not shown: only the gravest are kept.} o
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 msgstr "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 
-#. placeholder {0}: app.people
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
-#: src/policies/findings-table.tsx
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# person} other {# people}}"
 
@@ -101,11 +84,6 @@ msgstr "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # thin
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
 msgstr "{0, plural, one {The team you left out} other {The # teams you left out}}"
 
-#. placeholder {0}: condition.moreThan
-#: src/policies/policy.ts
-msgid "{0, plural, one {Used by more than # person} other {Used by more than # people}}"
-msgstr "{0, plural, one {Used by more than # person} other {Used by more than # people}}"
-
 #. {about} is what the app is for, as the app list writes it, e.g. “Accounting”. {date} is a day and month.
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{about} · connected {date}"
@@ -122,18 +100,6 @@ msgstr "{about} has {open, plural, one {# decision open} other {# decisions open
 #: src/engines/resource-bindings.tsx
 msgid "{account} on {provider}"
 msgstr "{account} on {provider}"
-
-#: src/policies/policy.ts
-msgid "{acting, plural, one {# app blocked} other {# apps blocked}}"
-msgstr "{acting, plural, one {# app blocked} other {# apps blocked}}"
-
-#: src/policies/policy.ts
-msgid "{acting, plural, one {# app flagged} other {# apps flagged}}"
-msgstr "{acting, plural, one {# app flagged} other {# apps flagged}}"
-
-#: src/policies/policy.ts
-msgid "{acting, plural, one {Would catch # app} other {Would catch # apps}}"
-msgstr "{acting, plural, one {Would catch # app} other {Would catch # apps}}"
 
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
@@ -300,10 +266,6 @@ msgstr "{category} by {vendor}"
 msgid "{category} by {vendor}, with AI built in"
 msgstr "{category} by {vendor}, with AI built in"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
-msgstr "{caught, plural, one {Would catch # app today.} other {Would catch # apps today.}}"
-
 #: src/routes/_shell.workflows.index.tsx
 msgid "{chosen} (no longer in this domain)"
 msgstr "{chosen} (no longer in this domain)"
@@ -440,10 +402,6 @@ msgstr "{count, plural, one {# person} other {# people}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# remark on tools} other {# remarks on tools}}"
-
-#: src/brain/brain.ts
-msgid "{count, plural, one {# rule in use} other {# rules in use}}"
-msgstr "{count, plural, one {# rule in use} other {# rules in use}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# rule} other {# rules}}"
@@ -629,10 +587,6 @@ msgstr "{each, plural, one {# hour a week} other {# hours a week}}"
 msgid "{each} a run"
 msgstr "{each} a run"
 
-#: src/policies/policy.ts
-msgid "{excepted, plural, one {# exception} other {# exceptions}}"
-msgstr "{excepted, plural, one {# exception} other {# exceptions}}"
-
 #: src/dashboard/standard-widgets.tsx
 msgid "{expected} a month expected return"
 msgstr "{expected} a month expected return"
@@ -656,14 +610,6 @@ msgstr "{failures, plural, one {Once} other {# times}}"
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} removed"
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "{fileName} · uploaded by {uploadedBy} on {uploadedOn}"
-msgstr "{fileName} · uploaded by {uploadedBy} on {uploadedOn}"
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "{fileName} · uploaded on {uploadedOn}"
-msgstr "{fileName} · uploaded on {uploadedOn}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "{finished} of {started}"
@@ -779,10 +725,6 @@ msgstr "{idle, plural, one {# more workflow didn't run in this time.} other {# m
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 
-#: src/policies/policies-table.tsx
-msgid "{inUse, plural, one {# rule in use} other {# rules in use}}"
-msgstr "{inUse, plural, one {# rule in use} other {# rules in use}}"
-
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
 msgstr "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
@@ -817,10 +759,6 @@ msgstr "{label}, started by {name} (Grasp staff)"
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
 msgstr "{label}:"
-
-#: src/landscape/overview-tab.tsx
-msgid "{label}: open in {tabLabel}"
-msgstr "{label}: open in {tabLabel}"
 
 #: src/onboarding/work-record.tsx
 msgid "{lacking, plural, one {thing still missing} other {things still missing}}"
@@ -921,10 +859,6 @@ msgstr "{mapped} mapped"
 #: src/brain/brain-transcript.tsx
 msgid "{match} of {matches}"
 msgstr "{match} of {matches}"
-
-#: src/landscape/audit-trail.tsx
-msgid "{matching, plural, one {End of the audit trail · # event} other {End of the audit trail · # events}}"
-msgstr "{matching, plural, one {End of the audit trail · # event} other {End of the audit trail · # events}}"
 
 #: src/dashboard/standard-widgets.tsx
 msgid "{measured} a month measured return"
@@ -1092,14 +1026,6 @@ msgstr "{name} takes part"
 #: src/settings/week-hours.tsx
 msgid "{name} until"
 msgstr "{name} until"
-
-#: src/landscape/landscape-overview.ts
-msgid "{name} was first seen on {firstSeen}, less than a month ago."
-msgstr "{name} was first seen on {firstSeen}, less than a month ago."
-
-#: src/landscape/landscape-overview.ts
-msgid "{name} was first seen on {firstSeen}, more than a month ago."
-msgstr "{name} was first seen on {firstSeen}, more than a month ago."
 
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
@@ -1319,10 +1245,6 @@ msgstr "{points} of {weight}"
 #: src/tour/tour-layer.tsx
 msgid "{position} of {count}"
 msgstr "{position} of {count}"
-
-#: src/policies/policies-table.tsx
-msgid "{proposed, plural, one {# proposed} other {# proposed}}"
-msgstr "{proposed, plural, one {# proposed} other {# proposed}}"
 
 #: src/onboarding/work-record.tsx
 msgid "{quiet} in a quiet month, {busy} in a busy one."
@@ -1611,10 +1533,6 @@ msgstr "{team}: “{words}”"
 msgid "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
 msgstr "{team}: some do a step another way, and nobody could say why. I keep both ways until you decide."
 
-#: src/landscape/app-cells.tsx
-msgid "{teamName} share of users"
-msgstr "{teamName} share of users"
-
 #: src/onboarding/staff-words.ts
 msgid "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
 msgstr "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
@@ -1673,10 +1591,6 @@ msgstr "{toAsk, plural, one {# person who does this work has not talked yet.} ot
 msgid "{told} of {steps}"
 msgstr "{told} of {steps}"
 
-#: src/routes/_shell.policies.index.tsx
-msgid "{toReview} to review"
-msgstr "{toReview} to review"
-
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
@@ -1685,33 +1599,13 @@ msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of it
 msgid "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
 msgstr "{total, plural, one {{matching} of # person} other {{matching} of # people}}"
 
-#: src/routes/_shell.landscape.index.tsx
-msgid "{total, plural, one {{shownCount} of # app} other {{shownCount} of # apps}}"
-msgstr "{total, plural, one {{shownCount} of # app} other {{shownCount} of # apps}}"
-
-#: src/landscape/audit-trail.tsx
-msgid "{total, plural, one {{shownCount} of # event} other {{shownCount} of # events}}"
-msgstr "{total, plural, one {{shownCount} of # event} other {{shownCount} of # events}}"
-
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 
-#: src/routes/_shell.landscape.index.tsx
-msgid "{total, plural, one {# app} other {# apps}}"
-msgstr "{total, plural, one {# app} other {# apps}}"
-
-#: src/landscape/audit-trail.tsx
-msgid "{total, plural, one {# event} other {# events}}"
-msgstr "{total, plural, one {# event} other {# events}}"
-
 #: src/settings/pulse-people.tsx
 msgid "{total, plural, one {# person} other {# people}}"
 msgstr "{total, plural, one {# person} other {# people}}"
-
-#: src/landscape/app-cells.tsx
-msgid "{total, plural, one {# user} other {# users}} across {teamCount, plural, one {# team} other {# teams}}"
-msgstr "{total, plural, one {# user} other {# users}} across {teamCount, plural, one {# team} other {# teams}}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
@@ -1741,20 +1635,6 @@ msgstr "{unseen} of {total} named, not seen in use"
 msgid "{used} of {of}"
 msgstr "{used} of {of}"
 
-#: src/landscape/app-table.tsx
-msgid "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
-msgstr "{users, plural, one {{appName} · # user} other {{appName} · # users}}"
-
-#: src/routes/_shell.landscape.$appId.tsx
-msgid "{users, plural, one {{vendor} · # user} other {{vendor} · # users}}"
-msgstr "{users, plural, one {{vendor} · # user} other {{vendor} · # users}}"
-
-#: src/landscape/app-mosaic.tsx
-#: src/landscape/data-tab.tsx
-#: src/routes/_shell.landscape.$appId.tsx
-msgid "{users, plural, one {# user} other {# users}}"
-msgstr "{users, plural, one {# user} other {# users}}"
-
 #: src/onboarding/work-canvas.tsx
 msgid "{usual} min"
 msgstr "{usual} min"
@@ -1771,10 +1651,6 @@ msgstr "{value, plural, one {# agreed interview} other {# agreed interviews}}"
 msgid "{value} of {of}"
 msgstr "{value} of {of}"
 
-#: src/routes/_shell.landscape.$appId.tsx
-msgid "{vendor} · usage unknown"
-msgstr "{vendor} · usage unknown"
-
 #: src/knowledge/purge.tsx
 msgid "{versions, plural, one {# version purged} other {# versions purged}}"
 msgstr "{versions, plural, one {# version purged} other {# versions purged}}"
@@ -1782,10 +1658,6 @@ msgstr "{versions, plural, one {# version purged} other {# versions purged}}"
 #: src/knowledge/purge.tsx
 msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
 msgstr "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
-
-#: src/landscape/columns-menu.tsx
-msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
-msgstr "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
@@ -1938,14 +1810,6 @@ msgstr "1 Vision"
 msgid "1, not good"
 msgstr "1, not good"
 
-#: src/landscape/landscape.ts
-msgid "10 to 49 users"
-msgstr "10 to 49 users"
-
-#: src/landscape/landscape.ts
-msgid "100 users or more"
-msgstr "100 users or more"
-
 #: src/workflows/requests/request-plan.tsx
 msgid "12 months"
 msgstr "12 months"
@@ -1957,10 +1821,6 @@ msgstr "2 Inventory"
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "5, very good"
 msgstr "5, very good"
-
-#: src/landscape/landscape.ts
-msgid "50 to 99 users"
-msgstr "50 to 99 users"
 
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -2337,32 +2197,10 @@ msgstr "About teams"
 msgid "About tools"
 msgstr "About tools"
 
-#: src/policies/policy-editing.tsx
-msgid "Acceptable use of AI"
-msgstr "Acceptable use of AI"
-
 #: src/brain/memory-page.tsx
 msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Accepted"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "category of an audit event"
-msgid "Access"
-msgstr "Access"
-
-#: src/landscape/audit-trail.tsx
-msgid "Access and permission changes on {appName} show up here as they are recorded."
-msgstr "Access and permission changes on {appName} show up here as they are recorded."
-
-#: src/landscape/connections-tab.tsx
-msgid "Access connections"
-msgstr "Access connections"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Access to company data"
-msgstr "Access to company data"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -2381,15 +2219,6 @@ msgstr "Action"
 msgid "Actions"
 msgstr "Actions"
 
-#: src/policies/findings-table.tsx
-msgctxt "column: actions on a row"
-msgid "Actions"
-msgstr "Actions"
-
-#: src/policies/findings-table.tsx
-msgid "Actions for {appName}"
-msgstr "Actions for {appName}"
-
 #: src/settings/teams.tsx
 msgid "Actions for {name}"
 msgstr "Actions for {name}"
@@ -2397,15 +2226,6 @@ msgstr "Actions for {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
 msgstr "Actions for {who}"
-
-#: src/policies/policy.ts
-msgctxt "status of a policy rule"
-msgid "Active"
-msgstr "Active"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "Active rules"
-msgstr "Active rules"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -2459,10 +2279,6 @@ msgstr "Add"
 msgid "Add a card"
 msgstr "Add a card"
 
-#: src/policies/policy-editing.tsx
-msgid "Add a condition"
-msgstr "Add a condition"
-
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Add a domain for a second brand or an old one."
 msgstr "Add a domain for a second brand or an old one."
@@ -2510,17 +2326,9 @@ msgstr "Add a widget"
 msgid "Add a word"
 msgstr "Add a word"
 
-#: src/landscape/add-app-dialog.tsx
-msgid "Add an app"
-msgstr "Add an app"
-
 #: src/settings/person-limits.tsx
 msgid "Add an exception"
 msgstr "Add an exception"
-
-#: src/routes/_shell.landscape.index.tsx
-msgid "Add app"
-msgstr "Add app"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -2530,10 +2338,6 @@ msgstr "Add approver"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Add documents"
 msgstr "Add documents"
-
-#: src/landscape/filter-menu.tsx
-msgid "Add filter"
-msgstr "Add filter"
 
 #: src/workflows/module-files.tsx
 msgid "Add module"
@@ -2627,11 +2431,6 @@ msgstr "Adjusted: {goal}"
 msgid "Admin"
 msgstr "Admin"
 
-#: src/policies/policy.ts
-msgctxt "what a permission lets an app do with company data"
-msgid "administer"
-msgstr "administer"
-
 #: src/knowledge/collection-markers.tsx
 msgid "Admins"
 msgstr "Admins"
@@ -2644,23 +2443,9 @@ msgstr "Admins alerted at {alertAt}"
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins can change anyone's role, end their sessions and remove them, other admins included."
 
-#: src/landscape/overview-tab.tsx
-msgid "Adoption"
-msgstr "Adoption"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "column of the audit trail export: the value after the change"
-msgid "After"
-msgstr "After"
-
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
 msgstr "After {most} interviews, it is better split in two"
-
-#. Read by screen readers before the new value.
-#: src/landscape/audit-trail.tsx
-msgid "After:"
-msgstr "After:"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "who does a step"
@@ -2726,18 +2511,6 @@ msgstr "AI"
 msgid "AI apps"
 msgstr "AI apps"
 
-#: src/policies/policy.ts
-msgid "AI built in"
-msgstr "AI built in"
-
-#: src/landscape/landscape.ts
-msgid "AI is a feature inside a larger app, such as suggestions, copilots or summaries."
-msgstr "AI is a feature inside a larger app, such as suggestions, copilots or summaries."
-
-#: src/landscape/landscape.ts
-msgid "AI is a primary function of this app. It generates, decides or acts on data."
-msgstr "AI is a primary function of this app. It generates, decides or acts on data."
-
 #: src/routes/_shell.settings.ai-providers.tsx
 #: src/routes/_shell.settings.tsx
 #: src/settings/ai-providers.tsx
@@ -2758,24 +2531,10 @@ msgctxt "dashboard widget"
 msgid "AI spend this month"
 msgstr "AI spend this month"
 
-#: src/policies/policy.ts
-msgid "AI tool"
-msgstr "AI tool"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "AI tool"
-
-#: src/landscape/landscape.ts
-msgid "AI tools"
-msgstr "AI tools"
-
-#: src/landscape/filter-menu.tsx
-#: src/landscape/landscape-overview.ts
-#: src/landscape/landscape.ts
-msgid "AI type"
-msgstr "AI type"
 
 #: src/routes/_shell.onboarding.tsx
 msgctxt "onboarding area section"
@@ -2976,10 +2735,6 @@ msgstr "An answer"
 msgid "An App"
 msgstr "An App"
 
-#: src/policies/policy-editing.tsx
-msgid "An app breaks the rule when every condition holds."
-msgstr "An app breaks the rule when every condition holds."
-
 #: src/engines/screen-approval.tsx
 msgid "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
 msgstr "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
@@ -3024,11 +2779,6 @@ msgstr "An old format: save it as PDF or a newer file"
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
 msgstr "An owner can turn this on."
-
-#: src/policies/policy-editing.tsx
-msgctxt "between two conditions of a rule: both must hold"
-msgid "and"
-msgstr "and"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "and {more} more"
@@ -3129,26 +2879,6 @@ msgstr "Answers come only from what {organizationName} shared, with sources."
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Answers come only from what your organization shared, with sources."
 
-#: src/landscape/filter-menu.tsx
-msgid "Any AI type"
-msgstr "Any AI type"
-
-#: src/landscape/filter-menu.tsx
-msgid "Any application"
-msgstr "Any application"
-
-#: src/landscape/filter-menu.tsx
-msgid "Any exposure"
-msgstr "Any exposure"
-
-#: src/landscape/filter-menu.tsx
-msgid "Any number of users"
-msgstr "Any number of users"
-
-#: src/landscape/filter-menu.tsx
-msgid "Any owner"
-msgstr "Any owner"
-
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: team"
 msgid "Any team"
@@ -3192,21 +2922,6 @@ msgstr "Anywhere"
 msgid "App"
 msgstr "App"
 
-#: src/policies/policy-editing.tsx
-msgctxt "an app in the landscape"
-msgid "App"
-msgstr "App"
-
-#: src/policies/findings-table.tsx
-msgctxt "column: an app in the landscape"
-msgid "App"
-msgstr "App"
-
-#: src/landscape/app-table.tsx
-msgctxt "column: the app"
-msgid "App"
-msgstr "App"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "App approval"
@@ -3217,23 +2932,13 @@ msgctxt "kind of thing that waits"
 msgid "App approval"
 msgstr "App approval"
 
-#: src/landscape/landscape.ts
-msgid "App name"
-msgstr "App name"
-
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.landscape.$appId.tsx
 msgid "App not found"
 msgstr "App not found"
 
-#: src/landscape/overview-tab.tsx
-msgid "App profile"
-msgstr "App profile"
-
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
-#: src/landscape/filter-menu.tsx
 msgid "Application"
 msgstr "Application"
 
@@ -3359,41 +3064,14 @@ msgstr "Approver for new tools named"
 msgid "Apps"
 msgstr "Apps"
 
-#: src/policies/rules-table.tsx
-msgctxt "column: apps a policy rule catches"
-msgid "Apps"
-msgstr "Apps"
-
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Apps and connections"
 msgstr "Apps and connections"
 
-#: src/routes/_shell.policies.index.tsx
-msgid "Apps blocked"
-msgstr "Apps blocked"
-
-#: src/landscape/app-mosaic.tsx
-msgid "Apps by category"
-msgstr "Apps by category"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "Apps flagged"
-msgstr "Apps flagged"
-
-#: src/policies/policy-editing.tsx
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Apps it catches"
-msgstr "Apps it catches"
-
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps it works in"
-
-#: src/routes/_shell.policies.index.tsx
-msgctxt "tab: apps that break a rule"
-msgid "Apps that break them"
-msgstr "Apps that break them"
 
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
@@ -3485,10 +3163,6 @@ msgstr "Ask {name} in"
 msgid "Ask again"
 msgstr "Ask again"
 
-#: src/routes/_shell.landscape.$appId.audit.tsx
-msgid "Ask an admin if you need to see what happened here."
-msgstr "Ask an admin if you need to see what happened here."
-
 #: src/chat/chat-dock.tsx
 msgid "Ask anything about the brain"
 msgstr "Ask anything about the brain"
@@ -3514,10 +3188,6 @@ msgstr "Ask Grasp"
 #: src/dashboard/widget-board.tsx
 msgid "Ask Grasp for a widget"
 msgstr "Ask Grasp for a widget"
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Ask Grasp to add “{typed}”"
-msgstr "Ask Grasp to add “{typed}”"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
@@ -3545,14 +3215,6 @@ msgstr "Ask the agent to fix"
 #: src/chat/chat-dock.tsx
 msgid "Ask the brain"
 msgstr "Ask the brain"
-
-#: src/landscape/overview-tab.tsx
-msgid "Ask the vendor for SOC 2 or ISO 27001 evidence."
-msgstr "Ask the vendor for SOC 2 or ISO 27001 evidence."
-
-#: src/landscape/data-tab.tsx
-msgid "Ask the vendor where data is stored and processed before sign-off."
-msgstr "Ask the vendor where data is stored and processed before sign-off."
 
 #: src/workflows/workflow-status.tsx
 msgid "Ask to go live with version {askable}"
@@ -3678,16 +3340,6 @@ msgstr "Attempt {n}"
 msgid "Audit trail"
 msgstr "Audit trail"
 
-#: src/landscape/landscape-app.ts
-msgctxt "tab of an app page"
-msgid "Audit trail"
-msgstr "Audit trail"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "who recorded an audit event"
-msgid "Automated"
-msgstr "Automated"
-
 #: src/workflows/runs.tsx
 msgid "Automatically"
 msgstr "Automatically"
@@ -3746,11 +3398,6 @@ msgstr "Back to how it began"
 msgid "Back to latest"
 msgstr "Back to latest"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Back to policies"
-msgstr "Back to policies"
-
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Back to the current version"
@@ -3763,10 +3410,6 @@ msgstr "Back to the list"
 msgid "Back to the small chat"
 msgstr "Back to the small chat"
 
-#: src/routes/_shell.landscape.$appId.usage.$userId.tsx
-msgid "Back to users"
-msgstr "Back to users"
-
 #: src/onboarding/work-record.tsx
 msgid "Back to what is still missing"
 msgstr "Back to what is still missing"
@@ -3774,15 +3417,6 @@ msgstr "Back to what is still missing"
 #: src/settings/ai-providers.tsx
 msgid "Base URL"
 msgstr "Base URL"
-
-#: src/brain/brain.ts
-msgid "Became"
-msgstr "Became"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "column of the audit trail export: the value before the change"
-msgid "Before"
-msgstr "Before"
 
 #: src/brain/brain.ts
 msgctxt "note property"
@@ -3809,11 +3443,6 @@ msgstr "Before the work: what you told me about AI."
 #: src/onboarding/setup-steps.tsx
 msgid "Before we start, which language do you prefer?"
 msgstr "Before we start, which language do you prefer?"
-
-#. Read by screen readers before the old value.
-#: src/landscape/audit-trail.tsx
-msgid "Before:"
-msgstr "Before:"
 
 #: src/chat/builds.tsx
 msgid "Being built"
@@ -3884,20 +3513,6 @@ msgstr "Bind {alias}"
 msgid "Binding"
 msgstr "Binding"
 
-#: src/policies/policy.ts
-msgctxt "what a policy rule does"
-msgid "Block"
-msgstr "Block"
-
-#: src/policies/policy.ts
-msgctxt "what a policy rule did to an app"
-msgid "Blocked"
-msgstr "Blocked"
-
-#: src/landscape/app-table.tsx
-msgid "Blocked by “{rule}”"
-msgstr "Blocked by “{rule}”"
-
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Blocker"
@@ -3957,19 +3572,6 @@ msgctxt "where a package runs"
 msgid "Browser"
 msgstr "Browser"
 
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Browser extension"
-msgstr "Browser extension"
-
-#: src/policies/policy.ts
-msgid "Browser extension in use"
-msgstr "Browser extension in use"
-
-#: src/policies/policy.ts
-msgid "Browser extension offered, not in use"
-msgstr "Browser extension offered, not in use"
-
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -4002,11 +3604,6 @@ msgstr "Built approved packages"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Business process"
 msgstr "Business process"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "column of the audit trail export: who recorded the event"
-msgid "By"
-msgstr "By"
 
 #: src/brain/memory-page.tsx
 msgid "By {by}"
@@ -4107,10 +3704,6 @@ msgstr "Came in"
 msgid "Came up in {source}"
 msgstr "Came up in {source}"
 
-#: src/policies/policy.ts
-msgid "Can {verbs} company data"
-msgstr "Can {verbs} company data"
-
 #: src/onboarding/place-picker.tsx
 msgid "Can’t be read"
 msgstr "Can’t be read"
@@ -4135,7 +3728,6 @@ msgstr "Can’t be read"
 #: src/onboarding/interview-actions.tsx
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
@@ -4201,29 +3793,9 @@ msgstr "Carry on there. Lost that device? Ask whoever sent you the link for a ne
 msgid "Case {name}, when it holds"
 msgstr "Case {name}, when it holds"
 
-#: src/landscape/landscape-audit.ts
-#: src/landscape/landscape.ts
-msgid "Category"
-msgstr "Category"
-
-#: src/landscape/audit-trail.tsx
-msgctxt "filter: category of an audit event"
-msgid "Category"
-msgstr "Category"
-
-#: src/landscape/landscape-overview.ts
-#: src/landscape/overview-tab.tsx
-msgid "Certifications"
-msgstr "Certifications"
-
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Chain check"
-
-#: src/policies/policy.ts
-msgctxt "what a permission lets an app do with company data"
-msgid "change"
-msgstr "change"
 
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/person-limits.tsx
@@ -4510,15 +4082,6 @@ msgstr "Checking it against your numbers…"
 msgid "Checking…"
 msgstr "Checking…"
 
-#: src/policies/rules-table.tsx
-msgctxt "column: what a policy rule checks"
-msgid "Checks"
-msgstr "Checks"
-
-#: src/policies/policy.ts
-msgid "China"
-msgstr "China"
-
 #: src/engines/resource-bindings.tsx
 msgid "Choose a collection"
 msgstr "Choose a collection"
@@ -4587,19 +4150,9 @@ msgid "Clear"
 msgstr "Clear"
 
 #: src/brain/brain-transcript.tsx
-#: src/landscape/faceted-filter.tsx
-#: src/landscape/filter-menu.tsx
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
 msgstr "Clear filters"
-
-#: src/landscape/audit-trail.tsx
-msgid "Clear search and filters"
-msgstr "Clear search and filters"
-
-#: src/landscape/app-cells.tsx
-msgid "Click to open Usage"
-msgstr "Click to open Usage"
 
 #: src/brain/forget.tsx
 #: src/brain/remember-dialog.tsx
@@ -4675,11 +4228,6 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 msgid "Code"
 msgstr "Code"
 
-#: src/landscape/landscape.ts
-msgctxt "kind of data an app touches"
-msgid "Code"
-msgstr "Code"
-
 #: src/chat/builds.tsx
 msgid "Code it may use changed: {code}"
 msgstr "Code it may use changed: {code}"
@@ -4722,15 +4270,6 @@ msgstr "Collections"
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 
-#: src/landscape/columns-menu.tsx
-msgid "Columns"
-msgstr "Columns"
-
-#: src/routes/_shell.landscape.index.tsx
-msgctxt "row height"
-msgid "Comfortable"
-msgstr "Comfortable"
-
 #: src/decision-confirmation.tsx
 msgctxt "a comment on an answer to a decision"
 msgid "Comment"
@@ -4752,11 +4291,6 @@ msgstr "Committed"
 #: src/chat/builds.tsx
 msgid "Committed by a person."
 msgstr "Committed by a person."
-
-#: src/routes/_shell.landscape.index.tsx
-msgctxt "row height"
-msgid "Compact"
-msgstr "Compact"
 
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
@@ -4950,14 +4484,6 @@ msgstr "Connected an account"
 msgid "Connected by"
 msgstr "Connected by"
 
-#: src/landscape/landscape.ts
-msgid "Connected in Integrations, through Composio, which keeps the access in its own cloud."
-msgstr "Connected in Integrations, through Composio, which keeps the access in its own cloud."
-
-#: src/landscape/landscape.ts
-msgid "Connected in Integrations, through Grasp's own connector."
-msgstr "Connected in Integrations, through Grasp's own connector."
-
 #: src/connections/connection-list.tsx
 msgid "Connected on"
 msgstr "Connected on"
@@ -5024,11 +4550,6 @@ msgstr "Connection {connectionId}, {resource}"
 msgid "Connections"
 msgstr "Connections"
 
-#: src/landscape/landscape-app.ts
-msgctxt "tab of an app page"
-msgid "Connections"
-msgstr "Connections"
-
 #: src/dashboard/to-do.tsx
 msgid "Connections to sign in to again"
 msgstr "Connections to sign in to again"
@@ -5083,10 +4604,6 @@ msgstr "Continue with {signIn}"
 msgid "Contract"
 msgstr "Contract"
 
-#: src/landscape/landscape.ts
-msgid "Contracts, DPAs, legal terms, procurement clauses or compliance records."
-msgstr "Contracts, DPAs, legal terms, procurement clauses or compliance records."
-
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
 msgid "Conversations"
@@ -5115,10 +4632,6 @@ msgstr "Copy"
 msgid "Copy address"
 msgstr "Copy address"
 
-#: src/landscape/app-table.tsx
-msgid "Copy app ID"
-msgstr "Copy app ID"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copy as Markdown"
@@ -5126,10 +4639,6 @@ msgstr "Copy as Markdown"
 #: src/chat/answer-markdown.tsx
 msgid "Copy code"
 msgstr "Copy code"
-
-#: src/landscape/audit-trail.tsx
-msgid "Copy fingerprint"
-msgstr "Copy fingerprint"
 
 #: src/chat/answer-markdown.tsx
 msgid "Copy table"
@@ -5164,10 +4673,6 @@ msgstr "Copy the link for {name}"
 msgid "Copying didn't work"
 msgstr "Copying didn't work"
 
-#: src/landscape/landscape.ts
-msgid "Core AI"
-msgstr "Core AI"
-
 #: src/brain/memory-page.tsx
 msgid "Correct it"
 msgstr "Correct it"
@@ -5181,18 +4686,9 @@ msgstr "Corrected by"
 msgid "Could be better"
 msgstr "Could be better"
 
-#: src/policies/policies-table.tsx
-msgctxt "status of an uploaded policy"
-msgid "Could not be read"
-msgstr "Could not be read"
-
 #: src/workflows/triggers.tsx
 msgid "Could not copy the address"
 msgstr "Could not copy the address"
-
-#: src/landscape/audit-trail.tsx
-msgid "Could not copy the fingerprint"
-msgstr "Could not copy the fingerprint"
 
 #: src/activity/pending.tsx
 msgid "couldn't be read"
@@ -5266,10 +4762,6 @@ msgstr "Created by the member {owner}."
 msgid "Created by you."
 msgstr "Created by you."
 
-#: src/landscape/landscape.ts
-msgid "Credentials"
-msgstr "Credentials"
-
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Critical"
@@ -5288,18 +4780,6 @@ msgstr "Current plan"
 msgid "Current version"
 msgstr "Current version"
 
-#: src/landscape/landscape.ts
-msgid "Customer data"
-msgstr "Customer data"
-
-#: src/policies/policy-editing.tsx
-msgid "Customer data stays in the EU"
-msgstr "Customer data stays in the EU"
-
-#: src/landscape/landscape.ts
-msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
-msgstr "Customer records, messages, tickets, CRM fields or files that identify customers."
-
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Dark"
@@ -5309,41 +4789,15 @@ msgstr "Dark"
 msgid "Dashboard"
 msgstr "Dashboard"
 
-#: src/landscape/landscape-app.ts
-msgctxt "tab of an app page"
-msgid "Data"
-msgstr "Data"
-
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Data and analytics"
 
-#: src/landscape/data-tab.tsx
-msgid "Data categories"
-msgstr "Data categories"
-
-#: src/landscape/app-cells.tsx
-#: src/landscape/data-tab.tsx
-#: src/landscape/filter-menu.tsx
-#: src/landscape/landscape.ts
-msgid "Data exposure"
-msgstr "Data exposure"
-
-#: src/landscape/landscape-overview.ts
-msgid "Data hosting"
-msgstr "Data hosting"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Data it touches"
-msgstr "Data it touches"
-
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Data location"
 msgstr "Data location"
 
-#: src/landscape/overview-tab.tsx
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement"
 msgstr "Data processing agreement"
@@ -5353,17 +4807,9 @@ msgstr "Data processing agreement"
 msgid "Data processing agreement signed"
 msgstr "Data processing agreement signed"
 
-#: src/landscape/data-tab.tsx
-msgid "Data residency"
-msgstr "Data residency"
-
 #: src/routes/_shell.settings.models.tsx
 msgid "Data rules"
 msgstr "Data rules"
-
-#: src/landscape/landscape-audit.ts
-msgid "Date"
-msgstr "Date"
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.onboarding.ai-use.tsx
@@ -5428,11 +4874,6 @@ msgstr "Decisions"
 msgid "Default"
 msgstr "Default"
 
-#: src/routes/_shell.landscape.index.tsx
-msgctxt "row height"
-msgid "Default"
-msgstr "Default"
-
 #: src/settings/person-limits.tsx
 msgid "Default limit"
 msgstr "Default limit"
@@ -5474,7 +4915,6 @@ msgstr "Delete “{title}”?"
 msgid "Delete {first}'s interview for good, with all they said?"
 msgstr "Delete {first}'s interview for good, with all they said?"
 
-#: src/policies/policy-editing.tsx
 #: src/settings/teams.tsx
 msgid "Delete {name}?"
 msgstr "Delete {name}?"
@@ -5495,10 +4935,6 @@ msgstr "Delete my interview"
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Delete project"
 msgstr "Delete project"
-
-#: src/policies/policy-editing.tsx
-msgid "Delete rule"
-msgstr "Delete rule"
 
 #: src/chat/chat-menus.tsx
 msgid "Delete the project “{name}”?"
@@ -5540,11 +4976,6 @@ msgstr "Depends on"
 msgid "Describe the app: what it shows, and for whom"
 msgstr "Describe the app: what it shows, and for whom"
 
-#: src/landscape/landscape-audit.ts
-#: src/landscape/landscape.ts
-msgid "Description"
-msgstr "Description"
-
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Design and media"
@@ -5566,7 +4997,6 @@ msgstr "Designed"
 
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
-#: src/landscape/landscape-audit.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
 msgstr "Details"
@@ -5647,15 +5077,6 @@ msgstr "Disconnected"
 msgid "Disconnected an account"
 msgstr "Disconnected an account"
 
-#: src/landscape/landscape-audit.ts
-msgctxt "category of an audit event"
-msgid "Discovery"
-msgstr "Discovery"
-
-#: src/landscape/landscape-overview.ts
-msgid "Discovery sources"
-msgstr "Discovery sources"
-
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
@@ -5718,30 +5139,13 @@ msgctxt "what Grasp knows, by source"
 msgid "Documents shared"
 msgstr "Documents shared"
 
-#: src/landscape/landscape.ts
-msgid "Documents written by employees, workspace files, user profiles and internal collaboration."
-msgstr "Documents written by employees, workspace files, user profiles and internal collaboration."
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 
-#: src/policies/rules-table.tsx
-msgctxt "column: what a policy rule does"
-msgid "Does"
-msgstr "Does"
-
 #: src/onboarding/interview-words.ts
 msgid "Does not take part"
 msgstr "Does not take part"
-
-#: src/policies/policy.ts
-msgid "Does not train on your data"
-msgstr "Does not train on your data"
-
-#: src/policies/policy.ts
-msgid "Does nothing until it is turned on again."
-msgstr "Does nothing until it is turned on again."
 
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
@@ -5767,8 +5171,6 @@ msgstr "Doesn't take part: nobody in it gets a link."
 #: src/dashboard/runs-widget.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
-#: src/landscape/app-cells.tsx
-#: src/landscape/landscape-overview.ts
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -5822,7 +5224,6 @@ msgstr "Domain shortcuts"
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
-#: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
@@ -5934,14 +5335,6 @@ msgstr "Download table as CSV"
 #: src/chat/answer-markdown.tsx
 msgid "Download table as Markdown"
 msgstr "Download table as Markdown"
-
-#: src/landscape/landscape-overview.ts
-msgid "DPA status"
-msgstr "DPA status"
-
-#: src/brain/brain.ts
-msgid "Draft"
-msgstr "Draft"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain still being made"
@@ -6076,17 +5469,9 @@ msgstr "Edit"
 msgid "Edit project"
 msgstr "Edit project"
 
-#: src/policies/policy-editing.tsx
-msgid "Edit rule"
-msgstr "Edit rule"
-
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Edit the instructions"
 msgstr "Edit the instructions"
-
-#: src/policies/policy-editing.tsx
-msgid "Edit the rule"
-msgstr "Edit the rule"
 
 #: src/onboarding/interview-people.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -6103,10 +5488,6 @@ msgstr "Email"
 msgctxt "kind of app"
 msgid "Email and calendar"
 msgstr "Email and calendar"
-
-#: src/landscape/landscape.ts
-msgid "Embedded AI"
-msgstr "Embedded AI"
 
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
@@ -6144,10 +5525,6 @@ msgstr "End the tour"
 #: src/workflows/run-detail.tsx
 msgid "Ended"
 msgstr "Ended"
-
-#: src/policies/policy-editing.tsx
-msgid "Ended on {until}"
-msgstr "Ended on {until}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
@@ -6213,20 +5590,6 @@ msgstr "EU routing"
 msgid "European Union"
 msgstr "European Union"
 
-#: src/landscape/landscape-audit.ts
-msgctxt "column of the audit trail export"
-msgid "Event"
-msgstr "Event"
-
-#: src/landscape/audit-trail.tsx
-#: src/routes/_shell.landscape.$appId.audit.tsx
-msgid "Event timeline"
-msgstr "Event timeline"
-
-#: src/routes/_shell.landscape.index.tsx
-msgid "Every app your teams use: how Grasp knows about it, what data it touches and who owns it."
-msgstr "Every app your teams use: how Grasp knows about it, what data it touches and who owns it."
-
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
 msgstr "Every call stays in the EU: no."
@@ -6274,11 +5637,6 @@ msgstr "Every Monday: hours, runs, and what is waiting."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Every other app Grasp can connect to."
 msgstr "Every other app Grasp can connect to."
-
-#: src/landscape/audit-trail.tsx
-#: src/routes/_shell.landscape.$appId.audit.tsx
-msgid "Every recorded access and permission event, most recent first."
-msgstr "Every recorded access and permission event, most recent first."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Every source adds its own share, and only once it is in."
@@ -6407,10 +5765,6 @@ msgstr "Everything Grasp stores for your organization stays here."
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 
-#: src/landscape/insight.tsx
-msgid "Evidence"
-msgstr "Evidence"
-
 #: src/interview/words.ts
 msgid "Example"
 msgstr "Example"
@@ -6420,29 +5774,10 @@ msgctxt "kind of fact"
 msgid "Example"
 msgstr "Example"
 
-#: src/policies/policy.ts
-msgctxt "an app allowed to break a policy rule"
-msgid "Exception"
-msgstr "Exception"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Exception"
-msgstr "Exception"
-
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
 msgid "Exception"
 msgstr "Exception"
-
-#: src/policies/policy-editing.tsx
-msgid "Exceptions"
-msgstr "Exceptions"
-
-#: src/routes/_shell.policies.index.tsx
-msgctxt "filter: apps allowed to break a rule"
-msgid "Exceptions"
-msgstr "Exceptions"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6462,13 +5797,10 @@ msgid "Expected return"
 msgstr "Expected return"
 
 #: src/export/export-menu.tsx
-#: src/routes/_shell.landscape.$appId.tsx
 msgid "Export"
 msgstr "Export"
 
 #: src/activity/audit-log.tsx
-#: src/landscape/audit-trail.tsx
-#: src/routes/_shell.landscape.index.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Export CSV"
 msgstr "Export CSV"
@@ -6590,10 +5922,6 @@ msgstr "Fallbacks, in order"
 msgid "Fewer than {least} of {of}"
 msgstr "Fewer than {least} of {of}"
 
-#: src/landscape/landscape.ts
-msgid "Fewer than 10 users"
-msgstr "Fewer than 10 users"
-
 #: src/workflows/requests/request-needs.tsx
 #: src/workflows/requests/request-who.tsx
 msgid "Fewer than five of {reach} asked him"
@@ -6644,7 +5972,6 @@ msgid "Filling in the new fields stopped making progress, and trying again didn'
 msgstr "Filling in the new fields stopped making progress, and trying again didn't help."
 
 #: src/activity/audit-log.tsx
-#: src/landscape/faceted-filter.tsx
 #: src/settings/filter-menu.tsx
 msgid "Filter"
 msgstr "Filter"
@@ -6655,7 +5982,6 @@ msgid "Filter"
 msgstr "Filter"
 
 #: src/brain/brain-transcript.tsx
-#: src/landscape/filter-menu.tsx
 msgctxt "open the filters"
 msgid "Filter"
 msgstr "Filter"
@@ -6677,14 +6003,6 @@ msgctxt "kind of app"
 msgid "Finance and accounting"
 msgstr "Finance and accounting"
 
-#: src/landscape/landscape.ts
-msgid "Finance documents, invoices, billing exports, procurement records or forecasts."
-msgstr "Finance documents, invoices, billing exports, procurement records or forecasts."
-
-#: src/landscape/landscape.ts
-msgid "Financial data"
-msgstr "Financial data"
-
 #: src/routes/_shell.onboarding.organization.index.tsx
 msgid "Find a team or a person"
 msgstr "Find a team or a person"
@@ -6692,14 +6010,6 @@ msgstr "Find a team or a person"
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
 msgstr "Findings"
-
-#: src/landscape/landscape-audit.ts
-msgid "Fingerprint"
-msgstr "Fingerprint"
-
-#: src/landscape/audit-trail.tsx
-msgid "Fingerprint copied"
-msgstr "Fingerprint copied"
 
 #: src/routes/guest.tsx
 msgid "Finish"
@@ -6716,10 +6026,6 @@ msgstr "Finished on {date}"
 #: src/onboarding/setup-steps.tsx
 msgid "First I need your staff list."
 msgstr "First I need your staff list."
-
-#: src/landscape/landscape-overview.ts
-msgid "First seen"
-msgstr "First seen"
 
 #: src/interview/words.ts
 msgid "First, the steps."
@@ -6765,29 +6071,6 @@ msgstr "Fixed on {date} · {up} helpful since"
 msgid "Fixed: “{label}”, asked {times} times since"
 msgstr "Fixed: “{label}”, asked {times} times since"
 
-#: src/policies/policy.ts
-msgctxt "what a policy rule does"
-msgid "Flag"
-msgstr "Flag"
-
-#: src/policies/policy.ts
-msgctxt "what a policy rule did to an app"
-msgid "Flagged"
-msgstr "Flagged"
-
-#: src/landscape/app-table.tsx
-msgid "Flagged by “{rule}”"
-msgstr "Flagged by “{rule}”"
-
-#: src/routes/_shell.policies.index.tsx
-msgctxt "filter: apps a rule acts on"
-msgid "Flagged or blocked"
-msgstr "Flagged or blocked"
-
-#: src/policies/policy.ts
-msgid "Flags or blocks the apps that break it."
-msgstr "Flags or blocks the apps that break it."
-
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Fold the chat away"
@@ -6800,18 +6083,6 @@ msgstr "Fold the navigation"
 #: src/routes/_shell.onboarding.tsx
 msgid "Fold the sections"
 msgstr "Fold the sections"
-
-#: src/landscape/landscape-audit.ts
-msgid "Follows from"
-msgstr "Follows from"
-
-#: src/landscape/audit-trail.tsx
-msgid "Follows from another event"
-msgstr "Follows from another event"
-
-#: src/landscape/audit-trail.tsx
-msgid "Follows from: {parentTitle}"
-msgstr "Follows from: {parentTitle}"
 
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "For"
@@ -6955,10 +6226,6 @@ msgstr "From Google Drive. I read only the files you add."
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "From SharePoint or OneDrive. I read only the files you add."
 
-#: src/landscape/add-app-dialog.tsx
-msgid "From the catalog"
-msgstr "From the catalog"
-
 #: src/routes/_shell.onboarding.interviewers.tsx
 msgid "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
 msgstr "From the end of what someone said to the first sound of the answer, measured on their own page while they talk by voice: the middle answer of each day, and the one nine in ten were faster than."
@@ -6966,10 +6233,6 @@ msgstr "From the end of what someone said to the first sound of the answer, meas
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
 msgstr "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
-
-#: src/landscape/data-tab.tsx
-msgid "From the permissions people granted and how the app is classified."
-msgstr "From the permissions people granted and how the app is classified."
 
 #: src/frame/surface-nav.tsx
 msgid "From your domains"
@@ -7072,17 +6335,9 @@ msgstr "Google sign-in"
 msgid "Got it."
 msgstr "Got it."
 
-#: src/policies/policy-editing.tsx
-msgid "Grant"
-msgstr "Grant"
-
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
-
-#: src/policies/policy-editing.tsx
-msgid "Grant an exception"
-msgstr "Grant an exception"
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -7150,18 +6405,6 @@ msgstr "Grasp converts uploaded PDFs with {whereItRuns}, using Grasp's own key. 
 msgid "Grasp could not be reached. Try again."
 msgstr "Grasp could not be reached. Try again."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp could not finish reading it. Read it again."
-msgstr "Grasp could not finish reading it. Read it again."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp could not make rules of what it read. Read it again, or make its rules by hand."
-msgstr "Grasp could not make rules of what it read. Read it again, or make its rules by hand."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp could not read this policy"
-msgstr "Grasp could not read this policy"
-
 #: src/chat/failure.ts
 msgid "Grasp couldn't put this question to the model. Try again."
 msgstr "Grasp couldn't put this question to the model. Try again."
@@ -7174,14 +6417,6 @@ msgstr "Grasp doesn't know where this came from, so it can't be resolved here."
 msgid "Grasp doesn’t send these emails yet. What you choose here applies once it does."
 msgstr "Grasp doesn’t send these emails yet. What you choose here applies once it does."
 
-#: src/landscape/usage-tab.tsx
-msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
-msgstr "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp found no requirement in this policy that a rule can check."
-msgstr "Grasp found no requirement in this policy that a rule can check."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp gave its go"
@@ -7190,10 +6425,6 @@ msgstr "Grasp gave its go"
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp is busy right now. Read it again in a minute."
-msgstr "Grasp is busy right now. Read it again in a minute."
-
 #: src/chat/failure.ts
 msgid "Grasp is busy with other questions. Try again in a minute."
 msgstr "Grasp is busy with other questions. Try again in a minute."
@@ -7201,10 +6432,6 @@ msgstr "Grasp is busy with other questions. Try again in a minute."
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
 msgstr "Grasp is making it…"
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Grasp is reading the policy"
-msgstr "Grasp is reading the policy"
 
 #: src/dashboard/widget-progress.tsx
 msgid "Grasp is starting on the widget…"
@@ -7323,10 +6550,6 @@ msgstr "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp was updated while this page was open. Try again to load the new version."
 
-#: src/landscape/connections-tab.tsx
-msgid "Grasp will show a path here once it observes an MCP, native connector or OAuth grant for this app."
-msgstr "Grasp will show a path here once it observes an MCP, native connector or OAuth grant for this app."
-
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp won't run what {about} needs: {requirement}"
@@ -7433,10 +6656,6 @@ msgstr "Handover"
 msgid "Handovers"
 msgstr "Handovers"
 
-#: src/policies/policy.ts
-msgid "Has no owner"
-msgstr "Has no owner"
-
 #: src/routes/_shell.onboarding.interviews.$person.tsx
 msgid "Has not agreed to take part yet."
 msgstr "Has not agreed to take part yet."
@@ -7469,14 +6688,6 @@ msgstr "He doesn't ask about it, and moves on when somebody brings it up."
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
-
-#: src/landscape/landscape.ts
-msgid "Health data"
-msgstr "Health data"
-
-#: src/landscape/landscape.ts
-msgid "Health-related employee or customer information that needs a closer review."
-msgstr "Health-related employee or customer information that needs a closer review."
 
 #: src/interview/before.tsx
 msgid "Hear both again"
@@ -7571,17 +6782,12 @@ msgctxt "thinking effort"
 msgid "High"
 msgstr "High"
 
-#: src/landscape/insight.tsx
-msgid "High confidence"
-msgstr "High confidence"
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Hire-to-Retire"
 msgstr "Hire-to-Retire"
 
 #: src/knowledge/timeline.tsx
-#: src/landscape/overview-tab.tsx
 msgid "History"
 msgstr "History"
 
@@ -7589,37 +6795,13 @@ msgstr "History"
 msgid "Hold for 4 seconds"
 msgstr "Hold for 4 seconds"
 
-#: src/landscape/app-cells.tsx
-msgid "Holds a permission on one of its connections. Opens the domain."
-msgstr "Holds a permission on one of its connections. Opens the domain."
-
-#: src/policies/policy.ts
-msgid "Hosted in {regions}"
-msgstr "Hosted in {regions}"
-
-#: src/policies/policy-editing.tsx
-msgid "Hosted in one of"
-msgstr "Hosted in one of"
-
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Hosted in the EU"
 
-#: src/policies/policy.ts
-msgid "Hosted outside {regions}"
-msgstr "Hosted outside {regions}"
-
-#: src/policies/policy-editing.tsx
-msgid "Hosted outside all of"
-msgstr "Hosted outside all of"
-
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Hours not known yet"
-
-#: src/policies/policy-editing.tsx
-msgid "How {field} reads"
-msgstr "How {field} reads"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"
@@ -7636,10 +6818,6 @@ msgstr "How far it is"
 #: src/onboarding/work-list.tsx
 msgid "How far the workflows are"
 msgstr "How far the workflows are"
-
-#: src/landscape/app-cells.tsx
-msgid "How Grasp knows about {appName}"
-msgstr "How Grasp knows about {appName}"
 
 #: src/chat/composer.tsx
 msgid "How hard it thinks"
@@ -7888,10 +7066,6 @@ msgid "In one chat only, for {requester}"
 msgstr "In one chat only, for {requester}"
 
 #: src/brain/brain.ts
-msgid "In Policies"
-msgstr "In Policies"
-
-#: src/brain/brain.ts
 msgid "In the brain"
 msgstr "In the brain"
 
@@ -7914,11 +7088,6 @@ msgstr "In the proposer's words"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "In this conversation"
 msgstr "In this conversation"
-
-#: src/policies/policies-table.tsx
-msgctxt "status of an uploaded policy whose rules are published"
-msgid "In use"
-msgstr "In use"
 
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
@@ -7968,10 +7137,6 @@ msgstr "Integration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integrations"
-
-#: src/landscape/landscape.ts
-msgid "Internal data"
-msgstr "Internal data"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -8057,18 +7222,6 @@ msgstr "Invoices and receipts go here."
 #: src/interview/words.ts
 msgid "Is that correct?"
 msgstr "Is that correct?"
-
-#: src/policies/policy.ts
-msgid "ISO 27001"
-msgstr "ISO 27001"
-
-#: src/policies/policy.ts
-msgid "ISO 27701"
-msgstr "ISO 27701"
-
-#: src/policies/policy.ts
-msgid "ISO 42001"
-msgstr "ISO 42001"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -8175,22 +7328,6 @@ msgstr "It isn't shared with anyone."
 msgid "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 msgstr "It knows who leads which team, so I can talk to the leads first. We connect it with you."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "It looks for the requirements about apps and AI tools, and proposes a rule for each. This takes up to a minute."
-msgstr "It looks for the requirements about apps and AI tools, and proposes a rule for each. This takes up to a minute."
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "It may have been deleted, or removed with its policy."
-msgstr "It may have been deleted, or removed with its policy."
-
-#: src/routes/_shell.landscape.$appId.tsx
-msgid "It may have been removed, or the link is no longer valid."
-msgstr "It may have been removed, or the link is no longer valid."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "It may have been removed."
-msgstr "It may have been removed."
-
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "It may have been renamed or removed."
@@ -8223,10 +7360,6 @@ msgstr "It rests on nothing you can see."
 msgid "It rests on turns you were not part of."
 msgstr "It rests on turns you were not part of."
 
-#: src/landscape/overview-tab.tsx
-msgid "It shows once the desktop agent or single sign-on sees someone use the app."
-msgstr "It shows once the desktop agent or single sign-on sees someone use the app."
-
 #: src/brain/remember-dialog.tsx
 msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
 msgstr "It starts as proposed: Grasp uses it, and you can correct or retire it here."
@@ -8250,10 +7383,6 @@ msgstr "It still does not work. You can stop for now and come back later. Your p
 #: src/onboarding/organization-dialogs.tsx
 msgid "It takes part from the start. Add its people next and pick its lead: the lead talks first."
 msgstr "It takes part from the start. Add its people next and pick its lead: the lead talks first."
-
-#: src/policies/policy-editing.tsx
-msgid "It waits for you to publish it. Everyone in the company can see its title and its rules, never its text here."
-msgstr "It waits for you to publish it. Everyone in the company can see its title and its rules, never its text here."
 
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
@@ -8335,10 +7464,6 @@ msgstr "Its budget can't be read, so it serves nothing."
 msgid "Its current version has no parameters."
 msgstr "Its current version has no parameters."
 
-#: src/policies/policy-editing.tsx
-msgid "Its exceptions go with it. This can't be undone."
-msgstr "Its exceptions go with it. This can't be undone."
-
 #: src/chat/chat-menus.tsx
 msgid "Its goal and documents are deleted. Its chats stay, back among the chats by date."
 msgstr "Its goal and documents are deleted. Its chats stay, back among the chats by date."
@@ -8346,10 +7471,6 @@ msgstr "Its goal and documents are deleted. Its chats stay, back among the chats
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
 msgstr "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
-
-#: src/policies/policy-editing.tsx
-msgid "Its last day: the rule catches the app again after it."
-msgstr "Its last day: the rule catches the app again after it."
 
 #: src/onboarding/organization-words.ts
 msgid "Its lead named it, and nobody in the team is asked about it. Pick someone under People."
@@ -8427,10 +7548,6 @@ msgstr "Its people get their links without waiting, and Stephen asks each what w
 msgid "its retries"
 msgstr "its retries"
 
-#: src/policies/policy-editing.tsx
-msgid "Its rules stay, as rules made by hand. This can't be undone."
-msgstr "Its rules stay, as rules made by hand. This can't be undone."
-
 #: src/workflows/files-and-apps.tsx
 msgid "Its runs have written no file you may see."
 msgstr "Its runs have written no file you may see."
@@ -8501,11 +7618,6 @@ msgstr "Jump to the newest message"
 msgid "Just for you"
 msgstr "Just for you"
 
-#: src/policies/policy-proposals.tsx
-msgctxt "keep a proposed rule"
-msgid "Keep"
-msgstr "Keep"
-
 #: src/onboarding/review-parts.tsx
 msgid "Keep “Require sender authentication” on, then save."
 msgstr "Keep “Require sender authentication” on, then save."
@@ -8535,18 +7647,9 @@ msgstr "Keep my interview"
 msgid "Keep my text"
 msgstr "Keep my text"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Keep the rules that say what your policy means, edit them where needed, and leave out the rest."
-msgstr "Keep the rules that say what your policy means, edit them where needed, and leave out the rest."
-
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Keeps failing"
-
-#: src/policies/policy-proposals.tsx
-msgctxt "a proposed rule an admin kept"
-msgid "Kept"
-msgstr "Kept"
 
 #: src/activity/audit-words.ts
 msgid "Kept access at the provider for an account connected again"
@@ -8564,10 +7667,6 @@ msgstr "Key"
 msgid "Key: <0>{mask}</0>"
 msgstr "Key: <0>{mask}</0>"
 
-#: src/landscape/landscape.ts
-msgid "Keys, tokens, secrets, credentials or runbooks that could grant access."
-msgstr "Keys, tokens, secrets, credentials or runbooks that could grant access."
-
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
 msgid "Kickoff"
@@ -8578,11 +7677,6 @@ msgstr "Kickoff"
 #: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Kind"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Kind of AI"
-msgstr "Kind of AI"
 
 #: src/brain/brain-transcript.tsx
 msgid "Kind of statement"
@@ -8626,23 +7720,6 @@ msgstr "Known in more than one way"
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
 msgstr "Known: {known}% of the {threshold}% to open"
-
-#: src/policies/policy-editing.tsx
-msgid "Lacks all of"
-msgstr "Lacks all of"
-
-#: src/policies/policy-editing.tsx
-msgid "Lacks any of"
-msgstr "Lacks any of"
-
-#: src/routes/_shell.landscape.$appId.tsx
-#: src/routes/_shell.landscape.index.tsx
-msgid "Landscape"
-msgstr "Landscape"
-
-#: src/routes/_shell.landscape.index.tsx
-msgid "Landscape tools"
-msgstr "Landscape tools"
 
 #: src/language-picker.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -8717,10 +7794,6 @@ msgstr "Later version"
 msgid "Latest activity"
 msgstr "Latest activity"
 
-#: src/routes/_shell.landscape.index.tsx
-msgid "Layout"
-msgstr "Layout"
-
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
 msgstr "Lead not yet"
@@ -8766,11 +7839,6 @@ msgstr "Leave as it is"
 msgid "Leave it to the rules"
 msgstr "Leave it to the rules"
 
-#: src/policies/policy-proposals.tsx
-msgctxt "leave out a proposed rule"
-msgid "Leave out"
-msgstr "Leave out"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Leave out personnel files and anything about one person."
 msgstr "Leave out personnel files and anything about one person."
@@ -8791,23 +7859,10 @@ msgstr "Left as it is since {date}"
 msgid "Left in"
 msgstr "Left in"
 
-#: src/policies/policy-proposals.tsx
-msgctxt "a proposed rule an admin left out"
-msgid "Left out"
-msgstr "Left out"
-
 #: src/onboarding/organization-words.ts
 msgctxt "filter: teams that don't take part in the interviews"
 msgid "Left out"
 msgstr "Left out"
-
-#: src/landscape/overview-tab.tsx
-msgid "Legal and policy documents the vendor publishes."
-msgstr "Legal and policy documents the vendor publishes."
-
-#: src/landscape/landscape.ts
-msgid "Legal data"
-msgstr "Legal data"
 
 #: src/brain/memory-page.tsx
 msgctxt "the Brain's lessons from repeated failures"
@@ -8817,10 +7872,6 @@ msgstr "Lessons"
 #: src/routes/_shell.settings.security.tsx
 msgid "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
 msgstr "Let an AI app such as Claude or ChatGPT use Grasp. It reads what Grasp knows, and it can show you a page. For anything else it asks you here first: nothing changes unless you allow it."
-
-#: src/policies/policy-editing.tsx
-msgid "Let an app break this rule"
-msgstr "Let an app break this rule"
 
 #: src/activity/audit-words.ts
 msgid "Let an erased member's old address in again"
@@ -8987,10 +8038,6 @@ msgstr "Live, being measured"
 msgid "Live: {who}, version {version}."
 msgstr "Live: {who}, version {version}."
 
-#: src/policies/policy-editing.tsx
-msgid "Load it as it is now to edit it. What you changed here isn't kept."
-msgstr "Load it as it is now to edit it. What you changed here isn't kept."
-
 #: src/workflows/history-view.tsx
 msgid "Load more"
 msgstr "Load more"
@@ -8998,10 +8045,6 @@ msgstr "Load more"
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Load older"
-
-#: src/policies/policy-editing.tsx
-msgid "Load the current rule"
-msgstr "Load the current rule"
 
 #: src/chat/builds.tsx
 msgid "Load the review again"
@@ -9020,7 +8063,6 @@ msgstr "Loading"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
-#: src/landscape/audit-trail.tsx
 #: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Loading…"
@@ -9054,35 +8096,6 @@ msgctxt "thinking effort"
 msgid "Low"
 msgstr "Low"
 
-#: src/landscape/insight.tsx
-msgid "Low confidence"
-msgstr "Low confidence"
-
-#: src/policies/policy.ts
-msgid "Made by {vendors}"
-msgstr "Made by {vendors}"
-
-#: src/policies/policy-editing.tsx
-#: src/policies/rules-table.tsx
-msgid "Made by hand"
-msgstr "Made by hand"
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Made by hand by {maker} on {madeOn}."
-msgstr "Made by hand by {maker} on {madeOn}."
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Made by hand on {madeOn}."
-msgstr "Made by hand on {madeOn}."
-
-#: src/policies/policy-editing.tsx
-msgid "Made by none of"
-msgstr "Made by none of"
-
-#: src/policies/policy-editing.tsx
-msgid "Made by one of"
-msgstr "Made by one of"
-
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Made with Grasp on {date}"
@@ -9111,10 +8124,6 @@ msgstr "Main"
 #: src/routes/_shell.settings.members.tsx
 msgid "Make {name} an admin?"
 msgstr "Make {name} an admin?"
-
-#: src/policies/policy-editing.tsx
-msgid "Make a rule from it"
-msgstr "Make a rule from it"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Make a workflow of it"
@@ -9213,10 +8222,6 @@ msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Medium"
 
-#: src/landscape/insight.tsx
-msgid "Medium confidence"
-msgstr "Medium confidence"
-
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/members-tabs.tsx
@@ -9288,11 +8293,6 @@ msgstr "Minutes of voice"
 msgid "Minutes saved a request"
 msgstr "Minutes saved a request"
 
-#: src/policies/policy.ts
-msgctxt "state of a data processing agreement"
-msgid "Missing"
-msgstr "Missing"
-
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -9305,10 +8305,6 @@ msgstr "Model call"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Model cost"
-
-#: src/landscape/landscape-overview.ts
-msgid "Model training"
-msgstr "Model training"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
@@ -9380,14 +8376,6 @@ msgstr "More for the project {name}"
 msgid "More for this chat"
 msgstr "More for this chat"
 
-#: src/policies/policy-editing.tsx
-msgid "More for this policy"
-msgstr "More for this policy"
-
-#: src/policies/policy-editing.tsx
-msgid "More for this rule"
-msgstr "More for this rule"
-
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "More of the steps."
@@ -9420,10 +8408,6 @@ msgstr "More was sent than is shown above. Read exactly what was sent."
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 
-#: src/routes/_shell.landscape.index.tsx
-msgid "Mosaic"
-msgstr "Mosaic"
-
 #: src/settings/person-limits.tsx
 msgid "Most a month, in US dollars"
 msgstr "Most a month, in US dollars"
@@ -9443,10 +8427,6 @@ msgstr "Most people can’t name every tool they use, so a small app on the work
 #: src/dashboard/widget-board.tsx
 msgid "Move"
 msgstr "Move"
-
-#: src/landscape/columns-menu.tsx
-msgid "Move {label}, use the arrow keys"
-msgstr "Move {label}, use the arrow keys"
 
 #: src/settings/ai-providers.tsx
 msgid "Move {name} down"
@@ -9503,11 +8483,6 @@ msgctxt "field: the name of a team"
 msgid "Name"
 msgstr "Name"
 
-#: src/policies/policy-editing.tsx
-msgctxt "the name of a policy rule"
-msgid "Name"
-msgstr "Name"
-
 #: src/settings/ai-providers.tsx
 msgid "Name a model this endpoint serves below and choose it, then test it."
 msgstr "Name a model this endpoint serves below and choose it, then test it."
@@ -9555,7 +8530,6 @@ msgid "Names come with the company's own list. Until it is in, nobody is known h
 msgstr "Names come with the company's own list. Until it is in, nobody is known here."
 
 #: src/connections/source-badge.tsx
-#: src/landscape/landscape.ts
 msgid "Native"
 msgstr "Native"
 
@@ -9577,10 +8551,6 @@ msgstr "Needs a look"
 #: src/dashboard/dependency-requests.tsx
 msgid "Needs alongside it"
 msgstr "Needs alongside it"
-
-#: src/landscape/landscape-overview.ts
-msgid "Needs assignment"
-msgstr "Needs assignment"
 
 #: src/dashboard/widget-board.tsx
 msgid "Needs attention"
@@ -9711,11 +8681,6 @@ msgstr "New project"
 msgid "New project…"
 msgstr "New project…"
 
-#: src/policies/policy-editing.tsx
-#: src/routes/_shell.policies.rules.new.tsx
-msgid "New rule"
-msgstr "New rule"
-
 #: src/dashboard/dependency-requests.tsx
 msgid "New since the last approval: {added}"
 msgstr "New since the last approval: {added}"
@@ -9787,7 +8752,6 @@ msgstr "Next week"
 msgid "Nine in ten"
 msgstr "Nine in ten"
 
-#: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "No"
@@ -9795,15 +8759,6 @@ msgstr "No"
 #: src/onboarding/setup-steps.tsx
 msgid "No {onlySignIn}? A staff list works too."
 msgstr "No {onlySignIn}? A staff list works too."
-
-#: src/landscape/landscape.ts
-#: src/policies/policy.ts
-msgid "No AI"
-msgstr "No AI"
-
-#: src/landscape/landscape.ts
-msgid "No AI capabilities found in this app."
-msgstr "No AI capabilities found in this app."
 
 #: src/settings/ai-providers.tsx
 msgid "No AI provider is connected yet, so Grasp's AI features can't answer."
@@ -9817,38 +8772,13 @@ msgstr "No AI provider is connected yet, so Grasp's AI features can't answer. Ad
 msgid "No AI provider is connected yet. Ask your admin to connect one."
 msgstr "No AI provider is connected yet. Ask your admin to connect one."
 
-#: src/routes/_shell.policies.index.tsx
-msgid "No app breaks an active rule."
-msgstr "No app breaks an active rule."
-
 #: src/workflows/requests/request-needs.tsx
 msgid "No app for it yet"
 msgstr "No app for it yet"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "No app in the landscape breaks it today."
-msgstr "No app in the landscape breaks it today."
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "No app in the landscape breaks this rule."
-msgstr "No app in the landscape breaks this rule."
-
-#: src/policies/policy-editing.tsx
-msgid "No app is allowed to break this rule."
-msgstr "No app is allowed to break this rule."
-
 #: src/routes/_shell.apps.index.tsx
 msgid "No app is called “{asked}”"
 msgstr "No app is called “{asked}”"
-
-#: src/policies/policy.ts
-msgid "No apps"
-msgstr "No apps"
-
-#: src/landscape/app-mosaic.tsx
-#: src/landscape/app-table.tsx
-msgid "No apps match these filters."
-msgstr "No apps match these filters."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -9883,10 +8813,6 @@ msgstr "No caps of its own"
 msgid "No card on file"
 msgstr "No card on file"
 
-#: src/landscape/overview-tab.tsx
-msgid "No certifications on file"
-msgstr "No certifications on file"
-
 #: src/settings/chat-accounts.tsx
 msgid "No chat app accounts are linked."
 msgstr "No chat app accounts are linked."
@@ -9903,21 +8829,9 @@ msgstr "No chats here yet."
 msgid "No chats yet. What is asked above starts one, and it stays in this project."
 msgstr "No chats yet. What is asked above starts one, and it stays in this project."
 
-#: src/landscape/usage-tab.tsx
-msgid "No connected users"
-msgstr "No connected users"
-
-#: src/landscape/connections-tab.tsx
-msgid "No connection paths recorded"
-msgstr "No connection paths recorded"
-
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "No connector yet"
-
-#: src/landscape/overview-tab.tsx
-msgid "No data"
-msgstr "No data"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No domain has a model bound to it."
@@ -9944,14 +8858,6 @@ msgstr "No domains yet. Domains are made in chat."
 msgid "No drafts."
 msgstr "No drafts."
 
-#: src/landscape/audit-trail.tsx
-msgid "No events in the latest stretch of the log"
-msgstr "No events in the latest stretch of the log"
-
-#: src/landscape/audit-trail.tsx
-msgid "No events match"
-msgstr "No events match"
-
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
 msgstr "No events match in the latest stretch of the log."
@@ -9959,14 +8865,6 @@ msgstr "No events match in the latest stretch of the log."
 #: src/activity/audit-log.tsx
 msgid "No events match."
 msgstr "No events match."
-
-#: src/landscape/audit-trail.tsx
-msgid "No events yet"
-msgstr "No events yet"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "No exceptions."
-msgstr "No exceptions."
 
 #: src/chat/builds.tsx
 msgid "No file changes."
@@ -10112,12 +9010,6 @@ msgstr "No one is in your organization yet."
 msgid "No other domain serves every function it declares, public and exactly as declared."
 msgstr "No other domain serves every function it declares, public and exactly as declared."
 
-#: src/landscape/app-mosaic.tsx
-#: src/landscape/filter-menu.tsx
-#: src/landscape/landscape.ts
-msgid "No owner"
-msgstr "No owner"
-
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "No owner yet"
@@ -10138,17 +9030,9 @@ msgstr "No packages were approved for this domain before."
 msgid "No people yet."
 msgstr "No people yet."
 
-#: src/landscape/data-tab.tsx
-msgid "No permissions synced"
-msgstr "No permissions synced"
-
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "No permissions."
-
-#: src/policies/policies-table.tsx
-msgid "No policies yet. Upload one to have Grasp propose its rules."
-msgstr "No policies yet. Upload one to have Grasp propose its rules."
 
 #: src/settings/pulse.ts
 msgctxt "Pulse status"
@@ -10174,18 +9058,6 @@ msgstr "No requests in {month}"
 #: src/routes/_shell.workflows.requests.tsx
 msgid "No requests in the last twelve months"
 msgstr "No requests in the last twelve months"
-
-#: src/landscape/data-tab.tsx
-msgid "No residency disclosed"
-msgstr "No residency disclosed"
-
-#: src/landscape/overview-tab.tsx
-msgid "No risk signals"
-msgstr "No risk signals"
-
-#: src/policies/rules-table.tsx
-msgid "No rules yet. Upload a policy, or make a rule yourself."
-msgstr "No rules yet. Upload a policy, or make a rule yourself."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -10240,30 +9112,9 @@ msgstr "No teams yet."
 msgid "No turn of this interview has a text version on record."
 msgstr "No turn of this interview has a text version on record."
 
-#: src/landscape/overview-tab.tsx
-msgid "No usage data yet"
-msgstr "No usage data yet"
-
-#: src/landscape/data-tab.tsx
-msgid "No usage found."
-msgstr "No usage found."
-
-#: src/landscape/usage-tab.tsx
-msgid "No usage recorded for this app yet."
-msgstr "No usage recorded for this app yet."
-
-#: src/landscape/app-cells.tsx
-#: src/landscape/app-mosaic.tsx
-msgid "No usage seen"
-msgstr "No usage seen"
-
 #: src/workflows/files-and-apps.tsx
 msgid "No version uses it yet"
 msgstr "No version uses it yet"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "No watching rule catches an app."
-msgstr "No watching rule catches an app."
 
 #: src/dashboard/spend-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
@@ -10411,11 +9262,6 @@ msgstr "Nobody leads it"
 msgid "Nobody matches."
 msgstr "Nobody matches."
 
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Nobody owns it"
-msgstr "Nobody owns it"
-
 #: src/dashboard/signals.tsx
 msgid "Nobody read or changed {doc} in {where} in the last {days, plural, one {day} other {# days}}."
 msgstr "Nobody read or changed {doc} in {where} in the last {days, plural, one {day} other {# days}}."
@@ -10460,10 +9306,6 @@ msgstr "Nobody stopped halfway."
 msgid "Nobody with that name."
 msgstr "Nobody with that name."
 
-#: src/routes/_shell.landscape.$appId.usage.$userId.tsx
-msgid "Nobody with this link is connected to {appName}."
-msgstr "Nobody with this link is connected to {appName}."
-
 #: src/settings/stephen-audience.tsx
 msgid "Nobody yet"
 msgstr "Nobody yet"
@@ -10481,12 +9323,6 @@ msgstr "none"
 msgid "None"
 msgstr "None"
 
-#: src/landscape/app-cells.tsx
-#: src/landscape/landscape.ts
-msgctxt "no data exposure"
-msgid "None"
-msgstr "None"
-
 #: src/routes/_shell.settings.billing.tsx
 #: src/routes/_shell.settings.pulse.tsx
 msgctxt "nothing set"
@@ -10501,17 +9337,9 @@ msgstr "None current"
 msgid "None drawn yet. They show up here as the interviews come in."
 msgstr "None drawn yet. They show up here as the interviews come in."
 
-#: src/landscape/data-tab.tsx
-msgid "None found."
-msgstr "None found."
-
 #: src/activity/pending.tsx
 msgid "none now"
 msgstr "none now"
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "None of its rules are in use any more."
-msgstr "None of its rules are in use any more."
 
 #: src/engines/resource-bindings.tsx
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
@@ -10529,10 +9357,6 @@ msgstr "None of this is right"
 msgid "None of this team's work is mapped yet."
 msgstr "None of this team's work is mapped yet."
 
-#: src/landscape/landscape-overview.ts
-msgid "None on file"
-msgstr "None on file"
-
 #: src/onboarding/interview-list.tsx
 msgid "None right now."
 msgstr "None right now."
@@ -10546,7 +9370,6 @@ msgid "None waiting for an admin."
 msgstr "None waiting for an admin."
 
 #: src/brain/brain.ts
-#: src/landscape/app-cells.tsx
 msgid "None yet"
 msgstr "None yet"
 
@@ -10583,10 +9406,6 @@ msgstr "Not approved"
 msgid "Not asked"
 msgstr "Not asked"
 
-#: src/landscape/app-mosaic.tsx
-msgid "Not assessed"
-msgstr "Not assessed"
-
 #: src/engines/resource-bindings.tsx
 msgid "Not bound"
 msgstr "Not bound"
@@ -10594,15 +9413,6 @@ msgstr "Not bound"
 #: src/engines/resource-bindings.tsx
 msgid "Not checked"
 msgstr "Not checked"
-
-#: src/landscape/landscape.ts
-msgid "Not classified yet."
-msgstr "Not classified yet."
-
-#: src/landscape/landscape-overview.ts
-msgctxt "model training, retention or deletion"
-msgid "Not confirmed"
-msgstr "Not confirmed"
 
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
@@ -10615,10 +9425,6 @@ msgstr "Not connected"
 #: src/dashboard/standard-widgets.tsx
 msgid "not counted yet"
 msgstr "not counted yet"
-
-#: src/landscape/landscape-overview.ts
-msgid "Not disclosed"
-msgstr "Not disclosed"
 
 #: src/brain/brain.ts
 msgid "Not drawn yet"
@@ -10639,7 +9445,6 @@ msgstr "Not every choice could be checked: some may be missing from the list."
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
-#: src/routes/_shell.landscape.$appId.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
 msgstr "Not found"
@@ -10657,21 +9462,9 @@ msgctxt "lowest end of a rating of the interview"
 msgid "Not good"
 msgstr "Not good"
 
-#: src/landscape/landscape.ts
-msgid "Not in a domain yet"
-msgstr "Not in a domain yet"
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Not in the catalog"
-msgstr "Not in the catalog"
-
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Not interviewed yet."
-
-#: src/landscape/landscape-overview.ts
-msgid "Not known"
-msgstr "Not known"
 
 #: src/onboarding/work-record.tsx
 msgid "Not known: nobody said it."
@@ -10680,10 +9473,6 @@ msgstr "Not known: nobody said it."
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "Not listed"
-
-#: src/policies/policy.ts
-msgid "Not made by {vendors}"
-msgstr "Not made by {vendors}"
 
 #: src/settings/chat-accounts.tsx
 msgid "Not mine"
@@ -10707,10 +9496,6 @@ msgstr "Not offered"
 msgid "Not offered: its secret isn’t set"
 msgstr "Not offered: its secret isn’t set"
 
-#: src/landscape/overview-tab.tsx
-msgid "Not on file yet."
-msgstr "Not on file yet."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Not planned yet"
@@ -10731,10 +9516,6 @@ msgstr "Not read: connect it again"
 #: src/onboarding/setup-steps.tsx
 msgid "Not read: no connection"
 msgstr "Not read: no connection"
-
-#: src/landscape/landscape-overview.ts
-msgid "Not recorded"
-msgstr "Not recorded"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -10872,8 +9653,6 @@ msgstr "Nothing dealt with yet. What you decide here shows up in this list, and 
 msgid "Nothing found"
 msgstr "Nothing found"
 
-#: src/landscape/faceted-filter.tsx
-#: src/landscape/filter-menu.tsx
 #: src/settings/filter-menu.tsx
 msgid "Nothing found."
 msgstr "Nothing found."
@@ -10903,10 +9682,6 @@ msgstr "Nothing here matches the filter."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Nothing here yet."
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Nothing in the catalog matches “{typed}”."
-msgstr "Nothing in the catalog matches “{typed}”."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Nothing is due while the plan is not running."
@@ -10984,10 +9759,6 @@ msgstr "Nothing starts it on its own: it runs when someone starts it."
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
 msgstr "Nothing to make better right now."
-
-#: src/landscape/overview-tab.tsx
-msgid "Nothing to raise right now."
-msgstr "Nothing to raise right now."
 
 #: src/dashboard/custom-widget.tsx
 msgid "Nothing to show yet."
@@ -11121,10 +9892,6 @@ msgstr "Offline"
 msgid "Often corrected"
 msgstr "Often corrected"
 
-#: src/landscape/audit-trail.tsx
-msgid "Older events haven't been read yet."
-msgstr "Older events haven't been read yet."
-
 #: src/inbox/inbox-page.tsx
 msgid "Older workflows that failed are on the <0>dashboard</0>."
 msgstr "Older workflows that failed are on the <0>dashboard</0>."
@@ -11180,10 +9947,6 @@ msgstr "On in {name}"
 msgid "on mail to {address}@"
 msgstr "on mail to {address}@"
 
-#: src/landscape/landscape-audit.ts
-msgid "On the connection {account}"
-msgstr "On the connection {account}"
-
 #: src/chat/builds-state.ts
 msgid "on the event {event}, filtered"
 msgstr "on the event {event}, filtered"
@@ -11232,10 +9995,6 @@ msgstr "Onboarding steps"
 msgid "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 msgstr "Once I have about {threshold}% of the picture, your team can start. I’ll fill in the rest as we go."
 
-#: src/policies/policy-editing.tsx
-msgid "Once it is active, every app that breaks this rule is marked as blocked, and its access should be removed."
-msgstr "Once it is active, every app that breaks this rule is marked as blocked, and its access should be removed."
-
 #: src/knowledge/purge.tsx
 msgid "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
 msgstr "One a line, up to {most}: a name, each other form of it, an email address. A term is removed as a whole word, in any case, so list joined forms as terms of their own."
@@ -11278,10 +10037,6 @@ msgstr "Only accounts of the tenant {tenantId}."
 #: src/settings/use-team-change.ts
 msgid "Only admins can change teams."
 msgstr "Only admins can change teams."
-
-#: src/routes/_shell.landscape.$appId.audit.tsx
-msgid "Only admins can read the audit trail"
-msgstr "Only admins can read the audit trail"
 
 #: src/knowledge/new-collection.tsx
 msgid "Only an admin makes a collection for everyone or for teams."
@@ -11377,16 +10132,6 @@ msgctxt "column: a button that opens a run"
 msgid "Open"
 msgstr "Open"
 
-#: src/policies/policies-table.tsx
-msgctxt "column: a link that opens the policy"
-msgid "Open"
-msgstr "Open"
-
-#: src/policies/rules-table.tsx
-msgctxt "column: a link that opens the rule"
-msgid "Open"
-msgstr "Open"
-
 #: src/workflows/independent-workflows.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -11406,11 +10151,6 @@ msgstr "Open"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Open"
-
-#: src/landscape/app-table.tsx
-msgctxt "open an app"
 msgid "Open"
 msgstr "Open"
 
@@ -11461,10 +10201,6 @@ msgstr "Open external link?"
 msgid "Open full page"
 msgstr "Open full page"
 
-#: src/landscape/overview-tab.tsx
-msgid "Open in {tabLabel}"
-msgstr "Open in {tabLabel}"
-
 #: src/chat/chat-dock.tsx
 msgid "Open in chat"
 msgstr "Open in chat"
@@ -11476,10 +10212,6 @@ msgstr "Open in full"
 #: src/dashboard/in-inbox.tsx
 msgid "Open in the inbox: {title}"
 msgstr "Open in the inbox: {title}"
-
-#: src/policies/findings-table.tsx
-msgid "Open in the landscape"
-msgstr "Open in the landscape"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
@@ -11611,10 +10343,6 @@ msgstr "Opportunity-to-Cash"
 msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
 
-#: src/policies/policy-editing.tsx
-msgid "Or paste the policy's text below: Grasp doesn't read PDF or Word files yet."
-msgstr "Or paste the policy's text below: Grasp doesn't read PDF or Word files yet."
-
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Or withdraw: nothing you said is used from now on, and you can still read it here."
@@ -11719,11 +10447,6 @@ msgctxt "tab of a workflow"
 msgid "Overview"
 msgstr "Overview"
 
-#: src/landscape/landscape-app.ts
-msgctxt "tab of an app page"
-msgid "Overview"
-msgstr "Overview"
-
 #: src/interview/words.ts
 msgid "Own list or tool"
 msgstr "Own list or tool"
@@ -11744,13 +10467,6 @@ msgstr "Owned by someone else"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Owned by you"
 msgstr "Owned by you"
-
-#: src/landscape/filter-menu.tsx
-#: src/landscape/landscape-overview.ts
-#: src/landscape/landscape.ts
-#: src/landscape/owner.tsx
-msgid "Owner"
-msgstr "Owner"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: who owns a workflow"
@@ -11773,11 +10489,6 @@ msgstr "Owner: nobody yet. Change owner"
 #: src/workflows/requests/request-who.tsx
 msgid "Owners see people one by one."
 msgstr "Owners see people one by one."
-
-#: src/landscape/landscape-audit.ts
-msgctxt "category of an audit event"
-msgid "Ownership"
-msgstr "Ownership"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Package"
@@ -11906,11 +10617,6 @@ msgctxt "a workflow's state"
 msgid "Paused"
 msgstr "Paused"
 
-#: src/policies/policy.ts
-msgctxt "status of a policy rule"
-msgid "Paused"
-msgstr "Paused"
-
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Paused"
@@ -11968,11 +10674,6 @@ msgstr "People"
 
 #: src/brain/brain-source-contents.tsx
 msgctxt "column: how many people"
-msgid "People"
-msgstr "People"
-
-#: src/policies/findings-table.tsx
-msgctxt "column: people who use an app"
 msgid "People"
 msgstr "People"
 
@@ -12041,15 +10742,6 @@ msgstr "People sign in with an address in these domains, through your organizati
 msgid "People tell a step two ways, and nobody can say why."
 msgstr "People tell a step two ways, and nobody can say why."
 
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "People using it"
-msgstr "People using it"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "People using them"
-msgstr "People using them"
-
 #: src/workflows/requests/request-who.tsx
 msgid "People who asked"
 msgstr "People who asked"
@@ -12112,10 +10804,6 @@ msgstr "Permission for the platform's statistics"
 msgid "Permission to invite guests"
 msgstr "Permission to invite guests"
 
-#: src/landscape/data-tab.tsx
-msgid "Permissions"
-msgstr "Permissions"
-
 #: src/brain/brain-source-contents.tsx
 msgctxt "column: the OAuth permissions granted to an application"
 msgid "Permissions"
@@ -12135,15 +10823,6 @@ msgstr "Person"
 msgctxt "who does a step"
 msgid "Person"
 msgstr "Person"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "who recorded an audit event"
-msgid "Person"
-msgstr "Person"
-
-#: src/landscape/landscape-audit.ts
-msgid "Person or automated"
-msgstr "Person or automated"
 
 #: src/onboarding/interview-words.ts
 msgctxt "kind of fact"
@@ -12195,44 +10874,9 @@ msgstr "Play"
 msgid "Play it again"
 msgstr "Play it again"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-#: src/routes/_shell.policies.index.tsx
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-#: src/routes/_shell.policies.rules.new.tsx
-msgid "Policies"
-msgstr "Policies"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Policies"
-msgstr "Policies"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
 msgstr "Policies, procedures, work instructions. Share whatever you have. Drafts are fine too."
-
-#: src/landscape/landscape-audit.ts
-msgctxt "category of an audit event"
-msgid "Policy"
-msgstr "Policy"
-
-#: src/policies/policies-table.tsx
-msgctxt "column: an uploaded policy"
-msgid "Policy"
-msgstr "Policy"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Policy"
-msgstr "Policy"
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Policy not found"
-msgstr "Policy not found"
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Popular in the catalog"
-msgstr "Popular in the catalog"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -12276,10 +10920,6 @@ msgstr "Previous"
 msgid "Previous match"
 msgstr "Previous match"
 
-#: src/landscape/overview-tab.tsx
-msgid "Privacy policy"
-msgstr "Privacy policy"
-
 #: src/onboarding/work-rules.tsx
 msgid "Probably two workflows in one, or teams that work differently."
 msgstr "Probably two workflows in one, or teams that work differently."
@@ -12287,15 +10927,6 @@ msgstr "Probably two workflows in one, or teams that work differently."
 #: src/onboarding/setup-steps.tsx
 msgid "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
 msgstr "Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me."
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Processing agreement"
-msgstr "Processing agreement"
-
-#: src/policies/policy.ts
-msgid "Processing agreement {states}"
-msgstr "Processing agreement {states}"
 
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.tsx
@@ -12359,10 +10990,6 @@ msgstr "Proposed by the agent, in their chat, <0>{asked}</0>"
 msgid "Proposed packages"
 msgstr "Proposed packages"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Proposed rules"
-msgstr "Proposed rules"
-
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Provided by Grasp, not installed again: {provided}"
@@ -12373,7 +11000,6 @@ msgstr "Provider"
 
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
-#: src/policies/policy-editing.tsx
 msgid "Publish"
 msgstr "Publish"
 
@@ -12404,10 +11030,6 @@ msgstr "Published"
 #: src/workflows/definition-editor.tsx
 msgid "Published as version {0}."
 msgstr "Published as version {0}."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Published rules start by watching: they show what they would flag or block, and you turn them on when you are ready."
-msgstr "Published rules start by watching: they show what they would flag or block, and you turn them on when you are ready."
 
 #. Product name: keep it as it is
 #. Product name: keep it as it is
@@ -12491,10 +11113,6 @@ msgctxt "a workflow's state"
 msgid "Queued"
 msgstr "Queued"
 
-#: src/landscape/filter-menu.tsx
-msgid "Quick filters"
-msgstr "Quick filters"
-
 #: src/dashboard/widget-board.tsx
 msgid "Ran"
 msgstr "Ran"
@@ -12554,11 +11172,6 @@ msgstr "Reached"
 msgid "Reaches"
 msgstr "Reaches"
 
-#: src/policies/policy.ts
-msgctxt "what a permission lets an app do with company data"
-msgid "read"
-msgstr "read"
-
 #: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Read"
@@ -12596,10 +11209,6 @@ msgstr "Read everyone's calls of unknown outcome"
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "Read how knowledge is used"
-
-#: src/policies/policy-proposals.tsx
-msgid "Read it again"
-msgstr "Read it again"
 
 #: src/settings/stephen-settings.tsx
 msgid "Read others' words"
@@ -12668,10 +11277,6 @@ msgstr "Reading it back"
 msgid "Reading people and teams…"
 msgstr "Reading people and teams…"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
-msgstr "Reading policies needs a model this deployment allows for sensitive data. Ask Grasp to set one up, then read it again. Meanwhile, make its rules by hand."
-
 #: src/knowledge/new-collection.tsx
 msgid "Reading the teams"
 msgstr "Reading the teams"
@@ -12695,15 +11300,6 @@ msgstr "Reading who can own it…"
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
 msgstr "Reading your staff list"
-
-#: src/policies/policy-proposals.tsx
-msgid "Reading…"
-msgstr "Reading…"
-
-#: src/policies/policies-table.tsx
-msgctxt "Grasp is reading an uploaded policy"
-msgid "Reading…"
-msgstr "Reading…"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
@@ -12734,14 +11330,6 @@ msgstr "Receipt"
 msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
-
-#: src/landscape/audit-trail.tsx
-msgid "Recorded by"
-msgstr "Recorded by"
-
-#: src/landscape/audit-trail.tsx
-msgid "Recorded details"
-msgstr "Recorded details"
 
 #: src/engines/store-changes.tsx
 msgid "Records checked: {scanned}. Filled in: {filled}."
@@ -12853,7 +11441,6 @@ msgstr "Remember something"
 msgid "Reminded on {date}"
 msgstr "Reminded on {date}"
 
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -12869,10 +11456,6 @@ msgstr "Remove {documentName}"
 #: src/routes/_shell.settings.pulse.tsx
 msgid "Remove {domain}"
 msgstr "Remove {domain}"
-
-#: src/policies/policy-editing.tsx
-msgid "Remove {field}"
-msgstr "Remove {field}"
 
 #: src/onboarding/document-drop.tsx
 #: src/workflows/module-files.tsx
@@ -12903,10 +11486,6 @@ msgstr "Remove {named} as an approver"
 msgid "Remove {title} from the brain"
 msgstr "Remove {title} from the brain"
 
-#: src/policies/policy-editing.tsx
-msgid "Remove {title}?"
-msgstr "Remove {title}?"
-
 #: src/brain/forget.tsx
 msgid "Remove {what} from the brain?"
 msgstr "Remove {what} from the brain?"
@@ -12920,10 +11499,6 @@ msgstr "Remove from the brain"
 #: src/brain/forget.tsx
 msgid "Remove it"
 msgstr "Remove it"
-
-#: src/policies/policy-editing.tsx
-msgid "Remove policy"
-msgstr "Remove policy"
 
 #: src/settings/person-limits.tsx
 msgid "Remove the exception for {name}"
@@ -13017,10 +11592,6 @@ msgstr "Replaced a request for packages"
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Report"
-
-#: src/landscape/landscape.ts
-msgid "Repository content, snippets, editor context, build logs or engineering documentation."
-msgstr "Repository content, snippets, editor context, build logs or engineering documentation."
 
 #: src/connections/request-app-dialog.tsx
 msgid "Request an app"
@@ -13117,10 +11688,6 @@ msgstr "Results"
 #: src/workflows/workflow-status.tsx
 msgid "Resume"
 msgstr "Resume"
-
-#: src/landscape/landscape-overview.ts
-msgid "Retention period"
-msgstr "Retention period"
 
 #: src/engines/package-approvals.tsx
 msgid "Retire"
@@ -13228,7 +11795,6 @@ msgstr "Revision {revision} passes the profile and can be published."
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
-#: src/policies/policy-editing.tsx
 msgid "Revoke"
 msgstr "Revoke"
 
@@ -13243,10 +11809,6 @@ msgstr "Revoke the binding of {alias}"
 #: src/engines/resource-bindings.tsx
 msgid "Revoke the binding of {alias}?"
 msgstr "Revoke the binding of {alias}?"
-
-#: src/policies/policy-editing.tsx
-msgid "Revoke the exception for {app}"
-msgstr "Revoke the exception for {app}"
 
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}"
@@ -13280,10 +11842,6 @@ msgstr "Reword it for them if you like. It can't rest on documents they may not 
 msgid "Reword the goal"
 msgstr "Reword the goal"
 
-#: src/landscape/landscape-overview.ts
-msgid "Right to deletion"
-msgstr "Right to deletion"
-
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Risk assessment"
 msgstr "Risk assessment"
@@ -13295,10 +11853,6 @@ msgstr "Risk assessment done"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Risk assessment signed off"
 msgstr "Risk assessment signed off"
-
-#: src/landscape/overview-tab.tsx
-msgid "Risk signals"
-msgstr "Risk signals"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -13330,23 +11884,8 @@ msgstr "Rome"
 msgid "Room used"
 msgstr "Room used"
 
-#: src/routes/_shell.landscape.index.tsx
-msgid "Row height"
-msgstr "Row height"
-
 #: src/brain/brain.ts
 #: src/interview/words.ts
-msgid "Rule"
-msgstr "Rule"
-
-#: src/policies/findings-table.tsx
-#: src/policies/rules-table.tsx
-msgctxt "column: a policy rule"
-msgid "Rule"
-msgstr "Rule"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
 msgid "Rule"
 msgstr "Rule"
 
@@ -13355,45 +11894,10 @@ msgctxt "kind of fact"
 msgid "Rule"
 msgstr "Rule"
 
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Rule not found"
-msgstr "Rule not found"
-
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.models.tsx
 msgid "Rules"
 msgstr "Rules"
-
-#: src/policies/policies-table.tsx
-msgctxt "column: rules drawn from a policy"
-msgid "Rules"
-msgstr "Rules"
-
-#: src/routes/_shell.policies.index.tsx
-msgctxt "tab: the rules in the policy manager"
-msgid "Rules"
-msgstr "Rules"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "Rules for the apps and AI tools your people use, drawn from your own policies."
-msgstr "Rules for the apps and AI tools your people use, drawn from your own policies."
-
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "Rules from this policy"
-msgstr "Rules from this policy"
-
-#: src/brain/brain.ts
-msgid "Rules published"
-msgstr "Rules published"
-
-#: src/policies/policies-table.tsx
-msgctxt "status of an uploaded policy"
-msgid "Rules to review"
-msgstr "Rules to review"
-
-#: src/brain/brain.ts
-msgid "Rules waiting for a decision"
-msgstr "Rules waiting for a decision"
 
 #: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 msgid "Run"
@@ -13612,7 +12116,6 @@ msgstr "Same version, different contents: {changed}"
 #: src/chat/chat-more.tsx
 #: src/chat/project-dialog.tsx
 #: src/knowledge/document.tsx
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/settings/person-limits.tsx
 #: src/workflows/resource-params.tsx
@@ -13639,10 +12142,6 @@ msgstr "Save instructions"
 #: src/settings/ai-providers.tsx
 msgid "Save key"
 msgstr "Save key"
-
-#: src/policies/policy-editing.tsx
-msgid "Save rule"
-msgstr "Save rule"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
@@ -13696,10 +12195,6 @@ msgstr "Say what should change"
 msgid "Say what should change in {name}. Every change is a new version of it."
 msgstr "Say what should change in {name}. Every change is a new version of it."
 
-#: src/policies/policy-editing.tsx
-msgid "Say which apps break the rule, and what happens to them."
-msgstr "Say which apps break the rule, and what happens to them."
-
 #: src/dashboard/standard-widgets.tsx
 msgctxt "how far a team is with AI"
 msgid "Scaling"
@@ -13731,14 +12226,6 @@ msgstr "Search"
 msgid "Search {name}"
 msgstr "Search {name}"
 
-#: src/landscape/filter-menu.tsx
-msgid "Search application"
-msgstr "Search application"
-
-#: src/routes/_shell.landscape.index.tsx
-msgid "Search apps"
-msgstr "Search apps"
-
 #: src/onboarding/interview-people.tsx
 msgid "Search by name"
 msgstr "Search by name"
@@ -13750,10 +12237,6 @@ msgstr "Search by name or kind"
 #: src/chat/chat-window.tsx
 msgid "Search chats and projects"
 msgstr "Search chats and projects"
-
-#: src/landscape/audit-trail.tsx
-msgid "Search events"
-msgstr "Search events"
 
 #: src/routes/_shell.apps.index.tsx
 msgid "Search for another name, or look under another tab."
@@ -13770,10 +12253,6 @@ msgstr "Search Knowledge"
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
 msgstr "Search members"
-
-#: src/landscape/filter-menu.tsx
-msgid "Search owner"
-msgstr "Search owner"
 
 #: src/onboarding/interview-people.tsx
 #: src/people/person-picker.tsx
@@ -13796,10 +12275,6 @@ msgstr "Search reads every collection you may read. Try other words, or fewer."
 #: src/routes/_shell.apps.index.tsx
 msgid "Search the apps"
 msgstr "Search the apps"
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Search the catalog"
-msgstr "Search the catalog"
 
 #: src/brain/brain-transcript.tsx
 msgid "Search the transcript"
@@ -14072,10 +12547,6 @@ msgstr "Shared with you"
 msgid "Show"
 msgstr "Show"
 
-#: src/landscape/audit-trail.tsx
-msgid "Show {more} more"
-msgstr "Show {more} more"
-
 #: src/workflows/diagram-overview.tsx
 msgid "Show {name} in the drawing"
 msgstr "Show {name} in the drawing"
@@ -14087,10 +12558,6 @@ msgstr "Show activity by"
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Show all {count} lines ({characters} characters)"
-
-#: src/routes/_shell.policies.index.tsx
-msgid "Show apps"
-msgstr "Show apps"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Show every package"
@@ -14140,13 +12607,8 @@ msgid "Show more · {left} left"
 msgstr "Show more · {left} left"
 
 #: src/dashboard/failed-workflows.tsx
-#: src/landscape/audit-trail.tsx
 msgid "Show older"
 msgstr "Show older"
-
-#: src/landscape/audit-trail.tsx
-msgid "Show older events to read further back."
-msgstr "Show older events to read further back."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Show only the failed runs."
@@ -14180,10 +12642,6 @@ msgstr "Show the page for {title}"
 msgid "Show workflows"
 msgstr "Show workflows"
 
-#: src/landscape/audit-trail.tsx
-msgid "Showing {showing} of {shownCount}"
-msgstr "Showing {showing} of {shownCount}"
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Showing the first {pageMaxLimit} files."
 msgstr "Showing the first {pageMaxLimit} files."
@@ -14191,10 +12649,6 @@ msgstr "Showing the first {pageMaxLimit} files."
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "Showing the first {runsPageSize} runs of more."
-
-#: src/policies/policy.ts
-msgid "Shows which apps it would flag or block, without doing it."
-msgstr "Shows which apps it would flag or block, without doing it."
 
 #: src/workflows/workflow-diagram.tsx
 msgctxt "parts in a row"
@@ -14302,7 +12756,6 @@ msgstr "Sign-in timed out or was started elsewhere. Try again."
 msgid "Signals by kind"
 msgstr "Signals by kind"
 
-#: src/policies/policy.ts
 #: src/routes/_shell.onboarding.agreements.tsx
 msgctxt "state of a data processing agreement"
 msgid "Signed"
@@ -14366,10 +12819,6 @@ msgstr "Skip"
 #: src/onboarding/setup-steps.tsx
 msgid "Skip for now"
 msgstr "Skip for now"
-
-#: src/policies/policy.ts
-msgid "SOC 2"
-msgstr "SOC 2"
 
 #: src/onboarding/document-drop.tsx
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
@@ -14449,11 +12898,6 @@ msgstr "Sort"
 msgid "Source"
 msgstr "Source"
 
-#: src/landscape/landscape.ts
-msgctxt "column: how Grasp knows an app is used"
-msgid "Source"
-msgstr "Source"
-
 #: src/chat/cited-note.tsx
 msgid "Source {number}: {title}"
 msgstr "Source {number}: {title}"
@@ -14503,11 +12947,6 @@ msgctxt "begin the interview"
 msgid "Start"
 msgstr "Start"
 
-#: src/policies/policy-editing.tsx
-msgctxt "how a new rule starts: watching or active"
-msgid "Start"
-msgstr "Start"
-
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Start a chat in {name}"
 msgstr "Start a chat in {name}"
@@ -14519,14 +12958,6 @@ msgstr "Start a test run"
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Start again from version {newerVersion}"
-
-#: src/policies/policy-editing.tsx
-msgid "Start blocking"
-msgstr "Start blocking"
-
-#: src/policies/policy-editing.tsx
-msgid "Start blocking?"
-msgstr "Start blocking?"
 
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
@@ -14608,11 +13039,6 @@ msgctxt "a table column: a workflow's"
 msgid "State"
 msgstr "State"
 
-#: src/policies/findings-table.tsx
-msgctxt "column: what a rule does to an app"
-msgid "State"
-msgstr "State"
-
 #: src/brain/brain.ts
 msgid "Statement"
 msgstr "Statement"
@@ -14630,7 +13056,6 @@ msgstr "Statistics"
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.policies.rules.$ruleId.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/pulse-people.tsx
 #: src/workflows/resource-runs.tsx
@@ -14639,24 +13064,10 @@ msgstr "Statistics"
 msgid "Status"
 msgstr "Status"
 
-#: src/policies/policies-table.tsx
-msgctxt "column: status of a policy"
-msgid "Status"
-msgstr "Status"
-
-#: src/policies/rules-table.tsx
-msgctxt "column: status of a policy rule"
-msgid "Status"
-msgstr "Status"
-
 #: src/workflows/workflows-table.tsx
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
-
-#: src/policies/policy-editing.tsx
-msgid "Status of this rule"
-msgstr "Status of this rule"
 
 #: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
@@ -14921,10 +13332,6 @@ msgstr "System"
 msgctxt "kind of fact"
 msgid "System"
 msgstr "System"
-
-#: src/routes/_shell.landscape.index.tsx
-msgid "Table"
-msgstr "Table"
 
 #: src/settings/team-members-dialog.tsx
 msgid "Take {who} off {name}"
@@ -15202,10 +13609,6 @@ msgctxt "dashboard widget: how far each team is with AI"
 msgid "Teams with AI"
 msgstr "Teams with AI"
 
-#: src/landscape/data-tab.tsx
-msgid "Teams with at least one grant. Open a team to see its usage."
-msgstr "Teams with at least one grant. Open a team to see its usage."
-
 #: src/engines/resource-bindings.tsx
 msgid "Template"
 msgstr "Template"
@@ -15217,10 +13620,6 @@ msgstr "Template {templateId}, version {version}"
 #: src/engines/resource-bindings.tsx
 msgid "Template version"
 msgstr "Template version"
-
-#: src/landscape/overview-tab.tsx
-msgid "Terms and conditions"
-msgstr "Terms and conditions"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/settings/ai-providers.tsx
@@ -15274,10 +13673,6 @@ msgstr "Tests"
 #: src/knowledge/document.tsx
 msgid "Text"
 msgstr "Text"
-
-#: src/policies/policy-editing.tsx
-msgid "Text or Markdown file"
-msgstr "Text or Markdown file"
 
 #: src/engines/resource-bindings.tsx
 msgid "Text, at most {tokens} tokens"
@@ -15418,14 +13813,6 @@ msgstr "The answer was cut off at the model's limit."
 msgid "The app couldn't be loaded."
 msgstr "The app couldn't be loaded."
 
-#: src/policies/policy.ts
-msgid "The app is marked as blocked; access should be removed."
-msgstr "The app is marked as blocked; access should be removed."
-
-#: src/policies/policy.ts
-msgid "The app is marked in the landscape, so its owner can act on it."
-msgstr "The app is marked in the landscape, so its owner can act on it."
-
 #: src/screens/screen-frame.tsx
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
@@ -15549,10 +13936,6 @@ msgstr "The dashboard is back to how it began."
 msgid "The data processing agreement isn't signed"
 msgstr "The data processing agreement isn't signed"
 
-#: src/landscape/data-tab.tsx
-msgid "The data this app touches and the teams that use it."
-msgstr "The data this app touches and the teams that use it."
-
 #: src/onboarding/send-plan-form.tsx
 msgid "The day after"
 msgstr "The day after"
@@ -15645,10 +14028,6 @@ msgstr "The domains this chat builds didn't load."
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
 msgstr "The earlier wording stays in the goal's history."
-
-#: src/policies/policy.ts
-msgid "the EU"
-msgstr "the EU"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx
@@ -15833,10 +14212,6 @@ msgstr "The model gateway treats what agents read from it as sensitive."
 msgid "The model is busy. Try again in a minute."
 msgstr "The model is busy. Try again in a minute."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "The model key does not work. Check it in Settings, under Models."
-msgstr "The model key does not work. Check it in Settings, under Models."
-
 #: src/chat/failure.ts
 msgid "The model's answer came back in the wrong shape. Try again."
 msgstr "The model's answer came back in the wrong shape. Try again."
@@ -15889,10 +14264,6 @@ msgstr "The organization"
 msgid "The organization has no teams yet."
 msgstr "The organization has no teams yet."
 
-#: src/landscape/app-cells.tsx
-msgid "The other kinds of data this app touches"
-msgstr "The other kinds of data this app touches"
-
 #: src/onboarding/work-rules.tsx
 msgid "The owner of the workflow settles one nobody can explain"
 msgstr "The owner of the workflow settles one nobody can explain"
@@ -15913,10 +14284,6 @@ msgstr "The packages couldn't be read again, so this list may be out of date: {u
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "The part of the address before the @, on the mail domain set up for Grasp."
 
-#: src/policies/policy-editing.tsx
-msgid "The passage it says"
-msgstr "The passage it says"
-
 #: src/settings/package-approvers.tsx
 msgid "The people and teams who approve or deny the npm packages domains and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
 msgstr "The people and teams who approve or deny the npm packages domains and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
@@ -15928,10 +14295,6 @@ msgstr "The person the run acts for says what happened on their dashboard"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "The platform is open to everyone at the company: it was never closed for the onboarding."
-
-#: src/policies/policy-editing.tsx
-msgid "The policy's text"
-msgstr "The policy's text"
 
 #: src/settings/ai-providers.tsx
 msgid "the provider didn't answer"
@@ -15996,14 +14359,6 @@ msgstr "The risk assessment isn't done"
 msgid "The roles above say what each may do."
 msgstr "The roles above say what each may do."
 
-#: src/policies/policy-editing.tsx
-msgid "The rule is active, so from the moment it is saved every app that breaks it is marked as blocked, and its access should be removed."
-msgstr "The rule is active, so from the moment it is saved every app that breaks it is marked as blocked, and its access should be removed."
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "The rule is paused, so it catches nothing."
-msgstr "The rule is paused, so it catches nothing."
-
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
@@ -16048,10 +14403,6 @@ msgstr "The same pain in other teams"
 #: src/inbox/items.ts
 msgid "The schedule of {workflowName} stopped"
 msgstr "The schedule of {workflowName} stopped"
-
-#: src/landscape/overview-tab.tsx
-msgid "The signals that weigh most on this app."
-msgstr "The signals that weigh most on this app."
 
 #: src/onboarding/work-rules.tsx
 msgid "The sponsor settles one nobody can explain"
@@ -16108,14 +14459,6 @@ msgstr "The text each interview ran on"
 msgctxt "what Grasp knows, by source"
 msgid "The tools in use"
 msgstr "The tools in use"
-
-#: src/policies/policy.ts
-msgid "the United Kingdom"
-msgstr "the United Kingdom"
-
-#: src/policies/policy.ts
-msgid "the United States"
-msgstr "the United States"
 
 #: src/screens/screen-files.ts
 msgid "The upload was cancelled."
@@ -16316,10 +14659,6 @@ msgstr "These notes rest on nothing else and go too: {named}."
 msgid "These releases can never be made current: {releases}."
 msgstr "These releases can never be made current: {releases}."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "These requirements are about how people work, not which apps they use. They stay in your policy; no rule watches them."
-msgstr "These requirements are about how people work, not which apps they use. They stay in your policy; no rule watches them."
-
 #: src/settings/person-limits.tsx
 msgid "They are no longer in your organization."
 msgstr "They are no longer in your organization."
@@ -16347,10 +14686,6 @@ msgstr "They reach everything their role allows."
 #: src/settings/staff-access.tsx
 msgid "They reach the onboarding alone."
 msgstr "They reach the onboarding alone."
-
-#: src/landscape/data-tab.tsx
-msgid "They show here once Grasp reads your identity provider's grants."
-msgstr "They show here once Grasp reads your identity provider's grants."
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
@@ -16621,21 +14956,9 @@ msgstr "This page didn't load"
 msgid "This page is not here"
 msgstr "This page is not here"
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "This policy is not here any more"
-msgstr "This policy is not here any more"
-
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "This project isn't here any more."
 msgstr "This project isn't here any more."
-
-#: src/policies/policy-editing.tsx
-msgid "This rule changed since you started editing it"
-msgstr "This rule changed since you started editing it"
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "This rule is not here any more"
-msgstr "This rule is not here any more"
 
 #: src/chat/failure.ts
 msgid "This run has made all the model calls it may make."
@@ -16701,10 +15024,6 @@ msgstr "Through Composio, which keeps the access in its own cloud. Your workflow
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 
-#: src/landscape/landscape-audit.ts
-msgid "Time (UTC)"
-msgstr "Time (UTC)"
-
 #: src/brain/forget.tsx
 msgid "Time left to undo"
 msgstr "Time left to undo"
@@ -16741,11 +15060,6 @@ msgstr "Timed out: {timedOut}"
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Timeline"
 msgstr "Timeline"
-
-#: src/policies/policy-editing.tsx
-msgctxt "the title of a policy document"
-msgid "Title"
-msgstr "Title"
 
 #: src/settings/week-hours.tsx
 msgctxt "between two hours"
@@ -16900,10 +15214,6 @@ msgstr "Topic"
 msgid "Topics"
 msgstr "Topics"
 
-#: src/policies/policy.ts
-msgid "Touches {kinds}"
-msgstr "Touches {kinds}"
-
 #: src/tour/tour-layer.tsx
 msgid "Tour of Grasp"
 msgstr "Tour of Grasp"
@@ -16912,23 +15222,6 @@ msgstr "Tour of Grasp"
 msgctxt "tab of a workflow"
 msgid "Traces"
 msgstr "Traces"
-
-#: src/policies/policy.ts
-msgid "Training not stated"
-msgstr "Training not stated"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Training on your data"
-msgstr "Training on your data"
-
-#: src/policies/policy.ts
-msgid "Trains on your data"
-msgstr "Trains on your data"
-
-#: src/policies/policy.ts
-msgid "Trains unless you opt out"
-msgstr "Trains unless you opt out"
 
 #: src/brain/brain-markdown.ts
 #: src/interview/page.tsx
@@ -16967,10 +15260,6 @@ msgstr "Try"
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Try again"
-
-#: src/landscape/audit-trail.tsx
-msgid "Try another search, or clear the filters to see the whole trail."
-msgstr "Try another search, or clear the filters to see the whole trail."
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
@@ -17032,10 +15321,6 @@ msgstr "Typed, started on {started}, not agreed to yet."
 msgid "Unanswered question"
 msgstr "Unanswered question"
 
-#: src/landscape/landscape.ts
-msgid "Uncategorized"
-msgstr "Uncategorized"
-
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Under 5"
@@ -17080,35 +15365,8 @@ msgstr "Undoing its changes after it was cancelled"
 msgid "Unknown"
 msgstr "Unknown"
 
-#: src/landscape/landscape.ts
-msgctxt "AI type of an app"
-msgid "Unknown"
-msgstr "Unknown"
-
-#: src/landscape/app-cells.tsx
-msgctxt "data exposure of an app"
-msgid "Unknown"
-msgstr "Unknown"
-
-#: src/landscape/app-cells.tsx
-msgctxt "domains that use an app, which couldn't be read"
-msgid "Unknown"
-msgstr "Unknown"
-
-#: src/landscape/app-cells.tsx
-msgctxt "how Grasp knows an app is used"
-msgid "Unknown"
-msgstr "Unknown"
-
 #: src/brain/brain-source-contents.tsx
 msgctxt "number of people"
-msgid "Unknown"
-msgstr "Unknown"
-
-#: src/landscape/app-cells.tsx
-#: src/landscape/data-tab.tsx
-#: src/policies/findings-table.tsx
-msgctxt "usage of an app, which nothing measures yet"
 msgid "Unknown"
 msgstr "Unknown"
 
@@ -17158,13 +15416,10 @@ msgstr "Unreadable event"
 msgid "Unsaved changes"
 msgstr "Unsaved changes"
 
-#: src/policies/policy-editing.tsx
 #: src/settings/staff-access.tsx
 msgid "Until"
 msgstr "Until"
 
-#: src/policies/findings-table.tsx
-#: src/policies/policy-editing.tsx
 #: src/workflows/history-view.tsx
 msgid "Until {until}"
 msgstr "Until {until}"
@@ -17194,7 +15449,6 @@ msgid "Updated Grasp"
 msgstr "Updated Grasp"
 
 #: src/knowledge/uploads.tsx
-#: src/policies/policy-editing.tsx
 msgid "Upload"
 msgstr "Upload"
 
@@ -17202,41 +15456,13 @@ msgstr "Upload"
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Upload a PDF, Word or Excel file, or captions (.vtt)"
 
-#: src/policies/policy-editing.tsx
-msgid "Upload a policy"
-msgstr "Upload a policy"
-
-#: src/policies/policies-table.tsx
-msgctxt "column: who uploaded a policy, and when"
-msgid "Uploaded"
-msgstr "Uploaded"
-
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "Uploaded to knowledge"
 
-#: src/brain/brain.ts
-msgid "Uploaded to Policies"
-msgstr "Uploaded to Policies"
-
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Uploading…"
-
-#: src/landscape/app-cells.tsx
-#: src/landscape/usage-tab.tsx
-msgid "Usage"
-msgstr "Usage"
-
-#: src/landscape/landscape-app.ts
-msgctxt "tab of an app page"
-msgid "Usage"
-msgstr "Usage"
-
-#: src/landscape/app-mosaic.tsx
-#: src/routes/_shell.landscape.$appId.tsx
-msgid "Usage unknown"
-msgstr "Usage unknown"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Use a staff list instead"
@@ -17275,14 +15501,6 @@ msgstr "Used a connected tool"
 msgid "Used by"
 msgstr "Used by"
 
-#: src/policies/policy-editing.tsx
-msgid "Used by more than this many people"
-msgstr "Used by more than this many people"
-
-#: src/landscape/landscape.ts
-msgid "Used in"
-msgstr "Used in"
-
 #: src/brain/brain.ts
 msgid "Used in a workflow"
 msgstr "Used in a workflow"
@@ -17290,19 +15508,6 @@ msgstr "Used in a workflow"
 #: src/labels.ts
 msgid "User"
 msgstr "User"
-
-#: src/routes/_shell.landscape.$appId.usage.$userId.tsx
-msgid "User not found"
-msgstr "User not found"
-
-#: src/landscape/filter-menu.tsx
-#: src/landscape/landscape.ts
-msgid "Users"
-msgstr "Users"
-
-#: src/landscape/data-tab.tsx
-msgid "Users by team"
-msgstr "Users by team"
 
 #. A time zone
 #: src/routes/_shell.settings.workspace.tsx
@@ -17316,50 +15521,6 @@ msgstr "VAT number"
 #: src/brain/brain-markdown.ts
 msgid "Vault root"
 msgstr "Vault root"
-
-#: src/landscape/landscape-overview.ts
-#: src/landscape/landscape.ts
-msgid "Vendor"
-msgstr "Vendor"
-
-#: src/landscape/landscape-audit.ts
-msgctxt "category of an audit event"
-msgid "Vendor"
-msgstr "Vendor"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Vendor"
-msgstr "Vendor"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Vendor certificates"
-msgstr "Vendor certificates"
-
-#: src/landscape/overview-tab.tsx
-msgid "Vendor documents"
-msgstr "Vendor documents"
-
-#: src/policies/policy.ts
-msgid "Vendor has no {certificate}"
-msgstr "Vendor has no {certificate}"
-
-#: src/policies/policy.ts
-msgid "Vendor has none of {certificates}"
-msgstr "Vendor has none of {certificates}"
-
-#: src/policies/policy.ts
-msgid "Vendor lacks one of {certificates}"
-msgstr "Vendor lacks one of {certificates}"
-
-#: src/landscape/overview-tab.tsx
-msgid "Vendor, data handling and governance facts."
-msgstr "Vendor, data handling and governance facts."
-
-#: src/policies/policy-editing.tsx
-msgid "Vendors, separated by commas"
-msgstr "Vendors, separated by commas"
 
 #: src/activity/audit-log.tsx
 msgid "Verified"
@@ -17453,7 +15614,6 @@ msgid "Very good"
 msgstr "Very good"
 
 #: src/connections/source-badge.tsx
-#: src/landscape/landscape.ts
 msgid "Via Composio"
 msgstr "Via Composio"
 
@@ -17462,18 +15622,9 @@ msgstr "Via Composio"
 msgid "Vienna"
 msgstr "Vienna"
 
-#: src/routes/_shell.landscape.index.tsx
-msgctxt "how the landscape is shown"
-msgid "View"
-msgstr "View"
-
 #: src/chat/studio.tsx
 msgid "View app"
 msgstr "View app"
-
-#: src/landscape/overview-tab.tsx
-msgid "View usage"
-msgstr "View usage"
 
 #: src/brain/brain.ts
 msgid "Vision"
@@ -17575,11 +15726,6 @@ msgstr "Waiting for an event"
 #: src/brain/work-knowledge.tsx
 msgid "Waiting for more voices"
 msgstr "Waiting for more voices"
-
-#: src/policies/policy.ts
-msgctxt "state of a data processing agreement"
-msgid "Waiting for signature"
-msgstr "Waiting for signature"
 
 #: src/dashboard/custom-widget.tsx
 msgctxt "workflow runs"
@@ -17685,11 +15831,6 @@ msgstr "Was unknown"
 #: src/brain/brain.ts
 msgid "Was: {before}"
 msgstr "Was: {before}"
-
-#: src/policies/policy.ts
-msgctxt "status of a policy rule"
-msgid "Watching"
-msgstr "Watching"
 
 #. A folder of sources: conversations, Pulse, documents or connections
 #: src/brain/brain.ts
@@ -17839,10 +15980,6 @@ msgstr "What goes differently"
 msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "What Grasp and its agents do by themselves is under Activity."
 
-#: src/routes/_shell.policies.documents.$policyId.tsx
-msgid "What Grasp cannot check yet"
-msgstr "What Grasp cannot check yet"
-
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."
 msgstr "What Grasp does not know yet, and who can answer it."
@@ -17918,17 +16055,9 @@ msgstr "What is shared with this team stops being shared with its members throug
 msgid "What is still missing"
 msgstr "What is still missing"
 
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "What it checks"
-msgstr "What it checks"
-
 #: src/workflows/traces.tsx
 msgid "What it did"
 msgstr "What it did"
-
-#: src/policies/policy-editing.tsx
-msgid "What it does"
-msgstr "What it does"
 
 #: src/onboarding/organization-dialogs.tsx
 msgid "What it does, in a few words"
@@ -17971,10 +16100,6 @@ msgstr "What it should say"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "What it was for, and which model did it."
-
-#: src/policies/policy-editing.tsx
-msgid "What it's for"
-msgstr "What it's for"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
@@ -18110,10 +16235,6 @@ msgstr "What the run of version {version} did"
 msgid "What the table shows"
 msgstr "What the table shows"
 
-#: src/landscape/overview-tab.tsx
-msgid "What the vendor publishes about its certificates."
-msgstr "What the vendor publishes about its certificates."
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "What the workspace pays for Grasp."
 msgstr "What the workspace pays for Grasp."
@@ -18206,10 +16327,6 @@ msgstr "What you and your agents remember, and what others share with you, shows
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "What you chose"
-
-#: src/landscape/data-tab.tsx
-msgid "What your identity provider granted {appName}."
-msgstr "What your identity provider granted {appName}."
 
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
@@ -18330,16 +16447,9 @@ msgctxt "the card that follows one item across workflows"
 msgid "Where is it"
 msgstr "Where is it"
 
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.onboarding.open.tsx
-#: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Where it comes from"
 msgstr "Where it comes from"
-
-#: src/policies/policy-editing.tsx
-msgctxt "rule condition"
-msgid "Where it's hosted"
-msgstr "Where it's hosted"
 
 #: src/settings/stephen-settings.tsx
 msgid "Where people reach him"
@@ -18374,10 +16484,6 @@ msgstr "Where the summary goes"
 msgid "Where the time goes"
 msgstr "Where the time goes"
 
-#: src/landscape/data-tab.tsx
-msgid "Where the vendor says data is stored and processed, and any transfers to other countries."
-msgstr "Where the vendor says data is stored and processed, and any transfers to other countries."
-
 #: src/brain/brain-article/team-work.tsx
 msgid "Where the work passes on"
 msgstr "Where the work passes on"
@@ -18385,10 +16491,6 @@ msgstr "Where the work passes on"
 #: src/onboarding/work-list.tsx
 msgid "Where the workflows stand"
 msgstr "Where the workflows stand"
-
-#: src/landscape/app-cells.tsx
-msgid "Where this app comes up"
-msgstr "Where this app comes up"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"
@@ -18409,10 +16511,6 @@ msgstr "Whether people from Grasp can sign in to help with this workspace. They 
 #: src/chat/suggestions.tsx
 msgid "Which AI tools do people use?"
 msgstr "Which AI tools do people use?"
-
-#: src/landscape/add-app-dialog.tsx
-msgid "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
-msgstr "Which app should Grasp start tracking? Grasp knows an app once it is connected, so one from the catalog opens where you connect it."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
@@ -18563,10 +16661,6 @@ msgstr "Who told which step"
 msgid "Who uses it"
 msgstr "Who uses it"
 
-#: src/landscape/overview-tab.tsx
-msgid "Who uses this app, and how that changed over the last 30 days."
-msgstr "Who uses this app, and how that changed over the last 30 days."
-
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
 msgid "Who works where"
@@ -18594,7 +16688,6 @@ msgstr "Whose numbers to show"
 
 #: src/engines/package-approvals.tsx
 #: src/knowledge/purge.tsx
-#: src/policies/policy-editing.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "Why"
 msgstr "Why"
@@ -18602,10 +16695,6 @@ msgstr "Why"
 #: src/workflows/run-detail.tsx
 msgid "Why it failed"
 msgstr "Why it failed"
-
-#: src/landscape/app-cells.tsx
-msgid "Why it shows"
-msgstr "Why it shows"
 
 #: src/brain/brain.ts
 msgid "Why now"
@@ -18682,10 +16771,6 @@ msgstr "Without all three, nobody is invited: the admin's links wait, and go out
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Word"
-
-#: src/policies/policy-editing.tsx
-msgid "Word for word, as the policy has it."
-msgstr "Word for word, as the policy has it."
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Words he has to know"
@@ -18898,16 +16983,6 @@ msgctxt "settings section"
 msgid "Workspace"
 msgstr "Workspace"
 
-#: src/routes/_shell.policies.index.tsx
-msgctxt "filter: apps a watching rule would act on"
-msgid "Would apply"
-msgstr "Would apply"
-
-#: src/policies/policy.ts
-msgctxt "what a watching policy rule would do to an app"
-msgid "Would apply"
-msgstr "Would apply"
-
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Would run after approval"
@@ -18967,7 +17042,6 @@ msgstr "Written in a document"
 msgid "Wrong"
 msgstr "Wrong"
 
-#: src/landscape/landscape-audit.ts
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"
 msgstr "Yes"
@@ -19215,11 +17289,6 @@ msgstr "Your plan · {of}"
 #: src/onboarding/setup-steps.tsx
 msgid "Your platform is open."
 msgstr "Your platform is open."
-
-#: src/routes/_shell.policies.index.tsx
-msgctxt "tab: the company's own policy documents"
-msgid "Your policies"
-msgstr "Your policies"
 
 #: src/chat/composer.tsx
 msgid "Your question"

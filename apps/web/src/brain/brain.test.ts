@@ -106,19 +106,6 @@ describe(buildBrain, () => {
     expect(words(note("src-pulse"), "Added")).toMatch(/^\d+ applications$/u);
   });
 
-  it("files the policies uploaded to Policies as documents, linked to Policies and to the draft they came from", () => {
-    const policy = note("policy-ai-data");
-    expect(policy.path).toStrictEqual(["Sources", "Documents"]);
-    expect(
-      policy.points.find((point) => point.label === "In Policies")?.refs[0]
-    ).toMatchObject({ policyId: "policy-ai-data" });
-    expect(policy.article?.length).toBeGreaterThan(1);
-    expect(words(note("src-ai-policy"), "Became")).toBe(
-      "AI and data guideline"
-    );
-    expect(note("policy-ai-data").backlinks).toContain("src-ai-policy");
-  });
-
   it("files sources by the way they were collected, in a fixed order", () => {
     expect(
       Object.fromEntries(
@@ -798,7 +785,6 @@ describe("a brain of a deployment that holds nothing yet", () => {
       },
     ],
     landscape: [],
-    policies: [],
   };
 
   it("is the company, its vision page and the empty source folders, linked to nothing that isn't there", () => {
@@ -914,7 +900,6 @@ describe("a brain of the onboarding alone, as core reads it for an admin", () =>
     workflows: [],
     connections: [],
     landscape: [],
-    policies: [],
   };
 
   it("files the interview, the document and its tool, and counts only the interviewed team as interviewed", () => {
