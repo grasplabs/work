@@ -44,7 +44,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 
 // The Apps page (grasplabs/prototype `components/apps/apps-overview.tsx`):
 // the apps of every domain the person can open, each a tile on a painted
-// field that opens the app in its domain (/domains/$engine/apps/$screen).
+// field that opens the app on its App's page (/apps/$app), as the
+// prototype's tile does.
 // An app is what people read for one of a domain's screens; the domains
 // themselves are the Domains page's. The newest domain's apps come first.
 // Split by where their domain stands (published, draft) only when both
@@ -156,8 +157,9 @@ const AppTile = ({
       <TileTitle
         render={
           <Link
-            params={{ engine: domain.id, screen }}
-            to="/domains/$engine/apps/$screen"
+            params={{ app: domain.id }}
+            search={{ screen }}
+            to="/apps/$app"
           />
         }
       >

@@ -3353,7 +3353,9 @@ msgstr "Freigabe für neue Tools benannt"
 
 #: src/frame/app-sidebar.tsx
 #: src/inbox/items.ts
+#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/settings/stephen-settings.tsx
 msgid "Apps"
@@ -5824,8 +5826,6 @@ msgstr "Domänen-Verknüpfungen"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/landscape/app-cells.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.new.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -9380,6 +9380,10 @@ msgstr "Mehr zum Projekt {name}"
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
 msgstr "Mehr zu diesem Chat"
+
+#: src/engines/app-status.tsx
+msgid "More for this domain"
+msgstr "Mehr zu dieser Domäne"
 
 #: src/policies/policy-editing.tsx
 msgid "More for this policy"
