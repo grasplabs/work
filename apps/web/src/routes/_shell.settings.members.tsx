@@ -402,7 +402,10 @@ const MembersList = ({
   const [search, setSearch] = useState("");
   const searchField = useRef<HTMLInputElement>(null);
   const people = members.length;
-  const shown = members.filter((member) => matches(member, search));
+  // Their own row first, as in the prototype; the rest as core lists them.
+  const shown = members
+    .filter((member) => matches(member, search))
+    .toSorted((a, b) => Number(b.userId === me) - Number(a.userId === me));
   const invited = invitations.filter((invitation) =>
     matches(invitation, search)
   );
