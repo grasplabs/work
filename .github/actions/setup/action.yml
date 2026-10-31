@@ -1,0 +1,58 @@
+# Vite+, Node.js and the workspace's installed dependencies: every job's
+# setup but the journeys' (their image packs caches another way, see e2e in
+# ci.yml). The installed node_modules are cached whole, by the lockfile:
+# restoring them skips the install, which with pnpm's store restored still
+# linked 1,200 packages, checked the lockfile against the supply-chain
+# policies over the network and ran the build scripts, about 25 s of each
+# job's 39 s setup (October 2026). A lockfile the cache hasn't seen installs
+# from the pnpm store's cache as before, and checks its policies.
+#
+# Only a job that says so saves a cache it missed: `plan` for a pull
+# request, which runs before the test shards, so they hit what it saved,
+# and `release` on a push to main, whose caches every pull request can
+# read. Every job saving would have them all pack the same 2 GB at once,
+# for one to win.
+name: Set up
+description: Install Vite+ and Node.js, and restore or install node_modules
+
+inputs:
+  save:
+    description: "Save node_modules when the cache missed: true or false"
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # Every node_modules of the workspace's packages (pnpm-workspace.yaml):
+    # each holds links into the root's virtual store.
+    - id: modules
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          packages/connectors/*/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.node-version', 'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+    - if: steps.modules.outputs.cache-hit == 'true'
+      uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        node-version-file: .node-version
+        cache: false
+        run-install: false
+    - if: steps.modules.outputs.cache-hit != 'true'
+      uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        node-version-file: .node-version
+        cache: true
+        run-install: |
+          - args: ["--frozen-lockfile"]
+    - if: steps.modules.outputs.cache-hit != 'true' && inputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+          packages/connectors/*/node_modules
+        key: ${{ steps.modules.outputs.cache-primary-key }}
