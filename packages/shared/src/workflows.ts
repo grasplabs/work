@@ -8,7 +8,11 @@ import type { Json } from "./json.ts";
 import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
 import { platformLimits } from "./platform-limits.ts";
+import type { RunFilterStatus } from "./run-filter.ts";
 import type { WorkflowRunStatus } from "./workflow-resources.ts";
+
+export { runFilterStatuses } from "./run-filter.ts";
+export type { RunFilterStatus } from "./run-filter.ts";
 
 // A workflow is code in an App (`workflows/<id>.ts`), written with the
 // workflow SDK. Each run is pinned to the App version it started on, and
@@ -1175,19 +1179,6 @@ export const callReviewed = (
     (calls.steps[name]?.includes(binding) ?? false)
   );
 };
-
-/**
- * What the Runs list is filtered by: runs waiting for a decision, running
- * otherwise (paused ones too), failed, or done (completed or cancelled).
- */
-export const runFilterStatuses = [
-  "waiting",
-  "running",
-  "failed",
-  "done",
-] as const;
-
-export type RunFilterStatus = (typeof runFilterStatuses)[number];
 
 /** Which runs `WorkflowsApi.runs` lists; each field narrows it. */
 export interface RunFilter {

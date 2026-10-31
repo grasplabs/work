@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 
 import { folderHolding, regionGroups } from "../brain/atlas-map.ts";
-import { atlasOf, isRegion, TEAM_FOLDER } from "../brain/brain-atlas.ts";
+import { atlasOf, TEAM_FOLDER } from "../brain/brain-atlas.ts";
 import type { Atlas, Region } from "../brain/brain-atlas.ts";
 import type { BrainData } from "../brain/brain-data.ts";
 import { BrainNav } from "../brain/brain-nav.tsx";
@@ -22,6 +22,7 @@ import {
 import type { Brain, Folder, Note } from "../brain/brain.ts";
 import { NoteReveal } from "../brain/note-reveal.tsx";
 import { readBrain } from "../brain/read-brain.ts";
+import { isRegion } from "../brain/region-id.ts";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";

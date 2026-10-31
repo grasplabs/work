@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
-import { builtins, fingerprintOf, release } from "../src/builtins.ts";
+import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, ordinaryData } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -215,7 +215,7 @@ const copyOf = async (
   admin: Person,
   { model = true, guests = false }: { model?: boolean; guests?: boolean } = {}
 ): Promise<AppId> => {
-  await builtins(env).ensureInstalled(await fingerprintOf(release));
+  await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
   const made = await admin.api.apps.blueprints.create(intake, {
     name: `Intake ${unique()}`,
   });
