@@ -783,10 +783,6 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{known} of {workflows} workflows known"
 msgstr "{known} de {workflows} flujos de trabajo conocidos"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label} · {count}"
-msgstr "{label} · {count}"
-
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
@@ -4178,10 +4174,6 @@ msgstr "Sigue allí. ¿Ya no tienes ese dispositivo? Pide a quien te envió el e
 msgid "Case {name}, when it holds"
 msgstr "Caso {name}, cuando se cumple"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Categories"
-msgstr "Categorías"
-
 #: src/landscape/landscape-audit.ts
 #: src/landscape/landscape.ts
 msgid "Category"
@@ -4903,6 +4895,11 @@ msgid "Connected"
 msgstr "Conectado"
 
 #: src/routes/_shell.integrations.index.tsx
+msgctxt "apps that are connected and that workflows use"
+msgid "Connected"
+msgstr "Conectadas"
+
+#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Conectadas"
@@ -4945,6 +4942,10 @@ msgstr "Proveedores conectados"
 #: src/brain/brain.ts
 msgid "Connected, direct"
 msgstr "Conectada, acceso directo"
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Connected, used by no workflow you can open"
+msgstr "Conectadas, sin usar en ningún flujo de trabajo que usted pueda abrir"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -6243,6 +6244,10 @@ msgstr "Cada lunes por la mañana, para ti"
 msgid "Every Monday: hours, runs, and what is waiting."
 msgstr "Cada lunes: horas, ejecuciones y lo que está pendiente."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Every other app Grasp can connect to."
+msgstr "Todas las demás apps que Grasp puede conectar."
+
 #: src/landscape/audit-trail.tsx
 #: src/routes/_shell.landscape.$appId.audit.tsx
 msgid "Every recorded access and permission event, most recent first."
@@ -6411,10 +6416,6 @@ msgstr "Excepciones"
 msgctxt "filter: apps allowed to break a rule"
 msgid "Exceptions"
 msgstr "Excepciones"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Expand the filters"
-msgstr "Desplegar los filtros"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -6640,11 +6641,6 @@ msgstr "Filtrar integraciones"
 msgid "Filters"
 msgstr "Filtros"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "heading of the column that filters the integrations"
-msgid "Filters"
-msgstr "Filtros"
-
 #: src/onboarding/about-story.tsx
 msgid "Finance"
 msgstr "Finanzas"
@@ -6768,10 +6764,6 @@ msgstr "Marca o bloquea las aplicaciones que la incumplen."
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Plegar el chat"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Fold the filters"
-msgstr "Plegar los filtros"
 
 #: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
@@ -9339,6 +9331,11 @@ msgstr "Más sobre estas conexiones"
 msgid "More about this connection"
 msgstr "Más sobre esta conexión"
 
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "the catalog's apps nobody connected"
+msgid "More apps"
+msgstr "Más apps"
+
 #: src/chat/chat-menus.tsx
 msgid "More for {title}"
 msgstr "Más para {title}"
@@ -9582,6 +9579,7 @@ msgstr "Hay que volver a iniciar sesión"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Alguien tiene que volver a iniciar sesión"
