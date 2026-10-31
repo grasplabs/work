@@ -2104,6 +2104,7 @@ msgstr "Une étape"
 #: src/workflows/requests/request-parts.tsx
 msgid "A team"
 msgstr "Une équipe"
+
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "A team it is no longer shared with"
 msgstr "Une équipe avec qui elle n’est plus partagée"
@@ -2770,6 +2771,10 @@ msgstr "Une application ne s’exécute qu’une fois son code approuvé par un 
 msgid "An archived domain is kept as it is and goes offline: nobody opens its apps, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
 msgstr "Un domaine archivé est conservé tel quel et passe hors ligne : personne n’ouvre ses apps, ses déclencheurs s’arrêtent et ses exécutions inachevées sont annulées. Un concepteur peut le restaurer plus tard, en brouillon."
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
+msgstr "Un domaine archivé est conservé tel quel et passe hors ligne : personne ne l’ouvre, ses déclencheurs s’arrêtent et ses exécutions inachevées sont annulées. Un créateur peut le restaurer, comme brouillon."
+
 #: src/settings/audit-chain.tsx
 msgid "An entry doesn't link to the one before it."
 msgstr "Une entrée n’est pas liée à celle qui la précède."
@@ -2786,9 +2791,6 @@ msgstr "Une entrée a été modifiée après avoir été écrite."
 msgctxt "memory record kind"
 msgid "An experience"
 msgstr "Une expérience"
-#: src/routes/_shell.apps.$app_.settings.tsx
-msgid "An archived domain is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
-msgstr "Un domaine archivé est conservé tel quel et passe hors ligne : personne ne l’ouvre, ses déclencheurs s’arrêtent et ses exécutions inachevées sont annulées. Un créateur peut le restaurer, comme brouillon."
 
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
@@ -5209,8 +5211,6 @@ msgstr "Ne participe pas : personne n’y reçoit de lien."
 #: src/dashboard/runs-widget.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
-#: src/landscape/app-cells.tsx
-#: src/landscape/landscape-overview.ts
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
@@ -5266,9 +5266,7 @@ msgstr "Raccourcis des domaines"
 #: src/chat/side-panel.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
-#: src/landscape/app-cells.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -6308,6 +6306,7 @@ msgstr "A donné son consentement pour une connexion"
 #: src/activity/audit-words.ts
 msgid "Gave up revoking a disconnected account's access at its provider"
 msgstr "A renoncé à révoquer l’accès d’un compte déconnecté chez son fournisseur"
+
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "General"
 msgstr "Général"
@@ -8154,34 +8153,9 @@ msgctxt "thinking effort"
 msgid "Low"
 msgstr "Faible"
 
-#: src/landscape/insight.tsx
-msgid "Low confidence"
-msgstr "Confiance faible"
-
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Made by {person} on {date}."
 msgstr "Créée par {person} le {date}."
-
-#: src/policies/policy.ts
-msgid "Made by {vendors}"
-msgstr "Éditée par {vendors}"
-
-#: src/policies/policy-editing.tsx
-#: src/policies/rules-table.tsx
-msgid "Made by hand"
-msgstr "Créée manuellement"
-
-#: src/routes/_shell.policies.rules.$ruleId.tsx
-msgid "Made by hand by {createdBy} on {madeOn}."
-msgstr "Créée manuellement par {createdBy} le {madeOn}."
-
-#: src/policies/policy-editing.tsx
-msgid "Made by none of"
-msgstr "D’aucun de"
-
-#: src/policies/policy-editing.tsx
-msgid "Made by one of"
-msgstr "De l’un de"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Made for"
@@ -11200,6 +11174,10 @@ msgstr "Rangez-le dans des dossiers avec une barre oblique, comme dans manuel/co
 msgid "Put one back"
 msgstr "En remettre un"
 
+#: src/routes/_shell.apps.$app_.settings.tsx
+msgid "Putting it away"
+msgstr "La ranger"
+
 #: src/dashboard/widget-progress.tsx
 msgid "Putting it on your board…"
 msgstr "Ajout à votre tableau de bord…"
@@ -11211,9 +11189,6 @@ msgstr "Correction, essai {attempt} sur {attempts}…"
 #: src/chat/suggestions.tsx
 msgid "Questions to start with"
 msgstr "Questions pour commencer"
-#: src/routes/_shell.apps.$app_.settings.tsx
-msgid "Putting it away"
-msgstr "La ranger"
 
 #: src/workflows/runs.tsx
 msgid "Queued"
@@ -12773,17 +12748,14 @@ msgstr "Affichage des {pageMaxLimit} premiers fichiers."
 msgid "Showing the first {runsPageSize} runs of more."
 msgstr "Affichage des {runsPageSize} premières exécutions sur davantage."
 
-#: src/workflows/workflow-diagram.tsx
-msgctxt "parts in a row"
-msgid "Side by side"
-msgstr "Côte à côte"
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Shown with the domain. It opens the domain to nobody: who may use it is who it is shared with."
 msgstr "Affiché avec le domaine. Cela ne le rend accessible à personne : seules les personnes avec qui il est partagé peuvent l’utiliser."
 
-#: src/policies/policy.ts
-msgid "Shows which apps it would flag or block, without doing it."
-msgstr "Montre les applications qu’elle signalerait ou bloquerait, sans le faire."
+#: src/workflows/workflow-diagram.tsx
+msgctxt "parts in a row"
+msgid "Side by side"
+msgstr "Côte à côte"
 
 #: src/routes/_shell.index.tsx
 #: src/screens/app-panel.tsx
@@ -12987,12 +12959,13 @@ msgstr "Quelqu’un d’autre"
 msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
 msgstr "Quelqu’un d’autre s’est connecté sur ce navigateur, cette application a donc été arrêtée. Réessayez pour l’ouvrir au nom de la personne connectée maintenant."
 
-#: src/knowledge/purge.tsx
-msgid "Someone left the organization"
-msgstr "Quelqu’un a quitté l’organisation"
 #: src/routes/_shell.apps.$app_.settings.tsx
 msgid "Someone it is no longer shared with"
 msgstr "Quelqu’un avec qui elle n’est plus partagée"
+
+#: src/knowledge/purge.tsx
+msgid "Someone left the organization"
+msgstr "Quelqu’un a quitté l’organisation"
 
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
@@ -13188,7 +13161,6 @@ msgstr "Statistiques"
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
-#: src/policies/policy-editing.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
