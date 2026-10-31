@@ -344,15 +344,12 @@ describe("changing the policies", () => {
     };
 
     expect({
-      unpicked: ruleInputOf({
-        ...fresh,
-        conditions: [freshCondition("data")],
-      }),
+      fresh: ruleInputOf(fresh),
       none: ruleInputOf({ ...picked, conditions: [] }),
       picked: ruleInputOf(picked),
       valid: ruleInputSchema.safeParse(ruleInputOf(picked)).success,
     }).toStrictEqual({
-      unpicked: undefined,
+      fresh: undefined,
       none: undefined,
       picked: {
         name: "No unowned AI",

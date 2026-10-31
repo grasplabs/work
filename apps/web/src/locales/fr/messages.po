@@ -5292,6 +5292,10 @@ msgstr "Version actuelle"
 msgid "Customer data"
 msgstr "Données clients"
 
+#: src/policies/policy-editing.tsx
+msgid "Customer data stays in the EU"
+msgstr "Les données clients restent dans l’UE"
+
 #: src/landscape/landscape.ts
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
 msgstr "Fiches clients, messages, tickets, champs CRM ou fichiers qui identifient des clients."
@@ -6868,10 +6872,6 @@ msgstr "Par exemple : répond aux questions des clients"
 msgid "For example: everything around lease contracts, from request to renewal"
 msgstr "Par exemple : tout ce qui concerne les contrats de leasing, de la demande au renouvellement"
 
-#: src/policies/policy-editing.tsx
-msgid "For example: No AI tools hosted in China"
-msgstr "Par exemple : aucun outil d’IA hébergé en Chine"
-
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "Par exemple : lire les nouvelles recrues et préparer leur premier jour"
@@ -7932,10 +7932,6 @@ msgstr "Dans vos documents, j’ai vu {tools}."
 #: src/dashboard/in-inbox.tsx
 msgid "In your inbox"
 msgstr "Dans votre boîte de réception"
-
-#: src/policies/policy-editing.tsx
-msgid "In your own words, so everyone knows why the rule is there."
-msgstr "Avec vos propres mots, pour que chacun sache pourquoi la règle existe."
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -17210,11 +17206,6 @@ msgstr "Importez un fichier PDF, Word ou Excel, ou des sous-titres (.vtt)"
 msgid "Upload a policy"
 msgstr "Importer une politique"
 
-#: src/policies/policy-editing.tsx
-msgctxt "button: opens the dialog to upload a policy"
-msgid "Upload policy"
-msgstr "Importer une politique"
-
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
 msgid "Uploaded"
@@ -17961,10 +17952,6 @@ msgstr "Ce à quoi elle est liée ne peut plus la servir : son autorisation a é
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
-#: src/policies/policy-editing.tsx
-msgid "What it is for"
-msgstr "À quoi elle sert"
-
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Ce sur quoi il repose"
@@ -17984,6 +17971,10 @@ msgstr "Ce qu'il devrait dire"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "À quoi elle a servi, et quel modèle l’a fait."
+
+#: src/policies/policy-editing.tsx
+msgid "What it's for"
+msgstr "À quoi elle sert"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"

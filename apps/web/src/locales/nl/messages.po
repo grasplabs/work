@@ -5292,6 +5292,10 @@ msgstr "Huidige versie"
 msgid "Customer data"
 msgstr "Klantgegevens"
 
+#: src/policies/policy-editing.tsx
+msgid "Customer data stays in the EU"
+msgstr "Klantgegevens blijven in de EU"
+
 #: src/landscape/landscape.ts
 msgid "Customer records, messages, tickets, CRM fields or files that identify customers."
 msgstr "Klantgegevens, berichten, tickets, CRM-velden of bestanden die klanten identificeren."
@@ -6868,10 +6872,6 @@ msgstr "Bijvoorbeeld: beantwoordt vragen van klanten"
 msgid "For example: everything around lease contracts, from request to renewal"
 msgstr "Bijvoorbeeld: alles rond leasecontracten, van aanvraag tot verlenging"
 
-#: src/policies/policy-editing.tsx
-msgid "For example: No AI tools hosted in China"
-msgstr "Bijvoorbeeld: geen AI-tools die in China worden gehost"
-
 #: src/connections/request-app-dialog.tsx
 msgid "For example: read new hires and prepare their first day"
 msgstr "Bijvoorbeeld: nieuwe medewerkers lezen en hun eerste dag voorbereiden"
@@ -7932,10 +7932,6 @@ msgstr "In je documenten zag ik {tools}."
 #: src/dashboard/in-inbox.tsx
 msgid "In your inbox"
 msgstr "In je inbox"
-
-#: src/policies/policy-editing.tsx
-msgid "In your own words, so everyone knows why the rule is there."
-msgstr "In je eigen woorden, zodat iedereen weet waarom de regel er is."
 
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
@@ -17210,11 +17206,6 @@ msgstr "Upload een PDF-, Word- of Excelbestand, of ondertitels (.vtt)"
 msgid "Upload a policy"
 msgstr "Beleid uploaden"
 
-#: src/policies/policy-editing.tsx
-msgctxt "button: opens the dialog to upload a policy"
-msgid "Upload policy"
-msgstr "Beleid uploaden"
-
 #: src/policies/policies-table.tsx
 msgctxt "column: who uploaded a policy, and when"
 msgid "Uploaded"
@@ -17961,10 +17952,6 @@ msgstr "Waaraan hij gekoppeld is, kan hem niet meer bedienen: het recht is inget
 msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 msgstr "Waaraan hij gekoppeld is, is veranderd sinds de koppeling is goedgekeurd. Koppel hem opnieuw zodra je hebt gecontroleerd dat het nog past."
 
-#: src/policies/policy-editing.tsx
-msgid "What it is for"
-msgstr "Waar hij voor is"
-
 #: src/brain/memory-page.tsx
 msgid "What it rests on"
 msgstr "Waar het op berust"
@@ -17984,6 +17971,10 @@ msgstr "Wat er moet staan"
 #: src/routes/_shell.onboarding.ai-use.tsx
 msgid "What it was for, and which model did it."
 msgstr "Waarvoor het was, en welk model het deed."
+
+#: src/policies/policy-editing.tsx
+msgid "What it's for"
+msgstr "Waar hij voor is"
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"

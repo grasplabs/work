@@ -181,7 +181,7 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
   try {
     const adminPage = await pageOf(admin);
     await adminPage.goto("/policies");
-    await adminPage.getByRole("button", { name: "Upload policy" }).click();
+    await adminPage.getByRole("button", { name: "Upload a policy" }).click();
     await adminPage.getByLabel("Title").fill(title);
     await adminPage
       .getByLabel("The policy's text")
@@ -207,10 +207,7 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
       adminPage.getByRole("heading", { level: 1, name: "New rule" })
     ).toBeVisible();
     await adminPage.getByLabel("Name").fill(name);
-    // It starts by catching AI tools, as the prototype's form does.
-    await expect(
-      adminPage.getByRole("button", { name: "AI tool" })
-    ).toHaveAttribute("aria-pressed", "true");
+    await adminPage.getByRole("button", { name: "Customer data" }).click();
     await adminPage
       .getByLabel("The passage it says")
       .fill("Staff may not paste customer data into AI tools");
@@ -256,7 +253,7 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
       },
       meanwhile.revision
     );
-    await editing.getByLabel("What it is for").fill("Changed here");
+    await editing.getByLabel("What it's for").fill("Changed here");
     await editing.getByRole("button", { name: "Save" }).click();
     await expect(
       editing.getByText("This rule changed since you started editing it")
@@ -265,10 +262,10 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await editing
       .getByRole("button", { name: "Load the current rule" })
       .click();
-    await expect(editing.getByLabel("What it is for")).toHaveValue(
+    await expect(editing.getByLabel("What it's for")).toHaveValue(
       "Changed meanwhile"
     );
-    await editing.getByLabel("What it is for").fill("Changed after reading it");
+    await editing.getByLabel("What it's for").fill("Changed after reading it");
     await editing.getByRole("button", { name: "Save" }).click();
     await expect(editing).toHaveCount(0);
     await expect(adminPage.getByText("Changed after reading it")).toBeVisible();
@@ -284,7 +281,7 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await page.goto("/policies");
     await expect(page.getByText(name)).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Upload policy" })
+      page.getByRole("button", { name: "Upload a policy" })
     ).toHaveCount(0);
     await expect(page.getByRole("link", { name: "New rule" })).toHaveCount(0);
     // Its page, opened by its address, sends them back.
