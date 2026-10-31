@@ -39,6 +39,7 @@
     "./admin/present": "./src/admin/present.ts",
     "./admin/trail": "./src/admin/trail.ts",
     "./agent": "./src/agent.ts",
+    "./ai-providers": "./src/ai-providers.ts",
     "./app-file-limits": "./src/app-file-limits.ts",
     "./app-files": "./src/app-files.ts",
     "./app-link-limits": "./src/app-link-limits.ts",

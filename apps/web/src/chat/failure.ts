@@ -10,6 +10,7 @@ import { msg } from "@lingui/core/macro";
 const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.invalid_call": msg`Grasp couldn't put this question to the model. Try again.`,
   "model.unconfigured": msg`Models aren't set up yet. Ask your admin to have Grasp set them up.`,
+  "model.no_provider": msg`No AI provider is connected yet. Ask your admin to connect one.`,
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
   "model.eu_only": msg`This chat stays in the EU, and this model isn't hosted there. Pick another one.`,
   "model.sensitive_data": msg`This chat holds sensitive data this model may not see. Pick another one.`,
