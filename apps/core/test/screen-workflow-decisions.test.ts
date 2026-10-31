@@ -967,19 +967,51 @@ describe(
           target?.id === raced.decisionId
       ).length;
 
-      // An answer against its run closing it at the deadline: one of them.
-      const timed = await runAsking(app, opened + 1000);
-      const run = {
+      // An answer against its run closing it at the deadline, both orders,
+      // each landed at the exact point: reviewed and confirmed first, then
+      // the close just before the answer's write, or just after it.
+      const runOf = (asked: { runId: string }) => ({
         kind: "resource" as const,
-        runId: timed.runId,
+        runId: asked.runId,
         workflow: workflowId,
         version: 1,
+      });
+      const closedFirst = await runAsking(app, opened + 1000);
+      let closedBefore: { answered: boolean } | undefined;
+      const lateAnswer = await answered(
+        reviewer,
+        screen,
+        closedFirst,
+        approve,
+        async () => {
+          closedBefore = await decisionOutcome(
+            env,
+            runOf(closedFirst),
+            closedFirst.decisionId,
+            true
+          );
+        }
+      );
+      const answeredFirst = await runAsking(app, opened + 1500);
+      const intime = await answered(reviewer, screen, answeredFirst, approve);
+      const closedAfter = await decisionOutcome(
+        env,
+        runOf(answeredFirst),
+        answeredFirst.decisionId,
+        true
+      );
+      const deadline = {
+        closedFirst: {
+          answer: lateAnswer,
+          status: await statusOf(closedFirst.decisionId),
+          answered: closedBefore?.answered,
+        },
+        answeredFirst: {
+          answer: intime,
+          status: await statusOf(answeredFirst.decisionId),
+          answered: closedAfter.answered,
+        },
       };
-      const [late, closed] = await Promise.all([
-        answered(reviewer, screen, timed, approve),
-        decisionOutcome(env, run, timed.decisionId, true),
-      ]);
-      const timedStatus = await statusOf(timed.decisionId);
 
       // The context changes between the confirmation and the answer.
       const changed = await runAsking(app, opened + 2000);
@@ -1030,14 +1062,8 @@ describe(
         oneStands: winners.length === 1 && both.includes("decision.closed"),
         racedMatches: racedStatus === winners[0],
         racedAnswers,
-        // The answer and the close agree on how it ended.
-        timed:
-          (late === "approved" &&
-            timedStatus === "approved" &&
-            closed.answered) ||
-          (late === "decision.closed" &&
-            timedStatus === "timed_out" &&
-            !closed.answered),
+        // The answer and the close agree on how it ended, either way.
+        deadline,
         conflict,
         changedStatus,
         reviewedAgain,
@@ -1049,7 +1075,18 @@ describe(
         oneStands: true,
         racedMatches: true,
         racedAnswers: 1,
-        timed: true,
+        deadline: {
+          closedFirst: {
+            answer: "decision.closed",
+            status: "timed_out",
+            answered: false,
+          },
+          answeredFirst: {
+            answer: "approved",
+            status: "approved",
+            answered: true,
+          },
+        },
         conflict: "decision.conflict",
         changedStatus: "open",
         reviewedAgain: "approved",
