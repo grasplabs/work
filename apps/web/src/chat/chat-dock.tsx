@@ -1,6 +1,7 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
   Link,
@@ -17,13 +18,14 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { lazy, Suspense, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { buildsApp } from "../engines/app-role.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { useFrameRead } from "../frame/frame-read.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -38,9 +40,15 @@ import { setDockMode, useDockDrawerWidth, useDockMode } from "./dock-mode.ts";
 import type { DockMode } from "./dock-mode.ts";
 import { DrawerEdge } from "./drawer-edge.tsx";
 import { HeldWrites } from "./held-writes.tsx";
-import { ChatThread } from "./thread.tsx";
 import { useAsk } from "./use-ask.ts";
 import type { AskOptions } from "./use-ask.ts";
+
+// The conversation, with its Markdown and code highlighting, loads once a
+// chat is open: most pages show the dock folded or empty.
+const ChatThread = lazy(async () => {
+  const { ChatThread: thread } = await import("./thread.tsx");
+  return { default: thread };
+});
 
 // Grasp's chat on every page but Chat's own, bottom right, as in the
 // prototype (`components/chat/global-chat.tsx`, `knowledge/brain-chat.tsx`):
@@ -78,20 +86,68 @@ const readModels = async (
     signal
   );
 
-/** Why nothing can be asked yet, if that is so: the models are what a question names. */
+/**
+ * Why nothing can be asked yet, if that is so: the models are what a
+ * question names. None offered means no AI provider to call yet, or none
+ * of its models chosen: `provider`, said as a state with the way out.
+ */
 const useNoModels = (
   models: Loaded<Offered> | undefined
-): string | undefined => {
+): { why: "provider" } | { why: "read"; text: string } | undefined => {
   const { t } = useLingui();
   if (models === undefined || models.state === "ready") {
     return models?.state === "ready" && models.data.models.length === 0
-      ? t`No model is set up for this deployment yet.`
+      ? { why: "provider" }
       : undefined;
   }
   if (models.state === "offline") {
-    return t`Grasp can't be reached right now. Try again in a moment.`;
+    return {
+      why: "read",
+      text: t`Grasp can't be reached right now. Try again in a moment.`,
+    };
   }
-  return models.state === "refused" ? models.message : undefined;
+  return models.state === "refused"
+    ? { why: "read", text: models.message }
+    : undefined;
+};
+
+/**
+ * Why nothing can be asked yet, under the box: the way to connect an AI
+ * provider, or why the models couldn't be read, with the way to read them
+ * again.
+ */
+const NoModels = ({
+  noModels,
+  open,
+  onRetry,
+}: {
+  noModels: NonNullable<ReturnType<typeof useNoModels>>;
+  open: boolean;
+  onRetry: (() => void) | undefined;
+}) => {
+  if (noModels.why === "provider") {
+    return (
+      <div className={open ? undefined : "px-3 pb-3"}>
+        <ConnectAiProvider size="xs" />
+      </div>
+    );
+  }
+  return (
+    <p
+      className={
+        open
+          ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
+          : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
+      }
+    >
+      {noModels.text}
+      {onRetry === undefined ? null : (
+        <Button onClick={onRetry} size="xs" variant="link">
+          <Trans>Try again</Trans>
+        </Button>
+      )}
+    </p>
+  );
 };
 
 /** A button in the dock's header, named by its label. */
@@ -212,31 +268,40 @@ const DockThread = ({
   failure: string | undefined;
   onRetry: () => void;
 }) => {
+  const { t } = useLingui();
   // Before anything is asked: a chat not made yet, or one made empty (an
   // App's, opened before its first question).
   if (chatId === undefined || (view.loaded && view.messages.length === 0)) {
     return <p className="text-muted-foreground flex-1 p-5">{empty}</p>;
   }
   return (
-    <ChatThread
-      chatId={chatId}
-      compact
-      loaded={view.loaded || failure !== undefined}
-      messages={view.messages}
-      onRetry={onRetry}
-      output={view.output}
-      partial={view.partial}
-      running={view.running}
-      tools={view.tools}
-    >
-      {failure === undefined && view.stopped === null ? null : (
-        <div className="flex flex-col gap-2">
-          <ErrorText>{failure}</ErrorText>
-          <ErrorText>{view.stopped ?? undefined}</ErrorText>
+    <Suspense
+      fallback={
+        <div className="flex flex-1 justify-center py-8">
+          <Spinner aria-label={t`Loading…`} />
         </div>
-      )}
-      <HeldWrites chatId={chatId} version={view.held} />
-    </ChatThread>
+      }
+    >
+      <ChatThread
+        chatId={chatId}
+        compact
+        loaded={view.loaded || failure !== undefined}
+        messages={view.messages}
+        onRetry={onRetry}
+        output={view.output}
+        partial={view.partial}
+        running={view.running}
+        tools={view.tools}
+      >
+        {failure === undefined && view.stopped === null ? null : (
+          <div className="flex flex-col gap-2">
+            <ErrorText>{failure}</ErrorText>
+            <ErrorText>{view.stopped ?? undefined}</ErrorText>
+          </div>
+        )}
+        <HeldWrites chatId={chatId} version={view.held} />
+      </ChatThread>
+    </Suspense>
   );
 };
 
@@ -512,20 +577,11 @@ const Dock = ({
           {box}
           <ErrorText>{ways.failure}</ErrorText>
           {noModels === undefined ? null : (
-            <p
-              className={
-                open
-                  ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
-                  : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
-              }
-            >
-              {noModels}
-              {canRetry ? (
-                <Button onClick={retry} size="xs" variant="link">
-                  <Trans>Try again</Trans>
-                </Button>
-              ) : null}
-            </p>
+            <NoModels
+              noModels={noModels}
+              onRetry={canRetry ? retry : undefined}
+              open={open}
+            />
           )}
         </div>
       </section>

@@ -19,18 +19,14 @@ import {
   legendCorner,
 } from "../brain/atlas-overlays.tsx";
 import type { Spot, TrailStep } from "../brain/atlas-overlays.tsx";
-import {
-  atlasOf,
-  isRegion,
-  REGION_IDS,
-  signalPaths,
-} from "../brain/brain-atlas.ts";
+import { atlasOf, REGION_IDS, signalPaths } from "../brain/brain-atlas.ts";
 import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
 import { useBrainData } from "../brain/brain-data.ts";
 import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
+import { isRegion } from "../brain/region-id.ts";
 import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
 import { ThinkingDive } from "../brain/thinking/dive.tsx";
 import {

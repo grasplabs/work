@@ -26,7 +26,7 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
-import { askableFor } from "./channels/workflow-offers.ts";
+import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";

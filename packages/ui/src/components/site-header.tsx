@@ -4,7 +4,8 @@
 // rail, so the line beside it continues that sidebar's edge; then where
 // the page is; on the right, the page's actions. It stays in view while
 // the page scrolls, and keeps to one line whatever the window: on a
-// narrow one only the step before the page is kept. With no crumbs yet
+// narrow one only the step before the page is kept, or the first alone
+// (`phoneCrumbs`). With no crumbs yet
 // (the page is loading), a skeleton where they will be.
 import {
   Breadcrumb,
@@ -36,6 +37,7 @@ function SiteHeader({
   triggerLabel,
   breadcrumbLabel,
   actions,
+  phoneCrumbs = "last-two",
 }: {
   crumbs: readonly SiteCrumb[];
   /** What the sidebar's trigger says to a screen reader, translated by the page. */
@@ -43,8 +45,16 @@ function SiteHeader({
   /** The breadcrumb's name, translated by the page. */
   breadcrumbLabel?: string;
   actions?: ReactNode;
+  /**
+   * Which crumbs a phone keeps: the step before the page and the page
+   * (`last-two`, below md), or the first alone (`first`, below sm) for a
+   * page whose header is full of its own actions, as an open chat's is in
+   * the prototype, with the whole trail from sm up.
+   */
+  phoneCrumbs?: "last-two" | "first";
 }) {
   const last = crumbs.length - 1;
+  const firstOnly = phoneCrumbs === "first";
   return (
     <header
       data-slot="site-header"
@@ -67,13 +77,19 @@ function SiteHeader({
                 <Fragment key={`${index}:${crumb.label}`}>
                   {index > 0 ? (
                     <BreadcrumbSeparator
-                      className={cn(index < last && "max-md:hidden")}
+                      className={cn(
+                        firstOnly
+                          ? "max-sm:hidden"
+                          : index < last && "max-md:hidden"
+                      )}
                     />
                   ) : null}
                   <BreadcrumbItem
                     className={cn(
                       index === last ? "min-w-8" : "flex-none",
-                      index < last - 1 && "max-md:hidden"
+                      firstOnly
+                        ? index > 0 && "max-sm:hidden"
+                        : index < last - 1 && "max-md:hidden"
                     )}
                   >
                     {crumb.link === undefined ? (
