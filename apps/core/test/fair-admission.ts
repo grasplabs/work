@@ -1,7 +1,7 @@
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { admitAttempt } from "../src/workflows/quotas.ts";
@@ -249,6 +249,61 @@ export const loadWakesOf = async (run: string): Promise<number[]> =>
       .toArray()
       .map(({ at }) => at)
   );
+
+/**
+ * Once `run` waits in round `round` of waiting for load: the engine has
+ * the run waiting, and that round's wait, its latest, under way. With
+ * `end`, the round then ends now, as its time passing would (`woken`):
+ * its deadline, and the run's alarm with it, moved to now. Read and moved
+ * in one go in the run's object, so the round can't end on its own
+ * between the two. A test drives rounds so, round by round, instead of
+ * sleeping for as long as it guesses they take on a busy runner.
+ */
+export const inRound = async (
+  run: string,
+  round: number,
+  { end = false } = {}
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const waiting = await runInDurableObject(
+        runObject(run),
+        async (_object, state) => {
+          const { sql } = state.storage;
+          const [current] = sql
+            .exec<{ status: string }>("SELECT status FROM run")
+            .toArray();
+          const rounds = sql
+            .exec<{ ordinal: number; state: string }>(
+              "SELECT ordinal, state FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%' ORDER BY ordinal"
+            )
+            .toArray();
+          const latest = rounds.at(-1);
+          if (
+            current?.status !== "waiting" ||
+            rounds.length !== round ||
+            latest?.state !== "waiting"
+          ) {
+            return false;
+          }
+          if (end) {
+            const now = Date.now();
+            sql.exec(
+              "UPDATE steps SET deadline = ? WHERE ordinal = ?",
+              now,
+              latest.ordinal
+            );
+            sql.exec("UPDATE run SET wake_at = ?", now);
+            await state.storage.setAlarm(now);
+          }
+          return true;
+        }
+      );
+      expect(waiting).toBeTruthy();
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+};
 
 /**
  * Keeps the first lease of `run`'s attempts ending a second from now, again
