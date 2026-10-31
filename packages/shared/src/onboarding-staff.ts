@@ -6,6 +6,7 @@ import type { WorkRecord } from "./admin/org-record.ts";
 import type { InterviewProgress } from "./interview-links.ts";
 import type { InterviewPhase } from "./interview-turn.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
+import type { LogActor } from "./onboarding-staff-log.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
 import type {
   Agreements,
@@ -14,6 +15,9 @@ import type {
   InterviewLocale,
   Interviewer,
 } from "./onboarding.ts";
+
+export { logActors, logFilterSchema } from "./onboarding-staff-log.ts";
+export type { LogActor, LogFilter } from "./onboarding-staff-log.ts";
 
 // Grasp's onboarding area (core's onboarding/staff-area.ts): what a Grasp
 // consultant in a client's deployment sees of its onboarding. Where it
@@ -88,10 +92,6 @@ export interface StaffNote {
   text: string;
 }
 
-/** Who did something in the log. */
-export const logActors = ["staff", "company", "person", "grasp"] as const;
-export type LogActor = (typeof logActors)[number];
-
 /** One thing that happened in the onboarding. */
 export interface StaffLogEntry {
   seq: number;
@@ -116,20 +116,6 @@ export interface StaffLog {
   /** The roster's teams, by id and name. */
   teams: { id: string; name: string }[];
 }
-
-/** What the log can be narrowed to. */
-export const logFilterSchema = z.strictObject({
-  actor: z.enum(logActors).optional(),
-  /** The start of what happened: `interview`, `onboarding.links`. */
-  what: z
-    .string()
-    .regex(/^[a-z_.]{1,64}$/u)
-    .optional(),
-  team: z.string().max(64).optional(),
-  /** An ISO day. */
-  day: z.iso.date().optional(),
-});
-export type LogFilter = z.input<typeof logFilterSchema>;
 
 /** The most log entries one read returns, the newest first. */
 export const logPageMax = 500;

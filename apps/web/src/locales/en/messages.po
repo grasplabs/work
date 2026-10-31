@@ -2341,6 +2341,7 @@ msgid "Account"
 msgstr "Account"
 
 #: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Action"
 msgstr "Action"
 
@@ -2794,7 +2795,7 @@ msgstr "All calls"
 msgid "All calls together"
 msgstr "All calls together"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "All chats"
 msgstr "All chats"
 
@@ -4374,7 +4375,7 @@ msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sen
 msgstr "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
 
 #: src/chat/chat-more.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chat name"
 msgstr "Chat name"
@@ -4384,6 +4385,7 @@ msgid "Chat width"
 msgstr "Chat width"
 
 #: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 msgid "Chats"
 msgstr "Chats"
@@ -4754,7 +4756,7 @@ msgstr "Computations"
 msgid "Condition {position}"
 msgstr "Condition {position}"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Configuration"
 msgstr "Configuration"
 
@@ -5299,7 +5301,7 @@ msgstr "Decide"
 msgid "Decided on a held action"
 msgstr "Decided on a held action"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -5941,7 +5943,7 @@ msgstr "Each workflow run, with the runs it starts"
 msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
 msgstr "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Earlier"
@@ -7783,7 +7785,7 @@ msgstr "Input"
 msgid "Instructions"
 msgstr "Instructions"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Instructions and files"
 msgstr "Instructions and files"
 
@@ -7965,7 +7967,7 @@ msgstr "It happened"
 msgid "It happened: {who}"
 msgstr "It happened: {who}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 
@@ -8492,7 +8494,7 @@ msgstr "Languages he interviews in"
 msgid "Last"
 msgstr "Last"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Last 7 days"
@@ -8572,7 +8574,7 @@ msgstr "Leads get their link {when}. Everyone else right after their lead has ta
 msgid "Leads talked: {count} of {of}"
 msgstr "Leads talked: {count} of {of}"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Leave"
 
@@ -8601,7 +8603,7 @@ msgstr "Leave out"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Leave out personnel files and anything about one person."
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Leave this app?"
 msgstr "Leave this app?"
 
@@ -8834,6 +8836,7 @@ msgid "Loading"
 msgstr "Loading"
 
 #: src/activity/audit-log.tsx
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
@@ -9106,7 +9109,7 @@ msgstr "Missing"
 msgid "Model"
 msgstr "Model"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Model call"
 msgstr "Model call"
 
@@ -9443,12 +9446,12 @@ msgid "New board goal"
 msgstr "New board goal"
 
 #: src/chat/chat-dock.tsx
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "New chat"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "New chat in {projectName}"
 msgstr "New chat in {projectName}"
 
@@ -9476,7 +9479,7 @@ msgstr "New group"
 msgid "New note"
 msgstr "New note"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-dialog.tsx
 #: src/chat/project-shelf.tsx
 msgid "New project"
@@ -9653,11 +9656,11 @@ msgstr "No certifications on file"
 msgid "No chat app accounts are linked."
 msgstr "No chat app accounts are linked."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chat has that."
 msgstr "No chat has that."
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "No chats here yet."
 msgstr "No chats here yet."
 
@@ -11817,7 +11820,7 @@ msgstr "Per request"
 msgid "Per request, in US dollars"
 msgstr "Per request, in US dollars"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Permission"
 msgstr "Permission"
 
@@ -11909,7 +11912,7 @@ msgstr "Platform measures"
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 msgstr "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Platform update"
 msgstr "Platform update"
 
@@ -12027,7 +12030,7 @@ msgstr "Profile"
 msgid "Project"
 msgstr "Project"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/project-shelf.tsx
 msgid "Projects"
 msgstr "Projects"
@@ -12276,7 +12279,7 @@ msgctxt "what a permission lets an app do with company data"
 msgid "read"
 msgstr "read"
 
-#: src/activity/audit-log.tsx
+#: src/activity/type-labels.ts
 msgid "Read"
 msgstr "Read"
 
@@ -13418,7 +13421,7 @@ msgstr "Search by name"
 msgid "Search by name or kind"
 msgstr "Search by name or kind"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search chats and projects"
 msgstr "Search chats and projects"
 
@@ -13464,7 +13467,7 @@ msgstr "Search reads every collection you may read. Try other words, or fewer."
 msgid "Search the transcript"
 msgstr "Search the transcript"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgid "Search your chats and projects, and open one."
 msgstr "Search your chats and projects, and open one."
 
@@ -14293,7 +14296,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
-#: src/screens/screen-frame.tsx
+#: src/screens/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Stay"
 
@@ -16388,7 +16391,7 @@ msgstr "To use them again, someone who approves packages reviews them again."
 msgid "Today"
 msgstr "Today"
 
-#: src/chat/chat-switcher.tsx
+#: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"

@@ -5,8 +5,8 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 
-import { typeLabels } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
+import { typeLabels } from "../activity/type-labels.ts";
 import { formatDateTime } from "../format.ts";
 import { DashboardCard, DashboardCardHeader } from "./dashboard-card.tsx";
 
