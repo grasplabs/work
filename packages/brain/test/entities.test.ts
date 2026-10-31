@@ -1283,7 +1283,7 @@ describe("entity linking", () => {
     }
     const admin: Caller = { userId: "admin", reads: [sales.id, support.id] };
     const [hubEntity] = await entitiesFor(host.brain, admin, { query: hub });
-    const everyone = await entitiesFor(host.brain, admin, { limit: 100 });
+    const everyone = await entitiesFor(host.brain, admin, { limit: 50 });
     const others = everyone
       .filter(({ id }) => id !== hubEntity?.id)
       .map(({ id }) => id);
