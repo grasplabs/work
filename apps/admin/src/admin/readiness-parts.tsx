@@ -4,6 +4,7 @@
  */
 import {
   Alert,
+  AlertAction,
   AlertDescription,
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
@@ -33,10 +34,10 @@ const statusWords: Readonly<Record<CheckStatus, string>> = {
 };
 
 const statusVariant: Readonly<
-  Record<CheckStatus, "passed" | "destructive" | "outline">
+  Record<CheckStatus, "passed" | "attention" | "outline">
 > = {
   ready: "passed",
-  blocked: "destructive",
+  blocked: "attention",
   waiting: "outline",
   not_configured: "outline",
 };
@@ -138,8 +139,13 @@ export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
       <AlertTitle>
         {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
       </AlertTitle>
-      <AlertDescription>
-        {first === undefined ? null : <p>{`${first.title}: ${first.words}`}</p>}
+      {first === undefined ? null : (
+        <AlertDescription>
+          <p>{`${first.title}: ${first.words}`}</p>
+        </AlertDescription>
+      )}
+      {/* The alert's own place for its action: inside its description, a link takes the description's underline. */}
+      <AlertAction placement="below">
         <Link
           className={buttonVariants({ size: "sm", variant: "outline" })}
           hash={readinessId}
@@ -147,7 +153,7 @@ export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
         >
           Open Readiness
         </Link>
-      </AlertDescription>
+      </AlertAction>
     </Alert>
   );
 };

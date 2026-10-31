@@ -125,7 +125,8 @@ const Figure = ({
 const Line = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-5 py-3">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="min-w-0 text-right">{children}</dd>
+    {/* Beside its label however long it is, rather than on a line of its own pushed to the right. */}
+    <dd className="min-w-0 flex-1 text-right">{children}</dd>
   </div>
 );
 
@@ -210,7 +211,13 @@ const Summary = ({ view }: { view: AdminView }) => {
       aria-label="The contract in short"
       className="overflow-hidden rounded-xl border"
     >
-      <div className="bg-border grid grid-cols-2 gap-px lg:grid-cols-4">
+      {/* Four abreast only when there are four: two never leave half the row empty. */}
+      <div
+        className={cn(
+          "bg-border grid grid-cols-2 gap-px",
+          !draft && known && "lg:grid-cols-4"
+        )}
+      >
         {known ? (
           <Figure
             attention={contract.status !== "signed"}
