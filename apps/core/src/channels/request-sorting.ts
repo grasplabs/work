@@ -8,7 +8,7 @@ import {
   stephenRequestQuestions,
   stephenRequestTopics,
 } from "../db/core/schema.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelForRole, modelSettings, models } from "../models.ts";
 
 // Sorting one of Stephen's requests into the company's topics, and naming
 // the question it was in Grasp's own wording, through the model gateway as
@@ -136,7 +136,7 @@ export const sortRequest = async (
     answer,
   }: { userId: string; platform: string; message: string; answer: string }
 ): Promise<Sorted | null> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {
