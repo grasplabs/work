@@ -6473,6 +6473,7 @@ msgid "Fewer than 10 users"
 msgstr "Minder dan 10 gebruikers"
 
 #: src/workflows/requests/request-needs.tsx
+#: src/workflows/requests/request-who.tsx
 msgid "Fewer than five of {reach} asked him"
 msgstr "Minder dan vijf van {reach} vroegen hem iets"
 

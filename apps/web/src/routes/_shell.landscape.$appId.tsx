@@ -203,7 +203,7 @@ const AppLayout = () => {
       <SiteHeader crumbs={crumbs} />
       <Page wide>
         <AppHeader app={app.data} audit={audit} />
-        <Tabs value={tab}>
+        <Tabs size="sm" value={tab}>
           <TabsList variant="line">
             {appTabs.map((each) => (
               <TabsTrigger
