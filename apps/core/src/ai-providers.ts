@@ -8,7 +8,7 @@ import {
   aiProviders,
 } from "@grasp-os/shared/ai-providers";
 import type {
-  AiModelChoice,
+  AiModelChoiceNow,
   AiProviderAdd,
   AiProviderId,
   AiProviderKey,
@@ -23,15 +23,18 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { z } from "zod";
 
 import {
   aiModelsKind,
   aiRoutesOf,
+  choiceNow,
+  choiceOf,
   isConnectedModel,
   readModelChoice,
+  readStoredChoice,
 } from "./ai-model-choice.ts";
 import {
   auditedBatch,
@@ -41,7 +44,7 @@ import {
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import { orgSettings } from "./db/core/schema.ts";
-import { parseModelRef } from "./model-catalog.ts";
+import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
 import { models } from "./models.ts";
@@ -143,6 +146,7 @@ const listed = (
       ? aiProviders[key.provider].whereItRuns
       : `${aiProviders[key.provider].whereItRuns}: ${new URL(key.baseUrl).hostname}`,
   status: statusOf(health, key.provider),
+  models: catalogModelsOf(key.provider),
 });
 
 /** Connect's refusal of a key, in the words of this API. */
@@ -180,7 +184,11 @@ const listing = async (env: Env): Promise<AiProvidersListing> => {
       label: aiProviders[provider].label,
       whereItRuns: aiProviders[provider].whereItRuns,
     })),
-    choice,
+    // As it stands: never a model of a provider no longer connected.
+    choice: choiceOf(
+      keys.map(({ provider }) => provider),
+      choice
+    ),
     // Grasp's own features don't go through a provider of their own yet.
     platform: [],
   };
@@ -282,33 +290,16 @@ const testProvider = async (
 };
 
 /**
- * Sets the organization's models, each one of a provider it connected,
- * while `by` is one of its own admins: the write and its audit event in
- * one batch, recorded only when it changed.
+ * Keeps `choice` as the organization's models while `by` is still one of
+ * its admins: the write and its audit event in one batch, recorded only
+ * when it changed.
  */
-const setModels = async (
+const writeChoice = async (
   env: Env,
   by: Identity,
-  input: unknown
+  choice: AiModelChoiceNow
 ): Promise<void> => {
-  requireOwnAdmin(by);
-  const parsed = aiModelChoiceSchema.safeParse(input);
-  if (!parsed.success) {
-    throw aiProviderErrors.create("ai_provider.invalid");
-  }
-  const routes = await aiRoutesOf(env);
-  const { defaultModel } = parsed.data;
-  const fallbacks = [...new Set(parsed.data.fallbacks)].filter(
-    (model) => model !== defaultModel
-  );
-  if (
-    ![defaultModel, ...fallbacks].every((model) =>
-      isConnectedModel(routes, model)
-    )
-  ) {
-    throw aiProviderErrors.create("ai_provider.model_unavailable");
-  }
-  const choice: AiModelChoice = { defaultModel, fallbacks };
+  const { defaultModel, fallbacks } = choice;
   const value = JSON.stringify(choice);
   const now = Date.now();
   const db = drizzle(env.DB);
@@ -348,6 +339,104 @@ const setModels = async (
   }
 };
 
+/** How often a prune is tried while other writes keep getting there first. */
+const pruneAttempts = 5;
+
+/**
+ * Takes every model of a provider the organization no longer has
+ * connected, as connect says now, out of its choice, while `by` is still
+ * one of its admins: a default of one is none until an admin chooses
+ * another. The write lands only while the stored choice is the one read
+ * (compare and set), so a save another admin made meanwhile is pruned in
+ * turn, never overwritten; tried again while one keeps getting there
+ * first. Its audit event in the same batch, recorded only when it landed.
+ */
+const pruneChoice = async (env: Env, by: Identity): Promise<void> => {
+  for (let attempt = 0; attempt < pruneAttempts; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const stored = await readStoredChoice(env);
+    if (stored === null) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const kept = choiceNow(await aiRoutesOf(env), stored.choice);
+    if (
+      kept === null ||
+      JSON.stringify(kept) === JSON.stringify(stored.choice)
+    ) {
+      return;
+    }
+    const value = JSON.stringify(kept);
+    const db = drizzle(env.DB);
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const [written] = await auditedBatch(env, db, [
+      db
+        .update(orgSettings)
+        .set({ value, updatedAt: new Date() })
+        .where(
+          and(
+            eq(orgSettings.kind, aiModelsKind),
+            eq(orgSettings.value, stored.value),
+            activeMember(by.userId, ["admin"])
+          )
+        ),
+      outboxedIfChanged(db, {
+        actor: actorOf(by),
+        action: "ai_provider.models_set",
+        target: { type: "organization_ai", id: aiModelsKind },
+        detail: {
+          defaultModel: kept.defaultModel,
+          fallbacks: kept.fallbacks.join(" "),
+        },
+      }),
+    ]);
+    if (written.meta.changes > 0) {
+      return;
+    }
+    // Unchanged since it was read: what stopped the write was `by` no
+    // longer being an admin. Changed: another write got there first.
+    // oxlint-disable-next-line no-await-in-loop -- again only after a conflict
+    const now = await readStoredChoice(env);
+    if (now?.value === stored.value) {
+      throw roleErrors.create("role.forbidden");
+    }
+  }
+  log.error("ai_models.prune_conflict", { attempts: pruneAttempts });
+  throw aiProviderErrors.create("ai_provider.failed");
+};
+
+/**
+ * Sets the organization's models, each one of a provider it connected,
+ * while `by` is one of its own admins: the write and its audit event in
+ * one batch, recorded only when it changed.
+ */
+const setModels = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<void> => {
+  requireOwnAdmin(by);
+  const parsed = aiModelChoiceSchema.safeParse(input);
+  if (!parsed.success) {
+    throw aiProviderErrors.create("ai_provider.invalid");
+  }
+  const routes = await aiRoutesOf(env);
+  const { defaultModel } = parsed.data;
+  const fallbacks = [...new Set(parsed.data.fallbacks)].filter(
+    (model) => model !== defaultModel
+  );
+  if (
+    ![defaultModel, ...fallbacks].every((model) =>
+      isConnectedModel(routes, model)
+    )
+  ) {
+    throw aiProviderErrors.create("ai_provider.model_unavailable");
+  }
+  await writeChoice(env, by, { defaultModel, fallbacks });
+  // A provider removed since the check above leaves none of its models.
+  await pruneChoice(env, by);
+};
+
 /**
  * Removes the provider's key from connect, which audits it in the same
  * write when it had one, in the admin's name.
@@ -371,6 +460,8 @@ const removeProvider = async (
   if (removed) {
     drainConnectOutboxSoon(env);
   }
+  // Its models go from the choice too, so none is offered or saved again.
+  await pruneChoice(env, by);
 };
 
 /** The organization's AI providers over `/rpc`, for admins. */

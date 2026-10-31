@@ -9,7 +9,7 @@ import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
 import { testComposioKey } from "../connect/test/provider-config.ts";
-import { testBlueprintsModule } from "./build-blueprints.ts";
+import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";
 import { testVersionModule } from "./test/compiler-version.ts";
 import {
@@ -214,6 +214,10 @@ export const coreProject = (
     resolve: {
       alias: [
         { find: /^#blueprints$/u, replacement: testBlueprintsModule },
+        {
+          find: /^#blueprints-digest$/u,
+          replacement: digestModuleOf(testBlueprintsModule),
+        },
         { find: /^#version$/u, replacement: testVersionModule },
       ],
     },
