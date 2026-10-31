@@ -34,7 +34,7 @@ import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../../core-connection.ts";
 import { ErrorText } from "../../error-text.tsx";
-import { formatDay, formatMonth, formatNumber } from "../../format.ts";
+import { formatIsoDayMonth, formatMonth, formatNumber } from "../../format.ts";
 import { LoadingLines } from "../../frame/page-states.tsx";
 import { useCore } from "../../use-core.ts";
 import { NeedActions, NeedPart, useAskGrasp } from "./request-needs.tsx";
@@ -198,7 +198,7 @@ const Over = ({
     count: { label: asked ? t`Asked` : t`Billed`, color: "chart-1" },
   };
   const format = (at: string) =>
-    report.by === "day" ? formatDay(at) : formatMonth(at);
+    report.by === "day" ? formatIsoDayMonth(at) : formatMonth(at);
   return (
     <div className="px-4">
       <ChartContainer
