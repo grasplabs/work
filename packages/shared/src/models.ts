@@ -8,6 +8,8 @@ import type { ModelBindingBudget } from "./resource-bindings.ts";
 export const modelErrors = defineErrorFamily({
   "model.invalid_call": "That isn't a valid model call.",
   "model.unconfigured": "Models aren't set up for this deployment yet.",
+  "model.no_provider":
+    "No AI provider is connected yet. Connect an AI provider to use models.",
   "model.not_allowed": "This deployment doesn't allow that model.",
   "model.eu_only":
     "This call must stay in the EU, and that model isn't hosted in the EU. Choose one that is.",
