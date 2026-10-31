@@ -62,7 +62,7 @@ export const Talk = ({
       >
         {loop.line === "" ? null : (
           <div
-            className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500"
+            className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500 motion-reduce:animate-none"
             key={loop.saying}
           >
             <p className="type-display">

@@ -9,6 +9,7 @@ import { MailIcon } from "lucide-react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
 import { Tile } from "../../../admin/parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatDate } from "../../../admin/words.ts";
 
 /** Where someone stands with the platform, in a word or two. */
@@ -145,15 +146,16 @@ const Members = () => {
           <Tile label={hereLabel} value={here} />
         </div>
       </section>
-      <section className="bg-card overflow-hidden rounded-xl border">
-        <div className="flex flex-col gap-0.5 px-5 py-4">
-          <h2 className="font-medium">Members</h2>
-          <p className="text-muted-foreground">
+      <Section
+        title="Members"
+        description={
+          <>
             The company invites its own people. Invitations that still wait, and
             who of them is from Grasp, aren’t read from the company’s own Grasp
             yet.
-          </p>
-        </div>
+          </>
+        }
+      >
         {members.length === 0 ? (
           <p className="text-muted-foreground border-t px-5 py-4">
             Nobody has made an account yet.
@@ -167,7 +169,7 @@ const Members = () => {
             </ul>
           </div>
         )}
-      </section>
+      </Section>
     </>
   );
 };

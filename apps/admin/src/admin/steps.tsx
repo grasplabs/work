@@ -52,7 +52,8 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Kickoff, visionWords } from "./kickoff.tsx";
-import { Done, KnowledgeDots, Panel, PanelRow, Tile } from "./parts.tsx";
+import { Done, KnowledgeDots, Tile } from "./parts.tsx";
+import { Section, SectionRow } from "./section.tsx";
 import { sectionTo } from "./sections.ts";
 import {
   formatDate,
@@ -231,7 +232,7 @@ const Conversation = ({
 }) => {
   const { conversation } = view.state;
   return (
-    <Panel
+    <Section
       description="Grasp’s first talk with the sponsor. Bring the transcript in here: Stephen reads it, and says what is still missing."
       title="The first conversation"
     >
@@ -247,7 +248,7 @@ const Conversation = ({
           </p>
         )}
       </div>
-      <PanelRow
+      <SectionRow
         description="What was said stays in the company’s own Grasp: the admin never shows it."
         label="The transcript"
       >
@@ -256,10 +257,10 @@ const Conversation = ({
         ) : (
           <Done>Brought in</Done>
         )}
-      </PanelRow>
+      </SectionRow>
       {/* Keyed by the company: another's drafts and answers never carry over. */}
       <Kickoff clientId={clientId} key={clientId} />
-    </Panel>
+    </Section>
   );
 };
 
@@ -315,7 +316,7 @@ const Research = ({ view }: { view: OrgView }) => {
     <span className="text-muted-foreground">Not looked up yet</span>
   );
   return (
-    <Panel
+    <Section
       description="Stephen looks up the company, never its people. Every fact keeps its source and its date."
       title="The research"
     >
@@ -373,7 +374,7 @@ const Research = ({ view }: { view: OrgView }) => {
         Starting the research and passing a disagreement on to the company’s
         admin aren’t in the admin yet.
       </NotHere>
-    </Panel>
+    </Section>
   );
 };
 
@@ -425,7 +426,7 @@ const councilWords = {
 const Agreed = ({ view, paused }: { view: OrgView; paused: boolean }) => {
   const { agreed } = view.state;
   return (
-    <Panel
+    <Section
       description="Without all three, nobody is invited."
       title="Agreed before the first interview"
     >
@@ -470,7 +471,7 @@ const Agreed = ({ view, paused }: { view: OrgView; paused: boolean }) => {
       <NotHere>
         Keeping what was agreed as it comes in isn’t in the admin yet.
       </NotHere>
-    </Panel>
+    </Section>
   );
 };
 
@@ -497,11 +498,11 @@ const Company = ({ view }: { view: OrgView }) => {
     );
   }
   return (
-    <Panel
+    <Section
       description="In its own onboarding. Grasp waits on each of these, and sees it here the moment it is done."
       title="What the company does itself"
     >
-      <PanelRow
+      <SectionRow
         description="It tells Grasp who works where: the teams, and everyone in them."
         label="The sign-in is connected"
       >
@@ -512,8 +513,8 @@ const Company = ({ view }: { view: OrgView }) => {
         ) : (
           waits
         )}
-      </PanelRow>
-      <PanelRow
+      </SectionRow>
+      <SectionRow
         description="From the company’s HR platform, or typed in by its admin."
         label="The team leads are named"
       >
@@ -522,14 +523,14 @@ const Company = ({ view }: { view: OrgView }) => {
         ) : (
           waits
         )}
-      </PanelRow>
-      <PanelRow
+      </SectionRow>
+      <SectionRow
         description="The company’s own message goes first. The same day every team lead gets a link."
         label="The team is told"
       >
         {told}
-      </PanelRow>
-    </Panel>
+      </SectionRow>
+    </Section>
   );
 };
 
@@ -578,7 +579,7 @@ const Leads = ({ view }: { view: OrgView }) => {
   );
   const waiting = leads.filter(({ lead }) => lead.mayRemind).length;
   return (
-    <Panel
+    <Section
       description="A lead’s interview takes 30 minutes: the team’s work, how much of it there is, and who knows each piece best. The same day their team gets its links."
       title="Team leads"
     >
@@ -620,7 +621,7 @@ const Leads = ({ view }: { view: OrgView }) => {
           reminder isn’t in the admin yet.
         </NotHere>
       ) : null}
-    </Panel>
+    </Section>
   );
 };
 
@@ -667,18 +668,18 @@ const Interviews = ({
   }
   if (!view.told) {
     return (
-      <Panel description={description} title="Interviews">
+      <Section description={description} title="Interviews">
         {paused ? <Paused /> : null}
         <p className="text-muted-foreground border-t px-5 py-4">
           Nobody has a link yet. They go out once everything is agreed and the
           company has told its team.
         </p>
-      </Panel>
+      </Section>
     );
   }
   const reminders = view.people.filter((each) => each.mayRemind).length;
   return (
-    <Panel description={description} title="Interviews">
+    <Section description={description} title="Interviews">
       {paused ? <Paused /> : null}
       <div className="bg-border grid gap-px border-t sm:grid-cols-2 lg:grid-cols-4">
         <Tile
@@ -741,7 +742,7 @@ const Interviews = ({
           Sending the reminder isn’t in the admin yet.
         </NotHere>
       )}
-    </Panel>
+    </Section>
   );
 };
 
@@ -812,7 +813,7 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
   );
   const notKnown = [...blocked, ...open];
   return (
-    <Panel
+    <Section
       description="The company’s platform stays closed until Grasp gives its go. What is not known by then shows to the company as still open, so it keeps nobody out."
       title="Grasp opens"
     >
@@ -911,7 +912,7 @@ const Opens = ({ view, clientId }: { view: OrgView; clientId: string }) => {
         Giving Grasp’s go, taking it back and changing the share it opens at
         aren’t in the admin yet.
       </NotHere>
-    </Panel>
+    </Section>
   );
 };
 

@@ -22,7 +22,7 @@ import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
 import { ChatStudio } from "../chat/studio.tsx";
-import { Suggestions } from "../chat/suggestions.tsx";
+import { StartingQuestions } from "../chat/suggestions.tsx";
 import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
@@ -151,7 +151,7 @@ const NewChat = ({
           <Composer running={false} {...composer} />
           {project === undefined ? (
             <div className="flex flex-col gap-6">
-              <Suggestions
+              <StartingQuestions
                 disabled={composer.busy || models.length === 0}
                 onPick={(question) => {
                   void ask(question);

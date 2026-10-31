@@ -4,9 +4,10 @@ import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { PageLoading } from "../../admin/failure.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { PlatformNav, platformCrumb } from "../../admin/platform-nav.tsx";
-import { Quiet } from "../../admin/release-parts.tsx";
+import { EmptySection } from "../../admin/section.tsx";
 import {
   deletePlacedClientFn,
   fetchOffboardedClients,
@@ -64,6 +65,7 @@ const DeleteResources = ({ client }: { client: OffboardedClient }) => {
           </Field>
           <div className="flex flex-wrap items-center gap-4">
             <Button
+              size="sm"
               disabled={busy || !noExport}
               onClick={remove}
               variant="destructive"
@@ -105,7 +107,7 @@ const OffboardedPage = () => {
     >
       <PlatformNav />
       {offboarded.length === 0 ? (
-        <Quiet>No client is offboarded.</Quiet>
+        <EmptySection>No client is offboarded.</EmptySection>
       ) : (
         <ul className="flex flex-col gap-4">
           {offboarded.map((client) => (
@@ -121,4 +123,5 @@ export const Route = createFileRoute("/platform/offboarded")({
   loader: async () => await fetchOffboardedClients(),
   head: () => ({ meta: [{ title: "Offboarded" }] }),
   component: OffboardedPage,
+  pendingComponent: PageLoading,
 });
