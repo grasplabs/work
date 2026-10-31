@@ -7,6 +7,11 @@ import type {
   ChatReasoning,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -577,13 +582,19 @@ const Failed = ({
     );
   }
   return (
-    <div className="flex items-start gap-3 rounded-lg border px-3.5 py-3">
-      <TriangleAlertIcon className="text-destructive mt-0.5 size-4 flex-none" />
-      <p className="flex-1" role="alert">
-        {failureMessage(failure, i18n)}
-      </p>
-      <TryAgain onRetry={onRetry} />
-    </div>
+    // As the prototype says a failed answer: the kit's alert, with the way
+    // to ask again under what went wrong.
+    <Alert variant="destructive">
+      <TriangleAlertIcon />
+      <AlertTitle>{failureMessage(failure, i18n)}</AlertTitle>
+      {onRetry === undefined ? null : (
+        <AlertDescription>
+          <div className="pt-2">
+            <TryAgain onRetry={onRetry} />
+          </div>
+        </AlertDescription>
+      )}
+    </Alert>
   );
 };
 
@@ -885,7 +896,7 @@ export const ChatThread = ({
                 return (
                   <li key={item.message.id}>
                     <Message align="end">
-                      <Bubble size="lg" variant="secondary">
+                      <Bubble variant="muted">
                         <BubbleContent>{item.message.text}</BubbleContent>
                       </Bubble>
                     </Message>

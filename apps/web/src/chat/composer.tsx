@@ -25,7 +25,8 @@ import {
 import { msg, select } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon, SparklesIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -123,6 +124,7 @@ const ModelPicker = ({
   efforts,
   effort,
   onEffort,
+  onOpenChange,
 }: {
   models: readonly string[];
   model: string;
@@ -130,12 +132,13 @@ const ModelPicker = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
+  onOpenChange?: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         aria-label={
           thinks && effort !== undefined
@@ -237,6 +240,7 @@ const ModelChoice = ({
   efforts,
   effort,
   onEffort,
+  onOpenChange,
 }: {
   models: readonly string[];
   model: string | undefined;
@@ -244,6 +248,7 @@ const ModelChoice = ({
   efforts: readonly ModelEffort[];
   effort: ModelEffort | undefined;
   onEffort: ((effort: ModelEffort) => void) | undefined;
+  onOpenChange?: (open: boolean) => void;
 }) => (
   <PromptInputTools>
     {models.length === 0 ||
@@ -256,6 +261,7 @@ const ModelChoice = ({
         models={models}
         onEffort={onEffort}
         onModel={onModel}
+        onOpenChange={onOpenChange}
       />
     )}
   </PromptInputTools>
@@ -325,6 +331,86 @@ const QuestionField = ({
   );
 };
 
+/**
+ * The compact box: one line, its button beside it; or, while it is
+ * `choosing`, the model on a row under the text, as in the prototype's
+ * corner chat (`components/chat/corner-chat.tsx`). The bar grows upwards,
+ * so that row comes in right under the pointer that just clicked into the
+ * box: until the pointer moves, a press on the row is one meant for the
+ * text, which keeps the cursor, and never opens the model's list.
+ */
+const CompactBox = ({
+  field,
+  choice,
+  send,
+  choosing,
+  children,
+}: {
+  field: ReactNode;
+  choice: ReactNode;
+  send: ReactNode;
+  choosing: boolean;
+  children: ReactNode;
+}) => {
+  const [settled, setSettled] = useState(true);
+  const [wasChoosing, setWasChoosing] = useState(choosing);
+  if (choosing !== wasChoosing) {
+    setWasChoosing(choosing);
+    if (choosing) {
+      setSettled(false);
+    }
+  }
+  const keepToText = (event: SyntheticEvent<HTMLElement>): void => {
+    // A click from the keyboard (no press of a pointer) always goes through.
+    const fromKeyboard =
+      event.nativeEvent instanceof MouseEvent && event.nativeEvent.detail === 0;
+    if (settled || (event.type === "click" && fromKeyboard)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget
+      .closest("[data-slot=input-group]")
+      ?.querySelector("textarea")
+      ?.focus();
+  };
+  return (
+    <InputGroup
+      onPointerMove={
+        settled
+          ? undefined
+          : () => {
+              setSettled(true);
+            }
+      }
+      size="chat"
+    >
+      {field}
+      {choosing ? (
+        <InputGroupAddon
+          align="block-end"
+          onClickCapture={keepToText}
+          onMouseDownCapture={keepToText}
+          onPointerDownCapture={keepToText}
+        >
+          <div className="mr-auto -ml-1 flex min-w-0">{choice}</div>
+          <div className="flex items-center gap-1">
+            {children}
+            {send}
+          </div>
+        </InputGroupAddon>
+      ) : (
+        <InputGroupAddon align="inline-end" className="self-end">
+          <div className="flex items-center gap-1">
+            {children}
+            {send}
+          </div>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
+  );
+};
+
 /** Where nobody picks a model. */
 const noModels: readonly string[] = [];
 
@@ -353,6 +439,7 @@ export const Composer = ({
   children,
   maxLength,
   disabled = false,
+  expanded = false,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -380,11 +467,14 @@ export const Composer = ({
   /** Stops the answer being written; only where one can be. */
   onStop?: () => void;
   /**
-   * One line that grows as it is typed in, its button beside it and no
-   * model to pick (the default model asks): the chat dock and the guest
-   * page.
+   * One line that grows as it is typed in, its button beside it: the chat
+   * dock and the guest page. Where there are models to pick from, they
+   * come in on a row under the text once the box is typed in or
+   * `expanded`, so the box at rest stays one line.
    */
   compact?: boolean;
+  /** In a compact box: the chat around it is open, so its model row stays. */
+  expanded?: boolean;
   /** What the box is called; "Your question" without it. */
   label?: string;
   /** The id of what says more about the box, in a compact box. */
@@ -400,9 +490,38 @@ export const Composer = ({
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
   const canSend = !running && !busy && !disabled && !empty && model !== "";
+  // The compact box counts as typed in while the cursor is anywhere in it,
+  // the model's button beside the text too, and while the model's list,
+  // which takes the focus out of it, is open.
+  const [focused, setFocused] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const choosing =
+    compact && models.length > 0 && (expanded || focused || picking || !empty);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const element = form.current;
+    const enter = (): void => {
+      setFocused(true);
+    };
+    const leave = (event: FocusEvent): void => {
+      if (
+        !(event.relatedTarget instanceof Node) ||
+        element?.contains(event.relatedTarget) !== true
+      ) {
+        setFocused(false);
+      }
+    };
+    element?.addEventListener("focusin", enter);
+    element?.addEventListener("focusout", leave);
+    return () => {
+      element?.removeEventListener("focusin", enter);
+      element?.removeEventListener("focusout", leave);
+    };
+  }, []);
   return (
     <form
       className="flex flex-col gap-1.5"
+      ref={form}
       onSubmit={(event) => {
         event.preventDefault();
         if (canSend) {
@@ -411,30 +530,42 @@ export const Composer = ({
       }}
     >
       {compact ? (
-        // One line, its button beside it: the chat dock and the guest page.
-        <InputGroup size="chat">
-          <QuestionField
-            compact={compact}
-            describedBy={describedBy}
-            label={label}
-            maxLength={maxLength}
-            onText={onText}
-            placeholder={placeholder}
-            text={text}
-          />
-          <InputGroupAddon align="inline-end" className="self-end">
-            <div className="flex items-center gap-1">
-              {children}
-              <SendOrStop
-                busy={busy}
-                canSend={canSend}
-                compact={compact}
-                onStop={onStop}
-                running={running}
-              />
-            </div>
-          </InputGroupAddon>
-        </InputGroup>
+        <CompactBox
+          choice={
+            <ModelChoice
+              effort={effort}
+              efforts={efforts}
+              model={model}
+              models={models}
+              onEffort={onEffort}
+              onModel={onModel}
+              onOpenChange={setPicking}
+            />
+          }
+          choosing={choosing}
+          field={
+            <QuestionField
+              compact={compact}
+              describedBy={describedBy}
+              label={label}
+              maxLength={maxLength}
+              onText={onText}
+              placeholder={placeholder}
+              text={text}
+            />
+          }
+          send={
+            <SendOrStop
+              busy={busy}
+              canSend={canSend}
+              compact={!choosing}
+              onStop={onStop}
+              running={running}
+            />
+          }
+        >
+          {children}
+        </CompactBox>
       ) : (
         <InputGroup size="prompt">
           <PromptInputBody>

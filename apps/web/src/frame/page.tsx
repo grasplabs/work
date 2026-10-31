@@ -52,14 +52,17 @@ export const PageHeading = ({
   clamp = false,
   meta,
   action,
+  actionAt = "end",
 }: {
   title: ReactNode;
   description?: ReactNode;
   clamp?: boolean;
   meta?: ReactNode;
   action?: ReactNode;
+  /** Where `action` stands: at the heading's foot, or on the title's line. */
+  actionAt?: "end" | "start";
 }) => (
-  <PageHeader>
+  <PageHeader align={actionAt}>
     <PageHeaderContent>
       <PageHeaderTitle>{title}</PageHeaderTitle>
       {description === undefined ? null : (
