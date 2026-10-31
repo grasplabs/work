@@ -408,8 +408,11 @@ interface RanAt {
   method: string;
 }
 
-/** Splits text into characters as a person reads them, so a cut keeps each whole. */
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/**
+ * Splits text into characters as a person reads them, so a cut keeps each
+ * whole. Made at first use, not as core starts: it loads ICU's break rules.
+ */
+let graphemes: Intl.Segmenter | undefined;
 
 /** How many bytes `value` takes as UTF-8 JSON. */
 const jsonBytesOf = (value: unknown): number =>
@@ -432,6 +435,7 @@ export const failureDetails = (
   if (start === message && jsonBytesOf(whole) <= appErrorDetailsBytes) {
     return whole;
   }
+  graphemes ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
   const characters = Array.from(
     graphemes.segment(start),
     ({ segment }) => segment
