@@ -22,6 +22,20 @@ import { testHost, writerOf } from "./host.ts";
 
 const designer = writerOf("designer");
 const owner = writerOf("owner");
+const evaluator = writerOf("evaluator");
+
+/** Who calls, as the host grants them: what they may do with suites. */
+const asDesigner = {
+  userId: "designer",
+  reads: [],
+  evaluation: ["designer"],
+} as const;
+const asEvaluator = {
+  userId: "evaluator",
+  reads: [],
+  evaluation: ["evaluator"],
+} as const;
+const asOwner = { userId: "owner", reads: [] } as const;
 
 /** Why a database write failed, with what caused it, or `ok`. */
 const failureOf = async (call: Promise<unknown>): Promise<string> => {
@@ -97,6 +111,7 @@ describe("a learning suite version", () => {
       group: await codeOf(
         proposeSuiteVersion(
           brain,
+          asDesigner,
           designer,
           proposalOf(suiteId, [...threeSplits, caseOf("a2", "final", "a")])
         )
@@ -104,6 +119,7 @@ describe("a learning suite version", () => {
       source: await codeOf(
         proposeSuiteVersion(
           brain,
+          asDesigner,
           designer,
           proposalOf(suiteId, [
             ...threeSplits,
@@ -114,6 +130,7 @@ describe("a learning suite version", () => {
       emptySplit: await codeOf(
         proposeSuiteVersion(
           brain,
+          asDesigner,
           designer,
           proposalOf(suiteId, [
             caseOf("a", "development"),
@@ -122,7 +139,12 @@ describe("a learning suite version", () => {
         )
       ),
       apart: await codeOf(
-        proposeSuiteVersion(brain, designer, proposalOf(suiteId, threeSplits))
+        proposeSuiteVersion(
+          brain,
+          asDesigner,
+          designer,
+          proposalOf(suiteId, threeSplits)
+        )
       ),
     }).toStrictEqual({
       group: "knowledge.invalid",
@@ -137,15 +159,17 @@ describe("a learning suite version", () => {
     const suiteId = `suite-${crypto.randomUUID()}`;
     const first = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
     const reordered = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits.toReversed())
     );
-    const changed = await proposeSuiteVersion(brain, designer, {
+    const changed = await proposeSuiteVersion(brain, asDesigner, designer, {
       ...proposalOf(suiteId, [
         ...threeSplits.slice(0, 2),
         { ...caseOf("c", "final"), expected: { answer: "another" } },
@@ -184,28 +208,31 @@ describe("a learning suite version", () => {
     const suiteId = `suite-${crypto.randomUUID()}`;
     const proposed = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
     const early = await codeOf(
-      moveSuiteVersion(brain, owner, suiteId, 1, "accepted", 1)
+      moveSuiteVersion(brain, asOwner, owner, suiteId, 1, "accepted", 1)
     );
     const calibrated = await moveSuiteVersion(
       brain,
-      designer,
+      asEvaluator,
+      evaluator,
       suiteId,
       1,
       "calibrated",
       proposed.revision
     );
     const byDesigner = await codeOf(
-      moveSuiteVersion(brain, designer, suiteId, 1, "accepted", 2)
+      moveSuiteVersion(brain, asDesigner, designer, suiteId, 1, "accepted", 2)
     );
     const stale = await codeOf(
-      moveSuiteVersion(brain, owner, suiteId, 1, "accepted", 1)
+      moveSuiteVersion(brain, asOwner, owner, suiteId, 1, "accepted", 1)
     );
     const accepted = await moveSuiteVersion(
       brain,
+      asOwner,
       owner,
       suiteId,
       1,
@@ -213,13 +240,22 @@ describe("a learning suite version", () => {
       calibrated.revision
     );
     const again = await codeOf(
-      moveSuiteVersion(brain, designer, suiteId, 1, "calibrated", 3)
+      moveSuiteVersion(
+        brain,
+        asEvaluator,
+        evaluator,
+        suiteId,
+        1,
+        "calibrated",
+        3
+      )
     );
     const retiredByDesigner = await codeOf(
-      moveSuiteVersion(brain, designer, suiteId, 1, "retired", 3)
+      moveSuiteVersion(brain, asDesigner, designer, suiteId, 1, "retired", 3)
     );
     const retired = await moveSuiteVersion(
       brain,
+      asOwner,
       owner,
       suiteId,
       1,
@@ -240,7 +276,7 @@ describe("a learning suite version", () => {
       retired: retired.state,
     }).toStrictEqual({
       early: "knowledge.conflict",
-      byDesigner: "knowledge.forbidden",
+      byDesigner: "knowledge.not_found",
       stale: "knowledge.conflict",
       accepted: { state: "accepted", by: "owner", revision: 3 },
       again: "knowledge.conflict",
@@ -253,39 +289,60 @@ describe("a learning suite version", () => {
     const { brain } = testHost();
     const suiteId = `suite-${crypto.randomUUID()}`;
     const selfOwned = await codeOf(
-      proposeSuiteVersion(brain, designer, {
+      proposeSuiteVersion(brain, asDesigner, designer, {
         ...proposalOf(suiteId, threeSplits),
         ownerId: "designer",
       })
     );
     const first = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
     const otherOwner = await codeOf(
-      proposeSuiteVersion(brain, designer, {
+      proposeSuiteVersion(brain, asDesigner, designer, {
         ...proposalOf(suiteId, threeSplits),
         ownerId: "someone-else",
       })
     );
     const byDesigner = await codeOf(
-      changeSuiteOwner(brain, designer, suiteId, "designer", first.revision)
+      changeSuiteOwner(
+        brain,
+        asDesigner,
+        designer,
+        suiteId,
+        "designer",
+        first.revision
+      )
     );
     const toDesigner = await codeOf(
-      changeSuiteOwner(brain, owner, suiteId, "designer", first.revision)
+      changeSuiteOwner(
+        brain,
+        asOwner,
+        owner,
+        suiteId,
+        "designer",
+        first.revision
+      )
     );
     const handed = await changeSuiteOwner(
       brain,
+      asOwner,
       owner,
       suiteId,
       "owner2",
       first.revision
     );
     const keptOld = await codeOf(
-      proposeSuiteVersion(brain, designer, proposalOf(suiteId, threeSplits))
+      proposeSuiteVersion(
+        brain,
+        asDesigner,
+        designer,
+        proposalOf(suiteId, threeSplits)
+      )
     );
-    const next = await proposeSuiteVersion(brain, designer, {
+    const next = await proposeSuiteVersion(brain, asDesigner, designer, {
       ...proposalOf(suiteId, threeSplits),
       ownerId: "owner2",
     });
@@ -315,6 +372,7 @@ describe("a learning suite version", () => {
     const folded = await codeOf(
       proposeSuiteVersion(
         brain,
+        asDesigner,
         designer,
         proposalOf(suiteId, [...threeSplits, caseOf("a2", "final", " A ")])
       )
@@ -322,6 +380,7 @@ describe("a learning suite version", () => {
     const sameInput = await codeOf(
       proposeSuiteVersion(
         brain,
+        asDesigner,
         designer,
         proposalOf(suiteId, [
           ...threeSplits,
@@ -331,6 +390,7 @@ describe("a learning suite version", () => {
     );
     const version = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
@@ -369,6 +429,7 @@ describe("a learning suite version", () => {
     const suiteId = `suite-${crypto.randomUUID()}`;
     await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
@@ -418,11 +479,13 @@ describe("a learning suite version", () => {
     const given = [...threeSplits, composed, decomposed];
     const one = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(`suite-${crypto.randomUUID()}`, given)
     );
     const other = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(`suite-${crypto.randomUUID()}`, given.toReversed())
     );
@@ -435,6 +498,7 @@ describe("a learning suite version", () => {
     const suiteId = `suite-${crypto.randomUUID()}`;
     const first = await proposeSuiteVersion(
       brain,
+      asDesigner,
       designer,
       proposalOf(suiteId, threeSplits)
     );
@@ -451,6 +515,7 @@ describe("a learning suite version", () => {
               handedOn = true;
               await changeSuiteOwner(
                 brain,
+                asOwner,
                 owner,
                 suiteId,
                 "owner2",
@@ -463,14 +528,19 @@ describe("a learning suite version", () => {
       },
     };
     const proposed = await codeOf(
-      proposeSuiteVersion(handingOn, designer, proposalOf(suiteId, threeSplits))
+      proposeSuiteVersion(
+        handingOn,
+        asDesigner,
+        designer,
+        proposalOf(suiteId, threeSplits)
+      )
     );
     const handed = await brain.db
       .select({ nextOwnerId: brainEvalSuiteVersions.nextOwnerId })
       .from(brainEvalSuiteVersions)
       .where(eq(brainEvalSuiteVersions.suiteId, suiteId));
     // A version proposed while a handoff reads the latest.
-    const second = await proposeSuiteVersion(brain, designer, {
+    const second = await proposeSuiteVersion(brain, asDesigner, designer, {
       ...proposalOf(suiteId, threeSplits),
       ownerId: "owner2",
     });
@@ -484,7 +554,7 @@ describe("a learning suite version", () => {
             return async (...args: unknown[]): Promise<unknown> => {
               if (!proposedMeanwhile) {
                 proposedMeanwhile = true;
-                await proposeSuiteVersion(brain, designer, {
+                await proposeSuiteVersion(brain, asDesigner, designer, {
                   ...proposalOf(suiteId, threeSplits),
                   ownerId: "owner2",
                 });
@@ -502,6 +572,7 @@ describe("a learning suite version", () => {
     const handoff = await codeOf(
       changeSuiteOwner(
         proposing,
+        { userId: "owner2", reads: [] },
         { ...owner, userId: "owner2" },
         suiteId,
         "owner3",
