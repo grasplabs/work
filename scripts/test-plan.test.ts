@@ -20,6 +20,7 @@ import {
   affectedProjects,
   packageOf,
   packagesSelected,
+  projectsImporting,
   reachSince,
   reachedPackages,
 } from "./test-plan.ts";
@@ -208,7 +209,7 @@ describe("following a pull request's changes from its base", () => {
 });
 
 describe("leaving out what no Vitest test sees", () => {
-  it("runs no project when only the journeys change", () => {
+  it("sets journey files apart from the root's own, for the tests that import them", () => {
     const { repo, base, change } = workspaceWithBase();
     try {
       mkdirSync(path.join(repo, "e2e"));
@@ -218,9 +219,53 @@ describe("leaving out what no Vitest test sees", () => {
 
       expect(reach.all).toBeFalsy();
       expect(reach.all ? ["all"] : [...reach.affected]).toStrictEqual([]);
+      expect(reach.all ? [] : relativeTo(repo, reach.journeys)).toStrictEqual([
+        "e2e/apps.e2e.ts",
+        "playwright.config.ts",
+      ]);
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+
+  // This repository's own files, by TypeScript's resolution of their
+  // imports: some of its tests, in their projects.
+  const repoRoot = path.join(import.meta.dirname, "..");
+  const repoTests = [
+    { project: "scripts", file: "scripts/e2e-parts.test.ts" },
+    { project: "scripts", file: "scripts/test-shards.test.ts" },
+    { project: "@grasp-os/core", file: "apps/core/test/agent.test.ts" },
+    { project: "@grasp-os/web", file: "apps/web/src/error-reports.test.ts" },
+  ].map(({ project, file }) => ({ project, file: path.join(repoRoot, file) }));
+
+  it("runs the scripts project when playwright.config.ts changes, which e2e-parts.test.ts imports", () => {
+    expect(
+      projectsImporting(
+        [path.join(repoRoot, "playwright.config.ts")],
+        repoTests,
+        repoRoot
+      )
+    ).toStrictEqual(["scripts"]);
+  });
+
+  it("runs no project when only a journey changes", () => {
+    expect(
+      projectsImporting(
+        [path.join(repoRoot, "e2e/apps.e2e.ts")],
+        repoTests,
+        repoRoot
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("runs a test no tsconfig holds, whose imports are unknown", () => {
+    expect(
+      projectsImporting(
+        [path.join(repoRoot, "e2e/apps.e2e.ts")],
+        [{ project: "loose", file: path.join(repoRoot, "loose.test.ts") }],
+        repoRoot
+      )
+    ).toStrictEqual(["loose"]);
   });
 
   it("doesn't reach a package through a dependency on another's build alone", () => {

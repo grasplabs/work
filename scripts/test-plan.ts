@@ -8,16 +8,17 @@
 // which, from every package.json in the workspace. A change outside every
 // package (the root's config, the lockfile, CI, the repo's tooling) can
 // reach any test, so it runs them all, as the merge queue always does: no
-// base, every project. Two things no Vitest test sees are left out: the
-// Playwright journeys (`journeyFiles`), and core's dependency on web, which
-// is on web's build alone (`buildOnlyDependencies`).
+// base, every project. Two exceptions: a change to the Playwright journeys
+// runs only the projects whose tests import it (`journeyFiles`), and
+// core's dependency on web, which is on web's build alone, isn't followed
+// (`buildOnlyDependencies`).
 //
 //   GRASP_TEST_BASE=HEAD^1 node scripts/test-plan.ts
 //
 // Writes `projects` (Vitest's `--project` arguments, empty for all) and
 // `shards` (a JSON array of shard numbers, empty for none) to
 // $GITHUB_OUTPUT, and why to the step summary.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -63,12 +64,16 @@ export const affectedProjects = (
 };
 
 /**
- * Files outside every package that no Vitest test reads: the Playwright
- * journeys and their configs. No test imports them, and the journeys run
- * in full on every ready pull request (`e2e`), so a change to them alone
- * runs no Vitest project. They were the only files outside a package in
- * 22 of 150 merged pull requests (October 2026), each running every
- * project for it.
+ * Files outside every package that don't reach every test: the Playwright
+ * journeys and their configs. They aren't config every test runs under
+ * (unlike the root's vite.config.ts or the lockfile), so a change to them
+ * runs only the projects with a test that imports one, directly or not,
+ * by TypeScript's module resolution (`projectsImporting`). For a journey
+ * (e2e/*.e2e.ts) that is none, and the journeys run in full on every ready
+ * pull request (`e2e`); for playwright.config.ts it is the scripts
+ * project, whose e2e-parts.test.ts imports it through e2e-parts.ts. They
+ * were the only files outside a package in 22 of 150 merged pull requests
+ * (October 2026), each running every project for it.
  */
 export const journeyFiles = [
   "e2e/**",
@@ -207,14 +212,114 @@ export type Reach =
       readonly changed: readonly string[];
       /** Those and every package that depends on one, directly or not. */
       readonly affected: ReadonlySet<string>;
+      /**
+       * The changed files outside every package that match `journeyFiles`
+       * (absolute paths): they run the projects whose tests import them.
+       */
+      readonly journeys: readonly string[];
     };
+
+/** The files changed since `base` in the repository at `root`, absolute. */
+const filesChangedSince = (base: string, root: string): string[] =>
+  execFileSync("git", ["diff", "--name-only", base], {
+    cwd: root,
+    encoding: "utf-8",
+  })
+    .split("\n")
+    .filter((file) => file !== "")
+    .map((file) => path.join(root, file));
+
+/** A line of `tsc --explainFiles` that says which file imports the one above. */
+const importedVia = /^\s+Imported via .+ from file '(?<importer>[^']+)'/u;
+
+/**
+ * Each file's importers, by TypeScript's own module resolution: `tsc
+ * --explainFiles` of every tsconfig.json in the repository at `root`
+ * (tsconfig paths, package exports and imports, as type-checking resolves
+ * them). Also every file some program holds, so a test no program holds is
+ * known as one whose imports are unknown. Vitest's `--related` walk follows
+ * each project's Vite environment, and core's Workers pool isn't one it
+ * can transform (its .sql imports, the compiler's `#kit`).
+ */
+const importGraph = (
+  root: string
+): { importers: Map<string, Set<string>>; files: Set<string> } => {
+  const tsconfigs = execFileSync(
+    "git",
+    ["ls-files", "tsconfig.json", "**/tsconfig.json"],
+    { cwd: root, encoding: "utf-8" }
+  )
+    .split("\n")
+    .filter((file) => file !== "");
+  const importers = new Map<string, Set<string>>();
+  const files = new Set<string>();
+  for (const tsconfig of tsconfigs) {
+    // Its files whatever the exit: a config with no inputs (TS18003)
+    // lists none, and a test no program lists counts as reaching all.
+    const { stdout: output } = spawnSync(
+      "vp",
+      ["exec", "tsc", "-p", tsconfig, "--explainFiles", "--listFilesOnly"],
+      { cwd: root, encoding: "utf-8", maxBuffer: 512 * 1024 * 1024 }
+    );
+    let current: string | undefined;
+    for (const line of output.split("\n")) {
+      if (line !== "" && !line.startsWith(" ")) {
+        current = path.resolve(root, line);
+        files.add(current);
+        continue;
+      }
+      const importer = importedVia.exec(line)?.groups?.importer;
+      if (current !== undefined && importer !== undefined) {
+        const known = importers.get(current) ?? new Set<string>();
+        known.add(path.resolve(root, importer));
+        importers.set(current, known);
+      }
+    }
+  }
+  return { importers, files };
+};
+
+/**
+ * The projects with a test file (`files` of the plan) that imports one of
+ * `changed` (absolute), directly or not, in the repository at `root`, by
+ * TypeScript's resolution (`importGraph`). A test file no tsconfig holds
+ * counts as importing them: a change is only left out where every test is
+ * known not to reach it.
+ */
+export const projectsImporting = (
+  changed: readonly string[],
+  tests: readonly PlannedFile[],
+  root: string
+): string[] => {
+  if (changed.length === 0) {
+    return [];
+  }
+  const { importers, files } = importGraph(root);
+  const reached = new Set(changed);
+  const queue = [...changed];
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    for (const importer of importers.get(file) ?? []) {
+      if (!reached.has(importer) && !importer.includes("/node_modules/")) {
+        reached.add(importer);
+        queue.push(importer);
+      }
+    }
+  }
+  const projects = new Set<string>();
+  for (const { project, file } of tests) {
+    if (reached.has(file) || !files.has(file)) {
+      projects.add(project);
+    }
+  }
+  return [...projects].toSorted(byKey);
+};
 
 /**
  * The packages that changed since `base` (a commit) in the workspace at
  * `root`, and what they reach. A change to the root's own files (config,
- * the lockfile, CI, tooling) reaches everything; one to the journeys
- * alone, nothing. What depends on a package only for its build
- * (`buildOnly`) isn't reached through it.
+ * the lockfile, CI, tooling) reaches everything, but for `journeyFiles`,
+ * which are returned apart, for the tests that import them. What depends
+ * on a package only for its build (`buildOnly`) isn't reached through it.
  */
 export const reachSince = (
   base: string,
@@ -226,10 +331,22 @@ export const reachSince = (
   if (changed.includes(root)) {
     return { all: true, changed };
   }
+  const packages = workspacePackages(root);
+  const packageDirs = packages
+    .map(({ dir }) => dir)
+    .filter((dir) => dir !== root);
+  const journeys = filesChangedSince(base, root).filter(
+    (file) =>
+      packageOf(file, packageDirs) === undefined &&
+      journeyFiles.some((pattern) =>
+        path.matchesGlob(path.relative(root, file), pattern)
+      )
+  );
   return {
     all: false,
     changed,
-    affected: reachedPackages(workspacePackages(root), changed, buildOnly),
+    affected: reachedPackages(packages, changed, buildOnly),
+    journeys,
   };
 };
 
@@ -264,23 +381,34 @@ const plan = async (base: string | undefined): Promise<void> => {
     if (reach.all) {
       why = `Files outside every workspace package changed since ${base} (config, lockfile, CI or tooling): every project.`;
     } else {
-      const { changed, affected } = reach;
+      const { changed, affected, journeys } = reach;
       const packages = packagesSelected(undefined, root);
-      projects = affectedProjects(
-        specs.map((spec) => ({
-          project: spec.project.name,
-          file: spec.moduleId,
-        })),
-        packages,
-        affected
-      );
+      const tests = specs.map((spec) => ({
+        project: spec.project.name,
+        file: spec.moduleId,
+      }));
+      const importing = projectsImporting(journeys, tests, root);
+      projects = [
+        ...new Set([
+          ...affectedProjects(tests, packages, affected),
+          ...importing,
+        ]),
+      ].toSorted(byKey);
       why = `Changed since ${base}: ${
         changed.map((dir) => path.relative(root, dir)).join(", ") ||
         "no package"
       }. With what depends on them: ${
         [...affected].map((dir) => path.relative(root, dir)).join(", ") ||
         "nothing"
-      }.`;
+      }.${
+        journeys.length === 0
+          ? ""
+          : ` Journey files: ${journeys
+              .map((file) => path.relative(root, file))
+              .join(", ")}, imported by tests of ${
+              importing.join(", ") || "no project"
+            }.`
+      }`;
     }
   }
 
