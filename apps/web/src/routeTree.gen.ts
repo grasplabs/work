@@ -86,6 +86,7 @@ import { Route as ShellOnboardingWorkflowsIndexRouteImport } from './routes/_she
 import { Route as ShellOnboardingWorkflowsWorkRouteImport } from './routes/_shell.onboarding.workflows.$work'
 import { Route as ShellPoliciesDocumentsPolicyIdRouteImport } from './routes/_shell.policies.documents.$policyId'
 import { Route as ShellPoliciesRulesRuleIdRouteImport } from './routes/_shell.policies.rules.$ruleId'
+import { Route as ShellPoliciesRulesNewRouteImport } from './routes/_shell.policies.rules.new'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as ShellDomainsEngineAppsScreenRouteImport } from './routes/_shell.domains.$engine.apps.$screen'
@@ -498,6 +499,11 @@ const ShellPoliciesRulesRuleIdRoute =
     path: '/policies/rules/$ruleId',
     getParentRoute: () => ShellRoute,
   } as any)
+const ShellPoliciesRulesNewRoute = ShellPoliciesRulesNewRouteImport.update({
+  id: '/policies/rules/new',
+  path: '/policies/rules/new',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSettingsPackagesIndexRoute =
   ShellSettingsPackagesIndexRouteImport.update({
     id: '/packages/',
@@ -619,6 +625,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
+  '/policies/rules/new': typeof ShellPoliciesRulesNewRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
@@ -701,6 +708,7 @@ export interface FileRoutesByTo {
   '/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
+  '/policies/rules/new': typeof ShellPoliciesRulesNewRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
   '/landscape/$appId': typeof ShellLandscapeAppIdIndexRoute
@@ -789,6 +797,7 @@ export interface FileRoutesById {
   '/_shell/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/_shell/policies/documents/$policyId': typeof ShellPoliciesDocumentsPolicyIdRoute
   '/_shell/policies/rules/$ruleId': typeof ShellPoliciesRulesRuleIdRoute
+  '/_shell/policies/rules/new': typeof ShellPoliciesRulesNewRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
   '/_shell/landscape/$appId/': typeof ShellLandscapeAppIdIndexRoute
@@ -877,6 +886,7 @@ export interface FileRouteTypes {
     | '/onboarding/workflows/$work'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
+    | '/policies/rules/new'
     | '/workflows/$app/$workflow'
     | '/domains/$engine/'
     | '/landscape/$appId/'
@@ -959,6 +969,7 @@ export interface FileRouteTypes {
     | '/onboarding/workflows/$work'
     | '/policies/documents/$policyId'
     | '/policies/rules/$ruleId'
+    | '/policies/rules/new'
     | '/workflows/$app/$workflow'
     | '/domains/$engine'
     | '/landscape/$appId'
@@ -1046,6 +1057,7 @@ export interface FileRouteTypes {
     | '/_shell/onboarding/workflows/$work'
     | '/_shell/policies/documents/$policyId'
     | '/_shell/policies/rules/$ruleId'
+    | '/_shell/policies/rules/new'
     | '/_shell/workflows/$app/$workflow'
     | '/_shell/domains/$engine/'
     | '/_shell/landscape/$appId/'
@@ -1616,6 +1628,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellPoliciesRulesRuleIdRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/policies/rules/new': {
+      id: '/_shell/policies/rules/new'
+      path: '/policies/rules/new'
+      fullPath: '/policies/rules/new'
+      preLoaderRoute: typeof ShellPoliciesRulesNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/settings/packages/': {
       id: '/_shell/settings/packages/'
       path: '/packages'
@@ -1830,6 +1849,7 @@ interface ShellRouteChildren {
   ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
   ShellPoliciesDocumentsPolicyIdRoute: typeof ShellPoliciesDocumentsPolicyIdRoute
   ShellPoliciesRulesRuleIdRoute: typeof ShellPoliciesRulesRuleIdRoute
+  ShellPoliciesRulesNewRoute: typeof ShellPoliciesRulesNewRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
   ShellDomainsEngineIndexRoute: typeof ShellDomainsEngineIndexRoute
   ShellDomainsEngineAppsScreenRoute: typeof ShellDomainsEngineAppsScreenRoute
@@ -1863,6 +1883,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
   ShellPoliciesDocumentsPolicyIdRoute: ShellPoliciesDocumentsPolicyIdRoute,
   ShellPoliciesRulesRuleIdRoute: ShellPoliciesRulesRuleIdRoute,
+  ShellPoliciesRulesNewRoute: ShellPoliciesRulesNewRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
   ShellDomainsEngineIndexRoute: ShellDomainsEngineIndexRoute,
   ShellDomainsEngineAppsScreenRoute: ShellDomainsEngineAppsScreenRoute,

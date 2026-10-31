@@ -169,6 +169,14 @@ export const ruleInputSchema = z.strictObject({
 });
 export type RuleInput = z.input<typeof ruleInputSchema>;
 
+/**
+ * A rule as an admin edits it: everything but its status, which only
+ * `setRuleStatus` changes, so an edit saved from an old page never turns a
+ * rule back on or off.
+ */
+export const ruleEditSchema = ruleInputSchema.omit({ status: true });
+export type RuleEdit = z.input<typeof ruleEditSchema>;
+
 /** A rule the company set for the apps its people use, usually drawn from one of its policies. */
 export interface PolicyRule {
   id: string;
@@ -183,7 +191,16 @@ export interface PolicyRule {
   createdBy: string;
   /** ISO 8601. */
   createdAt: string;
+  /**
+   * 1 when made, one more with each change. Every write to the rule names
+   * the revision its page read, and is refused as `policy.conflict` once
+   * the rule changed since.
+   */
+  revision: number;
 }
+
+/** A rule's revision, as a write names the one its page read. */
+export const ruleRevisionSchema = z.int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /** A rule Grasp proposed from a policy, waiting for someone to take or leave it. */
 export interface RuleProposal {
@@ -329,7 +346,7 @@ export const policyErrors = defineErrorFamily({
     "That isn't a policy, rule or exception as Grasp keeps them: check each field.",
   "policy.not_found": "There's no such policy, rule or exception.",
   "policy.conflict":
-    "A rule names a policy that isn't there, or the policy changed meanwhile.",
+    "The rule or its policy changed since it was read, or a rule names a policy that isn't there. Read it again, then retry.",
 });
 
 /** The company's policies, over `/rpc`. */
@@ -374,9 +391,30 @@ export interface PoliciesApi {
   /** Makes a rule. The organization's own admins only; audited. */
   createRule: (rule: RuleInput) => Promise<PolicyRule>;
   /** Replaces a rule's name, conditions, effect or status. The organization's own admins only; audited. */
-  updateRule: (ruleId: string, rule: RuleInput) => Promise<PolicyRule>;
-  /** Removes a rule and its exceptions. The organization's own admins only; audited. */
-  removeRule: (ruleId: string) => Promise<void>;
+  /**
+   * Replaces what a rule says, keeping its status. Only from `revision`,
+   * the one the admin's page read: refused as `policy.conflict` once the
+   * rule changed since. The organization's own admins only; audited.
+   */
+  updateRule: (
+    ruleId: string,
+    rule: RuleEdit,
+    revision: number
+  ) => Promise<PolicyRule>;
+  /**
+   * Turns a rule to watching, active or paused, and nothing else. Only from
+   * `revision`, as `updateRule`. The organization's own admins only; audited.
+   */
+  setRuleStatus: (
+    ruleId: string,
+    status: RuleStatus,
+    revision: number
+  ) => Promise<PolicyRule>;
+  /**
+   * Removes a rule and its exceptions. Only from `revision`, as
+   * `updateRule`. The organization's own admins only; audited.
+   */
+  removeRule: (ruleId: string, revision: number) => Promise<void>;
   /**
    * Lets one app break one rule until a date, in place of any exception it
    * had for it. The organization's own admins only; audited.

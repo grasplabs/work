@@ -4,7 +4,10 @@ import {
   exceptionInputSchema,
   policyErrors,
   policyUploadSchema,
+  ruleEditSchema,
   ruleInputSchema,
+  ruleRevisionSchema,
+  ruleStatusSchema,
 } from "@grasp-os/shared/policies";
 import type {
   ExceptionInput,
@@ -16,11 +19,13 @@ import type {
   PolicyRule,
   PolicyUpload,
   RuleInput,
+  RuleEdit,
   RuleProposal,
+  RuleStatus,
 } from "@grasp-os/shared/policies";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -142,6 +147,7 @@ const ruleOf = (row: RuleRow): PolicyRule => ({
   ...(row.excerpt === null ? {} : { excerpt: row.excerpt }),
   createdBy: row.createdBy,
   createdAt: row.createdAt.toISOString(),
+  revision: row.revision,
 });
 
 const exceptionOf = (row: ExceptionRow): PolicyException => ({
@@ -351,10 +357,11 @@ const removePolicy = async (
       action: "policy.removed",
       target: target("policy", id),
     }),
-    // Its rules stay, as rules made by hand, in the same batch.
+    // Its rules stay, as rules made by hand, in the same batch: each a
+    // change, so a page that read one from the policy can't write it back.
     db
       .update(policyRules)
-      .set({ policyId: null })
+      .set({ policyId: null, revision: sql`${policyRules.revision} + 1` })
       .where(
         and(
           eq(policyRules.policyId, id),
@@ -365,6 +372,25 @@ const removePolicy = async (
   if (removed.meta.changes === 0) {
     await unwritten(env, by, notFound);
   }
+};
+
+/** What an edit says, checked: its policy must be there. Never a status. */
+const editRow = async (env: Env, input: unknown) => {
+  const rule = parsed(ruleEditSchema, input);
+  if (rule.policyId !== null) {
+    const policy = await readDocument(env, rule.policyId);
+    if (policy === undefined) {
+      throw policyErrors.create("policy.conflict");
+    }
+  }
+  return {
+    name: rule.name,
+    description: rule.description,
+    conditions: rule.conditions,
+    effect: rule.effect,
+    policyId: rule.policyId,
+    excerpt: rule.excerpt ?? null,
+  };
 };
 
 /** The rule's row as `input` says it, checked: a rule from a policy names one that is there. */
@@ -421,6 +447,7 @@ const createRule = async (
           createdBy: as<string>(by.userId, "created_by"),
           createdAt: as<Date>(now, "created_at"),
           updatedAt: as<Date>(now, "updated_at"),
+          revision: as<number>(1, "revision"),
         })
         .from(sql`(SELECT 1)`)
         .where(onlyWhile(by, policyStillThere(row.policyId)))
@@ -442,40 +469,129 @@ const createRule = async (
 
 /** What a rule says, as `updateRule` compares it. */
 const sameFieldsOf = (
-  rule: Omit<RuleInput, "excerpt"> & { excerpt?: string }
+  rule: Omit<RuleEdit, "excerpt"> & { excerpt?: string }
 ) => [
   rule.name,
   rule.description,
   rule.conditions,
   rule.effect,
-  rule.status,
   rule.policyId,
   rule.excerpt ?? null,
 ];
 
+/**
+ * After a write to a rule that wrote nothing: unchanged when the rule, at
+ * the revision the page read, already says what was asked (`same`);
+ * refused as not there when it's gone; else refused as changed since it
+ * was read, the page reading it again. Refused outright when the admin
+ * stopped being one.
+ */
+const settled = async (
+  env: Env,
+  by: Identity,
+  id: string,
+  revision: number,
+  same: (rule: PolicyRule) => boolean
+): Promise<PolicyRule> => {
+  const found = await readRule(env, id);
+  if (found !== undefined && found.revision === revision && same(found)) {
+    return found;
+  }
+  return await unwritten(env, by, () => {
+    if (found === undefined) {
+      return notFound();
+    }
+    throw policyErrors.create("policy.conflict");
+  });
+};
+
+/** One more than the rule's revision, as a write to it sets it. */
+const nextRevision = sql`${policyRules.revision} + 1`;
+
+/**
+ * Turns a rule on, off or to watching, and nothing else. Only from the
+ * revision the admin's page read: once anything about the rule changed
+ * since, the turn is refused and the page reads it again, so nobody turns
+ * on a rule that blocks believing it only flags. The event records the
+ * effect the rule has as it turns, which that revision fixes.
+ */
+const setRuleStatus = async (
+  env: Env,
+  by: Identity,
+  id: string,
+  input: unknown,
+  read: unknown
+): Promise<PolicyRule> => {
+  requireOwnAdmin(by, "setRuleStatus");
+  const status = parsed(ruleStatusSchema, input);
+  const revision = parsed(ruleRevisionSchema, read);
+  const before = (await readRule(env, id)) ?? notFound();
+  if (before.revision !== revision) {
+    throw policyErrors.create("policy.conflict");
+  }
+  const db = drizzle(env.DB);
+  const [written] = await auditedBatch(env, db, [
+    db
+      .update(policyRules)
+      .set({ status, revision: nextRevision, updatedAt: new Date() })
+      .where(
+        and(
+          eq(policyRules.id, id),
+          eq(policyRules.revision, revision),
+          // Only when it differs: the same turn twice records one change.
+          ne(policyRules.status, status),
+          stillAdmin(by)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "policy.rule.updated",
+      target: target("policy_rule", id),
+      detail: { effect: before.effect, status },
+    }),
+  ]);
+  if (written.meta.changes === 0) {
+    return await settled(
+      env,
+      by,
+      id,
+      revision,
+      (rule) => rule.status === status
+    );
+  }
+  return (await readRule(env, id)) ?? notFound();
+};
+
+/**
+ * Replaces what a rule says, never its status, which only `setRuleStatus`
+ * turns. Only from the revision the admin's page read, as a status turn.
+ */
 const updateRule = async (
   env: Env,
   by: Identity,
   id: string,
-  input: unknown
+  input: unknown,
+  read: unknown
 ): Promise<PolicyRule> => {
   requireOwnAdmin(by, "updateRule");
-  const row = await ruleRow(env, input);
+  const row = await editRow(env, input);
+  const revision = parsed(ruleRevisionSchema, read);
   const db = drizzle(env.DB);
   const conditions = JSON.stringify(row.conditions);
   const [written] = await auditedBatch(env, db, [
     db
       .update(policyRules)
-      .set({ ...row, updatedAt: new Date() })
+      .set({ ...row, revision: nextRevision, updatedAt: new Date() })
       .where(
         and(
           eq(policyRules.id, id),
+          eq(policyRules.revision, revision),
           // Only when something differs: the same save twice records one change.
           sql`(${policyRules.name}, ${policyRules.description}, ${policyRules.conditions},
-            ${policyRules.effect}, ${policyRules.status}, coalesce(${policyRules.policyId}, ''),
+            ${policyRules.effect}, coalesce(${policyRules.policyId}, ''),
             coalesce(${policyRules.excerpt}, ''))
             IS NOT (${row.name}, ${row.description}, ${conditions}, ${row.effect},
-            ${row.status}, ${row.policyId ?? ""}, ${row.excerpt ?? ""})`,
+            ${row.policyId ?? ""}, ${row.excerpt ?? ""})`,
           policyStillThere(row.policyId),
           stillAdmin(by)
         )
@@ -484,38 +600,44 @@ const updateRule = async (
       actor: actorOf(by),
       action: "policy.rule.updated",
       target: target("policy_rule", id),
-      detail: { effect: row.effect, status: row.status },
+      detail: { effect: row.effect },
     }),
   ]);
-  const found = await readRule(env, id);
-  if (found === undefined) {
-    return notFound();
-  }
   if (written.meta.changes === 0) {
-    // Unchanged when it already said exactly this.
-    const same =
-      JSON.stringify(sameFieldsOf(found)) ===
-      JSON.stringify(
-        sameFieldsOf({ ...row, excerpt: row.excerpt ?? undefined })
-      );
-    if (!same) {
-      return await unwritten(env, by, () => {
-        throw policyErrors.create("policy.conflict");
-      });
-    }
+    const wanted = JSON.stringify(
+      sameFieldsOf({ ...row, excerpt: row.excerpt ?? undefined })
+    );
+    return await settled(
+      env,
+      by,
+      id,
+      revision,
+      (rule) => JSON.stringify(sameFieldsOf(rule)) === wanted
+    );
   }
-  return found;
+  return (await readRule(env, id)) ?? notFound();
 };
 
+/** Removes a rule and its exceptions; only from the revision the admin's page read. */
 const removeRule = async (
   env: Env,
   by: Identity,
-  id: string
+  id: string,
+  read: unknown
 ): Promise<void> => {
   requireOwnAdmin(by, "removeRule");
+  const revision = parsed(ruleRevisionSchema, read);
   const db = drizzle(env.DB);
   const [removed] = await auditedBatch(env, db, [
-    db.delete(policyRules).where(and(eq(policyRules.id, id), stillAdmin(by))),
+    db
+      .delete(policyRules)
+      .where(
+        and(
+          eq(policyRules.id, id),
+          eq(policyRules.revision, revision),
+          stillAdmin(by)
+        )
+      ),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "policy.rule.removed",
@@ -532,7 +654,8 @@ const removeRule = async (
       ),
   ]);
   if (removed.meta.changes === 0) {
-    await unwritten(env, by, notFound);
+    // Gone is not found; still there, it changed since it was read.
+    await settled(env, by, id, revision, () => false);
   }
 };
 
@@ -728,6 +851,7 @@ const acceptProposal = async (
           createdBy: as<string>(by.userId, "created_by"),
           createdAt: as<Date>(now, "created_at"),
           updatedAt: as<Date>(now, "updated_at"),
+          revision: as<number>(1, "revision"),
         })
         .from(sql`(SELECT 1)`)
         .where(onlyWhile(by, stillOpen(policyId, proposalId, at)))
@@ -876,16 +1000,33 @@ export class PoliciesRpc extends CoreRpcTarget implements PoliciesApi {
     );
   }
 
-  async updateRule(ruleId: string, rule: RuleInput): Promise<PolicyRule> {
+  async updateRule(
+    ruleId: string,
+    rule: RuleEdit,
+    revision: number
+  ): Promise<PolicyRule> {
     return await withPerson(
       this.#check,
-      async (by) => await updateRule(this.#env, by, idOf(ruleId), rule)
+      async (by) =>
+        await updateRule(this.#env, by, idOf(ruleId), rule, revision)
     );
   }
 
-  async removeRule(ruleId: string): Promise<void> {
+  async setRuleStatus(
+    ruleId: string,
+    status: RuleStatus,
+    revision: number
+  ): Promise<PolicyRule> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await setRuleStatus(this.#env, by, idOf(ruleId), status, revision)
+    );
+  }
+
+  async removeRule(ruleId: string, revision: number): Promise<void> {
     await withPerson(this.#check, async (by) => {
-      await removeRule(this.#env, by, idOf(ruleId));
+      await removeRule(this.#env, by, idOf(ruleId), revision);
     });
   }
 

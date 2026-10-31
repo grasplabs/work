@@ -1,6 +1,7 @@
 import type { PolicyBook, PolicyFindings } from "@grasp-os/shared/policies";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { readPeople } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
@@ -50,18 +51,31 @@ export const findingsOfLoaded = (
   loaded: Loaded<PolicyFindings>
 ): PolicyFindings => (loaded.state === "ready" ? loaded.data : noFindings);
 
-/** What the Policies pages read: the book, and which apps its rules catch. */
+/**
+ * People's names by ID, for who made a rule or uploaded a policy: none
+ * when the members can't be read, so a page never shows an ID instead.
+ */
+export const readPeopleOf = async (
+  core: CoreConnection
+): Promise<ReadonlyMap<string, string>> => {
+  const read = await loadFromCore(core, readPeople);
+  return read.state === "ready" ? read.data : new Map<string, string>();
+};
+
+/** What the Policies pages read: the book, which apps its rules catch, and people's names. */
 export interface PoliciesData {
   book: Loaded<PolicyBook>;
   found: Loaded<PolicyFindings>;
+  people: ReadonlyMap<string, string>;
 }
 
 export const loadPolicies = async (
   core: CoreConnection
 ): Promise<PoliciesData> => {
-  const [book, found] = await Promise.all([
+  const [book, found, people] = await Promise.all([
     readPolicyBook(core),
     readPolicyFindings(core),
+    readPeopleOf(core),
   ]);
-  return { book, found };
+  return { book, found, people };
 };

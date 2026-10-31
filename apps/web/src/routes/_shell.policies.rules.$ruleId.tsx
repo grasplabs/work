@@ -15,11 +15,16 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadLandscape } from "../landscape/landscape-data.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import { FindingsTable } from "../policies/findings-table.tsx";
-import { bookOf, findingsOfLoaded } from "../policies/policies-data.ts";
+import {
+  bookOf,
+  findingsOfLoaded,
+  readPeopleOf,
+} from "../policies/policies-data.ts";
 import {
   editsPolicies,
   RuleActions,
   RuleExceptions,
+  RuleStatusControl,
 } from "../policies/policy-editing.tsx";
 import {
   ConditionChips,
@@ -51,7 +56,10 @@ const RuleDetail = ({
   apps,
   book,
   edits,
+  people,
 }: {
+  /** People's names by ID. */
+  people: ReadonlyMap<string, string>;
   rule: PolicyRule;
   found: readonly PolicyFinding[];
   /** The Landscape's apps, an exception is granted to one of. */
@@ -70,7 +78,8 @@ const RuleDetail = ({
     all.filter(({ ruleId }) => ruleId === rule.id)
   );
   const madeOn = formatDate(rule.createdAt);
-  const { createdBy } = rule;
+  // By name, never by ID: unknown when the member list can't be read.
+  const maker = people.get(rule.createdBy);
   return (
     <>
       <SiteHeader
@@ -89,9 +98,12 @@ const RuleDetail = ({
         />
 
         <section className="bg-card flex flex-col gap-3 rounded-xl border p-4">
-          <SectionTitle>
-            <Trans>Status</Trans>
-          </SectionTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SectionTitle>
+              <Trans>Status</Trans>
+            </SectionTitle>
+            {edits ? <RuleStatusControl rule={rule} /> : null}
+          </div>
           <p className="text-muted-foreground">
             {i18n._(ruleStatusDescription[rule.status])}
           </p>
@@ -120,13 +132,19 @@ const RuleDetail = ({
             <Trans>Where it comes from</Trans>
           </SectionTitle>
           <div className="bg-card flex flex-col gap-3 rounded-xl border p-4">
-            {policy === undefined ? (
+            {policy === undefined && maker === undefined ? (
+              <p>
+                <Trans>Made by hand on {madeOn}.</Trans>
+              </p>
+            ) : null}
+            {policy === undefined && maker !== undefined ? (
               <p>
                 <Trans>
-                  Made by hand by {createdBy} on {madeOn}.
+                  Made by hand by {maker} on {madeOn}.
                 </Trans>
               </p>
-            ) : (
+            ) : null}
+            {policy === undefined ? null : (
               <>
                 <p>
                   <Link
@@ -174,7 +192,7 @@ const RuleDetail = ({
 const RulePage = () => {
   const { t } = useLingui();
   const { ruleId } = Route.useParams();
-  const { apps, found, book: loaded } = Route.useLoaderData();
+  const { apps, found, book: loaded, people } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const book = bookOf(loaded);
   const rule = book.rules.find(({ id }) => id === ruleId);
@@ -217,6 +235,7 @@ const RulePage = () => {
       apps={apps.state === "ready" ? apps.data : []}
       edits={editsPolicies(identity)}
       found={findingsOfLoaded(found).findings}
+      people={people}
       rule={rule}
     />
   );
@@ -224,8 +243,13 @@ const RulePage = () => {
 
 export const Route = createFileRoute("/_shell/policies/rules/$ruleId")({
   // The Landscape's apps too: an exception is granted to one of them.
-  loader: async ({ context: { core, identity } }) =>
-    await loadLandscape(core, identity),
+  loader: async ({ context: { core, identity } }) => {
+    const [landscape, people] = await Promise.all([
+      loadLandscape(core, identity),
+      readPeopleOf(core),
+    ]);
+    return { ...landscape, people };
+  },
   pendingComponent: PageLoading,
   component: RulePage,
 });

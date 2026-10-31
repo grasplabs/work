@@ -196,25 +196,79 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await adminPage.getByRole("button", { name: "Publish" }).click();
     await expect(adminPage.getByText("Rules from this policy")).toBeVisible();
 
+    // A rule from it is written on a page of its own, the policy chosen.
     await adminPage
-      .getByRole("button", { name: "Make a rule from it" })
+      .getByRole("button", { name: "More for this policy" })
       .click();
+    await adminPage
+      .getByRole("menuitem", { name: "Make a rule from it" })
+      .click();
+    await expect(
+      adminPage.getByRole("heading", { level: 1, name: "New rule" })
+    ).toBeVisible();
     await adminPage.getByLabel("Name").fill(name);
-    await adminPage.getByRole("checkbox", { name: "Customer data" }).click();
+    await adminPage.getByRole("button", { name: "Customer data" }).click();
     await adminPage
       .getByLabel("The passage it says")
       .fill("Staff may not paste customer data into AI tools");
-    await adminPage.getByRole("button", { name: "Save" }).click();
+    await adminPage.getByRole("button", { name: "Save rule" }).click();
     await expect(
       adminPage.getByRole("heading", { level: 1, name })
     ).toBeVisible();
+    // It starts by watching, and is turned on from its page.
+    const status = adminPage.getByRole("group", {
+      name: "Status of this rule",
+    });
     await expect(
-      adminPage.getByText("Watching", { exact: true })
+      status.getByRole("button", { name: "Watching" })
+    ).toHaveAttribute("aria-pressed", "true");
+    await status.getByRole("button", { name: "Active" }).click();
+    await expect(
+      status.getByRole("button", { name: "Active" })
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // Another admin changes the rule while this one edits it: the save is
+    // refused, the dialog says the rule changed, and loads it as it is
+    // now; saving from there goes through. The old draft is never sent
+    // again under the new revision.
+    await adminPage.getByRole("button", { name: "More for this rule" }).click();
+    await adminPage.getByRole("menuitem", { name: "Edit rule" }).click();
+    const editing = adminPage.getByRole("dialog", { name: "Edit the rule" });
+    const { rules: before } = await api.policies.book();
+    const meanwhile = before.find((each) => each.name === name);
+    if (meanwhile === undefined) {
+      throw new Error(`No rule ${name}`);
+    }
+    await api.policies.updateRule(
+      meanwhile.id,
+      {
+        name: meanwhile.name,
+        description: "Changed meanwhile",
+        conditions: meanwhile.conditions,
+        effect: meanwhile.effect,
+        policyId: meanwhile.policyId,
+        ...(meanwhile.excerpt === undefined
+          ? {}
+          : { excerpt: meanwhile.excerpt }),
+      },
+      meanwhile.revision
+    );
+    await editing.getByLabel("What it's for").fill("Changed here");
+    await editing.getByRole("button", { name: "Save" }).click();
+    await expect(
+      editing.getByText("This rule changed since you started editing it")
     ).toBeVisible();
-    await adminPage.getByRole("button", { name: "Edit" }).click();
-    await adminPage.getByLabel("Status").selectOption("active");
-    await adminPage.getByRole("button", { name: "Save" }).click();
-    await expect(adminPage.getByText("Active", { exact: true })).toBeVisible();
+    await expect(editing.getByRole("button", { name: "Save" })).toBeDisabled();
+    await editing
+      .getByRole("button", { name: "Load the current rule" })
+      .click();
+    await expect(editing.getByLabel("What it's for")).toHaveValue(
+      "Changed meanwhile"
+    );
+    await editing.getByLabel("What it's for").fill("Changed after reading it");
+    await editing.getByRole("button", { name: "Save" }).click();
+    await expect(editing).toHaveCount(0);
+    await expect(adminPage.getByText("Changed after reading it")).toBeVisible();
 
     await adminPage.getByRole("button", { name: "Grant an exception" }).click();
     await adminPage.getByLabel("Why").fill(reason);
@@ -229,13 +283,19 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await expect(
       page.getByRole("button", { name: "Upload a policy" })
     ).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "New rule" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "New rule" })).toHaveCount(0);
+    // Its page, opened by its address, sends them back.
+    await page.goto("/policies/rules/new");
+    await expect(page).toHaveURL(/\/policies$/u);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Policies" })
+    ).toBeVisible();
     await page.goto(ruleUrl);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByText(reason)).toBeVisible();
     await expect(
       page.getByRole("button", {
-        name: /^(?:Edit|Delete|Grant an exception|Revoke.*)$/u,
+        name: /^(?:More for this rule|Watching|Active|Paused|Grant an exception|Revoke.*)$/u,
       })
     ).toHaveCount(0);
     await page.goto(policyUrl);
@@ -244,7 +304,7 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     ).toBeVisible();
     await expect(
       page.getByRole("button", {
-        name: /^(?:Remove|Make a rule from it|Publish)$/u,
+        name: /^(?:More for this policy|Publish)$/u,
       })
     ).toHaveCount(0);
 
@@ -253,7 +313,8 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await expect(
       adminPage.getByText("No app is allowed to break this rule.")
     ).toBeVisible();
-    await adminPage.getByRole("button", { name: "Delete" }).click();
+    await adminPage.getByRole("button", { name: "More for this rule" }).click();
+    await adminPage.getByRole("menuitem", { name: "Delete rule" }).click();
     await adminPage
       .getByRole("alertdialog")
       .getByRole("button", { name: "Remove" })
@@ -261,7 +322,10 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await expect(adminPage).toHaveURL(/\/policies$/u);
     await expect(adminPage.getByText(name)).toHaveCount(0);
     await adminPage.goto(policyUrl);
-    await adminPage.getByRole("button", { name: "Remove" }).click();
+    await adminPage
+      .getByRole("button", { name: "More for this policy" })
+      .click();
+    await adminPage.getByRole("menuitem", { name: "Remove policy" }).click();
     await adminPage
       .getByRole("alertdialog")
       .getByRole("button", { name: "Remove" })
@@ -273,8 +337,8 @@ test("a member sees the landscape but not an app's audit trail, and the policy m
     await Promise.all(
       book.rules
         .filter((each) => each.name === name)
-        .map(async ({ id }) => {
-          await api.policies.removeRule(id);
+        .map(async ({ id, revision }) => {
+          await api.policies.removeRule(id, revision);
         })
     );
     await Promise.all(
