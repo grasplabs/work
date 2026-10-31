@@ -30,6 +30,7 @@ import {
   whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
+import { testAssets } from "./test/test-run.ts";
 import { withNoBackgroundCompile } from "./workerd-v8-flags.ts";
 
 // Background compilation off in the tests' workerd (workerd-v8-flags.ts).
@@ -315,8 +316,8 @@ export const coreProject = (
                 }),
           },
           // A stand-in frontend and the App compiler, written by the
-          // global setup.
-          assets: { directory: "./dist/test-assets" },
+          // global setup into this run's own directory.
+          assets: { directory: testAssets },
           // The real connect Worker behind the CONNECT service binding,
           // bundled by the global setup. Given as a script: a `scriptPath`
           // fails to start in the test pool.
