@@ -287,6 +287,39 @@ export const aiProvidersFake = () => {
       });
     }
     if (url.pathname === "/v1/audio/transcriptions") {
+      // As OpenAI does: the audio's format by the file name's extension
+      // alone, and a name without one it takes refused.
+      // No backslash in here: the source is embedded in a template string.
+      const name =
+        /name="file"; filename="(?<name>[^"]*)"/u.exec(body)?.groups?.name ??
+        "";
+      const dot = name.lastIndexOf(".");
+      const extension = dot === -1 ? undefined : name.slice(dot + 1);
+      const takes = [
+        "flac",
+        "m4a",
+        "mp3",
+        "mp4",
+        "mpeg",
+        "mpga",
+        "oga",
+        "ogg",
+        "wav",
+        "webm",
+      ];
+      if (extension === undefined || !takes.includes(extension)) {
+        return Response.json(
+          {
+            error: {
+              message: `Invalid file format. Supported formats: ${JSON.stringify(takes)}`,
+              type: "invalid_request_error",
+              param: null,
+              code: null,
+            },
+          },
+          { status: 400 }
+        );
+      }
       return Response.json(
         { text: "Hello there" },
         { headers: { "x-request-id": `req-heard-${seen.length}` } }

@@ -45,6 +45,8 @@ interface Asked {
   path: string;
   fields: Record<string, string[]>;
   file: number;
+  /** The name the recording went under. */
+  fileName: string;
 }
 
 /** What reached OpenAI with `audio` in it: each request's fields and file. */
@@ -57,14 +59,16 @@ const askedWith = async (audio: string): Promise<Asked[]> => {
       }).formData();
       const fields: Record<string, string[]> = {};
       let file = 0;
+      let fileName = "";
       for (const [name, value] of form.entries()) {
         if (typeof value === "string") {
           fields[name] = [...(fields[name] ?? []), value];
         } else {
           file = value.size;
+          fileName = value.name;
         }
       }
-      return { path, fields, file };
+      return { path, fields, file, fileName };
     })
   );
 };
@@ -155,14 +159,14 @@ const gatewayEvents = async (head: number) => {
 /** A recording as the page sends it, with the link and what it measured. */
 const recording = (
   link: { secret: string; key: string },
-  { seconds = "2.4", audio = newAudio() } = {}
+  { seconds = "2.4", audio = newAudio(), type = "audio/webm" } = {}
 ): FormData => {
   const form = new FormData();
   form.set("secret", link.secret);
   form.set("key", link.key);
   form.set("locale", "en");
   form.set("seconds", seconds);
-  form.set("audio", new File([audio], "stretch", { type: "audio/webm" }));
+  form.set("audio", new File([audio], "stretch", { type }));
   return form;
 };
 
@@ -270,6 +274,45 @@ describe(
         headers: ["authorization"],
         inBody: false,
         placeholder: false,
+      });
+    });
+
+    it.each([
+      ["Chrome's WebM with Opus", "audio/webm;codecs=opus", "stretch.webm"],
+      ["Firefox's Ogg with Opus", "audio/ogg;codecs=opus", "stretch.ogg"],
+      ["Safari's MP4 with AAC", "audio/mp4", "stretch.mp4"],
+      ["an M4A recording", "audio/x-m4a", "stretch.m4a"],
+      ["a WAV recording", "audio/wav", "stretch.wav"],
+    ])(
+      "sends %s under a name whose extension OpenAI reads its format by",
+      async (_, type, name) => {
+        const { link } = await openedFor();
+        const audio = newAudio();
+        const status = await hearing(async () => {
+          const response = await hear(recording(link, { audio, type }));
+          await response.body?.cancel();
+          return response.status;
+        });
+        const [request] = await askedWith(audio);
+        expect({ status, name: request?.fileName }).toStrictEqual({
+          status: 200,
+          name,
+        });
+      }
+    );
+
+    it("refuses a recording of a type OpenAI can't take, sending nothing", async () => {
+      const { link } = await openedFor();
+      const audio = newAudio();
+      const refusal = await hearing(
+        async () =>
+          await codeOf(
+            await hear(recording(link, { audio, type: "audio/aac" }))
+          )
+      );
+      expect({ refusal, sent: await sentCount(audio) }).toStrictEqual({
+        refusal: [400, "hear.invalid"],
+        sent: 0,
       });
     });
 
