@@ -11,27 +11,42 @@ import * as React from "react";
  * asks; `tight` and `snug` keep a list of small items together, as the
  * prototype's Landscape lists a vendor's documents and an insight's evidence.
  */
+/*
+ * `variant="card"`: the items as rows on a card, each under a line (its
+ * items take `variant="row"`), as a page's questions to start from.
+ */
 function ItemGroup({
   className,
   spacing = "default",
+  variant = "default",
+  render,
   ...props
-}: React.ComponentProps<"div"> & { spacing?: "default" | "tight" | "snug" }) {
-  return (
-    <div
-      role="list"
-      data-slot="item-group"
-      data-spacing={spacing}
-      className={cn(
-        "group/item-group flex w-full flex-col",
-        spacing === "default" &&
-          "gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
-        spacing === "tight" && "gap-1",
-        spacing === "snug" && "gap-1.5",
-        className
-      )}
-      {...props}
-    />
-  );
+}: useRender.ComponentProps<"div"> & {
+  spacing?: "default" | "tight" | "snug";
+  variant?: "default" | "card";
+}) {
+  // `render` makes it a `ul` of `li`s, a list by its own element.
+  return useRender({
+    defaultTagName: "div",
+    props: mergeProps<"div">(
+      {
+        role: "list",
+        className: cn(
+          "group/item-group flex w-full flex-col",
+          variant === "default" &&
+            spacing === "default" &&
+            "gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
+          variant === "default" && spacing === "tight" && "gap-1",
+          variant === "default" && spacing === "snug" && "gap-1.5",
+          variant === "card" && "bg-card overflow-hidden rounded-xl border",
+          className
+        ),
+      },
+      props
+    ),
+    render,
+    state: { slot: "item-group", spacing, variant },
+  });
 }
 
 function ItemSeparator({
@@ -56,8 +71,12 @@ const itemVariants = cva(
         default: "border-transparent",
         outline: "border-border",
         muted: "bg-muted/50 border-transparent",
-        // A row of a card list, under a line.
-        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 in-[li:last-child]:border-b-0",
+        // A quiet row of muted text, as the questions under a chat's box:
+        // the box stays what the page is about.
+        quiet:
+          "text-muted-foreground [button]:hover:text-foreground rounded-lg border-transparent text-left disabled:pointer-events-none disabled:opacity-50",
+        // A row of a card list (`ItemGroup variant="card"`), under a line.
+        row: "[button]:hover:bg-muted/60 focus-visible:bg-muted/60 rounded-none border-0 border-b text-left focus-visible:ring-inset in-[li:last-child]:border-b-0",
       },
       size: {
         default: "gap-3.5 px-4 py-3.5",
@@ -66,8 +85,9 @@ const itemVariants = cva(
       },
     },
     compoundVariants: [
-      // In line with the title of a settings card above the rows.
-      { variant: "row", size: "default", className: "gap-3 px-5 py-3" },
+      // In line with the text in the chat's box above the questions.
+      { variant: "quiet", size: "sm", className: "px-4.5 py-2" },
+      { variant: "row", size: "sm", className: "gap-3 px-3.5 py-2.5" },
     ],
     defaultVariants: {
       variant: "default",
