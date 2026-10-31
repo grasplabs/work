@@ -494,6 +494,38 @@ describe("AI providers in connect", () => {
       });
     });
 
+    it("sends Grasp's own key to OpenAI's EU host, its project's, and to no host but OpenAI's own", async () => {
+      const euUrl = "https://eu.api.openai.com/v1/responses";
+      const toEu = await connect().modelFetch(
+        modelRequest(euUrl),
+        await grantFor({
+          provider: "openai",
+          host: "eu.api.openai.com",
+          credential: "platform",
+        })
+      );
+      const elsewhere = await connect().modelFetch(
+        modelRequest("https://api.anthropic.com/v1/responses"),
+        await grantFor({
+          provider: "openai",
+          host: "api.anthropic.com",
+          credential: "platform",
+        })
+      );
+
+      expect({
+        toEu: refusalOf(toEu),
+        sentTo: sent.map(({ host }) => host),
+        key: sent[0]?.headers.authorization,
+        elsewhere: refusalOf(elsewhere),
+      }).toStrictEqual({
+        toEu: "sent",
+        sentTo: ["eu.api.openai.com"],
+        key: `Bearer ${platformKey}`,
+        elsewhere: "endpoint",
+      });
+    });
+
     it("sends a request on Grasp's key to OpenAI with store off, whatever core asked, and the organization's as it came", async () => {
       const body = JSON.stringify({ model: "gpt-5.4", store: true });
       await connect().saveAiProviderKey(

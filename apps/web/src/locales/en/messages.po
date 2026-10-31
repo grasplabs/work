@@ -8019,6 +8019,10 @@ msgctxt "what AI was used for"
 msgid "Interviews"
 msgstr "Interviews"
 
+#: src/settings/ai-providers.tsx
+msgid "Interviews aren't transcribed: this deployment keeps everything in the EU, and {whereItRuns} isn't."
+msgstr "Interviews aren't transcribed: this deployment keeps everything in the EU, and {whereItRuns} isn't."
+
 #: src/settings/invitations.tsx
 msgid "Invite"
 msgstr "Invite"
@@ -15695,6 +15699,10 @@ msgstr "The input isn't JSON."
 #: src/onboarding/staff-words.ts
 msgid "The interview days are set"
 msgstr "The interview days are set"
+
+#: src/settings/ai-providers.tsx
+msgid "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and {whereItRuns} isn't."
+msgstr "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and {whereItRuns} isn't."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The interviews"

@@ -175,6 +175,79 @@ export const aiProviderHost = (provider: AiProviderId): string | undefined => {
 };
 
 /**
+ * Where Grasp's own OpenAI project keeps its data: the EU (a data
+ * residency project, which OpenAI answers at its EU host only) or the US.
+ * The platform's AI settings say which (@grasp-os/shared/platform-ai).
+ */
+export const platformRegions = ["eu", "us"] as const;
+export type PlatformRegion = (typeof platformRegions)[number];
+
+/**
+ * The hosts Grasp's own key for a provider goes to, by its project's
+ * region, for a provider whose host depends on it: OpenAI's.
+ */
+const platformHosts: Readonly<
+  Partial<Record<AiProviderId, Readonly<Record<PlatformRegion, string>>>>
+> = {
+  openai: { eu: "eu.api.openai.com", us: "api.openai.com" },
+};
+
+/** Where a platform feature's requests go on Grasp's own key, and where that is. */
+export interface PlatformRoute {
+  host: string;
+  /** Its region, as the model ledger and the rules take it. */
+  region: AiProviderSpec["region"];
+  /** Where it runs, in plain words. */
+  whereItRuns: string;
+}
+
+const regionWords: Readonly<Record<PlatformRegion, string>> = {
+  eu: "European Union",
+  us: "United States",
+};
+
+/**
+ * Where Grasp's own key for `provider` sends a platform feature's
+ * requests, its project in `region`: the one place a platform region
+ * becomes a host. None for a provider without a fixed host.
+ */
+export const platformRouteOf = (
+  provider: AiProviderId,
+  region: PlatformRegion
+): PlatformRoute | undefined => {
+  const regional = platformHosts[provider];
+  if (regional !== undefined) {
+    return {
+      host: regional[region],
+      region,
+      whereItRuns: `${aiProviders[provider].label}, ${regionWords[region]}`,
+    };
+  }
+  const host = aiProviderHost(provider);
+  return host === undefined
+    ? undefined
+    : {
+        host,
+        region: aiProviders[provider].region,
+        whereItRuns: aiProviders[provider].whereItRuns,
+      };
+};
+
+/**
+ * Every host Grasp's own key for `provider` may be sent to, whichever
+ * region its project is in: connect's allow-list for platform requests,
+ * whose grant names the one host core chose (`platformRouteOf`).
+ */
+export const platformHostsOf = (provider: AiProviderId): string[] => {
+  const regional = platformHosts[provider];
+  if (regional !== undefined) {
+    return Object.values(regional);
+  }
+  const host = aiProviderHost(provider);
+  return host === undefined ? [] : [host];
+};
+
+/**
  * What core puts where the key goes, which connect replaces with the real
  * key: a request that carries anything else there is refused, so core can
  * never send a credential of its own, nor learn the real one.
@@ -332,6 +405,11 @@ export interface AiPlatformUse {
   feature: AiPlatformFeature;
   /** The provider, and where it runs; none when the deployment does it itself. */
   provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
+  /**
+   * Off on this deployment: it keeps everything in the EU, and Grasp's
+   * project for the provider isn't there, so nothing is sent at all.
+   */
+  off: boolean;
 }
 
 /** The organization's AI providers and its choice of models. */

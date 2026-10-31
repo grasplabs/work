@@ -1,3 +1,8 @@
+import { platformRouteOf } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderId,
+  PlatformRoute,
+} from "@grasp-os/shared/ai-providers";
 import { jsonVar } from "@grasp-os/shared/config";
 import { log } from "@grasp-os/shared/log";
 import {
@@ -40,4 +45,20 @@ export const platformAi = (
     });
   }
   return settings;
+};
+
+/**
+ * Where Grasp's own key for `provider` sends a platform feature's
+ * requests, by the settings' region (`platformRouteOf`): OpenAI's EU host
+ * for an EU project. None while the settings don't parse, when every
+ * platform feature is off.
+ */
+export const platformRouteFor = (
+  env: Pick<Env, "PLATFORM_AI">,
+  provider: AiProviderId
+): PlatformRoute | undefined => {
+  const settings = platformAi(env);
+  return settings === undefined
+    ? undefined
+    : platformRouteOf(provider, settings.region);
 };

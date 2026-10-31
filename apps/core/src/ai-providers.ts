@@ -49,7 +49,7 @@ import { catalogModelsOf, parseModelRef } from "./model-catalog.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { ProviderHealth } from "./model-ledger.ts";
 import { deploymentStaysInEu, models } from "./models.ts";
-import { platformAi } from "./platform-ai.ts";
+import { platformAi, platformRouteFor } from "./platform-ai.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -172,22 +172,38 @@ const refusalOf = (error: unknown): Error => {
   return aiProviderErrors.create("ai_provider.failed");
 };
 
-/** `provider` as the listing names it: its name and where it runs. */
+/**
+ * `provider` as the listing names it, on Grasp's own key: its name, and
+ * where its project's region sends the requests (`platformRouteFor`).
+ */
 const platformProvider = (
+  env: Env,
   provider: AiProviderId
 ): NonNullable<AiPlatformUse["provider"]> => ({
   id: provider,
   label: aiProviders[provider].label,
-  whereItRuns: aiProviders[provider].whereItRuns,
+  whereItRuns:
+    platformRouteFor(env, provider)?.whereItRuns ??
+    aiProviders[provider].whereItRuns,
 });
+
+/**
+ * Whether a platform feature on `provider` is off for this deployment: it
+ * keeps everything in the EU, and Grasp's project for the provider isn't
+ * there (models.ts refuses such a call as `model.eu_only`).
+ */
+const offOutsideEu = (env: Env, provider: AiProviderId): boolean =>
+  deploymentStaysInEu(env) && platformRouteFor(env, provider)?.region !== "eu";
 
 /**
  * Who handles Grasp's own AI features for this deployment (platform-ai.ts),
  * on Grasp's keys whatever the organization connected: its admins can't
- * switch them off here, but they see where that data goes. Document
- * conversion stays on the deployment where knowledge/extract.ts keeps it
- * there (`local`, or a deployment that keeps everything in the EU); none
- * at all while the settings don't parse, as every feature is then off.
+ * switch them off here, but they see where that data goes, and which are
+ * off because the deployment keeps everything in the EU and Grasp's
+ * project isn't there. Document conversion stays on the deployment where
+ * knowledge/extract.ts keeps it there (`local`, or an EU-only deployment
+ * whose conversion provider isn't in the EU); none at all while the
+ * settings don't parse, as every feature is then off.
  */
 const platformUses = (env: Env): AiPlatformUse[] => {
   const settings = platformAi(env);
@@ -199,15 +215,22 @@ const platformUses = (env: Env): AiPlatformUse[] => {
     {
       feature: "conversion",
       provider:
-        conversion.provider === "local" || deploymentStaysInEu(env)
+        conversion.provider === "local" ||
+        offOutsideEu(env, conversion.provider)
           ? null
-          : platformProvider(conversion.provider),
+          : platformProvider(env, conversion.provider),
+      off: false,
     },
     {
       feature: "transcription",
-      provider: platformProvider(transcription.provider),
+      provider: platformProvider(env, transcription.provider),
+      off: offOutsideEu(env, transcription.provider),
     },
-    { feature: "speech", provider: platformProvider(speech.provider) },
+    {
+      feature: "speech",
+      provider: platformProvider(env, speech.provider),
+      off: offOutsideEu(env, speech.provider),
+    },
   ];
 };
 

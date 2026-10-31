@@ -1069,13 +1069,14 @@ describe("AI providers", { timeout: 60_000 }, () => {
         }
       };
 
+      // Grasp's OpenAI project keeps its data in the EU unless set.
       await expect(uses()).resolves.toStrictEqual([
-        "conversion: OpenAI, United States",
-        "transcription: OpenAI, United States",
-        "speech: OpenAI, United States",
+        "conversion: OpenAI, European Union",
+        "transcription: OpenAI, European Union",
+        "speech: OpenAI, European Union",
       ]);
       await expect(
-        uses({ conversion: { provider: "local" } })
+        uses({ conversion: { provider: "local" }, region: "us" })
       ).resolves.toStrictEqual([
         "conversion: here",
         "transcription: OpenAI, United States",
@@ -1107,13 +1108,15 @@ describe("AI providers", { timeout: 60_000 }, () => {
       );
 
       expect(answer.text).toBe("Converted.");
+      // At OpenAI's EU host: Grasp's project keeps its data there.
       await expect(placesOf(platformOpenAiKey)).resolves.toStrictEqual(
-        onlyAt(openaiCase)
+        onlyAt({ ...openaiCase, host: "eu.api.openai.com" })
       );
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event?.detail).toMatchObject({
         transport: "connect",
         credential: "platform",
+        region: "eu",
         platform: "brain_upkeep",
       });
     });

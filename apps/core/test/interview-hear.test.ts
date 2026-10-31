@@ -270,7 +270,7 @@ describe(
       });
       // Grasp's key from connect alone, once, to OpenAI.
       await expect(keyPlaces(audio, platformOpenAiKey)).resolves.toStrictEqual({
-        hosts: ["api.openai.com"],
+        hosts: ["eu.api.openai.com"],
         headers: ["authorization"],
         inBody: false,
         placeholder: false,

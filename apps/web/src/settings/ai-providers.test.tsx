@@ -601,9 +601,9 @@ describe("Settings › AI providers", () => {
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
-        { feature: "conversion", provider: openai },
-        { feature: "transcription", provider: openai },
-        { feature: "speech", provider: openai },
+        { feature: "conversion", provider: openai, off: false },
+        { feature: "transcription", provider: openai, off: false },
+        { feature: "speech", provider: openai, off: false },
       ],
     });
     await shown(api);
@@ -625,9 +625,32 @@ describe("Settings › AI providers", () => {
     expect(section?.textContent).toContain("Grasp's own provider keys");
   });
 
+  it("says which of Grasp's own features are off where the deployment keeps everything in the EU and Grasp's project isn't there", async () => {
+    const openai = {
+      id: "openai",
+      label: aiProviders.openai.label,
+      whereItRuns: "OpenAI, United States",
+    } as const;
+    const { api } = fakeAiProviders({
+      platform: [
+        { feature: "conversion", provider: null, off: false },
+        { feature: "transcription", provider: openai, off: true },
+        { feature: "speech", provider: openai, off: true },
+      ],
+    });
+    await shown(api);
+
+    expect(text()).toContain(
+      "Interviews aren't transcribed: this deployment keeps everything in the EU, and OpenAI, United States isn't."
+    );
+    expect(text()).toContain(
+      "The interview's questions aren't read aloud: this deployment keeps everything in the EU, and OpenAI, United States isn't."
+    );
+  });
+
   it("says when documents are converted on the deployment itself", async () => {
     const { api } = fakeAiProviders({
-      platform: [{ feature: "conversion", provider: null }],
+      platform: [{ feature: "conversion", provider: null, off: false }],
     });
     await shown(api);
 

@@ -1002,9 +1002,12 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       transcriptionModel,
     ],
     [
-      "the deployment stays in the EU, and the EU rule doesn't name it",
-      { eu: { deployment: true, models: [textModel] } },
-      undefined,
+      "the deployment stays in the EU and Grasp's project is in the US, whatever its EU models list",
+      {
+        models: [textModel, transcriptionModel],
+        eu: { deployment: true, models: [textModel, transcriptionModel] },
+      },
+      { region: "us" },
       "model.eu_only",
       transcriptionModel,
     ],
@@ -1067,7 +1070,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
-  it("listens when the deployment stays in the EU and its EU rule names the model", async () => {
+  it("listens for an EU-only deployment at OpenAI's EU host, where Grasp's project keeps its data, whatever its EU models list", async () => {
     const { ada } = await openedTwo();
 
     const { upstream, result } = await relaying(
@@ -1086,13 +1089,18 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       {
         config: {
           models: [textModel, transcriptionModel],
-          eu: { deployment: true, models: [transcriptionModel] },
+          eu: { deployment: true, models: [textModel] },
         },
       }
     );
 
-    expect([result, upstream.opened[0]?.path]).toStrictEqual([
+    expect([
+      result,
+      upstream.opened[0]?.host,
+      upstream.opened[0]?.path,
+    ]).toStrictEqual([
       "ready",
+      "eu.api.openai.com",
       "/v1/realtime?intent=transcription",
     ]);
   });

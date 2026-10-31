@@ -314,6 +314,48 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("says Stephen's lines in a voice the platform's model has when it names none: tts-1 has no cedar", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    const before = env.PLATFORM_AI;
+    env.PLATFORM_AI = { speech: { provider: "openai", model: "tts-1" } };
+    let status: number;
+    try {
+      const response = await speak({ text, language: "en", link });
+      ({ status } = response);
+      await response.body?.cancel();
+    } finally {
+      env.PLATFORM_AI = before;
+    }
+
+    expect(status).toBe(200);
+    await expect(askedFor(text)).resolves.toStrictEqual([
+      { model: "tts-1", input: text, voice: "onyx" },
+    ]);
+  });
+
+  it("says nothing while the platform's settings give a speaker a voice its model doesn't have", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    const before = env.PLATFORM_AI;
+    env.PLATFORM_AI = {
+      speech: {
+        provider: "openai",
+        model: "tts-1",
+        voices: { stephen: "cedar" },
+      },
+    };
+    let result: unknown[];
+    try {
+      result = await codeOf(await speak({ text, language: "en", link }));
+    } finally {
+      env.PLATFORM_AI = before;
+    }
+
+    expect(result).toStrictEqual([503, "speech.unavailable"]);
+    await expect(carrying(text)).resolves.toStrictEqual([]);
+  });
+
   it("says nothing while the platform's AI settings don't parse", async () => {
     const { link } = await opened();
     const text = newLine();

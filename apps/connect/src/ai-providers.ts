@@ -3,6 +3,7 @@ import {
   aiGrantHeader,
   aiKeyErrors,
   aiProviderHost,
+  platformHostsOf,
   aiProviderIdSchema,
   aiProviderIds,
   aiProviderKeySaveSchema,
@@ -451,11 +452,16 @@ interface Destination {
 /** The key and where it may go, for `claims`; none when there is no key. */
 const destinationOf = async (
   env: Env,
-  { provider, credential }: ModelGrantClaims
+  { provider, credential, host: granted }: ModelGrantClaims
 ): Promise<Destination | undefined> => {
   if (credential === "platform") {
+    // Grasp's own key goes to the host core's grant names, its project's
+    // region's (`platformRouteOf`), only when it is one of that provider's
+    // own hosts: OpenAI's EU or US host. Any other leaves the provider's
+    // first, which the request's own host then fails as `endpoint`.
     const key = platformKeyOf(env, provider);
-    const host = aiProviderHost(provider);
+    const hosts = platformHostsOf(provider);
+    const host = hosts.includes(granted) ? granted : hosts[0];
     return key === undefined || host === undefined
       ? undefined
       : { key, base: new URL(`https://${host}`) };

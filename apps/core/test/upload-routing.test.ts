@@ -108,14 +108,14 @@ const timesSent = async (upload: Upload): Promise<number> => {
 };
 
 /** Runs `run` with `config` as the deployment's gateway config. */
-const withDeployment = async (
+const withDeployment = async <T>(
   config: unknown,
-  run: () => Promise<void>
-): Promise<void> => {
+  run: () => Promise<T>
+): Promise<T> => {
   const { MODEL_GATEWAY: gateway } = env;
   env.MODEL_GATEWAY = config;
   try {
-    await run();
+    return await run();
   } finally {
     env.MODEL_GATEWAY = gateway;
   }
@@ -195,7 +195,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
       extractor: "platform",
       recorded: 1,
       hits: [{ path: name, headings: ["Expense policy", "Travel"] }],
-      host: "api.openai.com",
+      host: "eu.api.openai.com",
       path: "/v1/responses",
       body: {
         model: "gpt-5.4-mini",
@@ -225,7 +225,7 @@ describe("upload routing", { timeout: 60_000 }, () => {
       },
     });
     await expect(keyPlaces(name, platformOpenAiKey)).resolves.toStrictEqual({
-      hosts: ["api.openai.com"],
+      hosts: ["eu.api.openai.com"],
       headers: ["authorization"],
       inBody: false,
       placeholder: false,
@@ -432,14 +432,41 @@ describe("upload routing", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sent: [], status: "ready", extractor: "local" });
   });
 
-  it("keeps every file of a deployment whose rules keep everything in the EU in the Worker", async () => {
+  it("converts an EU-only deployment's PDF at OpenAI's EU host, where Grasp's project keeps its data", async () => {
+    const person = await signedInApi(idp, "user");
+    const collectionId = await ownCollection(person.api);
+    const name = newName("pdf");
+    await plan(platformOpenAiKey, [
+      converted("openai-responses", "# Expense policy\n\nFly economy."),
+    ]);
+
+    const upload = await withDeployment(
+      euOnly,
+      async () => await uploadedTo(person.api, collectionId, name)
+    );
+
+    const sent = await carrying(name);
+    expect({
+      status: upload.status,
+      extractor: await extractorOf(upload),
+      hosts: sent.map(({ host }) => host),
+    }).toStrictEqual({
+      status: "ready",
+      extractor: "platform",
+      hosts: ["eu.api.openai.com"],
+    });
+  });
+
+  it("keeps every file of an EU-only deployment in the Worker while Grasp's project is in the US", async () => {
     const person = await signedInApi(idp, "user");
     const collectionId = await ownCollection(person.api);
     const name = newName("pdf");
     const uploads: Upload[] = [];
 
     await withDeployment(euOnly, async () => {
-      uploads.push(await uploadedTo(person.api, collectionId, name));
+      await withPlatformAi({ region: "us" }, async () => {
+        uploads.push(await uploadedTo(person.api, collectionId, name));
+      });
     });
 
     expect({

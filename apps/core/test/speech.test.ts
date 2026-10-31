@@ -180,7 +180,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     ]);
     await expect(sentWith(line)).resolves.toStrictEqual([
       {
-        host: "api.openai.com",
+        host: "eu.api.openai.com",
         path: "/v1/audio/speech",
         body: {
           model: "gpt-4o-mini-tts",
@@ -242,7 +242,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
     const events = await auditedFor(person.userId, 2);
     await expect(keyPlaces(said, platformOpenAiKey)).resolves.toStrictEqual({
-      hosts: ["api.openai.com"],
+      hosts: ["eu.api.openai.com"],
       headers: ["authorization"],
       inBody: false,
       placeholder: false,
@@ -357,14 +357,22 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       "model.sensitive_data",
     ],
     [
-      "the deployment must stay in the EU and it isn't hosted there",
-      { eu: { models: [textModel], deployment: true } },
+      "the deployment must stay in the EU and Grasp's project is in the US, whatever its EU models list",
+      {
+        models: [textModel, speechModel],
+        eu: { models: [textModel, speechModel], deployment: true },
+      },
       "model.eu_only",
+      { region: "us" },
     ],
   ])(
     "refuses an onboarding line when %s, sending nothing",
-    async (_, rules, code) => {
-      const { gatewayEnv } = withGateway(rules);
+    async (_, rules, code, platform?: unknown) => {
+      const { gatewayEnv: rulesEnv } = withGateway(rules);
+      const gatewayEnv: ModelsEnv =
+        platform === undefined
+          ? rulesEnv
+          : { ...rulesEnv, PLATFORM_AI: platform };
       const person = newPerson();
       const line = newLine();
 
@@ -386,11 +394,11 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     }
   );
 
-  it("says an onboarding line in a speech model the rules list for sensitive data and the EU", async () => {
+  it("says an EU-only deployment's line at OpenAI's EU host, where Grasp's project keeps its data, whatever its EU models list", async () => {
     const { gatewayEnv } = withGateway({
       models: [textModel, speechModel],
       sensitive: { models: [speechModel] },
-      eu: { models: [speechModel], deployment: true },
+      eu: { models: [textModel], deployment: true },
     });
     const person = newPerson();
     const line = newLine();
@@ -401,11 +409,13 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       language: "fr",
     });
 
-    await expect(carrying(line)).resolves.toHaveLength(1);
+    const sent = await carrying(line);
+    expect(sent.map(({ host }) => host)).toStrictEqual(["eu.api.openai.com"]);
     const [event] = await auditedFor(person.userId, 1);
     expect(event?.detail).toMatchObject({
       euOnly: "deployment",
       sensitive: "restricted",
+      region: "eu",
     });
   });
 

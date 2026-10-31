@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { defaultPlatformAi, parsePlatformAi } from "../src/platform-ai.ts";
+import {
+  defaultPlatformAi,
+  defaultVoicesOf,
+  parsePlatformAi,
+} from "../src/platform-ai.ts";
 
 // The `PLATFORM_AI` var as core reads it: each of Grasp's own AI features'
 // provider and model, OpenAI's defaults for what it leaves out, and nothing
@@ -9,6 +13,26 @@ import { defaultPlatformAi, parsePlatformAi } from "../src/platform-ai.ts";
 describe("the platform's AI settings", () => {
   it("are OpenAI's defaults for an empty setting", () => {
     expect(parsePlatformAi({})).toStrictEqual(defaultPlatformAi);
+  });
+
+  it("give each speaker a voice the speech model has when the settings name none", () => {
+    expect(
+      parsePlatformAi({ speech: { provider: "openai", model: "tts-1" } })
+        ?.speech.voices
+    ).toStrictEqual({
+      stephen: "onyx",
+      claire: "nova",
+      mark: "ash",
+      lisa: "coral",
+      tim: "echo",
+    });
+  });
+
+  it("keep Grasp's OpenAI project in the EU unless set", () => {
+    expect([
+      parsePlatformAi({})?.region,
+      parsePlatformAi({ region: "us" })?.region,
+    ]).toStrictEqual(["eu", "us"]);
   });
 
   it("switch a feature by configuration, keeping the defaults for the rest", () => {
@@ -27,8 +51,10 @@ describe("the platform's AI settings", () => {
       speech: {
         provider: "openai",
         model: "tts-1-hd",
-        voices: { ...defaultPlatformAi.speech.voices, claire: "sage" },
+        // The rest in the model's own default voices.
+        voices: { ...defaultVoicesOf["tts-1-hd"], claire: "sage" },
       },
+      region: "eu",
     });
   });
 
@@ -78,6 +104,21 @@ describe("the platform's AI settings", () => {
         },
       },
     ],
+    [
+      "a voice the speech model doesn't have",
+      {
+        speech: {
+          provider: "openai",
+          model: "tts-1",
+          voices: { stephen: "cedar" },
+        },
+      },
+    ],
+    [
+      "a speech model there isn't",
+      { speech: { provider: "openai", model: "gpt-9-tts" } },
+    ],
+    ["a region there isn't", { region: "asia" }],
     ["nothing at all", null],
     ["no setting, rather than an empty one", undefined],
   ])("refuse %s", (_, value) => {

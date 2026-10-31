@@ -11,9 +11,14 @@ import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { deploymentStaysInEu, models, usableAnswerTokens } from "../models.ts";
+import {
+  deploymentStaysInEu,
+  modelRules,
+  models,
+  usableAnswerTokens,
+} from "../models.ts";
 import type { ModelAnswer, ModelCall, ModelsEnv } from "../models.ts";
-import { platformAi } from "../platform-ai.ts";
+import { platformAi, platformRouteFor } from "../platform-ai.ts";
 import {
   boundedInCore,
   PlatformBoundError,
@@ -538,14 +543,22 @@ export const extractorFor = (
   trigger: AuditActor
 ): { name: ExtractorName; extract: Extractor } => {
   const local = { name: "local", extract: localExtractor(env) } as const;
-  if (
-    collection.sensitive ||
-    mediaType !== uploadTypes.pdf ||
-    deploymentStaysInEu(env)
-  ) {
+  if (collection.sensitive || mediaType !== uploadTypes.pdf) {
     return local;
   }
   const conversion = platformAi(env)?.conversion;
+  // An EU-only deployment's PDFs go out only where Grasp's project for
+  // the provider is in the EU; read here otherwise, never sent elsewhere,
+  // as while the deployment's rules don't parse.
+  if (
+    modelRules(env) === undefined ||
+    (deploymentStaysInEu(env) &&
+      (conversion === undefined ||
+        conversion.provider === "local" ||
+        platformRouteFor(env, conversion.provider)?.region !== "eu"))
+  ) {
+    return local;
+  }
   if (conversion === undefined) {
     return {
       name: "platform",

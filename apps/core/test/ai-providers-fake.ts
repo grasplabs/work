@@ -44,6 +44,8 @@ export const realtimeControlUrl = "https://ai-providers-control.test/realtime";
 
 /** One realtime socket the fake took, as tests read it. */
 export interface RealtimeSocket {
+  /** The host it was opened at: OpenAI's EU host, or its US one. */
+  host: string;
   path: string;
   authorization: string | null;
   /** The session it was told to set up (`session.update`). */
@@ -101,6 +103,7 @@ export const aiProvidersFake = () => {
   const hosts = new Set([
     "api.anthropic.com",
     "api.openai.com",
+    "eu.api.openai.com",
     "api.mistral.ai",
     "openrouter.ai",
     "llm.acme-ai.test",
@@ -142,6 +145,7 @@ export const aiProvidersFake = () => {
     const { 0: client, 1: server } = new WebSocketPair();
     server.accept();
     const record: RealtimeSocket = {
+      host: url.hostname,
       path: url.pathname + url.search,
       authorization: request.headers.get("authorization"),
       session: null,
@@ -266,7 +270,11 @@ export const aiProvidersFake = () => {
     url: URL,
     body: string
   ): Response | undefined => {
-    if (url.hostname !== "api.openai.com") {
+    // Grasp's own project answers at OpenAI's EU host, or its US one.
+    if (
+      url.hostname !== "api.openai.com" &&
+      url.hostname !== "eu.api.openai.com"
+    ) {
       return undefined;
     }
     if (
@@ -279,6 +287,38 @@ export const aiProvidersFake = () => {
       const asked: unknown = JSON.parse(body);
       const input =
         isRecord(asked) && typeof asked.input === "string" ? asked.input : "";
+      // As OpenAI does: a voice the model doesn't have is refused.
+      const classic = [
+        "alloy",
+        "ash",
+        "coral",
+        "echo",
+        "fable",
+        "nova",
+        "onyx",
+        "sage",
+        "shimmer",
+      ];
+      const voicesOf: Record<string, string[]> = {
+        "gpt-4o-mini-tts": [...classic, "ballad", "verse", "marin", "cedar"],
+        "tts-1": classic,
+        "tts-1-hd": classic,
+      };
+      const model = isRecord(asked) ? String(asked.model) : "";
+      const voice = isRecord(asked) ? String(asked.voice) : "";
+      if (!(voicesOf[model] ?? []).includes(voice)) {
+        return Response.json(
+          {
+            error: {
+              message: `The voice ${voice} isn't available for ${model}.`,
+              type: "invalid_request_error",
+              param: "voice",
+              code: null,
+            },
+          },
+          { status: 400 }
+        );
+      }
       return new Response(new Uint8Array(input.length * 1200), {
         headers: {
           "content-type": "audio/pcm",

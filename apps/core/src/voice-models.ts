@@ -2,6 +2,7 @@ import {
   speechProviders,
   transcriptionProviders,
 } from "@grasp-os/shared/platform-ai";
+import type { SpeechModel } from "@grasp-os/shared/platform-ai";
 import type { SpokenWord } from "@grasp-os/shared/voice";
 
 import type { ListPrices } from "./model-prices.ts";
@@ -30,7 +31,10 @@ const speechPrices = {
   "gpt-4o-mini-tts": { perMillionChars: 0.6, perMinuteAudio: 0.015 },
   "tts-1": { perMillionChars: 15, perMinuteAudio: 0 },
   "tts-1-hd": { perMillionChars: 30, perMinuteAudio: 0 },
-} as const;
+} as const satisfies Record<
+  SpeechModel,
+  { perMillionChars: number; perMinuteAudio: number }
+>;
 
 /**
  * The longest a line plays, per character it says, in ms: five

@@ -20,7 +20,10 @@ import {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiProviderRoutes } from "@grasp-os/shared/ai-providers";
+import type {
+  AiProviderRoutes,
+  PlatformRoute,
+} from "@grasp-os/shared/ai-providers";
 import {
   auditActorSchema,
   auditEventSchema,
@@ -139,6 +142,7 @@ import type {
   TransportFailure,
   TransportRoute,
 } from "./model-transport.ts";
+import { platformRouteFor } from "./platform-ai.ts";
 import {
   charactersOf,
   speechCountsOf,
@@ -2799,7 +2803,7 @@ const connectRouting = async (
     way: {
       transport: endpoint.transport,
       provider: target.provider,
-      region: aiProviders[target.provider].region,
+      region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
     },
     fallbacks,
@@ -2897,7 +2901,16 @@ const routingOf = async (
         because: "platform",
       });
     }
-    const target = { credential: "platform", provider, baseUrl: null } as const;
+    const platform = platformRouteFor(env, provider);
+    if (platform === undefined) {
+      throw modelErrors.create("model.unconfigured");
+    }
+    const target = {
+      credential: "platform",
+      provider,
+      baseUrl: null,
+      platform,
+    } as const;
     return { ref, routing: await connectRouting(env, call, ref, target, []) };
   }
   const connected = routes.organization.find(
@@ -2978,7 +2991,16 @@ const admit = async (
   ) {
     return await refuse(env, call, { code: "model.answer_too_long" });
   }
-  const verdict = await judgeCall(env, rules, call);
+  // A platform feature's route decides whether an EU-only call may take
+  // it (`judgeCall`): its region, never a list of models.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    routing.way.credential === "platform"
+      ? routing.way.region === "eu"
+      : undefined
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
@@ -3663,6 +3685,8 @@ interface SpeechRecord {
   characters: number;
   /** Ms of audio charged; 0 when the provider said nothing or bills none. */
   audioMs: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   logId: string | undefined;
   outcome: Outcome;
@@ -3672,10 +3696,13 @@ interface SpeechRecord {
 }
 
 /** The way a platform voice feature goes, as the ledger and the audit log record it. */
-const platformWay = (provider: ConnectTarget["provider"]): LedgerRoute => ({
+const platformWay = (
+  provider: ConnectTarget["provider"],
+  platform: PlatformRoute
+): LedgerRoute => ({
   transport: "connect",
   provider,
-  region: aiProviders[provider].region,
+  region: platform.region,
   credential: "platform",
 });
 
@@ -3715,7 +3742,7 @@ const speechEntry = (
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
       transport: "connect",
-      region: aiProviders[ref.provider].region,
+      region: recorded.region,
       credential: "platform",
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -3734,6 +3761,7 @@ const speechEntry = (
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
   audioMs: Number.MAX_SAFE_INTEGER,
+  region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
   outcome: "invalid_output",
@@ -3754,6 +3782,8 @@ interface SpeechRoute extends Admitting {
   characters: number;
   /** The longest its audio may play, which the ledger reserves for. */
   audioMsMost: number;
+  /** Where its requests go on Grasp's own key (`platformRouteOf`). */
+  platform: PlatformRoute;
 }
 
 /**
@@ -3764,7 +3794,7 @@ const platformTarget = async (
   env: ModelsEnv,
   call: Session,
   provider: ConnectTarget["provider"]
-): Promise<ConnectTarget> => {
+): Promise<ConnectTarget & { platform: PlatformRoute }> => {
   const routes = await routesOrFailed(env);
   if (!routes.platform.includes(provider)) {
     return await refuse(env, call, {
@@ -3772,7 +3802,11 @@ const platformTarget = async (
       because: "platform",
     });
   }
-  return { credential: "platform", provider, baseUrl: null };
+  const platform = platformRouteFor(env, provider);
+  if (platform === undefined) {
+    throw modelErrors.create("model.unconfigured");
+  }
+  return { credential: "platform", provider, baseUrl: null, platform };
 };
 
 /**
@@ -3802,11 +3836,17 @@ const admitSpeech = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Its route's region decides whether an EU-only line may be said.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    target.platform.region === "eu"
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  const target = await platformTarget(env, call, ref.provider);
   const price = await pinnedPrice(voicePricesOf(ref));
   if (price === undefined) {
     // Never expected: the voice catalog's prices are ours.
@@ -3834,7 +3874,7 @@ const admitSpeech = async (
     ref,
     judged: verdict.judged,
     price,
-    way: platformWay(ref.provider),
+    way: platformWay(ref.provider, target.platform),
     send: async (id, limit) =>
       await connectRequest(
         env,
@@ -3845,6 +3885,7 @@ const admitSpeech = async (
       ),
     characters,
     audioMsMost,
+    platform: target.platform,
     // Its text, known before it is sent, and the longest its audio may
     // play: settled to how long it did once it is said (`heardSpeech`).
     bound: () => ({ inputTokens: most.input, outputTokens: most.output }),
@@ -4074,6 +4115,7 @@ const recordSpeech = async (
     speechEntry(call, route.ref, route.judged, {
       characters,
       audioMs: counts.output,
+      region: route.platform.region,
       cost: costDollars(route.price, counts),
       logId: providerLogIdOf(sent.answered?.headers),
       outcome,
@@ -4179,6 +4221,8 @@ export interface Listening {
 interface HeardRecord {
   /** Seconds charged. */
   seconds: number;
+  /** Where its route went (`platformRouteOf`). */
+  region: LedgerRoute["region"];
   cost: number;
   outcome: Outcome;
   ledger: Ledgered;
@@ -4214,7 +4258,7 @@ const listeningEntry = (
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
       transport: "connect",
-      region: aiProviders[ref.provider].region,
+      region: recorded.region,
       credential: "platform",
       euOnly: judged.euOnly ?? null,
       sensitive: judged.sensitive ?? null,
@@ -4227,6 +4271,7 @@ const listeningEntry = (
 /** The most a listening can add to its audit event (`largestRecord`). */
 const largestHeard: HeardRecord = {
   seconds: maxListeningSeconds,
+  region: "custom",
   cost: Number.MAX_VALUE,
   outcome: "invalid_output",
   ledger: largestRecord.ledger,
@@ -4276,11 +4321,17 @@ const listenThrough = async (
     // Never expected, as for a text model's call (`admit`).
     throw modelErrors.create("model.invalid_call");
   }
-  const verdict = await judgeCall(env, rules, call);
+  const target = await platformTarget(env, call, ref.provider);
+  // Its route's region decides whether an EU-only listening may open.
+  const verdict = await judgeCall(
+    env,
+    rules,
+    call,
+    target.platform.region === "eu"
+  );
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  const target = await platformTarget(env, call, ref.provider);
   const price = await pinnedPrice(hearingPricesOf(ref));
   if (price === undefined) {
     // Never expected: the transcription catalog's prices are ours.
@@ -4291,7 +4342,7 @@ const listenThrough = async (
     env,
     call,
     price,
-    way: platformWay(ref.provider),
+    way: platformWay(ref.provider, target.platform),
     perRequest: undefined,
     // What it may hear is all it is billed for, known before it opens.
     bound: () => ({ inputTokens: call.seconds, outputTokens: 0 }),
@@ -4340,6 +4391,7 @@ const listenThrough = async (
           drizzle(env.DB),
           listeningEntry(call, ref, verdict.judged, {
             seconds,
+            region: target.platform.region,
             cost: costDollars(price, secondCounts(seconds)),
             outcome,
             ledger: ledgerOf([settled]),

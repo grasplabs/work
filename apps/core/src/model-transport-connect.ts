@@ -13,6 +13,7 @@ import {
 import type {
   AiCredentialSource,
   AiProviderId,
+  PlatformRoute,
 } from "@grasp-os/shared/ai-providers";
 import { signModelGrant } from "@grasp-os/shared/capability";
 import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
@@ -43,6 +44,11 @@ export interface ConnectTarget {
   provider: AiProviderId;
   /** For an OpenAI-compatible endpoint, the base URL its key goes to. */
   baseUrl: string | null;
+  /**
+   * For Grasp's own key: where its project's region sends the requests
+   * (`platformRouteOf`), in place of the provider's own host.
+   */
+  platform?: PlatformRoute;
 }
 
 /**
@@ -67,9 +73,15 @@ const baseUrlOf = (
     return target.baseUrl ?? undefined;
   }
   const { api } = ref.catalog;
-  return isRouteApi(api)
+  const base = isRouteApi(api)
     ? aiProviders[target.provider].baseUrls[api]
     : undefined;
+  if (base === undefined || target.platform === undefined) {
+    return base;
+  }
+  const regional = new URL(base);
+  regional.hostname = target.platform.host;
+  return regional.href.replace(/\/+$/u, "");
 };
 
 /**
@@ -208,11 +220,12 @@ export interface SentBy {
 
 /**
  * The URL of `path` at `target`'s provider, for a platform feature's
- * request of its own (speech, a recording written down): the provider's
- * own host. None for a provider without a fixed one.
+ * request of its own (speech, a recording written down): the host its
+ * project's region sends to (`platformRouteOf`). None for a provider
+ * without a fixed one.
  */
 const platformUrl = (target: ConnectTarget, path: string): URL | undefined => {
-  const host = aiProviderHost(target.provider);
+  const host = target.platform?.host ?? aiProviderHost(target.provider);
   return host === undefined ? undefined : new URL(path, `https://${host}`);
 };
 

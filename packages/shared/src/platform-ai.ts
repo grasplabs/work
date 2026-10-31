@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { platformRegions } from "./ai-providers.ts";
 import { speakers } from "./voice.ts";
 import type { Speaker } from "./voice.ts";
 
@@ -20,7 +21,10 @@ import type { Speaker } from "./voice.ts";
 // - `transcription`: what someone says on the onboarding's pages, live
 //   over the provider's realtime socket, or from a recording.
 // - `speech`: the onboarding's lines said out loud, each speaker in a
-//   voice of the provider's.
+//   voice the model has (`speechVoicesOf`).
+// - `region`: where Grasp's own OpenAI project keeps its data, the EU by
+//   default (`platformRouteOf` in ./ai-providers.ts makes it a host). An
+//   EU-only deployment uses an OpenAI feature only while it is the EU.
 //
 // A feature whose provider Grasp has no key for fails with a clear code,
 // never silently, and never on another provider.
@@ -70,12 +74,84 @@ const transcriptionSchema = z.strictObject({
   model: modelIdSchema,
 });
 
-const speechSchema = z.strictObject({
-  provider: z.enum(speechProviders),
-  model: modelIdSchema,
-  /** A voice for any speaker; the defaults' for the rest. */
-  voices: z.partialRecord(z.enum(speakers), voiceIdSchema).default({}),
-});
+/** The speech models a line can be said in. */
+export const speechModels = ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"] as const;
+export type SpeechModel = (typeof speechModels)[number];
+
+/** The voices `tts-1` and `tts-1-hd` have; GPT-4o mini TTS has more. */
+const classicVoices = [
+  "alloy",
+  "ash",
+  "coral",
+  "echo",
+  "fable",
+  "nova",
+  "onyx",
+  "sage",
+  "shimmer",
+] as const;
+
+/**
+ * The voices each speech model has, by OpenAI's names (OpenAI's text to
+ * speech guide, read on 2026-10-31): a voice it doesn't have fails every
+ * line said in it.
+ */
+export const speechVoicesOf: Readonly<Record<SpeechModel, readonly string[]>> =
+  {
+    "gpt-4o-mini-tts": [...classicVoices, "ballad", "verse", "marin", "cedar"],
+    "tts-1": classicVoices,
+    "tts-1-hd": classicVoices,
+  };
+
+/**
+ * Each speaker's voice when the settings name none, by the model: each a
+ * voice the model has. Stephen: young, confident, conversational. Claire:
+ * warm and bright. The sample speakers: each clearly not Stephen.
+ */
+export const defaultVoicesOf: Readonly<
+  Record<SpeechModel, Readonly<Record<Speaker, string>>>
+> = {
+  "gpt-4o-mini-tts": {
+    stephen: "cedar",
+    claire: "marin",
+    mark: "ash",
+    lisa: "coral",
+    tim: "verse",
+  },
+  "tts-1": {
+    stephen: "onyx",
+    claire: "nova",
+    mark: "ash",
+    lisa: "coral",
+    tim: "echo",
+  },
+  "tts-1-hd": {
+    stephen: "onyx",
+    claire: "nova",
+    mark: "ash",
+    lisa: "coral",
+    tim: "echo",
+  },
+};
+
+const speechSchema = z
+  .strictObject({
+    provider: z.enum(speechProviders),
+    model: z.enum(speechModels),
+    /** A voice for any speaker; the model's default for the rest. */
+    voices: z.partialRecord(z.enum(speakers), voiceIdSchema).default({}),
+  })
+  .superRefine(({ model, voices }, context) => {
+    for (const [speaker, voice] of Object.entries(voices)) {
+      if (voice !== undefined && !speechVoicesOf[model].includes(voice)) {
+        context.addIssue({
+          code: "custom",
+          message: `${model} has no voice ${voice}`,
+          path: ["voices", speaker],
+        });
+      }
+    }
+  });
 
 /**
  * Each feature's provider and model, as the defaults have them: OpenAI's
@@ -89,20 +165,16 @@ export const defaultPlatformAi = {
   speech: {
     provider: "openai",
     model: "gpt-4o-mini-tts",
-    voices: {
-      // Stephen: young, confident, conversational. Claire: warm and bright.
-      // The sample speakers: each clearly not Stephen.
-      stephen: "cedar",
-      claire: "marin",
-      mark: "ash",
-      lisa: "coral",
-      tim: "verse",
-    },
+    voices: defaultVoicesOf["gpt-4o-mini-tts"],
   },
+  region: "eu",
 } as const satisfies {
   conversion: z.input<typeof conversionSchema>;
   transcription: z.input<typeof transcriptionSchema>;
-  speech: z.input<typeof speechSchema> & { voices: Record<Speaker, string> };
+  speech: z.input<typeof speechSchema> & {
+    voices: Readonly<Record<Speaker, string>>;
+  };
+  region: (typeof platformRegions)[number];
 };
 
 /**
@@ -113,6 +185,8 @@ export const platformAiSchema = z.strictObject({
   conversion: conversionSchema.default(defaultPlatformAi.conversion),
   transcription: transcriptionSchema.default(defaultPlatformAi.transcription),
   speech: speechSchema.default(defaultPlatformAi.speech),
+  /** Where Grasp's own OpenAI project keeps its data: the EU unless set. */
+  region: z.enum(platformRegions).default(defaultPlatformAi.region),
 });
 export type PlatformAiInput = z.input<typeof platformAiSchema>;
 
@@ -123,15 +197,17 @@ export interface PlatformAi {
   speech: Omit<z.output<typeof speechSchema>, "voices"> & {
     voices: Record<Speaker, string>;
   };
+  region: z.output<typeof platformAiSchema>["region"];
 }
 
-/** One of Grasp's own AI features. */
-export type PlatformAiFeature = keyof PlatformAi;
+/** One of Grasp's own AI features: each setting but the region. */
+export type PlatformAiFeature = Exclude<keyof PlatformAi, "region">;
 
 /**
  * `value` as each feature's settings, the defaults for what it leaves out
- * (a speaker without a voice gets the default's, should the provider be
- * the default's); `undefined` when it doesn't parse, `null` included.
+ * (a speaker without a voice gets the model's default voice); `undefined`
+ * when it doesn't parse, `null` included, or names a voice its speech
+ * model doesn't have.
  */
 export const parsePlatformAi = (value: unknown): PlatformAi | undefined => {
   // Nothing in it is `{}`; anything else that isn't an object (`null`, a
@@ -140,7 +216,7 @@ export const parsePlatformAi = (value: unknown): PlatformAi | undefined => {
   if (!parsed.success) {
     return undefined;
   }
-  const { conversion, transcription, speech } = parsed.data;
-  const voices = { ...defaultPlatformAi.speech.voices, ...speech.voices };
-  return { conversion, transcription, speech: { ...speech, voices } };
+  const { conversion, transcription, speech, region } = parsed.data;
+  const voices = { ...defaultVoicesOf[speech.model], ...speech.voices };
+  return { conversion, transcription, speech: { ...speech, voices }, region };
 };
