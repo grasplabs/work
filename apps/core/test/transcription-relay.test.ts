@@ -482,6 +482,51 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     });
   });
 
+  it("sends one final for a stretch the session split at a pause, its first part's words written down after the page's commit", async () => {
+    const { ada } = await openedTwo();
+
+    const { result } = await relaying(async () => {
+      const page = await listen();
+      page.start({
+        type: "start",
+        language: "en",
+        sampleRate: 16_000,
+        link: ada,
+      });
+      await page.next();
+      page.socket.send(tenthOfASecond());
+      const first = await page.next();
+      // The person pauses: the session settles what they said so far, and
+      // writes it down only after the rest.
+      await actOnRealtime({ pause: true });
+      await vi.waitFor(async () => {
+        const socket = await newestSocket();
+        expect(socket?.paused).toBe(1);
+      });
+      page.socket.send(tenthOfASecond());
+      const both = await page.next();
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const final = await page.next();
+      // Nothing said since: this commit's own final, empty.
+      page.socket.send(JSON.stringify({ type: "commit" }));
+      const next = await page.next();
+      page.socket.close(1000, "Done");
+      return { first, both, final, next };
+    });
+
+    expect(result).toStrictEqual({
+      first: { type: "partial", text: "Hello" },
+      // The stretch so far: the part before the pause, then this one.
+      both: { type: "partial", text: "Hello Hello" },
+      final: {
+        type: "final",
+        text: "Before the pause Hello there",
+        words: [],
+      },
+      next: { type: "final", text: "", words: [] },
+    });
+  });
+
   it.each([
     ["a link that isn't one", "unknown", "interview.link_invalid"],
     ["another person's link, on this device", "other", "interview.elsewhere"],

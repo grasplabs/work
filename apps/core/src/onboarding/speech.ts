@@ -251,7 +251,7 @@ const keepUnlessPurged = async (
   await keep(env, key, answer, requestId);
   const store = onboardingStore(env);
   if ((await store.purgeMark()) !== purges) {
-    await store.forgetSpoken(await storedKeysOf([key]));
+    await store.forgetSpoken(await storedKeysOf([key.text]));
   }
 };
 
@@ -296,6 +296,7 @@ const say = async (
     return refused(503, speechErrors.create("speech.unavailable"), requestId);
   }
   const key: SpokenKey = {
+    text: asked.text,
     spoken: spokenOf(asked.text, asked.tone),
     voice,
     model,

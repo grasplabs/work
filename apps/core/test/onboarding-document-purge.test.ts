@@ -918,6 +918,7 @@ const writers: Writer[] = [
       const said = await saying;
       await said.body?.cancel();
       const kept = await keptLine(env, {
+        text: told.text,
         spoken: told.text,
         voice: defaultPlatformAi.speech.voices.stephen,
         model: speechModel,

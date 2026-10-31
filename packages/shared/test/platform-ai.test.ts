@@ -7,8 +7,7 @@ import { defaultPlatformAi, parsePlatformAi } from "../src/platform-ai.ts";
 // that doesn't parse passed off as a setting.
 
 describe("the platform's AI settings", () => {
-  it("are OpenAI's defaults while unset", () => {
-    expect(parsePlatformAi()).toStrictEqual(defaultPlatformAi);
+  it("are OpenAI's defaults for an empty setting", () => {
     expect(parsePlatformAi({})).toStrictEqual(defaultPlatformAi);
   });
 
@@ -79,6 +78,8 @@ describe("the platform's AI settings", () => {
         },
       },
     ],
+    ["nothing at all", null],
+    ["no setting, rather than an empty one", undefined],
   ])("refuse %s", (_, value) => {
     expect(parsePlatformAi(value)).toBeUndefined();
   });

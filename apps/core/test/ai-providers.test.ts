@@ -1081,9 +1081,16 @@ describe("AI providers", { timeout: 60_000 }, () => {
         "transcription: OpenAI, United States",
         "speech: OpenAI, United States",
       ]);
-      await expect(
-        uses({ speech: { provider: "elevenlabs" } })
-      ).resolves.toStrictEqual([]);
+      // Set but broken: every feature off, never the defaults' provider.
+      for (const broken of [
+        { speech: { provider: "elevenlabs" } },
+        '{"conversion": {"provider": "local"',
+        "null",
+        null,
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one setting at a time
+        await expect(uses(broken)).resolves.toStrictEqual([]);
+      }
     });
 
     it("calls a provider Grasp has a key for, with that key, audited as the platform's", async () => {

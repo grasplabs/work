@@ -92,9 +92,9 @@ export const newestSocket = async (): Promise<RealtimeSocket | undefined> => {
   return sockets.at(-1);
 };
 
-/** Has OpenAI's fake act on its open sockets: close them, or send an error. */
+/** Has OpenAI's fake act on its open sockets: close them, send an error, or settle at a pause. */
 export const actOnRealtime = async (
-  act: { close: number } | { error: string }
+  act: { close: number } | { error: string } | { pause: true }
 ): Promise<void> => {
   await internet().fetch(realtimeControlUrl, {
     method: "POST",

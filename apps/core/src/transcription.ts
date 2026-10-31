@@ -34,13 +34,22 @@ import { Resampler } from "./resampler.ts";
 // the audio is resampled as it comes (`Resampler`). It goes through as it
 // comes (resampler.ts), and nothing of it is kept: not here, not in a log.
 //
-// Ordering: the page counts on one `final` for each of its commits, in
-// order, and treats any other as settled at a pause. The session settles
-// at pauses itself (server VAD) too, so a page's commit can find nothing
-// left to settle, which the session answers with its error
-// (`input_audio_buffer_commit_empty`) in its turn: an empty `final` goes
-// in its place, and finals go out in the order the session took the
-// commits (`settlingOf`).
+// Ordering: the page counts on exactly one `final` for each of its
+// commits, in order, holding the whole stretch it closed. The session
+// also settles at pauses by itself (server VAD), into items of their own,
+// and their transcripts may come after a later item's: a stretch split at
+// a pause can have its first part written down after the page committed
+// the rest. So the relay sends no final for an item the session settled
+// at a pause: each item goes into the page's stretch it was committed in
+// (the session commits in the order it takes the audio), and a stretch's
+// one final goes out once the page committed it and every item in it was
+// written down, its items' words in their order (`settlingOf`). An item
+// was settled at a pause when the session said its speech stopped
+// (`input_audio_buffer.speech_stopped`) before committing it; any other
+// commit answers the page's. A page's commit can find nothing left to
+// settle, which the session answers with its error
+// (`input_audio_buffer_commit_empty`) in its turn: that closes the stretch
+// with what its pauses settled, or an empty final.
 
 /** The sample rate the realtime session takes PCM at. */
 export const sessionSampleRate = 24_000;
@@ -58,6 +67,10 @@ const safeCode = /^[a-z_]{1,64}$/u;
 const serverEventSchema = z.union([
   z.object({
     type: z.literal("input_audio_buffer.committed"),
+    item_id: z.string(),
+  }),
+  z.object({
+    type: z.literal("input_audio_buffer.speech_stopped"),
     item_id: z.string(),
   }),
   z.object({
@@ -133,11 +146,19 @@ class EventQueue implements AsyncIterable<TranscriptionEvent> {
   }
 }
 
-/** One commit's place in line: an item of the session's, or a page's that found nothing. */
-type Settled = { item: string } | { empty: true };
+/** One of the page's stretches: the session's items in it, in order. */
+interface Stretch {
+  items: string[];
+  /** The page committed it, and the session answered that commit. */
+  closed: boolean;
+}
 
-/** Where finals wait to go out in order (`settlingOf`). */
+/** Where a stretch's words wait for its one final (`settlingOf`). */
 interface Settling {
+  /** The page asked to settle what it sent so far. */
+  pageCommitted: () => void;
+  /** The session said the speech of `item` stopped: settled at a pause. */
+  speechStopped: (item: string) => void;
   committed: (item: string) => void;
   empty: () => void;
   delta: (item: string, delta: string) => void;
@@ -145,49 +166,107 @@ interface Settling {
 }
 
 /**
- * Finals in the order their audio was committed: an item's once its
- * transcript came, an empty commit's at once when it is next.
+ * One final for each of the page's commits, in order: the words of every
+ * item of its stretch, once the session answered the commit and wrote
+ * each item down, whatever order the transcripts came in.
  */
 const settlingOf = (events: EventQueue): Settling => {
-  const line: Settled[] = [];
-  const done = new Map<string, string>();
+  const stretches: Stretch[] = [];
+  const stretchOf = new Map<string, Stretch>();
+  const texts = new Map<string, string>();
   const deltas = new Map<string, string>();
+  const atPause = new Set<string>();
+  const committedItems = new Set<string>();
+  /** The page's commits the session hasn't answered yet. */
+  let unanswered = 0;
+  /** The stretch being sent: the page hasn't committed it yet. */
+  const open = (): Stretch => {
+    const last = stretches.at(-1);
+    if (last !== undefined && !last.closed) {
+      return last;
+    }
+    const next: Stretch = { items: [], closed: false };
+    stretches.push(next);
+    return next;
+  };
+  /** What a stretch has said so far: each item's words, or its partial. */
+  const sayingOf = (stretch: Stretch): string =>
+    stretch.items
+      .map((item) => texts.get(item) ?? deltas.get(item) ?? "")
+      .filter((text) => text !== "")
+      .join(" ");
   const flush = (): void => {
-    while (line.length > 0) {
-      const [next] = line;
-      const text =
-        next === undefined || !("item" in next) ? "" : done.get(next.item);
-      if (text === undefined) {
+    for (;;) {
+      const [first] = stretches;
+      if (
+        first === undefined ||
+        !first.closed ||
+        !first.items.every((item) => texts.has(item))
+      ) {
         return;
       }
-      line.shift();
-      if (next !== undefined && "item" in next) {
-        done.delete(next.item);
+      stretches.shift();
+      const text = sayingOf(first);
+      for (const item of first.items) {
+        texts.delete(item);
+        deltas.delete(item);
+        stretchOf.delete(item);
+        atPause.delete(item);
+        committedItems.delete(item);
       }
       // The session times no words: a final carries its text alone.
       events.push({ type: "committed", text, words: [] });
     }
   };
-  const committed = (item: string): void => {
-    if (!line.some((one) => "item" in one && one.item === item)) {
-      line.push({ item });
+  /** The stretch `item` is in, put in the one being sent when new. */
+  const placed = (item: string): Stretch => {
+    const known = stretchOf.get(item);
+    if (known !== undefined) {
+      return known;
     }
+    const stretch = open();
+    stretch.items.push(item);
+    stretchOf.set(item, stretch);
+    return stretch;
+  };
+  /** The page's oldest unanswered commit is answered: its stretch closes. */
+  const answered = (stretch: Stretch): void => {
+    unanswered -= 1;
+    stretch.closed = true;
   };
   return {
-    committed,
+    pageCommitted: () => {
+      unanswered += 1;
+    },
+    speechStopped: (item) => {
+      atPause.add(item);
+    },
+    committed: (item) => {
+      if (committedItems.has(item)) {
+        return;
+      }
+      committedItems.add(item);
+      // Its partial may have placed it already: in the stretch being sent.
+      const stretch = placed(item);
+      if (!atPause.has(item) && unanswered > 0) {
+        answered(stretch);
+      }
+      flush();
+    },
     empty: () => {
-      line.push({ empty: true });
+      if (unanswered > 0) {
+        answered(open());
+      }
       flush();
     },
     delta: (item, delta) => {
-      const text = `${deltas.get(item) ?? ""}${delta}`;
-      deltas.set(item, text);
-      events.push({ type: "partial", text });
+      deltas.set(item, `${deltas.get(item) ?? ""}${delta}`);
+      events.push({ type: "partial", text: sayingOf(placed(item)) });
     },
     completed: (item, transcript) => {
-      committed(item);
+      placed(item);
+      texts.set(item, transcript.trim());
       deltas.delete(item);
-      done.set(item, transcript.trim());
       flush();
     },
   };
@@ -281,6 +360,8 @@ export const platformTranscription = (
       } else if ("item_id" in heard) {
         if (heard.type === "input_audio_buffer.committed") {
           settling.committed(heard.item_id);
+        } else if (heard.type === "input_audio_buffer.speech_stopped") {
+          settling.speechStopped(heard.item_id);
         } else {
           stop("transcription_failed");
         }
@@ -317,7 +398,11 @@ export const platformTranscription = (
       },
       commit: () => {
         // The session answers one with nothing left to settle with its
-        // error, in its turn: an empty final then (`emptyCommit`).
+        // error, in its turn (`emptyCommit`): the stretch closes on what
+        // its pauses settled.
+        if (!closed) {
+          settling.pageCommitted();
+        }
         send({ type: "input_audio_buffer.commit" });
       },
       close: () => {

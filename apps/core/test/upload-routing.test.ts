@@ -287,6 +287,12 @@ describe("upload routing", { timeout: 60_000 }, () => {
       "the platform's settings don't parse",
       { conversion: { provider: "workers-ai", model: "toMarkdown" } },
     ],
+    // Broken JSON meant to keep conversion local: never OpenAI's default.
+    [
+      "the platform's settings aren't JSON",
+      '{"conversion": {"provider": "local"',
+    ],
+    ["the platform's settings are null", "null"],
   ])(
     "fails a PDF at once while %s, sending nothing, never read another way",
     async (_, settings) => {

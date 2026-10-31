@@ -26,6 +26,9 @@ export const writtenText = "Hello there";
 /** The delta a realtime stretch is first heard as. */
 export const partialText = "Hello";
 
+/** What a stretch settled at a pause (`{ pause: true }`) is written down as. */
+export const pausedText = "Before the pause";
+
 /** Bytes of speech the fake says for each character: 25 ms of 24 kHz PCM. */
 export const speechPcmBytesPerChar = 1200;
 
@@ -33,7 +36,9 @@ export const speechPcmBytesPerChar = 1200;
  * Where tests read the realtime sockets (GET: each one's opening, events,
  * audio bytes and close code, oldest first), and act as OpenAI on those
  * open: POST `{ close: code }` closes them, `{ error: code }` sends an
- * error event on them.
+ * error event on them, and `{ pause: true }` settles the stretch so far at
+ * a pause, as server VAD does, its transcript held back until after the
+ * next commit's (`pausedText`).
  */
 export const realtimeControlUrl = "https://ai-providers-control.test/realtime";
 
@@ -51,6 +56,8 @@ export interface RealtimeSocket {
   firstSamples: number[];
   /** How it closed, if it did: from core's side, or the fake's. */
   closed: number | null;
+  /** How many stretches it settled at a pause (`{ pause: true }`). */
+  paused: number;
 }
 
 /** Where tests plan replies (POST) and read the requests a key sent (GET). */
@@ -128,7 +135,7 @@ export const aiProvidersFake = () => {
   const realtime: {
     record: RealtimeSocket;
     /** What tests asked of it, done from its own request (`acting`). */
-    asked: ({ close: number } | { error: string })[];
+    asked: ({ close: number } | { error: string } | { pause: true })[];
   }[] = [];
   /** A realtime transcription session, as OpenAI holds one. */
   const openRealtime = (request: Request, url: URL): Response => {
@@ -142,9 +149,18 @@ export const aiProvidersFake = () => {
       audioBytes: 0,
       firstSamples: [],
       closed: null,
+      paused: 0,
     };
-    const asked: ({ close: number } | { error: string })[] = [];
+    const asked: ({ close: number } | { error: string } | { pause: true })[] =
+      [];
+    /** Items settled at a pause whose transcripts are still held back. */
+    const late: string[] = [];
     realtime.push({ record, asked });
+    let items = 0;
+    let current: string | null = null;
+    const send = (event: Record<string, unknown>): void => {
+      server.send(JSON.stringify(event));
+    };
     // A socket is only used from the request it came with: what tests ask
     // of it is done from here, every few ms.
     const acting = setInterval(() => {
@@ -152,6 +168,18 @@ export const aiProvidersFake = () => {
         if ("close" in act) {
           record.closed ??= act.close;
           server.close(act.close, "");
+        } else if ("pause" in act) {
+          // Server VAD settles what was said so far, by itself.
+          if (current !== null) {
+            send({
+              type: "input_audio_buffer.speech_stopped",
+              item_id: current,
+            });
+            send({ type: "input_audio_buffer.committed", item_id: current });
+            late.push(current);
+            current = null;
+          }
+          record.paused += 1;
         } else {
           server.send(
             JSON.stringify({
@@ -162,11 +190,6 @@ export const aiProvidersFake = () => {
         }
       }
     }, 10);
-    let items = 0;
-    let current: string | null = null;
-    const send = (event: Record<string, unknown>): void => {
-      server.send(JSON.stringify(event));
-    };
     server.addEventListener("message", (event) => {
       const parsed: unknown = JSON.parse(String(event.data));
       if (!isRecord(parsed) || typeof parsed.type !== "string") {
@@ -221,6 +244,14 @@ export const aiProvidersFake = () => {
           transcript: "Hello there",
         });
         current = null;
+        // What a pause settled before comes last: its transcript was late.
+        for (const item of late.splice(0)) {
+          send({
+            type: "conversation.item.input_audio_transcription.completed",
+            item_id: item,
+            transcript: "Before the pause",
+          });
+        }
       }
     });
     server.addEventListener("close", (event) => {
@@ -275,6 +306,8 @@ export const aiProvidersFake = () => {
           asked.push({ close: parsed.close });
         } else if (typeof parsed.error === "string") {
           asked.push({ error: parsed.error });
+        } else if (parsed.pause === true) {
+          asked.push({ pause: true });
         }
       }
       return new Response(null, { status: 204 });

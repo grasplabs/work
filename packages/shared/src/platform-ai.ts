@@ -131,10 +131,12 @@ export type PlatformAiFeature = keyof PlatformAi;
 /**
  * `value` as each feature's settings, the defaults for what it leaves out
  * (a speaker without a voice gets the default's, should the provider be
- * the default's); `undefined` when it doesn't parse.
+ * the default's); `undefined` when it doesn't parse, `null` included.
  */
-export const parsePlatformAi = (value?: unknown): PlatformAi | undefined => {
-  const parsed = platformAiSchema.safeParse(value ?? {});
+export const parsePlatformAi = (value: unknown): PlatformAi | undefined => {
+  // Nothing in it is `{}`; anything else that isn't an object (`null`, a
+  // broken var) doesn't parse.
+  const parsed = platformAiSchema.safeParse(value);
   if (!parsed.success) {
     return undefined;
   }

@@ -107,6 +107,7 @@ const talking = async (term: string, does = "") => {
 
 /** A line as Stephen says it in English, as the speech cache keeps it. */
 const spokenKey = (text: string): SpokenKey => ({
+  text,
   spoken: `[warm] ${text}`,
   voice: defaultPlatformAi.speech.voices.stephen,
   model: speechModel,

@@ -1,12 +1,8 @@
-import { voiceTags } from "@grasp-os/shared/interview-links";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
-import { defaultPlatformAi } from "@grasp-os/shared/platform-ai";
 import type { Speaker } from "@grasp-os/shared/voice";
 
 import { platformAi } from "../platform-ai.ts";
 import { forgetLines, storedKeysOf } from "../speech-cache.ts";
-import type { SpokenKey } from "../speech-cache.ts";
-import { speechModelOf } from "../speech.ts";
 
 // How Stephen's lines are said (speech.ts), and taking them out of the
 // cache of lines said before (speech-cache.ts) once the interview they
@@ -49,64 +45,28 @@ export interface SaidIn {
 }
 
 /**
- * Every key a line of `said` may be kept by: each tone, speech model,
- * speaker's voice and language, the platform's settings' now and the
- * defaults', so a line kept before the settings changed back is found too.
- */
-const keysOf = (env: Env, said: SaidIn): SpokenKey[] => {
-  const defaults = defaultPlatformAi.speech;
-  const models = [
-    ...new Set([
-      `${defaults.provider}/${defaults.model}`,
-      ...[speechModelOf(env)].filter((model) => model !== undefined),
-    ]),
-  ];
-  const voices = speakerVoicesOf(env);
-  const tones = [undefined, ...voiceTags];
-  return said.texts.flatMap((text) =>
-    said.languages.flatMap((language) =>
-      tones.flatMap((tone) =>
-        said.speakers.flatMap((speaker) =>
-          [...new Set([defaults.voices[speaker], voices?.[speaker]])]
-            .filter((voice) => voice !== undefined)
-            .flatMap((voice) =>
-              models.map((model) => ({
-                spoken: spokenOf(text, tone),
-                voice,
-                model,
-                language,
-              }))
-            )
-        )
-      )
-    )
-  );
-};
-
-/**
- * Takes out of the cache every line of `said`, as it may have been kept.
- * A line someone else heard too ("Hello, I'm Stephen") is said anew the
- * next time: a cost, never a leak.
+ * Takes out of the cache every line of `said`, however it was said: in
+ * any voice, model, tone or language, the speech settings' now or any
+ * before (speech-cache.ts). A line someone else heard too ("Hello, I'm
+ * Stephen") is said anew the next time: a cost, never a leak.
  */
 export const forgetSpokenLines = async (
-  env: Env,
+  env: Pick<Env, "FILES">,
   said: SaidIn
 ): Promise<void> => {
   if (said.texts.length === 0) {
     return;
   }
-  await forgetLines(env, keysOf(env, said));
+  await forgetLines(env, said.texts);
 };
 
 /**
- * The stored keys of every line of `said`, as it may have been kept:
- * hashes, so they can wait to be taken out without keeping what was said.
+ * What erasing every line of `said` takes out of the cache, however it was
+ * said: hashes, so they can wait to be taken out without keeping what was
+ * said.
  */
-export const spokenKeysOf = async (
-  env: Env,
-  said: SaidIn
-): Promise<string[]> =>
-  said.texts.length === 0 ? [] : await storedKeysOf(keysOf(env, said));
+export const spokenKeysOf = async (said: SaidIn): Promise<string[]> =>
+  await storedKeysOf(said.texts);
 
 /** Every language an interview may be held in, when its own isn't known. */
 export const anyLanguage: readonly string[] = interviewLocales;
