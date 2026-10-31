@@ -1,5 +1,15 @@
 import type { AppStatus, ListedScreen } from "@grasp-os/shared/apps";
 import { canBuild } from "@grasp-os/shared/roles";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -32,7 +42,7 @@ import {
   TileSheetBar,
   TileTitle,
 } from "@grasp-os/ui/components/tile";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
@@ -48,11 +58,7 @@ import {
 import { useState } from "react";
 
 import { buildsApp } from "../engines/app-role.ts";
-import {
-  ArchiveDialog,
-  statusLabel,
-  useStatusMove,
-} from "../engines/app-status.tsx";
+import { statusLabel, useStatusMove } from "../engines/app-status.tsx";
 import type { Transition } from "../engines/app-status.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
@@ -115,18 +121,26 @@ interface DomainApp {
   domain: ListedScreen["app"];
   screen: string;
   builds: boolean;
+  /** How many apps its domain has, this one included: archiving it takes them all. */
+  apps: number;
 }
 
 /** The screens core lists, in its order (the newest domain's first). */
 const appsOf = (
   screens: readonly ListedScreen[],
   built: ReadonlySet<string>
-): DomainApp[] =>
-  screens.map(({ app, screen }) => ({
+): DomainApp[] => {
+  const counts = new Map<string, number>();
+  for (const { app } of screens) {
+    counts.set(app.id, (counts.get(app.id) ?? 0) + 1);
+  }
+  return screens.map(({ app, screen }) => ({
     domain: app,
     screen,
     builds: built.has(app.id),
+    apps: counts.get(app.id) ?? 1,
   }));
+};
 
 /** New app, in lime: the page's one action. */
 const NewAppLink = ({ size }: { size?: "lg" }) => (
@@ -165,7 +179,7 @@ const FirstApp = ({ builds }: { builds: boolean }) => (
  * takes every app of the domain offline; Restore takes it back as a draft.
  */
 const TileMenu = ({
-  app: { domain, screen },
+  app: { domain, screen, apps },
   busy,
   move,
 }: {
@@ -210,7 +224,7 @@ const TileMenu = ({
               }}
             >
               <ArchiveRestoreIcon />
-              <Trans>Restore</Trans>
+              <Trans>Restore domain</Trans>
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem
@@ -219,17 +233,14 @@ const TileMenu = ({
               }}
             >
               <ArchiveIcon />
-              {domain.status === "published" ? (
-                <Trans>Archive and take offline</Trans>
-              ) : (
-                <Trans>Archive</Trans>
-              )}
+              <Trans>Archive domain</Trans>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      <ArchiveDialog
-        name={domain.name}
+      <ArchiveDomainDialog
+        apps={apps}
+        domain={domain.name}
         onArchive={() => {
           setArchiving(false);
           move("archive");
@@ -240,6 +251,49 @@ const TileMenu = ({
     </TileActions>
   );
 };
+
+/**
+ * Asks before archiving a tile's domain, naming it and saying that all
+ * its apps (`apps` of them) go with it, not only the tile's.
+ */
+const ArchiveDomainDialog = ({
+  domain,
+  apps,
+  open,
+  onOpenChange,
+  onArchive,
+}: {
+  domain: string;
+  apps: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onArchive: () => void;
+}) => (
+  <AlertDialog onOpenChange={onOpenChange} open={open}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          <Trans>Archive {domain}?</Trans>
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          <Plural
+            one="Its # app is archived with it."
+            other="Its # apps are archived with it."
+            value={apps}
+          />
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>
+          <Trans>Cancel</Trans>
+        </AlertDialogCancel>
+        <AlertDialogAction onClick={onArchive} variant="destructive">
+          <Trans>Archive</Trans>
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
 
 /** One app: its bar on a painted field, then its name, which opens it, and its domain. */
 const AppTile = ({

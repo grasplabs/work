@@ -215,6 +215,10 @@ msgstr "{approvals, plural, one {Damit endet # Genehmigung dieser Pakete.} other
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# App} other {# Apps}}"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "{apps, plural, one {Its # app is archived with it.} other {Its # apps are archived with it.}}"
+msgstr "{apps, plural, one {Ihre # App wird mit archiviert.} other {Ihre # Apps werden mit archiviert.}}"
+
 #: src/engines/package-approvals.tsx
 msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
 msgstr "{artifacts, plural, one {# bereits erstellter Build ({targets}) funktioniert weiter. Mit diesen Paketen wird nichts Neues gebaut.} other {# bereits erstellte Builds ({targets}) funktionieren weiter. Mit diesen Paketen wird nichts Neues gebaut.} =0 {Mit diesen Paketen wurde noch nichts gebaut, und es wird nichts Neues gebaut.}}"
@@ -3405,13 +3409,17 @@ msgstr "Zu genehmigende Apps"
 msgid "Archive"
 msgstr "Archivieren"
 
+#: src/routes/_shell.apps.index.tsx
+msgid "Archive {domain}?"
+msgstr "{domain} archivieren?"
+
 #: src/engines/app-status.tsx
 msgid "Archive {name}?"
 msgstr "{name} archivieren?"
 
 #: src/routes/_shell.apps.index.tsx
-msgid "Archive and take offline"
-msgstr "Archivieren und offline nehmen"
+msgid "Archive domain"
+msgstr "Domäne archivieren"
 
 #: src/engines/app-status.tsx
 msgctxt "a domain put away"
@@ -4142,6 +4150,7 @@ msgstr "Nicht lesbar"
 #: src/onboarding/organization-dialogs.tsx
 #: src/onboarding/place-picker.tsx
 #: src/policies/policy-editing.tsx
+#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/settings/invitations.tsx
 #: src/settings/staff-access.tsx
@@ -13082,9 +13091,12 @@ msgstr "Ressourcen"
 #: src/engines/app-page.tsx
 #: src/engines/app-status.tsx
 #: src/knowledge/timeline.tsx
-#: src/routes/_shell.apps.index.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
+
+#: src/routes/_shell.apps.index.tsx
+msgid "Restore domain"
+msgstr "Domäne wiederherstellen"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
