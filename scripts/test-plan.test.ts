@@ -456,8 +456,21 @@ describe("choosing which journey suites a change reaches", () => {
     });
   });
 
-  it("runs both for a file outside every package: a journey, its config or the tooling", () => {
+  it("runs a suite alone for a change to its own journeys or config", () => {
     expect(journeysFor("/repo/e2e/chat.e2e.ts")).toStrictEqual({
+      e2e: true,
+      "admin-e2e": false,
+    });
+    expect(
+      journeysFor(
+        "/repo/e2e/admin/rollout.e2e.ts",
+        "/repo/playwright.admin.config.ts"
+      )
+    ).toStrictEqual({ e2e: false, "admin-e2e": true });
+  });
+
+  it("runs both for any other file outside every package", () => {
+    expect(journeysFor("/repo/scripts/dev.ts")).toStrictEqual({
       e2e: true,
       "admin-e2e": true,
     });
