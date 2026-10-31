@@ -53,7 +53,7 @@ export const info: ReleaseInfo = {
   packages: { zod: "0.0.0-fixture" },
   compatibility: {
     interfaces: {
-      connect: { serves: 1, calls: {} },
+      connect: { serves: 1, servesFrom: 1, calls: {} },
       core: { calls: { connect: { min: 1, max: 1 } } },
     },
     workflowJournal: { min: 8, max: 9 },
