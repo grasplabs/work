@@ -214,6 +214,17 @@ export interface AppContents {
 }
 
 /**
+ * One screen of an App's current version (`AppsApi.screens`), with what
+ * a list of screens shows of its App: its name, where it stands and the
+ * business process it serves.
+ */
+export interface ListedScreen {
+  app: Pick<App, "id" | "name" | "status" | "process">;
+  /** The screen's name, as `AppContents.screens` gives it. */
+  screen: string;
+}
+
+/**
  * What an App's current version offers other Apps: its exports
  * (`appExportsPath`). None while it has no current version.
  */
@@ -690,6 +701,12 @@ export interface AppsApi {
   get: (app: string) => Promise<ViewedApp>;
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
+  /**
+   * Every screen of the current version of each App the person has a role
+   * in, as `list` finds the Apps and `contents` names the screens, in one
+   * read: the newest App first, its screens by name.
+   */
+  screens: () => Promise<ListedScreen[]>;
   /**
    * What the App's current version exports to other Apps: read from its
    * version alone, for anyone with a role in the App.
