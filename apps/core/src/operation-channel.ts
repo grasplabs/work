@@ -35,9 +35,7 @@ import {
 //   progress snapshots (`emit`), which have a budget of their own
 //   (`streamMaxEmits`, operations.ts): a run that streams 1000 of them
 //   still has its 100 calls. This holds an App's functions (queries,
-//   mutations, actions); Code Mode counts its own, and an App server
-//   written as a Durable Object counts its stubs' in the App's host
-//   (app.ts, `claimHostCall`);
+//   mutations, actions); Code Mode counts its own;
 // - its methods take only what a request is (no scope, principal, role,
 //   schema hash or receipt): who the invocation is for was resolved by
 //   core before the channel existed;
