@@ -690,7 +690,7 @@ const sharingRules = (owner: string) => ({
  * Refuses a change to store `id` while it is the default store of an
  * archived App (`app.archived`): read-only, as the App is, until a builder
  * restores it (app-status.ts). For changes made by admins without a role
- * check of their own on the App (backfills, migration samples). A removed
+ * check of their own on the App (backfills). A removed
  * App's default store isn't refused: nobody can restore the App, and its
  * admins manage the store from then on (`managedBy`).
  */

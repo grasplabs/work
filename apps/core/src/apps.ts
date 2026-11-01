@@ -1675,14 +1675,11 @@ export const makeCurrent = async (
   // retention sweep's deletion lands in between. Its tests passed as its
   // candidate was verified (`verifyVersion`), on the same files.
   const sealedLayout = isAppLayout(files);
-  let sampleGate: SQL | undefined;
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
-    const { noFailedSampleSql, requireMigrationEvidence } =
+    const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
-    // And again as the version is made current, below.
-    sampleGate = noFailedSampleSql(appId, number);
     await requireStoreSchemaActive(env, appId, number);
   }
   const triggers = await triggerRegistration(env, appId, number, files);
@@ -1706,22 +1703,6 @@ export const makeCurrent = async (
     // as such. Only a batch that keeps failing leaves the store switched
     // ahead of D1, until making it current is asked again.
     //
-    // A failed sample of its migrations is looked for once more first:
-    // the switch is where it is decided, since a store switched over
-    // supersedes the schema the version still current writes under, and
-    // refusing the version after it would only lock that one out of its
-    // store. Nothing a sample could fail on is left by then: the store
-    // switches only from ready, with no record left to transform (work
-    // queued again refuses it as `migration.pending`), and a sample of a
-    // ready store reads nothing, so it is `empty` and clears. A failure
-    // landing after this look read its records before the store was
-    // ready, and the backfill has since transformed and validated every
-    // one. Where nothing switched now (no ready migration, or a store a
-    // lost batch switched before), the change still refuses one
-    // (`sampleGate`).
-    const { requireMigrationEvidence } =
-      await import("./migration-evidence.ts");
-    await requireMigrationEvidence(env, appId, number);
     // Its candidate still verified, superseded by no commit meanwhile:
     // asked here, before the store switches, so a candidate refused below
     // never leaves the version current locked out of its store.
@@ -1731,11 +1712,7 @@ export const makeCurrent = async (
     // the candidate was verified, and a verified candidate never expires,
     // so an artifact changed in storage since must refuse it here.
     await requireReleaseAsReported(env, appId, number, candidate);
-    if (
-      await requireStoreSchemaActive(env, appId, number, { activate: true })
-    ) {
-      sampleGate = undefined;
-    }
+    await requireStoreSchemaActive(env, appId, number, { activate: true });
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
@@ -1761,7 +1738,6 @@ export const makeCurrent = async (
               sealedLayout
                 ? releaseAsReportedSql(appId, number, candidate)
                 : undefined,
-              sampleGate,
               verifiedCandidateSql(appId, number, candidate)
             )
           )
@@ -1859,15 +1835,8 @@ export const makeCurrent = async (
     }
     requireNotArchived(await findApp(env, appId));
     if (sealedLayout) {
-      // Revoked or deleted since it was checked, or a sample of its
-      // migrations failed since, where the change still checked that (its
-      // store didn't switch): refused as such.
+      // Revoked or deleted since it was checked: refused as such.
       await requireRunnableRelease(env, appId, number);
-      if (sampleGate !== undefined) {
-        const { requireMigrationEvidence } =
-          await import("./migration-evidence.ts");
-        await requireMigrationEvidence(env, appId, number);
-      }
     }
     // A verified candidate is never superseded (`supersededBy`), so what
     // is left is a conflict: the base moved, or the candidate ended.

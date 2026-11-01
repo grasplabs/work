@@ -411,7 +411,6 @@
   "@grasp-os/core:screens test/held-runs.test.ts": 23.3,
   "@grasp-os/core:screens test/held-wakes.test.ts": 31.7,
   "@grasp-os/core:screens test/mail-ingress.test.ts": 13.1,
-  "@grasp-os/core:screens test/migration-samples.test.ts": 10.2,
   "@grasp-os/core:screens test/migration-transform.test.ts": 6.6,
   "@grasp-os/core:screens test/orphaned-runs.test.ts": 27.2,
   "@grasp-os/core:screens test/portable-client.test.ts": 56.4,
