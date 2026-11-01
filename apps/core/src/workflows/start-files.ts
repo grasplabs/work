@@ -92,6 +92,23 @@ const holdsFile = (descriptor: ValueDescriptor): boolean => {
   return descriptor.kind === "union" && descriptor.members.some(holdsFile);
 };
 
+/**
+ * Whether a start under `descriptor` can hand its run a file: a `file`
+ * value anywhere but under a union, which a start refuses (`fileSlots`).
+ */
+export const takesFile = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.kind === "file") {
+    return true;
+  }
+  if (descriptor.kind === "object") {
+    return Object.values(descriptor.fields).some(takesFile);
+  }
+  if (descriptor.kind === "array") {
+    return takesFile(descriptor.item);
+  }
+  return descriptor.kind === "record" && takesFile(descriptor.value);
+};
+
 /** The `file` values of `value` under `descriptor`: where each is, and its ID. */
 export const fileSlots = (
   descriptor: ValueDescriptor,

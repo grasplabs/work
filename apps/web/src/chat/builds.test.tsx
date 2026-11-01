@@ -66,6 +66,7 @@ const review: VersionReview = {
   exports: [],
   permissions: [],
   grants: [],
+  handsFilesToWorkflows: false,
   tests: { status: "none", failures: [] },
 };
 
