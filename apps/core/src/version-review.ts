@@ -23,7 +23,7 @@ import type {
   TriggerDeclaration,
   WorkflowCalls,
 } from "@grasp-os/shared/workflows";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -84,8 +84,15 @@ const boundTakesFile = async (
   if (aliases.length === 0) {
     return false;
   }
-  const bound = await drizzle(env.DB)
-    .select({ contract: workflowResourceVersions.contract })
+  // The App's active bindings, whichever aliases they are under, filtered
+  // here: a list of aliases as query parameters would pass D1's limit of
+  // 100 for an App with that many.
+  const named = new Set(aliases);
+  const active = await drizzle(env.DB)
+    .select({
+      alias: appWorkflowBindings.alias,
+      contract: workflowResourceVersions.contract,
+    })
     .from(appWorkflowBindings)
     .innerJoin(
       workflowResourceVersions,
@@ -103,12 +110,11 @@ const boundTakesFile = async (
     .where(
       and(
         eq(appWorkflowBindings.appId, app),
-        eq(appWorkflowBindings.status, "active"),
-        inArray(appWorkflowBindings.alias, [...aliases])
+        eq(appWorkflowBindings.status, "active")
       )
     );
-  return bound.some(({ contract }) => {
-    if (contract === null) {
+  return active.some(({ alias, contract }) => {
+    if (!named.has(alias) || contract === null) {
       return false;
     }
     const parsed = boundContractSchema.safeParse(JSON.parse(contract));
