@@ -1,7 +1,6 @@
 /**
  * The vars a placed client's core is uploaded with (src/hosting/operation.ts):
- * what the admin derives for it (src/deploy/core-config.ts) and the
- * platform's AI settings (`PLATFORM_AI`, src/platform-ai.ts), each
+ * what the admin derives for it (src/deploy/core-config.ts), each
  * replaced by the client's setting of the same name, its other settings,
  * and the change core records, checked as core would take them.
  */
@@ -11,7 +10,6 @@ import { eq } from "drizzle-orm";
 
 import type { AdminDatabase } from "../db/act.ts";
 import { settings } from "../db/schema.ts";
-import { platformAiOf } from "../platform-ai.ts";
 import { checkDeployedConfig, onboardingSender } from "./core-config.ts";
 import { DeployError } from "./errors.ts";
 
@@ -37,17 +35,10 @@ const settingValue = (key: string, value: string): unknown => {
 };
 
 /**
- * Client `clientId`'s core vars from its `derived` config and the
- * platform's AI settings as `PLATFORM_AI`: each replaced by the client's
- * setting of the same name, its other settings, and `change` as
- * `PLATFORM_CHANGE`, checked as `checkDeployedConfig` says, its
- * `MAIL_FROM` against `mailSender`, the address its mail is locked to.
- *
- * `PLATFORM_AI` goes out whether or not Grasp has a key for the providers
- * it names: a deploy never waits on one. Without it connect has no route
- * for that provider, and core answers that feature as not configured yet
- * (`upload.conversion_unavailable` and the like) until a later deploy
- * brings the key; Platform's Readiness names the key meanwhile.
+ * Client `clientId`'s core vars from its `derived` config: each replaced
+ * by the client's setting of the same name, its other settings, and
+ * `change` as `PLATFORM_CHANGE`, checked as `checkDeployedConfig` says,
+ * its `MAIL_FROM` against `mailSender`, the address its mail is locked to.
  */
 export const configuredCoreVars = async (
   db: AdminDatabase,
@@ -69,7 +60,6 @@ export const configuredCoreVars = async (
   }
   const vars = {
     ...derived,
-    PLATFORM_AI: await platformAiOf(db),
     ...Object.fromEntries(
       rows.map(({ key, value }): [string, unknown] => [
         key,

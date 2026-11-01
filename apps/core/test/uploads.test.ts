@@ -27,6 +27,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, storedVersionTexts } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { connectWithoutGraspKeys } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -305,24 +306,18 @@ const wordFile = (document: string, styles: string): Uint8Array => {
 // Vitest's default five seconds on a loaded runner. Sixty fits the
 // longest, with room for signing in.
 describe("uploads", { timeout: 60_000 }, () => {
-  // Every test here runs as a deployment whose platform settings read
-  // every file locally (as on-prem), so each file is extracted in the
-  // sandbox, whatever its collection. Which extractor a file gets is
+  // Every test here runs as a deployment where connect holds no key of
+  // Grasp's (as on-prem), so each file is extracted in the sandbox,
+  // whatever its collection. Which extractor a file gets is
   // upload-routing.test.ts's.
-  let gatewayBefore: unknown;
-  let platformBefore: unknown;
+  let connectBefore: Env["CONNECT"];
   beforeAll(() => {
-    gatewayBefore = env.MODEL_GATEWAY;
-    platformBefore = env.PLATFORM_AI;
-    env.MODEL_GATEWAY = {
-      eu: { models: ["mistral/mistral-large-latest"], deployment: true },
-    };
-    env.PLATFORM_AI = { conversion: { provider: "local" } };
+    connectBefore = env.CONNECT;
+    env.CONNECT = connectWithoutGraspKeys(connectBefore);
   });
 
   afterAll(() => {
-    env.MODEL_GATEWAY = gatewayBefore;
-    env.PLATFORM_AI = platformBefore;
+    env.CONNECT = connectBefore;
   });
 
   it("make a PDF, a Word file and a workbook searchable by section", async () => {

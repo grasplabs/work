@@ -555,7 +555,12 @@ export const extractUpload = async (
   const bytes = new Uint8Array(await original.arrayBuffer());
   const actor: AuditActor = auditActorSchema.parse(JSON.parse(row.actor));
   // Converted for whoever uploaded it, on their budget.
-  const extractor = extractorFor(env, collection, mediaTypeOf(row), actor);
+  const extractor = await extractorFor(
+    env,
+    collection,
+    mediaTypeOf(row),
+    actor
+  );
   if (extractor.name === "platform") {
     // Recorded before the file leaves the Worker, so a failure after it
     // left is on record too; one that can't be recorded fails the step,

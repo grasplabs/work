@@ -16,13 +16,14 @@ import { z } from "zod";
 
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
+import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeysOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { linkHeaders, linkRefusal } from "./links.ts";
-import { speakerVoicesOf, spokenOf } from "./spoken-lines.ts";
+import { spokenOf } from "./spoken-lines.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -32,7 +33,7 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// ElevenLabs voices the platform's settings name, through the model
+// ElevenLabs voices fixed in src/platform-ai.ts, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -301,11 +302,8 @@ const say = async (
   listener: Listener,
   requestId: string
 ): Promise<Response> => {
-  const model = speechModelOf(env, asked.quick);
-  const voice = speakerVoicesOf(env)?.[asked.speaker];
-  if (model === undefined || voice === undefined) {
-    return refused(503, speechErrors.create("speech.unavailable"), requestId);
-  }
+  const model = speechModelOf(asked.quick);
+  const voice = platformAi.speech.voices[asked.speaker];
   const spoken = spokenOf(asked.text, asked.language, asked.tone);
   const key: SpokenKey = {
     text: asked.text,

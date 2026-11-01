@@ -641,19 +641,3 @@ export const clientWatch = sqliteTable("client_watch", {
   /** `WatchedSignals` (src/clients/watch.ts), as JSON. */
   signals: text().notNull(),
 });
-
-/**
- * Which provider and model each of Grasp's own AI features uses, as staff
- * choose them on Platform → AI (src/platform-ai.ts): one row, `id` 1,
- * none until staff first choose, when the defaults stand. Every deploy
- * gives it to the client's core as its `PLATFORM_AI` var. Never a key:
- * Grasp's provider keys live in Secrets Store and go to connect alone.
- */
-export const platformAi = sqliteTable("platform_ai", {
-  /** Always 1: there is one platform. */
-  id: integer().primaryKey(),
-  /** `platformAiSchema`'s output (@grasp-os/shared/platform-ai), as JSON. */
-  settings: text().notNull(),
-  updatedBy: text("updated_by").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});

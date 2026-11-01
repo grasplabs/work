@@ -190,13 +190,12 @@
       "secret_name": "APP_OAUTH_CLIENTS",
     },
     // Grasp's own AI provider keys, which pay for its platform features
-    // (converting PDFs for the Brain, transcription, speech), as staff
-    // choose each feature's provider on Platform → AI (src/platform-ai.ts).
-    // Every client's connect gets them as shared secrets, never its core
-    // (src/deploy/context.ts). Optional: added to the stage's 1Password
-    // Environment, each is bound at the next Deploy platform; until then,
-    // Platform → AI doesn't offer its provider, and the features that name
-    // it aren't configured in any organization (Readiness says which).
+    // (converting PDFs for the Brain, transcription, speech, fixed in
+    // core's src/platform-ai.ts). Every client's connect gets them as
+    // shared secrets, never its core (src/deploy/context.ts). Optional:
+    // added to the stage's 1Password Environment, each is bound at the next
+    // Deploy platform; until then, the features on its provider aren't
+    // available in any organization.
     {
       "binding": "OPENAI_API_KEY",
       "store_id": "account-secrets-store",

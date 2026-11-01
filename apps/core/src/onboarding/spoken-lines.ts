@@ -1,21 +1,12 @@
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { Speaker } from "@grasp-os/shared/voice";
 
-import { platformAi } from "../platform-ai.ts";
 import { forgetLines, storedKeysOf } from "../speech-cache.ts";
 
 // How Stephen's lines are said (speech.ts), and taking them out of the
 // cache of lines said before (speech-cache.ts) once the interview they
 // were said in is deleted (GRA-368): his lines read back what someone
 // told, and the cache keeps a line's words with its sound for a month.
-
-/**
- * Each speaker's voice, by its ElevenLabs ID: the platform's settings'
- * (@grasp-os/shared/platform-ai); none while they don't parse.
- */
-export const speakerVoicesOf = (
-  env: Pick<Env, "PLATFORM_AI">
-): Record<Speaker, string> | undefined => platformAi(env)?.speech.voices;
 
 /**
  * What the voice is sent: the line led by its tone, in English; the bare

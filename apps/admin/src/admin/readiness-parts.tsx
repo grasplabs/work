@@ -55,7 +55,6 @@ const checkLinks: Readonly<
   releases: { label: "Open Releases", to: "/platform/releases" },
   organizations: { label: "Open Organizations", to: "/" },
   platform: { label: "Open Platform", to: "/platform" },
-  platform_ai: { label: "Open Platform → AI", to: "/platform/ai" },
 };
 
 /** A check's link, where its next step is done in the admin. */
