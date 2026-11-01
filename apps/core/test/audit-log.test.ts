@@ -1125,3 +1125,99 @@ describe("AuditLog purges", () => {
     });
   });
 });
+
+/** The positions and actions of a page's records, newest first. */
+const positions = (page: Awaited<ReturnType<Log["searchArchive"]>>) =>
+  "records" in page
+    ? {
+        records: page.records.map(({ seq, event, verified }) => ({
+          seq,
+          action: event?.action,
+          verified,
+        })),
+        next: page.next,
+      }
+    : page;
+
+describe("AuditLog archive search", () => {
+  it("finds archived events newest first, a stretch per page, each checked against the chain", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+
+    const newer = await log.searchArchive({ filter: {}, limit: 10 });
+    expect(positions(newer)).toStrictEqual({
+      records: [
+        { seq: 7, action: "test.c", verified: true },
+        { seq: 6, action: "test.b", verified: true },
+        { seq: 5, action: "test.a", verified: true },
+        { seq: 4, action: "audit.archived", verified: true },
+      ],
+      next: 4,
+    });
+    await expect(
+      log.searchArchive({ filter: {}, before: 4, limit: 10 }).then(positions)
+    ).resolves.toStrictEqual({
+      records: [
+        { seq: 3, action: "test.c", verified: true },
+        { seq: 2, action: "test.b", verified: true },
+        { seq: 1, action: "test.a", verified: true },
+      ],
+      next: null,
+    });
+  });
+
+  it("filters archived events as a search does, and carries on within a stretch past its page", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+
+    await expect(
+      log
+        .searchArchive({ filter: { action: "test.b" }, limit: 10 })
+        .then(positions)
+    ).resolves.toMatchObject({ records: [{ seq: 6 }], next: 4 });
+    const first = await log.searchArchive({ filter: {}, limit: 2 });
+    expect(positions(first)).toMatchObject({
+      records: [{ seq: 7 }, { seq: 6 }],
+      next: 6,
+    });
+    await expect(
+      log.searchArchive({ filter: {}, before: 6, limit: 2 }).then(positions)
+    ).resolves.toMatchObject({ records: [{ seq: 5 }, { seq: 4 }], next: 4 });
+  });
+
+  it("passes over a stretch archive retention purged, and one before the filter's times", async () => {
+    const log = newLog();
+    await archiveTwoStretches(log);
+    await purgeLater(log);
+
+    await expect(
+      log.searchArchive({ filter: {}, before: 4, limit: 10 }).then(positions)
+    ).resolves.toStrictEqual({ records: [], next: null });
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 }).then(positions)
+    ).resolves.toMatchObject({ next: null });
+    await expect(
+      log
+        .searchArchive({
+          filter: { from: new Date(Date.now() + dayMs).toISOString() },
+          limit: 10,
+        })
+        .then(positions)
+    ).resolves.toStrictEqual({ records: [], next: null });
+  });
+
+  it("says which stretch it can't read when its archived copy is gone or isn't entries", async () => {
+    const log = newLog();
+    await appendThree(log);
+    const key = await archivedKey(log);
+    await env.AUDIT_ARCHIVE.put(key, "not an entry\n");
+
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 })
+    ).resolves.toStrictEqual({ unreadable: { from: 1, through: 3 } });
+    await env.AUDIT_ARCHIVE.delete(key);
+    await expect(
+      log.searchArchive({ filter: {}, limit: 10 })
+    ).resolves.toStrictEqual({ unreadable: { from: 1, through: 3 } });
+  });
+});
