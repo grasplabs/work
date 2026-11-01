@@ -115,7 +115,6 @@ export default defineProject({
           // which no stage's OAuth relay serves: no relay mode, but where
           // a test asks for it.
           CLIENT_DOMAIN: "grasp.test",
-          OAUTH_RELAY: "off",
           // Off production's hostname in wrangler.jsonc: the tests of the
           // admin's own hostname set it themselves (src/admin-host.ts).
           ADMIN_HOST: "",
