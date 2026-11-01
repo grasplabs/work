@@ -31,7 +31,6 @@ import { automaticChoice, destinationChoices } from "../hosting/placement.ts";
 import type { DestinationChoice } from "../hosting/placement.ts";
 import { platformSettingsView } from "../platform-settings.ts";
 import type { PlatformSettingsView } from "../platform-settings.ts";
-import { discordPublicKey, staffIds } from "./discord-settings.ts";
 
 /**
  * How a check stands:
@@ -86,9 +85,6 @@ const requiredSecrets = [
 
 /** How long the deployer's call may take before the check says it couldn't tell. */
 const reachTimeoutMs = 5000;
-
-/** A Discord application's public key: 32 bytes, hex. */
-const publicKeyPattern = /^[0-9a-f]{64}$/iu;
 
 const stageCheck = (envOf: Env): ReadinessCheck => {
   const stage = stageNamed(envOf.STAGE);
@@ -324,64 +320,6 @@ const deployerCheck = async (
   };
 };
 
-const roomsCheck = async (envOf: Env): Promise<ReadinessCheck> => {
-  const origin = envOf.ROOMS_ORIGIN ?? "";
-  const token = await ifStored(
-    async () => await storeSecret(envOf, "ROOMS_READ_TOKEN")
-  );
-  const steps = [
-    ...(origin.startsWith("https://")
-      ? []
-      : [
-          `ROOMS_ORIGIN isn't set. ${varStep("ROOMS_ORIGIN to Rooms' https origin")}`,
-        ]),
-    ...(token === null
-      ? [
-          `ROOMS_READ_TOKEN isn't in Secrets Store. ${secretStep(["ROOMS_READ_TOKEN"])}`,
-        ]
-      : []),
-  ];
-  return steps.length === 0
-    ? {
-        id: "rooms",
-        title: "Rooms",
-        required: false,
-        status: "ready",
-        words: `Proposals are read from Rooms at ${origin}.`,
-      }
-    : {
-        id: "rooms",
-        title: "Rooms",
-        required: false,
-        status: "not_configured",
-        words: `Not configured: proposals aren't read from Rooms. ${steps.join(" ")}`,
-      };
-};
-
-const discordBotCheck = (envOf: Env): ReadinessCheck => {
-  const key = discordPublicKey(envOf);
-  const staff = staffIds(envOf).size;
-  const missing = [
-    ...(publicKeyPattern.test(key) ? [] : ["DISCORD_PUBLIC_KEY"]),
-    ...(staff === 0 ? ["DISCORD_STAFF_IDS"] : []),
-  ];
-  return missing.length === 0
-    ? {
-        id: "discord_bot",
-        title: "Discord bot",
-        required: false,
-        status: "ready",
-        words: `The Discord bot answers ${staff} ${staff === 1 ? "staff member" : "staff members"}, and refuses anyone else.`,
-      }
-    : {
-        id: "discord_bot",
-        title: "Discord bot",
-        required: false,
-        status: "not_configured",
-        words: `Not configured: the Discord bot refuses everything. ${varStep(missing.join(" and "))}`,
-      };
-};
-
 /**
  * Grasp's own organization (src/platform-settings.ts): optional, as only
  * Ask Grasp needs it, and ready once the one chosen is live.
@@ -452,8 +390,6 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       placeable,
       missing.includes("DEPLOYER_API_TOKEN")
     ),
-    await roomsCheck(envOf),
-    discordBotCheck(envOf),
     graspOrganizationCheck(settings),
   ];
   return {

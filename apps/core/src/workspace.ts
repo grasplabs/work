@@ -17,6 +17,7 @@ import type {
 } from "@grasp-os/shared/audit";
 import {
   chatChannelSchema,
+  chatPlatformName,
   chatPlatformSchema,
   chatToolEventsKept,
   projectDocumentMaxBytes,
@@ -408,12 +409,6 @@ const throttled = (tell: (text: string) => unknown) => {
   };
 };
 
-/** A chat platform's chat's title, as people know the platform. */
-const platformTitles: Readonly<Record<string, string>> = {
-  teams: "Microsoft Teams",
-  slack: "Slack",
-};
-
 /**
  * A chat others share on a chat platform, as its door names it: the Chat
  * SDK's thread, whether it is a group chat or a channel, and who is in it
@@ -434,7 +429,7 @@ export type SharedChat = z.infer<typeof sharedChatSchema>;
 
 /** The title of a chat others share on `platform`. */
 const sharedTitle = (platform: string, kind: SharedChat["kind"]): string =>
-  `${platformTitles[platform] ?? platform} ${kind === "group" ? "group chat" : "channel"}`;
+  `${chatPlatformName(platform)} ${kind === "group" ? "group chat" : "channel"}`;
 
 /**
  * What a chat others share gets of the agent's APIs: its chat, and
@@ -1096,6 +1091,7 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         projectId: chats.projectId,
         appId: chats.appId,
+        via: chats.via,
         projectName: chatProjects.name,
         said: sql<string>`'' || ${saidWords}`,
       })
@@ -1126,6 +1122,7 @@ export class Workspace extends DurableObject<Env> {
         running: this.#turns.has(row.id),
         projectId: row.projectId,
         appId: row.appId,
+        via: row.via,
       },
       said: hasEvery(query, row.title, row.projectName ?? "")
         ? null
@@ -1339,7 +1336,8 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.deleted"
       | "chat.moved"
-      | "chat.draft_restored",
+      | "chat.draft_restored"
+      | "chat.draft_discarded",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -1581,7 +1579,7 @@ export class Workspace extends DurableObject<Env> {
       found ??
       this.createChat(
         where === undefined
-          ? (platformTitles[platform] ?? platform)
+          ? chatPlatformName(platform)
           : sharedTitle(platform, where.kind),
         personId,
         agentId,
@@ -3069,21 +3067,33 @@ export class Workspace extends DurableObject<Env> {
         lastAt: chats.lastAt,
         projectId: chats.projectId,
         appId: chats.appId,
+        via: chats.via,
       })
       .from(chats)
       .where(eq(chats.personId, personId))
       .orderBy(desc(chats.lastAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt, lastAt, projectId, appId }) => ({
-        id,
-        title,
-        createdAt: createdAt.toISOString(),
-        lastAt: lastAt.toISOString(),
-        running: this.#turns.has(id),
-        projectId,
-        appId,
-      }));
+      .map((chat) => this.#summaryOf(chat));
+  }
+
+  /** A chat as its person's list shows it. */
+  #summaryOf(
+    chat: Pick<
+      typeof chats.$inferSelect,
+      "id" | "title" | "createdAt" | "lastAt" | "projectId" | "appId" | "via"
+    >
+  ): ChatSummary {
+    return {
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt.toISOString(),
+      lastAt: chat.lastAt.toISOString(),
+      running: this.#turns.has(chat.id),
+      projectId: chat.projectId,
+      appId: chat.appId,
+      via: chat.via,
+    };
   }
 
   /**
@@ -3104,31 +3114,12 @@ export class Workspace extends DurableObject<Env> {
       )
       .orderBy(desc(chats.lastAt))
       .get();
-    return chat === undefined
-      ? null
-      : {
-          id: chat.id,
-          title: chat.title,
-          createdAt: chat.createdAt.toISOString(),
-          lastAt: chat.lastAt.toISOString(),
-          running: this.#turns.has(chat.id),
-          projectId: chat.projectId,
-          appId: chat.appId,
-        };
+    return chat === undefined ? null : this.#summaryOf(chat);
   }
 
   /** `personId`'s chat `chatId`, as their list shows it, listed or not. */
   chatSummary(chatId: unknown, personId: string): ChatSummary {
-    const chat = this.#ownChat(chatId, personId);
-    return {
-      id: chat.id,
-      title: chat.title,
-      createdAt: chat.createdAt.toISOString(),
-      lastAt: chat.lastAt.toISOString(),
-      running: this.#turns.has(chat.id),
-      projectId: chat.projectId,
-      appId: chat.appId,
-    };
+    return this.#summaryOf(this.#ownChat(chatId, personId));
   }
 
   /** The App chat `chatId` is for, or null: what its agent is told (`env.chat.info`). */
@@ -4498,6 +4489,34 @@ export class Workspace extends DurableObject<Env> {
     this.#dropPreview(id, appId);
     this.#draftsChanged(id);
     return restored;
+  }
+
+  /**
+   * Discards `personId`'s own chat's draft of App `appId`, audited as
+   * `by`'s: its changes go, its versions stay (to restore one), and its
+   * revision goes on, so a write of the agent's that read the draft
+   * before lands on nothing (`saveDraft`). Whatever the draft is now, as
+   * the person chose it; a draft that changes nothing is discarded all the
+   * same, and audited once each time.
+   */
+  discardDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    // No await from here to the outbox: the drop and its event are
+    // written together, as one of the object's turns.
+    const { revision } = this.draft(id, appId);
+    if (!this.dropDraft(id, appId, { revision })) {
+      throw appErrors.create("app.conflict");
+    }
+    this.#outboxed(by, "chat.draft_discarded", id, {
+      app: appId,
+      revision: revision + 1,
+    });
+    this.#deliverAudit();
   }
 
   /** Stops the chat's preview of App `appId`, and forgets its reports. */
