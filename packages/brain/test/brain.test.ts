@@ -2,8 +2,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { getDocument, writeVersion } from "../src/documents.ts";
+import { erasedSince, erasureMark } from "../src/erasures.ts";
 import { knowledgeErrors } from "../src/knowledge.ts";
 import { preparePurge, purge } from "../src/purge.ts";
+import type { OnErase } from "../src/purge.ts";
 import { recall } from "../src/recall.ts";
 import { search } from "../src/search.ts";
 import type { Caller } from "./host.ts";
@@ -133,6 +135,46 @@ describe("a standalone Brain", () => {
     await expect(outcome(write("# Leave\nSecond."))).resolves.toBe(
       "knowledge.conflict"
     );
+  });
+
+  it("finds a copy whose reading started while a purge of its document ran, and not one started after it", async () => {
+    const { brain } = testHost();
+    const collection = await newCollection(brain, "People");
+    const name = word();
+    const writer = writerOf("admin");
+    const written = await writeVersion(brain, writer, {
+      collection,
+      path: "team.md",
+      text: `# Team\n${name} leads it.`,
+      ifVersion: 0,
+      message: null,
+      restoredFrom: null,
+    });
+    const place = { collectionId: collection.id, path: "team.md" };
+    // A host's writer starts reading as the purge forgets its copies:
+    // after the purge's records, before its rewrites.
+    let during: number | undefined;
+    const onErase: OnErase = {
+      ...noCopies,
+      forgetDocuments: async () => {
+        during = await erasureMark(brain);
+      },
+    };
+    const input = {
+      type: "content",
+      documentIds: [written.id],
+      terms: [name],
+      reason: "erasure_request",
+    };
+    const { token } = await preparePurge(brain, writer, input, onErase);
+    await purge(brain, writer, input, token, onErase);
+    const after = await erasureMark(brain);
+
+    expect({
+      started: during !== undefined,
+      duringFound: await erasedSince(brain, during ?? after, [place]),
+      afterFound: await erasedSince(brain, after, [place]),
+    }).toStrictEqual({ started: true, duringFound: true, afterFound: false });
   });
 
   it("erases a term from every version and from search", async () => {

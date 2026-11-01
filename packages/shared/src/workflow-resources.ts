@@ -139,6 +139,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.branch_cancelled":
+    "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.item_keys_invalid":
@@ -347,6 +349,12 @@ export const catalogContractSchema = z
            * it is taken for a write.
            */
           readOnly: z.boolean().optional(),
+          /**
+           * That the operation answers a file an action may keep as a file
+           * of its run (GRA-886): only on an operation described by its
+           * native connector's JSON Schemas, as connect confirms it.
+           */
+          answersFile: z.literal(true).optional(),
         })
       )
       .optional(),
@@ -710,6 +718,17 @@ export interface WorkflowResourceRun {
   error?: { code: string | null; message: string };
 }
 
+/**
+ * How a workflow is started by hand: the version a start runs, the one
+ * approved to go live or else the one published last (null before any is
+ * published), and the JSON Schema its input must match exactly (null when
+ * it can't be read).
+ */
+export interface WorkflowStartForm {
+  version: number | null;
+  input: Record<string, unknown> | null;
+}
+
 /** A workflow resource, as its members see it. */
 export interface WorkflowResource {
   id: string;
@@ -875,6 +894,12 @@ export interface WorkflowResourceVersion {
  */
 export interface WorkflowVersionSource {
   files: Record<string, string>;
+}
+
+/** The organization's people and teams, by name, to share a workflow with. */
+export interface WorkflowShareCandidates {
+  people: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
 }
 
 /** Someone a workflow is shared with. */
@@ -1225,6 +1250,12 @@ export interface WorkflowResourcesApi {
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
   /**
+   * Whom its builders may share it with: the organization's people and
+   * teams, by name and ID alone (no address, no role, no team's members).
+   * For whoever may share it (`share`), never Grasp staff.
+   */
+  shareCandidates: (id: string) => Promise<WorkflowShareCandidates>;
+  /**
    * Whether its owner lets people ask Stephen to start it in a chat app;
    * for anyone with a role in it.
    */
@@ -1251,6 +1282,11 @@ export interface WorkflowResourcesApi {
    * Starts an exact version of a workflow the caller has a role in, acting
    * for them (`workflowStartSchema`): its admitted receipt.
    */
+  /**
+   * How to start it by hand (`WorkflowStartForm`): the version a start
+   * from its page runs and the input it takes; for anyone with a role.
+   */
+  startForm: (id: string) => Promise<WorkflowStartForm>;
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
   /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
