@@ -18,6 +18,7 @@ import type { AppId } from "./ids.ts";
 import type {
   GapAskedNotification,
   RunFailedNotification,
+  PackageRevokedNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
@@ -156,6 +157,13 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/** Packages of an App or workflow the person builds or approved, revoked as malware: replaced where they build it. */
+export interface RevokedPackageItem extends ItemBase {
+  kind: "revokedPackage";
+  verdicts: never[];
+  notification: PackageRevokedNotification;
+}
+
 /**
  * A workflow version, live or asked to go live, whose bindings no admin
  * approved, so its starts are refused: for the organization's own admins,
@@ -194,6 +202,7 @@ export type WaitingItem =
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | RevokedPackageItem
   | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
