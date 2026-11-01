@@ -618,8 +618,7 @@ const Checklist = ({
     },
     {
       id: "platform",
-      label:
-        "Its own platform is deployed, in its own Cloudflare account in the EU",
+      label: "Its own platform is deployed, in the EU",
       state: setup.provisioning.client?.status === "active" ? "done" : "todo",
       to: "setup",
     },
@@ -1000,7 +999,7 @@ const Status = ({
     ) : null}
     <StephenWatched setup={setup} />
     <Section
-      description="From its address to where its data is. Everything after the router is in the company’s own Cloudflare account, in the EU."
+      description="From its address to where its data is. Everything after the router runs in the EU, apart from every other company’s."
       title="How it runs"
     >
       <div className="border-t px-5 py-4">

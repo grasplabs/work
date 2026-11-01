@@ -130,7 +130,7 @@ describe("an organization's Setup", () => {
         "1 of 6 in place.",
       ].map((text) => checklist.includes(text)),
       deployed: checklist.includes(
-        "Its own platform is deployed, in its own Cloudflare account in the EU: done"
+        "Its own platform is deployed, in the EU: done"
       ),
       history: {
         kept: history.html.includes('aria-label="Its history"'),

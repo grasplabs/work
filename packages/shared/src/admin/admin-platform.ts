@@ -1,8 +1,8 @@
 /**
  * Each company's own Grasp as the admin runs it, and how a release reaches every company: the
  * records the admin (`apps/admin`) keeps, in the words its pages say them in. A company is a
- * client of the admin: its own Cloudflare account in the EU, made and set up by a provisioning
- * run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
+ * client of the admin: its own Workers in Grasp's EU Workers for Platforms namespace, made and set
+ * up by a provisioning run, then kept on a release by deploys, ring by ring. Pure: the pages only say what this works
  * out, from the records the admin reads.
  */
 
