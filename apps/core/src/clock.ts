@@ -25,6 +25,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
+import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
@@ -83,6 +84,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: retryAccessRevocations,
   },
   { name: "knowledge.uploads", period: "minute", run: sweepUploads },
+  // Exports of the company's Brain being written, and those past their
+  // window (src/knowledge/brain-export.ts).
+  { name: "brain.exports", period: "minute", run: advanceExports },
   // Knowledge payloads no version refers to (src/knowledge/payloads.ts).
   {
     name: "knowledge.payloads",

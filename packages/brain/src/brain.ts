@@ -24,7 +24,10 @@ export interface LessonFacts {
 // module reaches `Env` or the host itself.
 
 /** Where Knowledge keeps its payloads: an R2 bucket's calls it uses. */
-export type BlobStore = Pick<R2Bucket, "delete" | "get" | "head" | "put">;
+export type BlobStore = Pick<
+  R2Bucket,
+  "delete" | "get" | "head" | "list" | "put"
+>;
 
 /** A collection, as the host decides whether its skills may be selected. */
 export interface SkillCollection {

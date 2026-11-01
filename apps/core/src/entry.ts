@@ -55,6 +55,10 @@ import {
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
+import {
+  brainExportPath,
+  brainExportResponse,
+} from "./knowledge/brain-export.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
 import { hearResponse } from "./onboarding/hear.ts";
@@ -339,6 +343,7 @@ const pathHandlers: ReadonlyMap<
   (request: Request, env: Env, requestId: string) => Promise<Response>
 > = new Map([
   [auditExportPath, auditExportResponse],
+  [brainExportPath, brainExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [aiStatusReportPath, aiStatusReportResponse],
