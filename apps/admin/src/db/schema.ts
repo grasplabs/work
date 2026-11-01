@@ -145,13 +145,6 @@ export const clients = sqliteTable(
      */
     stripeCustomerId: text("stripe_customer_id"),
     /**
-     * The client's proposal in Grasp's Rooms: its room's id, as someone at
-     * Grasp linked it by hand (src/proposal/link.ts), never matched by
-     * name. Only the id is kept; the room and what was signed in it are
-     * read each time (src/proposal/rooms.ts). Null until it is linked.
-     */
-    roomsProjectId: text("rooms_project_id"),
-    /**
      * The client's company in Grasp's Attio: its record's id, as someone at
      * Grasp linked it by hand (src/crm/link.ts), never matched by name or
      * domain. Only the id is kept; the company, its people and its deals

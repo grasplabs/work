@@ -29,7 +29,7 @@ mockAccess();
 
 /** Runs `run` with the admin's vars as `vars` set them, as a deploy would. */
 const withVars = async <T>(
-  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN" | "DISCORD_PUBLIC_KEY">>,
+  vars: Partial<Pick<Env, "STAGE" | "CLIENT_DOMAIN">>,
   run: () => Promise<T>
 ): Promise<T> => {
   const before = { ...env };
@@ -39,7 +39,6 @@ const withVars = async <T>(
   } finally {
     env.STAGE = before.STAGE;
     env.CLIENT_DOMAIN = before.CLIENT_DOMAIN;
-    env.DISCORD_PUBLIC_KEY = before.DISCORD_PUBLIC_KEY;
   }
 };
 
@@ -96,8 +95,6 @@ describe("Platform's Readiness", () => {
         release: "blocked",
         secrets: "ready",
         deployer: "waiting",
-        rooms: "not_configured",
-        discord_bot: "ready",
         grasp_organization: "not_configured",
       },
       blocking: 3,
@@ -218,35 +215,10 @@ describe("Platform's Readiness", () => {
     });
   });
 
-  it("says the Discord bot is ready with a spaced public key, as the bot reads it", async () => {
-    const read = await withVars(
-      {
-        ...production,
-        DISCORD_PUBLIC_KEY: ` ${env.DISCORD_PUBLIC_KEY ?? ""} `,
-      },
-      readiness
-    );
-
-    expect(statuses(read).discord_bot).toBe("ready");
-  });
-
-  it("says the Discord bot isn't configured while its public key is unset, and reads only for staff", async () => {
-    const read = await withVars(
-      { ...production, DISCORD_PUBLIC_KEY: "" },
-      readiness
-    );
-
+  it("reads only for staff", async () => {
     await expect(
       callServerFn(fetchReadiness, undefined, { email: null })
     ).rejects.toThrow("The server function answered 403");
-    expect({
-      status: statuses(read).discord_bot,
-      words: wordsOf(read, "discord_bot"),
-    }).toStrictEqual({
-      status: "not_configured",
-      words:
-        "Not configured: the Discord bot refuses everything. Set DISCORD_PUBLIC_KEY in apps/admin/wrangler.jsonc for this stage, then run Deploy platform.",
-    });
   });
 
   it("says whether Grasp's own organization is chosen, live, or gone, and not that onboarding waits on it", async () => {
