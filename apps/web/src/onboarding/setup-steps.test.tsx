@@ -58,7 +58,8 @@ const view = (
   paused: boolean,
   sponsor: string | null,
   context: OnboardingContext,
-  mailSends: boolean
+  mailSends: boolean,
+  mailDomain: string | null
 ): OnboardingView => ({
   roster: null,
   plan: { start: "2026-10-12", days: 14 },
@@ -69,6 +70,7 @@ const view = (
   context,
   waiting: 0,
   mailSends,
+  mailDomain,
 });
 
 interface Shown {
@@ -84,6 +86,8 @@ interface Shown {
   mailSends?: boolean;
   /** What Grasp's AI has to call: one provider, ready, unless said; null when core can't say. */
   ai?: AiReadiness | null;
+  /** The domain core says its mail is from; a sender is set unless said. */
+  mailDomain?: string | null;
 }
 
 /** A step as it is drawn as it arrives, its markup and all. */
@@ -99,6 +103,7 @@ const drawn = (
     documents = [],
     mailSends = true,
     ai = { providers: ["Anthropic"], ready: true },
+    mailDomain = "mail.example.test",
   }: Shown
 ): string => {
   if (seen) {
@@ -107,10 +112,10 @@ const drawn = (
   const data: SetupData = {
     admin: "Ada",
     company: null,
-    view: view(paused, sponsor, context, mailSends),
+    view: view(paused, sponsor, context, mailSends, mailDomain),
     links: [],
     documents,
-    sendingDomain: "mail.example.test",
+    sendingDomain: mailDomain,
     gate: {
       open: false,
       closedSince: null,
@@ -241,6 +246,15 @@ describe("what needs the admin", () => {
     expect(
       drawn("review", { ai: { providers: ["OpenAI"], ready: false } })
     ).toContain('href="/settings/ai-providers"');
+  });
+
+  it("names no domain where core has no sender for Grasp's mail, says so, and leaves nothing to settle for it", () => {
+    const review = said("review", { mailDomain: null });
+    expect({
+      told: review.includes("Grasp has no sender for its mail yet"),
+      asked: review.includes("Let Grasp’s mail through"),
+      nothingOpen: review.includes("Nothing needs you"),
+    }).toStrictEqual({ told: true, asked: false, nothingOpen: true });
   });
 
   it("says mail isn't available where Grasp sends none, and leaves nothing to settle for it", () => {

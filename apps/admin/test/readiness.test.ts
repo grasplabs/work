@@ -3,7 +3,7 @@
  * entry, written from how onboarding fails when nobody looked first: a
  * stage or domain misset, no shared destination, no release, a
  * secret missing from Secrets Store, a deployer token that can't reach the
- * namespace, Grasp's AI on a provider it has no key for.
+ * namespace.
  */
 import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";

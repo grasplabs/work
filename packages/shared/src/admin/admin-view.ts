@@ -76,7 +76,6 @@ export const NEED_ORDER: readonly Need["kind"][] = [
   "agreement",
   "contract",
   "conflict",
-  "research",
   "ask",
   "budget",
   "signin",
@@ -99,11 +98,11 @@ export const adminViewOf = (
   const contract = contractOf(org, state, day);
   const members = membersOf(view, day, open);
   const integrations = integrationsOf(view, day);
-  const usage = usageOf(view, day, members);
+  const usage = usageOf(view, day);
 
   // What the company itself brings to Grasp's table, beside its onboarding.
   const needs: Need[] = [...view.needs];
-  const unknown = org.real?.unknown ?? { contract: false, works: false };
+  const unknown = org.real.unknown ?? { contract: false, works: false };
   // A contract nobody has told the admin of yet is not one waiting to be signed.
   if (contract.status !== "signed" && !unknown.contract) {
     needs.push({
