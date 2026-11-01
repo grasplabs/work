@@ -13,6 +13,7 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
 import { onboardingErrors } from "@grasp-os/shared/onboarding";
+import type { Agreements } from "@grasp-os/shared/onboarding";
 import { and, eq, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -73,6 +74,40 @@ const refuseUnless = (
   }
 };
 
+/** The agreements' fields in one order, to tell the same agreements apart from changed ones. */
+const agreementsKey = (agreements: Agreements | null): string =>
+  agreements === null
+    ? ""
+    : JSON.stringify([
+        agreements.processing,
+        agreements.processingOn ?? null,
+        agreements.assessment,
+        agreements.assessmentOn ?? null,
+        agreements.council,
+        agreements.councilOn ?? null,
+      ]);
+
+/**
+ * Keeps what was agreed, and sends the links that are due once all of it
+ * is in, at once rather than at the store's next alarm. It is the record
+ * of what was agreed before the first interview: once a link went out,
+ * it stays as it was. Saving it again unchanged still applies.
+ */
+const keepAgreements = async (
+  env: Env,
+  agreements: Agreements,
+  by: AuditActor
+): Promise<void> => {
+  const store = onboardingStore(env);
+  const kept = await store.staffAgreements();
+  refuseUnless(
+    !kept.told || agreementsKey(kept.agreements) === agreementsKey(agreements),
+    "onboarding.agreements_kept"
+  );
+  await store.setAgreements(agreements, by);
+  await store.releaseDue();
+};
+
 /** Applies one command's change, as `by`; throws an onboarding error when it can't. */
 const applyChange = async (
   env: Env,
@@ -82,13 +117,7 @@ const applyChange = async (
   const store = onboardingStore(env);
   switch (command.type) {
     case "onboarding.agreements": {
-      // The record of what was agreed before the first interview: once a
-      // link went out, it stays as it was.
-      const { told } = await store.staffAgreements();
-      refuseUnless(!told, "onboarding.agreements_kept");
-      await store.setAgreements(command.payload.agreements, by);
-      // Once all are in, the links that are due go out now, not at the next alarm.
-      await store.releaseDue();
+      await keepAgreements(env, command.payload.agreements, by);
       return;
     }
     case "onboarding.remind": {

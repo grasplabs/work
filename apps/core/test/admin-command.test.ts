@@ -243,13 +243,16 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
       await adminCommands().setAgreements(agreements);
     });
     const snapshot = await adminSnapshot();
-    // Lea's link is out, so the team is told: what was agreed stays.
+    // Lea's link is out, so the team is told: what was agreed stays,
+    // though saving it again unchanged still applies.
     const changedLater = await outcome(
       adminCommands().setAgreements({ ...agreements, assessment: false })
     );
+    const savedAgain = await outcome(adminCommands().setAgreements(agreements));
     const kept = await adminSnapshot();
     expect({
       changedLater,
+      savedAgain,
       keptAgreements: kept.agreements,
       agreements: snapshot.agreements,
       agreed: snapshot.agreed,
@@ -261,6 +264,7 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
       ),
     }).toStrictEqual({
       changedLater: "onboarding.agreements_kept",
+      savedAgain: "ok",
       keptAgreements: agreements,
       agreements,
       agreed: true,
