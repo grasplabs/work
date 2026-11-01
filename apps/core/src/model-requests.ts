@@ -98,7 +98,7 @@ const unboundedFields = [
   "modalities",
   "audio",
   "prediction",
-  // Workers AI's vision input, billed by what it shows.
+  // A top-level image input, billed by what it shows.
   "image",
   // Hosted execution and servers the provider runs, and bills, itself.
   "container",
@@ -167,10 +167,13 @@ const unboundedTool = (tools: unknown): string | undefined => {
 };
 
 /** What in `value`, content anywhere in a body, the bound can't cover. */
-const unboundedIn = (value: unknown): string | undefined => {
+const unboundedIn = (
+  value: unknown,
+  allowed: ReadonlySet<string>
+): string | undefined => {
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = unboundedIn(item);
+      const found = unboundedIn(item, allowed);
       if (found !== undefined) {
         return found;
       }
@@ -180,7 +183,11 @@ const unboundedIn = (value: unknown): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  if (typeof value.type === "string" && unboundedParts.has(value.type)) {
+  if (
+    typeof value.type === "string" &&
+    unboundedParts.has(value.type) &&
+    !allowed.has(value.type)
+  ) {
     return value.type;
   }
   // Anthropic charges a one-hour cache write at twice the input price,
@@ -190,7 +197,7 @@ const unboundedIn = (value: unknown): string | undefined => {
   }
   for (const [key, inner] of Object.entries(value)) {
     if (!schemaFields.has(key)) {
-      const found = unboundedIn(inner);
+      const found = unboundedIn(inner, allowed);
       if (found !== undefined) {
         return found;
       }
@@ -203,8 +210,13 @@ const unboundedIn = (value: unknown): string | undefined => {
  * What in a request's body its bytes can't bound or the catalog's prices
  * can't price, if anything: `undefined` for a body the ledger can bound.
  * A body that isn't JSON can't be read, so it can't be bounded either.
+ * `allowed` names content parts the caller bounds another way: a
+ * document's, by the model's whole context window (models.ts).
  */
-export const unboundedBy = (body: unknown): string | undefined => {
+export const unboundedBy = (
+  body: unknown,
+  allowed: ReadonlySet<string> = new Set()
+): string | undefined => {
   const parsed = parsedBody(body);
   if (!isRecord(parsed)) {
     return "body";
@@ -216,5 +228,5 @@ export const unboundedBy = (body: unknown): string | undefined => {
     return "inference_geo";
   }
   const field = unboundedFields.find((name) => parsed[name] !== undefined);
-  return field ?? unboundedTool(parsed.tools) ?? unboundedIn(parsed);
+  return field ?? unboundedTool(parsed.tools) ?? unboundedIn(parsed, allowed);
 };

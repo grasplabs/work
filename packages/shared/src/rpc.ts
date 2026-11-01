@@ -1,3 +1,4 @@
+import type { AiProvidersApi } from "./ai-providers.ts";
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { BrainApi } from "./brain.ts";
@@ -12,9 +13,9 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
 import type { EmailPreferencesApi } from "./email-preferences.ts";
+import type { HeldStartsApi } from "./held-starts.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
-import type { LandscapeApi } from "./landscape.ts";
 import type { MembersApi } from "./members.ts";
 import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
@@ -24,7 +25,6 @@ import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
-import type { PoliciesApi } from "./policies.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
@@ -33,7 +33,6 @@ import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
 import type { StoresApi } from "./stores.ts";
-import type { ScreenSubmissionsApi } from "./submissions.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
@@ -130,17 +129,6 @@ export interface SessionApi {
    * (which only admins connect and disconnect).
    */
   readonly connections: ConnectionsApi;
-  /**
-   * The application landscape: the apps the organization's people granted
-   * access, read from its identity provider.
-   */
-  readonly landscape: LandscapeApi;
-  /**
-   * The company's policies for the apps its people use: its policy
-   * documents, rules and exceptions. Everyone reads them; the
-   * organization's own admins change them.
-   */
-  readonly policies: PoliciesApi;
   /** Runs of Apps' workflows, for those with a role in the App. */
   readonly workflows: WorkflowsApi;
   /**
@@ -163,6 +151,11 @@ export interface SessionApi {
    * from, whatever their role.
    */
   readonly decisions: DecisionsApi;
+  /**
+   * Starts of independent workflows the person's chats' agents asked for,
+   * held until they confirm them.
+   */
+  readonly heldStarts: HeldStartsApi;
   /**
    * npm packages proposed for Apps, and the people who approve them: a
    * permission of its own, which no role gives.
@@ -200,6 +193,11 @@ export interface SessionApi {
    */
   readonly models: ModelsApi;
   /**
+   * The organization's own AI provider keys, sealed in connect, and the
+   * models its calls use. Admins read them; its own admins change them.
+   */
+  readonly aiProviders: AiProvidersApi;
+  /**
    * Business stores: a store's failed schema change, and abandoning it.
    * Admins only, never Grasp staff.
    */
@@ -215,11 +213,6 @@ export interface SessionApi {
    * that connect couldn't recover: the person says what became of each.
    */
   readonly unknownOutcomes: UnknownOutcomesApi;
-  /**
-   * The person's screen submissions whose answer may never have reached
-   * their page, by status only (spec 10.7.8).
-   */
-  readonly screenSubmissions: ScreenSubmissionsApi;
   /**
    * Improvement signals from runs and the audit log, computed daily: every
    * one for admins, an App's for its builders.

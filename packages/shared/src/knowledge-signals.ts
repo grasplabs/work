@@ -106,8 +106,7 @@ export interface UnreadDocument {
     /** When it last changed (ISO 8601). */
     updatedAt: string;
     /**
-     * The days nobody read it: {@link unreadDays}, or the audit log's
-     * retention where that's shorter, as the log keeps no reads past it.
+     * The days nobody read it: {@link unreadDays} when it was computed.
      */
     days: number;
   };

@@ -1,36 +1,35 @@
 import { execFileSync } from "node:child_process";
 
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
-
 import { coreProject } from "./vite.config.ts";
 
 // The Brain baseline against a real model (GRA-676), on request only: it
 // costs money, so it is in no project the root runs, and CI never runs it.
-// The model is `BRAIN_MODEL`, a gateway ref such as
-// `workers-ai/@cf/zai-org/glm-5.3-flash` or `anthropic/claude-sonnet-5`, or
-// while unset the one a deployment's gateway asks by default for chat. The
-// run's gateway lists it first, so it is the one its chats ask, reached
-// through core's model gateway and ledger over the real AI binding with
-// your Wrangler login (`wrangler whoami`). A model the gateway doesn't
-// offer is refused before anything is sent. Run from the repository root,
-// first the estimate, which spends nothing:
+// The model is `BRAIN_MODEL`, as the gateway names it, such as
+// `anthropic/claude-sonnet-5` or `mistral/mistral-large-latest` (the
+// latter while unset). The run's organization chooses it, so it is the one
+// its chats ask, reached through core's model gateway, ledger and connect,
+// then from the test's isolate to the provider's own API with the real key
+// `BRAIN_MODEL_KEY` (test/brain-real-provider.ts): Anthropic's, Mistral's
+// or OpenRouter's. Never commit the key; give it in the shell. A model the
+// gateway doesn't offer is refused before anything is sent. Run from the
+// repository root, first the estimate, which spends nothing and needs no
+// key:
 //
 //   BRAIN_MODEL=anthropic/claude-sonnet-5 BRAIN_MODEL_MODE=estimate vp -C apps/core test -c vite.brain-model.config.ts
 //
 // then a split (dev, validation or sealed), with the most it may spend, in
 // US dollars:
 //
-//   BRAIN_MODEL=anthropic/claude-sonnet-5 BRAIN_MODEL_MODE=run BRAIN_MODEL_SPLIT=validation BRAIN_MODEL_BUDGET_USD=5 \
+//   BRAIN_MODEL=anthropic/claude-sonnet-5 BRAIN_MODEL_KEY=… BRAIN_MODEL_MODE=run BRAIN_MODEL_SPLIT=validation BRAIN_MODEL_BUDGET_USD=5 \
 //     vp -C apps/core test -c vite.brain-model.config.ts
 //
 // Both take the repeats from `BRAIN_MODEL_REPEATS` (3 while unset), so give
 // the estimate the repeats the run will have.
 //
-// The budget is the ledger's deployment limit for the run: core refuses any
-// request that could take the spend past it, so the run stops there. Each
-// run reports on its output as JSON lines (`BRAIN_MODEL_REPORT`); keep them
-// outside the repository. Anthropic's models need the provider's auth on
-// the gateway: a stored key, or Unified Billing with credits.
+// The budget is the ledger's deployment limit for the run, and the only
+// cap on it: core refuses any request that could take the spend past it,
+// so the run stops there. Each run reports on its output as JSON lines
+// (`BRAIN_MODEL_REPORT`); keep them outside the repository.
 
 const mode = process.env.BRAIN_MODEL_MODE;
 if (mode !== "estimate" && mode !== "run") {
@@ -45,9 +44,11 @@ if (mode === "run" && !(Number.isFinite(budgetUsd) && budgetUsd > 0)) {
   );
 }
 
-/** The model under test: a gateway ref, the deployment default if unset. */
-const [deploymentDefault] = defaultGatewayModels;
-const model = process.env.BRAIN_MODEL ?? deploymentDefault;
+/** The model under test, as the gateway names it. */
+const model = process.env.BRAIN_MODEL ?? "mistral/mistral-large-latest";
+
+/** The provider's real key, for a run: from the shell, never committed. */
+const key = process.env.BRAIN_MODEL_KEY ?? "";
 
 const git = (...args: string[]): string =>
   execFileSync("git", args, {
@@ -66,20 +67,9 @@ export default coreProject(
     hookTimeout: maxHours * 60 * 60 * 1000,
   },
   {
-    // Only a run reaches Cloudflare; the estimate runs the stub.
-    remoteBindings: mode === "run",
     bindings: {
-      // A deployment's gateway as the console first configures it, and as
-      // core configures it while none is set: Workers AI's models, on the
-      // account's own AI Gateway; with the model under test listed first,
-      // which makes it the one chats ask.
-      MODEL_GATEWAY: {
-        gateway: "default",
-        models: [
-          model,
-          ...defaultGatewayModels.filter((listed) => listed !== model),
-        ],
-      },
+      // Only a run reaches the provider; the estimate runs the stub.
+      ...(mode === "run" && key !== "" ? { BRAIN_MODEL_KEY: key } : {}),
       BRAIN_MODEL: {
         mode,
         model,
@@ -94,7 +84,7 @@ export default coreProject(
           dirty: git("status", "--porcelain", "--untracked-files=no") !== "",
           profile:
             mode === "run"
-              ? "workerd (Vitest pool, RUNTIME_PROFILE=workerd), AI binding remote over Wrangler login"
+              ? "workerd (Vitest pool, RUNTIME_PROFILE=workerd), the provider's own API with a real key"
               : "workerd (Vitest pool, RUNTIME_PROFILE=workerd), stub provider",
         },
       },

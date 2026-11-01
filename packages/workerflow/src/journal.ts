@@ -36,7 +36,6 @@
 import { createHistory } from "./history.ts";
 import { eventMatches } from "./identity.ts";
 import type { JournaledMatch } from "./identity.ts";
-import { journalSchemaVersion } from "./journal-schema.ts";
 import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
 
@@ -49,7 +48,11 @@ export class JournalSchemaError extends Error {
   override readonly name = "JournalSchemaError";
 }
 
-export { journalSchemaVersion } from "./journal-schema.ts";
+/**
+ * The journal's own layout. A change to it is a new version; a journal of
+ * any other version is refused as it is read, never upgraded.
+ */
+export const journalSchemaVersion = 13;
 
 /** The index each sender's share of the inbox is counted by. */
 const senderIndex =
@@ -84,55 +87,11 @@ const createSettledOrder = (sql: SqlStorage): void => {
   `);
 };
 
-/**
- * The journal's version, once upgraded to this engine's where it was the
- * one before (`journalSchemaVersion`): each upgrade in one write, as the
- * journal is first read by an engine that knows it. Of a version it
- * doesn't upgrade, left as it was, for the caller to refuse.
- */
-const upgradedSchema = (
-  sql: SqlStorage
-): number | string | null | undefined => {
-  const [stored] = sql
+/** The journal's version as stored, before any of its other columns are read. */
+const storedSchema = (sql: SqlStorage): number | string | null | undefined =>
+  sql
     .exec<{ schema: number | string | null }>("SELECT schema FROM run")
-    .toArray();
-  let schema = stored?.schema;
-  // Each in one turn, so in one of the object's atomic writes: the columns
-  // and the version move together.
-  if (schema === 8) {
-    sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
-    sql.exec("UPDATE run SET schema = 9");
-    schema = 9;
-  }
-  if (schema === 9) {
-    sql.exec("ALTER TABLE events ADD COLUMN attributes TEXT");
-    sql.exec("ALTER TABLE steps ADD COLUMN event_match TEXT");
-    sql.exec("UPDATE run SET schema = 10");
-    schema = 10;
-  }
-  if (schema === 10) {
-    sql.exec(
-      "ALTER TABLE events ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0"
-    );
-    sql.exec("UPDATE run SET schema = 11");
-    schema = 11;
-  }
-  if (schema === 11) {
-    sql.exec("ALTER TABLE events ADD COLUMN sender TEXT");
-    sql.exec(senderIndex);
-    sql.exec("UPDATE run SET schema = 12");
-    schema = 12;
-  }
-  if (schema === 12) {
-    // Outcomes journaled before keep no order: they are handed back as
-    // they are reached, as they were.
-    sql.exec("ALTER TABLE steps ADD COLUMN settled INTEGER");
-    createSettledOrder(sql);
-    sql.exec("UPDATE run SET schema = 13");
-    schema = 13;
-  }
-  return schema;
-};
+    .toArray()[0]?.schema;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -731,7 +690,7 @@ export const notifyDue = (sql: SqlStorage): number | null => {
   if (!hasJournal(sql)) {
     return null;
   }
-  if (upgradedSchema(sql) !== journalSchemaVersion) {
+  if (storedSchema(sql) !== journalSchemaVersion) {
     return null;
   }
   return sql
@@ -747,12 +706,12 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   // The version first, on its own: another layout's columns may not be
   // the ones read below.
-  const schema = upgradedSchema(sql);
+  const schema = storedSchema(sql);
   if (schema === undefined) {
     return undefined;
   }
   if (schema !== journalSchemaVersion) {
-    // Outside what this engine reads (journal-schema.ts).
+    // Outside what this engine reads (`journalSchemaVersion`).
     throw new JournalSchemaError(
       `This run's journal has schema ${String(schema)}, where this engine reads only schema ${journalSchemaVersion}`
     );

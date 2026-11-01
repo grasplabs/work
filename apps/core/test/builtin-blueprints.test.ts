@@ -1,4 +1,5 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { createHash } from "node:crypto";
+
 import { workflowIdOf } from "@grasp-os/compiler";
 import {
   checkWorkflowBindings,
@@ -10,7 +11,6 @@ import type {
   DeclaredPermission,
   Authority,
 } from "@grasp-os/shared/permissions";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -24,19 +24,21 @@ import {
   installBuiltinBlueprint,
 } from "../src/app-blueprints.ts";
 import { startAppBinding } from "../src/app-workflow-bindings.ts";
+import { blueprintsDigestText } from "../src/builtin-digest.ts";
 import {
   builtins,
   fingerprintOf,
   installBuiltins,
-  release,
+  loadBuiltinRelease,
 } from "../src/builtins.ts";
 import type { Release } from "../src/builtins.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildScreens } from "../src/screens.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
+import { fakeProvider, testModel } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -61,6 +63,9 @@ import { testBinding } from "./test-env.ts";
 
 const idp = mockIdp();
 
+/** This release's built-ins, blueprints included. */
+const release = await loadBuiltinRelease();
+
 const hello = (): BuiltinBlueprint => {
   const found = release.blueprints.find(({ id }) => id === "hello");
   if (!found) {
@@ -73,13 +78,22 @@ const hello = (): BuiltinBlueprint => {
 const ensureInstalled = async (): Promise<boolean> =>
   await builtins(env).ensureInstalled(await fingerprintOf(release));
 
-/** This release, with `hello` changed as `change` says: another release. */
-const releaseWith = (change: Partial<BuiltinBlueprint>): Release => ({
-  ...release,
-  blueprints: release.blueprints.map((blueprint) =>
+/**
+ * This release, with `hello` changed as `change` says: another release,
+ * with the digest its build would embed.
+ */
+const releaseWith = (change: Partial<BuiltinBlueprint>): Release => {
+  const blueprints = release.blueprints.map((blueprint) =>
     blueprint.id === "hello" ? { ...blueprint, ...change } : blueprint
-  ),
-});
+  );
+  return {
+    ...release,
+    blueprints,
+    blueprintsDigest: createHash("sha256")
+      .update(blueprintsDigestText(blueprints))
+      .digest("hex"),
+  };
+};
 
 /** Where `hello` keeps its greeting, a function of its release. */
 const greetings = "operations/greetings.ts";
@@ -163,9 +177,6 @@ export default function Hello() {
 `,
     },
   });
-
-/** A model the deployment allows. */
-const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** A JSON Schema of an object of `properties`, all required. */
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -1062,18 +1073,16 @@ describe("the built-in blueprints", () => {
     const unapproved = await start(created.app.id, builder.userId, "k2");
     // The other copy's workflow is its own: the grant isn't its.
     const otherCopy = await start(theirs.app.id, other.userId, "k3");
-    await admin.api.workflowResources.approveBinding(workflow.id, {
-      alias: "model",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    const gateway = fakeGateway({
+    await fakeProvider({
       text: '{"line":"Hello, Ada"}',
       inputTokens: 1,
       outputTokens: 1,
     });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
+    await admin.api.workflowResources.approveBinding(workflow.id, {
+      alias: "model",
+      target: { kind: "model", model: testModel },
+      reviewed: { version: 1 },
+    });
     const started = await startAppBinding(
       env,
       authorityOf(created.app.id, builder.userId),
@@ -1092,7 +1101,6 @@ describe("the built-in blueprints", () => {
       { timeout: 30_000, interval: 100 }
     );
     const ran = await builder.api.workflowResources.run(workflow.id, runId);
-    vi.restoreAllMocks();
 
     expect({
       contract: installed
@@ -1215,10 +1223,9 @@ describe("the built-in blueprints", () => {
       )
     ).resolves.toBeTruthy();
     // Room for one workflow: the second is refused once the first is made.
-    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
-    env.QUOTA_LIMITS = {
-      generation: configured.generation + 200,
-      limits: { ...configured.limits, workflowResourcesPerPerson: 1 },
+    env.TEST_QUOTA_LIMITS = {
+      ...configuredLimits,
+      workflowResourcesPerPerson: 1,
     };
     let refused: string;
     try {
@@ -1226,10 +1233,7 @@ describe("the built-in blueprints", () => {
         builder.api.apps.blueprints.create("hello", { name: "Partway" })
       );
     } finally {
-      env.QUOTA_LIMITS = {
-        generation: configured.generation + 201,
-        limits: configured.limits,
-      };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     const counted = await env.DB.prepare(
       "SELECT count(*) AS made, count(*) FILTER (WHERE deleted_at IS NULL) AS live FROM workflow_resources WHERE owner_id = ?"

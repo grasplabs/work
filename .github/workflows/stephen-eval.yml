@@ -2,10 +2,13 @@
 # Actions tab, on the branch picked there. It costs money and takes a while,
 # so no push or pull request runs it; CI checks the hard rules on every
 # change against the scripted model (apps/core/test/stephen-eval.test.ts).
-# The model is reached through the stephen-eval 1Password Environment's
-# AI Gateway (`STEPHEN_EVAL_GATEWAY`), whose spend limit caps what a run
-# can spend, and the run's budget (`STEPHEN_EVAL_BUDGET_USD`) is the
-# ledger's limit too. Its numbers go to the run's summary and, when the
+# The model (`STEPHEN_EVAL_MODEL`) is reached at its provider's own API
+# with the stephen-eval 1Password Environment's key for that provider
+# (`STEPHEN_EVAL_MODEL_KEY`). The run's budget (`STEPHEN_EVAL_BUDGET_USD`)
+# is the ledger's deployment limit, the one cap on what a run spends: core
+# refuses any request that could take it past that. Give the key a spend
+# limit at the provider too if a run should never exceed one whatever the
+# code does. Its numbers go to the run's summary and, when the
 # branch has an open pull request, on it; its report and every model
 # exchange go to the run's artifact. The weekly run on main is
 # stephen-weekly.yml.
@@ -46,15 +49,16 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # The Cloudflare token and the eval's settings, from the stephen-eval
-      # 1Password Environment; a setting left out takes its default.
+      # The model's provider key and the eval's settings, from the
+      # stephen-eval 1Password Environment; a setting left out takes its
+      # default.
       - uses: ./.github/actions/load-1password
         with:
           environment: stephen-eval
           service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          secrets: CLOUDFLARE_API_TOKEN
-          settings: CLOUDFLARE_ACCOUNT_ID STEPHEN_EVAL_MODEL STEPHEN_EVAL_BUDGET_USD STEPHEN_EVAL_GATEWAY
-          required: CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
+          secrets: STEPHEN_EVAL_MODEL_KEY
+          settings: STEPHEN_EVAL_MODEL STEPHEN_EVAL_BUDGET_USD
+          required: STEPHEN_EVAL_MODEL_KEY
       # Fails on a broken hard rule (test/stephen-real-model.test.ts).
       - name: Run Stephen's eval with the real model
         run: |
@@ -63,7 +67,7 @@ jobs:
         env:
           STEPHEN_MODEL: ${{ env.STEPHEN_EVAL_MODEL }}
           STEPHEN_MODEL_BUDGET_USD: ${{ env.STEPHEN_EVAL_BUDGET_USD || '3' }}
-          STEPHEN_MODEL_GATEWAY: ${{ env.STEPHEN_EVAL_GATEWAY || 'stephen-ci' }}
+          STEPHEN_MODEL_KEY: ${{ env.STEPHEN_EVAL_MODEL_KEY }}
           STEPHEN_MODEL_CASES: ${{ inputs.cases }}
       - name: Report the numbers
         if: always()

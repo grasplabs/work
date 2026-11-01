@@ -214,6 +214,23 @@ export interface AppContents {
   workflows: string[];
 }
 
+/** An App as `AppsApi.list` gives it, with its current version's contents. */
+export interface AppOverview {
+  app: ViewedApp;
+  contents: AppContents;
+}
+
+/**
+ * One screen of an App's current version (`AppsApi.screens`), with what
+ * a list of screens shows of its App: its name, where it stands and the
+ * business process it serves.
+ */
+export interface ListedScreen {
+  app: Pick<App, "id" | "name" | "status" | "process">;
+  /** The screen's name, as `AppContents.screens` gives it. */
+  screen: string;
+}
+
 /**
  * What an App's current version offers other Apps: its exports
  * (`appExportsPath`). None while it has no current version.
@@ -546,6 +563,12 @@ export interface AppMember extends AppMemberRef {
   addedAt: string;
 }
 
+/** Someone who may answer for an App (`AppsApi.answerers`). */
+export interface AppAnswerer {
+  id: string;
+  name: string;
+}
+
 /**
  * Whom an App is shared with. Apps are private: open to their owner
  * (always a builder, and not listed here), to the organization's admins,
@@ -692,6 +715,17 @@ export interface AppsApi {
   /** The screens and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**
+   * Every screen of the current version of each App the person has a role
+   * in, as `list` finds the Apps and `contents` names the screens, in one
+   * read: the newest App first, its screens by name.
+   */
+  screens: () => Promise<ListedScreen[]>;
+  /**
+   * The Apps `list` gives, each with what `contents` says of it, in one
+   * read: the Domains page's cards.
+   */
+  overview: () => Promise<AppOverview[]>;
+  /**
    * What the App's current version exports to other Apps: read from its
    * version alone, for anyone with a role in the App.
    */
@@ -742,6 +776,13 @@ export interface AppsApi {
    * and bindings end. Afterwards it is answered as an App that isn't there.
    */
   remove: (app: string) => Promise<void>;
+  /**
+   * Who may answer for the App now, by ID and name (no email): each current
+   * member of the organization core would accept as `responsible`, those
+   * it is shared with through a team too. For whoever may name them: its
+   * builders, never Grasp staff.
+   */
+  answerers: (app: string) => Promise<AppAnswerer[]>;
   readonly files: AppFilesApi;
   readonly versions: AppVersionsApi;
   readonly members: AppMembersApi;

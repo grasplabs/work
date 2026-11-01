@@ -5,7 +5,10 @@ import { applyOutput } from "@grasp-os/shared/chat";
 import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
-import { memoryMaxLimit } from "@grasp-os/shared/memory";
+import {
+  memoryCharactersPerToken,
+  memoryLimits,
+} from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
@@ -37,22 +40,21 @@ import {
   codeStatuses,
   codeStep,
   readApiStep,
-  gatewayConfig,
+  configureObject,
   model,
   pausedReply,
-  pointAtGateway,
   says,
   setObjectEnv,
   testRunOpening,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // A chat's agent, through the Workspace object: the loop, the code it runs
@@ -62,24 +64,22 @@ const idp = mockIdp();
 
 /**
  * Models of different context windows, as pi's catalog gives them: one of
- * 1,000,000 tokens, one of 200,000 and one of 24,000. Each request keeps
+ * 1,000,000 tokens, one of 200,000 and one of 32,768. Each request keeps
  * 16,384 of them for the answer, or a quarter of a window too small for that
- * (6,000 of the 24,000).
+ * (8,192 of the 32,768).
  */
 const largeModel = "anthropic/claude-sonnet-5-5";
 const smallModel = "anthropic/claude-haiku-4-5";
-const tinyModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const tinyModel = "mistral/voxtral-small-latest";
 const answerTokens = 16_384;
 const inputTokens = {
   large: 1_000_000 - answerTokens,
   small: 200_000 - answerTokens,
+  tiny: 32_768 - 32_768 / 4,
 };
 
-/** A deployment that allows them all. */
-const bothModels = {
-  ...gatewayConfig,
-  models: [model, largeModel, smallModel, tinyModel],
-};
+/** The organization's models: all of them. */
+const bothModels = [model, largeModel, smallModel, tinyModel];
 
 /**
  * Adds `count` turns to the chat as the object keeps them: questions of
@@ -128,10 +128,20 @@ const addTurns = async (
 };
 
 /** A new chat for a person no other test uses, answered by `replies`. */
-const newChat = async (...replies: GatewayReply[]) => {
+const newChat = async (...replies: ProviderReply[]) => {
   // A member of the organization, whom no other test uses.
   const { userId } = await signedInWithRole(idp, "user");
   return await chatOf(userId, ...replies);
+};
+
+/**
+ * {@link newChat}, the organization having chosen `models` (the first its
+ * default), which answer with `replies`.
+ */
+const newChatOn = async (models: string[], ...replies: ProviderReply[]) => {
+  const chat = await newChat();
+  const provider = await fakeProviderFor(models, ...replies);
+  return { ...chat, provider };
 };
 
 /** Runs `code` as the chat's only code step, and returns what it gave. */
@@ -281,7 +291,7 @@ describe("a request's system prompt", () => {
 
 describe("chat agent", () => {
   it("answers a question with a code step against the chat's API, its declaration read first", async () => {
-    const { stub, chat, personId, gateway, ask } = await newChat(
+    const { stub, chat, personId, provider, ask } = await newChat(
       readApiStep("chat"),
       codeStep(
         "export default async (self, env) => (await env.chat.info()).personId;"
@@ -307,7 +317,7 @@ describe("chat agent", () => {
     ]);
     // The model saw the API listed, read its declaration, then the step's
     // result.
-    const [first, second, third] = gateway.requests.map(({ body }) =>
+    const [first, second, third] = provider.requests.map(({ body }) =>
       JSON.stringify(body)
     );
     const info =
@@ -336,60 +346,80 @@ describe("chat agent", () => {
   });
 
   it("hands a thinking model its own reasoning back on each later request, at the effort asked, after a restart too", async () => {
-    // DeepSeek's models refuse a request whose earlier assistant messages
-    // lack the reasoning they gave with them.
-    const deepSeek = "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017";
-    const config = { ...gatewayConfig, models: [deepSeek] };
+    // Anthropic's thinking models refuse a request whose earlier assistant
+    // messages lack the signed thinking they gave with them.
     const planned = "Work out six times seven in code.";
     const read = "The code returned 42.";
-    const { stub, chat, gateway } = await newChat(
+    const { stub, chat, provider } = await newChat(
       {
         ...codeStep("export default async () => 6 * 7;"),
         thinking: { text: planned, tokens: 20 },
       },
       { ...says("42."), thinking: { text: read, tokens: 10 } }
     );
-    await pointAtGateway(stub, gateway, { config });
     await stub.ask(chat.id, {
       text: "What is six times seven?",
-      model: deepSeek,
+      model,
       effort: "max",
     });
     await evictDurableObject(stub);
-    const later = fakeGateway(says("What six times seven is."));
-    await pointAtGateway(stub, later, { config });
-    await stub.ask(chat.id, { text: "What did I ask?", model: deepSeek });
+    const later = await fakeProvider(says("What six times seven is."));
+    await configureObject(stub);
+    await stub.ask(chat.id, { text: "What did I ask?", model });
 
+    // What each request sent, in Anthropic's wire format.
     const requestSchema = z.object({
-      thinking: z.unknown(),
-      reasoning_effort: z.string().optional(),
+      thinking: z.looseObject({ type: z.string(), budget_tokens: z.number() }),
       messages: z.array(
         z.looseObject({
           role: z.string(),
-          reasoning_content: z.string().optional(),
+          content: z.union([
+            z.string(),
+            z.array(
+              z.looseObject({
+                type: z.string(),
+                thinking: z.string().optional(),
+                signature: z.string().optional(),
+              })
+            ),
+          ]),
         })
       ),
     });
     expect(
-      [...gateway.requests, ...later.requests].map(({ body }) => {
+      [...provider.requests, ...later.requests].map(({ body }) => {
         const sent = requestSchema.parse(body);
         return {
-          thinking: sent.thinking,
-          effort: sent.reasoning_effort,
+          thinking: sent.thinking.type,
+          budget: sent.thinking.budget_tokens,
           reasoning: sent.messages
             .filter(({ role }) => role === "assistant")
-            .map(({ reasoning_content }) => reasoning_content),
+            .flatMap(({ content }) =>
+              typeof content === "string"
+                ? []
+                : content.flatMap((block) =>
+                    block.type === "thinking"
+                      ? [{ thinking: block.thinking, signed: block.signature }]
+                      : []
+                  )
+            ),
         };
       })
     ).toStrictEqual([
-      { thinking: { type: "enabled" }, effort: "max", reasoning: [] },
-      { thinking: { type: "enabled" }, effort: "max", reasoning: [planned] },
-      // A question that names no effort: medium, which DeepSeek lacks, so
-      // the next level up.
+      { thinking: "enabled", budget: 16_384, reasoning: [] },
       {
-        thinking: { type: "enabled" },
-        effort: "high",
-        reasoning: [planned, read],
+        thinking: "enabled",
+        budget: 16_384,
+        reasoning: [{ thinking: planned, signed: "signed" }],
+      },
+      // A question that names no effort: medium, a smaller budget.
+      {
+        thinking: "enabled",
+        budget: 8192,
+        reasoning: [
+          { thinking: planned, signed: "signed" },
+          { thinking: read, signed: "signed" },
+        ],
       },
     ]);
   });
@@ -436,7 +466,8 @@ describe("chat agent", () => {
       undefined,
       "teams"
     );
-    await pointAtGateway(stub, fakeGateway(says("Hello.")));
+    await fakeProvider(says("Hello."));
+    await configureObject(stub);
 
     await stub.ask(chat.id, { text: "Hi.", model });
 
@@ -467,7 +498,7 @@ describe("chat agent", () => {
   });
 
   it("stops at the most steps a turn may take", async () => {
-    const { stub, chat, gateway, ask } = await newChat(
+    const { stub, chat, provider, ask } = await newChat(
       ...Array.from({ length: maxSteps }, () =>
         codeStep("export default async () => 'again';")
       )
@@ -476,7 +507,7 @@ describe("chat agent", () => {
     const reply = await ask("Keep going.");
 
     expect(reply.outcome).toBe("max_steps");
-    expect(gateway.requests).toHaveLength(maxSteps);
+    expect(provider.requests).toHaveLength(maxSteps);
     // The last step's code isn't run: nobody would read its result.
     const results = await codeResults(stub, chat.id);
     expect(results.at(-1)).toStrictEqual({
@@ -552,7 +583,7 @@ describe("chat agent", () => {
       { ...codeStep("export default async () => 'done';"), text: "Running." },
       1
     );
-    const { personId, gateway, ask } = await newChat(
+    const { personId, provider, ask } = await newChat(
       reply,
       says("Never asked.")
     );
@@ -560,7 +591,7 @@ describe("chat agent", () => {
     const turn = codeOf(ask("Wait."));
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -571,7 +602,7 @@ describe("chat agent", () => {
 
     await expect(turn).resolves.toBe("permission.person_inactive");
     // No request for them after they left.
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 
   it("stops the turn when its person leaves during it", async () => {
@@ -579,7 +610,7 @@ describe("chat agent", () => {
       { ...codeStep("export default async () => 'done';"), text: "Running." },
       1
     );
-    const { personId, gateway, ask } = await newChat(
+    const { personId, provider, ask } = await newChat(
       reply,
       says("Never asked.")
     );
@@ -587,7 +618,7 @@ describe("chat agent", () => {
     const turn = codeOf(ask("Wait."));
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -597,7 +628,7 @@ describe("chat agent", () => {
     release();
 
     await expect(turn).resolves.toBe("permission.person_inactive");
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 });
 
@@ -1076,7 +1107,7 @@ describe("chat agent sandbox", () => {
 
 describe("chat agent turns", () => {
   it("can be cancelled while its code runs", async () => {
-    const { stub, chat, personId, gateway, ask } = await newChat(
+    const { stub, chat, personId, provider, ask } = await newChat(
       codeStep(
         "export default async () => { await scheduler.wait(10_000); return 'late'; };"
       )
@@ -1085,7 +1116,7 @@ describe("chat agent turns", () => {
     const reply = ask("Wait a minute.");
     await vi.waitFor(
       async () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
         // The step has started once its call is kept.
         await expect(transcript(stub, chat.id)).resolves.toHaveLength(3);
       },
@@ -1098,18 +1129,18 @@ describe("chat agent turns", () => {
       { isError: true, text: "Error (cancelled):\nThe run was cancelled." },
     ]);
     // No request after the cancelled step.
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
   });
 
   it("can be cancelled while the model answers", async () => {
-    const { stub, chat, personId, gateway, ask } = await newChat({
+    const { stub, chat, personId, provider, ask } = await newChat({
       hang: true,
     });
 
     const reply = ask("Take your time.");
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -1121,14 +1152,14 @@ describe("chat agent turns", () => {
   });
 
   it("takes one question at a time per chat", async () => {
-    const { stub, chat, personId, gateway, ask } = await newChat({
+    const { stub, chat, personId, provider, ask } = await newChat({
       hang: true,
     });
 
     const first = ask("First.");
     await vi.waitFor(
       () => {
-        expect(gateway.requests).toHaveLength(1);
+        expect(provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -1138,7 +1169,7 @@ describe("chat agent turns", () => {
     await expect(first).resolves.toMatchObject({ outcome: "cancelled" });
   });
 
-  it("refuses a model the deployment doesn't allow, before anything is kept", async () => {
+  it("refuses a model the organization didn't choose, before anything is kept", async () => {
     const { stub, chat } = await newChat();
 
     await expect(
@@ -1148,20 +1179,19 @@ describe("chat agent turns", () => {
   });
 
   it("keeps a chat in restricted mode to the models the client's data rule allows", async () => {
-    const { stub, chat, personId, gateway, ask } = await newChat(says("Hi."));
-    const euModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-    await pointAtGateway(stub, gateway, {
-      config: {
-        gateway: gatewayConfig.gateway,
-        models: [model, euModel],
-        sensitive: { models: [euModel] },
-      },
+    const euModel = "mistral/mistral-large-latest";
+    const { stub, chat, personId, provider, ask } = await newChatOn(
+      [model, euModel],
+      says("Hi.")
+    );
+    await configureObject(stub, {
+      rules: { sensitive: { models: [euModel] } },
     });
     // The chat has read restricted data: everything it sends is sensitive.
     await stub.restrictChat(chat.id);
 
     await expect(codeOf(ask("Hi."))).resolves.toBe("model.sensitive_data");
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
     await vi.waitFor(
       async () => {
@@ -1182,7 +1212,7 @@ describe("chat agent turns", () => {
   });
 
   it("stops acting for a person who has left", async () => {
-    const { personId, gateway, ask } = await newChat(says("Hi."));
+    const { personId, provider, ask } = await newChat(says("Hi."));
     await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
       .bind(personId)
       .run();
@@ -1190,11 +1220,12 @@ describe("chat agent turns", () => {
     await expect(codeOf(ask("Hi."))).resolves.toBe(
       "permission.person_inactive"
     );
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
   });
 
   it("shortens a long turn's oldest code results to fit the model's window, keeping its latest and every call's result", async () => {
-    const { stub, chat, gateway } = await newChat(
+    const { stub, chat, provider } = await newChatOn(
+      bothModels,
       // 30 code runs of a result the model reads cut to 32 KiB each: more
       // than the small model takes.
       ...Array.from({ length: maxRunsPerTurn / maxRunsPerResponse }, () =>
@@ -1205,7 +1236,6 @@ describe("chat agent turns", () => {
       ),
       says("Done.")
     );
-    await pointAtGateway(stub, gateway, { config: bothModels });
 
     await expect(
       stub.ask(chat.id, { text: "Run it all.", model: smallModel })
@@ -1224,7 +1254,7 @@ describe("chat agent turns", () => {
         })
       ),
     });
-    const last = gateway.requests.at(-1)?.body;
+    const last = provider.requests.at(-1)?.body;
     const blocks = bodySchema
       .parse(last)
       .messages.flatMap(({ content }) =>
@@ -1262,13 +1292,13 @@ describe("chat agent turns", () => {
   });
 
   it("sends as much of a long chat as the model's window takes, and stops a chat that is too long", async () => {
-    const { stub, chat, gateway, ask } = await newChat(
+    const { stub, chat, provider, ask } = await newChatOn(
+      bothModels,
       codeStep("export default async () => 'early' + '-result';"),
       says("Noted."),
       says("Still here."),
       says("All here.")
     );
-    await pointAtGateway(stub, gateway, { config: bothModels });
     await ask("Remember this.");
     // A long chat since, of 1.2 million characters: more than the small
     // model takes, and well within the large one's window.
@@ -1278,7 +1308,7 @@ describe("chat agent turns", () => {
       await expect(
         stub.ask(chat.id, { text: question, model: to })
       ).resolves.toMatchObject({ outcome: "answered", answer: answered });
-      const sent = JSON.stringify(gateway.requests.at(-1)?.body);
+      const sent = JSON.stringify(provider.requests.at(-1)?.body);
       return {
         // The first turn: its question, and what its code returned.
         early: [sent.includes("Remember this."), sent.includes("early-result")],
@@ -1328,7 +1358,10 @@ describe("chat agent turns", () => {
     if (memory === null) {
       throw new Error("An admin gets the Memory collection");
     }
-    const { stub, chat, gateway } = await newChat(says("Still here."));
+    const { stub, chat, provider } = await newChatOn(
+      bothModels,
+      says("Still here.")
+    );
     /** Saves the company's AGENTS.md, over what is there. */
     const saveRules = async (text: string) => {
       const { documents } = await admin.api.knowledge.listDocuments(memory);
@@ -1340,27 +1373,21 @@ describe("chat agent turns", () => {
         ifVersion: current?.currentVersion ?? 0,
       });
     };
-    // The largest a deployment may let a memory file be: 128,000
-    // characters, which every request of the chat carries.
-    const limits = env.MEMORY_LIMITS;
-    const raised = { "AGENTS.md": memoryMaxLimit };
-    const rules = `# Rules\n\n${"m".repeat(127_000)} the last rule`;
+    // As large as the company's AGENTS.md may be, which every request of
+    // the chat carries.
+    const rules = `# Rules\n\n${"m".repeat(
+      memoryLimits["AGENTS.md"] * memoryCharactersPerToken - 100
+    )} the last rule`;
     let sent = "";
     try {
-      Reflect.set(env, "MEMORY_LIMITS", raised);
-      await pointAtGateway(stub, gateway, {
-        config: bothModels,
-        memoryLimits: raised,
-      });
       await saveRules(rules);
       await addTurns(stub, chat.id, 40);
 
       await expect(
         stub.ask(chat.id, { text: "And now?", model: smallModel })
       ).resolves.toMatchObject({ outcome: "answered" });
-      sent = JSON.stringify(gateway.requests.at(-1)?.body);
+      sent = JSON.stringify(provider.requests.at(-1)?.body);
     } finally {
-      Reflect.set(env, "MEMORY_LIMITS", limits);
       // The company's memory is every later chat's too.
       await saveRules("# Rules");
     }
@@ -1384,8 +1411,10 @@ describe("chat agent turns", () => {
   });
 
   it("keeps a request that nearly fills the model's window within it, its note and tool declaration included", async () => {
-    const { stub, chat, gateway } = await newChat(says("Still here."));
-    await pointAtGateway(stub, gateway, { config: bothModels });
+    const { stub, chat, provider } = await newChatOn(
+      bothModels,
+      says("Still here.")
+    );
     // Turns of 5,000 characters, more than twice what the small model
     // takes: those sent fill its window to within one of them.
     await addTurns(stub, chat.id, 250, 5000);
@@ -1396,7 +1425,7 @@ describe("chat agent turns", () => {
 
     // The whole request as the provider got it: instructions, the tool's
     // declaration, the note and the turns.
-    const sent = JSON.stringify(gateway.requests.at(-1)?.body);
+    const sent = JSON.stringify(provider.requests.at(-1)?.body);
     const windowChars = requestChars(inputTokens.small);
     expect({
       tool: sent.includes('"name":"executeCode"'),
@@ -1414,45 +1443,42 @@ describe("chat agent turns", () => {
   });
 
   it("refuses a question too long for the model, before anything is kept or sent", async () => {
-    const { stub, chat, gateway } = await newChat(says("Hi."));
-    await pointAtGateway(stub, gateway, { config: bothModels });
+    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
 
-    // 50,000 characters, to a model that takes 18,000 tokens: its window
-    // of 24,000 less a quarter kept for the answer.
+    // 80,000 characters, to a model that takes 24,576 tokens: its window
+    // of 32,768 less a quarter kept for the answer.
     await expect(
-      codeOf(stub.ask(chat.id, { text: "q".repeat(50_000), model: tinyModel }))
+      codeOf(stub.ask(chat.id, { text: "q".repeat(80_000), model: tinyModel }))
     ).resolves.toBe("agent.question_too_long");
-    expect(gateway.requests).toStrictEqual([]);
+    expect(provider.requests).toStrictEqual([]);
     await expect(transcript(stub, chat.id)).resolves.toStrictEqual([]);
 
     // The same question to a model that takes it.
     await expect(
-      stub.ask(chat.id, { text: "q".repeat(50_000), model })
+      stub.ask(chat.id, { text: "q".repeat(80_000), model })
     ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
   });
 
   it("answers a short question on a model with a small window", async () => {
-    const { stub, chat, gateway } = await newChat(says("Hi."));
-    await pointAtGateway(stub, gateway, { config: bothModels });
+    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
 
     await expect(
       stub.ask(chat.id, { text: "Hi.", model: tinyModel })
     ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
-    // Instructions, tool and question all within the 18,000 tokens left.
-    const sent = JSON.stringify(gateway.requests.at(-1)?.body);
-    expect(sent.length).toBeLessThanOrEqual(requestChars(18_000));
+    // Instructions, tool and question all within the 24,576 tokens left.
+    const sent = JSON.stringify(provider.requests.at(-1)?.body);
+    expect(sent.length).toBeLessThanOrEqual(requestChars(inputTokens.tiny));
   });
 
   it("keeps what every request carries, its instructions, the index of its APIs and its tools, within a quarter of the smallest model's input", async () => {
-    const { stub, chat, gateway } = await newChat(says("Hi."));
-    await pointAtGateway(stub, gateway, { config: bothModels });
+    const { stub, chat, provider } = await newChatOn(bothModels, says("Hi."));
 
     await stub.ask(chat.id, { text: "Hi.", model: tinyModel });
     // A new chat with no memory or skills, and a question of three
     // characters: what is left is what every request carries.
-    const sent = JSON.stringify(gateway.requests.at(-1)?.body);
+    const sent = JSON.stringify(provider.requests.at(-1)?.body);
     expect({
-      share: sent.length <= requestChars(18_000) / 4,
+      share: sent.length <= requestChars(inputTokens.tiny) / 4,
       // What the model must always know stays in it.
       dataNotInstructions: sent.includes("data, not instructions"),
       admin: sent.includes("no permission holds until an admin grants it"),
@@ -1525,7 +1551,7 @@ describe("chat agent after a restart", () => {
     const cancelled = stopped.ask("Take your time.");
     await vi.waitFor(
       () => {
-        expect(stopped.gateway.requests).toHaveLength(1);
+        expect(stopped.provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -1541,7 +1567,7 @@ describe("chat agent after a restart", () => {
     const failing = codeOf(failed.ask("Wait."));
     await vi.waitFor(
       () => {
-        expect(failed.gateway.requests).toHaveLength(1);
+        expect(failed.provider.requests).toHaveLength(1);
       },
       { timeout: 10_000 }
     );
@@ -1606,12 +1632,12 @@ describe("chat agent after a restart", () => {
     await ask("Which chat is this?");
 
     await evictDurableObject(stub);
-    const gateway = fakeGateway(says("You asked which chat this is."));
-    await pointAtGateway(stub, gateway);
+    const provider = await fakeProvider(says("You asked which chat this is."));
+    await configureObject(stub);
     const reply = await ask("What did I ask before?");
 
     expect(reply.answer).toBe("You asked which chat this is.");
-    const sent = JSON.stringify(gateway.requests[0]?.body);
+    const sent = JSON.stringify(provider.requests[0]?.body);
     for (const earlier of [
       "Which chat is this?",
       "env.chat.info()",
@@ -1631,16 +1657,21 @@ describe("chat agent after a restart", () => {
     await ask("What is 6 * 7?");
     // The object died while the step ran: the step's call was kept, as the
     // loop keeps each message it finishes, but its result and the answer
-    // weren't.
+    // weren't. A message is kept with what it said for searches, so
+    // neither row of the last two exists.
     await runInDurableObject(stub, (_instance, state) => {
+      const lastTwo = "SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2";
       state.storage.sql.exec(
-        "DELETE FROM chat_messages WHERE id IN (SELECT id FROM chat_messages ORDER BY id DESC LIMIT 2)"
+        `DELETE FROM chat_search_text WHERE message_id IN (${lastTwo})`
+      );
+      state.storage.sql.exec(
+        `DELETE FROM chat_messages WHERE id IN (${lastTwo})`
       );
     });
 
     await evictDurableObject(stub);
-    const after = fakeGateway(says("It was 42."));
-    await pointAtGateway(stub, after);
+    const after = await fakeProvider(says("It was 42."));
+    await configureObject(stub);
     const reply = await ask("So?");
 
     const sent = JSON.stringify(after.requests[0]?.body);
@@ -2187,7 +2218,7 @@ describe("chat agent code run leases", () => {
   });
 
   it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {
-    const { id, stub, chat, gateway, ask } = await newChat(
+    const { id, stub, chat, provider, ask } = await newChat(
       codeStep(
         "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); return (await env.chat.info()).chatId; };"
       ),
@@ -2233,7 +2264,7 @@ describe("chat agent code run leases", () => {
       calls: calls.length,
       results: results.length,
       runs: runs.length,
-      requests: gateway.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({ calls: 1, results: 0, runs: 1, requests: 1 });
   });
 });
@@ -2462,15 +2493,13 @@ describe("chat agent code output", () => {
       undefined,
       "teams"
     );
-    await pointAtGateway(
-      stub,
-      fakeGateway(
-        codeStep(
-          "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
-        ),
-        says("Done.")
-      )
+    await fakeProvider(
+      codeStep(
+        "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+      ),
+      says("Done.")
     );
+    await configureObject(stub);
 
     await withRevocationReads(
       stub,

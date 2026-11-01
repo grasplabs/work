@@ -11,7 +11,7 @@ import { extractUpload, failUpload, finalFailures } from "./uploads.ts";
 // workflows but by the dispatcher's own hand (workflows/dispatcher.ts),
 // once per upload (uploads.ts). One step extracts the text and saves it;
 // a failure a retry may fix (the database, R2, the extractor's sandbox or
-// Workers AI out of reach for a moment, a save that conflicted) is retried with
+// Grasp's conversion out of reach for a moment, a save that conflicted) is retried with
 // backoff; one no retry changes (a file that doesn't read, one that runs
 // its sandbox out of CPU or memory, text over a document's limits) isn't.
 // Either way, once it fails for good, a last step fails the upload with

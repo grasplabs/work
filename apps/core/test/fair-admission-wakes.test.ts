@@ -3,13 +3,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { runEngine } from "../src/workflows/engine.ts";
-import { admitAttempt } from "../src/workflows/quotas.ts";
-import { shareWakeType, wakingOnSettle } from "../src/workflows/share-wakes.ts";
+import { shareWakeType } from "../src/workflows/share-wakes.ts";
 import {
   withShares,
   ownerOf,
-  anotherRun,
-  attemptOf,
   admit,
   shown,
   working,
@@ -17,7 +14,6 @@ import {
   loadWakesOf,
   endingEverySecond,
   holdingOf,
-  countingPolicyReads,
   settled,
   eventually2,
   eventually,
@@ -130,46 +126,6 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       status: "complete",
       prompt: true,
       rounds: 2,
-    });
-  });
-
-  it("read no quota policy to settle an attempt while no one waits for a share, and read it once someone does", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const owner = await ownerOf(builder);
-    const waiter = await anotherRun(builder, owner);
-
-    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
-      const settledWith = async (step: string): Promise<number> => {
-        const counting = countingPolicyReads();
-        const admission = await admitAttempt(env, owner, attemptOf(step));
-        const wakes: Promise<void>[] = [];
-        await wakingOnSettle(counting.env, admission, (wake) => {
-          wakes.push(wake());
-        }).settle();
-        await Promise.all(wakes);
-        return counting.policyReads();
-      };
-      const emptyQueue = await settledWith("alone");
-      // Its App's share is one: another run's step queues behind it.
-      const holding = await admitAttempt(env, owner, attemptOf("holding"));
-      const queued = shown(await admit(waiter, "waiting"));
-      const counting = countingPolicyReads();
-      const wakes: Promise<void>[] = [];
-      await wakingOnSettle(counting.env, holding, (wake) => {
-        wakes.push(wake());
-      }).settle();
-      await Promise.all(wakes);
-      return {
-        emptyQueue,
-        queued,
-        someoneWaiting: counting.policyReads() > 0,
-      };
-    });
-
-    expect(result).toStrictEqual({
-      emptyQueue: 0,
-      queued: "workflow.queued:app",
-      someoneWaiting: true,
     });
   });
 

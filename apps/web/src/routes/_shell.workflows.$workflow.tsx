@@ -4,8 +4,6 @@ import type {
   SteeredWrite,
   WorkflowActivity,
   WorkflowDraft,
-  WorkflowFile,
-  WorkflowKnowledge,
   WorkflowParams,
   WorkflowResource,
   WorkflowActionReview,
@@ -31,10 +29,8 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { WorkflowIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
-import { integrationsOf } from "../connections/integrations.ts";
-import type { Session } from "../core.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime, formatList } from "../format.ts";
 import {
@@ -52,15 +48,15 @@ import { ProcessBadge, ProcessPicker } from "../workflows/business-process.tsx";
 import { DefinitionEditor } from "../workflows/definition-editor.tsx";
 import { DiagramOverview } from "../workflows/diagram-overview.tsx";
 import { partsOf } from "../workflows/diagram-parts.ts";
+import type { DiagramPart } from "../workflows/diagram-parts.ts";
 import { FilesAndApps } from "../workflows/files-and-apps.tsx";
+import { ListedCount } from "../workflows/listed-count.tsx";
 import { ResourceParams } from "../workflows/resource-params.tsx";
 import { ResourceRuns } from "../workflows/resource-runs.tsx";
 import { SavedAgo } from "../workflows/saved-ago.tsx";
 import { TestRun } from "../workflows/test-run.tsx";
 import { Traces } from "../workflows/traces.tsx";
 import type { TracesPart } from "../workflows/traces.tsx";
-import { workflowAppsOf } from "../workflows/workflow-apps.ts";
-import type { WorkflowApps } from "../workflows/workflow-apps.ts";
 import {
   GoLiveDecision,
   WorkflowStatus,
@@ -210,6 +206,19 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
 };
 
 /**
+ * Whom the workflow belongs to: you, or its owner by name; someone else
+ * while their name isn't known (not listed, or not read yet), never an ID.
+ */
+const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
+  const { t } = useLingui();
+  if (owner === names.me) {
+    return t`Owned by you`;
+  }
+  const name = names.people.get(owner);
+  return name === undefined ? t`Owned by someone else` : t`Owned by ${name}`;
+};
+
+/**
  * Its name with whether it runs beside it; under them the process it
  * serves, its version, its owner, when its draft was saved, and what its
  * builders and owner reach from here; and, for whoever may decide it, the
@@ -230,10 +239,8 @@ const WorkflowHeader = ({
   savedAt: string | null;
 }) => {
   const router = useRouter();
-  const { t } = useLingui();
   const { currentVersion } = resource;
   const { me } = names;
-  const owner = names.people.get(resource.owner) ?? resource.owner;
   // As core answered the last change made here, until a later read of
   // it is loaded: whichever is at the later revision.
   const [changed, setChanged] = useState<WorkflowLifecycle>();
@@ -250,8 +257,12 @@ const WorkflowHeader = ({
   return (
     <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
       <div className="flex min-w-0 grow basis-96 flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <PageHeaderTitle>{resource.name}</PageHeaderTitle>
+        {/* Where it stands at the end of the title's line, as the
+            prototype has it: the title takes the room it needs. */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <PageHeaderTitle className="min-w-0 grow">
+            {resource.name}
+          </PageHeaderTitle>
           {status === undefined ? null : (
             <WorkflowStatus
               lifecycle={status}
@@ -287,7 +298,7 @@ const WorkflowHeader = ({
             <SelfApprovedBadge lifecycle={status} />
           )}
           <span className="text-xs">
-            {resource.owner === me ? t`Owned by you` : t`Owned by ${owner}`}
+            <OwnedBy names={names} owner={resource.owner} />
           </span>
           {savedAt === null ? null : (
             <span className="text-xs">
@@ -338,10 +349,13 @@ const WorkflowTabs = ({
   overview,
   definition,
   builder,
+  runs,
 }: {
   overview: boolean;
   definition: boolean;
   builder: boolean;
+  /** How many runs it has, beside their tab once read. */
+  runs: number | undefined;
 }) => (
   <TabsList variant="line">
     {overview ? (
@@ -357,10 +371,12 @@ const WorkflowTabs = ({
     {builder ? (
       <TabsTrigger value="traces">
         <Trans context="tab of a workflow">Traces</Trans>
+        <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     ) : (
       <TabsTrigger value="runs">
         <Trans context="tab listing the runs of workflows">Runs</Trans>
+        <ListedCount count={runs} of="runs" />
       </TabsTrigger>
     )}
     <TabsTrigger value="files">
@@ -376,15 +392,38 @@ const WorkflowTabs = ({
 );
 
 /**
- * The checkpoint a test on recent items runs: none before the draft's
- * first edit (revision 0 is the current version's definition).
+ * The draft the page goes by: its editor's last save or read (`edited`),
+ * or the page's own read when that is at a later revision (read again
+ * after a publication).
+ */
+const latestDraftOf = (
+  loaded: Loaded<WorkflowDraft> | undefined,
+  edited: WorkflowDraft | undefined
+): WorkflowDraft | undefined => {
+  const read = loaded?.state === "ready" ? loaded.data : undefined;
+  if (edited === undefined) {
+    return read;
+  }
+  return read !== undefined && read.revision > edited.revision ? read : edited;
+};
+
+/**
+ * What the page takes from the draft's checkpoint: the revision a test on
+ * recent items runs, none before the draft's first edit (revision 0 is
+ * the current version's definition); and its named parts, as its
+ * builders' drawing has them, for an Overview of a workflow drawn in parts.
  */
 const checkpointOf = (
-  draft: Loaded<WorkflowDraft> | undefined
-): number | null => {
-  const saved =
-    draft?.state === "ready" ? (draft.data.checkpoint?.revision ?? 0) : 0;
-  return saved > 0 ? saved : null;
+  draft: WorkflowDraft | undefined
+): { checkpoint: number | null; parts: DiagramPart[] } => {
+  const saved = draft?.checkpoint ?? null;
+  if (saved === null) {
+    return { checkpoint: null, parts: [] };
+  }
+  return {
+    checkpoint: saved.revision > 0 ? saved.revision : null,
+    parts: partsOf(saved.diagram),
+  };
 };
 
 /** The later of two ISO times, either of which may be missing. */
@@ -404,9 +443,6 @@ const WorkflowResourceView = ({
   askable,
   lifecycle,
   activity,
-  knowledge,
-  files,
-  apps,
   names,
   admin,
 }: {
@@ -418,9 +454,6 @@ const WorkflowResourceView = ({
   askable: Loaded<boolean>;
   lifecycle: Loaded<WorkflowLifecycle>;
   activity: Loaded<WorkflowActivity[]>;
-  knowledge: Loaded<WorkflowKnowledge[]>;
-  files: Loaded<WorkflowFile[]>;
-  apps: Loaded<WorkflowApps>;
   names: Names;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
@@ -435,16 +468,16 @@ const WorkflowResourceView = ({
     draft?.state === "ready" ? draft.data.editedAt : null,
     savedHere
   );
-  const [tab, setTab] = useState<WorkflowTab>(
-    draft === undefined ? "versions" : "definition"
-  );
+  const start: WorkflowTab = draft === undefined ? "versions" : "definition";
+  const [tab, setTab] = useState<WorkflowTab>(start);
   const [part, setPart] = useState<TracesPart>("runs");
-  const checkpoint = checkpointOf(draft);
-  // Its named parts, as its builders' drawing has them: an Overview of
-  // them only for a workflow drawn in parts.
-  const drawing =
-    draft?.state === "ready" ? draft.data.checkpoint?.diagram : undefined;
-  const parts = drawing === undefined ? [] : partsOf(drawing);
+  // The draft as its editor last saved or read it, beside the page's read:
+  // whichever is at the later revision is the draft the page goes by.
+  const [edited, setEdited] = useState<WorkflowDraft>();
+  const { checkpoint, parts } = checkpointOf(latestDraftOf(draft, edited));
+  // Its parts gone (a new checkpoint drawn in none), Overview goes too:
+  // the tab it was on shows where the page starts instead.
+  const shown = tab === "overview" && parts.length === 0 ? start : tab;
   return (
     <>
       <Tabs
@@ -452,7 +485,7 @@ const WorkflowResourceView = ({
           setTab(value);
         }}
         spacing="none"
-        value={tab}
+        value={shown}
       >
         <div className="flex flex-col gap-3 border-b px-6 pt-5">
           <WorkflowHeader
@@ -466,11 +499,12 @@ const WorkflowResourceView = ({
             builder={builder}
             definition={draft !== undefined}
             overview={parts.length > 0}
+            runs={runs.state === "ready" ? runs.data.length : undefined}
           />
         </div>
         {parts.length === 0 ? null : (
           <TabsContent value="overview">
-            <div className="mx-auto w-full max-w-6xl px-6 pt-8 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               <DiagramOverview
                 onShow={({ n }) => {
                   setTab("definition");
@@ -489,13 +523,14 @@ const WorkflowResourceView = ({
         {draft === undefined ? null : (
           // Kept while another tab shows: what was typed stays.
           <TabsContent keepMounted value="definition">
-            <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-6 pb-8">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 pt-6 pb-8">
               {draft.state === "ready" ? (
                 <DefinitionEditor
                   currentVersion={currentVersion}
                   loaded={draft.data}
-                  onDraftRead={({ editedAt }) => {
-                    setSavedHere(editedAt);
+                  onDraft={(next) => {
+                    setEdited(next);
+                    setSavedHere(next.editedAt);
                   }}
                   onVersionMoved={() => {
                     void router.invalidate();
@@ -519,7 +554,7 @@ const WorkflowResourceView = ({
         {builder ? (
           // Kept while another tab shows: a test going on stays followed.
           <TabsContent keepMounted value="traces">
-            <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               <Traces
                 activity={activity}
                 admin={admin}
@@ -534,7 +569,7 @@ const WorkflowResourceView = ({
           </TabsContent>
         ) : (
           <TabsContent value="runs">
-            <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
+            <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
               {runs.state === "ready" ? (
                 <ResourceRuns
                   admin={admin}
@@ -548,14 +583,20 @@ const WorkflowResourceView = ({
             </div>
           </TabsContent>
         )}
+        {/* Files and apps reads what no other tab needs: only while it
+            shows, afresh each time it is opened. */}
         <TabsContent value="files">
-          <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
-            <FilesAndApps apps={apps} files={files} knowledge={knowledge} />
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+            <FilesAndApps
+              currentVersion={currentVersion}
+              versions={versions}
+              workflow={resource.id}
+            />
           </div>
         </TabsContent>
         {/* Kept while another tab shows: what was typed stays. */}
         <TabsContent keepMounted value="parameters">
-          <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             {params.state === "ready" ? (
               <ResourceParams
                 editable={builder}
@@ -568,7 +609,7 @@ const WorkflowResourceView = ({
           </div>
         </TabsContent>
         <TabsContent value="versions">
-          <div className="mx-auto w-full max-w-5xl px-6 pt-6 pb-8">
+          <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
             {versions.state === "ready" ? (
               <Versions versions={versions.data} />
             ) : (
@@ -596,33 +637,29 @@ const WorkflowResourceView = ({
 };
 
 /**
- * The apps workflow `workflow` works in: the catalog and the connections
- * Integrations reads, which of them serve it, and the connector bindings
- * of its current version that nothing serves yet.
+ * People's names by ID, for the names on activity lines: read beside the
+ * page rather than before it, with IDs standing in until they come.
  */
-const readApps = async (
-  session: Session,
-  workflow: string
-): Promise<WorkflowApps> => {
-  const [resource, catalog, connections, uses, versions, approvals] =
-    await Promise.all([
-      session.workflowResources.get(workflow),
-      session.connections.catalog(),
-      session.connections.list(),
-      session.workflows.byConnection(),
-      session.workflowResources.versions(workflow),
-      session.workflowResources.bindings(workflow),
-    ]);
-  const { currentVersion } = resource;
-  const current = versions.find(({ version }) => version === currentVersion);
-  return workflowAppsOf({
-    workflow,
-    integrations: integrationsOf(catalog.entries, connections),
-    uses,
-    currentVersion,
-    bindings: current?.bindings ?? [],
-    approvals,
-  });
+const usePeople = (
+  read: Promise<Loaded<ReadonlyMap<string, string>>>
+): ReadonlyMap<string, string> => {
+  const [people, setPeople] = useState<ReadonlyMap<string, string>>(
+    () => new Map()
+  );
+  useEffect(() => {
+    let left = false;
+    const settle = async (): Promise<void> => {
+      const loaded = await read;
+      if (!left && loaded.state === "ready") {
+        setPeople(loaded.data);
+      }
+    };
+    void settle();
+    return () => {
+      left = true;
+    };
+  }, [read]);
+  return people;
 };
 
 const WorkflowResourcePage = () => {
@@ -635,11 +672,9 @@ const WorkflowResourcePage = () => {
     askable,
     lifecycle,
     activity,
-    knowledge,
-    files,
-    apps,
-    people,
+    people: peopleRead,
   } = Route.useLoaderData();
+  const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   const name = resource.state === "ready" ? resource.data.name : undefined;
@@ -667,11 +702,8 @@ const WorkflowResourcePage = () => {
           key={resource.data.id}
           activity={activity}
           admin={isAdmin(identity.role)}
-          apps={apps}
           askable={askable}
           draft={draft}
-          files={files}
-          knowledge={knowledge}
           lifecycle={lifecycle}
           names={{ people, me: identity.userId }}
           params={params}
@@ -687,23 +719,35 @@ const WorkflowResourcePage = () => {
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   pendingComponent: PageLoading,
   loader: async ({ context: { core }, params: { workflow } }) => {
+    // Names only, and not waited for: IDs stand in until they come.
+    const people = loadFromCore(core, readPeople);
+    const resourceRead = loadFromCore(
+      core,
+      async (session) => await session.workflowResources.get(workflow)
+    );
+    // Only its builders read its draft, as soon as core says who reads:
+    // beside the page's other reads, not after them.
+    const draftRead = async (): Promise<Loaded<WorkflowDraft> | undefined> => {
+      const read = await resourceRead;
+      return read.state === "ready" && read.data.role === "builder"
+        ? await loadFromCore(
+            core,
+            async (session) => await session.workflowResources.draft(workflow)
+          )
+        : undefined;
+    };
     const [
       resource,
+      draft,
       versions,
       params,
       runs,
       askable,
       lifecycle,
       activity,
-      knowledge,
-      files,
-      apps,
-      people,
     ] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.get(workflow)
-      ),
+      resourceRead,
+      draftRead(),
       loadFromCore(
         core,
         async (session) => await session.workflowResources.versions(workflow)
@@ -729,26 +773,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await session.workflowResources.activity(workflow)
       ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.knowledge(workflow)
-      ),
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.files(workflow)
-      ),
-      loadFromCore(core, async (session) => await readApps(session, workflow)),
-      // Names only: IDs stand in for anyone not listed in time.
-      loadFromCore(core, readPeople),
     ]);
-    // Only its builders read its draft.
-    const draft =
-      resource.state === "ready" && resource.data.role === "builder"
-        ? await loadFromCore(
-            core,
-            async (session) => await session.workflowResources.draft(workflow)
-          )
-        : undefined;
     return {
       resource,
       draft,
@@ -758,11 +783,7 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       askable,
       lifecycle,
       activity,
-      knowledge,
-      files,
-      apps,
-      people:
-        people.state === "ready" ? people.data : new Map<string, string>(),
+      people,
     };
   },
   component: WorkflowResourcePage,

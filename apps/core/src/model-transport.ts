@@ -9,11 +9,12 @@ import type {
 } from "@earendil-works/pi-ai";
 
 import { adapterFor } from "./model-catalog.ts";
-import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
+import type { RouteApi } from "./model-catalog.ts";
 
-// How the model gateway (models.ts) reaches a model: a transport. The
-// gateway stays the one choke point whatever the transport: the allowlist
-// and the rules (model-rules.ts), the budgets and the spend ceiling
+// How the model gateway (models.ts) reaches a model: a route through
+// connect (model-transport-connect.ts). The gateway stays the one choke
+// point: the
+// organization's chosen models and the rules (model-rules.ts), the budgets
 // (model-budgets.ts), the model ledger's admission of every provider
 // request before it is sent, and the audit log all run before and around
 // it, never inside it. A transport only says where a request goes and how
@@ -33,53 +34,10 @@ import type { ModelRef, Provider, RouteApi } from "./model-catalog.ts";
 // - Typed failures: `failureOfResponse` names a refused response by what
 //   it means for the caller (`TransportFailure`), from its status and
 //   headers alone, never its body, which may quote the prompt.
-// - Capabilities: which providers a transport reaches, and what it can
-//   promise about payload logging and caching (`TransportCapabilities`).
-
-/** The ways a deployment can reach its models. */
-export const transportKinds = [
-  /** Cloudflare AI Gateway, over the AI binding (model-transport-cloudflare.ts). */
-  "cloudflare-ai-gateway",
-] as const;
-export type TransportKind = (typeof transportKinds)[number];
-
-/** What a transport can do, as the gateway and the admin read it. */
-export interface TransportCapabilities {
-  /** The providers whose models it reaches. */
-  providers: readonly Provider[];
-  /**
-   * Whether every request it sends asks for its prompt and answer not to
-   * be logged by anything between the gateway and the model.
-   */
-  payloadLoggingOff: boolean;
-  /**
-   * Whether every request it sends asks not to be answered from a shared
-   * cache: a cached answer is one person's, and would be served to
-   * another.
-   */
-  sharedCacheOff: boolean;
-  /** Whether voice models (speech and listening) are reached through it. */
-  voice: boolean;
-  /**
-   * Whether pi's provider SDKs retry a refused request themselves (429 or
-   * 5xx), each retry admitted by the ledger on its own. Otherwise the
-   * gateway retries only what can't have been billed (models.ts).
-   */
-  sdkRetries: boolean;
-}
-
-/** What a request says about itself to the transport: identifiers only. */
-export interface RouteMetadata {
-  purpose: string;
-  /** The kind of caller: a person, an agent, a workflow. */
-  actor: string;
-  requestId: string | undefined;
-  runStep: { runId: string; step: string } | undefined;
-}
 
 /** One model reached one way: everything the gateway needs to send to it. */
 export interface TransportRoute {
-  transport: TransportKind;
+  transport: "connect";
   /** pi's model, pointed at the endpoint, under the name it has there. */
   model: Model<Api>;
   /** The API the endpoint speaks, which picks pi's adapter. */
@@ -92,27 +50,28 @@ export interface TransportRoute {
   fetch: FetchFunction;
   /** The request's body as the endpoint takes it, where it differs from pi's. */
   onPayload?: (payload: unknown) => unknown;
-  /** `init` tagged with the provider request's ID, for the endpoint's own logs. */
+  /**
+   * `init` tagged with the provider request's ID, for the endpoint's own
+   * logs, and the call's deadline (ms since the epoch), for a transport
+   * that must cut the request off on its own side too.
+   */
   tagged: (
     init: RequestInit | undefined,
-    providerRequest: string
+    providerRequest: string,
+    endsAt: number
   ) => RequestInit;
   /** The ID the endpoint logged the request under, from its response's headers. */
   logIdOf: (headers: Record<string, string>) => string | undefined;
-}
-
-/** A way to reach models. */
-export interface ModelTransport {
-  kind: TransportKind;
-  capabilities: TransportCapabilities;
-  /** The route to `ref`, or `undefined` when this transport doesn't reach it. */
-  route: (ref: ModelRef, metadata: RouteMetadata) => TransportRoute | undefined;
 }
 
 /**
  * Why a provider request failed, as the gateway acts on it:
  * - `auth`: the endpoint refused the credentials (401, 403). Nothing was
  *   taken on; asking again the same way fails the same way.
+ * - `quota`: the key's account has no credit or quota left (OpenAI's 429
+ *   `insufficient_quota`, a 402, Anthropic's billing refusal). Nothing was
+ *   taken on; asking again fails the same way until someone pays, so it
+ *   is never retried as a rate limit is.
  * - `rate_limited`: the endpoint is taking no more for now (429), with how
  *   long it asks to wait. Nothing was taken on.
  * - `refused`: the endpoint refused this request (another 4xx). Nothing
@@ -124,23 +83,25 @@ export interface ModelTransport {
  */
 export type TransportFailure =
   | { kind: "auth"; status: number }
+  | { kind: "quota"; status: number }
   | { kind: "rate_limited"; status: number; retryAfterSeconds: number }
   | { kind: "refused"; status: number }
   | { kind: "provider_down"; status: number | undefined }
   | { kind: "budget" };
 
-/** Whether a request that failed `failure`'s way can't have been billed. */
-export const neverTakenOn = (failure: TransportFailure): boolean =>
-  failure.kind !== "provider_down";
-
 /**
- * What a refused response means (`TransportFailure`), from its status and
- * the wait it asks for, as core bounds it (`retryAfterSeconds`).
+ * What a refused response means (`TransportFailure`), from its status, the
+ * wait it asks for, as core bounds it (`retryAfterSeconds`), and whether
+ * its body says the account ran out of credit (`outOfCredit`).
  */
 export const failureOfResponse = (
   status: number,
-  retryAfterSeconds: number
+  retryAfterSeconds: number,
+  outOfCredit = false
 ): TransportFailure => {
+  if (status === 402 || (outOfCredit && status < 500)) {
+    return { kind: "quota", status };
+  }
   if (status === 401 || status === 403) {
     return { kind: "auth", status };
   }
@@ -157,7 +118,6 @@ export interface StreamOptions {
   /** The gateway's fetch around the route's: admission, accounting. */
   fetch: FetchFunction;
   maxTokens: number;
-  maxRetries: number;
   reasoning: SimpleStreamOptions["reasoning"];
   signal: AbortSignal;
   onResponse: (response: {
@@ -181,7 +141,9 @@ export const streamRoute = async (
     fetch: options.fetch,
     headers: route.headers,
     maxTokens: options.maxTokens,
-    maxRetries: options.maxRetries,
+    // pi's provider SDKs never retry: the gateway retries only what can't
+    // have been billed (models.ts), each retry admitted by the ledger.
+    maxRetries: 0,
     reasoning: options.reasoning,
     signal: options.signal,
     onPayload: route.onPayload,

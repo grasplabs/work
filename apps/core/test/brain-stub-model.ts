@@ -1,6 +1,8 @@
+import { normalized } from "./brain-scoring.ts";
+import type { BrainTask } from "./fixtures/brain-tasks.ts";
 /**
  * The model provider of the Brain baseline's CI run (GRA-295): a stand-in
- * behind AI Gateway, the one outside system the run mocks. It reads like a
+ * behind connect, the one outside system the run mocks. It reads like a
  * careful model that can't reason past its context: it answers a task when
  * every piece of the task's evidence reached it, citing that evidence, and
  * abstains otherwise. In the agent arm it first runs code that searches
@@ -12,9 +14,7 @@
  * the model, within the platform's permissions, and what that cost: not
  * how well a model answers. A real model's run replaces it.
  */
-import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
-import { normalized } from "./brain-scoring.ts";
-import type { BrainTask } from "./fixtures/brain-tasks.ts";
+import type { ProviderReply, SentRequest } from "./model-provider.ts";
 
 /** Identifies the stub in a run's identity, as a model ID would. */
 export const brainStubModel = "brain-stub-reader/2026-10-15";
@@ -79,9 +79,9 @@ interface Block {
 }
 
 /**
- * A message of a request, in either wire format the gateway speaks:
- * Anthropic's, where tool results are blocks of a person's message, or
- * chat completions' (Workers AI, the default models), where each is a
+ * A message of a request, in either wire format it reads: Anthropic's,
+ * where tool results are blocks of a person's message, or chat
+ * completions' (Mistral's and OpenRouter's), where each is a
  * message of its own that names its call, the model's calls ride beside
  * its text, and the system prompt is the first message.
  */
@@ -260,7 +260,7 @@ export const resultsSinceQuestion = (body: unknown): string[] => {
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
 
-export const codeStep = (code: string, input: string): GatewayReply => ({
+export const codeStep = (code: string, input: string): ProviderReply => ({
   text: "",
   toolCalls: [
     {
@@ -273,7 +273,7 @@ export const codeStep = (code: string, input: string): GatewayReply => ({
   outputTokens: tokensOf(code),
 });
 
-export const says = (text: string, input: string): GatewayReply => ({
+export const says = (text: string, input: string): ProviderReply => ({
   text,
   inputTokens: tokensOf(input),
   outputTokens: tokensOf(text),
@@ -313,12 +313,12 @@ const answerOf = (task: BrainTask, input: string): string => {
 };
 
 /**
- * The stub provider: answers each gateway request for the turn `current`
+ * The stub provider: answers each request for the turn `current`
  * says the harness is in.
  */
 export const stubReader =
   (current: () => StubTurn) =>
-  (requests: readonly GatewayRequest[]): GatewayReply => {
+  (requests: readonly SentRequest[]): ProviderReply => {
     const body = requests.at(-1)?.body;
     const input = modelStrings(body).join("\n");
     const turn = current();

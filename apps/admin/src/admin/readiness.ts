@@ -19,11 +19,7 @@ import { count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import {
-  defaultModelSpendCeiling,
-  hostingDestinations,
-  releases,
-} from "../db/schema.ts";
+import { hostingDestinations, releases } from "../db/schema.ts";
 import {
   clientDomain,
   deployerApi,
@@ -203,19 +199,6 @@ const releaseCheck = (
         words: `${imported} ${imported === 1 ? "release is" : "releases are"} imported, the newest ${newest}.`,
         link: "releases",
       };
-
-/**
- * Model spend (GRA-141): every organization's model calls go through its
- * gateway, held to its ceiling: the default unless staff set another on
- * its Setup.
- */
-const modelSpendCheck: ReadinessCheck = {
-  id: "model_spend",
-  title: "Model spend",
-  required: true,
-  status: "ready",
-  words: `Every organization is held to a model spend ceiling of €${defaultModelSpendCeiling} a month, its gateway's budget, unless staff set another on its Setup.`,
-};
 
 /** The names of `names` Secrets Store doesn't have. */
 const missingSecrets = async (
@@ -469,7 +452,6 @@ export const readinessOf = async (envOf: Env): Promise<Readiness> => {
       placeable,
       missing.includes("DEPLOYER_API_TOKEN")
     ),
-    modelSpendCheck,
     await roomsCheck(envOf),
     discordBotCheck(envOf),
     graspOrganizationCheck(settings),

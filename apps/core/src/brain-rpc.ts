@@ -123,8 +123,6 @@ import { visibleApps } from "./workflows/overview.ts";
 // | goals              | the brain's records, for everyone signed in; each goal's |
 // |                    | linked workflows only as far as the person may see their |
 // |                    | App, while it still has them                             |
-// | landscape,         | nothing core can read holds them yet: empty              |
-// | policies           |                                                          |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
 // the documents shared) is the admin's: its own RPC shows the roster, the
@@ -1070,8 +1068,6 @@ export const readBrain = async (
     gaps: await brainGaps(env, person, records),
     workflows: records.workflows,
     connections,
-    landscape: [],
-    policies: [],
   };
 };
 

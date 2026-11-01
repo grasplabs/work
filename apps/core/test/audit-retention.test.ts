@@ -9,16 +9,15 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { AuditLog } from "../src/audit-log.ts";
-import { auditLog, retainAuditLog } from "../src/audit-log.ts";
+import { auditLog } from "../src/audit-log.ts";
 import { allEvents, exportReader, verifyAll } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 
-// Retention: the audit log's own alarm moves events past the deployment's
-// retention out of the log into the archive, and the chain still verifies
-// from its first event to its last. Config that isn't valid, or the
-// feature being off, archives nothing.
+// Retention: the audit log's own alarm moves events past retention out of
+// the log into the archive, and the chain still verifies from its first
+// event to its last.
 
 const idp = mockIdp();
 
@@ -103,25 +102,6 @@ const alarmAfter = async (
   expect(ran).toBeTruthy();
 };
 
-/**
- * Runs a retention pass over the deployment's log `days` after it
- * received `event`, with `changes` to the deployment's env: what the
- * log's alarm runs, under other config.
- */
-const passAfter = async (
-  event: AuditEvent,
-  days: number,
-  changes: Partial<Env>
-): Promise<void> => {
-  const log = auditLog(env);
-  await later(await receivedAtOf(event), days, async () => {
-    await runInDurableObject(
-      log,
-      async (instance) => await retainAuditLog(instance, { ...env, ...changes })
-    );
-  });
-};
-
 /** When `log`'s alarm is set to fire, if it is. */
 const alarmOf = async (log: Log): Promise<number | null> =>
   await runInDurableObject(
@@ -156,7 +136,7 @@ describe("audit log retention", () => {
     const old = await logged();
     const targetId = old.target?.id;
 
-    // Not yet past the default of 180 days.
+    // Not yet past 180 days.
     await alarmAfter(old, 179);
     const kept = await api.audit.search({ targetId });
     expect(kept.records.map(({ event }) => event?.id)).toStrictEqual([old.id]);
@@ -183,23 +163,6 @@ describe("audit log retention", () => {
     });
   });
 
-  it("keeps events for as many days as the deployment sets", async () => {
-    const event = await logged();
-    await passAfter(event, 40, { AUDIT_RETENTION_DAYS: "45" });
-    await expect(held(event)).resolves.toBeTruthy();
-    await passAfter(event, 46, { AUDIT_RETENTION_DAYS: "45" });
-    await expect(held(event)).resolves.toBeFalsy();
-  });
-
-  it("archives nothing while retention is below the minimum or not whole days", async () => {
-    const event = await logged();
-    for (const days of ["7", "a year", "90.5"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one config at a time
-      await passAfter(event, 400, { AUDIT_RETENTION_DAYS: days });
-    }
-    await expect(held(event)).resolves.toBeTruthy();
-  });
-
   it("stops an export that hasn't read the events it archives yet", async () => {
     const { session } = await signedInWithRole(idp, "admin");
     const event = await logged();
@@ -214,15 +177,15 @@ describe("audit log retention", () => {
     );
   });
 
-  it("purges archived events once the deployment's archive retention has passed", async () => {
+  it("purges archived events once seven years have passed since the log received them", async () => {
     const event = await logged();
     const receivedAt = await receivedAtOf(event);
     const seq = await seqOf(event);
     await alarmAfter(receivedAt, 181);
-    // Archive retention is 365 days in tests, from when the log received it.
-    await alarmAfter(receivedAt, 364);
+    // Archive retention is seven years, from when the log received it.
+    await alarmAfter(receivedAt, 7 * 365 - 1);
     await expect(purgesOf(seq)).resolves.toStrictEqual([]);
-    await alarmAfter(receivedAt, 366);
+    await alarmAfter(receivedAt, 7 * 365 + 1);
     await expect(purgesOf(seq)).resolves.toMatchObject([
       { actor: { type: "system" }, action: "audit.purged" },
     ]);

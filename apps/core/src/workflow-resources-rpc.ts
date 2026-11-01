@@ -26,7 +26,7 @@ import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
-import { askableFor } from "./channels/workflow-offers.ts";
+import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -330,10 +330,15 @@ export class WorkflowResourcesRpc
     );
   }
 
-  async runTrace(id: string, runId: string): Promise<WorkflowRunTrace> {
+  async runTrace(
+    id: string,
+    runId: string,
+    options?: unknown
+  ): Promise<WorkflowRunTrace> {
     return await withPerson(
       this.#check,
-      async (person) => await resourceRunTrace(this.#env, person, id, runId)
+      async (person) =>
+        await resourceRunTrace(this.#env, person, id, runId, options)
     );
   }
 

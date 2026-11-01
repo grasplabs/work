@@ -20,23 +20,6 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * Every migration so far only expands.
- */
-export const compatibleFromMigration = 0;
-
-/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -617,4 +600,21 @@ export const connectorEvents = sqliteTable(
 export const erasedPeople = sqliteTable("erased_people", {
   userId: text("user_id").primaryKey(),
   beganAt: timestamp("began_at").notNull(),
+});
+
+/**
+ * The organization's own key for each AI provider (ai-providers.ts),
+ * sealed with the vault, bound to its provider and, for an
+ * OpenAI-compatible endpoint, the base URL it goes to: a key moved to
+ * another row, or a base URL changed in the database, doesn't open. Never
+ * read back to core: only its mask, its first and last characters.
+ */
+export const aiProviderKeys = sqliteTable("ai_provider_keys", {
+  provider: text().primaryKey(),
+  sealed: text().notNull(),
+  mask: text().notNull(),
+  /** Only for an OpenAI-compatible endpoint: the base URL its key goes to. */
+  baseUrl: text("base_url"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
 });

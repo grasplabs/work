@@ -11,7 +11,7 @@ import type { Person } from "./people.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off. The local stack reaches no model, so the answer is the
+// off. The stack's provider refuses its key, so the answer is the
 // gateway's failure; streaming, resuming and the person check themselves
 // are core's tests (apps/core/test/chats.test.ts).
 
@@ -123,15 +123,20 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const question = `Send Ben invoice ${tag}.`;
   const title = `Invoice ${tag}`;
   await page.goto("/");
+  // Offered the tour first, in the greeting's place: turned down, the box
+  // to ask in has the focus the gone button had.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByLabel("Your question")).toBeFocused();
 
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  // No model answers here: the answer says so once the turn ends.
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  // The local stack's provider refuses every key (e2e/model-fake.ts): the
+  // answer says so once the turn ends, and who can put it right.
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   // It is the first chat in the window, named after the question.
@@ -150,8 +155,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     messages.getByRole("listitem").filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveValue(draft);
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  // The first try's failure stays where it was; the new one is last.
+  await expect(messages.getByRole("alert").last()).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   await box.fill("");
@@ -390,6 +396,26 @@ test("a person groups chats in a project with a goal and a document, moves them 
   await expect(rowOf(chats, second)).toBeVisible();
 });
 
+test("a person starts a chat from one of the questions under the box", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  await page.goto("/");
+  // The questions wait while the tour is offered, as in the prototype:
+  // turned down, they are under the box.
+  await page.getByRole("button", { name: "Not now" }).click();
+  const questions = page.getByRole("list", { name: "Questions to start with" });
+  await expect(questions.getByRole("button")).toHaveCount(4);
+  await questions
+    .getByRole("button", { name: "What waits on me today?" })
+    .click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  await expect(
+    page.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
+  ).toHaveText("What waits on me today?");
+});
+
 test("a followed chat says core can't be reached when it stays out of reach", async ({
   pageOf,
 }) => {
@@ -410,14 +436,14 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await page.getByLabel("Your question").fill(`Out of reach ${tag}.`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/[?&]chat=/u);
-  // The turn has ended (the local stack reaches no model), so nothing
-  // else is on its way when the connection drops.
+  // The turn has ended (the local stack's provider refuses every key), so
+  // nothing else is on its way when the connection drops.
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(
     `Out of reach ${tag}.`
   );
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -453,33 +479,36 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // The stack's first model doesn't think: the control names it alone.
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
   await control.click();
   const choices = page.getByRole("menuitemradio");
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
   ]);
 
   // One that thinks offers its efforts in the same menu, which stays open
   // for them, at the model's own default.
-  await page.getByRole("menuitemradio", { name: /^glm-5\.3-flash/u }).click();
+  await page
+    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
+    .click();
   await expect(choices).toHaveText([
-    /llama-3\.3-70b-instruct-fp8-fast/u,
-    /glm-5\.3-flash/u,
+    /mistral-large-latest/u,
+    /claude-sonnet-4-6/u,
     "Low",
+    "Medium",
     "High",
     "Max",
   ]);
   await expect(
-    page.getByRole("menuitemradio", { name: "High" })
+    page.getByRole("menuitemradio", { name: "Medium" })
   ).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemradio", { name: "Max" }).click();
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   const question = `Think hard ${tag}.`;
@@ -494,23 +523,23 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     (message) => message.includes('"send"') && message.includes(question)
   );
   expect(asked).toContain('"effort":"max"');
-  expect(asked).toContain('"model":"workers-ai/@cf/zai-org/glm-5.3-flash"');
+  expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
   // Kept for the person in this browser.
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+    "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
   await page
-    .getByRole("menuitemradio", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
     .click();
   await expect(choices).toHaveCount(2);
   await page.keyboard.press("Escape");
   await expect(control).toHaveAccessibleName(
-    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+    "Model: mistral-large-latest. Change model"
   );
 });
 
@@ -572,8 +601,8 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
-  await expect(messages.getByRole("alert")).toHaveText(
-    "The model couldn't answer. Try again.",
+  await expect(messages.getByRole("alert")).toContainText(
+    "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
   );
   // The page stayed where it was.

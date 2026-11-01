@@ -1,8 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import type { RunQueue } from "@grasp-os/shared/workflows";
+import type { RunAiProviderWait, RunQueue } from "@grasp-os/shared/workflows";
 import { and, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -15,10 +14,12 @@ import {
   workflowResourceRuns,
   workflowRuns,
 } from "../db/core/schema.ts";
+import { aiWaitsOf } from "./ai-waits.ts";
+import type { QuotaLimits } from "./quotas.ts";
 
 // Fair admission of workflow attempts (spec 18.3, 40.5): how many of the
 // client's workflow attempts run at once, in all, for one person and of
-// one App, each against its share in the quota policy
+// one App, each against its share in the quota limits
 // (`workflowClientAttempts`, `workflowPersonAttempts`,
 // `workflowAppAttempts`), and in what order the ones waiting get a share.
 // Core's database is the coordinator: an attempt's lineage receipt
@@ -150,9 +151,6 @@ import {
 //   (`askAgainMs`), and the run waits that long (host.ts); neither a
 //   workflow nor a person sets it, and asking sooner moves no one up the
 //   queue.
-// - A policy change missed: shares are read from the policy at each
-//   admission (quotas.ts, `quotaPolicy`), and an admission under an older
-//   generation than the highest recorded takes nothing.
 // - A database that can't answer: nothing is admitted (quotas.ts).
 //
 // What a run waiting for a share shows: `workflow.queued` as its step's
@@ -290,18 +288,18 @@ export const attemptPool: Pool = {
   leaseMs: platformLimits.workflowAttemptWallMs,
 };
 
-/** The shares of `policy`: an App's and a person's below the client's. */
-export const sharesOf = (policy: QuotaPolicy): Shares => {
-  const client = policy.limits.workflowClientAttempts;
+/** The shares of `limits`: an App's and a person's below the client's. */
+export const sharesOf = (limits: QuotaLimits): Shares => {
+  const client = limits.workflowClientAttempts;
   // With one attempt at once for the whole client there is nothing to
   // leave over: that one is anyone's.
   const most = Math.max(1, client - 1);
   return {
     client,
-    person: Math.min(policy.limits.workflowPersonAttempts, most),
-    app: Math.min(policy.limits.workflowAppAttempts, most),
-    queuedPerPerson: policy.limits.workflowQueuedPerPerson,
-    queuedPerApp: policy.limits.workflowQueuedPerApp,
+    person: Math.min(limits.workflowPersonAttempts, most),
+    app: Math.min(limits.workflowAppAttempts, most),
+    queuedPerPerson: limits.workflowQueuedPerPerson,
+    queuedPerApp: limits.workflowQueuedPerApp,
   };
 };
 
@@ -675,9 +673,17 @@ export const runDequeued = (db: DrizzleD1Database, run: string, took: SQL) =>
     .where(and(eq(workflowAdmissionQueue.runId, run), took));
 
 /**
+ * What a run that goes on by itself waits for, as its status shows it: a
+ * share of the attempts or model requests that run at once (`queued`), or
+ * its AI provider (`aiProvider`, ai-waits.ts).
+ */
+export type RunWait = { queued: RunQueue } | { aiProvider: RunAiProviderWait };
+
+/**
  * Of the runs `runs`, each one a step of which waits in the queue for a
  * share at `now`: the share, and the earliest a step of it asks again, as
- * its summary shows it (summary.ts). A place that stopped asking doesn't
+ * its summary shows it (summary.ts); or one held for a working AI provider
+ * key, since when (ai-waits.ts). A place that stopped asking doesn't
  * count. Only the runs' own places are read (the queue's primary key):
  * never who else waits, nor how many, nor where in the queue.
  */
@@ -685,7 +691,7 @@ export const queuedRuns = async (
   db: DrizzleD1Database,
   runs: readonly string[],
   now: number
-): Promise<Map<string, RunQueue>> => {
+): Promise<Map<string, RunWait>> => {
   if (runs.length === 0) {
     return new Map();
   }
@@ -722,13 +728,20 @@ export const queuedRuns = async (
         )
       ),
   ]);
+  // A step held for its AI provider (ai-waits.ts): shown first, as it
+  // waits for someone.
+  const aiWaits = await aiWaitsOf(db, runs);
   const rows = [...places, ...modelWaits].toSorted(
     (one, other) => one.retryAt.getTime() - other.retryAt.getTime()
   );
-  const byRun = new Map<string, RunQueue>();
+  const byRun = new Map<string, RunWait>(
+    [...aiWaits].map(([runId, aiProvider]) => [runId, { aiProvider }])
+  );
   for (const { runId, waitingFor, retryAt } of rows) {
     if (waitingFor !== null && !byRun.has(runId)) {
-      byRun.set(runId, { waitingFor, retryAt: retryAt.toISOString() });
+      byRun.set(runId, {
+        queued: { waitingFor, retryAt: retryAt.toISOString() },
+      });
     }
   }
   return byRun;

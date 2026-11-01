@@ -2,8 +2,7 @@ import type { RerankRequest } from "@grasp-os/brain/brain";
 import { brainErrors } from "@grasp-os/brain/contract";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { readerActor } from "./access.ts";
 import type { Reader } from "./access.ts";
 
@@ -39,11 +38,11 @@ const answerSchema = z.object({
  * may read them.
  */
 export const rerankCandidates = async (
-  env: ModelsEnv,
+  env: Env,
   reader: Reader,
   { question, candidates, provenance, deadlineMs }: RerankRequest
 ): Promise<string[]> => {
-  const model = modelForRole(gatewaySettings(env), "quick", {
+  const model = modelForRole(await modelSettings(env), "quick", {
     sensitive: true,
   });
   if (model === undefined) {

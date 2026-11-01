@@ -6,7 +6,6 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -15,7 +14,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { bindingSpendListed } from "@grasp-os/shared/models";
 import type { ModelBindingAlert, ModelSettings } from "@grasp-os/shared/models";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import { operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
@@ -52,7 +51,7 @@ import { bindingScopes } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings, usableAnswerTokens } from "./models.ts";
+import { modelSettings, usableAnswerTokens } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
@@ -78,6 +77,11 @@ import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
+import {
+  declarationHash,
+  projectStoreResource,
+  unprojectStoreResource,
+} from "./resource-declarations.ts";
 import { guestsAdapter } from "./resource-guests.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
@@ -86,6 +90,7 @@ import type { PlatformAction } from "./resource-platform.ts";
 import { statisticsAdapter } from "./resource-statistics.ts";
 import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 import { auditStoreRefusal } from "./store-operations.ts";
 import type { StoreGrant } from "./store-operations.ts";
 
@@ -145,17 +150,6 @@ const adapters: {
   statistics: statisticsAdapter,
   guests: guestsAdapter,
   app: appAdapter,
-};
-
-/** The SHA-256 of `declaration`, canonical, as a release sealed it. */
-export const declarationHash = async (
-  declaration: AnyResource
-): Promise<string> => {
-  const json = jsonOf(declaration);
-  if (json === undefined) {
-    throw new Error("A resource declaration is JSON");
-  }
-  return await sha256Hex(canonicalJson(json));
 };
 
 /**
@@ -441,7 +435,19 @@ export const approveResourceBinding = async (
   // Written only while `by` is still an admin and the reviewed version
   // still current, both read by the statements themselves.
   const stillReviewed = sql`(SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${found.id}) IS ${reviewed.version}`;
-  const allowed = and(stillAdminSql(by), stillReviewed);
+  // A store resource's store, too, only while it is live and no deletion
+  // has it closing: so a deletion that found no consumer resolving to it
+  // (data-stores.ts) never races an approval that does.
+  const allowed = and(
+    stillAdminSql(by),
+    stillReviewed,
+    target.kind === "store"
+      ? liveStoreSql(
+          sql`(SELECT object_id FROM permissions WHERE id = ${target.permissionId})`,
+          Date.now()
+        )
+      : undefined
+  );
   const db = drizzle(env.DB);
   // The alias's binding until now, if it had one, is revoked in the same
   // batch; without one, the update names no row and its event isn't kept.
@@ -480,6 +486,29 @@ export const approveResourceBinding = async (
           ...budgetDetail(budget),
         })
       ),
+      // The binding inventory (spec 24): the rows the replaced approval
+      // resolved name their declaration alone again, and those of every
+      // release kept whose declaration this one serves name its store.
+      ...(previous === undefined
+        ? []
+        : [
+            unprojectStoreResource(
+              db,
+              previous.id,
+              sql`EXISTS (SELECT 1 FROM app_resource_bindings WHERE id = ${row.id})`
+            ),
+          ]),
+      ...(target.kind === "store"
+        ? [
+            projectStoreResource(db, {
+              app: found.id,
+              alias,
+              declared: row.declarationHash,
+              approval: sql`(SELECT id FROM app_resource_bindings
+                WHERE id = ${row.id} AND status = 'active')`,
+            }),
+          ]
+        : []),
     ]);
   } catch (error) {
     // Another approval of the alias took its place first: the unique
@@ -546,6 +575,14 @@ export const revokeResourceBinding = async (
     outboxedIfChanged(
       db,
       bindingEntry(by, "app.resource_binding.revoked", found, {})
+    ),
+    // The rows it resolved in the binding inventory name their
+    // declaration alone again.
+    unprojectStoreResource(
+      db,
+      found.id,
+      sql`EXISTS (SELECT 1 FROM app_resource_bindings
+        WHERE id = ${found.id} AND status = 'revoked')`
     ),
   ]);
   const [row] = revoked;
@@ -888,10 +925,11 @@ const choicesFor = async (
   grants: ReviewGrants
 ): Promise<BindingChoices> => {
   if (declaration["~resource"] === "model") {
+    const { models: allowed } = await modelSettings(env);
     return {
       kind: "model",
       // Only those approving accepts: each can give its longest request.
-      models: gatewaySettings(env).models.filter((model) =>
+      models: allowed.filter((model) =>
         modelAnswers(model, longestAsk(declaration))
       ),
       truncated: false,

@@ -80,6 +80,15 @@ export default defineProject({
       "./test/apply-migrations.ts",
     ],
     sequence: { setupFiles: "list" },
+    // Logs go straight to workerd's output, not to Vitest over RPC, as in
+    // core and connect. The pool can't send a log from another request
+    // than the test's (a workflow run's alarm, a Durable Object) on the
+    // test's socket, so it holds the log until the file next sends
+    // something. One logged while the file's last update was in flight was
+    // never sent: the worker waited for its reply before saying the file
+    // had finished, and the run never ended (CI: every file passed, then
+    // the step timed out).
+    disableConsoleIntercept: true,
   },
   plugins: [
     tanstackStart(),

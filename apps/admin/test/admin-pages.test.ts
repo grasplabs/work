@@ -758,11 +758,11 @@ describe("the admin's frame", () => {
       contract: {
         title: contract.html.includes("Contract</h1>"),
         about: contract.html.includes(
-          "What was signed, what it gives the company, and what is billed."
+          "The seats taken, the proposal, the agreements, and what is billed."
         ),
-        // Core holds no contract yet, from Rooms; nor is it linked in Rooms or Stripe.
+        // Not linked in Rooms or Stripe yet.
         source: contract.html.includes(
-          "The contract: from Rooms, once it is connected. The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
+          "The proposal and who signed it: from Rooms, once it is connected. Its billing and invoices: from Stripe, once it is connected."
         ),
         current: columnEntryOf(
           columnOf(contract.html, acme.name),
@@ -843,29 +843,18 @@ describe("the admin's frame", () => {
       status,
       toCome: html.includes("This section isn’t in the admin yet."),
       summary: {
-        contract: html.includes("Not known yet"),
-        // Core holds no contract: it is neither a draft nor a fee of nothing.
-        draft: ["Being written", "not sent yet", "€0"].some((text) =>
-          html.includes(text)
+        // Core holds no contract: no status, terms, fee or seats it gives.
+        contract: ["Not known yet", "Being written", "not sent yet", "€0"].some(
+          (text) => html.includes(text)
         ),
-        seats: html.includes("taken; the contract isn’t known yet"),
+        seats: html.includes("are taken"),
         runs: html.includes("Still runs"),
         fee: html.includes("Fee a month"),
       },
-      terms: [
-        partOf("The terms").includes(
-          "Nothing is known about the contract yet."
-        ),
-        partOf("The terms").includes(
-          "Once Rooms is connected, this fills in by itself."
-        ),
-      ],
-      gives: [
-        partOf("What it gives the company").includes(
-          "Not known yet; 2 are taken."
-        ),
-        // What the model works out of AI use isn't what was used: the AI use section says what it is.
-        partOf("What it gives the company").includes("was used this month"),
+      parts: [
+        partOf("The terms"),
+        partOf("What it gives the company"),
+        partOf("Invoices"),
       ],
       agreements: {
         open: partOf("Agreed before the first interview").includes(
@@ -882,21 +871,16 @@ describe("the admin's frame", () => {
           "Who else handles the data"
         ),
       },
-      invoices: partOf("Invoices").includes(
-        "None known yet: nothing is known about the contract."
-      ),
     }).toStrictEqual({
       status: 200,
       toCome: false,
       summary: {
-        contract: true,
-        draft: false,
+        contract: false,
         seats: true,
         runs: false,
         fee: false,
       },
-      terms: [true, true],
-      gives: [true, false],
+      parts: ["", "", ""],
       agreements: {
         open: true,
         processing: true,
@@ -904,7 +888,6 @@ describe("the admin's frame", () => {
         council: true,
         others: true,
       },
-      invoices: true,
     });
   });
 

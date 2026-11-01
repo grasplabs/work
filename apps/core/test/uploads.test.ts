@@ -27,6 +27,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, storedVersionTexts } from "./knowledge.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { connectWithoutGraspKeys } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -48,9 +49,6 @@ import {
 // ever downloaded as an attachment, by those who may read its document.
 
 const idp = mockIdp();
-
-/** The one model the tests' gateway allows (vite.config.ts). */
-const testModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** A test file, from the fixtures the test assets serve. */
 const fixture = async (name: string): Promise<Uint8Array> => {
@@ -308,21 +306,18 @@ const wordFile = (document: string, styles: string): Uint8Array => {
 // Vitest's default five seconds on a loaded runner. Sixty fits the
 // longest, with room for signing in.
 describe("uploads", { timeout: 60_000 }, () => {
-  // Every test here runs as a deployment whose config keeps everything in
-  // the EU, so each file is extracted in the sandbox, whatever its
-  // collection. Which extractor a file gets is upload-routing.test.ts's.
-  let gatewayBefore: unknown;
+  // Every test here runs as a deployment where connect holds no key of
+  // Grasp's (as on-prem), so each file is extracted in the sandbox,
+  // whatever its collection. Which extractor a file gets is
+  // upload-routing.test.ts's.
+  let connectBefore: Env["CONNECT"];
   beforeAll(() => {
-    gatewayBefore = env.MODEL_GATEWAY;
-    env.MODEL_GATEWAY = {
-      gateway: "grasp-os-test",
-      models: [testModel],
-      eu: { models: [testModel], deployment: true },
-    };
+    connectBefore = env.CONNECT;
+    env.CONNECT = connectWithoutGraspKeys(connectBefore);
   });
 
   afterAll(() => {
-    env.MODEL_GATEWAY = gatewayBefore;
+    env.CONNECT = connectBefore;
   });
 
   it("make a PDF, a Word file and a workbook searchable by section", async () => {
