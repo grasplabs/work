@@ -728,6 +728,8 @@ export interface ResourceRunMemory {
   leaseOf: ResourceHostHooks["leaseOf"];
   /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
   triedOnce?: ResourceHostHooks["triedOnce"];
+  /** The run's settled scopes of items and branches (`ScopeFences`). */
+  fences?: ResourceHostHooks["fences"];
   /** The model calls its actions made (`ActionModelCalls`). */
   modelCalls?: ResourceHostHooks["modelCalls"];
   /** Aborts once the activation running the run is over. */
@@ -966,6 +968,7 @@ export const runActivation = async (
     sessionId: () => sessionId,
     leaseOf: memory.leaseOf,
     ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
+    ...(memory.fences === undefined ? {} : { fences: memory.fences }),
     ...(memory.modelCalls === undefined
       ? {}
       : { modelCalls: memory.modelCalls }),
@@ -1009,7 +1012,11 @@ export const runActivation = async (
     try {
       return await code.run(host, { input: run.input });
     } catch (error) {
+      host.isolateDone();
       return await afterCpuKill(error, calls);
+    } finally {
+      // Nothing more comes from it (resource-host.ts, `#account`).
+      host.isolateDone();
     }
   });
   if (!result.ok && memory.current?.() === false) {
