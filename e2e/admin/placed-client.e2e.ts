@@ -85,13 +85,15 @@ test("staff release a placed client, roll it back and offboard it", async ({
   await visit(page, "/platform/offboarded");
   const listed = page.getByRole("listitem").filter({ hasText: clientId });
   await expect(listed).toBeVisible();
-  await listed
-    .getByRole("checkbox", {
+  // Not yet: deleting is off, saying from when (core refuses it too:
+  // apps/admin/test/client-hosting.test.ts).
+  await expect(
+    listed.getByRole("checkbox", {
       name: "No export of it was made, and I delete its resources without one",
     })
-    .click();
-  await listed.getByRole("button", { name: "Delete its resources" }).click();
-  await expect(listed.getByRole("alert")).toContainText(
-    "kept for 30 days after it was offboarded"
-  );
+  ).toBeDisabled();
+  await expect(
+    listed.getByRole("button", { name: "Delete its resources" })
+  ).toBeDisabled();
+  await expect(listed).toContainText("once its 30 days are over");
 });
