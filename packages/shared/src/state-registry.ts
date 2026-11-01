@@ -534,6 +534,10 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "Execution records whose events were erased, and single events taken back: late captures stay erased."
     ),
+    brain_erased_documents: exported(
+      `${brain}erasures.ts`,
+      "Which documents each content purge erased, and when: copies made late go too."
+    ),
     brain_lessons: exported(
       `${brain}lessons.ts`,
       "Lesson candidates consolidated from a scope's episodes."
@@ -588,6 +592,10 @@ const connectDb: D1State = {
     composio_cleanups: exported(
       `${connect}composio-connections.ts`,
       "Deletions at Composio still owed."
+    ),
+    composio_tool_sends: transient(
+      `${connect}composio-connections.ts`,
+      "Tool-list sends to Composio not yet answered, kept a few minutes at most."
     ),
     connection_tokens: secret(
       `${connect}vault.ts`,
@@ -655,7 +663,6 @@ const workspaces: DurableObjectState = {
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
     custom_widgets: exported(`${core}workspace.ts`),
-    email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),
     preview_stores: transient(`${core}sealed-previews.ts`),
@@ -932,6 +939,7 @@ const workflowRuns: DurableObjectState = {
     grasp_action_model_calls: exported(`${core}workflows/run-object.ts`),
     grasp_run_cancelled: exported(`${core}workflows/run-object.ts`),
     grasp_run_shares: exported(`${core}workflows/run-object.ts`),
+    grasp_scope_fences: exported(`${core}workflows/run-object.ts`),
   },
 };
 

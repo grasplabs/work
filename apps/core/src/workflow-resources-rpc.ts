@@ -5,6 +5,7 @@ import type {
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
+  PendingWorkflowBindings,
   WorkflowBindingApproval,
   WorkflowCandidateRun,
   WorkflowDraft,
@@ -15,7 +16,9 @@ import type {
   WorkflowResourcesApi,
   WorkflowResourceRun,
   WorkflowResourceVersion,
+  WorkflowShareCandidates,
   WorkflowStart,
+  WorkflowStartForm,
   WorkflowVersionSource,
   WorkflowActivity,
   WorkflowFile,
@@ -31,6 +34,7 @@ import { askableFor } from "./channels/askable-workflows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { pendingWorkflowBindings } from "./workflow-binding-requests.ts";
 import {
   approveWorkflowBinding,
   listWorkflowBindings,
@@ -70,6 +74,8 @@ import {
   workflowSource,
   workflowVersions,
 } from "./workflow-resources.ts";
+import { workflowShareCandidates } from "./workflow-share-candidates.ts";
+import { workflowStartForm } from "./workflow-start-form.ts";
 import { startWorkflow } from "./workflow-starts.ts";
 import {
   candidateRunFor,
@@ -350,6 +356,20 @@ export class WorkflowResourcesRpc
     );
   }
 
+  async startForm(id: string): Promise<WorkflowStartForm> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowStartForm(this.#env, person, id)
+    );
+  }
+
+  async shareCandidates(id: string): Promise<WorkflowShareCandidates> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowShareCandidates(this.#env, person, id)
+    );
+  }
+
   async delete(id: string): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await deleteWorkflowResource(this.#env, person, id);
@@ -398,6 +418,13 @@ export class WorkflowResourcesRpc
     await withPerson(this.#check, async (person) => {
       await revokeWorkflowBinding(this.#env, person, id, approval);
     });
+  }
+
+  async pendingBindings(): Promise<PendingWorkflowBindings[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await pendingWorkflowBindings(this.#env, person)
+    );
   }
 
   async bindToApp(id: string, input: unknown): Promise<AppWorkflowBinding> {

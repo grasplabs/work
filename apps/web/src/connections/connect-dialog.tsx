@@ -13,7 +13,6 @@ import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -22,9 +21,8 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Switch } from "@grasp-os/ui/components/switch";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon, EyeIcon, LockIcon, PenLineIcon } from "lucide-react";
+import { CheckIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -36,6 +34,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { AppLogo } from "./app-logo.tsx";
 import type { Integration } from "./integrations.ts";
+import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
 
@@ -425,87 +424,6 @@ const ScopeChoice = ({
     </ScopeOption>
   </fieldset>
 );
-
-/** A tool that is off: Grasp never calls it. */
-const NeverBadge = () => (
-  <Badge variant="outline">
-    <LockIcon data-icon="inline-start" />
-    <Trans context="what a tool may do">Never</Trans>
-  </Badge>
-);
-
-/**
- * One tool of a toolkit, as the prototype's permission row: a switch to
- * allow it, and a badge with what it may do: Never while it is off, Read
- * when it only reads, Write when it changes things. An allowed tool's badge
- * is a button that switches it between Read and Write (tool-choices.ts).
- */
-const ToolChoice = ({
-  tool,
-  choice,
-  onAllow,
-  onRead,
-}: {
-  tool: CatalogTool;
-  choice: AllowedTool | undefined;
-  onAllow: (allow: boolean) => void;
-  onRead: (read: boolean) => void;
-}) => {
-  const { t } = useLingui();
-  const { name } = tool;
-  const id = `connect-tool-${name}`;
-  return (
-    <li className="flex min-h-11 items-center gap-2 border-b px-3 py-2 last:border-b-0">
-      <label
-        className={
-          choice === undefined
-            ? "text-muted-foreground min-w-0 flex-1 truncate"
-            : "min-w-0 flex-1 truncate"
-        }
-        htmlFor={id}
-      >
-        {name}
-      </label>
-      {choice === undefined ? (
-        <NeverBadge />
-      ) : (
-        <Badge
-          className="cursor-pointer"
-          onClick={() => {
-            onRead(!choice.read);
-          }}
-          render={
-            <button
-              aria-label={
-                choice.read
-                  ? t`${name} reads only. Change to Write`
-                  : t`${name} may write. Change to Read`
-              }
-              type="button"
-            />
-          }
-          variant={choice.read ? "outline" : "secondary"}
-        >
-          {choice.read ? (
-            <EyeIcon data-icon="inline-start" />
-          ) : (
-            <PenLineIcon data-icon="inline-start" />
-          )}
-          {choice.read ? (
-            <Trans context="what a tool may do">Read</Trans>
-          ) : (
-            <Trans context="what a tool may do">Write</Trans>
-          )}
-        </Badge>
-      )}
-      <Switch
-        checked={choice !== undefined}
-        id={id}
-        onCheckedChange={onAllow}
-      />
-    </li>
-  );
-};
 
 /** The native provider's sign-in: who uses it (an admin chooses), then signing in. */
 const NativeFlow = ({
