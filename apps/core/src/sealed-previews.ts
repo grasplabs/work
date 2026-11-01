@@ -202,7 +202,9 @@ const retryDelayMs = 60 * 60 * 1000;
 const retriedLater = async (
   db: ReturnType<typeof drizzle>,
   storeId: string,
-  at: Date
+  at: Date,
+  /** How long it may take: what is left of the caller's budget. */
+  stepMs = storeStepMs
 ): Promise<void> => {
   try {
     // Bounded, as every step of a sweep or removal is.
@@ -213,7 +215,7 @@ const retriedLater = async (
           .set({ retryAfter: new Date(at.getTime() + retryDelayMs) })
           .where(eq(previewFixtureStores.storeId, storeId));
       })(),
-      storeStepMs
+      stepMs
     );
   } catch (error) {
     log.warn("preview.store_retry_unrecorded", {
@@ -261,22 +263,27 @@ export const discardPreviewStoresOf = async (
   const stepMs = () => Math.max(1, Math.min(storeStepMs, until - Date.now()));
   let gone = 0;
   try {
-    const stores = await db
-      .select({ storeId: previewFixtureStores.storeId })
-      .from(previewFixtureStores)
-      .where(
-        and(
-          eq(previewFixtureStores.personId, personId),
-          // One whose discard failed waits out its delay, so a removal
-          // tried again gets past it to the rest.
-          or(
-            isNull(previewFixtureStores.retryAfter),
-            lte(previewFixtureStores.retryAfter, new Date())
+    // The read too, within the budget: the removal waits for it.
+    const stores = await within(
+      (async () =>
+        await db
+          .select({ storeId: previewFixtureStores.storeId })
+          .from(previewFixtureStores)
+          .where(
+            and(
+              eq(previewFixtureStores.personId, personId),
+              // One whose discard failed waits out its delay, so a removal
+              // tried again gets past it to the rest.
+              or(
+                isNull(previewFixtureStores.retryAfter),
+                lte(previewFixtureStores.retryAfter, new Date())
+              )
+            )
           )
-        )
-      )
-      .orderBy(previewFixtureStores.storeId)
-      .limit(storesPerErasure);
+          .orderBy(previewFixtureStores.storeId)
+          .limit(storesPerErasure))(),
+      stepMs()
+    );
     for (const { storeId } of stores) {
       if (Date.now() >= until) {
         break;
@@ -296,7 +303,7 @@ export const discardPreviewStoresOf = async (
           ...errorFields(error),
         });
         // oxlint-disable-next-line no-await-in-loop -- as above
-        await retriedLater(db, storeId, new Date());
+        await retriedLater(db, storeId, new Date(), stepMs());
       }
     }
   } catch (error) {

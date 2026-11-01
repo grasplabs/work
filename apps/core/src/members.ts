@@ -23,7 +23,7 @@ import {
 } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -546,6 +546,14 @@ const discardRemovedPreviews = async (env: Env): Promise<void> => {
         and(
           eq(memberRemovals.userId, previewFixtureStores.personId),
           eq(memberRemovals.organizationId, organizationId)
+        )
+      )
+      // Only people with a store due now: one waiting out its retry delay
+      // would hold a place, and later owners would never get a turn.
+      .where(
+        or(
+          isNull(previewFixtureStores.retryAfter),
+          lte(previewFixtureStores.retryAfter, new Date())
         )
       )
       .orderBy(asc(previewFixtureStores.personId))
