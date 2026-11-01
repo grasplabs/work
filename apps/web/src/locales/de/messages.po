@@ -2403,10 +2403,6 @@ msgstr "Hinzugefügt: liest und überschreibt jeden Datensatz von {table}, egal 
 msgid "Address"
 msgstr "Adresse"
 
-#: src/workflows/triggers.tsx
-msgid "Address copied"
-msgstr "Adresse kopiert"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -4606,10 +4602,6 @@ msgstr "Kopiert"
 msgid "Copy"
 msgstr "Kopieren"
 
-#: src/workflows/triggers.tsx
-msgid "Copy address"
-msgstr "Adresse kopieren"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Als Markdown kopieren"
@@ -4663,10 +4655,6 @@ msgstr "Korrigiert durch"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Könnte besser sein"
-
-#: src/workflows/triggers.tsx
-msgid "Could not copy the address"
-msgstr "Die Adresse konnte nicht kopiert werden"
 
 #: src/activity/pending.tsx
 msgid "couldn't be read"
@@ -16400,10 +16388,6 @@ msgstr "Wenn eine Aufgabe immer wieder auf dieselbe Weise fehlschlägt, notiert 
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
 msgstr "Wann ein Workflow bekannt ist"
-
-#: src/workflows/triggers.tsx
-msgid "When an email arrives at {address}"
-msgstr "Wenn eine E-Mail an {address} eingeht"
 
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"

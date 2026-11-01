@@ -16,12 +16,16 @@ import type { Provenance } from "./knowledge.ts";
 export const memoryFileNames = ["AGENTS.md", "MEMORY.md", "USER.md"] as const;
 export type MemoryFileName = (typeof memoryFileNames)[number];
 
-/** Each memory file's size limit, in tokens, unless the deployment sets one. */
-export const memoryDefaultLimits: Readonly<Record<MemoryFileName, number>> = {
+/** Each memory file's size limit, in tokens. */
+export const memoryLimits: Readonly<Record<MemoryFileName, number>> = {
   "AGENTS.md": 2000,
   "MEMORY.md": 2000,
   "USER.md": 2000,
 };
+
+// Left for the admin's deploy check (apps/admin's src/deploy/core-config.ts)
+// until it drops `MEMORY_LIMITS` (#1765): core no longer reads the var.
+// Delete both then.
 
 /** The largest limit a deployment may set: past it, memory crowds out work. */
 export const memoryMaxLimit = 32_000;

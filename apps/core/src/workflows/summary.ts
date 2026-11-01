@@ -367,7 +367,7 @@ export const runSummary = async (
     status === "failed" && sees ? errorOf(row.failure) : undefined;
   // Removed once the run's retention is up, whether or not the sweep has
   // been by yet, as every reader of a run says (`detailsRemoved`).
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: row.ended_at === null ? null : new Date(row.ended_at),
     detailsRemovedAt:
       row.details_removed_at === null ? null : new Date(row.details_removed_at),
@@ -375,7 +375,7 @@ export const runSummary = async (
   const error =
     reported === undefined || !removed
       ? reported
-      : { ...reported, message: removedText(env) };
+      : { ...reported, message: removedText };
   return {
     revision: row.summary_revision,
     runId: row.id,
@@ -390,7 +390,7 @@ export const runSummary = async (
           compensation: compensationOf(
             row,
             sees,
-            removed ? removedText(env) : undefined
+            removed ? removedText : undefined
           ),
         }
       : {}),

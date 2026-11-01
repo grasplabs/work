@@ -39,7 +39,6 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditRetentionDays } from "../audit-log.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -87,9 +86,9 @@ import type { KnowledgeTally } from "./usage-tally.ts";
 // the foreign key. Computing again is idempotent: the same signals, with the same
 // IDs, derived from their kind, collection and subject.
 //
-// Unread documents need every read of their window: `unreadDays`, or the
-// audit log's retention where that is shorter. While the log doesn't hold
-// them all (retention archived some meanwhile), that kind isn't computed:
+// Unread documents need every read of their window, `unreadDays`, shorter
+// than the audit log's retention. While the log doesn't hold them all
+// (retention archived some meanwhile), that kind isn't computed:
 // the computation carries the last one's over as they were. Questions
 // count what the log holds.
 //
@@ -147,14 +146,6 @@ const daysBetween = (from: number, to: number): number =>
 /** Collections whose documents their owner writes: those with signals. */
 const owned = notInArray(collections.source, [...readOnlySources]);
 
-/**
- * The days without a read that make a document unread: `unreadDays`, or
- * the audit log's retention while that's shorter, as the log holds no
- * reads older than that.
- */
-const unreadWindowDays = (env: Env): number =>
-  Math.min(unreadDays, auditRetentionDays(env) ?? unreadDays);
-
 /** What the audit log holds of reads and questions, added up. */
 export interface KnowledgeTotals {
   /** The days of reads `read` covers. */
@@ -178,20 +169,17 @@ export interface KnowledgeTotals {
  * unread window on, questions from `questionWindowDays` before, and totals
  * of nothing yet to add the stretches to.
  */
-export const knowledgeWindow = (env: Env, now: Date) => {
-  const days = unreadWindowDays(env);
-  return {
-    readsFrom: new Date(now.getTime() - days * dayMs).toISOString(),
-    questionsFrom: new Date(
-      now.getTime() - questionWindowDays * dayMs
-    ).toISOString(),
-    totals: (): KnowledgeTotals => ({
-      unreadDays: days,
-      read: new Set(),
-      questions: new Map(),
-    }),
-  };
-};
+export const knowledgeWindow = (now: Date) => ({
+  readsFrom: new Date(now.getTime() - unreadDays * dayMs).toISOString(),
+  questionsFrom: new Date(
+    now.getTime() - questionWindowDays * dayMs
+  ).toISOString(),
+  totals: (): KnowledgeTotals => ({
+    unreadDays,
+    read: new Set(),
+    questions: new Map(),
+  }),
+});
 
 /** Adds a stretch's partial totals (`AuditLog.tallyStretch`) to `totals`. */
 export const addKnowledgeTally = (

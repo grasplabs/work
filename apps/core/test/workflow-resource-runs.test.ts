@@ -547,7 +547,7 @@ describe("runs of JSON workflows", () => {
       ])
     );
     const started = await start(by, waiting.id);
-    // Past the deployment's run retention (30 days) since it started.
+    // Past the run retention (30 days) since it started.
     await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
     const receipt = await env.DB.prepare(
       "SELECT input, params FROM workflow_start_receipts WHERE id = ?"
@@ -1310,7 +1310,7 @@ describe("whose word a run's row takes, and whose clock", () => {
     });
   });
 
-  it("shows what a run returned only within the retention the deployment has now", async () => {
+  it("shows what a run returned only within its retention", async () => {
     const by = await builder();
     const done = await published(by, (name) =>
       definitionOf(name, [{ finish: { set: { status: "done" } } }])
@@ -1328,45 +1328,49 @@ describe("whose word a run's row takes, and whose clock", () => {
     const failed = await start(by, failing.id);
     await ended(by, done.id, completed.runId);
     await ended(by, failing.id, failed.runId);
-    // Two days on, the deployment's retention shortened to one: the engine
-    // still holds both, under the retention they were admitted with.
-    const shorter = { ...env, RUN_RETENTION_DAYS: "1" };
+    // A day before their retention is over, and a day after: the engine
+    // still holds both, as it purges an ended run on its own clock.
+    const within = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 29 * 86_400_000);
+    let kept: WorkflowResourceRun;
+    try {
+      kept = await resourceRunFor(env, by, done.id, completed.runId);
+    } finally {
+      within.mockRestore();
+    }
     const later = vi
       .spyOn(Date, "now")
-      .mockReturnValue(Date.now() + 2 * 86_400_000);
+      .mockReturnValue(Date.now() + 31 * 86_400_000);
     let reads: WorkflowResourceRun[];
     try {
       reads = [
-        await resourceRunFor(env, by, done.id, completed.runId),
         // Past its retention, read with the engine unreachable: the row
         // alone says it all.
         await whileEngineRefuses(
           () => true,
-          async () =>
-            await resourceRunFor(shorter, by, done.id, completed.runId)
+          async () => await resourceRunFor(env, by, done.id, completed.runId)
         ),
-        await resourceRunFor(shorter, by, failing.id, failed.runId),
+        await resourceRunFor(env, by, failing.id, failed.runId),
         // The engine's record of it gone too, its retention over there: the
         // code the row kept as it failed.
         await aroundEngine(
           async (method, call) =>
             method === "status" ? undefined : await call(),
-          async () =>
-            await resourceRunFor(shorter, by, failing.id, failed.runId)
+          async () => await resourceRunFor(env, by, failing.id, failed.runId)
         ),
         // Or unreachable: the row alone says it.
         await whileEngineRefuses(
           () => true,
-          async () =>
-            await resourceRunFor(shorter, by, failing.id, failed.runId)
+          async () => await resourceRunFor(env, by, failing.id, failed.runId)
         ),
       ];
     } finally {
       later.mockRestore();
     }
-    const [kept, removed, removedFailure, purgedFailure, unreachable] = reads;
+    const [removed, removedFailure, purgedFailure, unreachable] = reads;
     expect({
-      kept: kept?.output,
+      kept: kept.output,
       removed: removed?.output,
       failure: removedFailure?.error,
       purged: purgedFailure?.error,
@@ -1374,33 +1378,9 @@ describe("whose word a run's row takes, and whose clock", () => {
     }).toStrictEqual({
       kept: { status: "done" },
       removed: undefined,
-      failure: { code: "expression.failed", message: removedText(shorter) },
-      purged: { code: "expression.failed", message: removedText(shorter) },
-      unreachable: { code: "expression.failed", message: removedText(shorter) },
-    });
-  });
-
-  it("keeps what a run returned removed once the sweep removed it, though the retention is lengthened after", async () => {
-    const by = await builder();
-    const done = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
-    const { runId } = await start(by, done.id);
-    await ended(by, done.id, runId);
-    // Swept two days on under a retention of one day, then read under the
-    // thirty days it was admitted with: the engine still holds it.
-    const later = Date.now() + 2 * 86_400_000;
-    await sweepRunDetails({ ...env, RUN_RETENTION_DAYS: "1" }, new Date(later));
-    const spied = vi.spyOn(Date, "now").mockReturnValue(later);
-    let read: WorkflowResourceRun;
-    try {
-      read = await resourceRunFor(env, by, done.id, runId);
-    } finally {
-      spied.mockRestore();
-    }
-    expect({ status: read.status, output: read.output }).toStrictEqual({
-      status: "completed",
-      output: undefined,
+      failure: { code: "expression.failed", message: removedText },
+      purged: { code: "expression.failed", message: removedText },
+      unreachable: { code: "expression.failed", message: removedText },
     });
   });
 
@@ -2157,7 +2137,7 @@ describe(
         receipts: receipts.length,
         lineage: await lineageOf(runId),
       };
-      // Past the deployment's run retention (30 days) since it ended.
+      // Past the run retention (30 days) since it ended.
       await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
       const receipt = await env.DB.prepare(
         "SELECT input FROM workflow_start_receipts WHERE id = ?"

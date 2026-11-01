@@ -2403,10 +2403,6 @@ msgstr "Ajoutée : lit et réécrit chaque enregistrement de {table}, quel qu'en
 msgid "Address"
 msgstr "Adresse"
 
-#: src/workflows/triggers.tsx
-msgid "Address copied"
-msgstr "Adresse copiée"
-
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -4606,10 +4602,6 @@ msgstr "Copié"
 msgid "Copy"
 msgstr "Copier"
 
-#: src/workflows/triggers.tsx
-msgid "Copy address"
-msgstr "Copier l’adresse"
-
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copier en Markdown"
@@ -4663,10 +4655,6 @@ msgstr "Corrigé par"
 #: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "À améliorer"
-
-#: src/workflows/triggers.tsx
-msgid "Could not copy the address"
-msgstr "Impossible de copier l’adresse"
 
 #: src/activity/pending.tsx
 msgid "couldn't be read"
@@ -16400,10 +16388,6 @@ msgstr "Quand une tâche échoue sans cesse de la même manière, le Brain le no
 #: src/onboarding/work-rules.tsx
 msgid "When a workflow is known"
 msgstr "Quand un workflow est connu"
-
-#: src/workflows/triggers.tsx
-msgid "When an email arrives at {address}"
-msgstr "Quand un e-mail arrive à {address}"
 
 #: src/workflows/triggers.tsx
 msgid "When an email arrives for {localPart}"

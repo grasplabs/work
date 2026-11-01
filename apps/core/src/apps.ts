@@ -463,7 +463,6 @@ const checkLimits = (
  * its limit, and only if it also grew, as with `checkLimits`.
  */
 const checkMemory = (
-  env: Env,
   before: string | undefined,
   after: string | undefined
 ): void => {
@@ -471,7 +470,7 @@ const checkMemory = (
     after !== undefined &&
     (before === undefined || after.length > before.length);
   if (grew) {
-    requireWithinLimit(env, "AGENTS.md", after);
+    requireWithinLimit("AGENTS.md", after);
   }
 };
 
@@ -869,7 +868,7 @@ export const applyChanges = (
   }
   checkLimits(files, before);
   checkPaths(files.keys(), added);
-  checkMemory(env, agentsBefore, files.get(appMemoryPath));
+  checkMemory(agentsBefore, files.get(appMemoryPath));
   return changes;
 };
 

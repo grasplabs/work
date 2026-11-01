@@ -194,15 +194,15 @@ export const resourceRunTrace = async (
   // Its doors once per trace view: a trace followed again draws none.
   const drawn = workflowDiagram(parsed);
   const diagram = doors ? await withDoors(env, by, drawn, parsed) : drawn;
-  // Past its retention as the deployment has it now, or once swept, no
-  // more of it is shown than of its result (resource-runs.ts): the engine
-  // may still hold its journal for the retention it was admitted with.
+  // Past its retention, or once swept, no more of it is shown than of its
+  // result (resource-runs.ts): the engine may still hold its journal a
+  // moment longer, on its own clock.
   const receipt = await drizzle(env.DB)
     .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, run.id))
     .get();
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: run.endedAt === null ? null : new Date(run.endedAt),
     detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
   });

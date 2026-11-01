@@ -224,9 +224,6 @@ export const coreProject = (
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",
             CAPABILITY_SIGNING_KEY: capabilitySigningKey,
-            // The audit log works out when to purge archives from its own
-            // env: the shortest archive retention the admin may set.
-            AUDIT_ARCHIVE_RETENTION_DAYS: "365",
             ...testSignIn,
             // The client's Teams bot, so its door is open
             // (src/channels/door.ts).
@@ -248,8 +245,6 @@ export const coreProject = (
             // Few enough statistics points to reach each bound in a test.
             STATISTICS_POINT_LIMITS: "10/25",
             STATISTICS_READ_LIMITS: "20/60",
-            // One memory limit set, the others at their defaults.
-            MEMORY_LIMITS: { "USER.md": 500 },
             // Package limits a test can reach with packages it publishes
             // on the fake npm registry (test/packages.test.ts).
             PACKAGE_LIMITS: {

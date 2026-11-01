@@ -145,7 +145,7 @@ export interface WorkflowRunTrace {
   /** False when the journal held more than one read takes. */
   complete: boolean;
   /**
-   * The run's retention, as the deployment has it now, is over, or its
+   * The run's retention is over, or its
    * details were swept: nothing of what it reached is shown.
    */
   detailsRemoved: boolean;

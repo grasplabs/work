@@ -361,7 +361,7 @@ const followable = async (
           row.originAppVersion !== null &&
           origins.has(row.originAppVersion) &&
           (appRestricted || !returnedRestricted(row)) &&
-          !(row.status === "completed" && detailsRemoved(env, row))
+          !(row.status === "completed" && detailsRemoved(row))
       )
       .map((row) => row.id)
   );
@@ -719,7 +719,7 @@ const historyPage = async (
   // Read only once the run is the caller's: a cursor tells nothing of a
   // run they can't read.
   const after = sequenceOf(cursor);
-  if (detailsRemoved(env, run) || query.pinned === undefined) {
+  if (detailsRemoved(run) || query.pinned === undefined) {
     return nothing;
   }
   const declared = await declaredTasks(env, query.pinned, run.manifestHash);

@@ -628,7 +628,7 @@ export const runHistory = async (
     throw workflowErrors.create("workflow.run_not_found");
   }
   const { owner } = await appFor(env, by, row.appId, "user");
-  if (detailsRemoved(env, row)) {
+  if (detailsRemoved(row)) {
     return { items: [], nextCursor: null, hasMore: false };
   }
   const reviewed = await reviewedOf(env, row);

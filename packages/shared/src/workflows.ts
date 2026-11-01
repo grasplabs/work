@@ -799,12 +799,6 @@ export type WorkflowTrigger = { position: number } & (
       type: "email";
       /** The part of the address before the `@` ({@link emailLocalPartSchema}). */
       localPart: string;
-      /**
-       * The whole address people send to: the local part at the
-       * deployment's inbound mail domain (`INBOUND_MAIL_DOMAIN`); null
-       * while the deployment has none set.
-       */
-      address: string | null;
     }
   | { type: "event"; event: string }
 );
@@ -880,9 +874,9 @@ export interface WorkflowRun {
   failure?: RunFailure;
   /**
    * Set once its details are removed, its retention over: an ended run
-   * keeps them for the deployment's `RUN_RETENTION_DAYS`, 30 days unless
-   * set, counted from when it ended. The same wherever the run is read.
-   * The run itself stays: what it was, how it ended, when and for whom.
+   * keeps them for 30 days, counted from when it ended. The same wherever
+   * the run is read. The run itself stays: what it was, how it ended, when
+   * and for whom.
    */
   detailsRemoved?: true;
 }
