@@ -99,10 +99,6 @@ const removedSql = (app: string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.removedAt} IS NOT NULL)`;
 
 /**
- * Removes the archived App `input` names, for its owner or an admin of
- * the organization, never Grasp staff (see the header). Answers nothing.
- */
-/**
  * The statements that end App `appId`'s grants, bindings, members and
  * hand-added integrations, each only once the batch's first statement
  * removed it (`removedSql`), for the remover `revoker` names.
