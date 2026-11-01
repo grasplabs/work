@@ -438,8 +438,6 @@ export interface PublishedTemplate {
  */
 export interface TemplatesApi {
   publish: (publication: TemplatePublication) => Promise<PublishedTemplate>;
-  /** Every template version, newest first, at most 200. */
-  list: () => Promise<PublishedTemplate[]>;
 }
 
 /** Why a binding couldn't be approved, revoked or found. */
