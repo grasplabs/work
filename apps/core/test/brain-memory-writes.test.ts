@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepAudience } from "../src/knowledge/access.ts";
+import { sharedChatsOf } from "../src/knowledge/memory-publish.ts";
 import { forContext } from "../src/knowledge/memory.ts";
 import { brainOf } from "../src/knowledge/ports.ts";
 import { actingFor, newChat } from "./contexts.ts";
@@ -171,6 +172,93 @@ describe("publishing to the Brain's shared memory", setUpTime, () => {
       // Not in the team: its record never reaches him.
       ben: [`Company ${u}`],
       nothingRefusedKept: false,
+    });
+  });
+
+  it("lists only the shared chats a person is in and could publish into, each by the others in it, and refuses Grasp's staff", async () => {
+    const ada = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const cy = await signedInApi(idp, "user");
+    const agent = { type: "agent" as const, agentId: `agent-${unique()}` };
+    const [withBen, withOutsiders, benAlone] = await Promise.all([
+      newChat(agent),
+      newChat(agent),
+      newChat(agent),
+    ]);
+    await keepAudience(env, withBen, ada.userId, {
+      members: [ada.userId, ben.userId],
+      outsiders: false,
+    });
+    // Someone Grasp can't name is in it: nothing is published there.
+    await keepAudience(env, withOutsiders, ada.userId, {
+      members: [ada.userId, cy.userId],
+      outsiders: true,
+    });
+    await keepAudience(env, benAlone, ben.userId, {
+      members: [ben.userId],
+      outsiders: false,
+    });
+    const [adaIs, benIs] = await Promise.all([
+      ada.api.whoami(),
+      ben.api.whoami(),
+    ]);
+    const names = { ada: adaIs.name, ben: benIs.name };
+    const listed = async (person: Person) => {
+      const chats = await person.api.knowledge.sharedChats();
+      return chats
+        .filter(({ chatId }) =>
+          [withBen, withOutsiders, benAlone].some(
+            (chat) => chat.chatId === chatId
+          )
+        )
+        .map(({ chatId, others }) => ({ chatId, others }))
+        .toSorted((a, b) => a.chatId.localeCompare(b.chatId));
+    };
+
+    const lists = {
+      ada: await listed(ada),
+      ben: await listed(ben),
+      cy: await listed(cy),
+    };
+    // Grasp's staff, even under the id of someone in the chat, are refused.
+    const byStaff = await codeOf(
+      sharedChatsOf(env, {
+        type: "person",
+        person: {
+          userId: ada.userId,
+          email: `${ada.userId}@grasp.test`,
+          name: "Staff",
+          role: "admin",
+          teams: [],
+          staff: true,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        },
+      })
+    );
+    // What a chat lists is one a record can be published into.
+    const published = await codeOf(
+      ada.api.knowledge.memoriesPublish(
+        {
+          scope: "session",
+          scopeId: withBen.chatId,
+          kind: "fact",
+          text: `Listed ${unique()}`,
+        },
+        { idempotencyKey: key() }
+      )
+    );
+
+    expect({ lists, byStaff, published }).toStrictEqual({
+      lists: {
+        ada: [{ chatId: withBen.chatId, others: [names.ben] }],
+        ben: [
+          { chatId: withBen.chatId, others: [names.ada] },
+          { chatId: benAlone.chatId, others: [] },
+        ].toSorted((a, b) => a.chatId.localeCompare(b.chatId)),
+        cy: [],
+      },
+      byStaff: "brain.denied",
+      published: "ok",
     });
   });
 
