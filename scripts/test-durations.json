@@ -713,7 +713,6 @@
   "admin test/client-quota-policy.test.ts": 1.6,
   "admin test/client-resources.test.ts": 0.6,
   "admin test/client-sealed-secrets.test.ts": 12.6,
-  "admin test/client-secret-export.test.ts": 0,
   "admin test/client-settings.test.ts": 0.4,
   "admin test/client-sign-in.test.ts": 0,
   "admin test/client-teams-bot.test.ts": 4.4,

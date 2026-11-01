@@ -438,48 +438,6 @@ export const workerRoutes: Route[] = [
   },
   {
     method: "GET",
-    path: /^\/workers\/scripts\/(?<script>[^/]+)\/versions$/u,
-    answer: ({ account, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      // The latest first, as the API lists them.
-      const items = script.versions
-        .toReversed()
-        .map(({ id, number }) => ({ id, number }));
-      return envelope({ items });
-    },
-  },
-  {
-    method: "POST",
-    path: /^\/workers\/scripts\/(?<script>[^/]+)\/versions$/u,
-    answer: async ({ account, call, params }) => {
-      const script = scriptOf(account, params);
-      if (script instanceof Response) {
-        return script;
-      }
-      const upload = await readUpload(account, call.body);
-      if (upload instanceof Response) {
-        return upload;
-      }
-      if (upload.metadata.migrations !== undefined) {
-        return refusal(
-          400,
-          10_000,
-          "A version can't carry Durable Object migrations"
-        );
-      }
-      const { id, number } = newVersion(
-        script,
-        upload,
-        secretsOf(script, upload)
-      );
-      return envelope({ id, number });
-    },
-  },
-  {
-    method: "GET",
     path: /^\/workers\/scripts\/(?<script>[^/]+)\/deployments$/u,
     answer: ({ account, params }) => {
       const script = scriptOf(account, params);
@@ -592,22 +550,6 @@ export const workerRoutes: Route[] = [
         .map(({ cron }) => cron);
       return envelope({
         schedules: script.schedules.map((cron) => ({ cron })),
-      });
-    },
-  },
-  {
-    method: "PUT",
-    path: /^\/workflows\/(?<name>[^/]+)$/u,
-    answer: ({ account, params, json }) => {
-      const workflow = {
-        class_name: text(json, "class_name"),
-        script_name: text(json, "script_name"),
-      };
-      account.workflows.set(params.name ?? "", workflow);
-      return envelope({
-        id: crypto.randomUUID(),
-        name: params.name,
-        ...workflow,
       });
     },
   },

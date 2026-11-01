@@ -62,10 +62,9 @@ type SharedSecret =
  * holds no key, and never into the admin's database. And only ever to
  * Grasp Cloud: a deploy runs only in a Cloudflare destination the admin's
  * own deployer reaches (hosting/operation.ts refuses a workerd one,
- * `destination_unsupported`, before it delivers anything), and a client's
- * export for relocation carries none of the shared secrets
- * (src/deploy/secret-export.ts). On-prem never gets them: its operator
- * leaves them unset, and its platform features run locally or not at all.
+ * `destination_unsupported`, before it delivers anything). On-prem never
+ * gets them: its operator leaves them unset, and its platform features run
+ * locally or not at all.
  */
 const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
   core: ["ENTRA_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"],

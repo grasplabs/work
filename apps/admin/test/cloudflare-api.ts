@@ -1076,7 +1076,6 @@ export const fakeCloudflareApi = (token: string) => {
       zones: [],
       scripts: new Map(),
       namespaces: new Map(),
-      workflows: new Map(),
       assets: new Set(),
       sessions: new Map(),
       completions: new Set(),

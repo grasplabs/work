@@ -1,42 +1,11 @@
 /**
- * A destination's account and the resources a deployment needs in it. Everything
- * that stores data is created in the EU jurisdiction and nowhere else
- * (threat model R18); one that already exists outside it stops the caller,
- * since a jurisdiction is set only at creation.
- *
- * The `ensure*` calls are idempotent, so a provisioning step can run again
- * after a failure: each finds the resource first and creates it only when
- * it's missing.
+ * The D1 databases and R2 buckets a client's deployment needs in a
+ * destination's account: finding, creating and deleting them.
  */
 import { z } from "zod";
 
 import { CloudflareApiError, isNotFound, listAll } from "./api.ts";
 import type { CloudflareApi } from "./api.ts";
-
-const eu = "eu";
-
-const accountSchema = z.object({ id: z.string(), name: z.string() });
-export type Account = z.infer<typeof accountSchema>;
-
-/** The account `accountId`, as the token sees it. */
-export const getAccount = async (
-  api: CloudflareApi,
-  accountId: string
-): Promise<Account> =>
-  await api.call(
-    { method: "GET", path: `/accounts/${accountId}` },
-    accountSchema
-  );
-
-/** A resource Grasp needs in the EU that exists elsewhere. */
-export class OutsideEuError extends Error {
-  constructor(kind: string, name: string, jurisdiction: string | undefined) {
-    super(
-      `${kind} ${name} exists outside the EU jurisdiction (${jurisdiction ?? "none"}); it has to be recreated`
-    );
-    this.name = "OutsideEuError";
-  }
-}
 
 const d1Schema = z.object({
   uuid: z.string(),
@@ -80,27 +49,6 @@ export const createD1Database = async (
     },
     d1Schema
   );
-
-/** The D1 database `name` in the EU, created if it's missing. */
-export const ensureD1Database = async (
-  api: CloudflareApi,
-  accountId: string,
-  name: string
-): Promise<D1DatabaseInfo> => {
-  const database =
-    (await findD1Database(api, accountId, name)) ??
-    (await createD1Database(api, accountId, name, eu));
-  // Whichever call answered, only a database Cloudflare reports in the EU
-  // is used.
-  if (database.jurisdiction !== eu) {
-    throw new OutsideEuError(
-      "D1 database",
-      name,
-      database.jurisdiction ?? undefined
-    );
-  }
-  return database;
-};
 
 const bucketSchema = z.object({
   name: z.string(),
@@ -152,27 +100,6 @@ export const createR2Bucket = async (
     },
     bucketSchema
   );
-
-/** The R2 bucket `name` in the EU, created if it's missing. */
-export const ensureR2Bucket = async (
-  api: CloudflareApi,
-  accountId: string,
-  name: string
-): Promise<R2BucketInfo> => {
-  const bucket =
-    (await findR2Bucket(api, accountId, name, eu)) ??
-    (await createR2Bucket(api, accountId, name, eu));
-  // Whichever call answered, only a bucket Cloudflare reports in the EU is
-  // used.
-  if (bucket.jurisdiction !== eu) {
-    throw new OutsideEuError(
-      "R2 bucket",
-      name,
-      bucket.jurisdiction ?? undefined
-    );
-  }
-  return bucket;
-};
 
 /**
  * Deletes the D1 database `uuid`. One that's gone already counts as
