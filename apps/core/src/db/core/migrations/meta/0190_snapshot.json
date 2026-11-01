@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "008379a4-93f8-4666-a317-988ae24801ad",
+  "id": "8ac21ba5-933b-4e87-ab72-6a521168e2d5",
   "prevId": "cd77265f-7598-4b94-8b30-3f2319e25bd4",
   "tables": {
     "access_revocations": {
@@ -2165,6 +2165,20 @@
         },
         "removed_by": {
           "name": "removed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_workspace_id": {
+          "name": "provisional_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provisional_chat_id": {
+          "name": "provisional_chat_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -5523,27 +5537,6 @@
         },
         "trigger_id": {
           "name": "trigger_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "package_name": {
-          "name": "package_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "package_version": {
-          "name": "package_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "advisory": {
-          "name": "advisory",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
