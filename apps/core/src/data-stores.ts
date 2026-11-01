@@ -112,6 +112,14 @@ import type { ReadResult } from "./store-host.ts";
 //   store closing, before its object is touched; a seal's binding in turn
 //   requires the store live and not closing (app-releases.ts), so of the
 //   two, one wins. Deleting an App never deletes its stores.
+// - A store is deleted under a consumer an admin approved to call its
+//   operations (a workflow's operation binding, workflow-bindings.ts), so
+//   the consumer fails later, unseen: refused (`data.store_consumed`,
+//   naming how many) while any live workflow's active approval resolves
+//   to it in the binding inventory, read in the same statement that marks
+//   the store closing. An approval in turn requires the store live and not
+//   closing in its own batch, so of the two, one wins. Revoking the
+//   approvals, or deleting the workflows, lets the store go.
 // - A deletion stops half-way, or its records go unaudited: the object is
 //   marked first, with who deleted it and when; then the inventory row and
 //   the `store.deleted` event in one batch, which core runs at once and
@@ -415,6 +423,21 @@ const boundSql = (id: StoreId): SQL =>
     WHERE bound.kind = 'store' AND bound.target_id = ${id})`;
 
 /**
+ * The consumers whose active approval resolves to store `id`, in the
+ * binding inventory (spec 24, workflow-bindings.ts): each live workflow
+ * with an active approval that serves one of its operation bindings with
+ * the store's operation. Revoking the approval, or deleting the workflow,
+ * lets the store go.
+ */
+const consumersSql = (id: StoreId): SQL =>
+  sql`(SELECT COUNT(DISTINCT bound.resource_id) FROM sdk_resource_bindings AS bound
+    JOIN workflow_binding_approvals AS approval
+      ON approval.id = bound.approval_id AND approval.status = 'active'
+    JOIN workflow_resources AS consumer
+      ON consumer.id = bound.resource_id AND consumer.deleted_at IS NULL
+    WHERE bound.kind = 'operation' AND bound.target_id = ${id})`;
+
+/**
  * Marks store `id` closing at `now` for the deletion `owner`, in one
  * statement that requires it live, bound to no sealed release, and not
  * closing for another deletion (unless that mark lapsed,
@@ -443,11 +466,34 @@ const markClosing = async (
             new Date(now.getTime() - storeClosingMs)
           )
         ),
-        sql`NOT ${boundSql(id)}`
+        sql`NOT ${boundSql(id)}`,
+        sql`${consumersSql(id)} = 0`
       )
     )
     .returning({ owner: businessStores.closingOwner });
   return marked[0]?.owner === owner;
+};
+
+/**
+ * The refusal of a store's deletion while `consumers` call its operations
+ * through approvals: how many, and that an admin revokes them first.
+ */
+const consumedError = (consumers: number) =>
+  Object.assign(dataErrors.create("data.store_consumed", { consumers }), {
+    message:
+      consumers === 1
+        ? "One workflow calls this store's operations through an approval. Revoke that approval first, then delete the store."
+        : `${consumers} workflows call this store's operations through approvals. Revoke those approvals first, then delete the store.`,
+  });
+
+/** How many consumers' active approvals resolve to store `id`. */
+const consumersOf = async (env: Env, id: StoreId): Promise<number> => {
+  const row = await drizzle(env.DB)
+    .select({ count: sql<number>`${consumersSql(id)}` })
+    .from(businessStores)
+    .where(eq(businessStores.id, id))
+    .get();
+  return row?.count ?? 0;
 };
 
 /** Whether some sealed release is bound to store `id`. */
@@ -553,17 +599,29 @@ export const deleteStore = async (
   // the mark if its close is refused).
   const owner = crypto.randomUUID();
   if (!(await markClosing(env, store.id, owner, new Date()))) {
-    const reason = (await boundToRelease(env, store.id))
-      ? "data.store_bound"
-      : "data.store_closing";
+    const consumers = await consumersOf(env, store.id);
+    let reason:
+      | "data.store_bound"
+      | "data.store_consumed"
+      | "data.store_closing" = "data.store_closing";
+    if (await boundToRelease(env, store.id)) {
+      reason = "data.store_bound";
+    } else if (consumers > 0) {
+      reason = "data.store_consumed";
+    }
     const db = drizzle(env.DB);
     await auditedBatch(env, db, [
       outboxed(
         db,
-        storeEntry(by, "store.delete_refused", store.id, { reason })
+        storeEntry(by, "store.delete_refused", store.id, {
+          reason,
+          ...(reason === "data.store_consumed" ? { consumers } : {}),
+        })
       ),
     ]);
-    throw dataErrors.create(reason);
+    throw reason === "data.store_consumed"
+      ? consumedError(consumers)
+      : dataErrors.create(reason);
   }
   let mark: StoreDeletionMark;
   try {
