@@ -530,14 +530,6 @@ const knowledgeDb: D1State = {
       `${brain}outcomes.ts`,
       "How far each host boundary's task outcomes reached."
     ),
-    brain_eval_suite_versions: exported(
-      `${brain}eval-suites.ts`,
-      "Each learning suite version, frozen by its digests, and who accepted it."
-    ),
-    brain_eval_cases: exported(
-      `${brain}eval-suites.ts`,
-      "The cases of each learning suite version, by split, with their answer keys."
-    ),
     brain_purges: exported(
       `${brain}purge-ledger.ts`,
       "Each purge as a durable erasure: who ran it, when, and whether it finished; never what it erased."
@@ -671,7 +663,6 @@ const workspaces: DurableObjectState = {
     dashboards: exported(`${core}workspace.ts`),
     dashboard_widgets: exported(`${core}workspace.ts`),
     custom_widgets: exported(`${core}workspace.ts`),
-    email_preferences: exported(`${core}workspace.ts`),
     preview_releases: cache(`${core}sealed-previews.ts`),
     preview_release_artifacts: cache(`${core}sealed-previews.ts`),
     preview_stores: transient(`${core}sealed-previews.ts`),
