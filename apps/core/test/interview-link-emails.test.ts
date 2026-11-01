@@ -14,14 +14,7 @@ import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // Grasp emails everyone their interview link on its day, and one reminder
 // to whoever hasn't finished three working days later; the company's
@@ -247,9 +240,6 @@ describe("the interview link emails", () => {
 
   it("say whose failed, to staff and the company's admin, and are sent again by staff, audited without whom", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const session = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(session);
-    const staff = await core.authenticate();
     const store = onboardingStore(env);
     const mail = await captureMail(store, "E_RECIPIENT_SUPPRESSED");
     await api.onboarding.saveRoster({
@@ -263,11 +253,15 @@ describe("the interview link emails", () => {
       start: new Date().toISOString().slice(0, 10),
       days: 14,
     });
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "none",
+      },
+      { type: "system" }
+    );
+    await store.releaseDue();
     await store.deliverMail();
     const failed = mail.tried.length - mail.sent.length;
     /** What staff and the company's admin are told of oli's and ona's mail. */

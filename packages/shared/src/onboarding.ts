@@ -7,7 +7,6 @@ import type { OnboardingHrApi } from "./hr.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
-import type { StaffAgreements } from "./onboarding-staff.ts";
 import type { onboardingStages } from "./onboarding-summary.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
@@ -431,17 +430,6 @@ export interface OnboardingApi
   links: () => Promise<LinkToSend[]>;
   /** The admin took these people's links to send: they are new no more. */
   linksTaken: (people: string[]) => Promise<void>;
-}
-
-/**
- * What only Grasp's staff still do in an onboarding over `/rpc`: the
- * agreements. The rest is steered from Grasp's admin (`admin-command.ts`).
- */
-export interface OnboardingStaffApi {
-  /** Where the agreements stand, and the links that wait for them. */
-  agreements: () => Promise<StaffAgreements>;
-  /** Records where the agreements stand; once all are in, the links due go out. */
-  setAgreements: (agreements: Agreements) => Promise<OnboardingView>;
 }
 
 /** Why the onboarding refused something. */

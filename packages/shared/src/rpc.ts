@@ -21,7 +21,7 @@ import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
-import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
+import type { OnboardingApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
@@ -224,8 +224,6 @@ export interface SessionApi {
    * dates and the stage) for everyone signed in.
    */
   readonly onboarding: OnboardingApi;
-  /** What only Grasp's staff do in the onboarding: pause it, the agreements. */
-  readonly onboardingStaff: OnboardingStaffApi;
   /** Whether the company may come in yet: Grasp's go. */
   readonly onboardingGate: OnboardingGateApi;
 }
