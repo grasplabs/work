@@ -71,6 +71,7 @@ const nativeContract = (
       readOnly: declared.readOnly,
       input: JSON.stringify(declared.contract.input),
       output: JSON.stringify(declared.contract.output),
+      ...(declared.answersFile === true ? { answersFile: true as const } : {}),
     };
   }
   return { contract, actions };
@@ -224,7 +225,13 @@ export const nativeOperation = (request: unknown): NativeOperation => {
             canonicalJson(action.declared.contract.input) === input &&
             canonicalJson(action.declared.contract.output) === output
           ) {
-            return { contract, readOnly: action.declared.readOnly };
+            return {
+              contract,
+              readOnly: action.declared.readOnly,
+              ...(action.declared.answersFile === true
+                ? { answersFile: true as const }
+                : {}),
+            };
           }
         }
       }

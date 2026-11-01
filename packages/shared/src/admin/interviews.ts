@@ -1,10 +1,7 @@
-import { listeningAt } from "./onboarding.ts";
-import type { DirectoryTeam } from "./onboarding.ts";
-
 /**
- * Stephen's interviews: what one interview fills in, where everyone invited stands, and when a
- * workflow has been heard often enough to count as known. A fact counts only once the person who
- * said it has approved it. Pure, with the sample client's teams as mock data.
+ * Stephen's interviews: what one interview fills in, the states a person's link goes through, and
+ * when a workflow has been heard often enough to count as known. A fact counts only once the
+ * person who said it has approved it. Pure.
  */
 
 /** What one interview fills in about a piece of work. A question that fills none of these is not asked. */
@@ -117,48 +114,9 @@ export const PERSON_STATES = [
   "expired",
 ] as const;
 export type PersonState = (typeof PERSON_STATES)[number];
-export type StateCounts = Record<PersonState, number>;
 
 /** The company sees numbers only for groups of at least this many people. */
 export const MIN_GROUP = 5;
-
-const clamp = (value: number, min = 0, max = 1) =>
-  Math.min(Math.max(value, min), max);
-
-/**
- * Where everyone in each team stands at `progress` of the listening weeks, 0 to 1. Those who
- * talked are complete; of the rest some stopped halfway, some are talking now, and the others
- * have opened their link or not yet. Once the weeks are over, a link that was not used to the
- * end has expired.
- */
-export const teamStates = (
-  progress: number,
-  teams: DirectoryTeam[]
-): StateCounts[] => {
-  const p = clamp(progress);
-  const listening = listeningAt(p, teams);
-  return teams.map((team, index) => {
-    const completed =
-      p === 0 ? 0 : Math.min(listening.heard[index] ?? 0, team.people);
-    let left = team.people - completed;
-    const take = (count: number) => {
-      const taken = Math.max(0, Math.min(Math.round(count), left));
-      left -= taken;
-      return taken;
-    };
-    const incomplete = take(left * 0.18 * p);
-    const talking = take(p > 0 && p < 1 ? Math.min(2, left * 0.1) : 0);
-    const opened = take(p > 0 && p < 1 ? left * 0.35 : 0);
-    return {
-      invited: p < 1 ? left : 0,
-      opened,
-      progress: talking,
-      incomplete,
-      completed,
-      expired: p < 1 ? 0 : left,
-    };
-  });
-};
 
 /** A step is known once this many people who do the work described it. */
 export const EVIDENCE_PEOPLE = 3;
@@ -262,11 +220,6 @@ export const VISION_FIELDS = [
   "languages",
 ] as const;
 export type VisionField = (typeof VISION_FIELDS)[number];
-
-/** What the sample client's first conversation left open, as Stephen read it: he points it out, and the sponsor is asked. */
-export const VISION_OPEN: VisionField[] = ["languages"];
-
-export type HypothesisState = "hypothesis" | "confirmed" | "dropped";
 
 /** The ways an interviewer goes wrong, by kind: each guards a question before it is asked and scores the transcript after. */
 export const MISTAKES: Record<

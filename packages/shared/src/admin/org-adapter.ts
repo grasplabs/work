@@ -7,6 +7,7 @@ import type { Phase } from "./interviews.ts";
 import {
   filledBy,
   NOTHING_BY_HAND,
+  READ_ONE_IN,
   STARTING_ORG_RULES,
 } from "./onboarding-admin.ts";
 import type {
@@ -35,8 +36,7 @@ import { present } from "./present.ts";
  * A real organization, as the Worker keeps it (`StaffSnapshot`), in the shape Grasp's admin reads
  * every organization in (`Org`, `OrgState`): its teams and people from its roster, its work from
  * what the leads named and the interviews drew, and what really happened in days since its
- * interviews started. So every section of the admin works the same for a real organization as for
- * a sample, and nothing in it is played. Pure.
+ * interviews started. Pure.
  */
 
 const first = (name: string) => name.split(" ")[0] ?? name;
@@ -192,7 +192,7 @@ const clientStepOf = (snapshot: StaffSnapshot): ClientStep => {
 };
 
 /**
- * Every fact written down in an interview, as a sample interview counts them, and how many of those
+ * Every fact written down in an interview, and how many of those
  * the person took out again. Where only the numbers came, they stand for the facts: their words
  * stay where they were said.
  */
@@ -222,7 +222,6 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       id: team.id,
       name: team.name,
       people: people.filter((person) => person.team === team.id).length,
-      pace: 1,
       ...(lead ? { lead: first(lead.name) } : {}),
       leader: lead?.name ?? "",
       does: team.does,
@@ -388,7 +387,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     .filter((each) => each.approved && held.get(each.id)?.counted === undefined)
     .toSorted((a, b) => a.day - b.day)
     .entries()) {
-    interview.toRead = index % 5 === 0;
+    interview.toRead = index % READ_ONE_IN === 0;
   }
 
   const real: RealHappened = {
