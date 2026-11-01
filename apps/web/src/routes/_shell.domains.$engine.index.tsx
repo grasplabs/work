@@ -39,6 +39,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
+import { AppAccessRequests } from "../engines/app-access-requests.tsx";
 import { ExportDefinition } from "../engines/app-definition.tsx";
 import { RemoveApp } from "../engines/app-remove.tsx";
 import {
@@ -675,6 +676,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsContent value="integrations">
             <div className="pt-4">
               <Integrations identity={identity} integrations={integrations} />
+              <div className="pt-6">
+                <AppAccessRequests app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}
