@@ -166,13 +166,12 @@ const actionsOf = async (
     )
   );
   return new Map(
-    // A Composio connection's tools Grasp classed: a connect that predates
-    // classes says only which the admin allowed, and runs them all.
-    offered.map(({ id, source, provider, tools, offeredTools }) => [
+    // A Composio connection's tools Grasp classed.
+    offered.map(({ id, source, provider, offeredTools }) => [
       id,
       source === "native"
         ? (manifests.get(provider) ?? [])
-        : (offeredTools ?? tools ?? []),
+        : (offeredTools ?? []),
     ])
   );
 };

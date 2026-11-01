@@ -333,8 +333,7 @@ export interface ConnectionSummary {
   /**
    * Those of `tools` on offer: the ones Grasp classed (connect's
    * composio-classes.ts). A tool nobody classed is never offered or run,
-   * whatever the admin allowed. Absent for a native connection, and from
-   * a connect that predates it, which runs every allowed tool.
+   * whatever the admin allowed. Absent for a native connection.
    */
   offeredTools?: string[];
 }
