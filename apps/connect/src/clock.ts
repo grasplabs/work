@@ -5,6 +5,7 @@ import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 import { resealAiProviderKeys } from "./ai-providers.ts";
 import {
   purgeExpiredToolkitFlows,
+  reconcileUnsyncedTools,
   retryComposioCleanups,
 } from "./composio-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
@@ -35,6 +36,13 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   },
   // Revokes at a provider a disconnect couldn't make (src/revocations.ts).
   { name: "oauth.revocations", period: "minute", run: retryRevocations },
+  // Composio's tools brought to connect's, where a change's reconcile
+  // didn't finish.
+  {
+    name: "composio.tools",
+    period: "minute",
+    run: reconcileUnsyncedTools,
+  },
   // Held writes from a chat platform whose company's day is over.
   { name: "held.ended", period: "minute", run: expireHeldActions },
   // What a rotated key sealed, sealed again.

@@ -888,9 +888,11 @@ const maxRunIdLength = 256;
  * until the first; with one, exactly that run, whatever it starts.
  * Nothing runs or is controlled but by those calls: never on render,
  * remount or reconnect. Unmounting stops following; the run goes on. A
- * run the person may not see, or one of another contract, is thrown
- * while rendering, as a query's failure is; a command's failure rejects
- * its own promise and is never the run's `error`.
+ * run the person may not see as it is first followed, or one of another
+ * contract, is thrown while rendering, as a query's failure is; one shown
+ * that they may see no more (a decision that asked them was answered)
+ * shows as `unavailable`, never thrown. A command's failure rejects its
+ * own promise and is never the run's `error`.
  */
 export const useWorkflow = <Reference extends AnyWorkflowReference>(
   reference: Reference,
