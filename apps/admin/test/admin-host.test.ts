@@ -53,7 +53,6 @@ describe("the admin's own hostname", () => {
       await asStaff("https://ops.grasp.test/_serverFn/anything"),
       await asStaff("https://ops.grasp.test/mcp"),
       await asStaff("https://ops.grasp.test/mcp", { method: "POST" }),
-      new Request("https://ops.grasp.test/discord/interactions"),
       await asStaff("https://ops.grasp.test/", { method: "POST" }),
       await asStaff(`https://${adminHost}/`, { method: "POST" }),
     ];

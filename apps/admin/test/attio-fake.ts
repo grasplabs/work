@@ -6,7 +6,7 @@
  * admin only ever read.
  *
  * Any other request goes to the stand-in for `fetch` set up before it, as
- * test/rooms-fake.ts chains.
+ * test/stripe-mcp.ts chains.
  */
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
