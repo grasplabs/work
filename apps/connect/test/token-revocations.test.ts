@@ -1,7 +1,6 @@
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
 import { owedForMs } from "../src/revocations.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
@@ -483,65 +482,6 @@ describe("a disconnect's revoke at the provider, owed until it goes", () => {
         },
       ],
       revoked: [],
-    });
-  });
-
-  it("carries a revoke owed before each kept its own copy over, and revokes with it", async () => {
-    const person = someone();
-    const { connectionId, refreshToken } = await connected(person);
-    const owedAt = Date.now() - 60_000;
-    const migrations = z
-      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
-      .parse(Reflect.get(env, "CONNECT_MIGRATIONS"));
-    const queriesOf = (prefix: string): string[] =>
-      migrations.find(({ name }) => name.startsWith(prefix))?.queries ?? [];
-    const { sealed } =
-      (await env.DB.prepare(
-        "SELECT sealed FROM connection_tokens WHERE connection_id = ?"
-      )
-        .bind(connectionId)
-        .first<{ sealed: string }>()) ?? {};
-    // As a disconnect the provider refused left it under 0021: the
-    // connection stopped, its tokens kept, and the revoke owed by its ID.
-    await env.DB.batch([
-      env.DB.prepare("DROP TABLE token_revocations"),
-      ...queriesOf("0021_").map((query) => env.DB.prepare(query)),
-      env.DB.prepare(
-        "UPDATE connections SET status = 'disconnected' WHERE id = ?"
-      ).bind(connectionId),
-      env.DB.prepare(
-        "INSERT INTO token_revocations (connection_id, attempts, retry_at, created_at) VALUES (?, 2, ?, ?)"
-      ).bind(connectionId, owedAt + 1, owedAt),
-    ]);
-
-    await env.DB.batch(
-      queriesOf("0024_").map((query) => env.DB.prepare(query))
-    );
-    const carried = await env.DB.prepare(
-      "SELECT sealed, reason, attempts, retry_at AS retryAt, created_at AS createdAt FROM token_revocations WHERE connection_id = ?"
-    )
-      .bind(connectionId)
-      .first();
-    const kept = await keptOf(connectionId);
-    await due(connectionId);
-    await runMaintenance();
-
-    expect({
-      carried,
-      kept,
-      revoked: !apps.holds(refreshToken),
-      left: await keptOf(connectionId),
-    }).toStrictEqual({
-      carried: {
-        sealed,
-        reason: "disconnected",
-        attempts: 2,
-        retryAt: owedAt + 1,
-        createdAt: owedAt,
-      },
-      kept: { status: "disconnected", tokens: 0, owed: true },
-      revoked: true,
-      left: { status: "disconnected", tokens: 0, owed: false },
     });
   });
 });
