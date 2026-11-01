@@ -1317,7 +1317,8 @@ describe(
             "workflowVersion",
           ],
           // No engine runs these rows' run, so it waits on nothing the
-          // engine lists (run-waits.ts); a real run's are the journey's.
+          // engine lists (run-waits.ts); a real run's decision wait, as a
+          // reviewer and its starter see it, is screen-typed-workflows'.
           waits: [],
           control: {
             canPause: false,
