@@ -24,6 +24,7 @@ import type {
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
 import type { ScreensWaiting } from "./screen-trust.ts";
+import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
 // that stops until they decide or do something, each item of a kind,
@@ -163,6 +164,17 @@ export interface RevokedPackageItem extends ItemBase {
   notification: PackageRevokedNotification;
 }
 
+/**
+ * A workflow version, live or asked to go live, whose bindings no admin
+ * approved, so its starts are refused: for the organization's own admins,
+ * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
+ */
+export interface BindingApprovalItem extends ItemBase {
+  kind: "bindingApproval";
+  verdicts: never[];
+  pending: PendingWorkflowBindings;
+}
+
 /** A connection whose access ran out, which the person can sign in to again on its page. */
 export interface SignInAgainItem extends ItemBase {
   kind: "signInAgain";
@@ -191,6 +203,7 @@ export type WaitingItem =
   | OpenQuestionItem
   | StoppedScheduleItem
   | RevokedPackageItem
+  | BindingApprovalItem
   | SignInAgainItem
   | DecisionItem
   | HeldStartItem;
@@ -213,6 +226,7 @@ export const waitingParts = [
   "connections",
   "decisions",
   "heldStarts",
+  "bindings",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 

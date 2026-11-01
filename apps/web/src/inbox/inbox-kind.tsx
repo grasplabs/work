@@ -71,6 +71,11 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Malware",
     context: "inbox item kind: packages revoked as malware",
   }),
+  bindingApproval: msg({
+    message: "Bindings",
+    context:
+      "inbox item kind: what a workflow reaches, for an admin to approve",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -94,6 +99,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
   revokedPackage: ShieldAlertIcon,
+  bindingApproval: LockKeyholeIcon,
   decision: ScaleIcon,
 };
 
