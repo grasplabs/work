@@ -93,7 +93,7 @@ import {
   waitStep,
 } from "./host.ts";
 import type { Busy, CoreMarker, KeyWait, LoadWait, RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { callAction } from "./resource-action.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
@@ -4854,7 +4854,7 @@ export class ResourceRunHost
     passed: { input: Json; output: Json; size: number }
   ): Promise<number> {
     attempt.child = await this.#startedChild(attempt, running, passed);
-    const { limits } = await quotaPolicy(this.#env);
+    const limits = quotaLimits(this.#env);
     const lineageEnds =
       (this.#run.lineageStartedAt ?? this.#run.createdAt) +
       limits.workflowAgeMs;

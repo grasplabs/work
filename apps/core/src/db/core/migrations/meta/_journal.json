@@ -1310,6 +1310,13 @@
       "when": 1793503703937,
       "tag": "0186_drop_migration_samples",
       "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "6",
+      "when": 1793512660504,
+      "tag": "0187_drop_quota_policy_generations",
+      "breakpoints": true
     }
   ]
 }

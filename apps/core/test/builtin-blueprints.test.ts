@@ -11,7 +11,6 @@ import type {
   DeclaredPermission,
   Authority,
 } from "@grasp-os/shared/permissions";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -39,6 +38,7 @@ import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -1223,10 +1223,9 @@ describe("the built-in blueprints", () => {
       )
     ).resolves.toBeTruthy();
     // Room for one workflow: the second is refused once the first is made.
-    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
-    env.QUOTA_LIMITS = {
-      generation: configured.generation + 200,
-      limits: { ...configured.limits, workflowResourcesPerPerson: 1 },
+    env.TEST_QUOTA_LIMITS = {
+      ...configuredLimits,
+      workflowResourcesPerPerson: 1,
     };
     let refused: string;
     try {
@@ -1234,10 +1233,7 @@ describe("the built-in blueprints", () => {
         builder.api.apps.blueprints.create("hello", { name: "Partway" })
       );
     } finally {
-      env.QUOTA_LIMITS = {
-        generation: configured.generation + 201,
-        limits: configured.limits,
-      };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     const counted = await env.DB.prepare(
       "SELECT count(*) AS made, count(*) FILTER (WHERE deleted_at IS NULL) AS live FROM workflow_resources WHERE owner_id = ?"

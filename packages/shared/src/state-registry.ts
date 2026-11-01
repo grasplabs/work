@@ -364,7 +364,6 @@ const coreDb: D1State = {
     run_lineage_accounts: exported(`${core}workflows/quotas.ts`),
     run_lineage_children: exported(`${core}workflows/quotas.ts`),
     mail_domains: exported(`${core}workflows/inbound-email.ts`),
-    quota_policies: exported(`${core}workflows/quotas.ts`),
     workflow_run_controls: exported(`${core}workflows/controls.ts`),
     workflow_run_wakes: exported(`${core}workflows/wakes.ts`),
     workflow_triggers: exported(

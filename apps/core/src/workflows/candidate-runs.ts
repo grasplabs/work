@@ -496,9 +496,7 @@ const loadedCandidateRun = async (
   const fixtures = z
     .record(z.string(), z.object({ output: z.json() }))
     .parse(JSON.parse(row.fixtures));
-  // Never an end of the run when the policy can't be read for a moment
-  // (`modelCallLimitOf`): its last read, else the platform's limit.
-  const modelCalls = await modelCallLimitOf(env);
+  const modelCalls = modelCallLimitOf(env);
   return {
     run: {
       runId,

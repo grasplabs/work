@@ -843,9 +843,7 @@ const loadedRun = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  // Never an end of the run when the policy can't be read for a moment
-  // (`modelCallLimitOf`): its last read, else the platform's limit.
-  const modelCalls = await modelCallLimitOf(env);
+  const modelCalls = modelCallLimitOf(env);
   const calling = await callingRunOf(env, pin.workflow, runId);
   if (calling === undefined) {
     throw new Error(`Run ${runId} has ended`);
@@ -972,7 +970,7 @@ export const runActivation = async (
   const { run, output, owner, admission } = activation;
   const { runId } = run;
   // The workflow's own step limit only ever lowers the host's.
-  const ceiling = await stepLimitOf(env);
+  const ceiling = stepLimitOf(env);
   const step = countedStep(
     engineStep,
     Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)

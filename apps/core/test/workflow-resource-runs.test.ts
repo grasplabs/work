@@ -3,7 +3,6 @@ import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import {
   maxLiveRunsPerPrincipal,
@@ -34,7 +33,7 @@ import type { Settled } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
-import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
+import { admitAttempt } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
   listResourceRuns,
@@ -48,12 +47,12 @@ import {
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import {
   admittedFreely,
   aroundEngine,
   runObject,
   whileEngineRefuses,
-  withPolicyReadFailingOnce,
 } from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
@@ -1676,30 +1675,18 @@ describe("whose word a run's row takes, and whose clock", () => {
 // kill is stood in for (cpu-kills.ts), as plain workerd enforces none.
 
 /**
- * The generation of the next quota policy a test sets: each higher than
- * any before, as an operator's must be (quotas.ts, `quotaPolicy`).
- */
-let generations = 100;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/**
- * What `run` returns with the operator's quota policy `limits` in force,
- * under a new generation; the deployment's own again after, under a
- * newer one.
+ * What `run` returns with the quota limits `limits` lowered; the
+ * deployment's own again after.
  */
 const withQuotas = async <Result>(
   limits: Record<string, number>,
   run: () => Promise<Result>
 ): Promise<Result> => {
-  generations += 1;
-  env.QUOTA_LIMITS = { generation: generations, limits };
+  env.TEST_QUOTA_LIMITS = limits;
   try {
     return await run();
   } finally {
-    generations += 1;
-    env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+    env.TEST_QUOTA_LIMITS = configuredLimits;
   }
 };
 
@@ -2170,7 +2157,7 @@ describe(
       const admittedAt = Date.now();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?, 0)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?)"
         ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
         env.DB.prepare(
           "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
@@ -2427,7 +2414,7 @@ describe(
       );
       const receiptOfNobody = await outcome(
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'k', 1, 1, ?, 0, 0, 0, 0)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'k', 1, 1, ?, 0, 0, 0)"
         )
           .bind(nobody, runId)
           .run()
@@ -2461,69 +2448,6 @@ describe(
         moved: true,
         rooted: true,
       });
-    });
-
-    it("refuses a step past the policy's steps as it is admitted, whatever limit the run loaded with while the policy couldn't be read", async () => {
-      const by = await builder();
-      // Seven tasks, each a step of its own: the sixth is past five.
-      const workflow = await published(by, (name) =>
-        definitionOf(
-          name,
-          ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({
-            [id]: { set: { status: id } },
-          }))
-        )
-      );
-      // The policy as the run's attempts are admitted: five steps. Its
-      // load can't read it, and counts by the limit it last read.
-      const result = await withQuotas({ workflowSteps: 5 }, async () => {
-        // Recorded first, so each read of it later is one query.
-        await quotaPolicy(env);
-        // The load reads the policy for its model calls, then for its
-        // step limit: that read fails.
-        return await withPolicyReadFailingOnce(
-          async () => {
-            const { runId } = await start(by, workflow.id);
-            return await ended(by, workflow.id, runId);
-          },
-          { skip: 1 }
-        );
-      });
-      const receipts = await receiptsOf(result.value.id);
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        code: result.value.error?.code,
-        receipts: receipts.length,
-      }).toStrictEqual({
-        failed: true,
-        status: "failed",
-        code: "workflow.lineage_limit",
-        receipts: 5,
-      });
-    });
-
-    it("goes on with a run whose model call limit can't be read for a moment as it loads, and completes it", async () => {
-      const by = await builder();
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [{ a: { set: { status: "a" } } }])
-      );
-      // Recorded first, so each read of it later is one query. The load's
-      // read of its model call limit fails (`modelCallLimitOf`), as D1 can
-      // for a moment: the run counts by the limit last read, and goes on.
-      await quotaPolicy(env);
-      const result = await withPolicyReadFailingOnce(
-        async () => {
-          const { runId } = await start(by, workflow.id);
-          return await ended(by, workflow.id, runId);
-        },
-        { by: "modelCallLimitOf" }
-      );
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        error: result.value.error ?? null,
-      }).toStrictEqual({ failed: true, status: "completed", error: null });
     });
 
     it("checks what an attempt records while it still holds its admission, and settles it after", async () => {
@@ -2606,73 +2530,6 @@ describe(
       expect({ ok: settled.ok, happened }).toStrictEqual({
         ok: false,
         happened: ["record checked", "settled"],
-      });
-    });
-
-    it("refuses a step's run again after a wait for load past the policy's steps, whatever limit the run loaded with while the policy couldn't be read", async () => {
-      const by = await builder();
-      const hanging = await published(by, (name) =>
-        definitionOf(name, [{ finish: { set: { status: "done" } } }])
-      );
-      await forgedModule(hanging.id, hangingModule);
-      // Its own steps: a, the pause and b, its third.
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [
-          { a: { set: { status: "a" } } },
-          { pause: { wait: "PT5S" } },
-          { b: { set: { status: "b" } } },
-        ])
-      );
-      const result = await withQuotas(
-        { workflowPersonAttempts: 1 },
-        async () => {
-          const { runId } = await start(by, workflow.id);
-          // Once a has run, a hanging run takes the person's one attempt
-          // at once, so b waits for load.
-          await vi.waitFor(
-            async () => {
-              await expect(receiptsOf(runId)).resolves.toMatchObject([
-                { settled: 1 },
-              ]);
-            },
-            { timeout: 30_000, interval: 100 }
-          );
-          const holder = await start(by, hanging.id);
-          await vi.waitFor(
-            async () => {
-              await expect(loadWaitsOf(runId)).resolves.toBeGreaterThan(0);
-            },
-            { timeout: 30_000, interval: 200 }
-          );
-          // The operator lowers the steps to one; the run's next load
-          // can't read the policy, and counts by the limit it last read.
-          return await withQuotas(
-            { workflowPersonAttempts: 1, workflowSteps: 1 },
-            async () => {
-              // Recorded first, so each read of it later is one query. The
-              // load's read for its step limit fails (`stepLimitOf`): the
-              // holder's share coming back, the run's own wakes and
-              // admissions read it too, each in its own time.
-              await quotaPolicy(env);
-              return await withPolicyReadFailingOnce(
-                async () => {
-                  await terminateResourceRun(env, by, hanging.id, holder.runId);
-                  return await ended(by, workflow.id, runId);
-                },
-                { by: "stepLimitOf" }
-              );
-            }
-          );
-        }
-      );
-      expect({
-        failed: result.failed,
-        status: result.value.status,
-        code: result.value.error?.code,
-      }).toStrictEqual({
-        failed: true,
-        status: "failed",
-        code: "workflow.lineage_limit",
       });
     });
   }

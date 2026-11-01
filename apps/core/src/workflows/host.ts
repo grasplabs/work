@@ -104,7 +104,7 @@ import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { modelWaitRecorded } from "./model-waits.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import {
   citedVersions,
@@ -394,7 +394,7 @@ export const busyMarker = ({
 /**
  * An attempt refused for now: the seconds to wait, the share it was
  * queued for, when it was (`workflow.queued`), not its lineage busy, and
- * how long a step may wait in all, as the quota policy said then.
+ * how long a step may wait in all, as the quota limits said then.
  */
 export interface Busy {
   busyFor: number;
@@ -633,7 +633,7 @@ interface WaitRound {
 
 /**
  * The failure of step `step`, which waited for load as long as a step may
- * (`maxWaitMs`, the quota policy's `workflowQueuedStepMs`): no retry of
+ * (`maxWaitMs`, the quota limits' `workflowQueuedStepMs`): no retry of
  * its own is spent, and none tried.
  */
 export const queueTimedOut = (step: string, maxWaitMs: number): StepError => ({
@@ -1252,7 +1252,7 @@ const keptStatistics = (attempt: StepAttempt): boolean =>
  * `context` says, else `tries`, the attempts this execution made (fewer,
  * if an earlier execution made some: never the last too soon), against
  * its retries as the engine says, else `configured`, else the default.
- * The attempts the quota policy admits are its admission's to say
+ * The attempts the quota limits admit are its admission's to say
  * (`RunHost.#admit`).
  */
 const isLastAttempt = (
@@ -1350,69 +1350,29 @@ export const newAiCalls = (): AiCalls => ({
   unclaimed: new Map(),
 });
 
-/** The step limit this isolate last read from the quota policy. */
-let lastStepLimit: number | undefined;
-
 /**
  * The steps a run may take (spec 18.1's logical steps, 1000 a run), as
- * the deployment's quota policy has it now: so a run whose code loops on
- * steps without end can't journal without bound. Counted over each
- * activation's replay of the run's journal (`countedStep`), so a restart,
- * a retry or a new activation counts every step the run took before.
- *
- * Read before any of the run's steps, where a throw would end the run for
- * good, so a policy that can't be read (the database failing for a
- * moment) is logged, and the limit this isolate last read applies, else
- * the platform's: the run goes on. It admits nothing more: every attempt
- * of a step reads the policy again as it is admitted (quotas.ts,
- * `admitAttempt`), and one that can't is refused as the platform's
- * unexpected error, which the engine retries. The limit only bounds what
- * the run journals, and the next activation reads it again.
+ * the quota limits have them: so a run whose code loops on steps without
+ * end can't journal without bound. Counted over each activation's replay
+ * of the run's journal (`countedStep`), so a restart, a retry or a new
+ * activation counts every step the run took before. Every attempt of a
+ * step is held to them again as it is admitted (quotas.ts,
+ * `admitAttempt`).
  */
-export const stepLimitOf = async (env: Env): Promise<number> => {
-  try {
-    const { limits } = await quotaPolicy(env);
-    lastStepLimit = limits.workflowSteps;
-    return lastStepLimit;
-  } catch (error) {
-    log.warn("workflow.quota_policy_unread", errorFields(error));
-    return lastStepLimit ?? platformLimits.workflowSteps;
-  }
-};
-
-/** The model call limit this isolate last read from the quota policy. */
-let lastModelCallLimit: number | undefined;
+export const stepLimitOf = (env: Env): number => quotaLimits(env).workflowSteps;
 
 /**
- * The model calls a run's lineage may make, as the deployment's quota
- * policy has it now (`lineageModelRequests`): the ceiling a run's host
- * holds its model calls to (`maxModelCalls`).
- *
- * Read as a run loads, before any of its steps, where a throw would end
- * the run for good (GRA-1091), so a policy that can't be read for a moment
- * is logged, and the limit this isolate last read applies, else the
- * platform's own: never no limit at all. It admits nothing more: every
- * model request of a run's lineage reads the policy again as it is sent
- * (models.ts, `scopesNowOf`), and one that can't is held back, so a
- * lowered limit holds through the moment.
+ * The model calls a run's lineage may make, as the quota limits have them
+ * (`lineageModelRequests`): the ceiling a run's host holds its model calls
+ * to (`maxModelCalls`). Every model request of a run's lineage is held to
+ * them again as it is sent (models.ts, `scopesNowOf`).
  */
-export const modelCallLimitOf = async (env: Env): Promise<number> => {
-  try {
-    const { limits } = await quotaPolicy(env);
-    lastModelCallLimit = limits.lineageModelRequests;
-    return lastModelCallLimit;
-  } catch (error) {
-    log.warn("workflow.quota_policy_unread", {
-      ...errorFields(error),
-      limit: "lineageModelRequests",
-    });
-    return lastModelCallLimit ?? platformLimits.lineageModelRequests;
-  }
-};
+export const modelCallLimitOf = (env: Env): number =>
+  quotaLimits(env).lineageModelRequests;
 
 /**
- * `step`, counting the run's own steps (`stepLimit` is the operator's
- * allowance of them) and refusing one past it, as a failure of that step.
+ * `step`, counting the run's own steps (`stepLimit` is the allowance
+ * of them) and refusing one past it, as a failure of that step.
  * Core's own steps (`$grasp:…`, but for a wait's, which the run's code
  * causes without bound: {@link waitStepPrefix}) and the SDK's first
  * `$params` step are outside the allowance: a run of one step fits an
@@ -1477,8 +1437,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
         return await step.do(name, config, fn);
       }
       // Each attempt is told its step's place, for its admission against
-      // the policy as it is then (quotas.ts, `admitAttempt`): the limit
-      // this activation counts by may be a fallback (`stepLimitOf`).
+      // the limits as they are then (quotas.ts, `admitAttempt`).
       return await step.do(
         name,
         config,

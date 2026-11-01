@@ -65,8 +65,6 @@ import {
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
-import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
-import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { maxSpeechChars } from "@grasp-os/shared/voice";
 import type { Speech } from "@grasp-os/shared/voice";
@@ -143,7 +141,7 @@ import {
 } from "./voice-models.ts";
 import type { HearingRef, VoiceRef } from "./voice-models.ts";
 import { askAgainMs } from "./workflows/admission.ts";
-import { quotaPolicy } from "./workflows/quotas.ts";
+import { quotaLimits } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through a model transport (model-transport.ts), never
@@ -776,16 +774,14 @@ interface Route extends Admitted {
   price: PinnedPrice | undefined;
   /**
    * The scopes a provider request sent now counts against, in this month,
-   * its run lineage's limited by the quota policy in force now, and that
-   * policy's generation (none for a call with no lineage). Throws when the
-   * policy, or the teams of the person it is made for, can't be read:
-   * nothing is admitted without the limits they give.
+   * its run lineage's limited by the quota limits. Throws when the teams
+   * of the person it is made for can't be read: nothing is admitted
+   * without the limits they give.
    */
   scopesNow: () => Promise<{
     period: string;
     scopes: LedgerScope[];
-    policyGeneration: number | undefined;
-    /** Whose shares of the requests in flight it takes, under the policy now. */
+    /** Whose shares of the requests in flight it takes, under the quota limits. */
     fair: Fairness;
     /**
      * The person it is made for, and their teams, whose limit the ledger
@@ -1286,7 +1282,7 @@ const settleAdmitted = async (
   return { reservedMicros: admission.reservedMicros, settled };
 };
 
-/** `route`'s scopes now, or held back when the quota policy can't be read. */
+/** `route`'s scopes now, or held back when they can't be read. */
 const scopesRead = async (
   route: Admitting
 ): Promise<Awaited<ReturnType<Route["scopesNow"]>> | { held: Refusal }> => {
@@ -1429,22 +1425,19 @@ const documentBound = (
 /**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost (`Route.bound`), at the
- * model's pinned prices. Its ID, or why it is held back. Asked once
- * more, under the quota policy read again, when the ledger already
- * admitted under a newer one (`retried`).
+ * model's pinned prices. Its ID, or why it is held back.
  */
 const admitRequest = async (
   route: Admitting,
   body: unknown,
-  endsAt: number,
-  retried = false
+  endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
   const { env, call, price, perRequest } = route;
   const now = await scopesRead(route);
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, policyGeneration, fair, person } = now;
+  const { period, scopes, fair, person } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -1480,23 +1473,16 @@ const admitRequest = async (
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
       ...(route.leaseMs === undefined ? {} : { leaseMs: route.leaseMs }),
-      ...(policyGeneration === undefined ? {} : { policyGeneration }),
       fair,
       ...(person === undefined ? {} : { person }),
       ...(route.way === undefined ? {} : { route: route.way }),
     });
     if ("policyBehind" in admitted) {
-      if (!retried) {
-        return await admitRequest(route, body, endsAt, true);
-      }
-      // Never expected: core records a generation before any admission
-      // carries it, and reads the highest it recorded. A ledger ahead of
-      // core (core's database restored, say) holds back every workflow's
-      // call until core's policy passes it: logged with both generations,
-      // and refused for what it is, never as a ledger outage.
+      // Never expected: the ledger refuses this only for an admission that
+      // carries a policy generation, which none does. Logged, and refused
+      // for what it is, never as a ledger outage.
       log.error("model.quota_policy_behind", {
         model: call.model,
-        generation: policyGeneration,
         ledgerGeneration: admitted.highest,
       });
       return { held: { code: "model.quota_policy_behind" } };
@@ -1621,7 +1607,7 @@ const askUntilServed = async (
  * round (`onQueued`).
  *
  * One way out, however the wait ends (admitted, refused for anything, out
- * of time, cancelled, stopped by its caller, a policy that can't be read,
+ * of time, cancelled, stopped by its caller, scopes that can't be read,
  * a ledger that throws): a call that held a place and wasn't admitted
  * gives it up, so no abandoned place holds others back while it lapses,
  * and a caller told it waited is told it stopped.
@@ -2595,38 +2581,6 @@ const parseCall = <Schema extends z.ZodType>(
 };
 
 /**
- * The last quota policy this isolate read, for a call's shares when the
- * policy can't be read for a moment: closer to what the operator set than
- * the platform's ceilings. Per isolate, never shared or stored: a lowered
- * policy read anywhere else applies here at the next read that works.
- */
-let lastPolicyRead: QuotaPolicy | undefined;
-
-/** The deployment's quota policy as it stands, remembered (`lastPolicyRead`). */
-const readPolicy = async (env: Env): Promise<QuotaPolicy> => {
-  const read = await quotaPolicy(env);
-  lastPolicyRead = read;
-  return read;
-};
-
-/**
- * The deployment's quota policy; when it can't be read, the last this
- * isolate read, else the platform's own (its ceilings): for a call's
- * shares, which a policy only lowers, and which bound no spend.
- */
-const policyOrPlatform = async (env: Env): Promise<QuotaPolicy> => {
-  try {
-    return await readPolicy(env);
-  } catch (error) {
-    log.error("model.quota_policy_failed", {
-      ...errorFields(error),
-      fallback: lastPolicyRead === undefined ? "platform" : "last_read",
-    });
-    return lastPolicyRead ?? quotaPolicyOf();
-  }
-};
-
-/**
  * The scopes a provider request of `call` counts against once it is sent
  * (`Route.scopesNow`), by `scopesOn` for its day and its lineage's limit
  * of requests, and whose shares of the requests in flight it takes: from
@@ -2643,23 +2597,14 @@ const scopesNowOf = (
 ): Route["scopesNow"] => {
   const { subject, resource } = shareIdentity(call);
   return async () => {
-    // A run lineage's request limit, as the policy stands for this
-    // request: lowered for runs already under way too (model-budgets.ts).
-    const lineage =
-      call.trigger.type === "workflow" || call.lineage !== undefined
-        ? await readPolicy(env)
-        : undefined;
-    // The shares, as the policy stands too; for a call with no lineage,
-    // the last read or the platform's own should the policy not be read.
-    const policy = lineage ?? (await policyOrPlatform(env));
+    const limits = quotaLimits(env);
+    const lineageRequests = limits.lineageModelRequests;
     // One clock for both, so a request at a month's last instant never
     // counts its day in one month and its month in the next.
     const { month, day } = budgetPeriods(env);
     // The person's teams as core's records have them now, so a person
     // moved between teams is held to the right limit from their next
     // request.
-    const lineageRequests =
-      lineage?.limits.lineageModelRequests ?? lineageModelRequests;
     // A call on Grasp's own key counts against none of the organization's
     // budgets, a person's limit included (`platformScopes`).
     const person =
@@ -2672,15 +2617,7 @@ const scopesNowOf = (
         scopesOn === "platform"
           ? platformScopes(call, lineageRequests)
           : scopesOn(day, lineageRequests),
-      // The generation of the policy its shares come from, a fallback's
-      // too (the last read's, or the platform's own, 0), so the ledger
-      // refuses shares from a policy older than one it saw
-      // (`policyBehind`): the request reads it again, and is held back
-      // if it still can't. Shares from a fallback apply only while the
-      // ledger knows of no newer policy, so an operator's lowered share
-      // holds through an outage.
-      policyGeneration: policy.generation,
-      fair: { place, subject, resource, shares: modelSharesOf(policy) },
+      fair: { place, subject, resource, shares: modelSharesOf(limits) },
       person,
     };
   };
