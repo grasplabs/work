@@ -404,8 +404,6 @@ const coreDb: D1State = {
     notifications: exported(`${core}notifications.ts`),
     guest_chats: exported(`${core}guests.ts`),
     guest_messages: exported(`${core}guests.ts`),
-    migration_samples: exported(`${core}migration-samples.ts`),
-    migration_sample_leases: transient(`${core}migration-samples.ts`),
     business_stores: exported(`${core}data-stores.ts`),
     business_store_members: exported(`${core}data-stores.ts`),
     workflow_resources: exported(`${core}workflow-resources.ts`),
