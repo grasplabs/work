@@ -139,6 +139,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's result doesn't match its output schema, so the run failed.",
   "workflow.task_data_invalid":
     "A task's input, output or exported context doesn't match the task's schema, so the run failed.",
+  "workflow.branch_cancelled":
+    "Another branch settled this branch's scope (a race's winner, or an end), so this branch's next step didn't run.",
   "workflow.collection_invalid":
     "A for task's collection isn't a list of at most 1,000 items, so the run failed.",
   "workflow.item_keys_invalid":
@@ -716,6 +718,17 @@ export interface WorkflowResourceRun {
   error?: { code: string | null; message: string };
 }
 
+/**
+ * How a workflow is started by hand: the version a start runs, the one
+ * approved to go live or else the one published last (null before any is
+ * published), and the JSON Schema its input must match exactly (null when
+ * it can't be read).
+ */
+export interface WorkflowStartForm {
+  version: number | null;
+  input: Record<string, unknown> | null;
+}
+
 /** A workflow resource, as its members see it. */
 export interface WorkflowResource {
   id: string;
@@ -1269,6 +1282,11 @@ export interface WorkflowResourcesApi {
    * Starts an exact version of a workflow the caller has a role in, acting
    * for them (`workflowStartSchema`): its admitted receipt.
    */
+  /**
+   * How to start it by hand (`WorkflowStartForm`): the version a start
+   * from its page runs and the input it takes; for anyone with a role.
+   */
+  startForm: (id: string) => Promise<WorkflowStartForm>;
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
   /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
