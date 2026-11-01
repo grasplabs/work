@@ -203,13 +203,19 @@ export const currentRelations = (): SQL =>
  * most `readRowsMax`, conflicts among them marked, and whether that cap
  * left any out (`cut`): what every read of relations answers from. A read
  * bound `within` some collections (a recall's, GRA-307) reads documents
- * of those alone, before the cap, as the scope is.
+ * of those alone, before the cap, as the scope is. A read that drops
+ * `conflicting` (a recall's network hop) skips weighing claims for it
+ * (`weighConflicts: false`): its rows are the answer's alone, so it reads
+ * at most `readRowsMax + 1` of each kind, and none is marked.
  */
 export const readable = async <C>(
   brain: Brain<C>,
   { allowed, owner, ownerReads }: ReadScope,
   { entityId, predicate, at, knownAt }: RelationsQuery,
-  within?: readonly string[]
+  {
+    within,
+    weighConflicts = true,
+  }: { within?: readonly string[]; weighConflicts?: boolean } = {}
 ): Promise<{
   relations: ReadRelation[];
   cut: boolean;
@@ -283,15 +289,17 @@ export const readable = async <C>(
           .where(fromOwn)
           .orderBy(newest)
           .limit(readRowsMax + 1),
-    db
-      .select({ ...claimColumns, collectionId: collections.id })
-      .from(brainAssertions)
-      .innerJoin(documents, eq(documents.id, brainAssertions.documentId))
-      .innerJoin(collections, eq(collections.id, documents.collectionId))
-      .where(fromReadable)
-      .orderBy(newest)
-      .limit(claimRowsMax + 1),
-    fromOwn === undefined
+    weighConflicts
+      ? db
+          .select({ ...claimColumns, collectionId: collections.id })
+          .from(brainAssertions)
+          .innerJoin(documents, eq(documents.id, brainAssertions.documentId))
+          .innerJoin(collections, eq(collections.id, documents.collectionId))
+          .where(fromReadable)
+          .orderBy(newest)
+          .limit(claimRowsMax + 1)
+      : [],
+    fromOwn === undefined || !weighConflicts
       ? []
       : db
           .select(claimColumns)
@@ -314,12 +322,15 @@ export const readable = async <C>(
   ]
     .toSorted((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime())
     .slice(0, readRowsMax);
-  const weighed = [
-    ...docClaims.slice(0, claimRowsMax),
-    ...ownClaims
-      .slice(0, claimRowsMax)
-      .map((row) => ({ ...row, collectionId: null })),
-  ];
+  // Unweighed, the claims read are the answer's rows alone.
+  const weighed = weighConflicts
+    ? [
+        ...docClaims.slice(0, claimRowsMax),
+        ...ownClaims
+          .slice(0, claimRowsMax)
+          .map((row) => ({ ...row, collectionId: null })),
+      ]
+    : rows;
   // Relative to the entity asked about: two readable sources that relate
   // it the same way, in the same place (who owns it, or what it owns), to
   // different entities over a shared time. The Brain can't tell whether
@@ -342,14 +353,16 @@ export const readable = async <C>(
       validFrom: row.validFrom,
       validTo: row.validTo,
       state: row.state,
-      conflicting: others.some(
-        ({ claim, asSubject, other }) =>
-          claim.source !== row.source &&
-          asSubject === here.asSubject &&
-          claim.predicate === row.predicate &&
-          other !== here.other &&
-          overlaps(row, claim)
-      ),
+      conflicting:
+        weighConflicts &&
+        others.some(
+          ({ claim, asSubject, other }) =>
+            claim.source !== row.source &&
+            asSubject === here.asSubject &&
+            claim.predicate === row.predicate &&
+            other !== here.other &&
+            overlaps(row, claim)
+        ),
       recordedAt: row.recordedAt.toISOString(),
       supersededAt: row.supersededAt?.toISOString() ?? null,
       evidence: row.evidence,

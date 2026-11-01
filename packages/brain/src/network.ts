@@ -264,20 +264,25 @@ const expired = async (ms: number): Promise<null> => {
 };
 
 /**
- * `read`, or undefined once the deadline passes first: a read that would
- * outlast it is given up on (its rows are left unread), as the recall's
- * own full-text read is.
+ * What `read` answers, or undefined once the deadline passes first: a read
+ * that would outlast it is given up on (its rows are left unread), as the
+ * recall's own full-text read is. `read` starts only after the clock is
+ * checked, so none starts once the deadline has passed.
  */
 const beforeDeadline = async <C, T>(
   brain: Brain<C>,
   deadline: number,
-  read: Promise<T>
+  read: () => Promise<T>
 ): Promise<T | undefined> => {
   const remaining = deadline - brain.ports.clock().getTime();
   if (remaining <= 0) {
     return undefined;
   }
-  const settled = await Promise.race([answered(read), expired(remaining)]);
+  const started = read();
+  // A read given up on may still fail later, when nothing waits on it.
+  // oxlint-disable-next-line promise/prefer-await-to-then -- not awaited here
+  started.catch(() => null);
+  const settled = await Promise.race([answered(started), expired(remaining)]);
   return settled?.value;
 };
 
@@ -392,7 +397,7 @@ export const networkOf = async <C>(
   const seeded = await beforeDeadline(
     brain,
     query.deadline,
-    seedsOf(brain, scope, query)
+    async () => await seedsOf(brain, scope, query)
   );
   if (seeded === undefined) {
     return { ...none, cuts: ["deadline"] };
@@ -414,7 +419,12 @@ export const networkOf = async <C>(
     steps: [],
     passed: new Set([seed.entityId]),
   }));
-  for (let hop = 1; hop <= query.hops && starts.length > 0; hop += 1) {
+  let timedOut = false;
+  for (
+    let hop = 1;
+    hop <= query.hops && starts.length > 0 && !timedOut;
+    hop += 1
+  ) {
     if (starts.length > networkFanOut) {
       cuts.add("fan_out");
     }
@@ -427,15 +437,18 @@ export const networkOf = async <C>(
       const hopRead = await beforeDeadline(
         brain,
         query.deadline,
-        readable(
-          brain,
-          scope,
-          { entityId: start.entity.entityId },
-          query.within
-        )
+        // An item drops `conflicting`, so the hop weighs no claims for it.
+        async () =>
+          await readable(
+            brain,
+            scope,
+            { entityId: start.entity.entityId },
+            { within: query.within, weighConflicts: false }
+          )
       );
       if (hopRead === undefined) {
         cuts.add("deadline");
+        timedOut = true;
         break;
       }
       considered.push(...hopRead.considered);

@@ -670,6 +670,75 @@ describe("a recall's network route", () => {
     }).toStrictEqual({ cuts: ["deadline"], items: 1, inTime: true });
   });
 
+  it("starts no relation read once the recall's deadline has passed", async () => {
+    const { host, query, everyone } = await team();
+    // The clock runs past the deadline the moment the route's first
+    // relation read (its seeds) answers.
+    const state = { on: false, late: false, startedLate: 0 };
+    const watched = <T extends object>(target: T, sql: string): T =>
+      new Proxy(target, {
+        get: (object, property) => {
+          const value: unknown = Reflect.get(object, property, object);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return (...args: unknown[]) => {
+            const relationRead = state.on && sql.includes("brain_assertions");
+            if (relationRead && property !== "bind" && state.late) {
+              state.startedLate += 1;
+            }
+            const result: unknown = Reflect.apply(value, object, args);
+            if (
+              property === "bind" &&
+              typeof result === "object" &&
+              result !== null
+            ) {
+              return watched(result, sql);
+            }
+            if (result instanceof Promise && relationRead) {
+              return (async () => {
+                const settled: unknown = await result;
+                state.late = true;
+                return settled;
+              })();
+            }
+            return result;
+          };
+        },
+      });
+    const database = new Proxy(env.BRAIN, {
+      get: (object, property): unknown => {
+        if (property === "prepare") {
+          return (sql: string) => watched(object.prepare(sql), sql);
+        }
+        const value: unknown = Reflect.get(object, property, object);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, object, args)
+          : value;
+      },
+    });
+    const brain = {
+      db: drizzle(database),
+      ports: {
+        ...host.brain.ports,
+        clock: () => new Date(Date.now() + (state.late ? 60_000 : 0)),
+        onRead: async (
+          ...read: Parameters<typeof host.brain.ports.onRead>
+        ): ReturnType<typeof host.brain.ports.onRead> => {
+          state.on = true;
+          return await host.brain.ports.onRead(...read);
+        },
+      },
+    };
+
+    const pack = await recall(brain, everyone, { query, network: {} });
+
+    expect({
+      cuts: cutsOf(pack),
+      startedLate: state.startedLate,
+    }).toStrictEqual({ cuts: ["deadline"], startedLate: 0 });
+  });
+
   it("no longer follows a relation once its source's new version doesn't state it", async () => {
     const { host, notes, query, names, passages, everyone } = await team();
     await saved(host, notes, "handbook.md", `${names.tool} is retired.`, 1);
