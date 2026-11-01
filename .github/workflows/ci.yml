@@ -55,14 +55,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          # check:migrations compares with origin/main.
+          # check:migrations compares with origin/main. Without blobs: git
+          # fetches the few it reads when it reads them, and the full
+          # history's took most of this job's 9 s checkout.
           fetch-depth: 0
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+          filter: blob:none
+      - uses: ./.github/actions/setup
       - run: vp check
       - run: vp run check:secrets
       - run: vp run check:docs
@@ -100,12 +98,10 @@ jobs:
           persist-credentials: false
           # The merge commit and its first parent, the base it compares with.
           fetch-depth: 2
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      # Saves node_modules when its cache missed, for the test shards after.
+      - uses: ./.github/actions/setup
         with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+          save: true
       - id: plan
         run: node scripts/test-plan.ts
         env:
@@ -136,12 +132,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/setup
       # gdb, for the stall reporter to print the thread stacks of each
       # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
       # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
@@ -459,12 +450,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/setup
       - run: vp run --filter @grasp-os/web build
       - run: vp run smoke:workerd
       # Code Mode's executor, with a Worker Loader, on plain workerd.
@@ -489,12 +475,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      # On a push to main, saves node_modules when its cache missed, for
+      # every pull request after.
+      - uses: ./.github/actions/setup
         with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+          save: ${{ github.event_name == 'push' }}
       - run: vp run release:build --out release-out
       # The admin isn't deployed from here (see Deploy platform): check that
       # it builds, for each stage, into a Worker cf would deploy
@@ -534,12 +519,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/setup
       - run: vp run check:branch
       - run: printf '%s\n' "$PR_TITLE" | vp exec commitlint
         env:
@@ -589,12 +569,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: |
-            - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/setup
       # Staging's releases bucket and the account's R2 endpoint, by the names
       # module, for every step after: the release goes to it.
       - run: |
