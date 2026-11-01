@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -290,11 +291,8 @@ describe("the admin's numbers", () => {
 });
 
 describe("Grasp's staff in the onboarding", () => {
-  it("are the only ones who pause it or say the agreements are in", async () => {
+  it("are the only ones who say the agreements are in", async () => {
     const { api } = await signedInApi(idp, "admin");
-    await expect(outcome(api.onboardingStaff.pause())).resolves.toBe(
-      "onboarding.staff_only"
-    );
     await expect(
       outcome(
         api.onboardingStaff.setAgreements({
@@ -321,7 +319,7 @@ describe("Grasp's staff in the onboarding", () => {
     });
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.pause();
+    await adminCommands().pause();
     await staff.onboardingStaff.setAgreements({
       processing: true,
       assessment: true,
@@ -333,7 +331,7 @@ describe("Grasp's staff in the onboarding", () => {
     });
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.resume();
+    await adminCommands().resume();
     // At once: the lead's, and a team without a lead; Sales waits for its lead.
     const sent = await store.sentLinks();
     expect(sent.map(({ person: id }) => id)).toStrictEqual([
@@ -366,7 +364,7 @@ describe("Grasp's staff in the onboarding", () => {
       start: weekOn.toISOString().slice(0, 10),
       days: 14,
     });
-    await staff.onboardingStaff.resume();
+    await adminCommands().resume();
     await staff.onboardingStaff.setAgreements({
       processing: true,
       assessment: true,
@@ -388,12 +386,11 @@ describe("Grasp's staff in the onboarding", () => {
 
   it("put every change in the audit log, as who made it, with no name in it", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const events = await auditedDuring(async () => {
       await api.onboarding.saveRoster(roster);
       await api.onboarding.savePlan(plan());
-      await staff.onboardingStaff.pause();
-      await staff.onboardingStaff.resume();
+      await adminCommands().pause();
+      await adminCommands().resume();
     });
     // The admin's and staff's changes; links the alarm sends are Grasp's own.
     const ours = events.filter(

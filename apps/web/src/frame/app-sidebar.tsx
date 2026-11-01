@@ -19,7 +19,6 @@ import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BrainIcon,
   CogIcon,
-  ClipboardCheckIcon,
   LayoutGridIcon,
   MessagesSquareIcon,
   WorkflowIcon,
@@ -36,18 +35,11 @@ import { SidebarBrand } from "./sidebar-brand.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
 
 // The product's sections, down the left beside every signed-in page. What
-// only admins use is in the person menu at its foot. Grasp's staff also
-// have the onboarding area; staff who reach the onboarding alone, only it.
+// only admins use is in the person menu at its foot. Staff who reach the
+// onboarding alone get none: Grasp steers the onboarding from its admin.
 
 interface Section {
-  to:
-    | "/"
-    | "/brain"
-    | "/domains"
-    | "/apps"
-    | "/workflows"
-    | "/integrations"
-    | "/onboarding";
+  to: "/" | "/brain" | "/domains" | "/apps" | "/workflows" | "/integrations";
   label: MessageDescriptor;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -60,13 +52,6 @@ const sections: readonly Section[] = [
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];
-
-/** Grasp's onboarding area, for Grasp's staff alone. */
-const onboarding: Section = {
-  to: "/onboarding",
-  label: msg`Onboarding`,
-  icon: ClipboardCheckIcon,
-};
 
 /**
  * A section's entry: Chat is itself and its projects' pages; any other
@@ -149,7 +134,6 @@ export const AppSidebar = ({
                     })}
                   </>
                 )}
-                {identity.staff ? <SectionItem section={onboarding} /> : null}
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>

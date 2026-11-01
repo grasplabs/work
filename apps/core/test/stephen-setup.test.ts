@@ -6,6 +6,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
+import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -24,7 +26,8 @@ import {
 //
 // - Stephen asking about what staff told him to leave alone, because the
 //   kickoff's older word on it is still in his context.
-// - Anyone but staff reading or changing his setup or the agreements.
+// - Anyone but staff reading or changing the agreements; his setup is
+//   changed from Grasp's admin alone (admin-command.test.ts).
 // - A setup that isn't one: no language, one he doesn't speak, a line
 //   past its length.
 // - The words staff gave him in the audit log, which the company reads.
@@ -77,8 +80,7 @@ const staffs: StephenSetup = {
 describe("how Stephen is set up", () => {
   it("is what the kickoff suggests until staff set it, and every turn's context holds it with what the kickoff brought", async () => {
     await kickoffIn();
-    const staff = await asStaff();
-    const suggested = await staff.onboardingStaff.stephen();
+    const suggested = await onboardingStore(env).stephen();
     const before = await onboardingStore(env).interviewBrief();
     expect({
       setup: suggested.setup,
@@ -112,10 +114,12 @@ describe("how Stephen is set up", () => {
 
   it("holds staff's setup from the next turn on, in place of the kickoff's word on languages and what to leave alone, and goes back to it", async () => {
     await kickoffIn();
-    const staff = await asStaff();
-    const saved = await staff.onboardingStaff.saveStephen(staffs);
-    const brief = await onboardingStore(env).interviewBrief();
-    const reset = await staff.onboardingStaff.saveStephen(null);
+    const store = onboardingStore(env);
+    await adminCommands().saveStephen(staffs);
+    const saved = await store.stephen();
+    const brief = await store.interviewBrief();
+    await adminCommands().saveStephen(null);
+    const reset = await store.stephen();
     const after = await onboardingStore(env).interviewBrief();
     expect({
       setup: saved.setup,
@@ -146,14 +150,12 @@ describe("how Stephen is set up", () => {
 
   it("keeps a long limit from the sponsor whole when staff change only a language", async () => {
     await kickoffIn();
-    const staff = await asStaff();
+    const store = onboardingStore(env);
     const long = `Niets over de reorganisatie van de afdeling ${"Financiën, ".repeat(150)}einde.`;
-    await staff.onboardingStaff.answerKickoff("limits", long);
-    const { setup } = await staff.onboardingStaff.stephen();
-    const saved = await staff.onboardingStaff.saveStephen({
-      ...setup,
-      languages: ["nl"],
-    });
+    await adminKickoff().answerKickoff("limits", long);
+    const { setup } = await store.stephen();
+    await adminCommands().saveStephen({ ...setup, languages: ["nl"] });
+    const saved = await store.stephen();
     const brief = await onboardingStore(env).interviewBrief();
     expect({
       long: long.length > 1000,
@@ -163,17 +165,15 @@ describe("how Stephen is set up", () => {
   });
 
   it("holds before any kickoff is in", async () => {
-    const staff = await asStaff();
-    await staff.onboardingStaff.saveStephen(staffs);
+    await adminCommands().saveStephen(staffs);
     const brief = await onboardingStore(env).interviewBrief();
     expect(brief).toContain("Zebulon CRM");
   });
 
   it("is on record as staff's, without the words they gave him", async () => {
-    const staff = await asStaff();
     const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.saveStephen(staffs);
-      await staff.onboardingStaff.saveStephen(null);
+      await adminCommands().saveStephen(staffs);
+      await adminCommands().saveStephen(null);
     });
     expect({
       actions: events.map(({ action, actor }) => [action, actor.type]),
@@ -190,7 +190,6 @@ describe("how Stephen is set up", () => {
   });
 
   it("refuses what isn't a setup", async () => {
-    const staff = await asStaff();
     const tries: unknown[] = [
       { ...staffs, languages: [] },
       { ...staffs, languages: ["pt"] },
@@ -205,11 +204,12 @@ describe("how Stephen is set up", () => {
           await outcome(
             // SAFETY: what a client could send, whatever its types say.
             // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            staff.onboardingStaff.saveStephen(setup as StephenSetup)
+            adminCommands().saveStephen(setup as StephenSetup)
           )
       )
     );
-    expect(new Set(refused)).toStrictEqual(new Set(["onboarding.invalid"]));
+    // A command the admin couldn't have made is refused whole.
+    expect(new Set(refused)).toStrictEqual(new Set(["request.forbidden"]));
   });
 });
 
@@ -325,10 +325,14 @@ describe("what only staff set", () => {
     const { api: user } = await signedInApi(idp, "user");
     const refused = await Promise.all(
       [admin, user].flatMap((api) => [
-        outcome(api.onboardingStaff.stephen()),
-        outcome(api.onboardingStaff.saveStephen(staffs)),
-        outcome(api.onboardingStaff.saveStephen(null)),
         outcome(api.onboardingStaff.agreements()),
+        outcome(
+          api.onboardingStaff.setAgreements({
+            processing: true,
+            assessment: true,
+            council: "none",
+          })
+        ),
       ])
     );
     const kept = await onboardingStore(env).stephen();

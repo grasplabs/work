@@ -22,7 +22,6 @@ import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
 import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.connect-microsoft'
 import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
-import { Route as ShellOnboardingRouteImport } from './routes/_shell.onboarding'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
@@ -37,14 +36,6 @@ import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.inte
 import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
-import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboarding.index'
-import { Route as ShellOnboardingAgreementsRouteImport } from './routes/_shell.onboarding.agreements'
-import { Route as ShellOnboardingAiUseRouteImport } from './routes/_shell.onboarding.ai-use'
-import { Route as ShellOnboardingInterviewersRouteImport } from './routes/_shell.onboarding.interviewers'
-import { Route as ShellOnboardingLogRouteImport } from './routes/_shell.onboarding.log'
-import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboarding.notes'
-import { Route as ShellOnboardingOpenRouteImport } from './routes/_shell.onboarding.open'
-import { Route as ShellOnboardingStephenRouteImport } from './routes/_shell.onboarding.stephen'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
 import { Route as ShellSettingsAiProvidersRouteImport } from './routes/_shell.settings.ai-providers'
@@ -71,12 +62,6 @@ import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
 import { Route as ShellDomainsEngineIndexRouteImport } from './routes/_shell.domains.$engine.index'
 import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
-import { Route as ShellOnboardingInterviewsIndexRouteImport } from './routes/_shell.onboarding.interviews.index'
-import { Route as ShellOnboardingInterviewsPersonRouteImport } from './routes/_shell.onboarding.interviews.$person'
-import { Route as ShellOnboardingOrganizationIndexRouteImport } from './routes/_shell.onboarding.organization.index'
-import { Route as ShellOnboardingOrganizationTeamRouteImport } from './routes/_shell.onboarding.organization.$team'
-import { Route as ShellOnboardingWorkflowsIndexRouteImport } from './routes/_shell.onboarding.workflows.index'
-import { Route as ShellOnboardingWorkflowsWorkRouteImport } from './routes/_shell.onboarding.workflows.$work'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as ShellDomainsEngineAppsScreenRouteImport } from './routes/_shell.domains.$engine.apps.$screen'
@@ -146,11 +131,6 @@ const ShellDashboardRoute = ShellDashboardRouteImport.update({
 const ShellInboxRoute = ShellInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellOnboardingRoute = ShellOnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
@@ -225,48 +205,6 @@ const ShellKnowledgeCollectionRoute =
     path: '/knowledge/$collection',
     getParentRoute: () => ShellRoute,
   } as any)
-const ShellOnboardingIndexRoute = ShellOnboardingIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
-const ShellOnboardingAgreementsRoute =
-  ShellOnboardingAgreementsRouteImport.update({
-    id: '/agreements',
-    path: '/agreements',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingAiUseRoute = ShellOnboardingAiUseRouteImport.update({
-  id: '/ai-use',
-  path: '/ai-use',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
-const ShellOnboardingInterviewersRoute =
-  ShellOnboardingInterviewersRouteImport.update({
-    id: '/interviewers',
-    path: '/interviewers',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingLogRoute = ShellOnboardingLogRouteImport.update({
-  id: '/log',
-  path: '/log',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
-const ShellOnboardingNotesRoute = ShellOnboardingNotesRouteImport.update({
-  id: '/notes',
-  path: '/notes',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
-const ShellOnboardingOpenRoute = ShellOnboardingOpenRouteImport.update({
-  id: '/open',
-  path: '/open',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
-const ShellOnboardingStephenRoute = ShellOnboardingStephenRouteImport.update({
-  id: '/stephen',
-  path: '/stephen',
-  getParentRoute: () => ShellOnboardingRoute,
-} as any)
 const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
@@ -400,42 +338,6 @@ const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
   path: '/links/$app/$surface',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellOnboardingInterviewsIndexRoute =
-  ShellOnboardingInterviewsIndexRouteImport.update({
-    id: '/interviews/',
-    path: '/interviews/',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingInterviewsPersonRoute =
-  ShellOnboardingInterviewsPersonRouteImport.update({
-    id: '/interviews/$person',
-    path: '/interviews/$person',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingOrganizationIndexRoute =
-  ShellOnboardingOrganizationIndexRouteImport.update({
-    id: '/organization/',
-    path: '/organization/',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingOrganizationTeamRoute =
-  ShellOnboardingOrganizationTeamRouteImport.update({
-    id: '/organization/$team',
-    path: '/organization/$team',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingWorkflowsIndexRoute =
-  ShellOnboardingWorkflowsIndexRouteImport.update({
-    id: '/workflows/',
-    path: '/workflows/',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
-const ShellOnboardingWorkflowsWorkRoute =
-  ShellOnboardingWorkflowsWorkRouteImport.update({
-    id: '/workflows/$work',
-    path: '/workflows/$work',
-    getParentRoute: () => ShellOnboardingRoute,
-  } as any)
 const ShellSettingsPackagesIndexRoute =
   ShellSettingsPackagesIndexRouteImport.update({
     id: '/packages/',
@@ -486,7 +388,6 @@ export interface FileRoutesByFullPath {
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/dashboard': typeof ShellDashboardRoute
   '/inbox': typeof ShellInboxRoute
-  '/onboarding': typeof ShellOnboardingRouteWithChildren
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/apps/$app': typeof ShellAppsAppRoute
@@ -496,13 +397,6 @@ export interface FileRoutesByFullPath {
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
-  '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
-  '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
-  '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/onboarding/log': typeof ShellOnboardingLogRoute
-  '/onboarding/notes': typeof ShellOnboardingNotesRoute
-  '/onboarding/open': typeof ShellOnboardingOpenRoute
-  '/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
@@ -528,20 +422,13 @@ export interface FileRoutesByFullPath {
   '/domains/': typeof ShellDomainsIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
-  '/onboarding/': typeof ShellOnboardingIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
-  '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
-  '/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
-  '/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/domains/$engine/': typeof ShellDomainsEngineIndexRoute
-  '/onboarding/interviews/': typeof ShellOnboardingInterviewsIndexRoute
-  '/onboarding/organization/': typeof ShellOnboardingOrganizationIndexRoute
-  '/onboarding/workflows/': typeof ShellOnboardingWorkflowsIndexRoute
   '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
@@ -568,13 +455,6 @@ export interface FileRoutesByTo {
   '/brain/memory': typeof ShellBrainMemoryRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
-  '/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
-  '/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
-  '/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/onboarding/log': typeof ShellOnboardingLogRoute
-  '/onboarding/notes': typeof ShellOnboardingNotesRoute
-  '/onboarding/open': typeof ShellOnboardingOpenRoute
-  '/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/audit': typeof ShellSettingsAuditRoute
@@ -600,20 +480,13 @@ export interface FileRoutesByTo {
   '/domains': typeof ShellDomainsIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
-  '/onboarding': typeof ShellOnboardingIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
-  '/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
-  '/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
-  '/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/domains/$engine': typeof ShellDomainsEngineIndexRoute
-  '/onboarding/interviews': typeof ShellOnboardingInterviewsIndexRoute
-  '/onboarding/organization': typeof ShellOnboardingOrganizationIndexRoute
-  '/onboarding/workflows': typeof ShellOnboardingWorkflowsIndexRoute
   '/settings/packages': typeof ShellSettingsPackagesIndexRoute
   '/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
@@ -634,7 +507,6 @@ export interface FileRoutesById {
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/inbox': typeof ShellInboxRoute
-  '/_shell/onboarding': typeof ShellOnboardingRouteWithChildren
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
@@ -645,13 +517,6 @@ export interface FileRoutesById {
   '/_shell/brain/memory': typeof ShellBrainMemoryRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
-  '/_shell/onboarding/agreements': typeof ShellOnboardingAgreementsRoute
-  '/_shell/onboarding/ai-use': typeof ShellOnboardingAiUseRoute
-  '/_shell/onboarding/interviewers': typeof ShellOnboardingInterviewersRoute
-  '/_shell/onboarding/log': typeof ShellOnboardingLogRoute
-  '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
-  '/_shell/onboarding/open': typeof ShellOnboardingOpenRoute
-  '/_shell/onboarding/stephen': typeof ShellOnboardingStephenRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
@@ -677,20 +542,13 @@ export interface FileRoutesById {
   '/_shell/domains/': typeof ShellDomainsIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
-  '/_shell/onboarding/': typeof ShellOnboardingIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
   '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
-  '/_shell/onboarding/interviews/$person': typeof ShellOnboardingInterviewsPersonRoute
-  '/_shell/onboarding/organization/$team': typeof ShellOnboardingOrganizationTeamRoute
-  '/_shell/onboarding/workflows/$work': typeof ShellOnboardingWorkflowsWorkRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/_shell/domains/$engine/': typeof ShellDomainsEngineIndexRoute
-  '/_shell/onboarding/interviews/': typeof ShellOnboardingInterviewsIndexRoute
-  '/_shell/onboarding/organization/': typeof ShellOnboardingOrganizationIndexRoute
-  '/_shell/onboarding/workflows/': typeof ShellOnboardingWorkflowsIndexRoute
   '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
   '/_shell/domains/$engine/apps/$screen': typeof ShellDomainsEngineAppsScreenRoute
   '/_shell/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
@@ -712,7 +570,6 @@ export interface FileRouteTypes {
     | '/connect-microsoft'
     | '/dashboard'
     | '/inbox'
-    | '/onboarding'
     | '/settings'
     | '/decisions/$decision'
     | '/apps/$app'
@@ -722,13 +579,6 @@ export interface FileRouteTypes {
     | '/brain/memory'
     | '/integrations/$integration'
     | '/knowledge/$collection'
-    | '/onboarding/agreements'
-    | '/onboarding/ai-use'
-    | '/onboarding/interviewers'
-    | '/onboarding/log'
-    | '/onboarding/notes'
-    | '/onboarding/open'
-    | '/onboarding/stephen'
     | '/projects/$projectId'
     | '/settings/ai-providers'
     | '/settings/audit'
@@ -754,20 +604,13 @@ export interface FileRouteTypes {
     | '/domains/'
     | '/integrations/'
     | '/knowledge/'
-    | '/onboarding/'
     | '/settings/'
     | '/workflows/'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
-    | '/onboarding/interviews/$person'
-    | '/onboarding/organization/$team'
-    | '/onboarding/workflows/$work'
     | '/workflows/$app/$workflow'
     | '/domains/$engine/'
-    | '/onboarding/interviews/'
-    | '/onboarding/organization/'
-    | '/onboarding/workflows/'
     | '/settings/packages/'
     | '/domains/$engine/apps/$screen'
     | '/settings/packages/workflows/$workflow'
@@ -794,13 +637,6 @@ export interface FileRouteTypes {
     | '/brain/memory'
     | '/integrations/$integration'
     | '/knowledge/$collection'
-    | '/onboarding/agreements'
-    | '/onboarding/ai-use'
-    | '/onboarding/interviewers'
-    | '/onboarding/log'
-    | '/onboarding/notes'
-    | '/onboarding/open'
-    | '/onboarding/stephen'
     | '/projects/$projectId'
     | '/settings/ai-providers'
     | '/settings/audit'
@@ -826,20 +662,13 @@ export interface FileRouteTypes {
     | '/domains'
     | '/integrations'
     | '/knowledge'
-    | '/onboarding'
     | '/settings'
     | '/workflows'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
     | '/links/$app/$surface'
-    | '/onboarding/interviews/$person'
-    | '/onboarding/organization/$team'
-    | '/onboarding/workflows/$work'
     | '/workflows/$app/$workflow'
     | '/domains/$engine'
-    | '/onboarding/interviews'
-    | '/onboarding/organization'
-    | '/onboarding/workflows'
     | '/settings/packages'
     | '/domains/$engine/apps/$screen'
     | '/settings/packages/workflows/$workflow'
@@ -859,7 +688,6 @@ export interface FileRouteTypes {
     | '/_shell/connect-microsoft'
     | '/_shell/dashboard'
     | '/_shell/inbox'
-    | '/_shell/onboarding'
     | '/_shell/settings'
     | '/decisions/$decision'
     | '/_shell/'
@@ -870,13 +698,6 @@ export interface FileRouteTypes {
     | '/_shell/brain/memory'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
-    | '/_shell/onboarding/agreements'
-    | '/_shell/onboarding/ai-use'
-    | '/_shell/onboarding/interviewers'
-    | '/_shell/onboarding/log'
-    | '/_shell/onboarding/notes'
-    | '/_shell/onboarding/open'
-    | '/_shell/onboarding/stephen'
     | '/_shell/projects/$projectId'
     | '/_shell/settings/ai-providers'
     | '/_shell/settings/audit'
@@ -902,20 +723,13 @@ export interface FileRouteTypes {
     | '/_shell/domains/'
     | '/_shell/integrations/'
     | '/_shell/knowledge/'
-    | '/_shell/onboarding/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
     | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
     | '/_shell/links/$app/$surface'
-    | '/_shell/onboarding/interviews/$person'
-    | '/_shell/onboarding/organization/$team'
-    | '/_shell/onboarding/workflows/$work'
     | '/_shell/workflows/$app/$workflow'
     | '/_shell/domains/$engine/'
-    | '/_shell/onboarding/interviews/'
-    | '/_shell/onboarding/organization/'
-    | '/_shell/onboarding/workflows/'
     | '/_shell/settings/packages/'
     | '/_shell/domains/$engine/apps/$screen'
     | '/_shell/settings/packages/workflows/$workflow'
@@ -1030,13 +844,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellInboxRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/onboarding': {
-      id: '/_shell/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof ShellOnboardingRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/settings': {
       id: '/_shell/settings'
       path: '/settings'
@@ -1134,62 +941,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/knowledge/$collection'
       preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
       parentRoute: typeof ShellRoute
-    }
-    '/_shell/onboarding/': {
-      id: '/_shell/onboarding/'
-      path: '/'
-      fullPath: '/onboarding/'
-      preLoaderRoute: typeof ShellOnboardingIndexRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/agreements': {
-      id: '/_shell/onboarding/agreements'
-      path: '/agreements'
-      fullPath: '/onboarding/agreements'
-      preLoaderRoute: typeof ShellOnboardingAgreementsRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/ai-use': {
-      id: '/_shell/onboarding/ai-use'
-      path: '/ai-use'
-      fullPath: '/onboarding/ai-use'
-      preLoaderRoute: typeof ShellOnboardingAiUseRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/interviewers': {
-      id: '/_shell/onboarding/interviewers'
-      path: '/interviewers'
-      fullPath: '/onboarding/interviewers'
-      preLoaderRoute: typeof ShellOnboardingInterviewersRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/log': {
-      id: '/_shell/onboarding/log'
-      path: '/log'
-      fullPath: '/onboarding/log'
-      preLoaderRoute: typeof ShellOnboardingLogRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/notes': {
-      id: '/_shell/onboarding/notes'
-      path: '/notes'
-      fullPath: '/onboarding/notes'
-      preLoaderRoute: typeof ShellOnboardingNotesRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/open': {
-      id: '/_shell/onboarding/open'
-      path: '/open'
-      fullPath: '/onboarding/open'
-      preLoaderRoute: typeof ShellOnboardingOpenRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/stephen': {
-      id: '/_shell/onboarding/stephen'
-      path: '/stephen'
-      fullPath: '/onboarding/stephen'
-      preLoaderRoute: typeof ShellOnboardingStephenRouteImport
-      parentRoute: typeof ShellOnboardingRoute
     }
     '/_shell/projects/$projectId': {
       id: '/_shell/projects/$projectId'
@@ -1373,48 +1124,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/onboarding/interviews/': {
-      id: '/_shell/onboarding/interviews/'
-      path: '/interviews'
-      fullPath: '/onboarding/interviews/'
-      preLoaderRoute: typeof ShellOnboardingInterviewsIndexRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/interviews/$person': {
-      id: '/_shell/onboarding/interviews/$person'
-      path: '/interviews/$person'
-      fullPath: '/onboarding/interviews/$person'
-      preLoaderRoute: typeof ShellOnboardingInterviewsPersonRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/organization/': {
-      id: '/_shell/onboarding/organization/'
-      path: '/organization'
-      fullPath: '/onboarding/organization/'
-      preLoaderRoute: typeof ShellOnboardingOrganizationIndexRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/organization/$team': {
-      id: '/_shell/onboarding/organization/$team'
-      path: '/organization/$team'
-      fullPath: '/onboarding/organization/$team'
-      preLoaderRoute: typeof ShellOnboardingOrganizationTeamRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/workflows/': {
-      id: '/_shell/onboarding/workflows/'
-      path: '/workflows'
-      fullPath: '/onboarding/workflows/'
-      preLoaderRoute: typeof ShellOnboardingWorkflowsIndexRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
-    '/_shell/onboarding/workflows/$work': {
-      id: '/_shell/onboarding/workflows/$work'
-      path: '/workflows/$work'
-      fullPath: '/onboarding/workflows/$work'
-      preLoaderRoute: typeof ShellOnboardingWorkflowsWorkRouteImport
-      parentRoute: typeof ShellOnboardingRoute
-    }
     '/_shell/settings/packages/': {
       id: '/_shell/settings/packages/'
       path: '/packages'
@@ -1480,44 +1189,6 @@ const ShellBrainRouteWithChildren = ShellBrainRoute._addFileChildren(
   ShellBrainRouteChildren,
 )
 
-interface ShellOnboardingRouteChildren {
-  ShellOnboardingAgreementsRoute: typeof ShellOnboardingAgreementsRoute
-  ShellOnboardingAiUseRoute: typeof ShellOnboardingAiUseRoute
-  ShellOnboardingInterviewersRoute: typeof ShellOnboardingInterviewersRoute
-  ShellOnboardingLogRoute: typeof ShellOnboardingLogRoute
-  ShellOnboardingNotesRoute: typeof ShellOnboardingNotesRoute
-  ShellOnboardingOpenRoute: typeof ShellOnboardingOpenRoute
-  ShellOnboardingStephenRoute: typeof ShellOnboardingStephenRoute
-  ShellOnboardingIndexRoute: typeof ShellOnboardingIndexRoute
-  ShellOnboardingInterviewsPersonRoute: typeof ShellOnboardingInterviewsPersonRoute
-  ShellOnboardingOrganizationTeamRoute: typeof ShellOnboardingOrganizationTeamRoute
-  ShellOnboardingWorkflowsWorkRoute: typeof ShellOnboardingWorkflowsWorkRoute
-  ShellOnboardingInterviewsIndexRoute: typeof ShellOnboardingInterviewsIndexRoute
-  ShellOnboardingOrganizationIndexRoute: typeof ShellOnboardingOrganizationIndexRoute
-  ShellOnboardingWorkflowsIndexRoute: typeof ShellOnboardingWorkflowsIndexRoute
-}
-
-const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
-  ShellOnboardingAgreementsRoute: ShellOnboardingAgreementsRoute,
-  ShellOnboardingAiUseRoute: ShellOnboardingAiUseRoute,
-  ShellOnboardingInterviewersRoute: ShellOnboardingInterviewersRoute,
-  ShellOnboardingLogRoute: ShellOnboardingLogRoute,
-  ShellOnboardingNotesRoute: ShellOnboardingNotesRoute,
-  ShellOnboardingOpenRoute: ShellOnboardingOpenRoute,
-  ShellOnboardingStephenRoute: ShellOnboardingStephenRoute,
-  ShellOnboardingIndexRoute: ShellOnboardingIndexRoute,
-  ShellOnboardingInterviewsPersonRoute: ShellOnboardingInterviewsPersonRoute,
-  ShellOnboardingOrganizationTeamRoute: ShellOnboardingOrganizationTeamRoute,
-  ShellOnboardingWorkflowsWorkRoute: ShellOnboardingWorkflowsWorkRoute,
-  ShellOnboardingInterviewsIndexRoute: ShellOnboardingInterviewsIndexRoute,
-  ShellOnboardingOrganizationIndexRoute: ShellOnboardingOrganizationIndexRoute,
-  ShellOnboardingWorkflowsIndexRoute: ShellOnboardingWorkflowsIndexRoute,
-}
-
-const ShellOnboardingRouteWithChildren = ShellOnboardingRoute._addFileChildren(
-  ShellOnboardingRouteChildren,
-)
-
 interface ShellSettingsRouteChildren {
   ShellSettingsAiProvidersRoute: typeof ShellSettingsAiProvidersRoute
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
@@ -1571,7 +1242,6 @@ interface ShellRouteChildren {
   ShellConnectMicrosoftRoute: typeof ShellConnectMicrosoftRoute
   ShellDashboardRoute: typeof ShellDashboardRoute
   ShellInboxRoute: typeof ShellInboxRoute
-  ShellOnboardingRoute: typeof ShellOnboardingRouteWithChildren
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
@@ -1600,7 +1270,6 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellConnectMicrosoftRoute: ShellConnectMicrosoftRoute,
   ShellDashboardRoute: ShellDashboardRoute,
   ShellInboxRoute: ShellInboxRoute,
-  ShellOnboardingRoute: ShellOnboardingRouteWithChildren,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,

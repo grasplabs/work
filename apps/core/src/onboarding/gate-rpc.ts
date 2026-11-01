@@ -1,42 +1,22 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { onboardingErrors } from "@grasp-os/shared/onboarding";
-import { gateThresholds } from "@grasp-os/shared/onboarding-gate";
 import type {
-  GateThreshold,
   GateView,
   OnboardingGateApi,
 } from "@grasp-os/shared/onboarding-gate";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import { z } from "zod";
 
-import { signInConfig } from "../auth/config.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
-import {
-  closeGate,
-  endStaffAccess,
-  gateView,
-  openGate,
-  setGateThreshold,
-} from "./gate.ts";
+import { endStaffAccess, gateView } from "./gate.ts";
 import { onboardingStore } from "./store.ts";
 
 // The gate over `/rpc` (gate.ts): the company's admin sees where it stands,
-// how much Grasp knows and Grasp's staff access, and can end that access;
-// only Grasp's staff close it, give the go, and set how much is enough.
+// how much Grasp knows and Grasp's staff access, and can end that access.
+// Grasp's staff close it, give the go and set how much is enough from
+// Grasp's admin (admin-command.ts).
 
-const thresholdSchema = z.union(gateThresholds.map((each) => z.literal(each)));
-
-/** Refuses anyone but Grasp's staff, with `onboarding.staff_only`. */
-const requireStaff = (person: Identity): void => {
-  if (!person.staff) {
-    throw onboardingErrors.create("onboarding.staff_only");
-  }
-};
-
-/** The deployment's gate, for its admin to read and Grasp's staff to move. */
+/** The deployment's gate, for its admin to read, and to end Grasp's staff access. */
 export class OnboardingGateRpc
   extends CoreRpcTarget
   implements OnboardingGateApi
@@ -53,39 +33,6 @@ export class OnboardingGateRpc
   async view(): Promise<GateView> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
-      return await this.#view();
-    });
-  }
-
-  async close(): Promise<GateView> {
-    return await withPerson(this.#check, async (person) => {
-      requireStaff(person);
-      const config = signInConfig(this.#env);
-      if (config === undefined) {
-        throw onboardingErrors.create("onboarding.invalid");
-      }
-      await closeGate(this.#env, config, actorOf(person));
-      return await this.#view();
-    });
-  }
-
-  async open(): Promise<GateView> {
-    return await withPerson(this.#check, async (person) => {
-      requireStaff(person);
-      await openGate(this.#env, actorOf(person));
-      return await this.#view();
-    });
-  }
-
-  async setThreshold(threshold: GateThreshold): Promise<GateView> {
-    return await withPerson(this.#check, async (person) => {
-      requireStaff(person);
-      const parsed = onboardingErrors.parse(
-        "onboarding.invalid",
-        thresholdSchema,
-        threshold
-      );
-      await setGateThreshold(this.#env, parsed, actorOf(person));
       return await this.#view();
     });
   }

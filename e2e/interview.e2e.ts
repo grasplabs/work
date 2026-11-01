@@ -6,6 +6,7 @@ import { expect } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { z } from "zod";
 
+import { adminSnapshot } from "./admin-steering.ts";
 import { test } from "./csp.ts";
 import {
   answered,
@@ -20,7 +21,7 @@ import {
   turnOf,
   wavOf,
 } from "./interview-turns.ts";
-import { apiOf, signInStaff } from "./people.ts";
+import { signInStaff } from "./people.ts";
 
 // Someone's own interview, end to end (GRA-345, GRA-346, GRA-382): they
 // open their link, choose their language and who they talk with, read what
@@ -92,9 +93,7 @@ test("someone has their interview by typing, carries on after stopping, and agre
   // They stop, and the link carries on where it was, after a reload too.
   await page.getByRole("button", { name: "Stop for now" }).click();
   await expect(page.getByText("Your place is kept.")).toBeVisible();
-  await expect
-    .poll(async () => await personIn(staff, person))
-    .toBe("incomplete");
+  await expect.poll(async () => await personIn(person)).toBe("incomplete");
   await page.reload();
   await expect(page.getByText(back)).toBeVisible();
 
@@ -127,18 +126,17 @@ test("someone has their interview by typing, carries on after stopping, and agre
 
   // Core keeps it approved: both lines, as they were put right. Staff see
   // its numbers, never its words (GRA-329).
-  const reader = apiOf(staff);
-  try {
-    await expect
-      .poll(async () => {
-        const { state, counts } =
-          await reader.api.onboardingStaff.interview(person);
-        return { state, facts: counts.facts, approved: counts.approved };
-      })
-      .toStrictEqual({ state: "completed", facts: 2, approved: 2 });
-  } finally {
-    reader.core[Symbol.dispose]();
-  }
+  await expect
+    .poll(async () => {
+      const { interviews } = await adminSnapshot();
+      const kept = interviews.find((interview) => interview.person === person);
+      return {
+        agreed: kept?.agreed,
+        facts: kept?.facts,
+        confirmed: kept?.confirmed,
+      };
+    })
+    .toStrictEqual({ agreed: true, facts: 2, confirmed: 2 });
   expect({
     refused: asked.refused,
     events: asked.turns.map(({ event }) => event),
@@ -206,18 +204,13 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   await expect(
     page.getByText(/^Claire (?<doing>stelt een vraag|luistert|denkt na)\.$/u)
   ).toBeAttached();
-  const reader = apiOf(staff);
-  try {
-    await expect
-      .poll(async () => {
-        const { interviewer } =
-          await reader.api.onboardingStaff.interview(person);
-        return interviewer;
-      })
-      .toBe("claire");
-  } finally {
-    reader.core[Symbol.dispose]();
-  }
+  await expect
+    .poll(async () => {
+      const { interviews } = await adminSnapshot();
+      return interviews.find((interview) => interview.person === person)
+        ?.interviewer;
+    })
+    .toBe("claire");
   expect({
     refused: asked.refused,
     turns: asked.turns,

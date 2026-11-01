@@ -1,32 +1,13 @@
 import { z } from "zod";
 
-import type { AdminSnapshot } from "./admin-snapshot.ts";
-import type { OrgRules } from "./admin/onboarding-admin.ts";
 import type { OnboardingDirectoryApi } from "./directory.ts";
 import type { OnboardingPlacesApi } from "./document-places.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { OnboardingHrApi } from "./hr.ts";
-import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingChoicesApi } from "./onboarding-choices.ts";
 import type { OnboardingContext } from "./onboarding-context.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
-import type {
-  OrganizationChangeInput,
-  StaffOrganization,
-} from "./onboarding-organization.ts";
-import type {
-  LogFilter,
-  StaffAgreements,
-  StaffAiUseRow,
-  StaffInterviewers,
-  StaffLog,
-  StaffNote,
-  StaffOverview,
-  StaffInterview,
-  StaffWorks,
-  StephenSetup,
-  StephenSetupView,
-} from "./onboarding-staff.ts";
+import type { StaffAgreements } from "./onboarding-staff.ts";
 import type { onboardingStages } from "./onboarding-summary.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
@@ -452,86 +433,15 @@ export interface OnboardingApi
   linksTaken: (people: string[]) => Promise<void>;
 }
 
-/** What only Grasp's staff do in an onboarding, the kickoff included. */
-export interface OnboardingStaffApi extends KickoffApi {
-  /** Stops the interviews: no link opens and none goes out. */
-  pause: () => Promise<OnboardingView>;
-  resume: () => Promise<OnboardingView>;
+/**
+ * What only Grasp's staff still do in an onboarding over `/rpc`: the
+ * agreements. The rest is steered from Grasp's admin (`admin-command.ts`).
+ */
+export interface OnboardingStaffApi {
   /** Where the agreements stand, and the links that wait for them. */
   agreements: () => Promise<StaffAgreements>;
   /** Records where the agreements stand; once all are in, the links due go out. */
   setAgreements: (agreements: Agreements) => Promise<OnboardingView>;
-  /** How Stephen is set up for this deployment, and what the kickoff suggests. */
-  stephen: () => Promise<StephenSetupView>;
-  /** Sets how Stephen is set up; null takes him back to what the kickoff suggests. */
-  saveStephen: (setup: StephenSetup | null) => Promise<StephenSetupView>;
-  /**
-   * A new start for someone who lost the device their interview was on:
-   * what they said goes, and their link opens on the next device.
-   */
-  newStart: (person: string) => Promise<void>;
-  /**
-   * Sends someone's mail that failed (their link, or the reminder) again,
-   * once whatever stopped it is put right.
-   */
-  sendMailAgain: (person: string) => Promise<void>;
-  /** Where the onboarding stands: its stages, what needs Grasp, Grasp's notes. */
-  overview: () => Promise<StaffOverview>;
-  /** What happened, the newest first, narrowed by `filter`. */
-  log: (filter?: LogFilter) => Promise<StaffLog>;
-  addNote: (text: string) => Promise<StaffNote>;
-  /**
-   * Where someone's interview stands, and its numbers: never a word of it
-   * (GRA-329). Every look is in the audit log, as it names them.
-   */
-  interview: (person: string) => Promise<StaffInterview>;
-  /**
-   * Where everyone stands with their link and their interview, by name, as
-   * Grasp's admin reads it: numbers, never anyone's words. It names
-   * people, so every read is in the audit log.
-   */
-  interviews: () => Promise<AdminSnapshot>;
-  /**
-   * Someone's own link, for staff to send them by hand: its path, the
-   * secret after the `#`. Every read is in the audit log, without it.
-   */
-  link: (person: string) => Promise<string>;
-  /**
-   * Notes the one reminder as sent by hand to each of `people` whose link
-   * is out, who hasn't finished and wasn't reminded yet. Returns how many.
-   */
-  remind: (people: string[]) => Promise<number>;
-  /** A team that didn't take part takes part: its lead's link goes out first. */
-  askIn: (team: string) => Promise<OnboardingView>;
-  /**
-   * Deletes someone's interview because they asked: what they said is
-   * gone, and their link opens a new one.
-   */
-  deleteInterview: (person: string) => Promise<void>;
-  /** How Stephen and Claire are doing, as numbers: never who said what. */
-  interviewers: () => Promise<StaffInterviewers>;
-  /** The AI the onboarding used, by day, purpose and model. */
-  aiUse: () => Promise<StaffAiUseRow[]>;
-  /**
-   * The organization as Grasp knows it, team by team: it names people, so
-   * every read is in the audit log.
-   */
-  organization: () => Promise<StaffOrganization>;
-  /** Puts the list right, one change at a time; each is in the log. */
-  changeOrganization: (change: OrganizationChangeInput) => Promise<void>;
-  /**
-   * Every piece of work as drawn from what its people agreed to, with
-   * this organization's rules for when one is known and the pieces Grasp
-   * counts as known by hand. It holds what people said, by name, so every
-   * read is in the audit log.
-   */
-  works: () => Promise<StaffWorks>;
-  /** Sets when a piece of work counts as known here; null takes the starting values back. */
-  setRules: (rules: OrgRules | null) => Promise<void>;
-  /** Counts a piece of work as known by hand, or leaves it to the rules again. */
-  countAsKnown: (work: string, counted: boolean) => Promise<void>;
-  /** Draws a piece of work again from everything its people agreed to. */
-  drawWorkAgain: (work: string) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
