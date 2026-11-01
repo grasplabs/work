@@ -253,9 +253,7 @@ const researchLine = (view: OrgView): string => {
       ? "Done. Two sources disagree"
       : "Done";
   }
-  return org.made === true
-    ? "Not run for an organization made here"
-    : "Not started";
+  return "Not started";
 };
 
 const agreedLine = (view: OrgView): string => {
@@ -366,9 +364,6 @@ export const needLine = (need: Need, view: OrgView): string => {
     case "ask": {
       const count = need.fields.length;
       return `The first conversation left ${count} ${plural(count, "thing", "things")} open. Ask the sponsor.`;
-    }
-    case "research": {
-      return "Stephen has read the first conversation. Start the research.";
     }
     case "conflict": {
       return "Two sources disagree about the company. The company’s own account wins, so this goes to its admin.";
