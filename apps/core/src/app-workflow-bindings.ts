@@ -14,11 +14,11 @@ import type {
   AppWorkflowBinding,
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { editableApp } from "./apps.ts";
+import { appFor, editableApp } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -308,6 +308,31 @@ export const unbindWorkflowFromApp = async (
     }),
   ]);
   await tellBindingChanged(env, row.appId);
+};
+
+/**
+ * The active bindings of App `app`, by alias, for `by`, who must build it
+ * and isn't Grasp staff, as for binding and removing one. An archived
+ * App's are listed too: it keeps them for when it is restored.
+ */
+export const listAppWorkflowBindings = async (
+  env: Env,
+  by: Acting,
+  app: unknown
+): Promise<AppWorkflowBinding[]> => {
+  requireNotStaff(by);
+  const found = await appFor(env, by, app, "builder");
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(appWorkflowBindings)
+    .where(
+      and(
+        eq(appWorkflowBindings.appId, found.id),
+        eq(appWorkflowBindings.status, "active")
+      )
+    )
+    .orderBy(asc(appWorkflowBindings.alias));
+  return rows.map(bindingOf);
 };
 
 /**
