@@ -579,6 +579,20 @@ export const storeKnowledgeSignals = async (
                 )`
           ),
         ];
+  // In the same batch as each insert: none of someone erased since they
+  // were read is left, so an erasure that ran meanwhile never sees its
+  // signals come back (person-erasure.ts).
+  const noneErased = db
+    .delete(knowledgeSignals)
+    .where(
+      and(
+        eq(knowledgeSignals.computation, computation.id),
+        inArray(
+          knowledgeSignals.owner,
+          db.select({ userId: personErasures.userId }).from(personErasures)
+        )
+      )
+    );
   for (const [first, ...rest] of chunks(
     [...inserts, ...carried],
     insertsPerBatch
@@ -586,7 +600,7 @@ export const storeKnowledgeSignals = async (
     if (first !== undefined) {
       // Batches one after another, each within D1's limits.
       // oxlint-disable-next-line no-await-in-loop
-      await db.batch([first, ...rest]);
+      await db.batch([first, ...rest, noneErased]);
     }
   }
   const finished = isFinished(computations, computation);

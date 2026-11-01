@@ -504,6 +504,60 @@ describe("Knowledge usage signals", () => {
     }).toStrictEqual({ erased: 0, kept: 1 });
   });
 
+  it("tell no owner erased between the computation's read and its insert", async () => {
+    const erased = await newOwner();
+    const collectionId = await newCollection(erased);
+    await newDocument(erased, collectionId, "old.md", {
+      review: "2020-01-01",
+    });
+    // The database as the computation sees it: the erasure commits right
+    // before the batch that inserts the signals it read.
+    let inserting = false;
+    let erasedFirst = false;
+    const database = new Proxy(env.DB, {
+      get: (target, key): unknown => {
+        if (key === "prepare") {
+          return (query: string) => {
+            if (query.includes('insert into "knowledge_signals"')) {
+              inserting = true;
+            }
+            return target.prepare(query);
+          };
+        }
+        if (key === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (inserting && !erasedFirst) {
+              erasedFirst = true;
+              await target
+                .prepare(
+                  "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, 'Erased', ?, 1, ?, ?)"
+                )
+                .bind(
+                  erased.userId,
+                  `hash-${erased.userId}`,
+                  erased.userId,
+                  Date.now()
+                )
+                .run();
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    await refreshDailySignals({ ...env, DB: database }, nextDay());
+
+    expect({ erasedFirst, owned: await ownedBy(erased.userId) }).toStrictEqual({
+      erasedFirst: true,
+      owned: 0,
+    });
+  });
+
   it("tell the owner about documents nobody read or changed for 90 days, memory files' reads included, listed skills not", async () => {
     const owner = await newOwner();
     const reader = await newReader();
