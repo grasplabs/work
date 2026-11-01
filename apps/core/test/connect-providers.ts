@@ -248,40 +248,6 @@ export const botConnectorUninstallUrl =
   "https://bot-connector-control.test/uninstall";
 
 /**
- * The client's WhatsApp Business number, as core (`WHATSAPP_APP_SECRET`,
- * `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`) and connect
- * (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) are set up with it.
- */
-export const whatsAppNumber = {
-  appSecret: "acme-whatsapp-app-secret-for-tests",
-  phoneNumberId: "106540352242922",
-  verifyToken: "acme-whatsapp-verify-token-for-tests",
-  accessToken: "acme-whatsapp-access-token-for-tests",
-} as const;
-
-/**
- * The client's Telegram bot, as core (`TELEGRAM_WEBHOOK_SECRET`) and
- * connect (`TELEGRAM_BOT_TOKEN`) are set up with it in the tests.
- */
-export const telegramBot = {
-  webhookSecret: "acme-telegram-webhook-secret-for-tests",
-  token: "7140326550:AAH-acme-telegram-token-for-tests",
-  id: 7_140_326_550,
-} as const;
-
-/**
- * Where tests read what reached Telegram's Bot API, in order: each call's
- * method, its JSON, and whether its address carried the bot's token.
- */
-export const telegramSentUrl = "https://telegram-control.test/sent";
-
-/**
- * Where tests read what reached WhatsApp's Cloud API, in order: each
- * message's recipient, its JSON, and whether it carried the client's token.
- */
-export const whatsAppSentUrl = "https://whatsapp-control.test/sent";
-
-/**
  * Stephen's own Gmail mailbox, as connect holds it (`GMAIL_*`) in the
  * tests, and the fake Gmail behind it knows it.
  */
@@ -394,40 +360,6 @@ const botFramework = (${botFrameworkKeysFake.toString()})();
 let botFrameworkKeys = [];
 let botFrameworkSharedKey = null;
 const botConnector = (${botConnectorFake.toString()})(${JSON.stringify(teamsBot)});
-const telegramSent = [];
-/** Telegram's Bot API, as far as the door's adapter calls it. */
-const telegramAnswer = async (request, url) => {
-  const [, bot, method] = url.pathname.split("/");
-  const fields = await request.json();
-  telegramSent.push({
-    method,
-    fields,
-    authorized: bot === ${JSON.stringify(`bot${telegramBot.token}`)},
-  });
-  if (method === "getMe") {
-    return Response.json({ ok: true, result: { id: ${String(telegramBot.id)}, is_bot: true, first_name: "Stephen", username: "acme_stephen_bot" } });
-  }
-  if (method === "sendMessage") {
-    return Response.json({ ok: true, result: { message_id: telegramSent.length, date: Math.floor(Date.now() / 1000), chat: { id: fields.chat_id, type: "private" }, text: fields.text } });
-  }
-  return Response.json({ ok: true, result: true });
-};
-const whatsAppSent = [];
-/** WhatsApp's Cloud API, as far as the door's adapter calls it. */
-const whatsAppAnswer = async (request, url) => {
-  const fields = await request.json();
-  whatsAppSent.push({
-    path: url.pathname,
-    to: fields.to,
-    fields,
-    authorized: request.headers.get("authorization") === ${JSON.stringify(`Bearer ${whatsAppNumber.accessToken}`)},
-  });
-  return Response.json({
-    messaging_product: "whatsapp",
-    contacts: [{ input: fields.to, wa_id: fields.to }],
-    messages: [{ id: "wamid." + crypto.randomUUID() }],
-  });
-};
 const google = (${googleGmailFake.toString()})(${JSON.stringify(gmailAccount)});
 let googleKeys = [];
 const slackCalls = [];
@@ -654,18 +586,6 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
-    }
-    if (url.hostname === "api.telegram.org") {
-      return await telegramAnswer(request, url);
-    }
-    if (url.href === ${JSON.stringify(telegramSentUrl)}) {
-      return Response.json(telegramSent);
-    }
-    if (url.hostname === "graph.facebook.com") {
-      return await whatsAppAnswer(request, url);
-    }
-    if (url.href === ${JSON.stringify(whatsAppSentUrl)}) {
-      return Response.json(whatsAppSent);
     }
     if (url.hostname === "slack.com") {
       return await slackAnswer(request, url);

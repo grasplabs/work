@@ -26,8 +26,8 @@ import {
 // prefetch links), one that links twice, after its time, after a newer
 // one, or to a second person; someone linking an account they weren't
 // sent, or unlinking another's; staff linking anything; a removed person
-// still known on a platform; and the platform's id (a phone number on
-// WhatsApp) or the secret kept where it shouldn't be.
+// still known on a platform; and the platform's id (an email address on
+// Gmail) or the secret kept where it shouldn't be.
 
 const idp = mockIdp();
 
@@ -324,7 +324,7 @@ describe("a linked chat account", { timeout: 60_000 }, () => {
       me.userId
     );
     await expect(
-      personOnChannel(env, "telegram", platformUserId)
+      personOnChannel(env, "gmail", platformUserId)
     ).resolves.toBeNull();
     await expect(someoneElse.api.channelAccounts.list()).resolves.toStrictEqual(
       []

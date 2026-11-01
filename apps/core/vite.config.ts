@@ -26,8 +26,6 @@ import {
   platformOpenAiKey,
   slackApp,
   teamsBot,
-  telegramBot,
-  whatsAppNumber,
 } from "./test/connect-providers.ts";
 import { testSignIn } from "./test/sign-in-config.ts";
 import { testAssets } from "./test/test-run.ts";
@@ -231,12 +229,6 @@ export const coreProject = (
             TEAMS_BOT_ID: teamsBot.id,
             // The client's Slack app, so its door is open too.
             SLACK_SIGNING_SECRET: slackApp.signingSecret,
-            // The client's WhatsApp number (src/channels/whatsapp.ts).
-            WHATSAPP_APP_SECRET: whatsAppNumber.appSecret,
-            WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
-            WHATSAPP_VERIFY_TOKEN: whatsAppNumber.verifyToken,
-            // The client's Telegram bot (src/channels/telegram.ts).
-            TELEGRAM_WEBHOOK_SECRET: telegramBot.webhookSecret,
             // Stephen's Gmail mailbox and its push, so its door is open too.
             GMAIL_MAILBOX: gmailAccount.mailbox,
             GMAIL_PUBSUB_AUDIENCE: gmailPush.audience,
@@ -347,9 +339,6 @@ export const coreProject = (
                 TEAMS_BOT_SECRET: teamsBot.secret,
                 // Its Slack app, which the fake Slack there knows.
                 SLACK_BOT_TOKEN: slackApp.botToken,
-                WHATSAPP_PHONE_NUMBER_ID: whatsAppNumber.phoneNumberId,
-                WHATSAPP_ACCESS_TOKEN: whatsAppNumber.accessToken,
-                TELEGRAM_BOT_TOKEN: telegramBot.token,
                 // Grasp's own keys at OpenAI, Anthropic and ElevenLabs for
                 // platform features, which the fakes there take once a test
                 // plans for them (OpenAI's transcription and ElevenLabs'

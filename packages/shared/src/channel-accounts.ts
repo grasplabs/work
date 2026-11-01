@@ -42,8 +42,8 @@ const printable = /^[^\p{Cc}]+$/u;
 
 /**
  * A sender's id on their platform, as its adapter verified it (Chat SDK's
- * `message.author.userId`): a Slack member id, a Telegram user id, a
- * WhatsApp number. Opaque to Grasp; never parsed for meaning.
+ * `message.author.userId`): a Slack member id, a Gmail address. Opaque to
+ * Grasp; never parsed for meaning.
  */
 export const platformUserIdSchema = z.string().min(1).max(256).regex(printable);
 
