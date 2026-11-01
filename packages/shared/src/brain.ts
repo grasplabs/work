@@ -177,7 +177,7 @@ export interface Tool {
   name: string;
   teamIds: string[];
   sourceId: string;
-  /** As the team said it; a sighting in the landscape wins. Empty is unknown. */
+  /** As the team said it. Empty is unknown. */
   ai?: AiKind;
 }
 
@@ -374,31 +374,6 @@ export interface Connection {
   matches: string[];
 }
 
-/** How Grasp knows an application is in use. */
-export type SeenThrough = "microsoftSso" | "googleSso" | "pulse";
-
-/** One application in the client's landscape. */
-export interface LandscapeApp {
-  id: string;
-  name: string;
-  vendor: string;
-  category: string;
-  /** A file name in /logos, or none. */
-  logo?: string;
-  /** Its logo as the Landscape table shows it, as a full path. */
-  logoSrc?: string;
-  ai: AiKind;
-  /** People seen using it in the last 30 days. */
-  people: number;
-  seenThrough: SeenThrough[];
-  /** The team that owns it, or null when nobody does. */
-  owner: string | null;
-  /** Tool names that mean this application. */
-  matches: string[];
-  /** The OAuth permissions people granted it, in plain words. Empty when seen only by Pulse. */
-  permissions: string[];
-}
-
 /** Everything the brain is built from. */
 export interface Workspace {
   company: Company;
@@ -420,7 +395,6 @@ export interface Workspace {
   gaps: Gap[];
   workflows: Workflow[];
   connections: Connection[];
-  landscape: LandscapeApp[];
 }
 
 /** Most statements one call takes out of the brain. */
