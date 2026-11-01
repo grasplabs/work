@@ -7,6 +7,7 @@ import {
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type {
   AuditApi,
+  AuditExportOptions,
   AuditFilter,
   ChainVerification,
 } from "@grasp-os/shared/audit-log";
@@ -112,7 +113,8 @@ export const logHead = async (): Promise<number> => {
  */
 export const exportReader = async (
   session: string,
-  filter: AuditFilter
+  filter: AuditFilter,
+  options?: AuditExportOptions
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> => {
   const headers = new Headers({ cookie: session });
   const rpc = new AuditRpc(env, async () => {
@@ -122,7 +124,7 @@ export const exportReader = async (
     }
     return identity;
   });
-  const stream = await rpc.export(filter, "json");
+  const stream = await rpc.export(filter, "json", options);
   return stream.getReader();
 };
 

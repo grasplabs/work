@@ -67,6 +67,7 @@ import { ListedCount } from "../workflows/listed-count.tsx";
 import { readActivity } from "../workflows/reads.ts";
 import { workflowFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
+import { StartAppRun } from "../workflows/start-run.tsx";
 import { WorkflowTeamPicker } from "../workflows/team-picker.tsx";
 import { WorkflowTriggers } from "../workflows/triggers.tsx";
 
@@ -663,9 +664,12 @@ const WorkflowView = ({
               </p>
             ) : null}
           </div>
-          {params === null ? null : (
-            <TestButton app={summary.app} workflow={summary.workflow} />
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <StartAppRun app={summary.app} workflow={summary.workflow} />
+            {params === null ? null : (
+              <TestButton app={summary.app} workflow={summary.workflow} />
+            )}
+          </div>
         </div>
         <TabsList variant="line">
           <TabsTrigger value="steps">
