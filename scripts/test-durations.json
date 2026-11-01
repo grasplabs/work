@@ -766,7 +766,6 @@
   "scripts scripts/stall-reporter.test.ts": 5.8,
   "scripts scripts/state-coverage.test.ts": 0,
   "scripts scripts/stephen-eval.test.ts": 0,
-  "scripts scripts/stephen-load.test.ts": 0,
   "scripts scripts/test-durations.test.ts": 0,
   "scripts scripts/test-shards.test.ts": 0,
   "scripts scripts/workerd-assets.test.ts": 1.5,
