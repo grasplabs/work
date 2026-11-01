@@ -293,6 +293,10 @@ const coreDb: D1State = {
     permissions: exported(`${core}permissions.ts`),
     apps: exported(`${core}apps.ts`),
     access_revocations: exported(`${core}access-revocations.ts`),
+    admin_commands: exported(
+      `${core}admin-command.ts`,
+      "The admin's commands this core took, by id: one delivered again after a move still applies once."
+    ),
     app_members: exported(`${core}app-access.ts`),
     app_integrations: exported(`${core}app-integrations.ts`),
     screen_artifacts: exported(`${core}screen-trust.ts`),
