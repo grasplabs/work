@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { SETTLERS } from "./admin/onboarding-admin.ts";
 import type { OrgRules } from "./admin/onboarding-admin.ts";
-import type { WorkRecord } from "./admin/org-record.ts";
+import { heardAnswers } from "./admin/org-record.ts";
+import type { DrawnWork, WorkRecord } from "./admin/org-record.ts";
 import type { InterviewProgress } from "./interview-links.ts";
 import type { InterviewPhase } from "./interview-turn.ts";
 import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
@@ -333,3 +334,121 @@ export interface StaffWorks {
   /** Pieces of work Grasp counts as known by hand, by id. */
   counted: string[];
 }
+
+const triple = z.tuple([z.number(), z.number(), z.number()]);
+
+/** A drawing as the store keeps it, read back. */
+export const drawnWorkSchema = z.object({
+  at: z.string(),
+  from: z.array(z.string()),
+  starts: z.string(),
+  steps: z.array(
+    z.object({
+      text: z.string(),
+      who: z.string(),
+      tool: z.string(),
+      minutes: triple.nullable(),
+      documented: z.boolean(),
+    })
+  ),
+  waits: z.array(z.string()),
+  differently: z.array(
+    z.object({
+      when: z.string(),
+      does: z.string(),
+      outOfTen: z.number().nullable(),
+      after: z.number(),
+    })
+  ),
+  decides: z.string(),
+  own: z.string(),
+  ai: z.string(),
+  right: z.string(),
+  ask: z.string(),
+  next: z.string(),
+  term: z.object({ word: z.string(), meaning: z.string() }).nullable(),
+  differs: z
+    .object({
+      step: z.number(),
+      other: z.string(),
+      why: z.enum(["condition", "place", "conflict"]),
+      because: z.string(),
+    })
+    .nullable(),
+  per: z.enum(["week", "month"]),
+  unit: z.enum(["minutes", "hours"]),
+  heard: z.partialRecord(z.enum(heardAnswers), z.array(z.string())).optional(),
+  told: z.record(
+    z.string(),
+    z.object({
+      start: z.boolean(),
+      steps: z.array(z.number()),
+      end: z.boolean(),
+      way: z.object({ step: z.number(), other: z.boolean() }).nullable(),
+      waits: z.array(z.number()),
+      differently: z.array(z.number()),
+      decides: z.boolean(),
+      own: z.boolean(),
+      ai: z.boolean(),
+      volume: z.tuple([z.number(), z.number()]).nullable(),
+      volumeOf: z.enum(["me", "team", "unknown"]).optional(),
+      takes: triple.nullable(),
+      wrong: z.number().nullable(),
+      right: z.boolean(),
+      ask: z.boolean(),
+      next: z.boolean(),
+      example: z.string().nullable(),
+      term: z.boolean(),
+      out: z.array(z.string()),
+      stepMinutes: z
+        .array(
+          z.object({
+            step: z.number(),
+            minutes: triple,
+            normal: z.number().nullable().optional(),
+          })
+        )
+        .optional(),
+      gave: z
+        .object({
+          quiet: z.number().nullable(),
+          busy: z.number().nullable(),
+          per: z.enum(["week", "month"]).nullable(),
+          takes: z.tuple([
+            z.number().nullable(),
+            z.number().nullable(),
+            z.number().nullable(),
+          ]),
+        })
+        .optional(),
+      caseShares: z
+        .array(z.object({ case: z.number(), outOfTen: z.number() }))
+        .optional(),
+    })
+  ),
+  open: z.array(z.string()),
+}) satisfies z.ZodType<DrawnWork>;
+
+/**
+ * Every piece of work as staff read it (`StaffWorks`), checked on its way
+ * out of core (its staff RPC and the admin snapshot): only what the
+ * schema names leaves it.
+ */
+export const staffWorksSchema = z.object({
+  works: z.array(
+    z.object({
+      id: z.string(),
+      team: z.string(),
+      name: z.string(),
+      local: z.string().optional(),
+      item: z.tuple([z.string(), z.string()]),
+      doers: z.array(z.string()),
+      share: z.number(),
+      from: z.enum(["lead", "grasp"]),
+      drawn: drawnWorkSchema.nullable(),
+      stale: z.boolean(),
+    })
+  ),
+  rules: orgRulesSchema,
+  counted: z.array(z.string()),
+}) satisfies z.ZodType<StaffWorks>;

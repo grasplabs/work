@@ -10,6 +10,7 @@ import {
   updateMail,
 } from "../src/onboarding/mail-text.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -271,9 +272,11 @@ describe("the interview link emails", () => {
     const failed = mail.tried.length - mail.sent.length;
     /** What staff and the company's admin are told of oli's and ona's mail. */
     const told = async () => {
-      const interview = await staff.onboardingStaff.interview("oli");
+      const snapshot = await adminSnapshot();
       const links = await api.onboarding.links();
-      const { failedMail } = interview;
+      const failedMail =
+        snapshot.links.find((link) => link.person === "oli")?.failedMail ??
+        null;
       return {
         staff:
           failedMail === null
@@ -288,12 +291,10 @@ describe("the interview link emails", () => {
     const toldFailed = await told();
     const byAdmin = await outcome(api.onboardingStaff.sendMailAgain("oli"));
     const audited = await auditedDuring(async () => {
-      await staff.onboardingStaff.sendMailAgain("oli");
+      await adminCommands().sendMailAgain("oli");
       await store.deliverMail();
     });
-    const nothingFailed = await outcome(
-      staff.onboardingStaff.sendMailAgain("ona")
-    );
+    const nothingFailed = await outcome(adminCommands().sendMailAgain("ona"));
     const toldSent = await told();
     const { entries } = await staff.onboardingStaff.log({ what: "mail" });
     const resent = audited.filter(

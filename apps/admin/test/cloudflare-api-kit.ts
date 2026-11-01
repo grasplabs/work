@@ -2,6 +2,7 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
+import type { AdminCommandEnvelope } from "@grasp-os/shared/admin-command";
 import type {
   AdminKickoffRequest,
   AdminKickoffView,
@@ -191,6 +192,14 @@ export interface AccountState {
   kickoff?: AdminKickoffView | "shut_out";
   /** The kickoff requests its core took, as each signed request sent them. */
   kickoffAsks: AdminKickoffRequest[];
+  /**
+   * What its core answers a signed command with, when it doesn't apply it
+   * (@grasp-os/shared/admin-command): core's status and code. Unset, it
+   * applies every command.
+   */
+  commandRefusal?: { status: number; code: string };
+  /** The commands its core took, as each signed envelope sent them. */
+  commands: AdminCommandEnvelope[];
 }
 
 /** A call the fake got. */

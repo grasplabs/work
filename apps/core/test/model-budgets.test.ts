@@ -14,6 +14,7 @@ import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
+import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider, streamText } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
@@ -232,24 +233,6 @@ const failingLedger = (
 
 /** Whether `sql` writes to or reads an audit outbox. */
 const auditing = (sql: string): boolean => sql.includes("audit_outbox");
-
-/** The audit log's binding, refusing every append, as an unreachable one would. */
-const failingAuditLog = (): Env["AUDIT_LOG"] =>
-  new Proxy(env.AUDIT_LOG, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName" && name !== "get") {
-        return Reflect.get(namespace, name, namespace);
-      }
-      return () =>
-        new Proxy(
-          {},
-          {
-            get: () => async () =>
-              await Promise.reject(new Error("Unavailable")),
-          }
-        );
-    },
-  });
 
 /** What a call's audit event says the ledger did, its amounts in micros. */
 const said = (event: AuditEvent | undefined) => [

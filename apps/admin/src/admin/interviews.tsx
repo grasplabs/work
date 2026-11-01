@@ -1,5 +1,3 @@
-import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
-import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
 /**
  * The interviews of one organization, by team, by name and one by one,
  * ported from the prototype (grasplabs/prototype
@@ -9,10 +7,15 @@ import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
  *
  * Core sends an interview as numbers only, so what was said is nowhere
  * here: the transcripts tab lists the interviews without a word of them.
- * And the admin acts on nothing yet: the prototype's reminders, a team
- * asked in, the invitation and the list of links to send (a link is a
- * credential, which core never sends) aren't here.
+ * Staff act from here as from the company's Grasp before (commands.tsx):
+ * marking the one reminder, asking a team in, sending a failed mail again
+ * and giving someone who lost their device a new start. The invitation
+ * and the list of links to send aren't here: a link is a credential,
+ * which core never sends.
  */
+import type { AdminLink } from "@grasp-os/shared/admin-snapshot";
+import type { Funnel } from "@grasp-os/shared/admin/admin-interviews";
+import { funnelOf, talkedByDay } from "@grasp-os/shared/admin/admin-interviews";
 import type { Phase } from "@grasp-os/shared/admin/interviews";
 import {
   dateOn,
@@ -43,6 +46,7 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
 
+import { CommandButton } from "./commands.tsx";
 import { BarList, Dot, markOf, PeopleDots } from "./interview-parts.tsx";
 import { EmptySection, Section } from "./section.tsx";
 import {
@@ -176,7 +180,15 @@ const standsOf = (view: OrgView, team: TeamView): string => {
 };
 
 /** One team in the list: who leads it and where it stands, and its people as dots. */
-const TeamRow = ({ view, team }: { view: OrgView; team: TeamView }) => {
+const TeamRow = ({
+  view,
+  team,
+  clientId,
+}: {
+  view: OrgView;
+  team: TeamView;
+  clientId: string;
+}) => {
   const { lead, next } = team;
   const talked = team.counts.completed;
   const people = team.people.length;
@@ -187,7 +199,7 @@ const TeamRow = ({ view, team }: { view: OrgView; team: TeamView }) => {
     .filter((part) => part !== "")
     .join(" · ");
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-2 border-t px-5 py-3 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]">
       <span className="flex min-w-0 flex-col">
         <span className={cn("truncate", team.off && "text-muted-foreground")}>
           {team.team.name}
@@ -225,6 +237,20 @@ const TeamRow = ({ view, team }: { view: OrgView; team: TeamView }) => {
           </>
         )}
       </span>
+      {team.off && !view.closed ? (
+        <span className="col-start-2 row-start-1 md:col-start-auto md:row-start-auto">
+          <CommandButton
+            clientId={clientId}
+            command={{
+              type: "onboarding.ask_in",
+              payload: { team: team.team.id },
+            }}
+            label={`Ask ${team.team.name} in`}
+          >
+            Ask it in
+          </CommandButton>
+        </span>
+      ) : null}
     </li>
   );
 };
@@ -234,7 +260,13 @@ const TeamRow = ({ view, team }: { view: OrgView; team: TeamView }) => {
  * has come with their link, how many had talked by each day, and every
  * team with who talked there.
  */
-export const InterviewTeams = ({ view }: { view: OrgView }) => {
+export const InterviewTeams = ({
+  view,
+  clientId,
+}: {
+  view: OrgView;
+  clientId: string;
+}) => {
   if (view.teams.length === 0) {
     return (
       <EmptySection>
@@ -268,7 +300,12 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
       >
         <ul className="flex flex-col">
           {view.teams.map((team) => (
-            <TeamRow key={team.team.id} team={team} view={view} />
+            <TeamRow
+              clientId={clientId}
+              key={team.team.id}
+              team={team}
+              view={view}
+            />
           ))}
         </ul>
       </Section>
@@ -293,7 +330,12 @@ const lastOf = (view: OrgView, each: PersonView): string => {
 };
 
 /** What goes with where someone's link stands, on a second line. */
-const besideOf = (each: PersonView): string => {
+const besideOf = (each: PersonView, link: AdminLink | undefined): string => {
+  const failed = link?.failedMail ?? null;
+  if (failed !== null) {
+    const mail = failed.kind === "reminder" ? "reminder" : "link";
+    return `Their ${mail} failed on ${formatDate(failed.at)}: ${failed.reason ?? "no reason given"}`;
+  }
   if (each.deleted) {
     return "Deleted because they asked";
   }
@@ -304,10 +346,79 @@ const besideOf = (each: PersonView): string => {
 };
 
 /**
+ * What Grasp can do for one person: note the one reminder, send their
+ * failed mail again once what stopped it is put right, and give them a
+ * new start when they lost the device their interview was on, which
+ * deletes what they said, so only on their request.
+ */
+const PersonActions = ({
+  clientId,
+  each,
+  failed,
+}: {
+  clientId: string;
+  each: PersonView;
+  failed: boolean;
+}) => {
+  const { id, name } = each.person;
+  return (
+    <span className="flex flex-wrap items-start justify-end gap-2">
+      {each.mayRemind ? (
+        <CommandButton
+          clientId={clientId}
+          command={{ type: "onboarding.remind", payload: { people: [id] } }}
+          label={`Mark ${name} reminded`}
+          variant="ghost"
+        >
+          Mark reminded
+        </CommandButton>
+      ) : null}
+      {failed ? (
+        <CommandButton
+          clientId={clientId}
+          command={{
+            type: "onboarding.send_mail_again",
+            payload: { person: id },
+          }}
+          label={`Send ${name}’s mail again`}
+        >
+          Send again
+        </CommandButton>
+      ) : null}
+      {each.sent === null ? null : (
+        <CommandButton
+          clientId={clientId}
+          command={{ type: "onboarding.new_start", payload: { person: id } }}
+          confirm={{
+            title: `Give ${name} a new start?`,
+            description:
+              "What they said so far is deleted, and their link opens on the next device that opens it. Do this only when they asked.",
+            action: "Delete and start over",
+          }}
+          label={`Give ${name} a new start`}
+          variant="ghost"
+        >
+          New start
+        </CommandButton>
+      )}
+    </span>
+  );
+};
+
+/**
  * Where every person stands with their link, by name: for Grasp only.
  * The company never sees this list: it gets numbers per team.
  */
-export const InterviewPeople = ({ view }: { view: OrgView }) => {
+export const InterviewPeople = ({
+  view,
+  clientId,
+  links,
+}: {
+  view: OrgView;
+  clientId: string;
+  /** Each link as core sends it: whose mail failed. */
+  links: readonly AdminLink[];
+}) => {
   const [query, setQuery] = useState("");
   if (view.people.length === 0) {
     return (
@@ -322,6 +433,7 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
     );
   }
   const teams = new Map(view.teams.map((team) => [team.team.id, team]));
+  const linkOf = new Map(links.map((link) => [link.person, link]));
   const wanted = query.trim().toLowerCase();
   const shown = view.people.filter(
     (each) => wanted === "" || each.person.name.toLowerCase().includes(wanted)
@@ -363,12 +475,16 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
               <TableHead className="hidden md:table-cell" variant="card">
                 Last
               </TableHead>
+              <TableHead variant="card">
+                <span className="sr-only">What Grasp can do</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {shown.map((each) => {
               const team = teams.get(each.person.team);
-              const beside = besideOf(each);
+              const link = linkOf.get(each.person.id);
+              const beside = besideOf(each, link);
               return (
                 <TableRow key={each.person.id}>
                   <TableCell className="whitespace-normal" variant="card">
@@ -411,6 +527,13 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
                     <span className="text-muted-foreground">
                       {lastOf(view, each)}
                     </span>
+                  </TableCell>
+                  <TableCell variant="card">
+                    <PersonActions
+                      clientId={clientId}
+                      each={each}
+                      failed={(link?.failedMail ?? null) !== null}
+                    />
                   </TableCell>
                 </TableRow>
               );

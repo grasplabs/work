@@ -46,7 +46,7 @@ import { onboardingStore } from "./onboarding/store.ts";
 type AdminAsk = z.output<typeof adminKickoffRequestSchema>["ask"];
 
 /** Whether Grasp's staff may act in this company now, by its own sign-in config. */
-const staffLetIn = async (env: Env): Promise<boolean> => {
+export const staffLetIn = async (env: Env): Promise<boolean> => {
   const config = signInConfig(env);
   if (!(config?.staff && staffWindowOpen(config, Date.now()))) {
     return false;

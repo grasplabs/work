@@ -15,7 +15,7 @@ const Workflows = () => {
   const { integrations } = admin.snapshot;
   return (
     <>
-      <OrgWorkflows view={view} />
+      <OrgWorkflows clientId={admin.client.id} view={view} />
       {integrations === null ? null : (
         <Section
           description="Workflows that can’t run as they are: an app they work in isn’t connected, stopped, or has no connection approved for it yet."

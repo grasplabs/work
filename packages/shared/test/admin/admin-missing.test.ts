@@ -11,11 +11,13 @@ import type {
 import { STARTING_ORG_RULES } from "../../src/admin/onboarding-admin.ts";
 import { bothTalked, client, orders } from "./fixtures/bakkerij.ts";
 
-const drawn = adminOrgOf(bothTalked, client, {
-  works: [orders],
-  rules: STARTING_ORG_RULES,
-  counted: [],
-});
+const drawn = adminOrgOf(
+  {
+    ...bothTalked,
+    works: { works: [orders], rules: STARTING_ORG_RULES, counted: [] },
+  },
+  client
+);
 const found = recordOf(
   adminViewOf(drawn.org, drawn.state, "2026-10-14"),
   "orders"

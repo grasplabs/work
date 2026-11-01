@@ -36,9 +36,12 @@ const hexBytes = (hex: string): Uint8Array<ArrayBuffer> =>
 
 /**
  * What the console's signed `request` carries, checked against `schema`
- * and its `sentAt` against core's clock, or why it's refused.
+ * and when it was sent (`sentAt`, or a command's `issuedAt`) against
+ * core's clock, or why it's refused.
  */
-export const consoleSigned = async <T extends { sentAt: string }>(
+export const consoleSigned = async <
+  T extends { sentAt: string } | { issuedAt: string },
+>(
   request: Request,
   env: Pick<Env, "BETTER_AUTH_SECRET">,
   {
@@ -80,6 +83,8 @@ export const consoleSigned = async <T extends { sentAt: string }>(
   if (!checked.success) {
     return "invalid";
   }
-  const skew = Math.abs(Date.now() - Date.parse(checked.data.sentAt));
-  return skew > maxSkewMs ? "stale" : checked.data;
+  const { data } = checked;
+  const sentAt = "sentAt" in data ? data.sentAt : data.issuedAt;
+  const skew = Math.abs(Date.now() - Date.parse(sentAt));
+  return skew > maxSkewMs ? "stale" : data;
 };

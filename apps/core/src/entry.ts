@@ -1,3 +1,4 @@
+import { adminCommandPath } from "@grasp-os/shared/admin-command";
 import { adminKickoffPath } from "@grasp-os/shared/admin-kickoff";
 import { adminSnapshotPath } from "@grasp-os/shared/admin-snapshot";
 import { aiStatusReportPath } from "@grasp-os/shared/ai-status-report";
@@ -28,6 +29,7 @@ import {
 import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
+import { adminCommandResponse } from "./admin-command.ts";
 import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
@@ -342,6 +344,7 @@ const pathHandlers: ReadonlyMap<
   [aiStatusReportPath, aiStatusReportResponse],
   [adminSnapshotPath, adminSnapshotResponse],
   [adminKickoffPath, adminKickoffResponse],
+  [adminCommandPath, adminCommandResponse],
   [platformUpdatePath, platformUpdateResponse],
   [mailIngressPath, mailIngressResponse],
 ]);

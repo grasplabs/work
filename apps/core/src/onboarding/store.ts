@@ -71,6 +71,7 @@ import type {
   StaffOrganization,
 } from "@grasp-os/shared/onboarding-organization";
 import {
+  drawnWorkSchema,
   logPageMax,
   orgRulesSchema,
   stephenSetupSchema,
@@ -214,7 +215,7 @@ import {
   TooManyClaimChecksError,
 } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
-import { drawnWorkSchema, drawWork, knownOf } from "./work-drawing.ts";
+import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
@@ -422,6 +423,19 @@ interface MailContext {
   /** The company's onboarding admin, whom replies reach. */
   replyTo: string | undefined;
 }
+
+/** The agreements' fields in one order, to tell the same agreements apart from changed ones. */
+const agreementsKey = (agreements: Agreements | null): string =>
+  agreements === null
+    ? ""
+    : JSON.stringify([
+        agreements.processing,
+        agreements.processingOn ?? null,
+        agreements.assessment,
+        agreements.assessmentOn ?? null,
+        agreements.council,
+        agreements.councilOn ?? null,
+      ]);
 
 /** How long the alarm waits, at most, before it looks for due links again. */
 const linkCheckMs = 60 * 60 * 1000;
@@ -1461,10 +1475,22 @@ export class Onboarding extends DurableObject<Env> {
     return this.view();
   }
 
-  /** Records where the agreements stand. */
-  setAgreements(agreements: Agreements, by: AuditActor): OnboardingView {
+  /**
+   * Records where the agreements stand; false, changing nothing, once the
+   * team is told and they differ from what was agreed. They are the record
+   * of what was agreed before the first interview: checked and saved in
+   * one transaction, so no link can go out between the two. Saving them
+   * again unchanged still applies.
+   */
+  setAgreements(agreements: Agreements, by: AuditActor): boolean {
     const { processing, assessment, council } = agreements;
-    this.ctx.storage.transactionSync(() => {
+    const saved = this.ctx.storage.transactionSync(() => {
+      if (
+        this.#told() &&
+        agreementsKey(this.#row().agreements) !== agreementsKey(agreements)
+      ) {
+        return false;
+      }
       this.#db
         .update(onboarding)
         .set({ agreements: JSON.stringify(agreements) })
@@ -1478,10 +1504,13 @@ export class Onboarding extends DurableObject<Env> {
         assessmentOn: agreements.assessmentOn ?? null,
         councilOn: agreements.councilOn ?? null,
       });
+      return true;
     });
-    this.#deliverAudit();
-    this.ctx.waitUntil(this.#armLinks());
-    return this.view();
+    if (saved) {
+      this.#deliverAudit();
+      this.ctx.waitUntil(this.#armLinks());
+    }
+    return saved;
   }
 
   /**
@@ -4008,21 +4037,30 @@ export class Onboarding extends DurableObject<Env> {
     const { agreements } = this.#row();
     const roster = this.#roster();
     const { sent } = this.#linkFacts();
-    const [row] = this.#db
-      .select({ toldAt: onboarding.toldAt })
-      .from(onboarding)
-      .where(eq(onboarding.id, 1))
-      .all();
     const taking =
       roster?.people.filter((person) => takingPart(roster, person)) ?? [];
     return {
       agreements,
       agreed: agreementsIn(agreements),
-      // Links sent before the store kept when the first went out count too.
-      told: (row?.toldAt ?? null) !== null || sent.size > 0,
+      told: this.#told(),
       out: sent.size,
       waiting: taking.filter(({ id }) => !sent.has(id)).length,
     };
+  }
+
+  /** Whether the team is told: a link ever went out, even to someone since taken off the roster. */
+  #told(): boolean {
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    // Links sent before the store kept when the first went out count too.
+    return (
+      (row?.toldAt ?? null) !== null ||
+      this.#db.select({ person: links.person }).from(links).limit(1).all()
+        .length > 0
+    );
   }
 
   /** How Stephen is set up, and what the kickoff suggests. */
@@ -4769,6 +4807,18 @@ export class Onboarding extends DurableObject<Env> {
       failedMail: this.#failedMail(person),
       interviewId: code.linkId,
     };
+  }
+
+  /** Everyone on the roster whose latest mail failed for good, by id: for the admin's snapshot. */
+  failedMails(): Map<string, FailedMail> {
+    const failed = new Map<string, FailedMail>();
+    for (const { id } of this.#roster()?.people ?? []) {
+      const mail = this.#failedMail(id);
+      if (mail !== null) {
+        failed.set(id, mail);
+      }
+    }
+    return failed;
   }
 
   /**

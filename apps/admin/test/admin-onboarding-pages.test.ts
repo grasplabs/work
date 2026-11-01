@@ -93,6 +93,7 @@ const bakery = (): AdminSnapshot =>
         openedAt: "2026-10-05T07:30:00.000Z",
         remindedAt: null,
         deletedAt: null,
+        failedMail: null,
         state: "completed",
       },
       {
@@ -101,6 +102,7 @@ const bakery = (): AdminSnapshot =>
         openedAt: "2026-10-14T09:40:00.000Z",
         remindedAt: null,
         deletedAt: null,
+        failedMail: null,
         state: "progress",
       },
       {
@@ -109,6 +111,7 @@ const bakery = (): AdminSnapshot =>
         openedAt: "2026-10-06T08:00:00.000Z",
         remindedAt: null,
         deletedAt: null,
+        failedMail: null,
         state: "opened",
       },
     ],
@@ -227,10 +230,10 @@ describe("an organization's onboarding in the admin", () => {
         "Talked on 5 Oct 2026. 1 colleague got a link.",
         "Otto Smit",
         "Opened. The team waits for this interview.",
-        "1 lead can still be reminded. Sending the reminder isn’t in the admin yet.",
+        "1 lead can still be reminded, once each.",
       ].map((text) => html.includes(text)),
-      // Nothing here sends a reminder.
-      remind: html.includes(">Remind"),
+      // Staff note the one reminder from here, once someone gave it.
+      remind: html.includes("Mark 1 lead reminded"),
       complete: html.includes("nothing is missing"),
     }).toStrictEqual({
       status: 200,
@@ -241,12 +244,12 @@ describe("an organization's onboarding in the admin", () => {
       statuses: [true, true, true],
       opensAgreed: true,
       leads: [true, true, true, true, true],
-      remind: false,
+      remind: true,
       complete: false,
     });
   });
 
-  it("opens the step a link names, read only, with what can't be done from the admin said so", async () => {
+  it("opens the step a link names, with what staff can do there and what can't be done from the admin said so", async () => {
     const base = await liveClient(bakery());
 
     const agreed = await page(`${base}/steps?stage=agreed`);
@@ -267,11 +270,8 @@ describe("an organization's onboarding in the admin", () => {
           "Interviews can start.",
           "The team is told, so this stays as it was agreed.",
         ].map((text) => agreed.html.includes(text)),
-        // Nothing here changes what was agreed.
-        switches: agreed.html.includes('role="switch"'),
-        notHere: agreed.html.includes(
-          "Keeping what was agreed as it comes in isn’t in the admin yet."
-        ),
+        // Shown, never changed from here: the company records it in its Grasp.
+        change: agreed.html.includes("Change what was agreed"),
       },
       interviews: {
         shown: [
@@ -281,7 +281,8 @@ describe("an organization's onboarding in the admin", () => {
           "Waits for Otto’s list",
           "Everyone by name",
           `href="${base}/interviews"`,
-          "1 person can still be reminded. Sending the reminder isn’t in the admin yet.",
+          "1 person can still be reminded, once each.",
+          "Mark 1 person reminded",
         ].map((text) => interviews.html.includes(text)),
         // Logistics takes no part, so it isn't among the teams talking.
         logistics: interviews.html.includes(">Logistics<"),
@@ -293,7 +294,10 @@ describe("an organization's onboarding in the admin", () => {
           "Not enough is known yet. It can open once it is past 80%.",
           // Core counts the whole, and sends no share of each source.
           "The company’s own Grasp counts what is known and sends the whole",
-          "Giving Grasp’s go, taking it back and changing the share it opens at aren’t in the admin yet.",
+          // Grasp's switches beside its go: the share, the go, the interviews.
+          "How much has to be known before it opens",
+          "Pause the interviews",
+          "Give the go",
         ].map((text) => opens.html.includes(text)),
         go: opens.html.includes("Open Grasp for"),
       },
@@ -309,14 +313,13 @@ describe("an organization's onboarding in the admin", () => {
       agreed: {
         current: true,
         states: [true, true, true, true, true],
-        switches: false,
-        notHere: true,
+        change: false,
       },
       interviews: {
-        shown: [true, true, true, true, true, true],
+        shown: [true, true, true, true, true, true, true],
         logistics: false,
       },
-      opens: { known: [true, true, true, true, true], go: false },
+      opens: { known: [true, true, true, true, true, true, true], go: false },
       conversation: [true, true],
       unknown: true,
     });

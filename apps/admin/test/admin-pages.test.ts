@@ -124,6 +124,7 @@ const toldSnapshot = (
       openedAt: null,
       remindedAt: null,
       deletedAt: null,
+      failedMail: null,
       state: person === "lisa" && leadTalked ? "completed" : "waiting",
     })),
     interviews: leadTalked
@@ -429,7 +430,8 @@ describe("the admin's frame", () => {
       counted: main.includes(
         "Counted from the 1 that answered now: 2 didn’t, and aren’t in these numbers."
       ),
-      // Fees and hours core doesn't hold yet are not known, not nothing.
+      // Fees core doesn't hold yet are not known, not nothing; the hours
+      // freed are counted from the work core sends.
       unknownSums: ["a month under contract", "hours a week freed"].map(
         (label) => {
           const tile = main.slice(0, main.indexOf(label));
@@ -450,7 +452,7 @@ describe("the admin's frame", () => {
       down: { named: true, why: true, numbers: false },
       waiting: { named: true, why: true, numbers: false },
       counted: true,
-      unknownSums: [true, true],
+      unknownSums: [true, false],
       acmeCount: true,
     });
   });

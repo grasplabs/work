@@ -226,6 +226,16 @@ const roster: RosterInput = {
   ],
 };
 
+/** All three agreements in, each with its day. */
+const agreed = {
+  processing: true,
+  processingOn: "2026-10-01",
+  assessment: true,
+  assessmentOn: "2026-10-02",
+  council: "none" as const,
+  councilOn: "2026-10-03",
+};
+
 describe("the agreements, as staff put them in place", () => {
   it("keep each one's day, and once the last is in the links that wait go out at once; the team is told then", async () => {
     const { api } = await signedInApi(idp, "admin");
@@ -242,14 +252,7 @@ describe("the agreements, as staff put them in place", () => {
       council: "waiting",
     });
     const waiting = await staff.onboardingStaff.agreements();
-    const view = await staff.onboardingStaff.setAgreements({
-      processing: true,
-      processingOn: "2026-10-01",
-      assessment: true,
-      assessmentOn: "2026-10-02",
-      council: "none",
-      councilOn: "2026-10-03",
-    });
+    const view = await staff.onboardingStaff.setAgreements(agreed);
     const out = await staff.onboardingStaff.agreements();
     expect({ waiting, agreed: view.agreed, out }).toStrictEqual({
       waiting: {
@@ -267,14 +270,7 @@ describe("the agreements, as staff put them in place", () => {
       },
       agreed: true,
       out: {
-        agreements: {
-          processing: true,
-          processingOn: "2026-10-01",
-          assessment: true,
-          assessmentOn: "2026-10-02",
-          council: "none",
-          councilOn: "2026-10-03",
-        },
+        agreements: agreed,
         agreed: true,
         told: true,
         // The lead's and Ona's; Sam's waits for Lea.
@@ -284,24 +280,31 @@ describe("the agreements, as staff put them in place", () => {
     });
   });
 
-  it("stay as they were once the team is told, even when everyone with a link leaves the roster", async () => {
+  it("stay as they were once the team is told, even when everyone with a link leaves the roster, though saving them again unchanged still applies", async () => {
     const { api } = await signedInApi(idp, "admin");
     const staff = await asStaff();
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan({
       start: new Date().toISOString().slice(0, 10),
     });
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    await staff.onboardingStaff.setAgreements(agreed);
     await api.onboarding.saveRoster({
       teams: [{ id: "new", name: "New", lead: null }],
       people: [{ id: "neo", name: "Neo", team: "new" }],
     });
     const { told, out } = await staff.onboardingStaff.agreements();
-    expect({ told, out }).toStrictEqual({ told: true, out: 0 });
+    const changed = await outcome(
+      staff.onboardingStaff.setAgreements({ ...agreed, council: "waiting" })
+    );
+    const again = await outcome(staff.onboardingStaff.setAgreements(agreed));
+    const { agreements } = await staff.onboardingStaff.agreements();
+    expect({ told, out, changed, again, agreements }).toStrictEqual({
+      told: true,
+      out: 0,
+      changed: "onboarding.agreements_kept",
+      again: "ok",
+      agreements: agreed,
+    });
   });
 
   it("refuse a day that isn't one", async () => {

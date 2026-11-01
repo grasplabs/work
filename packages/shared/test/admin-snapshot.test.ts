@@ -1,3 +1,4 @@
+import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import { describe, expect, it } from "vite-plus/test";
 
 import { adminSnapshotSchema } from "../src/admin-snapshot.ts";
@@ -36,7 +37,12 @@ const snapshot = (changes: Record<string, unknown> = {}) => ({
   mapped: [],
   links: [],
   interviews: [],
-  works: null,
+  works: { works: [], rules: STARTING_ORG_RULES, counted: [] },
+  setup: {
+    setup: { languages: [], limits: [], terms: [] },
+    changed: false,
+    suggested: { languages: [], limits: [], terms: [] },
+  },
   kickoff: null,
   gate: {
     open: false,
@@ -66,7 +72,6 @@ describe("the admin snapshot as the console reads it", () => {
       plan: { ...base.plan, rhythm: "weekly" },
       agreements: { ...base.agreements, insurance: true },
       contacts: { sponsor: "Ann" },
-      works: [{ name: "Quotes" }],
       contract: { signed: true },
       integrations: {
         connected: [],

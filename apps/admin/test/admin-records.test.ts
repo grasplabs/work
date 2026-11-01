@@ -53,6 +53,7 @@ const link = (
   openedAt: state === "invited" ? null : "2026-10-05T08:00:00.000Z",
   remindedAt: null,
   deletedAt,
+  failedMail: null,
   state,
 });
 

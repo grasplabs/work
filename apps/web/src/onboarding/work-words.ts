@@ -34,7 +34,11 @@ export const readWorks = async (session: Session): Promise<WorkRead> => {
 
 /** Everything Grasp's admin knows of the organization on the day core answered, with its work. */
 export const workViewOf = ({ snapshot, works }: WorkRead): OrgView => {
-  const { org, state } = adminOrgOf(snapshot, { id: "organization" }, works);
+  // The snapshot holds the work too; `works` is read on its own for its list.
+  const { org, state } = adminOrgOf(
+    { ...snapshot, works },
+    { id: "organization" }
+  );
   return adminViewOf(org, state, snapshot.now.slice(0, 10));
 };
 

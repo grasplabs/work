@@ -6,11 +6,13 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -23,6 +25,7 @@ import {
   signedInApi,
   staffPerson,
   unique,
+  withSignIn,
 } from "./sign-in.ts";
 
 // Every piece of work for Grasp's staff (GRA-377, staff-rpc.ts): as drawn
@@ -264,6 +267,50 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     });
   });
 
+  it("sends the admin what each person told as counts and yes or no, never the example they shared or a fact of theirs, and nothing of it outside the staff window", async () => {
+    const { booking } = await drawn();
+    const example = `example-${crypto.randomUUID()}.pdf`;
+    const said = `fact-${crypto.randomUUID()}`;
+    // As a drawing that kept them would hold them.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      const [row] = state.storage.sql
+        .exec<{ drawn: string }>(
+          "SELECT drawn FROM drawn_works WHERE work = ?",
+          booking
+        )
+        .toArray();
+      const drawing = z
+        .object({
+          told: z.record(z.string(), z.record(z.string(), z.unknown())),
+        })
+        .loose()
+        .parse(JSON.parse(row?.drawn ?? "{}"));
+      for (const told of Object.values(drawing.told)) {
+        told.example = example;
+        told.out = [said];
+      }
+      state.storage.sql.exec(
+        "UPDATE drawn_works SET drawn = ? WHERE work = ?",
+        JSON.stringify(drawing),
+        booking
+      );
+    });
+    const text = JSON.stringify(await adminSnapshot());
+    // Outside the staff window, the admin gets no drawing at all.
+    const outside = await adminSnapshot(withSignIn({ staff: undefined }));
+    expect({
+      example: text.includes(example),
+      said: text.includes(said),
+      drawn: text.includes('"drawn":{'),
+      drawnOutside: outside.works.works.find(({ id }) => id === booking)?.drawn,
+    }).toStrictEqual({
+      example: false,
+      said: false,
+      drawn: true,
+      drawnOutside: null,
+    });
+  });
+
   it("knows a piece of work under the organization's own rules, and counts one as known by hand", async () => {
     const { ids, booking } = await drawn();
     const staff = await asStaff();
@@ -271,7 +318,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     // enough under rules that ask two and take any share of new facts.
     const starting = await knownOf(ids.team, booking);
     const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.setRules({
+      await adminCommands().setRules({
         ...STARTING_ORG_RULES,
         people: 2,
         minInterviews: 2,
@@ -279,12 +326,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       });
     });
     const byRules = await knownOf(ids.team, booking);
-    await staff.onboardingStaff.setRules(null);
+    await adminCommands().setRules(null);
     const reset = await knownOf(ids.team, booking);
-    await staff.onboardingStaff.countAsKnown(booking, true);
+    await adminCommands().countAsKnown(booking, true);
     const byHand = await knownOf(ids.team, booking);
     const { counted } = await staff.onboardingStaff.works();
-    await staff.onboardingStaff.countAsKnown(booking, false);
+    await adminCommands().countAsKnown(booking, false);
     const left = await knownOf(ids.team, booking);
     expect({
       starting,
@@ -295,11 +342,9 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       left,
       audited: events.map(({ action, detail }) => [action, detail.people]),
       invalid: await outcome(
-        staff.onboardingStaff.setRules({ ...STARTING_ORG_RULES, people: 0 })
+        adminCommands().setRules({ ...STARTING_ORG_RULES, people: 0 })
       ),
-      unknown: await outcome(
-        staff.onboardingStaff.countAsKnown("nothing", true)
-      ),
+      unknown: await outcome(adminCommands().countAsKnown("nothing", true)),
     }).toStrictEqual({
       starting: { state: "mapping", byHand: false },
       byRules: { state: "complete", byHand: false },
@@ -307,8 +352,12 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       byHand: { state: "complete", byHand: true },
       counted: true,
       left: { state: "mapping", byHand: false },
-      audited: [["onboarding.rules.set", 2]],
-      invalid: "onboarding.invalid",
+      audited: [
+        ["admin.command", undefined],
+        ["onboarding.rules.set", 2],
+      ],
+      // A command the admin couldn't have made is refused whole.
+      invalid: "request.forbidden",
       unknown: "onboarding.no_work",
     });
   });
@@ -318,7 +367,7 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
     const store = onboardingStore(env);
     const staff = await asStaff();
     const before = await store.drawNext();
-    await staff.onboardingStaff.drawWorkAgain(booking);
+    await adminCommands().drawWorkAgain(booking);
     const again = reply({
       steps: [{ text: "Open the invoice in Exact." }],
       open: [],
@@ -334,8 +383,8 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       steps: works
         .find(({ id }) => id === booking)
         ?.drawn?.steps.map(({ text }) => text),
-      nothing: await outcome(staff.onboardingStaff.drawWorkAgain(filing)),
-      unknown: await outcome(staff.onboardingStaff.drawWorkAgain("nothing")),
+      nothing: await outcome(adminCommands().drawWorkAgain(filing)),
+      unknown: await outcome(adminCommands().drawWorkAgain("nothing")),
     }).toStrictEqual({
       before: null,
       result: [`work:${booking}`, null],
