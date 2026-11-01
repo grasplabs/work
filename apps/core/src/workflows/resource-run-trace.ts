@@ -5,6 +5,10 @@ import type {
   TraceStep,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
+import {
+  workflowResourceErrors,
+  workflowRunTraceOptionsSchema,
+} from "@grasp-os/shared/workflow-resources";
 import type { ReadableHistoryRecord } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -12,6 +16,7 @@ import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
 import { workflowStartReceipts } from "../db/core/schema.ts";
+import { withDoors } from "../workflow-doors.ts";
 import {
   requireWorkflowRole,
   workflowDefinition,
@@ -169,8 +174,14 @@ export const resourceRunTrace = async (
   env: Env,
   by: Acting,
   id: unknown,
-  runId: unknown
+  runId: unknown,
+  options?: unknown
 ): Promise<WorkflowRunTrace> => {
+  const { doors } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    workflowRunTraceOptionsSchema,
+    options
+  );
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const run = await resourceRunFor(env, by, workflow.id, runId);
   const definition = await workflowDefinition(
@@ -179,16 +190,19 @@ export const resourceRunTrace = async (
     workflow.id,
     run.version
   );
-  const diagram = workflowDiagram(z.json().parse(JSON.parse(definition)));
-  // Past its retention as the deployment has it now, or once swept, no
-  // more of it is shown than of its result (resource-runs.ts): the engine
-  // may still hold its journal for the retention it was admitted with.
+  const parsed = z.json().parse(JSON.parse(definition));
+  // Its doors once per trace view: a trace followed again draws none.
+  const drawn = workflowDiagram(parsed);
+  const diagram = doors ? await withDoors(env, by, drawn, parsed) : drawn;
+  // Past its retention, or once swept, no more of it is shown than of its
+  // result (resource-runs.ts): the engine may still hold its journal a
+  // moment longer, on its own clock.
   const receipt = await drizzle(env.DB)
     .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, run.id))
     .get();
-  const removed = detailsRemoved(env, {
+  const removed = detailsRemoved({
     endedAt: run.endedAt === null ? null : new Date(run.endedAt),
     detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
   });
@@ -228,5 +242,6 @@ export const resourceRunTrace = async (
     steps,
     complete,
     detailsRemoved: false,
+    ...(run.aiProvider === undefined ? {} : { aiProvider: run.aiProvider }),
   };
 };

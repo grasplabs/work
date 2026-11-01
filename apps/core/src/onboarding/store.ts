@@ -125,6 +125,7 @@ import migrations from "../db/onboarding/migrations/migrations.js";
 import {
   approvals,
   askedAbout,
+  moreVoices,
   answerWaits,
   auditOutbox,
   brainSent,
@@ -197,6 +198,7 @@ import {
   dueLinks,
   leads,
   leadsTalked,
+  mondayOf,
   progressOf,
   sendsFrom,
   takingPart,
@@ -1271,6 +1273,7 @@ export class Onboarding extends DurableObject<Env> {
     for (const [id, team] of workTeam) {
       if (!teamIds.has(team)) {
         this.#db.delete(works).where(eq(works.id, id)).run();
+        this.#db.delete(moreVoices).where(eq(moreVoices.work, id)).run();
       }
     }
     this.#dropOrphanDrawings();
@@ -1380,7 +1383,12 @@ export class Onboarding extends DurableObject<Env> {
           wasIn.get(person.id) !== team.id &&
           !asked.has(person.id)
       );
-      const heard = new Map(mine.map(({ id, asked: of }) => [id, of.length]));
+      const wanted = this.#moreVoicesWanted();
+      // A piece of work the company asked to hear more people about is
+      // asked about first, ahead of any other.
+      const heard = new Map(
+        mine.map(({ id, asked: of }) => [id, wanted.has(id) ? -1 : of.length])
+      );
       for (const [person, work] of assignWork(
         newcomers,
         mine,
@@ -1714,7 +1722,7 @@ export class Onboarding extends DurableObject<Env> {
     const gone =
       said === null
         ? []
-        : await spokenKeysOf(this.env, {
+        : await spokenKeysOf({
             ...said,
             texts: said.texts.filter((text) => !kept.has(text)),
           });
@@ -2728,6 +2736,31 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * The interviews of the people who agreed to what was read back and
+   * still take part: someone who withdrew is never counted again
+   * (GRA-329), in a source's people or in a week's interviews.
+   */
+  #agreedInterviews(): { person: string; completedAt: string | null }[] {
+    return this.#db
+      .select({
+        person: interviewStates.person,
+        completedAt: interviewStates.completedAt,
+      })
+      .from(interviewStates)
+      .leftJoin(
+        participations,
+        eq(participations.person, interviewStates.person)
+      )
+      .where(
+        and(
+          isNotNull(interviewStates.agreedAt),
+          isNull(participations.withdrawnAt)
+        )
+      )
+      .all();
+  }
+
+  /**
    * Each team the brain has interviews of: one source for all of them
    * (brain-intake.ts), with how many of its people agreed and the day the
    * first of them did, never who. A team that left the roster has none.
@@ -2739,14 +2772,7 @@ export class Onboarding extends DurableObject<Env> {
     since: string;
   }[] {
     const roster = this.#roster();
-    const states = this.#db
-      .select({
-        person: interviewStates.person,
-        completedAt: interviewStates.completedAt,
-      })
-      .from(interviewStates)
-      .where(isNotNull(interviewStates.agreedAt))
-      .all();
+    const states = this.#agreedInterviews();
     return this.#db
       .select({ team: brainTeams.team })
       .from(brainTeams)
@@ -2773,10 +2799,105 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * How many interviews the brain learned from, week by week, never who
+   * gave them or on which day (GRA-1278): the interviews of the people who
+   * agreed and still take part, in teams whose interviews the brain holds,
+   * by the Monday of the week each finished in. A week of fewer than
+   * `minTeamShown` is left out, never added to another week: no line
+   * stands for fewer people than a team's claim needs, and a week a
+   * withdrawal takes below it goes without its rest showing up elsewhere,
+   * where the difference would tell how many were left.
+   */
+  interviewWeeks(): { week: string; interviews: number }[] {
+    const roster = this.#roster();
+    const sent = new Set(
+      this.#db
+        .select({ team: brainTeams.team })
+        .from(brainTeams)
+        .where(isNotNull(brainTeams.sentAt))
+        .all()
+        .map(({ team }) => team)
+    );
+    const inSent = new Set(
+      (roster?.people ?? [])
+        .filter((person) => sent.has(person.team))
+        .map(({ id }) => id)
+    );
+    const byWeek = new Map<string, number>();
+    for (const { person, completedAt } of this.#agreedInterviews()) {
+      if (completedAt !== null && inSent.has(person)) {
+        const week = mondayOf(dayOf(completedAt));
+        byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
+      }
+    }
+    return [...byWeek]
+      .filter(([, count]) => count >= minTeamShown)
+      .map(([week, count]) => ({ week, interviews: count }))
+      .toSorted((a, b) => a.week.localeCompare(b.week));
+  }
+
+  /**
    * A team's pieces of work, as its map holds them, who is asked about
    * each, each as drawn from what its people agreed to, and how far it is
    * known: for staff, and for the drawing of each piece.
    */
+  /** The pieces of work asked for more voices, by their onboarding ids. */
+  #moreVoicesWanted(): Set<string> {
+    return new Set(
+      this.#db
+        .select({ work: moreVoices.work })
+        .from(moreVoices)
+        .all()
+        .map(({ work }) => work)
+    );
+  }
+
+  /** The brain's id (`intakeIds.workflow`) of each piece of work, by its own id. */
+  async #brainIdsOfWorks(): Promise<Map<string, string>> {
+    const rows = this.#db
+      .select({ id: works.id, team: works.team })
+      .from(works)
+      .all();
+    return new Map(
+      await Promise.all(
+        rows.map(
+          async ({ id, team }) =>
+            [id, await intakeIds.workflow(team, id)] as const
+        )
+      )
+    );
+  }
+
+  /**
+   * Asks to hear more people about the piece of work the brain knows as
+   * `brainWork`: whoever is asked about one of its team's work next is
+   * asked about it first (`#askNewcomers`, a team's map drawn again).
+   * The piece of work's own id, or null for one the onboarding has no
+   * longer. Asking twice changes nothing.
+   */
+  async askMoreVoices(brainWork: string): Promise<string | null> {
+    const ids = await this.#brainIdsOfWorks();
+    const work = [...ids].find(([, brainId]) => brainId === brainWork)?.[0];
+    if (work === undefined) {
+      return null;
+    }
+    this.#db
+      .insert(moreVoices)
+      .values({ work, at: new Date().toISOString() })
+      .onConflictDoNothing()
+      .run();
+    return work;
+  }
+
+  /** The brain's ids of the pieces of work asked for more voices. */
+  async moreVoicesAsked(): Promise<string[]> {
+    const wanted = this.#moreVoicesWanted();
+    const ids = await this.#brainIdsOfWorks();
+    return [...ids].flatMap(([work, brainId]) =>
+      wanted.has(work) ? [brainId] : []
+    );
+  }
+
   teamWorks(team: string): TeamWork[] {
     const asked = this.#db.select().from(askedAbout).all();
     const rules = this.#rules();
@@ -6660,7 +6781,14 @@ export class Onboarding extends DurableObject<Env> {
           !away &&
           !drawn.some((work) => work.id === asked.get(id))
       );
-      const assigned = assignWork(open, drawn, members);
+      const wanted = this.#moreVoicesWanted();
+      const assigned = assignWork(
+        open,
+        drawn,
+        members,
+        // Asked for more voices: asked about first.
+        new Map(drawn.map(({ id }) => [id, wanted.has(id) ? -1 : 0]))
+      );
       // Whoever is asked about a piece of work also does it, as far as the record goes.
       for (const work of drawn) {
         for (const { id } of members) {
@@ -7240,7 +7368,7 @@ export class Onboarding extends DurableObject<Env> {
       const said = this.#saidIn(person);
       if (said !== null) {
         // oxlint-disable-next-line no-await-in-loop -- one interview's lines at a time
-        keys.set(person, await spokenKeysOf(this.env, said));
+        keys.set(person, await spokenKeysOf(said));
       }
     }
     return keys;
@@ -7270,7 +7398,7 @@ export class Onboarding extends DurableObject<Env> {
   async #afterForget(said: readonly (SaidIn | null)[]): Promise<void> {
     const each = await Promise.all(
       said.map(async (lines) =>
-        lines === null ? [] : await spokenKeysOf(this.env, lines)
+        lines === null ? [] : await spokenKeysOf(lines)
       )
     );
     const keys = each.flat();
@@ -7301,17 +7429,24 @@ export class Onboarding extends DurableObject<Env> {
     await this.#armDrawing();
   }
 
-  /** Most stored lines one try takes out of the cache. */
-  static readonly #linesPerTry = 1000;
+  /**
+   * Most stored lines one try takes out of the cache: each is a line's
+   * folder, listed before its objects go (speech-cache.ts).
+   */
+  static readonly #linesPerTry = 100;
+
+  /** Most tries one call makes; the alarm takes the rest. */
+  static readonly #triesPerCall = 5;
 
   /**
    * Takes the voice's lines still waiting (`linesToForget`) out of the
    * cache, a page at a time, each forgotten here once the cache confirms
-   * it. What fails waits for the alarm. Returns how many went.
+   * it. What fails, or is left past this call's tries, waits for the
+   * alarm. Returns how many went.
    */
   async forgetLinesNow(): Promise<number> {
     let gone = 0;
-    for (;;) {
+    for (let tries = 0; tries < Onboarding.#triesPerCall; tries += 1) {
       const page = this.#db
         .select({ key: linesToForget.key })
         .from(linesToForget)
@@ -7337,6 +7472,7 @@ export class Onboarding extends DurableObject<Env> {
         .run();
       gone += page.length;
     }
+    return gone;
   }
 
   /**

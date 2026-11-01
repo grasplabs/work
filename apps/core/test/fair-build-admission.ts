@@ -1,27 +1,16 @@
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { admitBuild, buildSeqOf } from "../src/build-admission.ts";
 import type { BuildLease, BuildOwner } from "../src/build-admission.ts";
+import { configuredLimits } from "./quota-limits.ts";
 
 // What the tests of fair build admission share (fair-build-admission.test.ts,
-// fair-build-stalled-renewal.test.ts). One module for every test file a
-// worker loads, so the policy's generation only ever rises.
+// fair-build-stalled-renewal.test.ts).
 
-/** The generation of the next policy a test sets: each higher than before. */
-let generations = 300;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/** Sets the operator's policy to the deployment's, with `limits` lowered. */
+/** Sets the quota limits to the deployment's, with `limits` lowered. */
 export const policyWith = (limits: Record<string, number>): void => {
-  generations += 1;
-  env.QUOTA_LIMITS = {
-    generation: generations,
-    limits: { ...configuredLimits, ...limits },
-  };
+  env.TEST_QUOTA_LIMITS = { ...configuredLimits, ...limits };
 };
 
 /** A job of `person`'s (someone new, unless named) on the App `app`. */

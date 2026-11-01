@@ -16,6 +16,7 @@ import type {
 import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
+import type { RunAiProviderWait } from "./workflows.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -175,6 +176,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+  "workflow.start_held_gone":
+    "That start no longer waits for you: it was confirmed, declined or let lapse, or isn't yours.",
+  "workflow.start_held_changed":
+    "What that start would send changed since you saw it. Look at it again, then confirm.",
+  "workflow.start_offer_only":
+    "In a chat app, offer the start on a card instead: the person presses Start there.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
   "workflow.start_conflict":
@@ -666,6 +673,12 @@ export interface WorkflowResourceRun {
   buildHash: string;
   principal: string;
   status: WorkflowRunStatus;
+  /**
+   * While it runs, a step of it waiting for its AI provider: which, what it
+   * showed (refusing the key, not answering, limiting requests), and since
+   * when. It goes on by itself once calls work.
+   */
+  aiProvider?: RunAiProviderWait;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
@@ -864,6 +877,11 @@ const stepPointerSchema = z.string().startsWith("/").max(4096);
 /** A task's body: its single key's value, as the profile reads it. */
 const stepBodySchema = z.record(z.string(), z.json());
 
+/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
+export const workflowRunTraceOptionsSchema = z
+  .strictObject({ doors: z.boolean().default(true) })
+  .default({ doors: true });
+
 /**
  * One step of a draft edited from the canvas (`editStep`), as the next
  * revision over `expectedRevision`: `change` replaces the body of the task
@@ -933,6 +951,18 @@ export const maxLiveCandidateRuns = 5;
  * (`workflow.candidate_kept_limit`).
  */
 export const maxKeptCandidateRuns = 100;
+
+/**
+ * The most runs a workflow's list of runs answers: the newest. A page
+ * that counts them says "50+" when it has this many.
+ */
+export const workflowRunsListed = 50;
+
+/**
+ * The most files, or activity entries, a read of a workflow's answers:
+ * the newest. A page that counts them says "100+" when it has this many.
+ */
+export const workflowOwnListed = 100;
 
 /**
  * The longest a test run may wait or sleep, from its start: a wait past it
@@ -1053,7 +1083,11 @@ export interface WorkflowDraft {
   checkpoint: {
     revision: number;
     source: string;
-    /** Drawn from the checkpoint's own JSON, as it passed. */
+    /**
+     * Drawn from the checkpoint's own JSON, as it passed. An edit that
+     * didn't pass leaves an earlier edit the checkpoint, as the editor
+     * already holds it: its answer draws that diagram without doors.
+     */
     diagram: WorkflowDiagram;
   } | null;
   editedBy: string | null;
@@ -1173,6 +1207,11 @@ export interface WorkflowResourcesApi {
    */
   askable: (id: string) => Promise<boolean>;
   /**
+   * The live workflows, of those the person sees, that people may ask
+   * Stephen to start, in one read: for Settings › Stephen.
+   */
+  askableWorkflows: () => Promise<{ id: string; name: string }[]>;
+  /**
    * Lets people ask Stephen to start it in a chat app, as themselves, or
    * stops that; for its owner.
    */
@@ -1213,8 +1252,17 @@ export interface WorkflowResourcesApi {
   activity: (id: string) => Promise<WorkflowActivity[]>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
-  /** What run `runId` did, over its version's diagram, for builders. */
-  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
+  /**
+   * What run `runId` did, over its version's diagram, for builders. With
+   * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
+   * without its doors: a trace followed while the run goes keeps the
+   * diagram its first read drew, as the run's version never changes.
+   */
+  runTrace: (
+    id: string,
+    runId: string,
+    options?: unknown
+  ) => Promise<WorkflowRunTrace>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for

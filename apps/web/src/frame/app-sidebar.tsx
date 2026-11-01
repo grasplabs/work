@@ -1,3 +1,4 @@
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   Sidebar,
@@ -19,6 +20,7 @@ import {
   BrainIcon,
   CogIcon,
   ClipboardCheckIcon,
+  LayoutGridIcon,
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -42,6 +44,7 @@ interface Section {
     | "/"
     | "/brain"
     | "/domains"
+    | "/apps"
     | "/workflows"
     | "/integrations"
     | "/onboarding";
@@ -53,6 +56,7 @@ const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/brain", label: msg`Brain`, icon: BrainIcon },
   { to: "/domains", label: msg`Domains`, icon: CogIcon },
+  { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];
@@ -64,15 +68,20 @@ const onboarding: Section = {
   icon: ClipboardCheckIcon,
 };
 
-/** A section's entry: Chat is only itself; any other holds the pages under it. */
+/**
+ * A section's entry: Chat is itself and its projects' pages; any other
+ * holds the pages under it.
+ */
 const SectionItem = ({ section }: { section: Section }) => {
   const { i18n } = useLingui();
   const matchRoute = useMatchRoute();
   const { to, label, icon: Icon } = section;
+  const inProject =
+    to === "/" && matchRoute({ to: "/projects/$projectId" }) !== false;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={matchRoute({ to, fuzzy: to !== "/" }) !== false}
+        isActive={inProject || matchRoute({ to, fuzzy: to !== "/" }) !== false}
         render={<Link to={to} />}
       >
         <Icon />
@@ -129,7 +138,12 @@ export const AppSidebar = ({
                       }
                       // With how many workflows need the person.
                       if (section.to === "/workflows") {
-                        return <WorkflowsItem key={section.to} />;
+                        return (
+                          <WorkflowsItem
+                            key={section.to}
+                            requests={isAdmin(identity.role)}
+                          />
+                        );
                       }
                       return <SectionItem key={section.to} section={section} />;
                     })}

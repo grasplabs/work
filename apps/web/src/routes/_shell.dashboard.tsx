@@ -1,15 +1,15 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { Activity } from "../dashboard/activity.tsx";
 import { readDashboard } from "../dashboard/read-dashboard.ts";
 import { ReportBar } from "../dashboard/report-bar.tsx";
-import { ReportDialog } from "../dashboard/report-dialog.tsx";
 import { programmeLine } from "../dashboard/report.ts";
 import { ToDo } from "../dashboard/to-do.tsx";
 import { WidgetBoard } from "../dashboard/widget-board.tsx";
 import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 
@@ -25,12 +25,22 @@ import { NotLoaded } from "../load-from-core.tsx";
 // replaces the Notifications page and Settings' pending approvals, which
 // lead here.
 
+// The report and its export, with their Markdown, load once it is first
+// asked for.
+const ReportDialog = lazy(async () => {
+  const { ReportDialog: dialog } =
+    await import("../dashboard/report-dialog.tsx");
+  return { default: dialog };
+});
+
 const DashboardPage = () => {
   const { waiting, board, programme, report, activity } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { i18n, t } = useLingui();
   const router = useRouter();
   const [exporting, setExporting] = useState(false);
+  // Kept once opened, so it closes as a dialog does, not all at once.
+  const [exported, setExported] = useState(false);
   // A programme only with a plan; none read, no line and no report.
   const planned = programme.state === "ready" ? programme.data : null;
   const line = planned === null ? undefined : programmeLine(planned, i18n);
@@ -39,22 +49,18 @@ const DashboardPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
-      <div className="pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
-            <h1 className="text-2xl font-medium tracking-tight">
-              <Trans>Dashboard</Trans>
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              {line ?? (
-                <Trans>
-                  What waits on you, each with its next step, and what could be
-                  better.
-                </Trans>
-              )}
-            </p>
-          </div>
-        </div>
+      <Page wide>
+        <PageHeading
+          description={
+            line ?? (
+              <Trans>
+                What waits on you, each with its next step, and what could be
+                better.
+              </Trans>
+            )
+          }
+          title={<Trans>Dashboard</Trans>}
+        />
         <ToDo identity={identity} waiting={waiting} />
         {next === undefined ||
         line === undefined ||
@@ -67,18 +73,23 @@ const DashboardPage = () => {
                 // not as it stood when the page was opened.
                 void (async () => {
                   await router.invalidate();
+                  setExported(true);
                   setExporting(true);
                 })();
               }}
             />
-            <ReportDialog
-              line={line}
-              next={next}
-              onOpenChange={setExporting}
-              open={exporting}
-              reads={report}
-              today={today}
-            />
+            {exported ? (
+              <Suspense fallback={null}>
+                <ReportDialog
+                  line={line}
+                  next={next}
+                  onOpenChange={setExporting}
+                  open={exporting}
+                  reads={report}
+                  today={today}
+                />
+              </Suspense>
+            ) : null}
           </>
         )}
         {/* Each comes as it is read: a slow one holds back nothing else. */}
@@ -94,7 +105,7 @@ const DashboardPage = () => {
             }
           </Await>
         )}
-      </div>
+      </Page>
     </>
   );
 };

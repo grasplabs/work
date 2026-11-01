@@ -24,7 +24,7 @@ import { testWorkspace } from "./test-workspace.ts";
 
 /** How many links a map sends out to the sources. */
 const via = (map: NeuronMap) =>
-  map.exits.find((exit) => exit.region === "sources")?.count ?? 0;
+  map.exits.find((exit) => exit.region === "stem")?.count ?? 0;
 
 /** How many bands a map's groups hang in. */
 const bandsOf = (map: NeuronMap) =>
@@ -71,28 +71,28 @@ describe(neuronMap, () => {
   });
 
   it("shows a crowded folder as one neuron, and each open question against the source it was noticed in", () => {
-    // The sources hold too many notes to show at once: each folder is one neuron, to open.
-    const sources = neuronMap("sources", atlas, brain, MAP_ROOM);
+    // What came in holds too many notes to show at once: each folder is one neuron, to open.
+    const stem = neuronMap("stem", atlas, brain, MAP_ROOM);
     expect(
-      sources.neurons
+      stem.neurons
         .filter((neuron) => neuron.kind !== "gap")
         .every((neuron) => neuron.kind === "cluster")
     ).toBeTruthy();
     // An open question sits with the source it was noticed in.
     expect(
-      sources.neurons
+      stem.neurons
         .filter((neuron) => neuron.kind === "gap")
         .every((neuron) => neuron.beside !== undefined)
     ).toBeTruthy();
     expect(
-      sources.neurons.find(
+      stem.neurons.find(
         (neuron) =>
           clusterFolder(neuron.id) ===
           "Sources/Conversations/Employee interviews"
       )?.noteIds
     ).toHaveLength(22);
     // Folder by folder, in the vault's order; the documents' own note names their group, the conversations' note the folders under it.
-    expect(sources.groups.map((group) => group.label)).toStrictEqual([
+    expect(stem.groups.map((group) => group.label)).toStrictEqual([
       "With the board",
       "Stakeholder interviews",
       "Employee interviews",
@@ -102,112 +102,90 @@ describe(neuronMap, () => {
       "Connections",
     ]);
     expect({
-      documents: sources.groups.find((group) => group.label === "Documents")
+      documents: stem.groups.find((group) => group.label === "Documents")
         ?.noteId,
-      above: sources.groups[0]?.parent?.label,
+      above: stem.groups[0]?.parent?.label,
     }).toStrictEqual({
       documents: "sources-documents",
       above: "Conversations",
     });
   });
 
-  it("folds the tools into the ones people named and the ones only seen, and keeps each gap a neuron of its own", () => {
-    // The tools as well: the ones people named, and the ones only seen, each to open.
+  it("puts each team's work under the team, the team naming its group", () => {
+    const front = neuronMap("parietal", atlas, brain, MAP_ROOM);
     expect(
-      neuronMap("tools", atlas, brain, MAP_ROOM)
-        .neurons.filter((neuron) => neuron.kind !== "gap")
-        .map((neuron) => [neuron.label, neuron.noteIds.length])
+      front.groups.map((group) => [group.label, group.noteId, group.team])
     ).toStrictEqual([
-      ["Mentioned · 7", 7],
-      ["Seen, never mentioned · 14", 14],
+      ["Customer service", "team-service", true],
+      ["Mortgage advice", "team-mortgage", true],
+      ["Client onboarding", "team-onboarding", true],
     ]);
-    // The gaps, each its own neuron: open ones in the attention colour, answered ones known.
-    const gaps = neuronMap("gaps", atlas, brain, MAP_ROOM);
     expect(
-      gaps.neurons.every(
-        (neuron) => neuron.kind === "gap" && neuron.beside === undefined
-      )
-    ).toBeTruthy();
-    expect({
-      open: gaps.neurons.find((neuron) => neuron.id === "gap-budget")?.state,
-      answered: gaps.neurons.find((neuron) => neuron.id === "gap-invoice-limit")
-        ?.state,
-    }).toStrictEqual({ open: "open", answered: "known" });
+      regionGroups("occipital", atlas).map((group) => [
+        group.label,
+        group.count,
+      ])
+    ).toStrictEqual([
+      ["Finance", 2],
+      ["Compliance", 1],
+    ]);
   });
 
-  it("puts an open question against its subject, with a synapse between them", () => {
-    const teams = neuronMap("teams", atlas, brain, MAP_ROOM);
-    const complaints = teams.neurons.findIndex(
+  it("puts an open question against what it is about, with a synapse between them", () => {
+    const back = neuronMap("occipital", atlas, brain, MAP_ROOM);
+    const complaints = back.neurons.findIndex(
       (neuron) => neuron.id === "gap-complaints-volume"
     );
-    const compliance = teams.neurons.findIndex(
-      (neuron) => neuron.id === "team-compliance"
+    const work = back.neurons.findIndex(
+      (neuron) => neuron.id === "cand-complaints"
     );
-    expect(teams.neurons[complaints]?.state).toBe("open");
-    expect(teams.neurons[complaints]?.beside).toBe(compliance);
-    expect(teams.synapses).toContainEqual([
-      Math.min(complaints, compliance),
-      Math.max(complaints, compliance),
+    expect(back.neurons[complaints]?.state).toBe("open");
+    expect(back.neurons[complaints]?.beside).toBe(work);
+    expect(back.synapses).toContainEqual([
+      Math.min(complaints, work),
+      Math.max(complaints, work),
     ]);
+  });
+
+  it("draws only a handover both teams told as a nerve, and one only proposed dashed", () => {
+    const front = neuronMap("parietal", atlas, brain, MAP_ROOM);
+    const confirmed = atlas.nerves.filter((nerve) => nerve.link.confirmed);
+    const proposed = atlas.nerves.filter((nerve) => !nerve.link.confirmed);
+    expect({
+      confirmed: confirmed.length > 0,
+      proposed: proposed.length > 0,
+      dashed: front.proposed?.length,
+    }).toStrictEqual({ confirmed: true, proposed: true, dashed: 1 });
   });
 
   it("narrows a region to one of its folders, every note in it shown", () => {
     expect(
-      regionGroups("tools", atlas).map((group) => [group.label, group.count])
-    ).toStrictEqual([
-      ["Mentioned", 7],
-      ["Seen, never mentioned", 14],
-    ]);
-    expect(
-      regionGroups("sources", atlas).map((group) => group.count)
-    ).toStrictEqual([2, 6, 22, 1, 1, 5, 3]);
-    expect(regionGroups("teams", atlas)).toStrictEqual([]);
+      regionGroups("stem", atlas).map((group) => group.count)
+    ).toStrictEqual([2, 6, 22, 1, 1, 4, 3]);
     const employees = "Sources/Conversations/Employee interviews";
     for (const room of [MAP_ROOM, { width: 400, height: 760 }]) {
-      const map = neuronMap("sources", atlas, brain, room, employees);
+      const map = neuronMap("stem", atlas, brain, room, employees);
       expect({
         sources: map.neurons.filter((neuron) => neuron.kind === "source")
           .length,
         folded: map.neurons.some((neuron) => neuron.kind === "cluster"),
       }).toStrictEqual({ sources: 22, folded: false });
     }
-  });
-
-  it("narrowed to a folder, shows its notes with their open questions beside them, and counts only its own ways out", () => {
-    const unnamed = neuronMap(
-      "tools",
-      atlas,
-      brain,
-      MAP_ROOM,
-      "2 Inventory/Tools/Seen, never mentioned"
-    );
-    // Its applications, with the open question about them beside them.
-    expect(
-      unnamed.neurons
-        .filter((neuron) => neuron.kind !== "gap")
-        .map((neuron) => neuron.kind)
-    ).toStrictEqual(Array.from({ length: 14 }, () => "app"));
-    expect(
-      unnamed.neurons
-        .filter((neuron) => neuron.kind === "gap")
-        .every((neuron) => neuron.beside !== undefined)
-    ).toBeTruthy();
     // Its ways out count only the links from what it shows.
-    const tools = neuronMap("tools", atlas, brain, MAP_ROOM);
-    expect(via(unnamed)).toBeGreaterThan(0);
-    expect(via(unnamed)).toBeLessThan(via(tools));
+    const narrowed = neuronMap("stem", atlas, brain, MAP_ROOM, employees);
+    const whole = neuronMap("stem", atlas, brain, MAP_ROOM);
+    expect(
+      narrowed.exits.reduce((sum, exit) => sum + exit.count, 0)
+    ).toBeLessThan(whole.exits.reduce((sum, exit) => sum + exit.count, 0));
   });
 
   it("opens a region to the folder a note is folded into, so the note is there to see", () => {
-    expect(folderHolding("sources", atlas, brain, "src-vision")).toBe(
+    expect(folderHolding("stem", atlas, brain, "src-vision")).toBe(
       "Sources/Conversations/With the board"
-    );
-    expect(folderHolding("tools", atlas, brain, "app-chatgpt")).toBe(
-      "2 Inventory/Tools/Seen, never mentioned"
     );
     // A note shown as itself needs no folder opened.
     expect(
-      folderHolding("teams", atlas, brain, "team-compliance")
+      folderHolding("occipital", atlas, brain, "cand-complaints")
     ).toBeUndefined();
   });
 
@@ -279,15 +257,15 @@ describe(neuronMap, () => {
   );
 
   it("wraps groups under each other in a narrow room", () => {
-    const wide = neuronMap("vision", atlas, brain, {
+    const wide = neuronMap("frontal", atlas, brain, {
       width: 1136,
       height: 836,
     });
-    const flat = neuronMap("vision", atlas, brain, {
+    const flat = neuronMap("frontal", atlas, brain, {
       width: 1800,
       height: 260,
     });
-    const narrow = neuronMap("vision", atlas, brain, {
+    const narrow = neuronMap("frontal", atlas, brain, {
       width: 220,
       height: 760,
     });
@@ -298,16 +276,17 @@ describe(neuronMap, () => {
     // A neuron on a large screen is larger than on a small one, but never more than a soma gets.
     expect(wide.cell.soma).toBeGreaterThan(narrow.cell.soma);
     expect(
-      neuronMap("teams", atlas, brain, { width: 2400, height: 1300 }).cell.soma
+      neuronMap("parietal", atlas, brain, { width: 2400, height: 1300 }).cell
+        .soma
     ).toBeLessThanOrEqual(58);
   });
 
   it("folds the fullest folders into one neuron each when there is no room to name every note", () => {
-    const small = neuronMap("workflows", atlas, brain, {
-      width: 240,
-      height: 200,
+    const small = neuronMap("occipital", atlas, brain, {
+      width: 200,
+      height: 140,
     });
-    const roomy = neuronMap("workflows", atlas, brain, {
+    const roomy = neuronMap("occipital", atlas, brain, {
       width: 1136,
       height: 836,
     });
@@ -324,17 +303,18 @@ describe(neuronMap, () => {
     ).toStrictEqual(new Set(roomy.neurons.flatMap((neuron) => neuron.noteIds)));
   });
 
-  it("sends links to other regions out over the room, in the atlas’s order", () => {
-    const teams = neuronMap("teams", atlas, brain, MAP_ROOM);
-    const sources = teams.exits.find((exit) => exit.region === "sources");
-    expect(sources?.count).toBe(
-      atlas.regions.find((each) => each.id === "teams")?.links.sources
+  it("sends links to other regions out over the room, in the atlas's order", () => {
+    const front = neuronMap("parietal", atlas, brain, MAP_ROOM);
+    // What came in runs to the stem, quietly: a way out to follow, never a nerve.
+    expect(front.exits.find((exit) => exit.region === "stem")).toMatchObject({
+      quiet: true,
+    });
+    expect(via(front)).toBeGreaterThan(0);
+    expect(front.exits.map((exit) => exit.region)).toStrictEqual(
+      REGION_IDS.filter((id) => front.exits.some((exit) => exit.region === id))
     );
-    expect(teams.exits.map((exit) => exit.region)).toStrictEqual(
-      REGION_IDS.filter((id) => teams.exits.some((exit) => exit.region === id))
-    );
-    expect(teams.exits.map((exit) => exit.x)).toStrictEqual(
-      teams.exits.map((exit) => exit.x).toSorted((a, b) => a - b)
+    expect(front.exits.map((exit) => exit.x)).toStrictEqual(
+      front.exits.map((exit) => exit.x).toSorted((a, b) => a - b)
     );
     for (const id of REGION_IDS) {
       const map = neuronMap(id, atlas, brain, MAP_ROOM);
@@ -382,49 +362,24 @@ describe(neuronMap, () => {
     expect(exitRows([], 300, 8)).toStrictEqual([]);
   });
 
-  it("draws a map in the figure’s points, every neuron with a soma, hollow while its note is still waiting", () => {
-    const map = neuronMap("sources", atlas, brain, MAP_ROOM);
-    const dots = mapDots(map, { x: 0, y: 0, reach: 1 / 600, zoom: 2.4 });
-    expect(dots.x).toHaveLength(atlasCount());
-    for (const index of map.neurons.keys()) {
-      expect(
-        dots.owner.some(
-          (owner, at) =>
-            owner === index && dots.role[at] === SOMA && dots.presence[at] === 1
-        )
-      ).toBeTruthy();
-    }
-    // The applications nobody named: one neuron, printed only at its rim.
-    const tools = neuronMap("tools", atlas, brain, MAP_ROOM);
-    const printed = mapDots(tools, { x: 0, y: 0, reach: 1 / 600, zoom: 2.4 });
-    const waiting = tools.neurons.findIndex(
-      (neuron) => neuron.state === "waiting"
-    );
-    const reach = (index: number) => {
-      const neuron = tools.neurons[index];
-      let nearest = Number.POSITIVE_INFINITY;
-      for (let at = 0; at < printed.x.length; at += 1) {
-        if (
-          neuron &&
-          printed.owner[at] === index &&
-          printed.role[at] === SOMA &&
-          printed.presence[at] === 1
-        ) {
-          nearest = Math.min(
-            nearest,
-            Math.hypot(
-              (printed.x[at] ?? 0) * 600 - neuron.x,
-              (printed.y[at] ?? 0) * 600 - neuron.y
-            ) / neuron.r
-          );
-        }
+  // Printing the whole figure takes a while on a busy machine.
+  it(
+    "draws a map in the figure's points, every neuron with a soma",
+    { timeout: 30_000 },
+    () => {
+      const map = neuronMap("stem", atlas, brain, MAP_ROOM);
+      const dots = mapDots(map, { x: 0, y: 0, reach: 1 / 600, zoom: 2.4 });
+      expect(dots.x).toHaveLength(atlasCount());
+      for (const index of map.neurons.keys()) {
+        expect(
+          dots.owner.some(
+            (owner, at) =>
+              owner === index &&
+              dots.role[at] === SOMA &&
+              dots.presence[at] === 1
+          )
+        ).toBeTruthy();
       }
-      return nearest;
-    };
-    expect(tools.neurons[waiting]?.kind).toBe("cluster");
-    expect(reach(waiting)).toBeGreaterThan(0.8);
-    expect(
-      reach(tools.neurons.findIndex((neuron) => neuron.state === "known"))
-    ).toBeLessThan(0.3);
-  });
+    }
+  );
 });

@@ -61,7 +61,7 @@ import {
 import { useState } from "react";
 
 import { actorWords, logLine, topicWords } from "./log-words.ts";
-import { Panel } from "./panel.tsx";
+import { Section } from "./section.tsx";
 import { formatDate } from "./words.ts";
 
 /** How many entries the list shows before it asks to show more. */
@@ -153,7 +153,7 @@ const BusyChart = ({
       "Everything so far happened on one day: here by the hour (UTC).";
   }
   return (
-    <Panel description={description} title="What happened, by who did it">
+    <Section description={description} title="What happened, by who did it">
       {days.length === 0 ? null : (
         <div className="border-t px-3 pt-4 pb-2">
           <ChartContainer
@@ -249,7 +249,7 @@ const BusyChart = ({
           </ul>
         </div>
       )}
-    </Panel>
+    </Section>
   );
 };
 

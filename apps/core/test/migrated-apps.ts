@@ -13,8 +13,7 @@ import type { Fixture } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
 // A Notes App whose next version migrates its notes with an explicit
-// migration (spec 17.2): the fixtures of custom-migration-runs.test.ts and
-// migration-samples.test.ts.
+// migration (spec 17.2): the fixtures of custom-migration-runs.test.ts.
 
 const placeholder = "0".repeat(64);
 

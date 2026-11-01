@@ -134,9 +134,6 @@ const typeRules: readonly {
   // A company admin setting or removing a limit per person (core's
   // src/model-ledger.ts): configuration, not a model call.
   { action: "model.limit", type: "config" },
-  // Core recording a new quota policy generation, the limits that apply
-  // from then on (core's src/workflows/quotas.ts).
-  { action: "quota_policy.recorded", type: "config" },
   { action: "model", type: "model_call" },
   { action: "permission", type: "permission" },
   // A chat or run whose context read restricted sources, and so is held to

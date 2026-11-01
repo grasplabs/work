@@ -114,7 +114,7 @@ export const sectionWords: Record<
   },
   contract: {
     title: "Contract",
-    about: "What was signed, what it gives the company, and what is billed.",
+    about: "The seats taken, the proposal, the agreements, and what is billed.",
     icon: FileSignatureIcon,
   },
   members: {
@@ -263,7 +263,6 @@ export const originsOf = (
   attio = false
 ): Record<OrgSection, Origin[]> => {
   const contacts = snapshot.contacts !== null;
-  const contract = snapshot.contract !== null;
   const works = snapshot.works !== null;
   const integrations = snapshot.integrations !== null;
   return {
@@ -278,7 +277,6 @@ export const originsOf = (
       },
     ],
     contract: [
-      { source: "rooms", what: "The contract", read: contract },
       { source: "rooms", what: "The proposal and who signed it", read: rooms },
       { source: "stripe", what: "Its billing and invoices", read: stripe },
     ],

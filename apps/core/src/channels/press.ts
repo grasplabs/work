@@ -22,12 +22,13 @@ import type {
   WriteState,
 } from "./cards.tsx";
 import { memberOf, viewOf } from "./held.ts";
+import { pressedChanges } from "./stephen-requests.ts";
 import { say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
 
 // A press on a card of held writes (cards.tsx `heldWritesCard`), on a chat
-// platform: D2, "a verified Teams press confirms exactly the held writes
-// on its card, once". The press is the person's yes, for exactly what the
+// platform (Teams, and Slack the same way): D2, "a verified Teams press
+// confirms exactly the held writes on its card, once". The press is the person's yes, for exactly what the
 // card showed and nothing else; Cancel is their no.
 //
 // What could go wrong, and what stops each. Each names the threat model's
@@ -72,7 +73,7 @@ const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
 
 /** A press on a card, as the door hands it on, from a verified member. */
 export interface CardPress {
-  platform: "teams";
+  platform: "teams" | "slack";
   /** The member who pressed, as the door verified them. */
   userId: string;
   event: ActionEvent;
@@ -229,6 +230,14 @@ export const pressCard = async (
         platform,
         outcome,
         ...errorFields(error),
+      });
+      // The request the card is for keeps that its change didn't work: one
+      // request with the answer that showed it, never a second.
+      // oxlint-disable-next-line no-await-in-loop -- once, then out
+      await pressedChanges(env, {
+        userId,
+        writeId: write.id,
+        action: held[index]?.action ?? "",
       });
       // oxlint-disable-next-line no-await-in-loop -- once, then out
       await editCard(event, shown(outcome));

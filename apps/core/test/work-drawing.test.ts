@@ -15,22 +15,22 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { drawnOf, knownOf } from "../src/onboarding/work-drawing.ts";
 import type { RawDrawing } from "../src/onboarding/work-drawing.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
   approveAgreed,
-  careful,
   modelOf,
   participate,
+  quick,
 } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // Each piece of work drawn from what its people agreed to
 // (src/onboarding/work-drawing.ts and the store's drawing): once someone
-// who does a piece of work agrees to their interview, the careful model
-// draws it again from everyone's agreed facts, and what nobody could say
-// becomes what Stephen asks next. AI Gateway is the outside system, faked
-// behind the AI binding. The ways it can fail, tried here:
+// who does a piece of work agrees to their interview, the organization's
+// model draws it again from everyone's agreed facts, and what nobody could
+// say becomes what Stephen asks next. The model provider is the outside
+// system, faked behind connect. The ways it can fail, tried here:
 //
 // - People's numbers averaged into one, or made up where nobody gave any.
 // - What the lead said about the whole team told as if it were the work.
@@ -153,8 +153,8 @@ const agree = async (
 
 type Ids = Awaited<ReturnType<typeof team>>;
 
-/** What the careful model answers for the map: tickets, by Max, Mia and Mo, and the rota, Lea's own. */
-const mapReply = (ids: Ids): GatewayReply => ({
+/** What the model answers for the map: tickets, by Max, Mia and Mo, and the rota, Lea's own. */
+const mapReply = (ids: Ids): ProviderReply => ({
   text: JSON.stringify({
     does: "Answers customers' questions",
     works: [
@@ -180,8 +180,8 @@ const mapReply = (ids: Ids): GatewayReply => ({
   outputTokens: 300,
 });
 
-/** What the careful model answers for tickets, from Max, Mia and Mo. */
-const ticketsReply = (ids: Ids): GatewayReply => ({
+/** What the model answers for tickets, from Max, Mia and Mo. */
+const ticketsReply = (ids: Ids): ProviderReply => ({
   text: JSON.stringify({
     starts: "A customer email arrives as a ticket in Zendesk.",
     starts_by: [ids.max, ids.mia],
@@ -268,7 +268,7 @@ const mapped = async (ids: Ids) => {
 /** The text of every message a request sent, in one string. */
 const sentOf = (body: unknown): string => JSON.stringify(body);
 
-const refused: GatewayReply = {
+const refused: ProviderReply = {
   status: 400,
   errorType: "invalid_request_error",
 };
@@ -304,7 +304,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     };
     const before = await contextOf();
     // The rota, Lea's own, is drawn from her alone; tickets after.
-    const rotaReply: GatewayReply = {
+    const rotaReply: ProviderReply = {
       text: JSON.stringify({ steps: [], open: [] }),
       inputTokens: 100,
       outputTokens: 10,
@@ -368,11 +368,11 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       saidByMo: after.includes("Salesforce"),
       due: [ids.max, ids.mia, ids.mo].filter((id) => due.includes(id)),
       counted: usage.some(
-        ({ purpose, model }) => purpose === "drawing" && model === careful
+        ({ purpose, model }) => purpose === "drawing" && model === quick
       ),
     }).toMatchObject({
       drew: `work:${tickets}`,
-      models: ["claude-opus-4-8", "claude-opus-4-8"],
+      models: ["claude-sonnet-4-5", "claude-sonnet-4-5"],
       sent: {
         max: true,
         example: false,
@@ -418,7 +418,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { rota } = await mapped(ids);
-    const reply: GatewayReply = {
+    const reply: ProviderReply = {
       text: JSON.stringify({
         steps: [{ text: "Plan next week's rota.", by: [ids.lea] }],
         open: [],

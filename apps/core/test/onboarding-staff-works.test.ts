@@ -11,9 +11,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   auditedDuring,
   openRpc,
@@ -27,8 +27,8 @@ import {
 
 // Every piece of work for Grasp's staff (GRA-377, staff-rpc.ts): as drawn
 // from what its people agreed to, with the organization's own rules for
-// when one is known, counted as known by hand, and drawn again. AI Gateway
-// is the outside system, faked behind the AI binding. The ways it can
+// when one is known, counted as known by hand, and drawn again. The model
+// provider is the outside system, faked behind connect. The ways it can
 // fail, tried here:
 //
 // - Anyone but staff reading what people agreed to, or changing how far
@@ -91,7 +91,7 @@ const agreeAs = async (
   await approveAgreed({ secret, key }, facts);
 };
 
-const reply = (value: object): GatewayReply => ({
+const reply = (value: object): ProviderReply => ({
   text: JSON.stringify(value),
   inputTokens: 1000,
   outputTokens: 200,

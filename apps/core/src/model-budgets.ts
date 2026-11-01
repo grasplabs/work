@@ -61,35 +61,19 @@ import { microsPerDollar } from "./model-prices.ts";
 // budgets per lineage. What a lineage spends in all grows with the Apps
 // it reaches, its descendant runs bounding how many. It has a budget only where the
 // deployment sets `run`; whatever it sets, a lineage makes at most the
-// provider requests the deployment's quota policy allows
-// (`lineageModelRequests`, @grasp-os/shared/quota-policy): the platform's
-// 100, or fewer where its operator lowered it. From the threat model:
+// platform's provider requests (`lineageModelRequests`, 100). From the
+// threat model:
 //
-// - Raising it: the operator can only lower it (the policy's schema caps
-//   it at the platform's, and `scopesFor` again); nothing a call, an App
-//   or a run passes reaches it. Only a release that changes the
-//   platform's limit raises it.
-// - A lowered limit missed by runs already under way: the gateway reads
-//   the policy for every provider request (models.ts, `scopesNow`), and
-//   the ledger checks the lineage's count as it stands against the limit
-//   that admission carries. A lineage already at or past a lowered limit
-//   sends nothing more. No limit is kept on the lineage's row, so none
-//   goes stale; each request's receipt keeps the limit and generation it
-//   was admitted under, as the record of it.
-// - Requests under an older policy after one under a newer: the ledger
-//   keeps the highest generation an admission carried, and refuses one
-//   under a lower (`policyBehind`); the gateway reads the policy again and
-//   tries once more. Still behind, it is held back as
-//   `model.quota_policy_behind`, logged with both generations. One that
-//   read the policy just before a newer generation was recorded, and
-//   reaches the ledger before anything under it, is admitted as if it
-//   came first: at most the requests already on their way when the policy
-//   changed, and never past the limit they read, so never past the
-//   platform's.
+// - Raising it: nothing a call, an App or a run passes reaches it
+//   (`scopesFor` caps it at the platform's). Only a release that changes
+//   the platform's limit raises it.
+// - A limit missed by runs already under way: the ledger checks the
+//   lineage's count as it stands against the limit each admission
+//   carries (models.ts, `scopesNow`). No limit is kept on the lineage's
+//   row, so none goes stale; each request's receipt keeps the limit it was
+//   admitted under, as the record of it.
 // - A rebuilt lineage starting afresh: a lineage whose spend row was lost
-//   comes back used up under any policy (model-ledger.ts, `#rebuildScope`).
-// - A policy that can't be read: a workflow's request is held back as
-//   `model.quota_policy_unavailable`, never admitted without its limit.
+//   comes back used up (model-ledger.ts, `#rebuildScope`).
 //
 // A model binding of an App (resource-bindings.ts) may have caps of its
 // own, set by the admin who approved it, on top of all these: per UTC
@@ -138,7 +122,9 @@ export interface BudgetInput {
           | "brain_upkeep"
           | "dashboard_widgets"
           | "brain_recall"
-          | "policy_reading";
+          | "stephen_requests"
+          | "provider_test"
+          | "document_conversion";
       };
 }
 
@@ -186,9 +172,8 @@ export const budgetMonth = (
     : now.toISOString().slice(0, "yyyy-mm".length);
 
 /**
- * The most provider requests one run lineage may make under any quota
- * policy, retries included (platform default: 100 model requests per run
- * lineage); a deployment's policy may lower it.
+ * The most provider requests one run lineage may make, retries included
+ * (platform default: 100 model requests per run lineage).
  */
 export const { lineageModelRequests } = platformLimits;
 
@@ -297,7 +282,7 @@ const workflowScopes = (
  * run lineage, for a workflow's call; and the person it is made by or
  * for. A scope without a budget is counted, and limits no spend; the run
  * lineage's requests are limited whatever the budgets, to
- * `lineageRequests` (the quota policy's), never above the platform's.
+ * `lineageRequests` (the quota limits'), never above the platform's.
  */
 export const scopesFor = (
   budgets: Budgets,
@@ -351,6 +336,43 @@ export const scopesFor = (
     };
   });
 };
+
+/**
+ * The scopes a call on Grasp's own key counts against (one of Grasp's own
+ * AI features, models.ts): Grasp's alone, which no budget limits, so the
+ * organization's budgets (the deployment's, a workflow's, a run's, a
+ * person's, a binding's) neither count it nor stop it; they limit what it
+ * spends on its own keys only. A run lineage's limit of requests, which
+ * holds every call, still holds it, with no budget. Still admitted and
+ * metered by the ledger, so what it costs shows to Grasp's staff.
+ */
+export const platformScopes = (
+  input: BudgetInput,
+  lineageRequests: number
+): LedgerScope[] => [
+  {
+    scope: "platform",
+    key: "platform",
+    limitMicros: null,
+    alertMicros: null,
+    limitRequests: null,
+    names: {},
+  },
+  ...workflowScopes(
+    undefined,
+    input,
+    Math.min(lineageRequests, lineageModelRequests)
+  )
+    .filter(({ scope }) => scope === "run")
+    .map(({ scope, key, names, requests }) => ({
+      scope,
+      key,
+      limitMicros: null,
+      alertMicros: null,
+      limitRequests: requests ?? null,
+      names,
+    })),
+];
 
 const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
 

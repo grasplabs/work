@@ -14,9 +14,9 @@ import type {
   WorkflowVersionRecord,
 } from "./brain-records.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { documentIdSchema } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
 import type { DocumentType } from "./knowledge.ts";
+import type { WorkKnowledge } from "./work-knowledge.ts";
 
 /** The standard business processes a workflow belongs to. */
 export type ProcessId = "o2c" | "i2r" | "p2p" | "r2c" | "r2r" | "h2r";
@@ -116,6 +116,58 @@ export interface Team {
   stakeholders: Stakeholder[];
 }
 
+/**
+ * One of the company's groups of teams, as its admin confirmed it or Grasp
+ * proposed it: a region of the brain.
+ */
+export interface TeamGroup {
+  id: string;
+  /** The company's own name for it. */
+  name: string;
+  /** Its teams, by the brain's team ids, in the company's order. */
+  teamIds: string[];
+  /** An admin confirmed it; until then it is only Grasp's proposal. */
+  confirmed: boolean;
+}
+
+/** Most groups of teams a company keeps. */
+export const teamGroupsMax = 50;
+
+/** A group of teams as an admin confirms it (`brain.saveTeamGroups`). */
+export const teamGroupInputSchema = z.strictObject({
+  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
+  name: z.string().trim().min(1).max(80),
+  teamIds: z
+    .array(z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/u))
+    .min(1)
+    .max(200),
+});
+export type TeamGroupInput = z.input<typeof teamGroupInputSchema>;
+
+/** The company's groups of teams, in its order: each id once, each team in one group at most. */
+export const teamGroupsInputSchema = z
+  .array(teamGroupInputSchema)
+  .max(teamGroupsMax)
+  .refine(
+    (groups) => new Set(groups.map(({ id }) => id)).size === groups.length,
+    "Each group once."
+  )
+  .refine((groups) => {
+    const teams = groups.flatMap(({ teamIds }) => teamIds);
+    return new Set(teams).size === teams.length;
+  }, "Each team in one group at most.");
+
+/**
+ * How many interviews the brain learned from in a week, never who gave them
+ * or on which day: each week holds at least five; a quieter week is left
+ * out.
+ */
+export interface InterviewWeek {
+  /** The Monday of the week, as an ISO date. */
+  week: string;
+  interviews: number;
+}
+
 /** Whether a tool is an AI tool or has AI built in. */
 export type AiKind = "tool" | "builtIn" | "none";
 
@@ -124,7 +176,7 @@ export interface Tool {
   name: string;
   teamIds: string[];
   sourceId: string;
-  /** As the team said it; a sighting in the landscape wins. Empty is unknown. */
+  /** As the team said it. Empty is unknown. */
   ai?: AiKind;
 }
 
@@ -179,8 +231,6 @@ export interface Source {
   connection?: "directory" | "signIn" | "pulse";
   /** For an interview: a team's stakeholder, or any other employee. */
   interviewee?: "stakeholder" | "employee";
-  /** For a document: the policy it became in the policy manager. */
-  policyId?: string;
   /** The teams this source speaks for: what makes a team interviewed. */
   teamIds?: string[];
   /** An interview written up as an article, paragraph by paragraph. */
@@ -196,6 +246,17 @@ export interface Source {
    * `brain.transcript` read.
    */
   transcript?: Transcript;
+  /**
+   * An admin may take it out of the brain (`brain.forget`): one of the
+   * brain's own records. The onboarding's sources and Knowledge's
+   * documents leave the brain their own way.
+   */
+  forgettable?: true;
+  /**
+   * When (ISO date) it was taken out of the brain: it keeps only its id,
+   * kind and day, so what still names it can say its source was removed.
+   */
+  removedAt?: string;
 }
 
 /** What a statement is about. */
@@ -312,54 +373,20 @@ export interface Connection {
   matches: string[];
 }
 
-/** How Grasp knows an application is in use. */
-export type SeenThrough = "microsoftSso" | "googleSso" | "pulse";
-
-/** One application in the client's landscape. */
-export interface LandscapeApp {
-  id: string;
-  name: string;
-  vendor: string;
-  category: string;
-  /** A file name in /logos, or none. */
-  logo?: string;
-  /** Its logo as the Landscape table shows it, as a full path. */
-  logoSrc?: string;
-  ai: AiKind;
-  /** People seen using it in the last 30 days. */
-  people: number;
-  seenThrough: SeenThrough[];
-  /** The team that owns it, or null when nobody does. */
-  owner: string | null;
-  /** Tool names that mean this application. */
-  matches: string[];
-  /** The OAuth permissions people granted it, in plain words. Empty when seen only by Pulse. */
-  permissions: string[];
-}
-
-/** A policy the company uploaded to the policy manager. */
-export interface PolicyDocument {
-  id: string;
-  title: string;
-  /** ISO minute. */
-  uploadedAt: string;
-  status: "reading" | "review" | "published" | "failed";
-  /** What the policy covers, in a sentence or two. */
-  summary?: string;
-  /** The rules proposed from it, each with the passage it comes from. */
-  proposals: { excerpt: string; decision: "open" | "accepted" | "rejected" }[];
-  /** Requirements no rule can check yet, each with its passage. */
-  unchecked: { excerpt: string }[];
-  /** ISO minute. */
-  publishedAt?: string;
-}
-
 /** Everything the brain is built from. */
 export interface Workspace {
   company: Company;
   vision: Vision;
   goals: Goal[];
   teams: Team[];
+  /**
+   * The company's groups of teams, in its order: the brain's regions. A
+   * team in none has no group yet; Grasp proposes one when an admin asks
+   * (`brain.proposeTeamGroups`).
+   */
+  teamGroups: TeamGroup[];
+  /** The interviews the brain learned from, week by week, oldest first. */
+  interviewWeeks: InterviewWeek[];
   tools: Tool[];
   sources: Source[];
   statements: Statement[];
@@ -367,8 +394,51 @@ export interface Workspace {
   gaps: Gap[];
   workflows: Workflow[];
   connections: Connection[];
-  landscape: LandscapeApp[];
-  policies: PolicyDocument[];
+}
+
+/** Most statements one call takes out of the brain. */
+export const brainForgetMaxStatements = 50;
+
+/**
+ * What is taken out of the brain: a whole source, with everything said
+ * in it, or some things that were said.
+ */
+export const brainForgetTargetSchema = z.union([
+  z.strictObject({ source: sourceIdSchema }),
+  z.strictObject({
+    statements: z.array(sourceIdSchema).min(1).max(brainForgetMaxStatements),
+  }),
+]);
+export type BrainForgetTarget = z.infer<typeof brainForgetTargetSchema>;
+
+/**
+ * What taking a source or statements out of the brain takes with it, as
+ * it stands now (`brain.forgetPreview`): what `brain.forget` would take,
+ * by id. The notes resting only on it are what the brain, built without
+ * those statements, no longer has.
+ */
+export interface BrainForgetPreview {
+  /** The source that goes, if one does; null for statements alone, or one gone already. */
+  source: string | null;
+  /** The statements that go. */
+  statements: string[];
+  /** The workflows whose numbers rest on the source: they keep them, and say their source was removed. */
+  workflows: string[];
+}
+
+/**
+ * What a picture of a chat's thinking is drawn from (`brain.thinking`):
+ * the brain's teams, what each said with the team that said it (the one
+ * its source speaks for) and the role of who did, and its workflows with
+ * their hours a week, `null` where they aren't known.
+ */
+export interface ThinkingGround {
+  teams: Pick<Team, "id" | "name">[];
+  statements: (Pick<Statement, "id" | "text" | "kind" | "sourceId"> & {
+    teamId: string;
+    who?: string;
+  })[];
+  workflows: (Pick<Workflow, "id" | "name"> & { hours: number | null })[];
 }
 
 /**
@@ -378,6 +448,11 @@ export interface Workspace {
  */
 export interface BrainApi {
   read: () => Promise<Workspace>;
+  /**
+   * What a picture of a chat's thinking is drawn from, as `read` gives
+   * it, and nothing else: no Knowledge, so nothing to audit.
+   */
+  thinking: () => Promise<ThinkingGround>;
   /**
    * The board's goals (`Workspace.goals`) alone, for the dashboard, as
    * `read` gives them: every member reads them, each with the workflows
@@ -396,11 +471,6 @@ export interface BrainApi {
    */
   changes: (options: BrainChangesOptions) => Promise<BrainChangePage>;
   /**
-   * Every note in the brain with its links (`brain.notes`), a page at a
-   * time, as the person may read them.
-   */
-  notes: (options?: BrainNotesOptions) => Promise<BrainNotePage>;
-  /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
    */
@@ -413,6 +483,31 @@ export interface BrainApi {
    * staff.
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /**
+   * What taking a source or statements out of the brain takes with it,
+   * nothing taken yet: for the company's admins.
+   */
+  forgetPreview: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
+  /**
+   * Takes a source, with everything said in it, or statements out of the
+   * brain, for good, audited without what they said: for the company's
+   * admins. Taking out again what is gone takes nothing; returns what it
+   * took.
+   */
+  forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
+  /**
+   * Has Grasp propose, through the model gateway, a group for every team
+   * in none that an admin confirmed: kept as proposals until an admin
+   * confirms them (`saveTeamGroups`), replacing earlier proposals. For the
+   * company's admins. Returns the groups as they are now.
+   */
+  proposeTeamGroups: () => Promise<TeamGroup[]>;
+  /**
+   * Confirms the company's groups of teams as given, in its order, all of
+   * them: what isn't given is no longer a group. For the company's
+   * admins, audited. Returns them as kept.
+   */
+  saveTeamGroups: (groups: TeamGroupInput[]) => Promise<TeamGroup[]>;
   /** Closes an open gap without an answer: for the company's admins. */
   closeGap: (gapId: string) => Promise<Gap>;
   /**
@@ -420,11 +515,26 @@ export interface BrainApi {
    * for the company's admins.
    */
   redactGapAnswer: (gapId: string) => Promise<Gap>;
+  /**
+   * What Grasp knows about a piece of work, in its own sentences, for
+   * everyone signed in (`WorkKnowledge`): never a quote, a name or a day.
+   */
+  work: (id: string) => Promise<WorkKnowledge>;
+  /**
+   * Asks to hear more people about a piece of work in Stephen's next
+   * interviews: for the company's admins.
+   */
+  askMorePeople: (id: string) => Promise<WorkKnowledge>;
 }
 
 /** Why a brain call was refused. */
 export const brainErrors = defineErrorFamily({
   "brain.invalid": "That isn't a valid moment, page, page size or source.",
+  "brain.forget_missing":
+    "The brain holds no such source or statement to take out.",
+  "brain.team_groups_invalid":
+    "Those aren't groups of the brain's teams: each needs a name and teams the brain has, each team in one group at most.",
+  "brain.work_not_found": "Grasp knows of no such piece of work.",
 });
 
 /**
@@ -483,60 +593,6 @@ export type BrainChange =
 /** A page of the brain's changes, newest first. */
 export interface BrainChangePage {
   changes: BrainChange[];
-  /** Where the next page starts; null when this is the last. */
-  next: string | null;
-}
-
-/**
- * Most notes one page holds: they, and as many collections, fit in the
- * audit event that records the read (`auditProvenanceMaxItems`).
- */
-export const brainNotesMaxLimit = 50;
-
-/** Most links of a note one page carries; the rest are counted (`moreLinks`). */
-export const brainNoteMaxLinks = 50;
-
-/** What a call for the brain's notes asks for. */
-export const brainNotesOptionsSchema = z
-  .strictObject({
-    /** Where the page before ended (`BrainNotePage.next`); none for the first. */
-    cursor: documentIdSchema.optional(),
-    limit: z.int().min(1).max(brainNotesMaxLimit).default(brainNotesMaxLimit),
-  })
-  .default({ limit: brainNotesMaxLimit });
-export type BrainNotesOptions = z.input<typeof brainNotesOptionsSchema>;
-
-/** A link in a note, to the path it names in the note's collection. */
-export interface BrainNoteLink {
-  path: string;
-  label: string | null;
-  /** The document at that path, when the person may read it; null otherwise. */
-  documentId: DocumentId | null;
-}
-
-/**
- * One note of the brain: what core records today, a Knowledge document,
- * what a listing shows of it (never its text) and its links. A union on
- * `kind` once core keeps other records.
- */
-export interface BrainNote {
-  kind: "document";
-  id: DocumentId;
-  collectionId: CollectionId;
-  path: string;
-  title: string;
-  type: DocumentType;
-  /** ISO 8601. */
-  updatedAt: string;
-  /** Its first `brainNoteMaxLinks` links, by the path each names. */
-  links: BrainNoteLink[];
-  /** How many links it has past those. */
-  moreLinks: number;
-}
-
-/** A page of the brain's notes. */
-export interface BrainNotePage {
-  notes: BrainNote[];
   /** Where the next page starts; null when this is the last. */
   next: string | null;
 }

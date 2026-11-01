@@ -14,12 +14,14 @@ import type {
 } from "@earendil-works/pi-ai";
 import { toToolDeclaration } from "@earendil-works/pi-ai/utils/transcript";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { chatAskLimits, chatAskSchema } from "@grasp-os/shared/chat";
 import { searchQueryMaxLength } from "@grasp-os/shared/knowledge";
 import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import { memoryCharactersPerToken } from "@grasp-os/shared/memory";
 import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
+import { isMessage, showThinkingName } from "./agent-messages.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
@@ -160,6 +162,65 @@ const readApi = (
       details: undefined,
     });
   },
+});
+
+const askParameters = Type.Object(
+  {
+    questions: Type.Array(
+      Type.Object(
+        {
+          question: Type.String({
+            description: `The question, one line of plain text, at most ${chatAskLimits.questionLength} characters.`,
+          }),
+          choices: Type.Array(Type.String(), {
+            minItems: chatAskLimits.choicesMin,
+            maxItems: chatAskLimits.choices,
+            description: `${chatAskLimits.choicesMin} to ${chatAskLimits.choices} answers to choose from, each one line of plain text, at most ${chatAskLimits.choiceLength} characters.`,
+          }),
+        },
+        { additionalProperties: false }
+      ),
+      { minItems: 1, maxItems: chatAskLimits.questions }
+    ),
+  },
+  { additionalProperties: false }
+);
+
+/**
+ * The tool that asks the person a few questions with choices (GRA-1001),
+ * in place of the composer, in Grasp's own chat. It ends the turn
+ * (`terminate`): the person's answers are their next message. A choice is
+ * only an answer the person may give, never a command: picking one sends
+ * their message and nothing else, and a change the agent then makes still
+ * waits for them to confirm it. Out of bounds is refused, never trimmed.
+ */
+const askQuestions = (): AgentTool<typeof askParameters> => ({
+  name: "askQuestions",
+  label: "Ask the person",
+  description: `Asks the person up to ${chatAskLimits.questions} questions, each with ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} short answers to choose from, shown in place of their message box; they can also answer in their own words. Use it when you need them to choose between a few clear options before you go on. Call it on its own, as the last thing in your response: their answers come as their next message, each after the question it answers when you asked more than one. A choice only answers your question: it confirms nothing, and a change still waits for them to confirm it in Grasp.`,
+  parameters: askParameters,
+  prepareArguments: (args) => {
+    const ask = chatAskSchema.safeParse(args);
+    if (!ask.success) {
+      throw new Error(
+        `askQuestions takes \`questions\`: 1 to ${chatAskLimits.questions}, each a \`question\` (one line, at most ${chatAskLimits.questionLength} characters) and ${chatAskLimits.choicesMin} to ${chatAskLimits.choices} different \`choices\` (one line each, at most ${chatAskLimits.choiceLength} characters), with no control or invisible formatting characters. Nothing else.`
+      );
+    }
+    return ask.data;
+  },
+  executionMode: "sequential",
+  execute: async () =>
+    await Promise.resolve({
+      content: [
+        {
+          type: "text",
+          text: "Asked. The person's answers come as their next message, each after the question it answers.",
+        },
+      ],
+      details: undefined,
+      // The person answers next: the turn ends here.
+      terminate: true,
+    }),
 });
 
 /**
@@ -709,6 +770,11 @@ export interface Turn {
    */
   events?: () => Message[];
   /**
+   * The tool that shows the turn's thinking in the brain (agent-thinking.ts),
+   * for a chat whose agent may read the brain; none for any other.
+   */
+  thinking?: AgentTool;
+  /**
    * The code runs whose results may not reach the model now: the chat's
    * agent, for its person, can no longer read something one of them read
    * (workspace.ts). Asked before every model request, after `whyStop`, so
@@ -716,18 +782,6 @@ export interface Turn {
    */
   withheld?: () => Promise<ReadonlySet<string>>;
 }
-
-const messageRoles = new Set<unknown>([
-  "system",
-  "user",
-  "assistant",
-  "toolResult",
-]);
-
-/** One of pi's own messages, the only kind this loop makes and keeps. */
-export const isMessage = (
-  message: AgentMessage | { role?: unknown }
-): message is Message => messageRoles.has(message.role);
 
 /**
  * Characters of a transcript's JSON to a token, for sizing without a
@@ -1089,6 +1143,10 @@ interface Progress {
   asking?: { response: AssistantMessage; calls: number };
   /** Why the turn was stopped before a request, if it was. */
   stopped?: Error;
+  /** Steps of thinking shown in the brain this turn. */
+  thought: number;
+  /** Whether the turn asked once for an answer in words after its thinking. */
+  askedForWords: boolean;
   /** The runs the next request withholds, read as it was prepared. */
   withheld: ReadonlySet<string>;
 }
@@ -1141,6 +1199,37 @@ const textOf = (message: AssistantMessage | undefined): string =>
     .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("");
 
+/**
+ * Responses kept for the answer once a turn shows its thinking: a step of
+ * thinking is refused once only these are left, so the rounds spent on it
+ * never leave none for the answer.
+ */
+const answerSteps = 2;
+
+/** Why a step of thinking isn't shown, if it isn't: the turn's last rounds are the answer's. */
+const thinkingRefusalOf = (
+  tool: string,
+  progress: Progress
+): string | undefined =>
+  tool === showThinkingName && progress.steps + answerSteps >= maxSteps
+    ? "Not shown: the rounds left are for your answer. Write it now, in words."
+    : undefined;
+
+/** What a turn that only showed its thinking is asked, once, before it ends. */
+const wordsPlease =
+  "You showed your thinking in the brain, but wrote no answer. Now write your answer to the person in words.";
+
+/**
+ * Whether the turn showed its thinking and ended without a word: it is
+ * asked once for its answer.
+ */
+const wantsWords = (progress: Progress): boolean =>
+  !progress.askedForWords &&
+  progress.thought > 0 &&
+  progress.last?.stopReason === "stop" &&
+  textOf(progress.last).trim() === "" &&
+  progress.steps < maxSteps;
+
 const outcomeOf = (
   last: AssistantMessage | undefined,
   steps: number,
@@ -1179,6 +1268,7 @@ export const runTurn = async ({
   whyStop,
   events,
   withheld,
+  thinking: thinkingTool,
 }: Turn): Promise<TurnResult> => {
   // In a chat app, no links in the agent's own words: links come from code.
   const ownWords = context.channel !== undefined;
@@ -1189,11 +1279,21 @@ export const runTurn = async ({
     ...systemUpdates(history, apis, context),
     { role: "user", content: question, timestamp: Date.now() },
   ];
-  const progress: Progress = { steps: 0, runs: 0, withheld: new Set() };
+  const progress: Progress = {
+    steps: 0,
+    runs: 0,
+    withheld: new Set(),
+    thought: 0,
+    askedForWords: false,
+  };
   const thinking = thinkingClock();
   const tools = [
     executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
     readApi(apis),
+    ...(thinkingTool === undefined ? [] : [thinkingTool]),
+    // Only in Grasp's own chat, where the questions take the composer's
+    // place; a chat app's chat asks in words.
+    ...(ownWords ? [] : [askQuestions()]),
   ];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
@@ -1203,6 +1303,16 @@ export const runTurn = async ({
   const asked = measureTurns([...history, ...prompts], room);
   const taken = async (): Promise<Message[]> =>
     await Promise.resolve(events?.() ?? []);
+  // Before the turn would end: what happened meanwhile, or, once, the
+  // answer a turn that only showed its thinking still owes in words.
+  const followUps = async (): Promise<AgentMessage[]> => {
+    const happened = await taken();
+    if (happened.length > 0 || !wantsWords(progress)) {
+      return happened;
+    }
+    progress.askedForWords = true;
+    return [{ role: "system", content: wordsPlease, timestamp: Date.now() }];
+  };
   if ((asked.sizes.at(-1) ?? 0) > asked.budget) {
     throw agentErrors.create("agent.question_too_long");
   }
@@ -1234,7 +1344,7 @@ export const runTurn = async ({
         ),
       toolExecution: "sequential",
       getSteeringMessages: taken,
-      getFollowUpMessages: taken,
+      getFollowUpMessages: followUps,
       // Checked again before every model request.
       // What is withheld is read here too, once a request: a result of the
       // turn under way can't be withheld, as the provider takes the latest
@@ -1252,11 +1362,16 @@ export const runTurn = async ({
         }
       },
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
-        // Reading a declaration runs no code: only the turn's steps bound it.
-        const runsCode = toolCall.name !== "readApi";
+        // Reading a declaration, or asking the person, runs no code: only
+        // the turn's steps bound them. Showing thinking runs none either,
+        // but leaves the answer room.
+        const runsCode =
+          toolCall.name !== "readApi" &&
+          toolCall.name !== showThinkingName &&
+          toolCall.name !== "askQuestions";
         const reason = runsCode
           ? refusal(progress, assistantMessage)
-          : undefined;
+          : thinkingRefusalOf(toolCall.name, progress);
         if (runsCode && reason === undefined) {
           progress.runs += 1;
         }
@@ -1279,6 +1394,13 @@ export const runTurn = async ({
           ownWords ? inOwnWords(event.message) : event.message,
           event.message.role === "assistant" ? thinking.take() : undefined
         );
+      }
+      if (
+        event.type === "tool_execution_end" &&
+        event.toolName === showThinkingName &&
+        !event.isError
+      ) {
+        progress.thought += 1;
       }
       if (event.type === "tool_execution_update") {
         const update: unknown = event.partialResult;

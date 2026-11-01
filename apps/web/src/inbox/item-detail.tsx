@@ -132,7 +132,7 @@ const Section = ({
   children: ReactNode;
 }) => (
   <section aria-label={title}>
-    <h2 className="bg-row-group flex h-14 items-center border-b px-5 font-medium">
+    <h2 className="bg-row-group text-row-group-foreground flex h-14 items-center border-b px-5 font-medium">
       {title}
     </h2>
     {children}
@@ -442,6 +442,69 @@ const HeldItem = ({
       ]}
       busy={busy}
       extra={<HeldWriteDetails action={action} shown={shown} />}
+      failure={failure}
+      frame={frame}
+    />
+  );
+};
+
+/**
+ * A start of a workflow a chat's agent asked for: confirming starts it,
+ * as the agent acting for the person, with exactly the input shown, which
+ * is all shown before either button.
+ */
+const HeldStartItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "heldStart" }>;
+}) => {
+  const { t } = useLingui();
+  const { start } = source;
+  const { busy, failure, decide } = useDecide(frame.onSaid);
+  const name = start.workflowName;
+  return (
+    <ItemFrame
+      acts={[
+        {
+          label: t`Start`,
+          name: t`Start ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.confirm(start.id, start.inputHash);
+              },
+              t`Started: ${name}.`
+            );
+          },
+        },
+        {
+          label: t`Decline`,
+          name: t`Decline starting ${name}`,
+          onPress: async () => {
+            await decide(
+              async (session) => {
+                await session.heldStarts.decline(start.id);
+              },
+              t`Declined: ${name}.`
+            );
+          },
+        },
+      ]}
+      busy={busy}
+      extra={
+        <div className="flex flex-col gap-2">
+          <h3 className="font-medium">
+            <Trans>What it starts with</Trans>
+          </h3>
+          <pre className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm">
+            <code className="font-mono">
+              {JSON.stringify(start.input, null, 2)}
+            </code>
+          </pre>
+        </div>
+      }
       failure={failure}
       frame={frame}
     />
@@ -801,6 +864,9 @@ export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
+  }
+  if (source.type === "heldStart") {
+    return <HeldStartItem frame={frame} source={source} />;
   }
   if (source.type === "outcome") {
     return <OutcomeItem frame={frame} source={source} />;

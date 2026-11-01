@@ -7,10 +7,15 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import {
+  PageHeader,
+  PageHeaderActions,
+  PageHeaderTitle,
+} from "@grasp-os/ui/components/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { FileTextIcon, NotebookPenIcon } from "lucide-react";
+import { FileTextIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -20,6 +25,9 @@ import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { LessonsView } from "./lessons-view.tsx";
+import { recordOf } from "./memory-parts.tsx";
+import { RememberDialog } from "./remember-dialog.tsx";
+import { ShareRecord } from "./share-record.tsx";
 
 // The Brain's memory records, as a person inspects and corrects them
 // (GRA-298; the threat model is on the issue): their own, or the shared
@@ -59,12 +67,6 @@ const readFrom = async <T,>(
     return { state: "refused", message: failureText(error) };
   }
 };
-
-/** The record a command's receipt names, if it names one. */
-const recordOf = (receipt: {
-  resourceRefs: readonly { kind: string; memoryId?: string }[];
-}): string | undefined =>
-  receipt.resourceRefs.find((ref) => ref.kind === "memory")?.memoryId;
 
 const StateBadge = ({ state }: { state: Shown["state"] }) => {
   const { t } = useLingui();
@@ -312,11 +314,13 @@ const RetireButton = ({
 const LineagePanel = ({
   memoryId,
   admin,
+  teams,
   onPick,
   onChanged,
 }: {
   memoryId: string;
   admin: boolean;
+  teams: readonly { id: string; name: string }[];
   onPick: (memoryId: string) => void;
   onChanged: (memoryId: string | undefined) => void;
 }) => {
@@ -392,6 +396,15 @@ const LineagePanel = ({
       </div>
       {correctable ? (
         <CorrectForm key={record.revision} onDone={onChanged} record={record} />
+      ) : null}
+      {/* One they may correct, they may share: the form says where. */}
+      {correctable ? (
+        <ShareRecord
+          admin={admin}
+          onShared={onChanged}
+          record={record}
+          teams={teams}
+        />
       ) : null}
       {retirable ? (
         <RetireButton
@@ -473,18 +486,38 @@ const RecordList = ({
 };
 
 /** The Brain's memory page: the records, and the one in hand. */
-export const MemoryPage = ({ admin }: { admin: boolean }) => {
+export const MemoryPage = ({
+  admin,
+  teams,
+}: {
+  admin: boolean;
+  /** The teams the person is in, to share their records with. */
+  teams: readonly { id: string; name: string }[];
+}) => {
   const [tab, setTab] = useState<Tab>("mine");
   const [picked, setPicked] = useState<string>();
   // Read again after a change: what changed shows as it is now.
   const [changes, setChanges] = useState(0);
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
-          <NotebookPenIcon className="size-5" />
-          <Trans>Memory</Trans>
-        </h1>
+    // A page of the brain as its log is (brain-log.tsx): the title in the
+    // serif, the kinds of record as a line of tabs under it, in the brain's
+    // column, with room at the foot for the chat.
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-8 md:px-12">
+        <PageHeader>
+          <PageHeaderTitle>
+            <Trans>Memory</Trans>
+          </PageHeaderTitle>
+          <PageHeaderActions>
+            <RememberDialog
+              onRemembered={(memoryId) => {
+                setTab("mine");
+                setChanges((count) => count + 1);
+                setPicked(memoryId);
+              }}
+            />
+          </PageHeaderActions>
+        </PageHeader>
         <Tabs
           onValueChange={(value: string) => {
             setTab(value === "shared" || value === "lessons" ? value : "mine");
@@ -492,47 +525,48 @@ export const MemoryPage = ({ admin }: { admin: boolean }) => {
           }}
           value={tab}
         >
-          <TabsList>
-            <TabsTrigger value="mine">
+          <TabsList variant="line">
+            <TabsTrigger className="flex-none" value="mine">
               <Trans context="memory records: the person's own">Yours</Trans>
             </TabsTrigger>
-            <TabsTrigger value="shared">
+            <TabsTrigger className="flex-none" value="shared">
               <Trans context="memory records: others' that you read">
                 Shared with you
               </Trans>
             </TabsTrigger>
-            <TabsTrigger value="lessons">
+            <TabsTrigger className="flex-none" value="lessons">
               <Trans context="the Brain's lessons from repeated failures">
                 Lessons
               </Trans>
             </TabsTrigger>
           </TabsList>
         </Tabs>
-      </div>
-      {tab === "lessons" ? (
-        <LessonsView admin={admin} />
-      ) : (
-        <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-          <RecordList
-            among={tab}
-            key={`${tab}:${changes}`}
-            onPick={setPicked}
-            picked={picked}
-          />
-          {picked === undefined ? null : (
-            <LineagePanel
-              admin={admin}
-              key={`${picked}:${changes}`}
-              memoryId={picked}
-              onChanged={(memoryId) => {
-                setChanges((count) => count + 1);
-                setPicked(memoryId);
-              }}
+        {tab === "lessons" ? (
+          <LessonsView admin={admin} />
+        ) : (
+          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+            <RecordList
+              among={tab}
+              key={`${tab}:${changes}`}
               onPick={setPicked}
+              picked={picked}
             />
-          )}
-        </div>
-      )}
+            {picked === undefined ? null : (
+              <LineagePanel
+                admin={admin}
+                teams={teams}
+                key={`${picked}:${changes}`}
+                memoryId={picked}
+                onChanged={(memoryId) => {
+                  setChanges((count) => count + 1);
+                  setPicked(memoryId);
+                }}
+                onPick={setPicked}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

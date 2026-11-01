@@ -1,6 +1,14 @@
 import { useLayoutEffect, useRef } from "react";
 
-import { ALPHAS, bucketOf, HEATS, lightness, palette, rgb } from "./dot-ink.ts";
+import {
+  ALPHAS,
+  bucketOf,
+  HEATS,
+  lightness,
+  palette,
+  rgb,
+  token,
+} from "./dot-ink.ts";
 import type { BrainDots } from "./dot-ink.ts";
 import {
   clamp01,
@@ -133,10 +141,7 @@ const play = (
   element.height = Math.round(height * dpr);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const styles = palette(element);
-  const background = rgb(
-    getComputedStyle(element).getPropertyValue("--background").trim() ||
-      "#fcfcfb"
-  );
+  const background = rgb(token(element, "--background"));
   const ground = `rgb(${background.join(", ")})`;
 
   const brain = from ?? disc(width / 2, height / 2);

@@ -122,6 +122,11 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
     // is printed at info level only.
     served = await serveCore(["--experimental", "--verbose"]);
     plain = await serveCore(["--experimental"]);
+    // The first isolate a workerd loads costs seconds on a loaded runner,
+    // more than the calls after it: loaded here, so the first test doesn't
+    // count it. A silenced one, whose value the first test reads as never
+    // printed: were it printed, that test would fail.
+    await fetch(new URL("/hashbang", served.url));
   }, 120_000);
 
   afterAll(() => {
@@ -234,7 +239,9 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
   // answered inside the call (the security review of GRA-939): a getter in
   // the answer, a constructor's throw, a method that is a throwing
   // accessor. An answer of the call's own never reads as a thrown error,
-  // whatever its keys, and a thrown error's details cross with it.
+  // whatever its keys, and a thrown error's details cross with it. Its 27
+  // calls each load an isolate of their own, one after another, so it runs
+  // past the default 5 s on a loaded runner: about 1 s here, alone.
   it("answers each other way a call could throw inside the call, with nothing of it reported", async () => {
     const run = async (route: string) => {
       const response = await fetch(new URL(route, served.url));
@@ -353,7 +360,7 @@ describe("isolates core loads itself off Cloudflare, on a workerd served --verbo
       },
       reported: false,
     });
-  });
+  }, 30_000);
 
   // App code has no Node.js (`isolateBase`: `nodejs_compat` is the default
   // from 2026-08-04 on, so it is turned off): a timer imported by name from

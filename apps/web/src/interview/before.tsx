@@ -1,6 +1,7 @@
 import { interviewerNames, interviewers } from "@grasp-os/shared/onboarding";
 import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -46,22 +47,19 @@ const Line = ({
   heading?: boolean;
 }) => {
   const said = useSaidOf(text);
-  const className =
-    "animate-in fade-in slide-in-from-bottom-2 max-w-lg text-2xl font-medium tracking-tight text-balance duration-500";
   return (
     <div
       aria-live="polite"
       className="flex min-h-16 w-full items-start justify-center"
     >
-      {heading ? (
-        <h1 className={className} key={text}>
+      <div
+        className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
+        key={text}
+      >
+        <PageHeaderTitle render={heading ? undefined : <p />}>
           <SpokenText said={said} text={text} />
-        </h1>
-      ) : (
-        <p className={className} key={text}>
-          <SpokenText said={said} text={text} />
-        </p>
-      )}
+        </PageHeaderTitle>
+      </div>
     </div>
   );
 };
@@ -102,7 +100,12 @@ const Language = ({ room, onNext }: { room: number; onNext: () => void }) => {
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line heading text={question} />
         <LanguageChoice onPick={keepGoing} picked />
-        <Button className="w-full max-w-sm" onClick={onNext} size="xl">
+        <Button
+          className="w-full max-w-sm"
+          onClick={onNext}
+          size="xl"
+          variant="highlight"
+        >
           {t`Continue`}
         </Button>
       </div>
@@ -201,7 +204,8 @@ const Who = ({
     line = also;
   }
   return (
-    <div className="flex w-full flex-col items-center gap-6 text-center">
+    // As wide as the two figures, so each name stands under its own figure, as the prototype has them.
+    <div className="flex w-fit max-w-full flex-col items-center gap-6 text-center">
       <div className="flex justify-center gap-4">
         {interviewers.map((each) => {
           const who = interviewerNames[each];
@@ -224,7 +228,7 @@ const Who = ({
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
         <Line text={line} />
-        <fieldset className="grid w-full max-w-md grid-cols-2 gap-4">
+        <fieldset className="grid w-full grid-cols-2 gap-4">
           <legend className="sr-only">{t`Who would you like to talk with?`}</legend>
           {interviewers.map((each) => (
             <Button
@@ -314,9 +318,9 @@ const About = ({
         />
       </div>
       <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <h1 className="text-2xl font-medium tracking-tight text-balance">
+        <PageHeaderTitle>
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
-        </h1>
+        </PageHeaderTitle>
         <dl className="w-full text-left">
           {rows.map((row) => (
             <div
@@ -329,7 +333,12 @@ const About = ({
           ))}
         </dl>
         <div className="flex w-full max-w-sm flex-col items-center gap-3">
-          <Button className="w-full" onClick={onNext} size="xl">
+          <Button
+            className="w-full"
+            onClick={onNext}
+            size="xl"
+            variant="highlight"
+          >
             {t`Check sound and microphone`}
           </Button>
           <Quiet onClick={onType}>{t`Type instead, without sound`}</Quiet>

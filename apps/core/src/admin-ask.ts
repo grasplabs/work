@@ -8,13 +8,13 @@ import {
 import type { AdminAskAnswer } from "@grasp-os/shared/admin-ask";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { modelErrors } from "@grasp-os/shared/models";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { organizationId } from "./auth/auth.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
-import { gatewaySettings, models } from "./models.ts";
-import type { ModelsEnv } from "./models.ts";
+import { modelForRole, modelSettings, models } from "./models.ts";
 
 // Ask Grasp (GRA-657) on Grasp's own core: the admin's chat over every
 // organization, whose model calls go through this core's model gateway
@@ -53,19 +53,13 @@ const answerTokens = 4000;
 const askTimeoutMs = 90_000;
 
 /**
- * The model Ask Grasp uses: the first the deployment allows that its rules
- * let take sensitive data, and in the EU when the deployment must stay
- * there; undefined when none may.
+ * The model Ask Grasp uses: the organization's careful one, which its
+ * rules let take sensitive data (`modelForRole`). Throws
+ * `model.no_provider` while it connected no AI provider; undefined when
+ * the rules let none of its models answer.
  */
-const askModel = (env: ModelsEnv): string | undefined => {
-  const { models: allowed, rules } = gatewaySettings(env);
-  return allowed.find(
-    (model) =>
-      (rules?.sensitive === undefined ||
-        rules.sensitive.models.includes(model)) &&
-      (rules?.eu?.deployment !== true || rules.eu.models.includes(model))
-  );
-};
+const askModel = async (env: Env): Promise<string | undefined> =>
+  modelForRole(await modelSettings(env), "careful", { sensitive: true });
 
 const forbidden = (requestId: string): Response =>
   errorResponse(403, requestErrors.create("request.forbidden"), requestId);
@@ -101,7 +95,20 @@ export const adminAskResponse = async (
       ? errorResponse(401, authErrors.create("auth.unauthenticated"), requestId)
       : forbidden(requestId);
   }
-  const model = askModel(env);
+  let model: string | undefined = undefined;
+  try {
+    model = await askModel(env);
+  } catch (error) {
+    if (modelErrors.codeOf(error) !== "model.no_provider") {
+      throw error;
+    }
+    log.warn("admin.ask.no_model", { code: "model.no_provider" });
+    return errorResponse(
+      503,
+      modelErrors.create("model.no_provider"),
+      requestId
+    );
+  }
   if (model === undefined) {
     log.warn("admin.ask.no_model", {});
     return errorResponse(

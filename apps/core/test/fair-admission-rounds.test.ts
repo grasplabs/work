@@ -10,6 +10,7 @@ import {
   endingEverySecond,
   failedWith,
   eventually,
+  inRound,
 } from "./fair-admission.ts";
 import { mockIdp } from "./idp.ts";
 import { finished, liveStatus } from "./runs.ts";
@@ -46,8 +47,11 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       async () => {
         const held = await admit(holder, "holder");
         const run = await builder.api.workflows.start(app, "work");
-        // Rounds of five, then ten seconds: three, more than its two steps.
-        await scheduler.wait(16_000);
+        // Three rounds, more than its two steps: the first two ended as
+        // their time passing would, each once it is under way.
+        await inRound(run.id, 1, { end: true });
+        await inRound(run.id, 2, { end: true });
+        await inRound(run.id, 3);
         const whileHeld = await liveStatus(run.id);
         const rounds = await loadWaitsOf(run.id);
         if ("admitted" in held) {

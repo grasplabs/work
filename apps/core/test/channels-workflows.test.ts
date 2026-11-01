@@ -13,9 +13,9 @@ import {
   workflowAskable,
 } from "../src/workflow-resources.ts";
 import { codeStep, says } from "./agent-chat.ts";
-import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import {
   member,
@@ -31,7 +31,7 @@ import type { TeamsPerson } from "./teams-door.ts";
 // (src/channels/workflow-offers.ts): a workflow whose owner lets people
 // ask for it is offered on a card by the chat's agent, started as the
 // person once they press Start, and its end told in their chat. The turn
-// runs in the person's Workspace, with the model gateway faked; the cards
+// runs in the person's Workspace, with the model provider faked; the cards
 // and lines reach the fake Bot Connector through connect; the run is a
 // real run of a published JSON workflow.
 
@@ -209,7 +209,7 @@ describe("a workflow its owner lets people ask for", setUpTime, () => {
 
   it("starts nothing for anyone else who presses it", async () => {
     const ann = await member(idp, offersFirst, says("There's a card for it."));
-    const bo = await memberAnsweredBy(idp, ann.gateway);
+    const bo = await memberAnsweredBy(idp, ann.provider);
     const workflow = await sharedWorkflow(await owner(), ann.userId, true);
     await post(messageFrom(ann.teams, { text: "Run the greeting for Ada" }));
     const [offer = ""] = await offersIn(ann.teams.conversation);
@@ -247,10 +247,10 @@ describe("a workflow its owner lets people ask for", setUpTime, () => {
 describe("a workflow its owner didn't open to asking", setUpTime, () => {
   it("is never offered, even named", async () => {
     // Its replies once the workflow is there, as the agent would name it.
-    const replies: GatewayReply[] = [];
+    const replies: ProviderReply[] = [];
     const ann = await memberAnsweredBy(
       idp,
-      answeringGateway(() => replies.shift())
+      await answeringProvider(() => replies.shift())
     );
     const workflow = await sharedWorkflow(await owner(), ann.userId, false);
     replies.push(
@@ -270,7 +270,7 @@ describe("a workflow its owner didn't open to asking", setUpTime, () => {
 
     await post(messageFrom(ann.teams, { text: "Run the greeting" }));
 
-    const told = JSON.stringify(ann.gateway.requests[1]?.body ?? null);
+    const told = JSON.stringify(ann.provider.requests[1]?.body ?? null);
     expect({
       listedNone: told.includes(String.raw`\"listed\":[]`),
       offered: told.includes(String.raw`\"offered\":true`),
@@ -310,3 +310,40 @@ describe("a workflow its owner didn't open to asking", setUpTime, () => {
     });
   });
 });
+
+describe(
+  "the workflows open to asking, as Settings › Stephen lists them",
+  setUpTime,
+  () => {
+    it("are those live and open to asking that the reader sees, in one read", async () => {
+      const by = await owner();
+      const ann = await signedInApi(idp, "user");
+      const open = await sharedWorkflow(by, ann.userId, true);
+      const closed = await sharedWorkflow(by, ann.userId, false);
+      // Open to asking, but never published, and published but not shared.
+      const unpublished = await createWorkflowResource(
+        env,
+        by,
+        `ask-${unique()}`
+      );
+      await setWorkflowAskable(env, by, unpublished.id, true);
+      const notShared = await createWorkflowResource(
+        env,
+        by,
+        `ask-${unique()}`
+      );
+      await publishWorkflowVersion(env, by, notShared.id, {
+        definition: greeting(notShared.name),
+        basedOn: null,
+      });
+      await setWorkflowAskable(env, by, notShared.id, true);
+
+      const listed = await ann.api.workflowResources.askableWorkflows();
+
+      const ours = new Set([open.id, closed.id, unpublished.id, notShared.id]);
+      expect(listed.filter(({ id }) => ours.has(id))).toStrictEqual([
+        { id: open.id, name: open.name },
+      ]);
+    });
+  }
+);

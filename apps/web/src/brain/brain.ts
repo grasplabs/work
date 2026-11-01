@@ -4,11 +4,8 @@ import type {
   Candidate,
   Gap,
   Goal,
-  LandscapeApp,
-  PolicyDocument,
   ProcessId,
   Role,
-  SeenThrough,
   Source,
   Stakeholder,
   Statement,
@@ -80,8 +77,6 @@ export interface NoteRef {
   to?: string;
   /** The workflow it points to, outside the brain on the Workflows page. */
   workflowId?: string;
-  /** The policy it points to, outside the brain in the policy manager. */
-  policyId?: string;
   /** The statement it points at, highlighted in the source `to`. */
   statement?: string;
 }
@@ -151,7 +146,7 @@ export interface Note {
   links: string[];
   /** Notes that point here. */
   backlinks: string[];
-  /** A tool's or application's logo as a full path: the Landscape table's, else its connector's. */
+  /** A tool's logo as a full path: its connector's. */
   logoSrc?: string;
   /** The standard business processes of the workflows this note leads to, in list order. */
   processIds: ProcessId[];
@@ -444,22 +439,16 @@ const special = /[.*+?^${}()|[\]\\]/gu;
 const escape = (text: string): string =>
   text.replaceAll(special, String.raw`\$&`);
 
-/** Whether a tool has AI, and who says so: "An AI tool, as Grasp sees it". */
-const aiText = (ai: AiKind | undefined, seenByGrasp: boolean): string => {
+/** Whether a tool has AI, as the team said it. */
+const aiText = (ai: AiKind | undefined): string => {
   if (!ai) {
     return t({ message: "Unknown", context: "whether a tool has AI" });
   }
-  return seenByGrasp
-    ? select(ai, {
-        tool: "An AI tool, as Grasp sees it",
-        builtIn: "AI built in, as Grasp sees it",
-        other: "No AI, as Grasp sees it",
-      })
-    : select(ai, {
-        tool: "An AI tool, as the team said it",
-        builtIn: "AI built in, as the team said it",
-        other: "No AI, as the team said it",
-      });
+  return select(ai, {
+    tool: "An AI tool, as the team said it",
+    builtIn: "AI built in, as the team said it",
+    other: "No AI, as the team said it",
+  });
 };
 
 /** "14 people", or that the size is unknown. */
@@ -470,43 +459,18 @@ const sizeText = (count: TeamCount | undefined): string => {
     : plural(people, { one: "# person", other: "# people" });
 };
 
-/** "8 people, 6 interviewed: the controller and 5 employees.", or "8 people." when nobody was interviewed yet. */
-const sizeAndInterviewed = (
-  people: number,
-  { stakeholder, employees }: { stakeholder?: string; employees: number }
-): string => {
-  const team = plural(people, { one: "# person", other: "# people" });
-  const total = (given(stakeholder) ? 1 : 0) + employees;
-  if (total === 0) {
-    return `${team}.`;
-  }
-  const staff = plural(employees, { one: "# employee", other: "# employees" });
-  if (!given(stakeholder)) {
-    const who = staff;
-    return t`${team}, ${total} interviewed: ${who}.`;
-  }
-  const role = lowerFirst(stakeholder);
-  const who = employees > 0 ? t`the ${role} and ${staff}` : t`the ${role}`;
-  return t`${team}, ${total} interviewed: ${who}.`;
-};
-
-/**
- * "8 people, 6 interviewed: the controller and 5 employees. Heard in 7 conversations."
- * Who was interviewed says how the people and the conversations meet: a team is heard in more
- * conversations than it had interviews when its people spoke to Grasp later, or other teams named it.
- * The statements are left out; the team's page counts them right under it.
- */
+/** "18 people.", with "Not interviewed yet." until anyone in it was heard: never who talked, nor how many. */
 const teamSummary = (
   count: TeamCount | undefined,
-  interviewed: { stakeholder?: string; employees: number },
-  conversations: number
+  interviewed: boolean
 ): string => {
   const people = count?.people;
+  // Its size, and whether it was interviewed: never how many of its people talked, which is theirs.
   const size =
     people === null || people === undefined
       ? t`Team size unknown.`
-      : sizeAndInterviewed(people, interviewed);
-  return `${size} ${plural(conversations, { one: "Heard in # conversation.", other: "Heard in # conversations." })}`;
+      : `${plural(people, { one: "# person", other: "# people" })}.`;
+  return interviewed ? size : `${size} ${t`Not interviewed yet.`}`;
 };
 
 /** "Service desk (14)", or "(unknown)" when the import did not count it. */
@@ -543,10 +507,6 @@ const interviewedOf = (done: number, invited: number): string => {
   });
 };
 
-/** "4 rules in use". */
-const rulesInUse = (count: number): string =>
-  plural(count, { one: "# rule in use", other: "# rules in use" });
-
 /** "33 employees interviewed", besides the teams' stakeholders. */
 const employeesInterviewed = (count: number): string =>
   plural(count, {
@@ -558,34 +518,12 @@ const employeesInterviewed = (count: number): string =>
 const stillOpen = (gaps: number): string =>
   plural(gaps, { one: "# gap", other: "# gaps" });
 
-/** A tool Grasp has seen in use, named by some teams. */
-const toolSeen = (teams: number, people: number, channels: string): string =>
-  t`Named by ${plural(teams, { one: "# team", other: "# teams" })}, and seen in use by ${plural(people, { one: "# person", other: "# people" })} through ${channels}.`;
-
 /** A tool only the teams have named. */
 const toolReported = (teams: number): string =>
   plural(teams, {
     one: "Named by # team. Not seen in use yet, so its use is reported, not observed.",
     other:
       "Named by # teams. Not seen in use yet, so its use is reported, not observed.",
-  });
-
-/** An application Grasp saw in use that no team has named. */
-const appUnnamed = (people: number, channels: string): string =>
-  plural(people, {
-    one: `# person uses it, seen through ${channels}. No team has named it yet.`,
-    other: `# people use it, seen through ${channels}. No team has named it yet.`,
-  });
-
-/** How many people Grasp saw using an application. */
-const peopleText = (people: number): string =>
-  plural(people, { one: "# person", other: "# people" });
-
-/** How many people Grasp saw using a tool, and under which name: "38 people, as Microsoft 365". */
-const peopleAs = (people: number, app: string): string =>
-  plural(people, {
-    one: `# person, as ${app}`,
-    other: `# people, as ${app}`,
   });
 
 /** A candidate process and where it came from. */
@@ -608,43 +546,11 @@ const addedText = (statements: number, breakdown: string): string =>
     other: `# statements: ${breakdown}`,
   });
 
-/** The stakeholder of an interviewed team: "Head of compliance, interviewed 29 Aug 2026 (voice agent)". */
-const interviewedOn = (
-  role: string,
-  date: string,
-  how: string | undefined
-): string =>
-  given(how)
-    ? t`${role}, interviewed ${date} (${how})`
-    : t`${role}, interviewed ${date}`;
-
 /** The stakeholder of a team not interviewed yet, and whether they are invited. */
 const notInterviewed = (role: string, date: string | undefined): string =>
   given(date)
     ? t`${role}, invited ${date}, not interviewed yet`
     : t`${role}, not invited yet, not interviewed yet`;
-
-/** How Grasp saw an application in use, in a list: "Microsoft sign-in". */
-const seenLabel: Record<SeenThrough, MessageDescriptor> = {
-  microsoftSso: msg`Microsoft sign-in`,
-  googleSso: msg`Google sign-in`,
-  pulse: msg({ message: "Pulse", comment: "Product name: keep it as it is" }),
-};
-
-/** When Grasp saw an application in use, on the timeline. */
-const seenInUse = (seen: SeenThrough): string =>
-  select(seen, {
-    microsoftSso: "Seen in use through Microsoft sign-in",
-    googleSso: "Seen in use through Google sign-in",
-    other: "Seen in use through Pulse",
-  });
-
-/** The import that showed an application in use. */
-const seenSource: Record<SeenThrough, string> = {
-  microsoftSso: "src-sso",
-  googleSso: "src-sso",
-  pulse: "src-pulse",
-};
 
 /** Linked notes in the side panel, grouped under these titles, in this order. */
 const linkedTitle: [NoteKind, MessageDescriptor][] = [
@@ -679,7 +585,6 @@ const byThe = (role: string): string => t`By the ${role}`;
 const confirmedByThe = (role: string): string => t`Confirmed by the ${role}`;
 const askThe = (role: string): string => t`Ask the ${role}`;
 const canAnswer = (role: string): string => t`${role} can answer it`;
-const addedAsQuestion = (): string => t`Added as an open question`;
 const versionText = (version: number): string => t`Version ${version}`;
 const teamInterviewed = (team: string): string => t`${team} interviewed`;
 const interviewedThe = (role: string): string => t`Interviewed: the ${role}`;
@@ -723,16 +628,6 @@ const sizeWas = (count: number | null): string => {
   return t`Was ${people}`;
 };
 
-/** What an application is, from the Landscape: "Chat assistant by OpenAI". */
-const appWhat = (
-  category: string,
-  vendor: string,
-  aiBuiltIn: boolean
-): string =>
-  aiBuiltIn
-    ? t`${category} by ${vendor}, with AI built in`
-    : t`${category} by ${vendor}`;
-
 /** "Answered: Monthly budget for AI", or "Changed the answer to: …" when it replaced one. */
 const answerTitle = (question: string, changed: boolean): string =>
   changed ? answerChangedTo(question) : questionAnswered(question);
@@ -766,24 +661,6 @@ const saidText = (statements: Statement[]): string =>
     .map(([kind, count]) => saidCount(kind, count))
     .join(", ");
 
-/** The landscape application a tool name means ("Outlook" is Microsoft 365), if Grasp has seen it. */
-const appFor = (ws: Workspace, tool: Tool): LandscapeApp | undefined => {
-  const name = tool.name.toLowerCase();
-  return ws.landscape.find(
-    (app) =>
-      app.name.toLowerCase() === name ||
-      app.matches.some((match) => match.toLowerCase() === name)
-  );
-};
-
-/** Applications Grasp saw in use that no interview or statement mentioned. */
-export const unmentionedApps = (ws: Workspace): LandscapeApp[] => {
-  const mentioned = new Set(
-    ws.tools.map((tool) => appFor(ws, tool)?.id).filter(given)
-  );
-  return ws.landscape.filter((app) => !mentioned.has(app.id));
-};
-
 /** One team as an import listed it: its size and roles then, and the size before when this import changed it. */
 export interface TeamRow {
   teamId: string;
@@ -792,17 +669,10 @@ export interface TeamRow {
   roles: Role[];
 }
 
-/** One application as sign-in or Pulse showed it, with its note: the tool a team named, or the application nobody did. */
-export interface AppRow {
-  app: LandscapeApp;
-  noteId: string;
-  named: boolean;
-}
-
 /** What an import brought in, row by row. */
-export type SourceContents =
-  | { kind: "teams"; rows: TeamRow[] }
-  | { kind: "apps"; signIn: boolean; rows: AppRow[] };
+export interface SourceContents {
+  rows: TeamRow[];
+}
 
 /** Every team as a directory listed it on that day. A refresh stores only what changed, so the rest carries over. */
 const directoryRows = (
@@ -833,50 +703,27 @@ const directoryRows = (
 
 /**
  * What an import brought in, so its source holds the context the other notes are drawn from: the
- * teams and roles from a directory, or the applications seen through sign-in or Pulse, by name.
- * Nothing for a conversation or a document, which have their own text.
+ * teams and roles from a directory. Nothing for a conversation or a document, which have their own
+ * text.
  */
 export const sourceContents = (
   ws: Workspace,
   sourceId: string
 ): SourceContents | undefined => {
   const source = ws.sources.find((candidate) => candidate.id === sourceId);
-  if (!source?.connection) {
+  if (source?.connection !== "directory") {
     return undefined;
   }
-  if (source.connection === "directory") {
-    return { kind: "teams", rows: directoryRows(ws, source, sourceId) };
-  }
-  const ways: SeenThrough[] =
-    source.connection === "pulse" ? ["pulse"] : ["microsoftSso", "googleSso"];
-  // The first tool that means an application is its note; several names can mean one ("Outlook" and "Excel").
-  const toolOf = new Map<string, string>();
-  for (const tool of ws.tools) {
-    const app = appFor(ws, tool);
-    if (app && !toolOf.has(app.id)) {
-      toolOf.set(app.id, tool.id);
-    }
-  }
-  const rows = ws.landscape
-    .filter((app) => app.seenThrough.some((way) => ways.includes(way)))
-    .map((app) => ({
-      app,
-      noteId: toolOf.get(app.id) ?? `app-${app.id}`,
-      named: toolOf.has(app.id),
-    }))
-    .toSorted((a, b) => a.app.name.localeCompare(b.app.name));
-  return { kind: "apps", signIn: source.connection === "signIn", rows };
+  return { rows: directoryRows(ws, source, sourceId) };
 };
 
 /** What an import added, in a few words: "6 teams, with their roles". */
 const importedText = (contents: SourceContents): string => {
   const count = contents.rows.length;
-  return contents.kind === "teams"
-    ? plural(count, {
-        one: "# team, with its roles",
-        other: "# teams, with their roles",
-      })
-    : plural(count, { one: "# application", other: "# applications" });
+  return plural(count, {
+    one: "# team, with its roles",
+    other: "# teams, with their roles",
+  });
 };
 
 /** Every step, in drawing order, wherever it sits. */
@@ -921,17 +768,9 @@ const connectionFor = (ws: Workspace, names: string[]) => {
   );
 };
 
-/** A system's logo as a full path: the one the Landscape table shows, else its connector's, else none. */
-const logoOf = (
-  ws: Workspace,
-  app: LandscapeApp | undefined,
-  names: string[]
-): string | undefined => {
-  // The Landscape records keep an empty path for an application without a logo.
-  if (given(app?.logoSrc)) {
-    return app.logoSrc;
-  }
-  const file = app?.logo ?? connectionFor(ws, names)?.logo;
+/** A system's logo as a full path: its connector's, else none. */
+const logoOf = (ws: Workspace, names: string[]): string | undefined => {
+  const file = connectionFor(ws, names)?.logo;
   return given(file) ? `/logos/${file}` : undefined;
 };
 
@@ -1124,15 +963,9 @@ const interviewRef = (
   if (!stakeholder) {
     return { label: t`No stakeholder named yet` };
   }
+  // Whether it was interviewed, never who talked or when: its lead's role alone would say who.
   if (interview) {
-    return {
-      label: interviewedOn(
-        stakeholder.role,
-        formatDay(interview.date),
-        given(interview.how) ? lowerFirst(interview.how) : undefined
-      ),
-      to: interview.id,
-    };
+    return { label: t({ message: "Yes", context: "a team was interviewed" }) };
   }
   return {
     label: notInterviewed(
@@ -1142,22 +975,6 @@ const interviewRef = (
         : undefined
     ),
   };
-};
-
-/** The tags of an application nobody named. */
-const appTags = (app: LandscapeApp): string[] => {
-  let ai: string[] = [];
-  if (app.ai === "tool") {
-    ai = ["ai-tool"];
-  } else if (app.ai === "builtIn") {
-    ai = ["ai"];
-  }
-  return [
-    "tool",
-    "never-mentioned",
-    ...ai,
-    ...(given(app.owner ?? undefined) ? [] : ["no-owner"]),
-  ];
 };
 
 /** A question the board answers on the Vision page, with its answers so far. */
@@ -1513,30 +1330,10 @@ const teamDraft = (cx: Context, team: Team): Draft => {
       ...(isInvited ? ["invited"] : []),
       interviews.length > 0 ? "interviewed" : "not-interviewed",
     ],
-    summary: teamSummary(
-      latest(team.counts),
-      {
-        stakeholder: interviews.length > 0 ? stakeholder?.role : undefined,
-        employees: cx.employeeSources.filter((source) =>
-          speaksFor(source, team.id)
-        ).length,
-      },
-      heardIn.length
-    ),
+    summary: teamSummary(latest(team.counts), interviews.length > 0),
     points: [],
-    timeline: [
-      ...teamHistory(cx, team),
-      ...interviews
-        .filter((source) => !heardIn.includes(source.id))
-        .map((source) =>
-          event(source.date, source.title, {
-            detail: whoAndHow(source),
-            to: source.id,
-          })
-        ),
-      ...perSource(cx, said, (source) => source.title),
-      ...workflows.flatMap(workflowEvents),
-    ],
+    // Its size, its stakeholder and its workflows over time; never each conversation with its day, which would say who talked and when.
+    timeline: [...teamHistory(cx, team), ...workflows.flatMap(workflowEvents)],
     open:
       interviews.length > 0 || !isInvited ? [] : teamStillToCome(stakeholder),
     links: [
@@ -1555,19 +1352,14 @@ const teamDraft = (cx: Context, team: Team): Draft => {
   };
 };
 
-/** The ways Grasp saw an application in use, in a list: "Microsoft sign-in and Pulse". */
-const seenThroughText = (app: LandscapeApp): string =>
-  joinNames(app.seenThrough.map((seen) => i18n._(seenLabel[seen])));
-
 /** A tool a team named. */
 const toolDraft = (cx: Context, tool: Tool): Draft => {
   const { ws } = cx;
-  const app = appFor(ws, tool);
   const about = ws.statements.filter((statement) =>
     statement.toolIds.includes(tool.id)
   );
   const workflows = workflowsUsing(ws, [tool.name]);
-  const names = [tool.name, ...(app ? [app.name, ...app.matches] : [])];
+  const names = [tool.name];
   const firstSaid = about.filter(
     (statement) => statement.sourceId === tool.sourceId
   );
@@ -1589,29 +1381,26 @@ const toolDraft = (cx: Context, tool: Tool): Draft => {
       .filter((workflow) => !noted.has(workflow.id))
       .map((workflow) => ({ label: workflow.name, workflowId: workflow.id })),
   ];
-  const ai = app?.ai ?? tool.ai;
+  const { ai } = tool;
   // Every team that names it counts, including the ones that did so in a later conversation.
   const namedBy = unique([
     ...tool.teamIds,
     ...about.flatMap((statement) => statement.teamIds),
   ]);
-  const seenThrough = app?.seenThrough ?? [];
   return {
     id: tool.id,
     kind: "tool",
     title: tool.name,
-    logoSrc: logoOf(ws, app, names),
+    logoSrc: logoOf(ws, names),
     path: ["2 Inventory", "Tools", "Mentioned"],
     step: 2,
     tags: [
       "tool",
-      app ? "observed" : "reported",
+      "reported",
       ...(namedBy.length > 1 ? ["shared"] : []),
       ...(ai !== undefined && ai !== "none" ? ["ai"] : []),
     ],
-    summary: app
-      ? toolSeen(namedBy.length, app.people, seenThroughText(app))
-      : toolReported(namedBy.length),
+    summary: toolReported(namedBy.length),
     points: points(
       point(t`Named by`, refsIn(cx, namedBy)),
       point(
@@ -1622,7 +1411,7 @@ const toolDraft = (cx: Context, tool: Tool): Draft => {
         toolWorkflows.length === 0 ? t`None yet` : toolWorkflows
       ),
       point(t`Grasp access`, accessText(ws, names)),
-      point(t`AI`, aiText(ai, Boolean(app)))
+      point(t`AI`, aiText(ai))
     ),
     timeline: [
       event(dateIn(cx, tool.sourceId), namedIn(titleIn(cx, tool.sourceId)), {
@@ -1630,92 +1419,20 @@ const toolDraft = (cx: Context, tool: Tool): Draft => {
         to: tool.sourceId,
         quotes: firstSaid.map((statement) => quote(statement)),
       }),
-      ...(app
-        ? seenThrough.map((seen) =>
-            event(dateIn(cx, seenSource[seen]), seenInUse(seen), {
-              detail: peopleAs(app.people, app.name),
-              to: seenSource[seen],
-            })
-          )
-        : []),
       ...perSource(
         cx,
         about.filter((statement) => statement.sourceId !== tool.sourceId),
         (source) => talkedAboutIn(source.title)
       ),
     ],
-    open: app
-      ? []
-      : [t`Seen in use: not observed through sign-in or Pulse yet`],
-    links: [
-      ...namedBy,
-      tool.sourceId,
-      ...processes,
-      ...(seenThrough.includes("pulse") ? ["src-pulse"] : []),
-    ],
+    open: [t`Seen in use: not observed through sign-in or Pulse yet`],
+    links: [...namedBy, tool.sourceId, ...processes],
     sourceIds: unique([
       tool.sourceId,
-      ...seenThrough.map((seen) => seenSource[seen]),
       ...about.map((statement) => statement.sourceId),
     ]),
     workflowIds: workflows.map((workflow) => workflow.id),
     terms: names,
-  };
-};
-
-/** An application Grasp saw in use that no team named. */
-const appDraft = (cx: Context, app: LandscapeApp): Draft => {
-  const { ws } = cx;
-  const id = `app-${app.id}`;
-  const ownerTeam = ws.teams.find((team) => team.name === app.owner);
-  const questions = ws.gaps.filter((gap) => gap.about.includes(id));
-  const seenSources = unique(app.seenThrough.map((seen) => seenSource[seen]));
-  return {
-    id,
-    kind: "app",
-    title: app.name,
-    logoSrc: logoOf(ws, app, [app.name, ...app.matches]),
-    path: ["2 Inventory", "Tools", "Seen, never mentioned"],
-    step: 2,
-    tags: appTags(app),
-    summary: appUnnamed(app.people, seenThroughText(app)),
-    points: points(
-      point(
-        t`What it is`,
-        appWhat(app.category, app.vendor, app.ai === "builtIn")
-      ),
-      point(
-        t({
-          message: "Owner",
-          context: "note property: the team that owns an application",
-        }),
-        app.owner ?? t`Nobody`
-      ),
-      point(t`Grasp access`, accessText(ws, [app.name, ...app.matches])),
-      point(
-        t`Open question`,
-        questions.map((gap) => ({ label: gap.question, to: gap.id }))
-      )
-    ),
-    timeline: [
-      ...app.seenThrough.map((seen) =>
-        event(dateIn(cx, seenSource[seen]), seenInUse(seen), {
-          detail: peopleText(app.people),
-          to: seenSource[seen],
-        })
-      ),
-      ...questions.map((gap) =>
-        event(dateIn(cx, gap.sourceId), addedAsQuestion(), {
-          detail: canAnswer(gap.owner),
-          to: gap.id,
-        })
-      ),
-    ],
-    open: [t`Named by a team`, t`Used in a workflow`],
-    links: [...seenSources, ...(ownerTeam ? [ownerTeam.id] : [])],
-    sourceIds: seenSources,
-    workflowIds: [],
-    terms: [app.name, ...app.matches],
   };
 };
 
@@ -1813,29 +1530,15 @@ const gapDraft = (cx: Context, gap: Gap): Draft => {
   };
 };
 
-/** The policies the client uploaded to the policy manager are documents in the brain as well; their rules stay in Policies. */
-const policyDocumentsIn = (ws: Workspace): PolicyDocument[] =>
-  ws.policies.filter(
-    (policy) => policy.status === "published" || policy.status === "review"
-  );
-
 /** Each source folder is a page, like the Vision page: what this way of collecting adds, and what came in. */
 const channelDraft = (
   cx: Context,
   folder: ChannelFolder,
   folderOf: Map<string, SourceFolder>
 ): Draft => {
-  const filed: Pick<Source, "id" | "title" | "date" | "who" | "how">[] = [
-    ...cx.brainSources.filter((source) => folderOf.get(source.id) === folder),
-    ...(folder === "Documents"
-      ? policyDocumentsIn(cx.ws).map((policy) => ({
-          id: policy.id,
-          title: policy.title,
-          date: policy.uploadedAt.slice(0, 10),
-          how: t`Uploaded to Policies`,
-        }))
-      : []),
-  ];
+  const filed = cx.brainSources.filter(
+    (source) => folderOf.get(source.id) === folder
+  );
   return {
     id: channelId(folder),
     kind: "channel",
@@ -1859,7 +1562,7 @@ const channelDraft = (
   };
 };
 
-/** A source's points: the policy it became, what it added, and the teams and workflows it spoke about. */
+/** A source's points: what it added, and the teams and workflows it spoke about. */
 const sourcePoints = (
   cx: Context,
   source: Source,
@@ -1871,18 +1574,7 @@ const sourcePoints = (
     contents && said.length === 0
       ? importedText(contents)
       : addedText(said.length, saidText(said));
-  const policyId = given(source.policyId) ? source.policyId : undefined;
   return points(
-    policyId === undefined
-      ? undefined
-      : point(t`Became`, [
-          {
-            label:
-              ws.policies.find((policy) => policy.id === policyId)?.title ??
-              policyId,
-            to: policyId,
-          },
-        ]),
     said.length > 0 || contents
       ? point(
           t({
@@ -1969,7 +1661,6 @@ const sourceDraft = (
     article: source.article,
     // A source links straight to what its statements are about.
     links: [
-      ...(given(source.policyId) ? [source.policyId] : []),
       ...(source.teamIds ?? []),
       ...said.flatMap((statement) => [
         ...statement.teamIds,
@@ -1977,66 +1668,6 @@ const sourceDraft = (
         ...(given(statement.candidateId) ? [statement.candidateId] : []),
       ]),
     ],
-    sourceIds: [],
-    workflowIds: [],
-    terms: [],
-  };
-};
-
-/** A policy uploaded to the policy manager, as a document in the brain. */
-const policyDraft = (cx: Context, policy: PolicyDocument): Draft => {
-  const date = policy.uploadedAt.slice(0, 10);
-  const rules = policy.proposals.filter(
-    (proposal) => proposal.decision === "accepted"
-  ).length;
-  const earlier = cx.brainSources.filter(
-    (source) => source.policyId === policy.id
-  );
-  return {
-    id: policy.id,
-    kind: "source",
-    title: policy.title,
-    path: ["Sources", "Documents"],
-    step: 2,
-    tags: ["source", "document", "policy"],
-    summary: `${t`Uploaded to Policies`} · ${formatDay(date)}.`,
-    points: points(
-      point(t`In Policies`, [
-        {
-          label:
-            policy.status === "published"
-              ? rulesInUse(rules)
-              : t`Rules waiting for a decision`,
-          policyId: policy.id,
-        },
-      ]),
-      earlier.length > 0
-        ? point(
-            t`Draft`,
-            earlier.map((source) => ({ label: source.title, to: source.id }))
-          )
-        : undefined
-    ),
-    timeline: [
-      event(date, t`Uploaded to Policies`, { own: true }),
-      ...(given(policy.publishedAt)
-        ? [
-            event(policy.publishedAt.slice(0, 10), t`Rules published`, {
-              detail: rulesInUse(rules),
-            }),
-          ]
-        : []),
-    ],
-    open: [],
-    // What the policy says, in its own words: its summary and the passages its rules come from.
-    article: [
-      ...(given(policy.summary) ? [policy.summary] : []),
-      ...unique([
-        ...policy.proposals.map((proposal) => proposal.excerpt),
-        ...policy.unchecked.map((each) => each.excerpt),
-      ]),
-    ],
-    links: earlier.map((source) => source.id),
     sourceIds: [],
     workflowIds: [],
     terms: [],
@@ -2059,7 +1690,6 @@ const sourceDrafts = (cx: Context): Draft[] => {
     ...cx.brainSources
       .toSorted((a, b) => rank(a) - rank(b) || a.date.localeCompare(b.date))
       .map((source) => sourceDraft(cx, source, folderOf)),
-    ...policyDocumentsIn(cx.ws).map((policy) => policyDraft(cx, policy)),
   ];
 };
 
@@ -2293,7 +1923,17 @@ const finished = (
   };
 };
 
-export const buildBrain = (ws: Workspace): Brain => {
+export const buildBrain = (read: Workspace): Brain => {
+  // A source taken out of the brain keeps only its id, kind and day: what
+  // still names it, such as a workflow's numbers, says it was removed.
+  const ws: Workspace = {
+    ...read,
+    sources: read.sources.map((source) =>
+      source.removedAt === undefined
+        ? source
+        : { ...source, title: t`Removed from the brain` }
+    ),
+  };
   const brainSources = ws.sources.filter(inBrain);
   // How the board steers the sprint: the budget for AI and who approves a new tool, each with its history.
   const boardQuestions: BoardQuestion[] = [
@@ -2334,7 +1974,6 @@ export const buildBrain = (ws: Workspace): Brain => {
     // Step 2: teams, tools, statements, candidates and gaps. What the client agreed to sits on the source folders' pages.
     ...ws.teams.map((team) => teamDraft(cx, team)),
     ...ws.tools.map((tool) => toolDraft(cx, tool)),
-    ...unmentionedApps(ws).map((app) => appDraft(cx, app)),
     // Statements are not notes: each is a highlight in the source it was said in (see transcript.ts).
     ...ws.candidates.map((candidate) => candidateDraft(cx, candidate)),
     ...ws.gaps.map((gap) => gapDraft(cx, gap)),
@@ -2540,25 +2179,6 @@ export const sameHandover = (ws: Workspace): [string, string] | undefined => {
 
 export const patterns = (ws: Workspace): string[] => {
   const found: string[] = [];
-
-  const [aiNobodyMentioned] = unmentionedApps(ws)
-    .filter((app) => app.ai === "tool")
-    .toSorted((a, b) => b.people - a.people);
-  if (aiNobodyMentioned) {
-    const app = aiNobodyMentioned.name;
-    const { people } = aiNobodyMentioned;
-    found.push(
-      given(aiNobodyMentioned.owner ?? undefined)
-        ? plural(people, {
-            one: `${app} is used by # person, and nobody mentioned it in an interview.`,
-            other: `${app} is used by # people, and nobody mentioned it in an interview.`,
-          })
-        : plural(people, {
-            one: `${app} is used by # person, and nobody mentioned it in an interview. No team owns it.`,
-            other: `${app} is used by # people, and nobody mentioned it in an interview. No team owns it.`,
-          })
-    );
-  }
 
   const bothSides = sameHandover(ws);
   if (bothSides) {

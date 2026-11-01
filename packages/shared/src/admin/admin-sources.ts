@@ -79,7 +79,7 @@ export const ADMIN_SOURCES: readonly AdminSource[] = [
     tools: [],
   },
   {
-    // Each company's own platform, deployed into its own Cloudflare account by the admin.
+    // Each company's own platform, deployed by the admin into Grasp's Workers for Platforms namespace.
     id: "console",
     ours: true,
     state: "planned",

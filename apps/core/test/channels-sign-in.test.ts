@@ -3,9 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { pointAtGateway, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { configureObject, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { acmeTenant, clientOrigin, otherTenant } from "./sign-in-config.ts";
 import { entraPerson, signedIn, whoami } from "./sign-in.ts";
 import {
@@ -64,9 +64,9 @@ const signsIn = async (
     entraPerson(acmeTenant, "acme.test", { oid })
   );
   const { userId } = await whoami(session);
-  const gateway = fakeGateway(...replies.map((text) => says(text)));
-  await pointAtGateway(workspace(env, personalWorkspaceId(userId)), gateway);
-  return { userId, gateway };
+  const provider = await fakeProvider(...replies.map((text) => says(text)));
+  await configureObject(workspace(env, personalWorkspaceId(userId)));
+  return { userId, provider };
 };
 
 describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
@@ -89,7 +89,7 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     const person = await newcomer();
     await post(messageFrom(person, { text: "How long is parental leave?" }));
 
-    const { userId, gateway } = await signsIn(
+    const { userId, provider } = await signsIn(
       person.aadObjectId,
       "Sixteen weeks.",
       "You're welcome."
@@ -99,20 +99,25 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     await expect(kept(person.conversation)).resolves.toStrictEqual([
       { platform: "teams", userId },
     ]);
-    expect(gateway.requests).toHaveLength(2);
-    expect(JSON.stringify(gateway.requests[0]?.body)).toContain(
+    expect(provider.requests).toHaveLength(2);
+    expect(JSON.stringify(provider.requests[0]?.body)).toContain(
       "How long is parental leave?"
     );
     const sent = await sentIn(person.conversation);
+    // The answers, in the order posted: not the thumbs after a streamed one.
     expect(
-      sent.slice(1).map((each) => each.includes("Sixteen weeks."))
-    ).toStrictEqual([true, false]);
+      sent.flatMap((each) =>
+        ["Sixteen weeks.", "You're welcome."].filter((text) =>
+          each.includes(text)
+        )
+      )
+    ).toStrictEqual(["Sixteen weeks.", "You're welcome."]);
   });
 
   it("asks once: the question kept is answered with the next message alone", async () => {
     const person = await newcomer();
     await post(messageFrom(person, { text: "Where's the handbook?" }));
-    const { gateway } = await signsIn(
+    const { provider } = await signsIn(
       person.aadObjectId,
       "In Knowledge.",
       "Hello again.",
@@ -122,7 +127,7 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     await post(messageFrom(person, { text: "Hi" }));
     await post(messageFrom(person, { text: "Bye" }));
 
-    expect(gateway.requests).toHaveLength(3);
+    expect(provider.requests).toHaveLength(3);
   });
 
   it("isn't known by a sign-in with another object id", async () => {
@@ -136,7 +141,7 @@ describe("one of the client's people Grasp hasn't seen", setUpTime, () => {
     await post(messageFrom(person, { text: "Hello?" }));
 
     await expect(kept(person.conversation)).resolves.toStrictEqual([]);
-    expect(someoneElse.gateway.requests).toHaveLength(0);
+    expect(someoneElse.provider.requests).toHaveLength(0);
     // The link was sent today already: nothing more.
     await expect(sentIn(person.conversation)).resolves.toHaveLength(1);
   });

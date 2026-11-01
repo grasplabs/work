@@ -76,6 +76,9 @@ catalogs:
     '@fontsource-variable/geist':
       specifier: 5.2.8
       version: 5.2.8
+    '@fontsource-variable/newsreader':
+      specifier: 5.3.0
+      version: 5.3.0
     '@lingui/babel-plugin-lingui-macro':
       specifier: 6.8.0
       version: 6.8.0
@@ -214,6 +217,9 @@ catalogs:
     jq-wasm:
       specifier: 3.0.0-jq-1.8.2
       version: 3.0.0-jq-1.8.2
+    lightningcss:
+      specifier: 1.33.0
+      version: 1.33.0
     lucide-react:
       specifier: 1.47.0
       version: 1.47.0
@@ -356,6 +362,12 @@ importers:
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
+      eslint:
+        specifier: 'catalog:'
+        version: 10.11.0(jiti@2.7.0)(supports-color@10.2.2)
+      lightningcss:
+        specifier: 'catalog:'
+        version: 1.33.0
       secretlint:
         specifier: 'catalog:'
         version: 13.0.5(supports-color@10.2.2)
@@ -395,6 +407,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
+      '@fontsource-variable/newsreader':
+        specifier: 'catalog:'
+        version: 5.3.0
       '@grasp-os/chat':
         specifier: workspace:*
         version: link:../../packages/chat
@@ -706,6 +721,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: 'catalog:'
         version: 5.2.8
+      '@fontsource-variable/newsreader':
+        specifier: 'catalog:'
+        version: 5.3.0
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
@@ -2519,6 +2537,9 @@ packages:
 
   '@fontsource-variable/geist@5.2.8':
     resolution: {integrity: sha512-cJ6m9e+8MQ5dCYJsLylfZrgBh6KkG4bOLckB35Tr9J/EqdkEM6QllH5PxqP1dhTvFup+HtMRPuz9xOjxXJggxw==}
+
+  '@fontsource-variable/newsreader@5.3.0':
+    resolution: {integrity: sha512-rrzYi43qMpbzwuFtf9OkWH8sxAPVPcQQQEwXpPtwaKYeJ8yVg5aLs5kawmo1f2Q1t1M38TLmEKCkGVDsYwgdFw==}
 
   '@google/genai@2.21.0':
     resolution: {integrity: sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q==}
@@ -9784,6 +9805,8 @@ snapshots:
   '@floating-ui/utils@0.2.12': {}
 
   '@fontsource-variable/geist@5.2.8': {}
+
+  '@fontsource-variable/newsreader@5.3.0': {}
 
   '@google/genai@2.21.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5))(supports-color@10.2.2)':
     dependencies:

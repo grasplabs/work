@@ -1,5 +1,4 @@
 import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   createFileRoute,
   Link,
@@ -9,8 +8,8 @@ import {
 import { useEffect } from "react";
 import { z } from "zod";
 
+import { NotFoundPage, PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
-import { Panel } from "../../../admin/panel.tsx";
 import {
   PlatformNav,
   platformCrumb,
@@ -26,6 +25,7 @@ import {
   rolloutStateWords,
   Targets,
 } from "../../../admin/rollout-parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { versionWords } from "../../../releases/version.ts";
 import { fetchRollout } from "../../../rollout/functions.ts";
@@ -71,7 +71,7 @@ const RolloutPage = () => {
     <AdminPage
       action={
         <Badge
-          variant={rollout.status === "failed" ? "destructive" : "secondary"}
+          variant={rollout.status === "failed" ? "attention" : "secondary"}
         >
           {state}
         </Badge>
@@ -82,7 +82,7 @@ const RolloutPage = () => {
     >
       <PlatformNav />
       <div className="flex flex-col gap-6 text-sm">
-        <Panel title="Where it stands">
+        <Section title="Where it stands">
           <div className="border-t px-5 py-4">
             <RingSteps
               label="The rollout, ring by ring"
@@ -118,7 +118,7 @@ const RolloutPage = () => {
             ]}
           />
           <Controls rollout={rollout} />
-        </Panel>
+        </Section>
         {rollout.kind === "secrets" ? (
           <Revocation rolloutId={rollout.id} />
         ) : null}
@@ -130,15 +130,8 @@ const RolloutPage = () => {
 
 /** A rollout id that names no rollout. */
 const NoSuchRollout = () => (
-  <AdminPage
-    action={
-      <Link
-        className={buttonVariants({ variant: "ghost", size: "sm" })}
-        to="/platform/rollouts"
-      >
-        Back to rollouts
-      </Link>
-    }
+  <NotFoundPage
+    back={{ label: "Back to rollouts", to: "/platform/rollouts" }}
     description="The admin has no rollout by that id."
     parents={[platformCrumb, rolloutsCrumb]}
     title="No such rollout"
@@ -159,5 +152,6 @@ export const Route = createFileRoute("/platform/rollouts/$rolloutId")({
     return rollout;
   },
   component: RolloutPage,
+  pendingComponent: PageLoading,
   notFoundComponent: NoSuchRollout,
 });
