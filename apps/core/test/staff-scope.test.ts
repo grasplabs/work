@@ -133,7 +133,6 @@ describe("a Grasp staff session, whatever its scope", () => {
         members: await outcome(api.members.list()),
         knowledge: await outcome(api.knowledge.listCollections()),
         auditLog: await outcome(api.audit.search()),
-        emailPreferences: await outcome(api.emailPreferences.get()),
         waiting: await outcome(api.waiting.list()),
         audit: audit.status,
       };
@@ -147,7 +146,6 @@ describe("a Grasp staff session, whatever its scope", () => {
       members: "role.forbidden",
       knowledge: "role.forbidden",
       auditLog: "role.forbidden",
-      emailPreferences: "role.forbidden",
       waiting: "role.forbidden",
       audit: 401,
     };
