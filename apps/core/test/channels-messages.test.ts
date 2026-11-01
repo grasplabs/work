@@ -37,19 +37,71 @@ watched();
 
 describe("a known person's message", () => {
   it("is taken, and its conversation kept as theirs", async () => {
-    const { userId, teams, gateway } = await member(idp, says("You're free."));
+    const { userId, teams, provider } = await member(idp, says("You're free."));
 
     await expect(post(messageFrom(teams))).resolves.toBe(200);
 
     await expect(kept(teams.conversation)).resolves.toStrictEqual([
       { platform: "teams", userId },
     ]);
-    expect(gateway.requests).toHaveLength(1);
+    expect(provider.requests).toHaveLength(1);
     expect(toMicrosoft).toStrictEqual([]);
   });
 
+  it("keeps no conversation of theirs when they were removed and erased while it waited", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { userId, person, teams } = await member(idp, says("Too late."));
+    // Core's database as the message reaches it: checked as theirs, then,
+    // just before its conversation is kept, an admin removes and erases
+    // them.
+    let erased: Promise<unknown> | undefined;
+    const waiting = (statement: D1PreparedStatement): D1PreparedStatement =>
+      new Proxy(statement, {
+        get: (target, property): unknown => {
+          if (property === "bind") {
+            return (...values: unknown[]) => waiting(target.bind(...values));
+          }
+          const value: unknown = Reflect.get(target, property);
+          if (typeof value !== "function") {
+            return value;
+          }
+          return async (...args: unknown[]): Promise<unknown> => {
+            erased ??= (async () => {
+              await admin.api.members.remove(userId);
+              await admin.api.members.erase(userId, String(person.name));
+            })();
+            await erased;
+            const answered: unknown = await Reflect.apply(value, target, args);
+            return answered;
+          };
+        },
+      });
+    const real = env.DB;
+    const interleaved = new Proxy(real, {
+      get: (target, property): unknown => {
+        if (property === "prepare") {
+          return (query: string): D1PreparedStatement => {
+            const statement = target.prepare(query);
+            return /^insert into "channel_conversations"/iu.test(query)
+              ? waiting(statement)
+              : statement;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await post(messageFrom(teams), { coreEnv: { ...env, DB: interleaved } });
+
+    expect({
+      erased: erased !== undefined,
+      kept: await kept(teams.conversation),
+    }).toStrictEqual({ erased: true, kept: [] });
+  });
+
   it("is taken once when Teams sends it again", async () => {
-    const { teams, gateway } = await member(
+    const { teams, provider } = await member(
       idp,
       says("First."),
       says("Second.")
@@ -61,7 +113,7 @@ describe("a known person's message", () => {
     await post(messageFrom(teams));
 
     await expect(kept(teams.conversation)).resolves.toHaveLength(1);
-    expect(gateway.requests).toHaveLength(2);
+    expect(provider.requests).toHaveLength(2);
   });
 });
 

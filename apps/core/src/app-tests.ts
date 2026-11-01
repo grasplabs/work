@@ -975,6 +975,11 @@ class FixtureSession extends TestTarget {
             deadline: this.#endsAt,
             recorded: (runId) => {
               recorded = true;
+              // Closed meanwhile: `close` let go of what it held already,
+              // and this run is discarded below, so it reaches nothing.
+              if (this.#closed) {
+                return;
+              }
               // Its store calls run in this suite's session, in their turn
               // among its calls, until the test ends (fixture-run-sessions.ts).
               this.#letGo.push(

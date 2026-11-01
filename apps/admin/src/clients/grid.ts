@@ -1,28 +1,23 @@
 /**
  * The client grid: every client with what the admin recorded of it
  * (release, ring, last deploy), read from D1 and shown at once, and, for
- * each active one, what its account shows now: drift, whether it runs the
- * shared secrets in Secrets Store, whether the router reaches its core,
- * its errors over the last day, what it cost this month, and where its
- * onboarding stands (onboarding.ts).
+ * each active one, what its destination shows now: drift, whether it runs
+ * the shared secrets in Secrets Store, whether the router reaches its
+ * core, and where its onboarding stands (onboarding.ts).
  *
  * The live columns are read after the page shows (`gridLive`): a few
  * clients at a time, each within a deadline, with what every client needs
- * (Secrets Store, the analytics of all their accounts, release manifests)
- * read once. Each client's answer is kept for a minute, so reloading the
+ * (Secrets Store, release manifests) read once. Each client's answer is kept for a minute, so reloading the
  * page doesn't read the accounts again. Whatever doesn't answer in time
  * shows as unknown, and is read again the next time: only an answer with
  * nothing unknown in it is kept. Nothing live fails the grid.
  */
-import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { accountUsage, monthCostUsd } from "../cloudflare/analytics.ts";
-import type { AccountUsage } from "../cloudflare/analytics.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
@@ -32,20 +27,25 @@ import {
   clientDomain,
   deployerToken,
   deploySecrets,
-  MissingStoreSecretError,
+  ifStored,
 } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { answeringVersion, mappedRoute } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import { needsAttentionOf } from "../hosting/attention.ts";
+import type { AttentionReason } from "../hosting/attention.ts";
+import type { NotStarted } from "../hosting/placement.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
+import { notStartedOf } from "../provision/queries.ts";
 import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { currentRun, isReplaceable } from "../runners.ts";
 import { coreAddressOf } from "./core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "./core-address.ts";
 import { onboardingSummaryOf } from "./onboarding.ts";
@@ -68,10 +68,6 @@ const liveStatusSchema = z.object({
   /** Whether it runs the shared secrets in Secrets Store now; null when that can't be told. */
   sharedSecretsCurrent: z.boolean().nullable(),
   reach: z.enum(["reachable", "unreachable", "no_route", "unknown"]),
-  /** Its Workers' requests and errors over the last day; null when unknown. */
-  day: z.object({ requests: z.number(), errors: z.number() }).nullable(),
-  /** What it cost this month so far, in USD, estimated; null when unknown. */
-  costUsd: z.object({ workers: z.number(), ai: z.number() }).nullable(),
   /** Its onboarding, numbers only (`OnboardingCell`); null when unknown. */
   onboarding: z
     .union([onboardingSummarySchema, z.literal("unreachable")])
@@ -79,21 +75,12 @@ const liveStatusSchema = z.object({
 });
 export type LiveStatus = z.infer<typeof liveStatusSchema>;
 
-/** What a client cost this month so far, in USD, estimated (`monthCostUsd`). */
-export type MonthCost = NonNullable<LiveStatus["costUsd"]>;
-
-/** What `used` costs this month; null when its account's usage is unknown. */
-const costOf = (used: AccountUsage | undefined): MonthCost | null =>
-  used === undefined ? null : monthCostUsd(used);
-
 /** A client as the grid shows it at once, from what the admin recorded. */
 export interface GridRow {
   id: string;
   name: string;
   status: "provisioning" | "active" | "offboarded";
   ring: number;
-  /** Its own account, under the account-per-client path; null for a placed client. */
-  accountId: string | null;
   /** `<id>.<domain>`; null while the admin has no domain. */
   hostname: string | null;
   /** The release the admin made live on every Worker; null when none, or they differ. */
@@ -108,6 +95,19 @@ export interface GridRow {
     status: "running" | "done" | "failed";
     at: Date;
   } | null;
+  /**
+   * While it's being provisioned, what waits for staff: it hasn't started
+   * (and why, `notStartedOf`; null when nothing keeps it), or it stopped
+   * (its operation failed, or its attempt ended without saying why), which
+   * the admin resumes by itself (src/hosting/reconcile.ts), or it needs a
+   * person as the admin gave up. Null while it's going, and once it's live.
+   */
+  setup:
+    | { state: "not_started"; why: NotStarted | null }
+    | { state: "stopped" }
+    | { state: "unread" }
+    | { state: "needs_attention"; reason: AttentionReason }
+    | null;
 }
 
 /** How long a client's health check, or another request to its core, may take. */
@@ -142,8 +142,6 @@ const unknownStatus: LiveStatus = {
   drift: "unknown",
   sharedSecretsCurrent: null,
   reach: "unknown",
-  day: null,
-  costUsd: null,
   onboarding: null,
 };
 
@@ -151,14 +149,11 @@ const unknownStatus: LiveStatus = {
  * Whether every column of `live` was read. Only such an answer is kept:
  * an unknown is an account, the store or the analytics not answering, and
  * kept, it would still show as unknown a minute after they answer again.
- * A client with no account of its own (`accountless`, every placed one)
- * has no usage or cost to read: those stay null, known.
  */
-const allKnown = (live: LiveStatus, accountless: boolean): boolean =>
+const allKnown = (live: LiveStatus): boolean =>
   live.drift !== "unknown" &&
   live.sharedSecretsCurrent !== null &&
   live.reach !== "unknown" &&
-  (accountless || (live.day !== null && live.costUsd !== null)) &&
   live.onboarding !== null;
 
 /**
@@ -172,7 +167,6 @@ const recordedClients = async (db: AdminDatabase) => {
       name: clients.name,
       status: clients.status,
       ring: clients.ring,
-      accountId: clients.accountId,
       pinnedReleaseId: clients.pinnedReleaseId,
       lastDeploy: {
         releaseId: clientProvisions.releaseId,
@@ -305,8 +299,6 @@ interface LiveSources {
   secrets: DeploySecrets | null;
   /** What Secrets Store holds, to check clients against; null when it can't be read. */
   store: StoreCheck | null;
-  /** The accounts' usage; null when the analytics couldn't be read at all. */
-  usage: Map<string, AccountUsage> | null;
   /** Release manifests, each read once. */
   manifestOf: ManifestOf;
 }
@@ -331,8 +323,8 @@ const orElse = async <T>(
  * Its requests stop when `signal` aborts.
  */
 const liveOf = async (
-  { env, db, apiFor, routerKey, secrets, store, usage }: LiveSources,
-  row: { id: string; accountId: string | null; hostname: string | null },
+  { env, db, apiFor, routerKey, secrets, store }: LiveSources,
+  row: { id: string; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
   const drift =
@@ -344,7 +336,7 @@ const liveOf = async (
               apiFor(signal),
               db,
               row.id,
-              routerKey === null ? undefined : { fetch, routerKey }
+              secrets === null ? undefined : { fetch, secrets }
             ),
           null,
           "grid.drift_unread",
@@ -385,51 +377,12 @@ const liveOf = async (
       row.id
     ),
   ]);
-  const used = row.accountId === null ? undefined : usage?.get(row.accountId);
   return {
     drift: drift?.state ?? "unknown",
     sharedSecretsCurrent,
     reach,
-    day:
-      used === undefined
-        ? null
-        : { requests: used.dayRequests, errors: used.dayErrors },
-    costUsd: costOf(used),
     onboarding,
   };
-};
-
-/** What `read` answers, or null when a secret it reads isn't in Secrets Store. */
-export const ifStored = async <T>(
-  read: () => Promise<T>
-): Promise<T | null> => {
-  try {
-    return await read();
-  } catch (error) {
-    if (error instanceof MissingStoreSecretError) {
-      return null;
-    }
-    throw error;
-  }
-};
-
-/**
- * `accountIds`' usage, its requests stopped after `ms`: each request's
- * answer stands as it comes, and one still going then is aborted, so only
- * its own accounts are unknown (`accountUsage` never throws).
- */
-const usageWithin = async (
-  ms: number,
-  apiFor: (signal: AbortSignal) => CloudflareApi,
-  accountIds: readonly string[],
-  now: Date
-): Promise<Map<string, AccountUsage>> => {
-  const limit = deadline(ms);
-  try {
-    return await accountUsage(apiFor(limit.signal), accountIds, now);
-  } finally {
-    limit.clear();
-  }
 };
 
 /**
@@ -438,10 +391,7 @@ const usageWithin = async (
  * anything unknown in it (`allKnown`; none is kept now, but one kept
  * before that rule may still be there): the answer is read again.
  */
-const cached = async (
-  clientId: string,
-  accountless: boolean
-): Promise<LiveStatus | undefined> => {
+const cached = async (clientId: string): Promise<LiveStatus | undefined> => {
   try {
     const cache = await caches.open(cacheName);
     const hit = await cache.match(cacheKey(clientId));
@@ -449,9 +399,7 @@ const cached = async (
       return undefined;
     }
     const parsed = liveStatusSchema.safeParse(await hit.json());
-    return parsed.success && allKnown(parsed.data, accountless)
-      ? parsed.data
-      : undefined;
+    return parsed.success && allKnown(parsed.data) ? parsed.data : undefined;
   } catch (error) {
     log.warn("grid.cache_unread", { clientId, error: errorCode(error) });
     return undefined;
@@ -491,51 +439,67 @@ const deployerApiFor = async (
     : (signal) => cloudflareApi({ token, waitBudgetMs, signal });
 };
 
-/**
- * What each of `rows` cost this month so far, as of `now`, by client id,
- * as the grid reads it: every account in as few analytics requests as it
- * can, within `limits.rowDeadlineMs`. A client whose account the
- * analytics don't answer for is null, and the others stand.
- */
-/**
- * The accounts of `rows` whose usage is read: a placed client has no
- * account of its own, so none of its usage is read here.
- */
-const accountsOf = (rows: readonly { accountId: string | null }[]): string[] =>
-  rows.flatMap(({ accountId }) => (accountId === null ? [] : [accountId]));
+/** How long the grid waits for one provisioning client's run to be read. */
+const runReadMs = 2000;
 
-export const monthCosts = async (
+/**
+ * What waits for staff in a client's provisioning (`GridRow["setup"]`):
+ * read only for a client being provisioned, its run only while its
+ * operation says running, so a grid of live clients reads nothing more.
+ */
+const setupOf = async (
   env: Env,
-  rows: readonly { id: string; accountId: string | null }[],
-  now: Date,
-  limits: LiveReadLimits = defaultLiveReadLimits
-): Promise<Record<string, MonthCost | null>> => {
-  const apiFor =
-    rows.length === 0 ? null : await deployerApiFor(env, limits.waitBudgetMs);
-  const usage =
-    apiFor === null
-      ? null
-      : await usageWithin(limits.rowDeadlineMs, apiFor, accountsOf(rows), now);
-  return Object.fromEntries(
-    rows.map(({ id, accountId }) => [
-      id,
-      accountId === null ? null : costOf(usage?.get(accountId)),
-    ])
-  );
+  db: AdminDatabase,
+  row: Pick<GridRow, "id" | "status" | "lastDeploy">
+): Promise<GridRow["setup"]> => {
+  if (row.status !== "provisioning") {
+    return null;
+  }
+  if (row.lastDeploy === null) {
+    return { state: "not_started", why: await notStartedOf(db, row.id) };
+  }
+  if (row.lastDeploy.status === "done") {
+    return null;
+  }
+  if (row.lastDeploy.status !== "failed") {
+    // Its run read within a short deadline, a failure this row's alone: a
+    // slow or failing read never stalls or breaks the grid (`unread`).
+    const read = await within(
+      runReadMs,
+      async () => ({ run: await currentRun(env, row.id) }),
+      null
+    );
+    if (read === null) {
+      log.warn("grid.run_unread", { clientId: row.id });
+      return { state: "unread" };
+    }
+    if (read.run !== null && !isReplaceable(read.run.status)) {
+      return null;
+    }
+  }
+  // Stopped: the admin resumes it by itself, unless it gave up.
+  const attention = await needsAttentionOf(db, row.id);
+  return attention === null
+    ? { state: "stopped" }
+    : { state: "needs_attention", reason: attention.reason };
 };
 
 /** Every client, as the admin recorded it, for the grid to show at once. */
 export const clientGrid = async (env: Env): Promise<GridRow[]> => {
   const domain = clientDomain(env);
-  const recorded = await recordedClients(adminDatabase(env.DB));
-  return recorded.map((row) => ({
-    ...row,
-    hostname: domain === null ? null : `${row.id}.${domain}`,
-  }));
+  const db = adminDatabase(env.DB);
+  const recorded = await recordedClients(db);
+  return await Promise.all(
+    recorded.map(async (row) => ({
+      ...row,
+      hostname: domain === null ? null : `${row.id}.${domain}`,
+      setup: await setupOf(env, db, row),
+    }))
+  );
 };
 
 /**
- * Each active client's live status, by id, as of `now`: kept answers
+ * Each active client's live status, by id: kept answers
  * from the last minute, and the rest read `options.concurrency` clients
  * at a time, each within `options.rowDeadlineMs`. An answer with anything
  * unknown in it isn't kept, so the next call reads that client again.
@@ -543,7 +507,6 @@ export const clientGrid = async (env: Env): Promise<GridRow[]> => {
  */
 export const gridLive = async (
   env: Env,
-  now: Date,
   options: LiveOptions = defaultLiveOptions,
   only?: string
 ): Promise<Record<string, LiveStatus>> => {
@@ -554,15 +517,9 @@ export const gridLive = async (
       status === "active" && (only === undefined || id === only)
   );
   const answers = new Map<string, LiveStatus>();
-  // Clients with no account of its own: no usage or cost to read.
-  const accountless = new Set(
-    active.filter(({ accountId }) => accountId === null).map(({ id }) => id)
-  );
   if (options.cache) {
     const kept = await Promise.all(
-      active.map(
-        async ({ id }) => [id, await cached(id, accountless.has(id))] as const
-      )
+      active.map(async ({ id }) => [id, await cached(id)] as const)
     );
     for (const [id, live] of kept) {
       if (live !== undefined) {
@@ -572,8 +529,8 @@ export const gridLive = async (
   }
   const toRead = active.filter(({ id }) => !answers.has(id));
   if (toRead.length > 0) {
-    // The token is read once, here: every client's reads, and the
-    // analytics', make their API from it, each stopped by its own deadline.
+    // The token is read once, here: every client's reads make their API
+    // from it, each stopped by its own deadline.
     const apiFor = await deployerApiFor(env, options.waitBudgetMs);
     const secrets = await ifStored(
       async (): Promise<DeploySecrets> => await deploySecrets(env)
@@ -586,15 +543,6 @@ export const gridLive = async (
       routerKey: secrets?.routerKey ?? null,
       secrets,
       store: secrets === null ? null : await storeCheck(secrets),
-      usage:
-        apiFor === null
-          ? null
-          : await usageWithin(
-              options.rowDeadlineMs,
-              apiFor,
-              accountsOf(toRead),
-              now
-            ),
       manifestOf: async (id) => {
         const known = manifests.get(id) ?? importedManifest(db, id);
         manifests.set(id, known);
@@ -620,7 +568,7 @@ export const gridLive = async (
     if (options.cache) {
       await Promise.all(
         read
-          .filter(([id, live]) => allKnown(live, accountless.has(id)))
+          .filter(([, live]) => allKnown(live))
           .map(async ([id, live]) => {
             await keep(id, live);
           })

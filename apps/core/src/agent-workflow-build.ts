@@ -436,7 +436,12 @@ workflowBuild: {
   create(name: string): Promise<{ id: string; name: string }>;
   /** The draft; revision 0 is a starting definition nobody saved yet. */
   draft(workflow: string): Promise<WorkflowDraft>;
-  /** Saves the draft over the revision you read, with all its modules (\`{}\` for none); refused if anyone saved since. */
+  /**
+   * Saves the draft over the revision you read, with all its modules (\`{}\` for none); refused if anyone saved since.
+   * A workflow of more than a few steps is drawn in named parts: on the top-level task that begins each part (never a task inside another), put
+   * \`metadata.grasp.section: { name, purpose, summary }\`, its name, what it is for in one sentence, and what
+   * happens in it in a few sentences, in the people's own words. Nothing in it runs.
+   */
   edit(workflow: string, edit: { expectedRevision: number; source: string; modules: Record<string, string> }): Promise<WorkflowDraft>;
   /** Test-runs the checkpoint at \`revision\`, calling nothing: \`fixtures[alias].output\` answers each binding's call, and one with none fails it. */
   startTest(workflow: string, start: { revision: number; input: unknown; params?: Record<string, unknown>; fixtures: Record<string, { output: unknown }> }): Promise<{ runId: string }>;

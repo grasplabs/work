@@ -23,8 +23,20 @@ import {
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
-import { and, asc, desc, eq, gt, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import type { Release } from "./app-releases.ts";
 import {
@@ -224,6 +236,11 @@ const publicStatus = {
   cancelled: "cancelled",
 } as const;
 
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationCauseSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+});
+
 /** The row statuses each public status is, for a status filter. */
 const rowStatuses: Readonly<Record<string, readonly string[]>> = {
   queued: ["starting"],
@@ -233,7 +250,7 @@ const rowStatuses: Readonly<Record<string, readonly string[]>> = {
   cancelled: ["cancelled"],
   waiting: [],
   paused: ["paused"],
-  compensating: [],
+  compensating: ["running"],
 };
 
 /** The most runs one page holds, and its size unless a page says. */
@@ -344,7 +361,7 @@ const followable = async (
           row.originAppVersion !== null &&
           origins.has(row.originAppVersion) &&
           (appRestricted || !returnedRestricted(row)) &&
-          !(row.status === "completed" && detailsRemoved(env, row))
+          !(row.status === "completed" && detailsRemoved(row))
       )
       .map((row) => row.id)
   );
@@ -357,6 +374,8 @@ interface RunsRow {
   readonly version: number;
   readonly manifestHash: string;
   readonly status: keyof typeof publicStatus;
+  /** Why it compensates while the engine rolls it back (resource-runs.ts). */
+  readonly compensation: string | null;
   readonly createdAt: Date;
   readonly endedAt: Date | null;
   readonly restricted: boolean;
@@ -391,6 +410,7 @@ const runsPage = async (
       version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
       status: workflowResourceRuns.status,
+      compensation: workflowResourceRuns.compensation,
       createdAt: workflowResourceRuns.createdAt,
       endedAt: workflowResourceRuns.endedAt,
       restricted: workflowResourceRuns.restricted,
@@ -409,6 +429,14 @@ const runsPage = async (
         eq(workflowStartReceipts.invokerId, caller.app),
         eq(workflowStartReceipts.principalId, caller.userId),
         eq(workflowResourceRuns.principalId, caller.userId),
+        // Running and compensating apart: a running row compensates once
+        // the engine rolls it back (resource-runs.ts).
+        ...(options.status === "running"
+          ? [isNull(workflowResourceRuns.compensation)]
+          : []),
+        ...(options.status === "compensating"
+          ? [isNotNull(workflowResourceRuns.compensation)]
+          : []),
         ...(statuses === undefined
           ? []
           : [
@@ -445,6 +473,10 @@ const runsPage = async (
   const watchable = await followable(env, caller, from, shown);
   const items: Json[] = shown.map((row) => {
     const status = publicStatus[row.status];
+    const compensation =
+      row.status === "running" && row.compensation !== null
+        ? compensationCauseSchema.safeParse(JSON.parse(row.compensation)).data
+        : undefined;
     return {
       run: {
         runId: row.id,
@@ -452,7 +484,14 @@ const runsPage = async (
         workflowVersion: row.version,
         manifestHash: row.manifestHash,
       },
-      status,
+      ...(compensation === undefined
+        ? { status }
+        : {
+            // Its cause and its cleanup's activity (spec 10.7.2, 10.7.3).
+            status: "compensating",
+            cause: compensation.cause,
+            activity: "running",
+          }),
       // Admitted is when it was started; a queued run hasn't begun.
       startedAt: status === "queued" ? null : row.createdAt.getTime(),
       finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
@@ -680,7 +719,7 @@ const historyPage = async (
   // Read only once the run is the caller's: a cursor tells nothing of a
   // run they can't read.
   const after = sequenceOf(cursor);
-  if (detailsRemoved(env, run) || query.pinned === undefined) {
+  if (detailsRemoved(run) || query.pinned === undefined) {
     return nothing;
   }
   const declared = await declaredTasks(env, query.pinned, run.manifestHash);
@@ -844,6 +883,8 @@ interface DecisionRow {
   readonly manifestHash: string;
   /** Whether it still takes answers (`resourceDecisionPending`). */
   readonly pending: number;
+  /** Whether its run is restricted (restricted.ts). */
+  readonly restricted: boolean;
 }
 
 /**
@@ -886,6 +927,7 @@ const decisionRows = (env: Env, where: ReturnType<typeof and>) =>
       version: workflowResourceRuns.version,
       manifestHash: workflowResourceRuns.manifestHash,
       pending: sql<number>`${resourceDecisionPending(new Date())}`,
+      restricted: workflowResourceRuns.restricted,
     })
     .from(workflowDecisions)
     .innerJoin(
@@ -957,10 +999,11 @@ const decisionsPage = async (
     return { items: [], hasMore: false };
   }
   const { after, runId } = options;
+  const appRestricted = await restrictedApp(env, caller);
   const rows: DecisionRow[] = await decisionRows(
     env,
     and(
-      decisionScope(env, caller, pinned, await restrictedApp(env, caller)),
+      decisionScope(env, caller, pinned, appRestricted),
       resourceDecisionPending(new Date()),
       ...(runId === undefined ? [] : [eq(workflowResourceRuns.id, runId)]),
       ...(after === undefined
@@ -1001,7 +1044,9 @@ const decisionsPage = async (
           manifestHash: row.manifestHash,
         },
         // Listed only while the caller may answer it and it takes answers.
-        wait: decisionWaitOf(row, named, true),
+        // Answerable only where the run's restricted mode is the App's
+        // (workflows/screen-runs.ts, `appDecision`).
+        wait: decisionWaitOf(row, named, row.restricted === appRestricted),
       });
     }
   }
@@ -1034,12 +1079,13 @@ const decisionDetail = async (
   if (pinned === undefined || query.decisionKeys.size === 0) {
     throw refused;
   }
+  const appRestricted = await restrictedApp(env, caller);
   const row: DecisionRow | undefined = await decisionRows(
     env,
     and(
       eq(workflowDecisions.id, decisionId),
       eq(workflowResourceRuns.id, runId),
-      decisionScope(env, caller, pinned, await restrictedApp(env, caller))
+      decisionScope(env, caller, pinned, appRestricted)
     )
   ).get();
   const named =
@@ -1060,12 +1106,15 @@ const decisionDetail = async (
   if (row.pending !== 1 || row.description === "") {
     return null;
   }
+  // Answerable only where the run's restricted mode is the App's
+  // (workflows/screen-runs.ts, `appDecision`).
+  const canRespond = row.restricted === appRestricted;
   return {
     key: named.key,
-    wait: decisionWaitOf(row, named, true),
+    wait: decisionWaitOf(row, named, canRespond),
     prompt: row.description,
     context: row.input,
-    canRespond: true,
+    canRespond,
   };
 };
 

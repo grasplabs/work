@@ -5,6 +5,8 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import type { AppWorkflowSummary, RunsPage } from "@grasp-os/shared/workflows";
+import { buttonVariants } from "@grasp-os/ui/components/button";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import {
   Table,
   TableBody,
@@ -19,6 +21,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import {
@@ -27,7 +30,7 @@ import {
   Link,
   useRouterState,
 } from "@tanstack/react-router";
-import { CogIcon, LayoutGridIcon } from "lucide-react";
+import { CogIcon, LayoutGridIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactElement } from "react";
 
@@ -35,13 +38,14 @@ import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/to-do.tsx";
+import { decidesRequests } from "../dashboard/waiting.ts";
+import { ExportDefinition } from "../engines/app-definition.tsx";
 import {
   AppStatusControls,
   StatusBadge,
   StatusNote,
 } from "../engines/app-status.tsx";
-import { EngineIcon } from "../engines/engine-icon.tsx";
+import { AppWorkflows } from "../engines/app-workflows.tsx";
 import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
 import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
@@ -64,6 +68,7 @@ import {
   useScreenOpening,
 } from "../screens/screen-navigate.ts";
 import { useCore } from "../use-core.ts";
+import { processNames } from "../workflows/business-process.tsx";
 import { listAppWorkflows, listRuns } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
@@ -229,22 +234,37 @@ const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
 );
 
 /**
- * The engine's apps, or why there are none; for an admin, with whether
- * their code is approved for the engine's data (`approval`).
+ * The engine's apps, or why there are none, and for someone who builds
+ * (`builds`) the way to make a new one; for an admin, with whether their
+ * code is approved for the engine's data (`approval`).
  */
 const Apps = ({
   engine,
   contents,
   approval,
+  builds,
 }: {
   engine: string;
   contents: AppContents;
   approval: Deferred<ScreenTrustReview> | undefined;
+  builds: boolean;
 }) => {
   const { t } = useLingui();
   const none = contents.version === null || contents.screens.length === 0;
   return (
     <div className="flex flex-col gap-6">
+      {builds ? (
+        <Link
+          className={cn(
+            buttonVariants({ size: "sm", variant: "outline" }),
+            "self-end"
+          )}
+          to="/apps/new"
+        >
+          <PlusIcon data-icon="inline-start" />
+          <Trans>New app</Trans>
+        </Link>
+      ) : null}
       {none ? (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
           <span
@@ -486,6 +506,25 @@ const SettingsScreen = ({
   );
 };
 
+/** What the domain is for, after the standard name of the process it serves, if any. */
+const AboutLine = ({ app }: { app: App }) => {
+  const { i18n } = useLingui();
+  const { process, description } = app;
+  const name = process === null ? null : i18n._(processNames[process]);
+  // Not said twice: a domain named after its process.
+  if (name === null || name === app.name) {
+    return description === "" ? null : (
+      <p className="text-muted-foreground">{description}</p>
+    );
+  }
+  return (
+    <p className="text-muted-foreground">
+      <span className="text-foreground/80">{name}</span>
+      {description === "" ? null : ` · ${description}`}
+    </p>
+  );
+};
+
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
   <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -515,15 +554,20 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     useState<Deferred<DependencyApprovals>>();
   const { app, contents } = page;
   const { version } = contents;
+  // Where it opens, as the prototype's: a business process's domain on
+  // its workflows, where its work is; one made for something else on its
+  // apps, which are what fill it.
+  const first = app.process === null ? "apps" : "workflows";
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
       <div className="flex flex-wrap items-start gap-4">
-        <EngineIcon />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h1 className="text-2xl font-medium tracking-tight">{app.name}</h1>
-          {app.description === "" ? null : (
-            <p className="text-muted-foreground">{app.description}</p>
-          )}
+        {/* The name keeps a width of its own: with no room beside it, the
+            actions go under it rather than squeezing it. */}
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
+          <PageHeaderTitle>{app.name}</PageHeaderTitle>
+          {/* As the prototype: the standard name of the process it serves
+              opens the line under it, for whoever knows it by that name. */}
+          <AboutLine app={app} />
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
             <StatusBadge status={app.status} />
             <span>
@@ -536,6 +580,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </div>
           <StatusNote status={app.status} />
         </div>
+        <ExportDefinition app={app} identity={identity} />
         {/* On its bar, as the prototype's Publish: for who builds. */}
         <AppStatusControls app={app} identity={identity} />
       </div>
@@ -544,8 +589,8 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         // The address's tab, again for each entry of the page's history:
         // a navigation to the App's settings opens that tab, whichever the
         // person had chosen on this page since.
-        defaultValue={tab ?? "apps"}
-        key={`${tab ?? "apps"}/${entry ?? ""}`}
+        defaultValue={tab ?? first}
+        key={`${tab ?? first}/${entry ?? ""}`}
         onValueChange={(value) => {
           if (value === "packages") {
             setPackagesRead(
@@ -558,18 +603,27 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           }
         }}
       >
+        {/* The prototype's order: Workflows, Apps, Integrations. */}
         <TabsList variant="line">
-          <TabsTrigger value="apps">
-            <Trans>Apps</Trans>
-            <Count count={contents.screens.length} />
-          </TabsTrigger>
           <TabsTrigger value="workflows">
             <Trans>Workflows</Trans>
             <Count count={contents.workflows.length} />
           </TabsTrigger>
+          <TabsTrigger value="apps">
+            <Trans>Apps</Trans>
+            <Count count={contents.screens.length} />
+          </TabsTrigger>
           {integrations === undefined ? null : (
             <TabsTrigger value="integrations">
               <Trans>Integrations</Trans>
+              {/* Counted once its read is in; nothing while it comes. */}
+              <Await fallback={null} promise={integrations}>
+                {(loaded) =>
+                  loaded.state === "ready" ? (
+                    <Count count={loaded.data.length} />
+                  ) : null
+                }
+              </Await>
             </TabsTrigger>
           )}
           {resources === undefined ? null : (
@@ -595,7 +649,12 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </TabsContent>
         <TabsContent value="apps">
           <div className="pt-4">
-            <Apps approval={approval} contents={contents} engine={app.id} />
+            <Apps
+              approval={approval}
+              builds={canBuild(identity.role)}
+              contents={contents}
+              engine={app.id}
+            />
           </div>
         </TabsContent>
         {integrations === undefined ? null : (
@@ -616,6 +675,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   />
                 )}
               </Later>
+              <div className="pt-6">
+                <AppWorkflows app={app} identity={identity} />
+              </div>
             </div>
           </TabsContent>
         )}
@@ -671,9 +733,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
       />
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-0.5">
-          <h1 className="text-2xl font-medium tracking-tight">
-            {listed.subject.name}
-          </h1>
+          <PageHeaderTitle>{listed.subject.name}</PageHeaderTitle>
           <p className="text-muted-foreground">
             <Trans>
               The packages approved for this domain. You see them because you

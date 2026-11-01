@@ -1,5 +1,4 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
@@ -24,7 +23,8 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { fixtureRunSessionOf } from "../src/workflows/fixture-run-sessions.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
@@ -463,13 +463,11 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
           { summary: { kind: "model", contract: key } }
         )
     );
-    const gateway = fakeGateway({
+    const provider = await fakeProvider({
       text: '{"line":"Hello"}',
       inputTokens: 1,
       outputTokens: 1,
     });
-    const ai: AiBinding = env.AI;
-    vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
     const session = await sessionOf(release);
     const run = startedAs(
       await session.start("desk-user", await startOf(release, { who: "Ada" }))
@@ -477,11 +475,42 @@ describe("an App's workflow tests", { timeout: 180_000 }, () => {
     const ended: unknown = JSON.parse(await session.runOutcome(run));
     const completed = await session.completedCount(run, "greet");
     await session.close();
-    expect({ ended, completed, asked: gateway.requests.length }).toMatchObject({
-      ended: { status: "failed", code: "workflow.test_unfixtured" },
-      completed: 0,
-      asked: 0,
+    expect({ ended, completed, asked: provider.requests.length }).toMatchObject(
+      {
+        ended: { status: "failed", code: "workflow.test_unfixtured" },
+        completed: 0,
+        asked: 0,
+      }
+    );
+  });
+
+  it("leave no way into a closed test for a run it recorded as it closed", async () => {
+    const { release } = await requestsApp(
+      async (by) => await workflowOf(by, greeting())
+    );
+    const session = await sessionOf(release);
+    const request = await startOf(release, { who: "Ada" });
+    // Every ID made meanwhile, the run's among them.
+    const made: string[] = [];
+    const randomUUID = crypto.randomUUID.bind(crypto);
+    const ids = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      const id = randomUUID();
+      made.push(id);
+      return id;
     });
+    let started: number | string;
+    try {
+      // The test closes while its run is being recorded.
+      const starting = session.start("desk-user", request);
+      await session.close();
+      started = startedAs(await starting);
+    } finally {
+      ids.mockRestore();
+    }
+    expect({
+      refused: typeof started,
+      reachable: made.filter((id) => fixtureRunSessionOf(id) !== undefined),
+    }).toStrictEqual({ refused: "string", reachable: [] });
   });
 
   it("answer only about the runs their own test started", async () => {

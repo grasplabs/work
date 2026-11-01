@@ -209,7 +209,7 @@ const hasTable = (db: DatabaseSync, table: string): boolean =>
     .get(table) !== undefined;
 
 /**
- * The local D1 database that has `table`: core's (`workflow_runs`) or
+ * The local D1 database that has `table`: core's (`workflow_resource_runs`) or
  * Knowledge's (`collections`), as Miniflare keeps them, one file each.
  */
 export const localD1 = (table: string): DatabaseSync => {

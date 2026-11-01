@@ -1,3 +1,4 @@
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { failedRunDays } from "@grasp-os/shared/workflows";
 import type {
   RunFilterStatus,
@@ -13,6 +14,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -34,6 +36,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime, formatNumber } from "../format.ts";
+import { ProcessHint } from "./business-process.tsx";
 import { handledOf, listsOf, workflowKey, workflowName } from "./lists.ts";
 import { WorkflowOwnerPicker } from "./owner-picker.tsx";
 import { RunResult } from "./runs.tsx";
@@ -42,10 +45,12 @@ import { RunResult } from "./runs.tsx";
 // (`components/workflows-overview.tsx`, `workflows-table.tsx`): on the
 // Workflows page, every workflow the person can open, an engine's or an
 // independent one, in two lists; on an engine's page, that engine's. A
-// line on the Workflows page begins with its engine's icon, which names
-// the engine when pointed at and opens it; an independent workflow's with
-// a workflow's. The prototype begins it with the business process's icon:
-// core knows no process of a workflow yet, so the engine stands in.
+// line on the Workflows page begins, as the prototype's does, with the
+// icon of the business process it serves (an App's workflows serve their
+// App's), or the engine's icon where the App serves none; pointed at, it
+// names the engine and the process, and it opens the engine. An
+// independent workflow's begins with a workflow's icon, naming the
+// process it serves when pointed at.
 
 /** When a workflow last ran, or that it never did. */
 const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
@@ -116,6 +121,7 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
         <span className="text-muted-foreground">–</span>
       ) : (
         <RunResult
+          aiProvider={workflow.lastRun.aiProvider}
           queued={workflow.lastRun.queued}
           status={workflow.lastRun.status}
         />
@@ -147,11 +153,31 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
 };
 
 /**
- * Where a line begins: its engine's icon, which says the engine's name and
- * opens it, with the prototype's attention mark on its corner while a run
- * waits for a decision. The mark only repeats what Status says in words.
+ * The business process each App, and each independent workflow, serves,
+ * by its ID: null for none.
  */
-const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
+export type AppProcesses = ReadonlyMap<string, BusinessProcess | null>;
+
+/** The process `row` serves: its App's, or an independent workflow's own. */
+export const processOf = (
+  processes: AppProcesses | undefined,
+  row: WorkflowSummary
+): BusinessProcess | null =>
+  processes?.get(row.type === "app" ? row.app : row.workflowId) ?? null;
+
+/**
+ * Where a line begins: its process's icon, or its engine's, which says the
+ * engine's name (and the process's) and opens it, with the prototype's
+ * attention mark on its corner while a run waits for a decision. The mark
+ * only repeats what Status says in words.
+ */
+const Lead = ({
+  workflow,
+  process,
+}: {
+  workflow: WorkflowSummary;
+  process: BusinessProcess | null;
+}) => {
   const { t } = useLingui();
   if (workflow.type === "resource") {
     return (
@@ -166,8 +192,15 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
             <WorkflowIcon className="size-4" />
           </span>
         </TooltipTrigger>
-        <TooltipContent>
-          <Trans>Independent workflow</Trans>
+        <TooltipContent className="max-w-64">
+          {process === null ? (
+            <Trans>Independent workflow</Trans>
+          ) : (
+            <span className="flex flex-col gap-1">
+              <Trans>Independent workflow</Trans>
+              <ProcessHint process={process} />
+            </span>
+          )}
         </TooltipContent>
       </Tooltip>
     );
@@ -185,7 +218,7 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
           />
         }
       >
-        <EngineIcon />
+        <EngineIcon process={process} />
         {workflow.waiting === 0 ? null : (
           <span
             aria-hidden="true"
@@ -195,7 +228,16 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
           </span>
         )}
       </TooltipTrigger>
-      <TooltipContent>{name}</TooltipContent>
+      <TooltipContent className="max-w-64">
+        {process === null ? (
+          name
+        ) : (
+          <span className="flex flex-col gap-1">
+            <span>{name}</span>
+            <ProcessHint process={process} />
+          </span>
+        )}
+      </TooltipContent>
     </Tooltip>
   );
 };
@@ -256,9 +298,11 @@ const Place = ({ workflow }: { workflow: WorkflowSummary }) =>
 const WorkflowRow = ({
   workflow,
   withEngine,
+  process,
 }: {
   workflow: WorkflowSummary;
   withEngine: boolean;
+  process: BusinessProcess | null;
 }) => {
   const { version } = workflow;
   const place = workflow.type === "app" ? workflow.appName : null;
@@ -266,12 +310,12 @@ const WorkflowRow = ({
     <TableRow className="relative">
       <TableCell variant="roomy">
         <div className="flex min-w-0 items-center gap-3">
-          {withEngine ? <Lead workflow={workflow} /> : null}
+          {withEngine ? <Lead process={process} workflow={workflow} /> : null}
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 items-center gap-2">
               <WorkflowLink workflow={workflow} />
               {workflow.type === "app" && workflow.scheduleStopped ? (
-                <Badge variant="destructive">
+                <Badge variant="attention">
                   <Trans>Schedule stopped</Trans>
                 </Badge>
               ) : null}
@@ -286,6 +330,11 @@ const WorkflowRow = ({
                 <Version version={version} />
               </span>
             )}
+            {/* Narrow, the status's cell is hidden too, as the prototype
+                keeps the name its room: where it stands goes under it. */}
+            <div className="@sm:hidden">
+              <Status workflow={workflow} />
+            </div>
           </div>
         </div>
       </TableCell>
@@ -310,7 +359,7 @@ const WorkflowRow = ({
           <WorkflowOwnerPicker workflow={workflow} />
         </div>
       </TableCell>
-      <TableCell variant="roomy">
+      <TableCell className="hidden @sm:table-cell" variant="roomy">
         <Status workflow={workflow} />
       </TableCell>
       <TableCell>
@@ -333,8 +382,11 @@ export const WorkflowsTable = ({
   rows,
   withEngine = true,
   empty,
+  processes,
 }: {
   rows: WorkflowSummary[];
+  /** The process each row's App serves; none known without it. */
+  processes?: AppProcesses;
   /** The engine column: left out where the table is the engine's own. */
   withEngine?: boolean;
   /** What an empty table says; the Workflows page's empty state without it. */
@@ -396,7 +448,7 @@ export const WorkflowsTable = ({
             <TableHead className="hidden w-20 @md:table-cell" variant="card">
               <Trans context="column: who owns a workflow">Owner</Trans>
             </TableHead>
-            <TableHead className="w-52" variant="card">
+            <TableHead className="hidden w-52 @sm:table-cell" variant="card">
               <Trans context="column: where a workflow stands">Status</Trans>
             </TableHead>
             <TableHead className="w-9" variant="card">
@@ -412,6 +464,7 @@ export const WorkflowsTable = ({
           {rows.map((row) => (
             <WorkflowRow
               key={workflowKey(row)}
+              process={processOf(processes, row)}
               withEngine={withEngine}
               workflow={row}
             />
@@ -426,14 +479,16 @@ export const WorkflowsTable = ({
 const List = ({
   title,
   rows,
+  processes,
 }: {
   title: ReactNode;
   rows: WorkflowSummary[];
+  processes: AppProcesses | undefined;
 }) =>
   rows.length === 0 ? null : (
     <section className="flex flex-col gap-3">
       <h2 className="text-muted-foreground">{title}</h2>
-      <WorkflowsTable rows={rows} />
+      <WorkflowsTable processes={processes} rows={rows} />
     </section>
   );
 
@@ -441,7 +496,7 @@ const List = ({
 const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
   <div className="flex min-w-0 flex-col-reverse gap-0.5">
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="text-2xl tabular-nums">{value ?? "–"}</dd>
+    <Stat render={<dd />}>{value ?? "–"}</Stat>
   </div>
 );
 
@@ -452,7 +507,7 @@ const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
  * top, are dashes: core measures no return yet, and keeps no designs.
  */
 const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
-  <dl className="@container grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
+  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
     <Big
       label={<Trans>runs a week by these workflows</Trans>}
       value={formatNumber(handledOf(rows))}
@@ -466,21 +521,57 @@ const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
 );
 
 /**
+ * `rows` in the overview's two lists, without the numbers over them: at
+ * work, those that have run, the ones waiting on a person first; on the
+ * way, those that haven't run yet. Needs you shows its workflows so, as
+ * the prototype's does.
+ */
+export const WorkflowLists = ({
+  rows,
+  processes,
+}: {
+  rows: WorkflowSummary[];
+  processes?: AppProcesses;
+}) => {
+  const { atWork, onTheWay } = listsOf(rows);
+  return (
+    <>
+      <List
+        processes={processes}
+        rows={atWork}
+        title={<Trans>At work</Trans>}
+      />
+      <List
+        processes={processes}
+        rows={onTheWay}
+        title={<Trans>On the way</Trans>}
+      />
+    </>
+  );
+};
+
+/**
  * The Workflows page's list, as the prototype tells it
  * (`components/workflows-overview.tsx`): made for many workflows, its
  * numbers on top, then two lists. At work, those that have run, the ones
  * waiting on a person first; on the way, those that haven't run yet.
  */
-export const WorkflowsOverview = ({ rows }: { rows: WorkflowSummary[] }) => {
+export const WorkflowsOverview = ({
+  rows,
+  processes,
+}: {
+  rows: WorkflowSummary[];
+  processes?: AppProcesses;
+}) => {
   if (rows.length === 0) {
     return <WorkflowsTable rows={rows} />;
   }
-  const { atWork, onTheWay } = listsOf(rows);
   return (
-    <div className="flex flex-col gap-8">
+    // The container for the numbers' columns: a container query never
+    // applies to the element that is the container.
+    <div className="@container flex flex-col gap-8">
       <Numbers rows={rows} />
-      <List rows={atWork} title={<Trans>At work</Trans>} />
-      <List rows={onTheWay} title={<Trans>On the way</Trans>} />
+      <WorkflowLists processes={processes} rows={rows} />
     </div>
   );
 };

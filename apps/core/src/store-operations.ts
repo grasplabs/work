@@ -17,7 +17,6 @@ import { z } from "zod";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import {
@@ -28,7 +27,7 @@ import {
 } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
-import { isApprovedVersion } from "./permissions.ts";
+import { isApprovedVersion, personRole } from "./permissions.ts";
 import { hostedRelease, requireNotRevoked } from "./release-runner.ts";
 
 // A business store's public operations, shared with other consumers (spec
@@ -495,6 +494,13 @@ export interface StoreOperationCaller {
   readonly actor: AuditActor;
   /** The person the consumer acts for: never anyone the request names. */
   readonly principal: string;
+  /**
+   * Whether the work the consumer acts in is a Grasp staff member's: the
+   * server-set mark of its authority (GRA-1088), never anything the
+   * request names. The principal then counts while their staff session
+   * lasts (`personRole`) rather than as a member.
+   */
+  readonly staff?: boolean;
   readonly requestId: string;
   readonly deadline: number;
   /** The consumer's own key for the call; hashed into the store's. */
@@ -580,7 +586,9 @@ export const callStoreOperation = async (
         throw operationErrors.create("resource.unavailable");
       }
       await requireApprovedConsumer(env, consumer);
-      if ((await memberRole(env.DB, caller.principal)) === undefined) {
+      if (
+        (await personRole(env, caller.principal, caller.staff)) === undefined
+      ) {
         throw permissionErrors.create("permission.person_inactive");
       }
       await caller.stillAllowed?.();

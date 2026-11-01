@@ -17,22 +17,13 @@ const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /** A release CI built and published, imported once its blobs checked out. */
 export const releases = sqliteTable("releases", {
-  /** `r<run6>-<sha7>`. */
+  /** `YY.MM.N` (@grasp-os/shared/release-id); the commit is `commitSha`. */
   id: text().primaryKey(),
   commitSha: text("commit_sha").notNull(),
   /** The release's manifest, as CI wrote it: JSON. */
   manifest: text().notNull(),
   /** The manifest's sha256, hex. */
   manifestSha256: text("manifest_sha256").notNull(),
-  /**
-   * Its limit evidence file, as CI's publish wrote it next to the manifest
-   * (@grasp-os/shared/release `limitEvidenceFileSchema`): JSON, checked on
-   * import against the manifest and R2's SHA-256. Null for a release that
-   * records no platform limits (built before they were).
-   */
-  limitEvidence: text("limit_evidence"),
-  /** That file's sha256, hex; null with it. */
-  limitEvidenceSha256: text("limit_evidence_sha256"),
   builtAt: timestamp("built_at").notNull(),
   importedAt: timestamp("imported_at").notNull(),
   /**
@@ -70,19 +61,16 @@ export const releaseImportProgress = sqliteTable("release_import_progress", {
   updatedAt: timestamp("updated_at").notNull(),
 });
 
-/** A client: one deployment of Grasp OS in its own Cloudflare account. */
+/**
+ * A client: one deployment of Grasp OS, placed in a hosting destination
+ * (src/hosting/), where its operation provisions and releases it.
+ */
 export const clients = sqliteTable(
   "clients",
   {
     /** The client's slug: its subdomain, `<slug>.<domain>`. */
     id: text().primaryKey(),
     name: text().notNull(),
-    /**
-     * The Cloudflare account the admin adopted for it, under the
-     * account-per-client path; null for a client created as a placement in
-     * a hosting destination (src/hosting/), which every new client is.
-     */
-    accountId: text("account_id").unique(),
     /**
      * The generation of the client's derived secrets: each is
      * `HMAC(<master key>, "<purpose>:<id>:<generation>")`
@@ -98,11 +86,6 @@ export const clients = sqliteTable(
      * keys are kept for a window from here (src/deploy/secrets.ts).
      */
     rotationLiveAt: timestamp("rotation_live_at"),
-    /**
-     * The account's workers.dev subdomain, where its core answers
-     * (`https://<core>.<subdomain>.workers.dev`); null before the first deploy.
-     */
-    workersSubdomain: text("workers_subdomain"),
     /** The rollout ring it's in: 0 first. */
     ring: integer().notNull().default(1),
     status: text({ enum: ["provisioning", "active", "offboarded"] })
@@ -139,6 +122,21 @@ export const clients = sqliteTable(
      */
     configChangedAt: timestamp("config_changed_at"),
     /**
+     * Where it runs: Grasp's cloud, or its own premises
+     * (src/hosting/organization.ts). Fixed once it is provisioned.
+     */
+    hosting: text({ enum: ["grasp_cloud", "on_prem"] })
+      .notNull()
+      .default("grasp_cloud"),
+    /**
+     * Where Grasp Cloud keeps its data: the EU jurisdiction, or none. Every
+     * database, bucket and Durable Object is created there; fixed once it
+     * is provisioned.
+     */
+    jurisdiction: text({ enum: ["eu", "none"] })
+      .notNull()
+      .default("eu"),
+    /**
      * The client's customer in Grasp's Stripe (`cus_...`), as someone at
      * Grasp linked it by hand (src/billing/link.ts): never matched by name
      * or email, so the admin never shows one company another's invoices.
@@ -146,13 +144,6 @@ export const clients = sqliteTable(
      * (src/billing/stripe.ts). Null until it is linked.
      */
     stripeCustomerId: text("stripe_customer_id"),
-    /**
-     * The client's proposal in Grasp's Rooms: its room's id, as someone at
-     * Grasp linked it by hand (src/proposal/link.ts), never matched by
-     * name. Only the id is kept; the room and what was signed in it are
-     * read each time (src/proposal/rooms.ts). Null until it is linked.
-     */
-    roomsProjectId: text("rooms_project_id"),
     /**
      * The client's company in Grasp's Attio: its record's id, as someone at
      * Grasp linked it by hand (src/crm/link.ts), never matched by name or
@@ -173,8 +164,8 @@ export const clients = sqliteTable(
 /**
  * The runner that's a client's current one (src/runners.ts): the
  * only one that may change what its account runs. A provisioning run (a
- * Workflow instance per attempt), a rollout while it deploys the client
- * (its Workflow instance), or a rollback of the client (its instance).
+ * run per attempt), a rollout while it deploys the client
+ * (its run), or a rollback of the client (its run).
  * Each claims it with one conditional write naming the runner it
  * replaces, so however many act at once, one wins: the single runner a
  * client's deploy relies on. No foreign key: a provisioning run is
@@ -184,7 +175,7 @@ export const clientRuns = sqliteTable("client_runs", {
   /** The client's id, as it will be recorded. */
   clientId: text("client_id").primaryKey(),
   /**
-   * The runner's id: a provisioning run's Workflow instance
+   * The runner's id: a provisioning attempt's run
    * (`<clientId>-<random>`), a rollout's (the rollout's id), a
    * rollback's (`rollback-<random>`), or applying the client's settings
    * (`apply-<random>`, src/clients/apply.ts).
@@ -200,6 +191,19 @@ export const clientRuns = sqliteTable("client_runs", {
   kind: text({
     enum: ["rollout", "rollback", "apply", "provision_placed"],
   }).notNull(),
+  /**
+   * The runner's attempt that holds the client, for a runner on Workerflow
+   * (src/runners.ts, `takeAttempt`): an attempt that timed out goes on
+   * beside its retry under the same run, and only the latest may act. 0
+   * for a runner that doesn't fence its attempts.
+   */
+  attempt: integer().notNull().default(0),
+  /**
+   * The step that attempt is of (Workerflow's idempotency key for it):
+   * with `attempt`, which attempt of which run's step holds the client
+   * (src/runners.ts, `takeAttempt`). Null until one takes it.
+   */
+  attemptKey: text("attempt_key"),
 });
 
 /**
@@ -220,58 +224,6 @@ export const clientWorkers = sqliteTable(
     deployedAt: timestamp("deployed_at"),
   },
   (table) => [primaryKey({ columns: [table.clientId, table.worker] })]
-);
-
-/**
- * Making a client's account run a release (src/deploy/deploy.ts): how far
- * it got. Every step can run again, so a deploy that failed is resumed by
- * running it again from the start.
- */
-export const clientDeploys = sqliteTable(
-  "client_deploys",
-  {
-    id: text().primaryKey(),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    releaseId: text("release_id")
-      .notNull()
-      .references(() => releases.id),
-    /**
-     * What it deploys: a release, or on the release the client runs
-     * already only new secrets (a secrets rollout, or its own rotated
-     * ones), only its settings (applied now, or by a rollout of that
-     * release), or both at once. Core records it as what changed.
-     */
-    kind: text({
-      enum: ["release", "secrets", "settings", "settings_and_secrets"],
-    })
-      .notNull()
-      .default("release"),
-    /** `superseded`: a newer deploy of the client started, so this one no longer runs. */
-    status: text({
-      enum: ["running", "done", "failed", "superseded"],
-    }).notNull(),
-    /** The last step that finished, such as `resources`; null before the first. */
-    step: text(),
-    /** Why it failed: an error code, never a token or a response body. */
-    error: text(),
-    /**
-     * The versions this deploy uploaded, each with fingerprints of what went
-     * into it and of its secrets alone: JSON, `{"byApp": {"connect":
-     * {"version": "<id>", "fingerprint": "<hex>", "secrets": "<hex>"}}}`
-     * (src/deploy/deploy.ts). A resumed deploy deploys these rather than
-     * upload again, unless what goes into one has changed since.
-     */
-    versions: text(),
-    /** The staff member who started it, or `system`. */
-    startedBy: text("started_by").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    index("client_deploys_client_idx").on(table.clientId, table.createdAt),
-  ]
 );
 
 /** Rolling a release (or only new secrets) out to clients, ring by ring. */
@@ -365,25 +317,6 @@ export const rolloutTargets = sqliteTable(
     primaryKey({ columns: [table.rolloutId, table.clientId] }),
     index("rollout_targets_client_idx").on(table.clientId),
   ]
-);
-
-/**
- * A client's deployment config (sign-in, model gateway), one row
- * per setting. Never a secret: those go straight to the client's Worker.
- */
-export const settings = sqliteTable(
-  "settings",
-  {
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    key: text().notNull(),
-    /** JSON. */
-    value: text().notNull(),
-    updatedBy: text("updated_by").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.key] })]
 );
 
 /**
@@ -487,65 +420,13 @@ export const hostingDestinations = sqliteTable("hosting_destinations", {
   accountId: text("account_id"),
   /** Its Workers for Platforms dispatch namespace; null otherwise. */
   namespace: text(),
-  /** The hosting policies it may serve, by id: JSON (src/hosting/policy.ts). */
-  policies: text().notNull(),
-  /**
-   * What staff verified it does, each with its evidence: JSON
-   * (`destinationCapabilitiesSchema`, src/hosting/policy.ts). A capability
-   * it doesn't list is unknown, which no policy accepts.
-   */
-  capabilities: text().notNull(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
 
 /**
- * Every capability of a destination as staff declared it, each time they
- * saved it (src/hosting/inventory.ts): written in the same batch as the
- * destination, never updated or deleted. A save records every capability,
- * the ones it doesn't list as `unknown`, so a destination's latest row per
- * capability is what its `capabilities` say. The evidence as it parsed
- * (`evidenceSchema`, src/hosting/policy.ts), flattened.
- */
-export const destinationCapabilityEvidence = sqliteTable(
-  "destination_capability_evidence",
-  {
-    /** Rising: the order the declarations were saved in. */
-    id: integer().primaryKey({ autoIncrement: true }),
-    destinationId: text("destination_id")
-      .notNull()
-      .references(() => hostingDestinations.id),
-    /** A capability (src/hosting/policy.ts). */
-    capability: text().notNull(),
-    /** `unknown`: the save didn't list it, and it has no evidence. */
-    status: text({ enum: ["verified", "unsupported", "unknown"] }).notNull(),
-    /** What the evidence was observed against; null when unknown. */
-    subjectKind: text("subject_kind", {
-      enum: ["source", "candidate", "release", "profile"],
-    }),
-    subjectId: text("subject_id"),
-    procedure: text(),
-    observedAt: timestamp("observed_at"),
-    /** Who the evidence says observed it. */
-    recordedBy: text("recorded_by"),
-    /** Where the full record is. */
-    record: text(),
-    /** Who saved it: a staff member's email, or `system`. */
-    declaredBy: text("declared_by").notNull(),
-    declaredAt: timestamp("declared_at").notNull(),
-  },
-  (table) => [
-    index("destination_capability_evidence_idx").on(
-      table.destinationId,
-      table.capability,
-      table.id
-    ),
-  ]
-);
-
-/**
- * The destination a client runs in and the policy it runs under, and the
- * opaque deployment id its resources' names are made from. Set once:
+ * The destination a client runs in, and the opaque deployment id its
+ * resources' names are made from. Set once:
  * moving a client elsewhere, or to another jurisdiction, is a migration
  * to new resources, never a change of this row (src/hosting/inventory.ts).
  */
@@ -558,7 +439,6 @@ export const clientPlacements = sqliteTable("client_placements", {
   destinationId: text("destination_id")
     .notNull()
     .references(() => hostingDestinations.id),
-  policyId: text("policy_id").notNull(),
   placedBy: text("placed_by").notNull(),
   placedAt: timestamp("placed_at").notNull(),
 });
@@ -670,8 +550,16 @@ export const clientProvisions = sqliteTable("client_provisions", {
    * of a secret.
    */
   progress: text(),
-  /** The runner that last recorded a step: a Workflow instance (src/runners.ts). */
+  /** The runner that last recorded a step: a run (src/runners.ts). */
   runId: text("run_id"),
+  /**
+   * The calls to the client's Workers still on their way, by sender (a
+   * runner's attempt at a step): JSON, each sender's change and when it
+   * sent (src/hosting/operation.ts, `sendHolding`). Apart from `progress`,
+   * which every step rewrites: a mark stays until its own sender clears it,
+   * or it ages out.
+   */
+  sending: text(),
   /**
    * Counts every change started on the client: each release, run again
    * and rollback raises it (src/hosting/operation.ts). What a rollout or
@@ -694,80 +582,24 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
- * An integration Grasp's agent builds into the platform: one row per app,
- * shared by every company that asked for it (src/builds/builds.ts). It
- * moves forward through its stages, each move a conditional write naming
- * the stage it leaves, audited in the same batch, so a late or repeated
- * event never moves it back. Never an app credential, a company's data or
- * anything the agent read: those stay in Secrets Store, the company's
- * deployment and the agent's session.
+ * The platform's own settings that staff choose (src/platform-settings.ts):
+ * one row, `id` 1. Which organization is Grasp's own is chosen on
+ * Platform, audited; Grasp's own public settings live in wrangler.jsonc
+ * per stage, and secrets in the stage's 1Password Environment.
  */
-export const integrationBuilds = sqliteTable("integration_builds", {
-  /** The app's connector name: its package's, `packages/connectors/<app>`. */
-  app: text().primaryKey(),
-  /** The app as people name it, such as `Personio`. */
-  name: text().notNull(),
-  stage: text({
-    enum: [
-      "asked",
-      "researching",
-      "plan_ready",
-      "credentials",
-      "writing",
-      "in_review",
-      "merged",
-      "needs_person",
-    ],
-  }).notNull(),
-  /** The stage it was in when it came to need a person; null otherwise. */
-  stoppedAt: text("stopped_at"),
-  /** Why it needs a person, as a code; null otherwise. */
-  reason: text(),
-  /** Its build's Workflow instance (src/builds/workflow.ts). */
-  runId: text("run_id").notNull(),
+export const platformSettings = sqliteTable("platform_settings", {
+  /** Always 1: there is one platform. */
+  id: integer().primaryKey(),
   /**
-   * The agent's plan, while it waits for a person or once approved: JSON
-   * (`buildPlanSchema`, src/builds/plan.ts). Its hosts are the only ones
-   * the connector's manifest may name.
+   * Grasp's own organization: the client whose core answers Ask Grasp
+   * (src/admin/ask.ts). Null until staff choose one. Not a reference: a
+   * client discarded later leaves it naming one the admin no longer has,
+   * which Ask Grasp says.
    */
-  plan: text(),
-  /** How many plans the agent has written: a sent-back plan starts the next round. */
-  planRound: integer("plan_round").notNull().default(0),
-  /** What the person who sent the last plan back asked for; null otherwise. */
-  planNote: text("plan_note"),
-  /** The staff member who approved the plan. */
-  approvedBy: text("approved_by"),
-  /** The branch it is written on, `feat/connector-<app>`, once it has a pull request. */
-  branch: text(),
-  /** Its pull request's number in grasplabs/work. */
-  pullRequest: integer("pull_request"),
-  /** The commit its pull request was squash-merged as, on `main`. */
-  mergeCommitSha: text("merge_commit_sha"),
-  /** The staff member who confirmed Build it. */
-  requestedBy: text("requested_by").notNull(),
-  createdAt: timestamp("created_at").notNull(),
+  graspClientId: text("grasp_client_id"),
+  updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
-
-/**
- * When the admin last told staff of each kind of alert about each client
- * (src/alerts.ts): an alert of the same client and kind within its window
- * isn't sent again, so a storm is one message. Nothing of what an alert
- * said is kept.
- */
-export const staffAlerts = sqliteTable(
-  "staff_alerts",
-  {
-    clientId: text("client_id").notNull(),
-    /**
-     * The alert's kind, such as `test`, and its subject when it has one:
-     * `teams_bot_secret_expiring/2027-04-30/30` (src/alerts.ts).
-     */
-    kind: text().notNull(),
-    sentAt: timestamp("sent_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.clientId, table.kind] })]
-);
 
 /**
  * What the admin's watch last read of how each client's Stephen fares

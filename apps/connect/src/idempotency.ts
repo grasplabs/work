@@ -16,6 +16,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { idempotentCalls } from "./db/schema.ts";
+import { ownerErased } from "./erased-people.ts";
 
 // Side effects happen once per idempotency key. The first call claims the
 // key before it calls out; its answer (a result, or the tool's error) is
@@ -175,6 +176,25 @@ import { idempotentCalls } from "./db/schema.ts";
 //   may have happened; only the run's wait goes. Nothing ever records that
 //   an effect was undone.
 
+/**
+ * A claim's batch, refused as a connection no longer active when its
+ * connection's owner is being erased (the claim's connection fails NOT
+ * NULL then).
+ */
+const claimBatch = async <T>(batch: Promise<T>): Promise<T> => {
+  try {
+    return await batch;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("NOT NULL") &&
+      error.message.includes("idempotent_calls.connection_id")
+    ) {
+      throw connectErrors.create("connect.connection_inactive");
+    }
+    throw error;
+  }
+};
 /**
  * How long a claim holds before connect stops waiting for its call: well
  * past the longest an MCP request may take. A claim older than this was
@@ -560,51 +580,56 @@ export const idempotencyStore = (
       kept: Kept | null = null
     ): Promise<StoredAnswer | undefined> => {
       const now = Date.now();
-      const [claimed] = await db.batch([
-        db
-          .insert(idempotentCalls)
-          .values({
-            ...subjectColumns(scope.subject),
-            onBehalfOf: scope.onBehalfOf,
-            connectionId: scope.connectionId,
-            action: scope.action,
-            idempotencyKey: scope.idempotencyKey,
-            resource: scope.resource,
-            inputHash,
-            state: "running",
-            createdAt: new Date(now),
-            claimedAt: new Date(now),
-            connectorVersion,
-            input: kept?.input ?? null,
-            origin: kept?.origin ?? null,
-            listId: crypto.randomUUID(),
-          })
-          .onConflictDoNothing()
-          .returning({ state: idempotentCalls.state }),
-        // Expired answers are dropped; the index on created_at keeps it
-        // cheap. Their keys stay used: their effect happened.
-        db
-          .update(idempotentCalls)
-          .set({ output: null, provenance: null })
-          .where(
-            and(
-              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
-              inArray(idempotentCalls.state, ["done", "failed"]),
-              isNotNull(idempotentCalls.output)
-            )
-          ),
-        // So is the input a call of unknown outcome kept for its person,
-        // whoever made it: its obligation stays, listed without it.
-        db
-          .update(idempotentCalls)
-          .set({ input: null })
-          .where(
-            and(
-              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
-              isNotNull(idempotentCalls.input)
-            )
-          ),
-      ]);
+      const [claimed] = await claimBatch(
+        db.batch([
+          db
+            .insert(idempotentCalls)
+            .values({
+              ...subjectColumns(scope.subject),
+              onBehalfOf: scope.onBehalfOf,
+              // NULL, which fails the batch, through a connection whose
+              // owner's erasure began: a call checked before it keeps
+              // nothing of theirs after it (person-erasure.ts).
+              connectionId: sql`(SELECT ${scope.connectionId} WHERE NOT ${ownerErased(scope.connectionId)})`,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey,
+              resource: scope.resource,
+              inputHash,
+              state: "running",
+              createdAt: new Date(now),
+              claimedAt: new Date(now),
+              connectorVersion,
+              input: kept?.input ?? null,
+              origin: kept?.origin ?? null,
+              listId: crypto.randomUUID(),
+            })
+            .onConflictDoNothing()
+            .returning({ state: idempotentCalls.state }),
+          // Expired answers are dropped; the index on created_at keeps it
+          // cheap. Their keys stay used: their effect happened.
+          db
+            .update(idempotentCalls)
+            .set({ output: null, provenance: null })
+            .where(
+              and(
+                lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+                inArray(idempotentCalls.state, ["done", "failed"]),
+                isNotNull(idempotentCalls.output)
+              )
+            ),
+          // So is the input a call of unknown outcome kept for its person,
+          // whoever made it: its obligation stays, listed without it.
+          db
+            .update(idempotentCalls)
+            .set({ input: null })
+            .where(
+              and(
+                lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+                isNotNull(idempotentCalls.input)
+              )
+            ),
+        ])
+      );
       if (claimed.length > 0) {
         mine = new Date(now);
         return undefined;

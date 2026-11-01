@@ -1,11 +1,10 @@
 /**
  * The apps companies asked Grasp to add, as their cores say it (the
  * snapshot's `asked`, core's app requests): one per app across every
- * company, so an app asked for at three companies is built once. This is
- * where an integration to build starts, at its first step, asked for
- * (`BUILD_STAGES`); the build itself, from Build it on, is the admin's
- * own record (GRA-689), which these rows meet by `key`.
+ * company, so an app asked for at three companies is listed once.
  */
+import type { AskedApp as ToolApp } from "@grasp-os/shared/admin/admin-integrations";
+
 import type { ClientAdmin } from "../clients/admin.ts";
 
 /** One company's request for an app. */
@@ -37,8 +36,8 @@ export const appKey = (name: string): string =>
 
 /**
  * Every app the answered companies asked for, once each: the app the most
- * companies asked for first, then the one asked for longest ago, as the
- * prototype sorts what waits on Grasp (`sortBuilds`). A company whose core
+ * companies asked for first, then the one asked for longest ago
+ * (`sortAsked`). A company whose core
  * didn't answer says nothing here.
  */
 export const askedApps = (admins: readonly ClientAdmin[]): AskedApp[] => {
@@ -74,3 +73,16 @@ export const askedApps = (admins: readonly ClientAdmin[]): AskedApp[] => {
       a.name.localeCompare(b.name)
   );
 };
+
+/**
+ * Every app asked for (`askedApps`), as the admin's MCP answers it
+ * (`apps_asked`), in the order the page lists them, so the two can't say
+ * different things. An app is known by an id that says nothing a company
+ * wrote, `asked-<n>`; its name, as a company wrote it, is data beside it.
+ */
+export const appsAsked = (admins: readonly ClientAdmin[]): ToolApp[] =>
+  askedApps(admins).map((app, index) => ({
+    id: `asked-${index + 1}`,
+    app: app.name,
+    requests: app.asks.map(({ org, on }) => ({ org, on })),
+  }));

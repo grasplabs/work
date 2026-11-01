@@ -22,7 +22,7 @@ export const dotClass = (kind: NoteKind): string =>
 
 /** The same hue as a soft fill, for chips and labels on a note page, so a name shows what it is before it is read. */
 const groupTint: Record<Group, string> = {
-  company: "bg-muted hover:bg-sidebar-accent",
+  company: "bg-muted hover:bg-muted/80",
   vision: "bg-graph-vision/15 hover:bg-graph-vision/25",
   teams: "bg-graph-teams/15 hover:bg-graph-teams/25",
   tools: "bg-graph-tools/15 hover:bg-graph-tools/25",

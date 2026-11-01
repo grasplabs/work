@@ -1,8 +1,3 @@
-// Routes split into chunks of their own share this module, so the bundler
-// moves it, with Zod and the shared schemas, into a chunk that runs before
-// main.tsx does. Importing this first keeps Zod jitless before any of them
-// builds a schema, whichever chunk they land in.
-import "./zod-jitless.ts";
 import { internalErrors } from "@grasp-os/shared/errors";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { t } from "@lingui/core/macro";

@@ -376,40 +376,6 @@ describe("a run's object", { timeout: 60_000 }, () => {
     });
   });
 
-  it("cancels a run whose Apps can't hear of the cancel, audited as its canceller, failing nothing", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const identity = await builder.api.whoami();
-    const app = await appWith(builder, napper);
-    const { id: run } = await builder.api.workflows.start(app, "napper");
-    await sleeping(run, "go");
-    // An App the run's object can't reach: its revoke throws.
-    await runInDurableObject(runObject(run), (_object, state) => {
-      state.storage.sql.exec(
-        "CREATE TABLE IF NOT EXISTS grasp_run_apps (app TEXT PRIMARY KEY)"
-      );
-      state.storage.sql.exec(
-        "INSERT INTO grasp_run_apps (app) VALUES (?)",
-        "x".repeat(300)
-      );
-    });
-
-    const cancelled = await outcome(cancelRun(env, identity, run));
-
-    expect({
-      cancelled,
-      ending: await endingOf(run),
-      engine: await liveStatus(run),
-    }).toStrictEqual({
-      cancelled: "ok",
-      ending: {
-        status: "cancelled",
-        cancelled: [identity.userId],
-        failed: [],
-      },
-      engine: "terminated",
-    });
-  });
-
   it("ends a run cancelled, as its canceller's, when it errors before its cancel's request recorded it", async () => {
     const builder = await signedInApi(idp, "builder");
     const identity = await builder.api.whoami();

@@ -25,7 +25,7 @@ import { acceptedInput, pinned } from "../workflow-starts.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import type { RunStep } from "./host.ts";
-import { quotaPolicy } from "./quotas.ts";
+import { quotaLimits } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { ResourceRunMemory } from "./resource-runs.ts";
 
@@ -311,7 +311,7 @@ export const runFixtureWorkflow = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
-  const { limits } = await quotaPolicy(env);
+  const limits = quotaLimits(env);
   return await runActivation(env, engineStep, memory, {
     run: {
       runId,

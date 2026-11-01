@@ -33,7 +33,7 @@ import {
   versionTree,
 } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
-import { memberOf } from "./auth/identity.ts";
+import { actingPerson } from "./auth/identity.ts";
 import {
   admitBuild,
   buildDequeued,
@@ -128,6 +128,13 @@ const buildJobInputSchema = z.strictObject({
   workspaceId: workspaceIdSchema,
   chatId: chatIdSchema,
   jobId: z.uuid(),
+  /**
+   * That a Grasp staff member's turn submitted it (GRA-1088): the mark of
+   * the run that submitted it, set by core as it starts the job's
+   * instance, never by the chat's code. The job then acts for them while
+   * their staff session lasts (`actingPerson`), not as a member.
+   */
+  staff: z.literal(true).optional(),
 });
 
 type JobInput = z.infer<typeof buildJobInputSchema>;
@@ -158,6 +165,7 @@ const scopeOf = (
   chatId: job.chatId,
   agentId: job.agentId,
   personId: job.personId,
+  ...(input.staff === true ? { staff: true } : {}),
 });
 
 /**
@@ -264,8 +272,9 @@ const seqOf = ({ step, context }: Pick<Asking, "step" | "context">): number => {
 /**
  * The chat's person as the job acts for them, and the job's App, once the
  * agent may still build it for them, as a build call checks it: the
- * agent's own permission to build Apps, the person still a member and a
- * builder of the App, and the chat not restricted.
+ * agent's own permission to build Apps, the person still a member (or,
+ * for a staff member's job, still in their staff session) and a builder
+ * of the App, and the chat not restricted.
  */
 const authorize = async (
   env: Env,
@@ -276,7 +285,9 @@ const authorize = async (
   if (!buildsApps(permissions)) {
     throw readDenied("write");
   }
-  const person = await memberOf(env.DB, scope.personId);
+  // Read again at each step: a staff member's job stops once their staff
+  // session has ended, as their turn would.
+  const person = await actingPerson(env, scope.personId, scope.staff);
   if (person === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }

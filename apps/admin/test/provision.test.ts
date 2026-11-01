@@ -1,24 +1,26 @@
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { asc, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   auditEvents,
-  clientDeploys,
   clientProvisions,
   clients,
+  hostingDestinations,
   releases,
 } from "../src/db/schema.ts";
-import { startDeploy } from "../src/deploy/deploy.ts";
 import { placeAndProvisionFn } from "../src/hosting/functions.ts";
+import { notStartedWords } from "../src/hosting/words.ts";
 import { createClient } from "../src/provision/control.ts";
 import type { ProvisionInput } from "../src/provision/control.ts";
 import { startClient } from "../src/provision/functions.ts";
+import { getProvisioning } from "../src/provision/queries.ts";
+import { adminWorkflows } from "../src/workflow-runs.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { db, destination, release, staff } from "./hosting.ts";
 import { callServerFn } from "./pages.ts";
+import { startsOf } from "./runs.ts";
 
 // Adding a client (src/provision/control.ts): staff record it with no
 // account of its own, then place it in a hosting destination and
@@ -33,7 +35,7 @@ import { callServerFn } from "./pages.ts";
 // - Anyone but staff adding one: the server function is behind Access.
 
 const token = "test-deployer-token-add-client-5e2b91";
-mockCloudflareApi(token, `${token}-tenant`);
+mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -103,6 +105,85 @@ const importedRelease = async (): Promise<string> => {
 };
 
 describe("adding a client", () => {
+  it("starts provisioning by itself as it's added once a destination and a release are there, and says which is missing until then", async () => {
+    // First, before any test imports a release.
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
+    const add = async () => {
+      const input = inputOf();
+      await callServerFn(startClient, input, { email: staff.email });
+      return input.clientId;
+    };
+    const setupOf = async (clientId: string) => {
+      const view = await getProvisioning(env, clientId);
+      const operation = await db
+        .select({ releaseId: clientProvisions.releaseId })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      return {
+        phase: view?.phase,
+        notStarted: view?.notStarted,
+        operation: operation?.releaseId ?? null,
+        audited: await actions(clientId),
+      };
+    };
+
+    try {
+      // Each read as it's added: what keeps it is what's missing now.
+      const noDestination = await setupOf(await add());
+      await destination();
+      const noRelease = await setupOf(await add());
+      await importedRelease();
+      const releaseId = await importedRelease();
+      const started = await setupOf(await add());
+
+      expect({
+        noDestination,
+        noRelease,
+        started: {
+          operation: started.operation,
+          audited: started.audited.slice(0, 4),
+        },
+        attempts: runs.started.length,
+        words: [
+          notStartedWords("no_destination"),
+          notStartedWords("no_release"),
+        ],
+      }).toStrictEqual({
+        noDestination: {
+          phase: "placing",
+          notStarted: "no_destination",
+          operation: null,
+          audited: ["client.create"],
+        },
+        noRelease: {
+          phase: "placing",
+          notStarted: "no_release",
+          operation: null,
+          audited: ["client.create"],
+        },
+        // The newest release, in the one destination that meets its policy.
+        started: {
+          operation: releaseId,
+          audited: [
+            "client.create",
+            "client.place",
+            "client.provision_placed",
+            "provision.start",
+          ],
+        },
+        attempts: 1,
+        words: [
+          "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.",
+          "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.",
+        ],
+      });
+    } finally {
+      // The tests after choose among their own destinations alone.
+      await db.update(hostingDestinations).set({ accountId: null });
+    }
+  });
+
   it("records it being provisioned with no account of its own, audited, as staff add it", async () => {
     const companyId = crypto.randomUUID();
     const input = inputOf({ attioCompanyId: companyId.toUpperCase() });
@@ -117,7 +198,6 @@ describe("adding a client", () => {
       result,
       row: {
         name: row?.name,
-        accountId: row?.accountId,
         status: row?.status,
         ring: row?.ring,
         attio: row?.attioCompanyId,
@@ -129,7 +209,6 @@ describe("adding a client", () => {
       result: { clientId: input.clientId, refused: null },
       row: {
         name: "Acme",
-        accountId: null,
         status: "provisioning",
         ring: 2,
         attio: companyId,
@@ -145,20 +224,19 @@ describe("adding a client", () => {
     const releaseId = await importedRelease();
     const input = inputOf();
     await createClient(env, staff, input);
-    await using runs = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
+    using runs = startsOf(adminWorkflows.provisionPlacedClient);
 
     const placed = await callServerFn(
       placeAndProvisionFn,
       {
         clientId: input.clientId,
         releaseId,
-        policyId: "eu-storage",
         destinationId: null,
       },
       { email: staff.email }
     );
 
-    const attempts = await runs.get();
+    const attempts = runs.started;
     const operation = await db
       .select({ releaseId: clientProvisions.releaseId })
       .from(clientProvisions)
@@ -173,24 +251,6 @@ describe("adding a client", () => {
       operation: { releaseId },
       attempts: 1,
     });
-  });
-
-  it("is never deployed by the account-per-client path, placed or not", async () => {
-    const releaseId = await importedRelease();
-    const input = inputOf();
-    await createClient(env, staff, input);
-
-    const refused = await codeOf(
-      startDeploy(db, staff, input.clientId, releaseId)
-    );
-
-    expect({
-      refused,
-      deploys: await db
-        .select({ id: clientDeploys.id })
-        .from(clientDeploys)
-        .where(eq(clientDeploys.clientId, input.clientId)),
-    }).toStrictEqual({ refused: "client_placed", deploys: [] });
   });
 
   it("records one client however many adds of its id race, and refuses the rest", async () => {

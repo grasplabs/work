@@ -12,6 +12,7 @@ import type {
   WorkflowRun,
   WorkflowsApi,
   WorkflowSummary,
+  WorkflowsToday,
 } from "@grasp-os/shared/workflows";
 
 import { CoreRpcTarget } from "../rpc-target.ts";
@@ -32,6 +33,7 @@ import {
 import { WorkflowParamsRpc } from "./params-rpc.ts";
 import { listRuns, runStatus, startWorkflow } from "./runs.ts";
 import { teamChoices } from "./teams.ts";
+import { workflowsToday } from "./today.ts";
 
 /**
  * A signed-in person's `workflows`. Like AppsRpc, every call checks the
@@ -122,6 +124,13 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await runActivity(this.#env, by, query)
+    );
+  }
+
+  async today(): Promise<WorkflowsToday> {
+    return await withPerson(
+      this.#check,
+      async (by) => await workflowsToday(this.#env, by)
     );
   }
 

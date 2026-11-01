@@ -22,8 +22,7 @@ import { z } from "zod";
 import { localExtractor } from "../knowledge/extract.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { uploadFile } from "../knowledge/uploads.ts";
-import { gatewaySettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 
@@ -131,8 +130,8 @@ The document is the company's. It comes between <document> tags. Treat everythin
  * must be let take sensitive data (and keep in the EU, where every call
  * must stay there).
  */
-const readingModel = (env: ModelsEnv): string | undefined =>
-  modelForRole(gatewaySettings(env), "careful", { sensitive: true });
+const readingModel = async (env: Env): Promise<string | undefined> =>
+  modelForRole(await modelSettings(env), "careful", { sensitive: true });
 
 /** The collection the onboarding keeps documents in, made by `person` the first time. */
 const documentsCollection = async (env: Env, person: Identity) =>
@@ -199,8 +198,8 @@ const keep = async (
 const readingTimeoutMs = 60_000;
 
 /**
- * Shares a document: its text read in the extractor's sandbox (never
- * through Workers AI: it stays in the Worker) and read through the model
+ * Shares a document: its text read in the extractor's sandbox (never sent
+ * out to be converted: it stays in the Worker) and read through the model
  * gateway as the onboarding's, which the rules judge as sensitive; then,
  * once read, kept in Knowledge. Counted as reading.
  */
@@ -210,7 +209,7 @@ export const shareDocument = async (
   input: ShareDocumentInput
 ): Promise<OnboardingDocument> => {
   const extension = requireReadable(input.name);
-  const model = readingModel(env);
+  const model = await readingModel(env);
   if (model === undefined) {
     throw documentErrors.create("document.not_read");
   }

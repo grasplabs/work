@@ -34,11 +34,11 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
-import { deploySecrets } from "../deploy/context.ts";
+import { deploySecrets, ifStored } from "../deploy/context.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import type { CoreAddress } from "./core-address.ts";
-import { clientGrid, ifStored, routeOf } from "./grid.ts";
+import { clientGrid, routeOf } from "./grid.ts";
 
 /**
  * How long the company's core may take: reading a long conversation takes
@@ -70,6 +70,7 @@ export type KickoffRefusal =
   | "kickoff.unreadable"
   | "kickoff.not_read"
   | "kickoff.invalid"
+  | "kickoff.purged"
   | "not_answered";
 
 /** What the page gets back. */
@@ -89,6 +90,7 @@ const kickoffCodes: ReadonlySet<string> = new Set([
   "kickoff.unreadable",
   "kickoff.not_read",
   "kickoff.invalid",
+  "kickoff.purged",
 ]);
 
 const isKickoffCode = (code: string): code is KickoffRefusal =>

@@ -52,11 +52,6 @@ export const settingsErrorCodes = [
   "nothing_deployed",
   /** Another runner (provisioning, a rollout, a rollback) has the client. */
   "client_busy",
-  /**
-   * The client is placed in a hosting destination (src/hosting/), whose
-   * Workers this account-per-client path doesn't deploy.
-   */
-  "client_placed",
   /** Secrets Store has no `CLIENT_KEY` to fingerprint a sign-in's admins, or seal a secret, with. */
   "store_secret_missing",
   /** A secret to seal isn't one: empty, with spaces in it, or too long. */

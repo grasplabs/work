@@ -302,6 +302,8 @@ export const isolateCall = async (
         owner,
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: codeCallMs,
+        // Its run bindings' `AsyncLocalStorage`, as `workflowSandbox` gives it.
+        asyncContext: true,
       },
       signal === undefined ? {} : { signal }
     );
@@ -472,6 +474,14 @@ export const bindings = ({ connections, collections, brains = [] }) => {
         unwrapped(await currentAttempt().callBrain(name, "skillsSelect", request)),
       skillsRead: async (request) =>
         unwrapped(await currentAttempt().callBrain(name, "skillsRead", request)),
+      entitiesList: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "entitiesList", request)),
+      entitySources: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "entitySources", request)),
+      relationsGet: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "relationsGet", request)),
+      relationsExplain: async (request) =>
+        unwrapped(await currentAttempt().callBrain(name, "relationsExplain", request)),
     };
   }
   for (let index = 0; index < connections.length; index += 1) {
@@ -1094,6 +1104,8 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
         owner,
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: runLoadMs,
+        // Its run bindings' `AsyncLocalStorage`, as `workflowSandbox` gives it.
+        asyncContext: true,
       };
       // Let go of once the run is cancelled or taken over, as it runs.
       const letGo = new AbortController();

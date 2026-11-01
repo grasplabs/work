@@ -239,14 +239,21 @@ export const smokeCheck = async (
  * version the admin can't read beforehand (a user Worker in a dispatch
  * namespace, whose upload is live at once and whose versions the
  * documented API doesn't list), so the version answering is the one to
- * hold the rest of the probe to. Its version and how many tries it took.
+ * hold the rest of the probe to, never `refuses` (the version it ran before,
+ * which an isolate of it still answering names). Its version and how many
+ * tries it took.
  */
 export const smokeAnswering = async (
   origin: string,
   routerSecret: string,
-  options: SmokeOptions = {}
+  { refuses, ...options }: SmokeOptions & { refuses?: string } = {}
 ): Promise<{ version: string; attempts: number }> => {
-  const answered = await smokeTries(origin, routerSecret, () => true, options);
+  const answered = await smokeTries(
+    origin,
+    routerSecret,
+    (version) => version !== refuses,
+    options
+  );
   if (answered === undefined) {
     throw new DeployError(
       "smoke_check_failed",

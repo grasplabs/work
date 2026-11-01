@@ -39,10 +39,12 @@ import { literalDurationMs } from "./values.ts";
  *   (`resolveTarget` throws). A `for` task is a call of the SDK's loop
  *   (`flow.for`), its list a function the SDK runs once per item of the
  *   collection its enter step recorded (sequentially; items at once and
- *   items' own keys aren't lowered yet), so every task runs at most once
- *   per item of the loops around it, and a run's steps are bounded by its
- *   tasks and its loops' recorded items; core refuses any step run twice,
- *   and any item no loop recorded, all the same (resource-host.ts).
+ *   items' own keys aren't lowered yet), and a `fork` task a call of the
+ *   SDK's fork, each branch a function it runs once, one after another; so
+ *   every task runs at most once per item or branch of the scopes around
+ *   it, and a run's steps are bounded by its tasks, its forks' branches and
+ *   its loops' recorded items; core refuses any step run twice, and any
+ *   item or branch no scope has, all the same (resource-host.ts).
  * - Expressions becoming code. An expression's source never enters the
  *   module: the module names it by its number in the expression table
  *   sealed beside it, and the host evaluates that table's entry with the
@@ -98,8 +100,10 @@ import { literalDurationMs } from "./values.ts";
  *   task's enter step. The generated code only asks the host to listen,
  *   by its task: the host matches events in the run's own inbox by what
  *   it recorded, never by anything the code passes. A filter's
- *   `correlate`, which would evaluate expressions over each event's own
- *   content, is reported as unsupported.
+ *   `correlate` is lowered only on an attribute the inbox keeps
+ *   (`${ .subject }`, say): sealed as the attribute and its correlation's
+ *   name, matched in the engine like any attribute, never an expression
+ *   over an event's content, which is reported as unsupported (GRA-947).
  * - A decision answered by the isolate. A `grasp.decision` call's binding,
  *   recipients, prompt and input are sealed as any call's, and its task
  *   runs as two steps the host checks: `enter:<id>`, in which the host
@@ -194,6 +198,7 @@ export type LoweredKind =
   | "call"
   | "do"
   | "for"
+  | "fork"
   | "listen"
   | "raise"
   | "run"
@@ -233,6 +238,19 @@ export interface GeneratedListen {
 export interface GeneratedFilter {
   readonly type: string;
   readonly attributes: readonly (readonly [string, CallTemplate])[];
+  /**
+   * Its correlations, by name, each the inbox attribute it correlates on:
+   * one with an `expect` is in `attributes` too; one without matches the
+   * value the run's earlier listens correlated under its name, or any
+   * value (then correlating it) when none has. Absent when it has none.
+   */
+  readonly correlate?: readonly GeneratedCorrelation[];
+}
+
+/** One correlation of a listen's filter (`GeneratedFilter`). */
+export interface GeneratedCorrelation {
+  readonly name: string;
+  readonly attribute: string;
 }
 
 /**
@@ -264,6 +282,28 @@ export interface GeneratedCatch {
       readonly status?: number;
     }
   >;
+  readonly when?: number;
+  readonly exceptWhen?: number;
+  /** Its retry policy, inline or of `use.retries`, if it retries. */
+  readonly retry?: GeneratedRetry;
+}
+
+/**
+ * A catch's retry policy, its durations in milliseconds (spec 13.7): the
+ * host runs a step of a task in the try's list that failed with a failure
+ * the catch would take, and that may be tried again, again in its place,
+ * after a durable backoff, up to `attempts` attempts in all (the first
+ * included), while its `when` holds and its `exceptWhen` doesn't (host
+ * expressions with the error in scope), within `limitMs` of the first.
+ * Each attempt of the step is bounded by `attemptMs`, if given.
+ */
+export interface GeneratedRetry {
+  readonly attempts: number;
+  readonly delayMs: number;
+  readonly backoff: "constant" | "linear" | "exponential";
+  readonly jitter?: { readonly fromMs: number; readonly toMs: number };
+  readonly limitMs?: number;
+  readonly attemptMs?: number;
   readonly when?: number;
   readonly exceptWhen?: number;
 }
@@ -464,11 +504,17 @@ export interface GeneratedTask {
    */
   readonly timeoutMs?: number;
   /**
-   * The `for` tasks around it, outermost first: each of its steps runs in
-   * the scope of an item of each (`task:<id>@<for>.<index>/…`). Empty for
-   * a task of the workflow's own list.
+   * The `for` and `fork` tasks around it, outermost first: each of its
+   * steps runs in the scope of an item, or a branch, of each
+   * (`task:<id>@<for>.<index>/<fork>.<branch>/…`). Empty for a task of the
+   * workflow's own list.
    */
   readonly scope: readonly string[];
+  /**
+   * Beside `scope`: for each `fork` around it, the branch it is in (the
+   * host runs its steps only in that branch), and null for each `for`.
+   */
+  readonly branches: readonly (number | null)[];
   /**
    * A `for` task's loop: its collection (`for.in`), which the host
    * resolves in its enter step; the slot of its items' keys
@@ -477,6 +523,12 @@ export interface GeneratedTask {
    * items' variables have; and the slot of its `while`, which each item's
    * `item` step evaluates.
    */
+  readonly fork?: {
+    /** How many branches it has, each a scope of its own. */
+    readonly branches: number;
+    /** Whether they race: the first that succeeds wins. */
+    readonly compete: boolean;
+  };
   readonly loop?: {
     readonly in: CallTemplate;
     readonly keys?: number;
@@ -545,7 +597,7 @@ const supportedRoot = new Set([
 ]);
 
 /** What `use` may hold: reusable timeouts and errors, which tasks name. */
-const supportedUse = new Set(["timeouts", "errors"]);
+const supportedUse = new Set(["timeouts", "errors", "retries"]);
 
 /** What a lowered task may hold besides its kind (`with`: a call's). */
 const supportedTaskKeys = new Set([
@@ -564,6 +616,7 @@ const loweredKinds = new Set<string>([
   "call",
   "do",
   "for",
+  "fork",
   "emit",
   "listen",
   "raise",
@@ -843,12 +896,19 @@ interface Emitter {
   readonly usedLabels: Set<string>;
   /** The caught errors in scope where the walk is, innermost last. */
   readonly caught: CaughtVariable[];
+  /** How many tries that retry hold the list the walk is in. */
+  retrying: number;
   /** Counts lists and tasks, for labels and variables of their own. */
   counter: number;
   /** The flow the code being written runs its tasks on: its variable. */
   flow: string;
   /** The `for` tasks around the code being written, outermost first. */
   scope: string[];
+  /**
+   * Beside `scope`, for each `fork` in it the branch the code being
+   * written is in, and null for each `for`.
+   */
+  branches: (number | null)[];
 }
 
 /**
@@ -1403,7 +1463,9 @@ const lowerDurable = (
   stages: Stages,
   place: ListPlace,
   body: (indent: string, entered: string) => void,
-  until = false
+  until = false,
+  /** Whether it enters whatever its stages: a try that retries does. */
+  alwaysEnter = false
 ): TaskStep[] => {
   const steps: TaskStep[] = [];
   const hasLeave = stages.leave.length > 0;
@@ -1411,7 +1473,7 @@ const lowerDurable = (
   // a leave step's `$task.startedAt` is the time its enter step recorded,
   // so a task with stages after its body always enters, with nothing to
   // evaluate if it has nothing before it.
-  const hasEnter = until || stages.enter.length > 0 || hasLeave;
+  const hasEnter = until || alwaysEnter || stages.enter.length > 0 || hasLeave;
   emitter.counter += 1;
   // Of this task alone: a nested task's are numbered after it.
   const raw = `raw${emitter.counter}`;
@@ -1455,7 +1517,7 @@ const lowerDurable = (
 /** What every task the generator seals has, whatever its kind. */
 type TaskBase = Pick<
   GeneratedTask,
-  "id" | "pointer" | "line" | "schemas" | "timeoutMs" | "scope"
+  "id" | "pointer" | "line" | "schemas" | "timeoutMs" | "scope" | "branches"
 >;
 
 /**
@@ -2023,10 +2085,123 @@ const matchableAttributes = new Set([
   "datacontenttype",
 ]);
 
+/** A correlation's `from` that reads one top-level attribute: `.subject`. */
+const attributeRead = /^\.(?<name>[a-z]+)$/u;
+
+/**
+ * The inbox attribute correlation `from` reads, if it reads exactly one
+ * the inbox keeps (`${ .subject }`): anything else reads an event's
+ * content, which the engine never evaluates.
+ */
+const correlatedAttribute = (
+  from: JsonValue | undefined
+): string | undefined => {
+  const slot = typeof from === "string" ? parseSlot(from) : undefined;
+  const name =
+    slot?.kind === "expression"
+      ? attributeRead.exec(slot.source)?.groups?.name
+      : undefined;
+  return name !== undefined && matchableAttributes.has(name) ? name : undefined;
+};
+
+/**
+ * The correlations of filter `filter` at `pointer`, each on an attribute
+ * the inbox keeps (`correlatedAttribute`), and the attributes its
+ * `expect`s require: `undefined`, each refused by its pointer, when one
+ * reads an event's content, or correlates on an attribute `taken` (its
+ * `with`, or another correlation) already names, which would ask the
+ * engine for two values of one attribute.
+ */
+const correlationsOf = (
+  emitter: Emitter,
+  item: ListTask,
+  filter: JsonObject,
+  pointer: string,
+  taken: Set<string>
+):
+  | {
+      correlate: GeneratedCorrelation[];
+      attributes: (readonly [string, CallTemplate])[];
+    }
+  | undefined => {
+  if (!Object.hasOwn(filter, "correlate")) {
+    return { correlate: [], attributes: [] };
+  }
+  const correlatePointer = pointerJoin(pointer, "correlate");
+  if (!isObject(filter.correlate)) {
+    throw new Error(`The checked workflow has no correlate at ${pointer}`);
+  }
+  const correlate: GeneratedCorrelation[] = [];
+  const attributes: (readonly [string, CallTemplate])[] = [];
+  let refused = false;
+  for (const [name, entry] of Object.entries(filter.correlate)) {
+    const entryPointer = pointerJoin(correlatePointer, name);
+    if (!isObject(entry)) {
+      throw new Error(
+        `The checked workflow has no correlation at ${entryPointer}`
+      );
+    }
+    const attribute = correlatedAttribute(entry.from);
+    if (attribute === undefined || taken.has(attribute)) {
+      emitter.refusals.add(
+        pointerJoin(entryPointer, "from"),
+        "listen:correlate",
+        item.id
+      );
+      refused = true;
+      continue;
+    }
+    taken.add(attribute);
+    correlate.push({ name, attribute });
+    if (Object.hasOwn(entry, "expect")) {
+      attributes.push([
+        attribute,
+        templateOf(
+          emitter,
+          entry.expect ?? null,
+          pointerJoin(entryPointer, "expect"),
+          item.id,
+          "json"
+        ),
+      ]);
+    }
+  }
+  return refused ? undefined : { correlate, attributes };
+};
+
+/**
+ * Refuses, by its listen's pointer, a correlation named by two filters of
+ * one listen when either lacks an `expect`: what the first of them takes
+ * would have to decide what the second matches (or pin the value the
+ * second expects), which the enter step resolves before either takes
+ * anything. Two filters that each `expect` a value under one name are fine.
+ */
+const unrecordedTwice = (
+  emitter: Emitter,
+  item: ListTask,
+  filters: readonly GeneratedFilter[],
+  pointer: string
+): boolean => {
+  const open = new Set<string>();
+  const pinned = new Set<string>();
+  for (const filter of filters) {
+    const expected = new Set(filter.attributes.map(([name]) => name));
+    for (const { name, attribute } of filter.correlate ?? []) {
+      const expects = expected.has(attribute);
+      if (open.has(name) || (!expects && pinned.has(name))) {
+        emitter.refusals.add(pointer, "listen:correlate", item.id);
+        return true;
+      }
+      (expects ? pinned : open).add(name);
+    }
+  }
+  return false;
+};
+
 /**
  * The filters of listen task `item`, sealed: `undefined` once one was
- * refused. A filter's `correlate` (an expression over each event's own
- * content) isn't lowered: a filter matches by attribute equality alone.
+ * refused. A filter matches by attribute equality alone, its correlations
+ * included (`correlationsOf`).
  */
 const filtersOf = (
   emitter: Emitter,
@@ -2053,15 +2228,6 @@ const filtersOf = (
         : pointerJoin(strategyPointer, index);
     if (!isObject(filter) || !isObject(filter.with)) {
       throw new Error(`The checked workflow has no filter at ${pointer}`);
-    }
-    if (Object.hasOwn(filter, "correlate")) {
-      emitter.refusals.add(
-        pointerJoin(pointer, "correlate"),
-        "listen:correlate",
-        item.id
-      );
-      refused = true;
-      continue;
     }
     const withPointer = pointerJoin(pointer, "with");
     const { type, ...rest } = filter.with;
@@ -2100,7 +2266,27 @@ const filtersOf = (
           ),
         ] as const
     );
-    filters.push({ type, attributes });
+    const correlated = correlationsOf(
+      emitter,
+      item,
+      filter,
+      pointer,
+      new Set(Object.keys(rest))
+    );
+    if (correlated === undefined) {
+      refused = true;
+      continue;
+    }
+    filters.push({
+      type,
+      attributes: [...attributes, ...correlated.attributes],
+      ...(correlated.correlate.length === 0
+        ? {}
+        : { correlate: correlated.correlate }),
+    });
+  }
+  if (!refused && unrecordedTwice(emitter, item, filters, strategyPointer)) {
+    return undefined;
   }
   return refused ? undefined : filters;
 };
@@ -2361,6 +2547,104 @@ const catchConditionOf = (
   return template.slot;
 };
 
+/** Reusable retry policy `name` of `use.retries`, as validation left it. */
+const reusableRetryOf = (
+  definition: JsonValue,
+  name: string
+): JsonObject | undefined => {
+  const use = isObject(definition) ? definition.use : undefined;
+  const retries = isObject(use) ? use.retries : undefined;
+  const policy =
+    isObject(retries) && Object.hasOwn(retries, name)
+      ? retries[name]
+      : undefined;
+  return isObject(policy) ? policy : undefined;
+};
+
+/** The milliseconds of a literal duration validation checked. */
+const durationMsOf = (value: JsonValue | undefined): number => {
+  const ms = literalDurationMs(value);
+  if (ms === undefined) {
+    throw new Error("The checked workflow has a retry of no duration");
+  }
+  return ms;
+};
+
+/**
+ * The slot of an inline retry policy's condition `key`, sealed as a host
+ * expression of the try's, with the error in scope; `undefined` without.
+ */
+const retryConditionOf = (
+  emitter: Emitter,
+  item: ListTask,
+  inline: JsonObject | undefined,
+  key: "when" | "exceptWhen"
+): number | undefined => {
+  if (inline === undefined || !Object.hasOwn(inline, key)) {
+    return undefined;
+  }
+  const catchPointer = pointerJoin(item.pointer, "catch");
+  const template = templateOf(
+    emitter,
+    inline[key] ?? null,
+    pointerJoin(pointerJoin(catchPointer, "retry"), key),
+    item.id,
+    "boolean"
+  );
+  if (!("slot" in template)) {
+    throw new Error(`The checked workflow's retry ${key} isn't an expression`);
+  }
+  return template.slot;
+};
+
+/**
+ * A catch's retry policy, sealed (`GeneratedRetry`): its own, or the one of
+ * `use.retries` it names; `undefined` when it doesn't retry. Upstream's
+ * defaults: a second's delay, constant backoff.
+ */
+const retryOf = (
+  emitter: Emitter,
+  item: ListTask,
+  handler: JsonObject
+): GeneratedRetry | undefined => {
+  const inline = isObject(handler.retry) ? handler.retry : undefined;
+  const policy =
+    typeof handler.retry === "string"
+      ? reusableRetryOf(emitter.checked.definition, handler.retry)
+      : inline;
+  if (policy === undefined) {
+    return undefined;
+  }
+  const limit = isObject(policy.limit) ? policy.limit : {};
+  const attempt = isObject(limit.attempt) ? limit.attempt : {};
+  const [backoff] = isObject(policy.backoff) ? Object.keys(policy.backoff) : [];
+  const jitter = isObject(policy.jitter) ? policy.jitter : undefined;
+  const when = retryConditionOf(emitter, item, inline, "when");
+  const exceptWhen = retryConditionOf(emitter, item, inline, "exceptWhen");
+  return Object.freeze({
+    attempts: typeof attempt.count === "number" ? attempt.count : 1,
+    delayMs: Object.hasOwn(policy, "delay") ? durationMsOf(policy.delay) : 1000,
+    backoff:
+      backoff === "linear" || backoff === "exponential" ? backoff : "constant",
+    ...(jitter === undefined
+      ? {}
+      : {
+          jitter: Object.freeze({
+            fromMs: durationMsOf(jitter.from),
+            toMs: durationMsOf(jitter.to),
+          }),
+        }),
+    ...(Object.hasOwn(limit, "duration")
+      ? { limitMs: durationMsOf(limit.duration) }
+      : {}),
+    ...(Object.hasOwn(attempt, "duration")
+      ? { attemptMs: durationMsOf(attempt.duration) }
+      : {}),
+    ...(when === undefined ? {} : { when }),
+    ...(exceptWhen === undefined ? {} : { exceptWhen }),
+  });
+};
+
 /**
  * The statements of a `try` task: its list in a JavaScript `try`, and,
  * on a failure, its catch step, in which the host decides whether its
@@ -2386,6 +2670,7 @@ const lowerTry = (
   emitter.caught.push({ variable, taskId: id });
   const when = catchConditionOf(emitter, item, handler, "when");
   const exceptWhen = catchConditionOf(emitter, item, handler, "exceptWhen");
+  const retry = retryOf(emitter, item, handler);
   emitter.caught.pop();
   const errors = errorFilterOf(handler);
   const steps: TaskStep[] = [];
@@ -2397,6 +2682,7 @@ const lowerTry = (
       ...(errors === undefined ? {} : { errors }),
       ...(when === undefined ? {} : { when }),
       ...(exceptWhen === undefined ? {} : { exceptWhen }),
+      ...(retry === undefined ? {} : { retry }),
     }),
     steps,
   });
@@ -2407,52 +2693,74 @@ const lowerTry = (
     emitter.lines.push(`${place.indent}let ${flag} = false;`);
   }
   steps.push(
-    ...lowerDurable(emitter, item, stages, place, (indent) => {
-      const tried = `tried${number}`;
-      const thrown = `thrown${number}`;
-      emitter.lines.push(`${indent}const ${tried} = output;`, `${indent}try {`);
-      emitter.counter += 1;
-      lowerList(
-        emitter,
-        Array.isArray(task.try) ? task.try : [],
-        pointerJoin(pointer, "try"),
-        `${indent}  `,
-        { label: `s${emitter.counter}`, number: emitter.counter }
-      );
-      emitter.lines.push(
-        `${indent}} catch (${thrown}) {`,
-        `${indent}  if (!(await ${emitter.flow}.catch(${literal(id)}, { input: ${tried}, context }))) {`,
-        `${indent}    throw ${thrown};`,
-        `${indent}  }`,
-        ...(flag === undefined ? [] : [`${indent}  ${flag} = true;`]),
-        `${indent}  output = ${tried};`
-      );
-      if (Array.isArray(handler.do)) {
-        emitter.caught.push({ variable, taskId: id });
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent) => {
+        const tried = `tried${number}`;
+        const thrown = `thrown${number}`;
+        emitter.lines.push(
+          `${indent}const ${tried} = output;`,
+          `${indent}try {`
+        );
         emitter.counter += 1;
+        const retries = retry === undefined ? 0 : 1;
+        emitter.retrying += retries;
         lowerList(
           emitter,
-          handler.do,
-          pointerJoin(pointerJoin(pointer, "catch"), "do"),
+          Array.isArray(task.try) ? task.try : [],
+          pointerJoin(pointer, "try"),
           `${indent}  `,
           { label: `s${emitter.counter}`, number: emitter.counter }
         );
-        emitter.caught.pop();
-      }
-      emitter.lines.push(`${indent}}`);
-    }),
+        emitter.retrying -= retries;
+        emitter.lines.push(
+          `${indent}} catch (${thrown}) {`,
+          `${indent}  if (!(await ${emitter.flow}.catch(${literal(id)}, { input: ${tried}, context }))) {`,
+          `${indent}    throw ${thrown};`,
+          `${indent}  }`,
+          ...(flag === undefined ? [] : [`${indent}  ${flag} = true;`]),
+          `${indent}  output = ${tried};`
+        );
+        if (Array.isArray(handler.do)) {
+          emitter.caught.push({ variable, taskId: id });
+          emitter.counter += 1;
+          lowerList(
+            emitter,
+            handler.do,
+            pointerJoin(pointerJoin(pointer, "catch"), "do"),
+            `${indent}  `,
+            { label: `s${emitter.counter}`, number: emitter.counter }
+          );
+          emitter.caught.pop();
+        }
+        emitter.lines.push(`${indent}}`);
+      },
+      false,
+      // The host decides a retry of a failed step in its list on the input
+      // of each try around it, as its catch sees it: the enter steps of a
+      // try that retries, and of every try inside one, record it.
+      retry !== undefined || emitter.retrying > 0
+    ),
     "catch"
   );
   return flag;
 };
 
-/** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
+/**
+ * Lowers a task list: `lowerList`, passed to the tasks it lowers. `first`
+ * is the index of `items`' first in the list at `pointer`: a fork's branch
+ * is its one task, of a list of them all.
+ */
 type ListLowerer = (
   emitter: Emitter,
   items: readonly JsonValue[],
   pointer: string,
   indent: string,
-  list: { label: string; number: number }
+  list: { label: string; number: number },
+  first?: number
 ) => void;
 
 /** Whether task `item` sleeps: a wait, or a `grasp.sleepUntil` call. */
@@ -2535,32 +2843,70 @@ const refusedLoop = (emitter: Emitter, item: ListTask): boolean => {
 };
 
 /**
- * Refuses what of a `try` or `raise` task `item` isn't lowered: a catch
- * that retries (GRA-278's next slice brings the durable timers it needs;
- * until then it is never run without them), and a raise's output or
- * export, as a raise never produces an output: nothing after its work
- * ever runs. Whether anything was.
+ * Refuses what of a `try` or `raise` task (of `kind`) isn't lowered: a
+ * reusable retry policy with conditions, a raise's output or export.
+ * Whether anything was.
  */
-const refusedFailureTask = (
+const refusedPartsOf = (
   emitter: Emitter,
   { id, task, pointer }: ListTask,
   kind: string
 ): boolean => {
   let refused = false;
+  // A reusable policy's conditions were compiled outside any catch, with
+  // no error in scope: only an inline policy's are lowered.
   const handler = kind === "try" && isObject(task.catch) ? task.catch : {};
-  if (Object.hasOwn(handler, "retry")) {
+  const reusable =
+    typeof handler.retry === "string"
+      ? reusableRetryOf(emitter.checked.definition, handler.retry)
+      : undefined;
+  if (
+    reusable !== undefined &&
+    (Object.hasOwn(reusable, "when") || Object.hasOwn(reusable, "exceptWhen"))
+  ) {
     emitter.refusals.add(
       pointerJoin(pointerJoin(pointer, "catch"), "retry"),
-      "catch.retry",
+      "use.retries:when",
       id
     );
     refused = true;
   }
+  // A raise never produces an output: nothing after its work ever runs.
   for (const key of ["output", "export"]) {
     if (kind === "raise" && Object.hasOwn(task, key)) {
       emitter.refusals.add(pointerJoin(pointer, key), `raise:${key}`, id);
       refused = true;
     }
+  }
+  return refused;
+};
+
+/**
+ * Refuses what of `fork` task `item` isn't lowered yet: branches at once
+ * (`metadata.grasp.concurrency` above 1, GRA-956) and forks nested past
+ * the scopes a step's name holds. Whether anything was.
+ */
+const refusedFork = (emitter: Emitter, item: ListTask): boolean => {
+  const grasp = graspMetadataOf(item.task);
+  let refused = false;
+  if (
+    grasp !== undefined &&
+    typeof grasp.concurrency === "number" &&
+    grasp.concurrency > 1
+  ) {
+    emitter.refusals.add(
+      pointerJoin(
+        pointerJoin(pointerJoin(item.pointer, "metadata"), "grasp"),
+        "concurrency"
+      ),
+      "fork:concurrency",
+      item.id
+    );
+    refused = true;
+  }
+  if (emitter.scope.length >= maxLoopDepth) {
+    emitter.refusals.add(item.pointer, "fork:depth", item.id);
+    refused = true;
   }
   return refused;
 };
@@ -2603,7 +2949,10 @@ const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
   if (kind === "for") {
     refused = refusedLoop(emitter, item) || refused;
   }
-  refused = refusedFailureTask(emitter, item, kind) || refused;
+  refused = refusedPartsOf(emitter, item, kind) || refused;
+  if (kind === "fork") {
+    refused = refusedFork(emitter, item) || refused;
+  }
   // A listen's timeout is its deadline: required, and what it waits until.
   const timed =
     (timedKinds.has(kind) && !sleepsOf(task, kind)) || kind === "listen";
@@ -2770,9 +3119,14 @@ const lowerFor = (
     `${indent}      let { output, context } = ${state};`,
     `${indent}      try {`
   );
-  const outer = { flow: emitter.flow, scope: emitter.scope };
+  const outer = {
+    flow: emitter.flow,
+    scope: emitter.scope,
+    branches: emitter.branches,
+  };
   emitter.flow = flow;
   emitter.scope = [...emitter.scope, id];
+  emitter.branches = [...emitter.branches, null];
   emitter.counter += 1;
   lowerList(
     emitter,
@@ -2783,6 +3137,7 @@ const lowerFor = (
   );
   emitter.flow = outer.flow;
   emitter.scope = outer.scope;
+  emitter.branches = outer.branches;
   emitter.lines.push(
     `${indent}      } finally {`,
     `${indent}        ${reached} = context;`,
@@ -2829,6 +3184,103 @@ const lowerOneStep = (
   } else {
     lowerCall(emitter, item, stages, place, sealed);
   }
+};
+
+/**
+ * The statements of a `fork` task: one call of the SDK's fork, with each
+ * branch a function of its own flow and data (its scope,
+ * `<fork>.<branch>`), the branch's task lowered in a block of its own that
+ * an `exit` leaves; an `end` in it ends the workflow (`end: true`, which
+ * the fork passes on). The SDK runs the branches one after another.
+ */
+const lowerFork = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase,
+  lowerList: ListLowerer
+): void => {
+  const { id, task, pointer } = item;
+  const fork = isObject(task.fork) ? task.fork : {};
+  const compete = fork.compete === true;
+  const branchesPointer = pointerJoin(pointerJoin(pointer, "fork"), "branches");
+  const branches = Array.isArray(fork.branches) ? fork.branches : [];
+  const steps: TaskStep[] = [];
+  // As a durable task's: a leave stage's `$task.startedAt` is the time the
+  // enter step recorded, before any branch waits, so a fork with stages
+  // after its branches always enters.
+  if (stages.enter.length > 0 || stages.leave.length > 0) {
+    steps.push("enter");
+  }
+  if (compete) {
+    steps.push("task");
+  }
+  if (stages.leave.length > 0) {
+    steps.push("leave");
+  }
+  const inputFrom = inputFromOf(emitter, item);
+  emitter.tasks.push({
+    ...sealed,
+    kind: "fork",
+    steps,
+    fork: { branches: branches.length, compete },
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+  });
+  emitter.counter += 1;
+  const forked = `forked${emitter.counter}`;
+  const { indent } = place;
+  const plan = planCode([
+    ...stages.enter,
+    ...stages.leave,
+    ...(compete ? ["compete: true"] : []),
+  ]);
+  emitter.lines.push(
+    `${indent}{`,
+    `${indent}  const ${forked} = await ${emitter.flow}.fork(${literal(id)}, { input: output, context }, ${plan}, [`
+  );
+  const outer = {
+    flow: emitter.flow,
+    scope: emitter.scope,
+    branches: emitter.branches,
+  };
+  emitter.scope = [...emitter.scope, id];
+  for (const [index, branchValue] of branches.entries()) {
+    emitter.branches = [...outer.branches, index];
+    emitter.counter += 1;
+    const number = emitter.counter;
+    const flow = `flow${number}`;
+    const state = `state${number}`;
+    emitter.flow = flow;
+    emitter.lines.push(
+      `${indent}    async (${flow}, ${state}) => {`,
+      `${indent}      let { output, context } = ${state};`
+    );
+    // A branch is a list of its one task, whose `exit` leaves it.
+    lowerList(
+      emitter,
+      [branchValue],
+      branchesPointer,
+      `${indent}      `,
+      { label: `s${number}`, number },
+      index
+    );
+    emitter.lines.push(
+      `${indent}      return { output, context };`,
+      `${indent}    },`
+    );
+  }
+  emitter.flow = outer.flow;
+  emitter.scope = outer.scope;
+  emitter.branches = outer.branches;
+  emitter.lines.push(
+    `${indent}  ]);`,
+    `${indent}  ({ output, context } = ${forked});`,
+    `${indent}  if (${forked}.end) {`,
+    `${indent}    ${endJump(emitter)}`,
+    `${indent}  }`,
+    `${indent}}`
+  );
 };
 
 /**
@@ -2912,6 +3364,7 @@ const lowerTask = (
     line,
     schemas: Object.freeze({ ...stages.schemas }),
     scope: Object.freeze([...emitter.scope]),
+    branches: Object.freeze([...emitter.branches]),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
   let caughtFlag: string | undefined;
@@ -2936,6 +3389,8 @@ const lowerTask = (
     lowerListen(emitter, item, stages, place, sealed, before);
   } else if (kind === "run") {
     lowerRun(emitter, item, stages, place, sealed, before);
+  } else if (kind === "fork") {
+    lowerFork(emitter, item, stages, place, sealed, lowerList);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
@@ -2976,10 +3431,11 @@ const lowerList: ListLowerer = (
   items,
   pointer,
   indent,
-  { label, number }
+  { label, number },
+  first = 0
 ) => {
   const tasks: ListTask[] = items.map((item, index) => {
-    const itemPointer = pointerJoin(pointer, index);
+    const itemPointer = pointerJoin(pointer, first + index);
     const entry = isObject(item) ? onlyEntry(item) : undefined;
     if (entry === undefined || !isObject(entry[1])) {
       throw new Error(`The checked workflow has no task at ${itemPointer}`);
@@ -3151,9 +3607,11 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     spans: [],
     usedLabels: new Set(),
     caught: [],
+    retrying: 0,
     counter: 0,
     flow: "flow",
     scope: [],
+    branches: [],
   };
   emitter.lines.push(
     "// Generated by Grasp from workflow.json: read-only, rebuilt from it.",

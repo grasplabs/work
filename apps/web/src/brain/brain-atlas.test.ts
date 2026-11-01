@@ -1,12 +1,22 @@
+import type { Workspace } from "@grasp-os/shared/brain";
 import { describe, expect, it } from "vite-plus/test";
 
-import { atlasOf, REGION_IDS, signalPaths, storyOf } from "./brain-atlas.ts";
+import {
+  atlasOf,
+  groupsOf,
+  LOBES,
+  REGION_IDS,
+  signalPaths,
+  storyOf,
+  TEAM_FOLDER,
+} from "./brain-atlas.ts";
 import type { AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { buildBrain } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
 
 // The prototype's tests of the atlas, on the brain's test company: the
-// same assertions, with its counts where the company differs.
+// board in front, the company's groups of teams in the lobes, what came
+// in at the stem.
 
 describe(atlasOf, () => {
   const ws = testWorkspace();
@@ -20,102 +30,121 @@ describe(atlasOf, () => {
     return found;
   };
 
-  it("gives every note but the company one region, the part of the navigation its kind belongs to", () => {
-    expect(atlas.home.has("company")).toBeFalsy();
-    expect(
-      brain.notes.filter((note) => {
-        const home = atlas.home.get(note.id);
-        return (
-          note.id !== "company" &&
-          (home === undefined || !REGION_IDS.includes(home))
-        );
-      })
-    ).toStrictEqual([]);
-    expect(
-      Object.fromEntries(
+  it("puts the board in front, each of the company's groups of teams in a lobe with its work, and what came in at the stem", () => {
+    expect({
+      homes: Object.fromEntries(
         [
           "vision",
           "goal-answer",
-          "app-chatgpt",
           "src-vision",
-          "src-pulse",
-          "src-directory",
           "sources-conversations",
-          "gap-budget",
+          "team-service",
+          "email-triage",
+          "team-finance",
+          "team-revenue",
         ].map((id) => [id, atlas.home.get(id)])
-      )
-    ).toStrictEqual({
-      vision: "vision",
-      "goal-answer": "vision",
-      "app-chatgpt": "tools",
-      "src-vision": "sources",
-      "src-pulse": "sources",
-      "src-directory": "sources",
-      "sources-conversations": "sources",
-      "gap-budget": "gaps",
+      ),
+      names: LOBES.map((id) => region(id).name),
+      does: region("parietal").does,
+      // A team's work sits in the team's own folder.
+      teamPath: region("parietal").notes.find(
+        (note) => note.id === "team-service"
+      )?.path,
+      // Systems and questions have no region of their own: they sit beside the work.
+      unplaced: ["company", "gap-budget"].filter((id) => atlas.home.has(id)),
+    }).toStrictEqual({
+      homes: {
+        vision: "frontal",
+        "goal-answer": "frontal",
+        "src-vision": "stem",
+        "sources-conversations": "stem",
+        "team-service": "parietal",
+        "email-triage": undefined,
+        "team-finance": "occipital",
+        // In no group the company keeps: one of its own, as Grasp would propose it.
+        "team-revenue": "cerebellum",
+      },
+      names: ["Front office", "Back office", "Revenue", ""],
+      does: "Customer service, Mortgage advice, and Client onboarding",
+      teamPath: [TEAM_FOLDER, "team-service"],
+      unplaced: [],
     });
-    expect(REGION_IDS).toStrictEqual(
-      expect.arrayContaining([
-        "vision",
-        "teams",
-        "workflows",
-        "tools",
-        "gaps",
-        "sources",
-      ])
+    const work = region("parietal").notes.filter(
+      (note) => note.kind === "candidate"
     );
-    const counted = atlas.regions.reduce(
-      (sum, each) => sum + each.notes.length,
-      0
-    );
-    expect(counted).toBe(brain.notes.length - 1);
+    expect(work.length).toBeGreaterThan(0);
+    expect(work.every((note) => note.path[0] === TEAM_FOLDER)).toBeTruthy();
+  });
+
+  it("proposes a group for every team the company placed in none, and holds the rest in the last lobe when there are more than four", () => {
+    const none: Workspace = { ...ws, teamGroups: [] };
+    const proposed = groupsOf(none);
+    const partly: Workspace = {
+      ...ws,
+      teamGroups: [
+        {
+          id: "g",
+          name: "Front office",
+          teamIds: ["team-service", "team-gone"],
+          confirmed: true,
+        },
+      ],
+    };
+    expect({
+      lobes: proposed.length,
+      confirmed: proposed.some((group) => group.confirmed),
+      teams: proposed.flatMap((group) => group.teamIds).toSorted(),
+      lastHoldsMore: (proposed.at(-1)?.teamIds.length ?? 0) > 1,
+      partly: groupsOf(partly)[0],
+    }).toStrictEqual({
+      lobes: LOBES.length,
+      confirmed: false,
+      teams: ws.teams.map((team) => team.id).toSorted(),
+      lastHoldsMore: true,
+      partly: {
+        id: "g",
+        name: "Front office",
+        teamIds: ["team-service"],
+        confirmed: true,
+      },
+    });
   });
 
   it("shows only open questions someone can answer, beside every note each is about", () => {
     const open = new Set(atlas.open.map((item) => item.id));
-    // The board's budget question is the gap already, so it is not asked twice.
-    expect({
-      budget: open.has("gap-budget"),
-      answered: open.has("gap-invoice-limit"),
-      askedTwice: open.has("vision:budget"),
-    }).toStrictEqual({ budget: true, answered: false, askedTwice: false });
-    // A gap shows among the gaps, beside what it is about (a team and a workflow), and with the source it was noticed in.
     const complaints = atlas.open.find(
       (item) => item.id === "gap-complaints-volume"
     );
-    expect(complaints?.regions).toStrictEqual([
-      "gaps",
-      "teams",
-      "workflows",
-      "sources",
-    ]);
-    expect(complaints?.who).toBe("Head of compliance");
     expect({
-      vision: region("vision").open.length,
-      teams: region("teams").open.length,
-      tools: region("tools").open.length,
-      workflows: region("workflows").open.length,
-    }).toStrictEqual({ vision: 1, teams: 1, tools: 2, workflows: 1 });
-    expect(region("gaps").open.map((item) => item.id)).toStrictEqual(
-      atlas.open
-        .filter((item) => item.id.startsWith("gap-"))
-        .map((item) => item.id)
-    );
+      budget: open.has("gap-budget"),
+      answered: open.has("gap-invoice-limit"),
+      // The board's budget question is the gap already, so it is not asked twice.
+      askedTwice: open.has("vision:budget"),
+      // Beside the team it is about, and with the source it was noticed in.
+      complaints: complaints?.regions,
+      who: complaints?.who,
+    }).toStrictEqual({
+      budget: true,
+      answered: false,
+      askedTwice: false,
+      complaints: ["occipital", "stem"],
+      who: "Head of compliance",
+    });
   });
 
   it("counts as waiting only what the note itself says is not there yet", () => {
-    expect(region("tools").waiting).toContain("app-chatgpt");
-    expect(
-      region("tools").waiting.every(
-        (id) =>
-          id.startsWith("app-") ||
-          brain.notes
-            .find((note) => note.id === id)
-            ?.tags.includes("reported") === true
-      )
-    ).toBeTruthy();
-    expect(region("teams").waiting).toStrictEqual([]);
-    expect(region("tools").waitingLabel).toContain("14");
+    for (const each of atlas.regions) {
+      expect(
+        each.waiting.every(
+          (id) =>
+            brain.notes
+              .find((note) => note.id === id)
+              ?.tags.some((tag) =>
+                ["not-interviewed", "never-mentioned", "reported"].includes(tag)
+              ) === true
+        )
+      ).toBeTruthy();
+    }
   });
 
   const between = (a: RegionId, b: RegionId) =>
@@ -125,73 +154,49 @@ describe(atlasOf, () => {
         (atlas.home.get(from) === b && atlas.home.get(to) === a)
     ).length;
 
-  it("counts the links between regions from the brain’s own edges", () => {
-    expect(region("teams").links.sources).toBe(between("teams", "sources"));
-    expect(region("tools").links.workflows).toBe(between("tools", "workflows"));
-    expect(region("teams").links.teams).toBeUndefined();
+  it("counts the links between regions from the brain's own edges", () => {
+    expect(region("parietal").links.stem).toBe(between("parietal", "stem"));
+    expect(region("parietal").links.occipital ?? 0).toBe(
+      between("parietal", "occipital")
+    );
+    expect(region("parietal").links.parietal).toBeUndefined();
   });
 });
 
 describe(storyOf, () => {
   const ws = testWorkspace();
-  const atlas = atlasOf(ws, buildBrain(ws));
+  const brain = buildBrain(ws);
+  const atlas = atlasOf(ws, brain);
 
-  it("tells every region in a few lines, each lighting up notes of the brain", () => {
-    for (const id of REGION_IDS) {
+  it("tells every region with teams in a few lines, each lighting up notes of the brain, ending with what is open", () => {
+    const known = new Set(brain.notes.map((note) => note.id));
+    for (const id of REGION_IDS.filter((each) => each !== "temporal")) {
       const lines = storyOf(id, atlas, ws);
-      expect(lines.length).toBeGreaterThanOrEqual(2);
+      expect(lines.length).toBeGreaterThanOrEqual(1);
       for (const line of lines) {
         expect(line.text.length).toBeGreaterThan(0);
         expect(line.notes.length).toBeGreaterThan(0);
-        for (const note of line.notes) {
-          expect(atlas.home.has(note) || note === "vision").toBeTruthy();
-        }
+        expect(line.notes.every((note) => known.has(note))).toBeTruthy();
       }
     }
-  });
-
-  it("ends a region's story with what is open, after the facts found in the records", () => {
-    const teams = storyOf("teams", atlas, ws).map((line) => line.text);
-    expect(teams.at(-1)).toMatch(/^Still open: /u);
-    expect(
-      teams.some((text) => text.includes("both name the same handover"))
-    ).toBeTruthy();
-  });
-
-  it("runs each statement from the source that heard it to what it is about", () => {
-    const paths = signalPaths(ws, atlas);
-    expect(paths.length).toBeGreaterThan(20);
-    expect(
-      paths.every(
-        (path) =>
-          (path[0] === "sources" || path[0] === "gaps") && path.length >= 2
-      )
-    ).toBeTruthy();
-    expect(
-      paths.some((path) => path.includes("teams") && path.includes("workflows"))
-    ).toBeTruthy();
-  });
-
-  it("runs what is still unknown from the gaps to each region they are about", () => {
-    // The gaps go to each region they are about.
-    const wired = signalPaths(ws, atlas).filter((path) => path[0] === "gaps");
-    const gapLinks =
-      atlas.regions.find((region) => region.id === "gaps")?.links ?? {};
-    expect(wired.length).toBeGreaterThan(0);
-    expect(
-      wired.every((path) => {
-        const [, to] = path;
-        return path.length === 2 && to !== undefined && (gapLinks[to] ?? 0) > 0;
-      })
-    ).toBeTruthy();
-    expect(wired.map((path) => path[1])).toStrictEqual(
-      expect.arrayContaining(["teams", "tools"])
+    const front = storyOf("parietal", atlas, ws).map((line) => line.text);
+    expect(front[0]).toMatch(
+      /^Customer service, Mortgage advice, and Client onboarding work here, on \d+ pieces? of work/u
     );
+    expect(front.at(-1)).toMatch(/^Still open: /u);
+  });
+
+  it("runs each statement from the source that heard it, up the spine, to the teams and the work it is about", () => {
+    const paths = signalPaths(ws, atlas);
+    expect(paths.length).toBeGreaterThan(10);
+    expect(
+      paths.every((path) => path[0] === "stem" && path.length >= 2)
+    ).toBeTruthy();
   });
 
   it("tells the same story every time", () => {
-    expect(storyOf("tools", atlas, ws)).toStrictEqual(
-      storyOf("tools", atlas, ws)
+    expect(storyOf("parietal", atlas, ws)).toStrictEqual(
+      storyOf("parietal", atlas, ws)
     );
   });
 });

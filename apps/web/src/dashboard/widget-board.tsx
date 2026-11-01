@@ -5,7 +5,7 @@ import type {
   StandardWidgetId,
 } from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
-import type { CustomWidget } from "@grasp-os/shared/widgets";
+import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
 import type {
   AppWorkflowSummary as WorkflowSummary,
   RunActivity,
@@ -18,6 +18,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Tooltip,
   TooltipContent,
@@ -29,7 +30,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
@@ -40,7 +41,6 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
-import { CustomWidgetBlock } from "./custom-widget.tsx";
 import {
   addWidget,
   differsFromDefault,
@@ -71,6 +71,14 @@ import {
   WidgetLoading,
   useFull,
 } from "./widget-block.tsx";
+import { WidgetProgressLine } from "./widget-progress.tsx";
+
+// A widget Grasp made draws its charts with Recharts, which loads only on a
+// board that has one.
+const CustomWidgetBlock = lazy(async () => {
+  const { CustomWidgetBlock: block } = await import("./custom-widget.tsx");
+  return { default: block };
+});
 
 // The dashboard's widget board, under what waits on the person, as the
 // prototype's (`components/dashboard/widget-board.tsx`, `widget-add.tsx`,
@@ -250,9 +258,7 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                 ))}
               </ul>
               <span className="flex w-full flex-col items-center border-t pt-2 text-center">
-                <span className="text-2xl font-medium tabular-nums">
-                  {here.length}
-                </span>
+                <Stat>{here.length}</Stat>
                 <span
                   className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs wrap-anywhere hyphens-auto"
                   lang={i18n.locale}
@@ -606,7 +612,11 @@ const BoardWidget = ({
   }
   const widget = made.get(id);
   if (widget !== undefined) {
-    return <CustomWidgetBlock widget={widget} />;
+    return (
+      <Suspense fallback={<WidgetLoading title={widget.view.title} />}>
+        <CustomWidgetBlock widget={widget} />
+      </Suspense>
+    );
   }
   return board.made.state === "ready" ? null : (
     <NotRead loaded={board.made} title={title} />
@@ -737,8 +747,10 @@ const AddTile = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
-  // Drawn in dots while Grasp makes the widget, in the place it takes.
+  // Drawn in dots while Grasp makes the widget, in the place it takes,
+  // with how it goes.
   const [making, setMaking] = useState(false);
+  const [progress, setProgress] = useState<WidgetProgress | null>(null);
   const back: readonly DashboardWidgetId[] = [
     ...missing,
     ...takenOff.map(({ id }) => id),
@@ -746,7 +758,12 @@ const AddTile = ({
   return (
     <div className="relative h-80 min-w-0">
       <div aria-busy={making} className="relative h-full">
-        {making ? <MakingDots /> : null}
+        {making ? (
+          <>
+            <MakingDots />
+            <WidgetProgressLine progress={progress} />
+          </>
+        ) : null}
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger
             render={
@@ -764,8 +781,8 @@ const AddTile = ({
               </PopoverTitle>
             </PopoverHeader>
             <WidgetAsk
-              ask={async (session, asked) =>
-                await session.dashboard.makeWidget(asked)
+              ask={async (session, asked, told) =>
+                await session.dashboard.makeWidget(asked, told)
               }
               label={t`Ask Grasp for a widget`}
               onBusy={setMaking}
@@ -773,6 +790,7 @@ const AddTile = ({
                 setOpen(false);
               }}
               onMade={onMade}
+              onProgress={setProgress}
               placeholder={t`Which workflows failed most this month?`}
             />
             {back.length === 0 ? null : (
@@ -875,6 +893,9 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const [announcement, setAnnouncement] = useState("");
   // The widget Grasp is changing now, drawn in dots meanwhile.
   const [changing, setChanging] = useState<DashboardWidgetId | null>(null);
+  const [changeProgress, setChangeProgress] = useState<WidgetProgress | null>(
+    null
+  );
   const [dragged, setDragged] = useState<DashboardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
@@ -1143,7 +1164,12 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                   dragging && "scale-102 shadow-lg"
                 )}
               >
-                {changing === id ? <MakingDots /> : null}
+                {changing === id ? (
+                  <>
+                    <MakingDots />
+                    <WidgetProgressLine progress={changeProgress} />
+                  </>
+                ) : null}
                 <WidgetControls
                   value={{
                     movable: true,
@@ -1162,6 +1188,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                               setChanging(busy ? id : null);
                             }}
                             onChanged={changedOne}
+                            onProgress={setChangeProgress}
                             widget={changeable}
                           />
                         )}

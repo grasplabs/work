@@ -1,4 +1,4 @@
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { setSignIn } from "../src/clients/settings.ts";
@@ -9,8 +9,9 @@ import {
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
+import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
-import { accessJwt, mockAccess } from "./access.ts";
+import { mockAccess } from "./access.ts";
 import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { adminOf } from "./secrets-store-admin.ts";
@@ -30,8 +31,6 @@ const recordClient = async (
   pinnedReleaseId: string | null = null
 ) => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const accountId =
-    status === "active" ? crypto.randomUUID().replaceAll("-", "") : null;
   const now = new Date();
   await act(
     db,
@@ -40,7 +39,6 @@ const recordClient = async (
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        accountId,
         ring: 3,
         status,
         pinnedReleaseId,
@@ -51,7 +49,7 @@ const recordClient = async (
     ],
     { action: "client.create", clientId: id }
   );
-  return { id, accountId };
+  return { id };
 };
 
 /** A release, published and imported. */
@@ -67,18 +65,6 @@ const setupOf = async (clientId: string, tab?: string) =>
     `/organizations/${clientId}/setup${tab === undefined ? "" : `?tab=${tab}`}`
   );
 
-/** Where the admin sends a staff member's page load of `url`, and how. */
-const movedFrom = async (url: string) => {
-  const response = await exports.default.fetch(url, {
-    headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) },
-    redirect: "manual",
-  });
-  return {
-    status: response.status,
-    location: response.headers.get("location"),
-  };
-};
-
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
   const at = html.indexOf(`aria-label="${title}"`);
@@ -86,36 +72,6 @@ const sectionOf = (html: string, title: string): string => {
 };
 
 describe("the company pages, in the admin", () => {
-  it("moves old addresses to where their page is now for good, keeping what the address asked", async () => {
-    const moves = await Promise.all(
-      [
-        "https://ops.grasp.test/admin?phase=open",
-        "https://ops.grasp.test/clients/new?from=grid",
-        "https://ops.grasp.test/clients/acme?tab=settings",
-      ].map(movedFrom)
-    );
-
-    expect(
-      moves.map(({ status, location }) => ({
-        status,
-        to: location === null ? null : new URL(location, "https://x.test"),
-      }))
-    ).toMatchObject([
-      { status: 301, to: { pathname: "/", search: "?phase=open" } },
-      {
-        status: 301,
-        to: { pathname: "/new-organization", search: "?from=grid" },
-      },
-      {
-        status: 301,
-        to: {
-          pathname: "/organizations/acme/setup",
-          search: "?tab=settings",
-        },
-      },
-    ]);
-  });
-
   it("lists every organization with its own platform still to read from its account, and a way to add one", async () => {
     const live = await recordClient("active");
 
@@ -137,30 +93,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("asks who an organization is, its sign-in and its ring on adding it, and no account to adopt or release", async () => {
-    const { status, html } = await page("/new-organization");
-
-    expect({
-      status,
-      form: html.includes('name="clientId"') && html.includes('name="ring"'),
-      account: html.includes('name="accountId"'),
-      release: html.includes('name="releaseId"'),
-      signIn: [
-        'name="entraTenantId"',
-        'name="googleHostedDomain"',
-        'name="domains"',
-        'name="admins"',
-      ].every((field) => html.includes(field)),
-    }).toStrictEqual({
-      status: 200,
-      form: true,
-      account: false,
-      release: false,
-      signIn: true,
-    });
-  });
-
-  it("shows a company just added its Hosting, to place and provision on an imported release", async () => {
+  it("shows a company just added its setting up step by step, and its Hosting folded away with nothing to choose", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
@@ -169,20 +102,28 @@ describe("the company pages, in the admin", () => {
 
     expect({
       status,
+      steps: [
+        `Reserving ${client.id}.grasp.test`,
+        "Installing Grasp",
+        "Inviting admins",
+      ].every((line) => html.includes(line)),
+      folded: hosting.includes("Show hosting details"),
       place: hosting.includes("Place and start provisioning"),
       release: hosting.includes('id="hosting-release"'),
+      where: hosting.includes("Grasp Cloud, data kept in the EU"),
       account: html.includes("Account id"),
-      hostname: html.includes(`${client.id}.grasp.test`),
     }).toStrictEqual({
       status: 200,
-      place: true,
-      release: true,
+      steps: true,
+      folded: true,
+      place: false,
+      release: false,
+      where: true,
       account: false,
-      hostname: true,
     });
   });
 
-  it("says where a company's provisioning stopped and why, for staff to start it again from Hosting", async () => {
+  it("says a stopped provisioning is being tried again, and that it needs a look once Grasp gives up, with why and Retry now", async () => {
     const releaseId = await importedRelease("feat(core): stops");
     const client = await recordClient();
     const now = new Date();
@@ -198,13 +139,28 @@ describe("the company pages, in the admin", () => {
       updatedAt: now,
     });
 
+    const retrying = await setupOf(client.id);
+    // Grasp's automatic retries give up: a person is asked to look.
+    await markNeedsAttention(db, client.id, await episodeOf(db, client.id), {
+      reason: "needs_person",
+      code: "probe_unanswered",
+    });
     const { html } = await setupOf(client.id);
 
     expect({
-      stopped: html.includes("Setting it up stopped at its resources step"),
+      retrying: [
+        retrying.html.includes("Trying again"),
+        retrying.html.includes("Setting it up needs a look"),
+      ],
+      stopped: html.includes("Setting it up needs a look"),
       code: html.includes("probe_unanswered"),
-      resume: sectionOf(html, "Hosting").includes("Resume provisioning"),
-    }).toStrictEqual({ stopped: true, code: true, resume: true });
+      resume: sectionOf(html, "Hosting").includes("Retry now"),
+    }).toStrictEqual({
+      retrying: [true, false],
+      stopped: true,
+      code: true,
+      resume: true,
+    });
   });
 
   it("shows an active company nothing left to set up, and reads its account's numbers once the page shows", async () => {
@@ -247,11 +203,11 @@ describe("the company pages, in the admin", () => {
 
     const releases = await setupOf(client.id, "releases");
     const settings = await setupOf(client.id, "settings");
-    const deploys = await setupOf(client.id, "deploys");
-    const history = sectionOf(deploys.html, "Its history");
+    const historyTab = await setupOf(client.id, "history");
+    const history = sectionOf(historyTab.html, "Its history");
 
     expect({
-      statuses: [releases.status, settings.status, deploys.status],
+      statuses: [releases.status, settings.status, historyTab.status],
       ring:
         releases.html.includes('name="ring"') &&
         releases.html.includes('value="3"'),

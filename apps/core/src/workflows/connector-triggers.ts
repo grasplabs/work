@@ -101,7 +101,8 @@ import { triggeredRunsPerHour } from "./runs.ts";
 //   clock past `holdsKeptMs`.
 // - An event dropped silently. A trigger that refuses it for good (its
 //   grant to start revoked, its person gone, an input its workflow doesn't
-//   take, its lineage full, an App run's mail) is audited
+//   take, its lineage full, an App run's mail, its workflow paused: what
+//   happens while it is paused never starts it later) is audited
 //   (`workflow.event.refused`) and the event settled for it; anything
 //   else fails the delivery, so connect delivers it again, until held
 //   back too long, audited as dropped.
@@ -121,6 +122,7 @@ const refusedForGood: ReadonlySet<string> = new Set([
   "workflow.start_invalid",
   "workflow.packages_revoked",
   "workflow.lineage_limit",
+  "workflow.paused",
 ]);
 
 /** How long an event a trigger holds back at its hourly limit waits before it is dropped. */

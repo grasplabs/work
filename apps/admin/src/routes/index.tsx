@@ -30,8 +30,12 @@ import {
 import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { ReadinessBanner } from "../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../admin/readiness.ts";
+import { Section } from "../admin/section.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
@@ -46,7 +50,6 @@ import {
   whole,
 } from "../admin/words.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
-import { usd } from "../clients/cost.tsx";
 import { fetchGridLive } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { ClientDriftState } from "../rollout/drift.ts";
@@ -117,26 +120,10 @@ const driftWords: Record<ClientDriftState, string> = {
   unknown: "drift not known",
 };
 
-const percent = new Intl.NumberFormat("en", {
-  style: "percent",
-  maximumFractionDigits: 1,
-});
-
-/** Its last day's errors, in a few words; null when not known. */
-const errorsOf = (day: LiveStatus["day"]): string | null => {
-  if (day === null) {
-    return null;
-  }
-  return day.requests === 0
-    ? "no requests"
-    : `${percent.format(day.errors / day.requests)} errors`;
-};
-
 /**
  * A company's own platform as its account shows it now, as the admin's
  * list of clients had it: whether the router reaches it and whether it
- * drifted, then its cost this month, its last day's errors and whether
- * it runs the shared secrets. A dash for one that isn't live.
+ * drifted, then whether it runs the shared secrets. A dash for one that isn't live.
  */
 const PlatformCell = ({ live, id }: { live: Live; id: string }) => {
   if (live === null) {
@@ -153,21 +140,15 @@ const PlatformCell = ({ live, id }: { live: Live; id: string }) => {
     own.drift === "split" ||
     own.drift === "off_pin" ||
     own.sharedSecretsCurrent === false;
-  const cost =
-    own.costUsd === null
-      ? null
-      : `${usd.format(own.costUsd.workers + own.costUsd.ai)} this month`;
   const secrets = own.sharedSecretsCurrent === false ? "secrets behind" : null;
   return (
     <span className="flex flex-col">
       <span className={cn(attention && "text-status-attention")}>
         {`${reachWords[own.reach]}, ${driftWords[own.drift]}`}
       </span>
-      <span className="text-muted-foreground text-xs">
-        {[cost, errorsOf(own.day), secrets]
-          .filter((part) => part !== null)
-          .join(" · ")}
-      </span>
+      {secrets === null ? null : (
+        <span className="text-muted-foreground text-xs">{secrets}</span>
+      )}
     </span>
   );
 };
@@ -516,13 +497,10 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
   }
   const more = waiting.length - todayItems;
   return (
-    <section className="bg-card overflow-hidden rounded-xl border text-sm">
-      <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">Needs Grasp today</h2>
-        <p className="text-muted-foreground">
-          At every organization, the most pressing first.
-        </p>
-      </div>
+    <Section
+      title="Needs Grasp today"
+      description="At every organization, the most pressing first."
+    >
       <ul className="flex flex-col">
         {waiting.slice(0, todayItems).map(({ id, name, text }, index) => (
           <li
@@ -562,7 +540,7 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
             : `${more} more, on the organizations’ own overviews.`}
         </p>
       ) : null}
-    </section>
+    </Section>
   );
 };
 
@@ -584,6 +562,7 @@ const Overview = () => {
   const navigate = useNavigate();
   const { phase } = Route.useSearch();
   const organizations = organizationsOf(adminRoute.useLoaderData().admins);
+  const readiness = Route.useLoaderData();
   const live = useLive();
   const views = organizations.flatMap(({ view }) =>
     view === null ? [] : [view]
@@ -606,6 +585,7 @@ const Overview = () => {
       overview
       title="Organizations"
     >
+      <ReadinessBanner readiness={readiness} />
       <Portfolio unread={organizations.length - views.length} views={views} />
       <NeedsToday organizations={organizations} />
       {/* The organizations by phase: where each is, from the first conversation until it works in Grasp. */}
@@ -692,5 +672,7 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: async () => await fetchReadiness(),
   component: Overview,
+  pendingComponent: PageLoading,
 });

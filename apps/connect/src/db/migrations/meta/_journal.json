@@ -141,6 +141,34 @@
       "when": 1792847929379,
       "tag": "0019_held_action_ends",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793217487078,
+      "tag": "0020_erased_people",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1793228066253,
+      "tag": "0021_token_revocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1793311067477,
+      "tag": "0022_ai_provider_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793454413780,
+      "tag": "0023_delete_landscape_connections",
+      "breakpoints": true
     }
   ]
 }

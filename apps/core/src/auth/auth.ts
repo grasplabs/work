@@ -5,6 +5,7 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
+import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
 import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
@@ -23,6 +24,7 @@ import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -178,19 +180,24 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
 )`;
 
+/** `members`, as `activeMember` reads it: apart from any caller's. */
+const activeMembership = alias(members, "active_membership");
+
 /**
  * That `userId` (an ID, or a column holding one) is an active member of
  * the organization now, with one of `roles` if given, as a SQL condition.
+ * Its own read of `members` is aliased: a caller's column of `members`
+ * (a query on members itself) is that caller's row, never this read's.
  */
 export const activeMember = (
   userId: string | SQLiteColumn,
   withRoles?: readonly string[]
 ): SQL => sql`EXISTS (
-  SELECT 1 FROM ${members}
-  WHERE ${members.organizationId} = ${organizationId}
-    AND ${members.userId} = ${userId}
-    ${withRoles === undefined ? sql`` : sql`AND ${inList(members.role, withRoles)}`}
-    AND ${notRemoved(userId)}
+  SELECT 1 FROM ${members} AS ${activeMembership}
+  WHERE ${activeMembership.organizationId} = ${organizationId}
+    AND ${activeMembership.userId} = ${userId}
+    ${withRoles === undefined ? sql`` : sql`AND ${inList(activeMembership.role, withRoles)}`}
+    AND ${notRemoved(activeMembership.userId)}
 )`;
 
 /**
@@ -928,7 +935,9 @@ const createAuth = (
         creatorRole: "admin",
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
-        teams: { enabled: true },
+        // An organization may have no teams at all: an admin deletes
+        // the last one as any other (Settings › Members).
+        teams: { enabled: true, allowRemovingAllTeams: true },
         // Leaving a team, or the team's deletion, can take a role in each
         // App shared with it away: their hosts tell the open screens to
         // look again (access-revocations.ts).
@@ -965,6 +974,17 @@ const createAuth = (
           },
         })),
         providersLimit: 0,
+        // In relay mode every IdP sends people back to the OAuth relay,
+        // which sends them on to this deployment's
+        // `/sso/callback/<provider>`, the one the signed state names
+        // (@grasp-os/shared/oauth-relay, routes.ts); the code is
+        // exchanged with this same redirect URI, the one it was given
+        // for. Otherwise IdPs send people straight to that callback.
+        ...(config.callbackOrigin === undefined
+          ? {}
+          : {
+              redirectURI: relayRedirectUri(config.callbackOrigin, "sign-in"),
+            }),
       }),
       // Signs App tokens (app-tokens.ts) with its own keys, and nothing
       // else: its `/token` and `/jwks` routes are off (routes.ts), and it

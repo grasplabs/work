@@ -6,33 +6,28 @@
 // binds, with `props: { script }` the admin sets from the client's
 // inventory as it uploads core. The gateway forwards every method core
 // calls to that script alone. Account-per-client deployments and on-prem
-// keep their direct `CONNECT` service binding. The gateway reaches the
-// clients' dispatch namespace alone, the one the router binds
-// (`clientDispatchNamespace`, ./router.ts).
-
-/** The gateway Worker's script name, in the account the namespace is in. */
-export const connectGatewayScript = "grasp-os-connect-gateway";
+// keep their direct `CONNECT` service binding. Each stage has its own
+// gateway (`grasp-connect-gateway`, `-staging`, ./names.ts), which reaches
+// its stage's clients' dispatch namespace alone, the one its router binds.
+import { clientConnectScriptPattern } from "./names.ts";
 
 /** What the admin sets on a placed core's binding to the gateway. */
 export interface ConnectGatewayProps {
-  /** The client's connect script in the namespace: `g<deployment>-grasp-os-connect`. */
+  /** The client's connect script in the namespace: `grasp-<deployment id>-connect`. */
   readonly script: string;
 }
 
 /**
- * A client connect's script name, as the admin names it
- * (`g<deployment>-grasp-os-connect`, apps/admin/src/hosting/inventory.ts):
- * the only scripts the gateway ever reaches.
+ * The client connect `props` name, or undefined for props that name none:
+ * only a placed client's connect script, as the names module names it
+ * (`clientConnectScriptPattern`), is ever reached.
  */
-const clientConnectScript = /^g[a-z0-9][a-z0-9-]*-grasp-os-connect$/u;
-
-/** The client connect `props` name, or undefined for props that name none. */
 export const gatewayScriptOf = (props: unknown): string | undefined => {
   if (typeof props !== "object" || props === null) {
     return undefined;
   }
   const script: unknown = Reflect.get(props, "script");
-  return typeof script === "string" && clientConnectScript.test(script)
+  return typeof script === "string" && clientConnectScriptPattern.test(script)
     ? script
     : undefined;
 };

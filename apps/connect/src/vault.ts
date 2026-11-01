@@ -30,9 +30,12 @@ const sealedPattern =
 
 /** Why a sealed value didn't open. Never says anything about the value. */
 export class VaultError extends Error {
+  readonly reason: "malformed" | "unknown_key" | "tampered";
+
   constructor(reason: "malformed" | "unknown_key" | "tampered") {
     super(`A sealed value didn't open: ${reason}`);
     this.name = "VaultError";
+    this.reason = reason;
   }
 }
 

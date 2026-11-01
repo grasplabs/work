@@ -12,11 +12,22 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { ArchiveIcon, GlobeIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  GlobeIcon,
+  MoreHorizontalIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -66,7 +77,7 @@ const moveOf = async (
  * Asks before archiving: it takes the domain offline and stops its runs,
  * which a restore doesn't start again.
  */
-const ArchiveDialog = ({
+export const ArchiveDialog = ({
   name,
   open,
   onOpenChange,
@@ -125,10 +136,13 @@ export const useStatusMove = (app: string) => {
 };
 
 /**
- * A builder's controls for the domain's status: Publish (or Unpublish)
- * and Archive while it is a draft or published, Restore once archived.
+ * A builder's controls for the domain's status, as the prototype's bar
+ * (`routes/domains/$engineId.tsx`): Publish on the bar while it is a
+ * draft, and the rest under one "…" menu, Unpublish and Archive; Restore
+ * on the bar once archived, the one thing left to do with it.
  */
 export const StatusActions = ({ app }: { app: App }) => {
+  const { t } = useLingui();
   const { busy, failure, move } = useStatusMove(app.id);
   const [archiving, setArchiving] = useState(false);
   const { name, status } = app;
@@ -147,18 +161,6 @@ export const StatusActions = ({ app }: { app: App }) => {
             <Trans>Publish</Trans>
           </Button>
         ) : null}
-        {status === "published" ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              move("unpublish");
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Unpublish</Trans>
-          </Button>
-        ) : null}
         {status === "archived" ? (
           <Button
             disabled={busy}
@@ -168,20 +170,44 @@ export const StatusActions = ({ app }: { app: App }) => {
             size="sm"
             variant="outline"
           >
+            <ArchiveRestoreIcon data-icon="inline-start" />
             <Trans>Restore</Trans>
           </Button>
         ) : (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setArchiving(true);
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <ArchiveIcon data-icon="inline-start" />
-            <Trans>Archive</Trans>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              disabled={busy}
+              render={
+                <Button
+                  aria-label={t`More for this domain`}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <MoreHorizontalIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {status === "published" ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    move("unpublish");
+                  }}
+                >
+                  <GlobeIcon />
+                  <Trans>Unpublish</Trans>
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem
+                onClick={() => {
+                  setArchiving(true);
+                }}
+              >
+                <ArchiveIcon />
+                <Trans>Archive</Trans>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
       <ErrorText>{failure}</ErrorText>

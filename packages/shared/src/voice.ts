@@ -5,6 +5,10 @@
 // what is said or heard is interview content, judged by the same rules as
 // any model call.
 //
+// Each goes to the provider and model the platform's settings name
+// (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
+// holds: ElevenLabs says lines, OpenAI writes down what is heard.
+//
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
 // is core's src/transcription.ts, which the onboarding's pages reach over a
@@ -30,8 +34,8 @@ export interface SpeechRequest {
   /** The language it is said in: an ISO 639-1 code, such as `en`. */
   language: string;
   /**
-   * The voice model, as the gateway names it (`<provider>/<model>`): one
-   * the deployment allows. The implementation's own when not named.
+   * The speech model, as the gateway names it (`<provider>/<model>`). The
+   * platform's setting when not named.
    */
   model?: string;
 }
@@ -135,7 +139,7 @@ export const speechRequestSchema = z.strictObject({
   speaker: z.enum(speakers).default("stephen"),
   /**
    * For a line only known as it is said, such as one with a count or a
-   * name: said by the quicker voice model where the deployment allows it.
+   * name: said by the platform's quicker speech model.
    */
   quick: z.boolean().default(false),
   /** How the line is said: one of the tones Stephen may use. */

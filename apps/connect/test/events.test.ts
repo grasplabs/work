@@ -50,7 +50,9 @@ import { fakeProviders } from "./oauth-provider.ts";
 const providers = fakeProviders();
 let graph: GraphEventsFake = graphEventsFake();
 /** Answers the next Graph request instead of the fake, when set. */
-let instead: (() => Response | Promise<Response>) | undefined;
+let instead:
+  | ((request: Request, url: URL) => Response | Promise<Response>)
+  | undefined;
 /** Drives Graph fails every request for. */
 const failingDrives = new Set<string>();
 /** Holds each request for where a drive stands until it resolves, when set. */
@@ -62,7 +64,7 @@ const internet = fakeInternet(async (request, url) => {
   const answer = instead;
   if (answer !== undefined) {
     instead = undefined;
-    return await answer();
+    return await answer(request, url);
   }
   if (
     [...failingDrives].some((drive) =>
@@ -311,6 +313,46 @@ describe("connector events", () => {
         provenance: [mail.id],
       },
     ]);
+  });
+
+  it("start listening nowhere for someone whose erasure began after the sync read where to listen", async () => {
+    const outlook = await connected();
+    // Their erasure began (person-erasure.ts marks it first) as the sync
+    // went from reading where connect listens to listening there.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(outlook.person.userId, Date.now())
+      .run();
+
+    await sync([listener(outlook)]);
+
+    const started = await listening();
+    expect({
+      sources: await sources(),
+      started: started.filter(({ target }) => target === outlook.id),
+    }).toStrictEqual({ sources: [], started: [] });
+  });
+
+  it("keep nothing a read finds for someone whose erasure began while the read was out", async () => {
+    const outlook = await connected();
+    await sync([listener(outlook)]);
+    const mail = invoiceMail(outlook.oid, 1, now());
+    graph.receive(outlook.oid, mail);
+    later();
+    // Their erasure begins (person-erasure.ts marks it first) while the
+    // read is out at Graph: what it brings back is theirs.
+    instead = async (request, url) => {
+      await env.DB.prepare(
+        "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+      )
+        .bind(outlook.person.userId, Date.now())
+        .run();
+      return graph.answer(request, url);
+    };
+    await sync([listener(outlook)]);
+
+    await expect(outboxed()).resolves.toStrictEqual([]);
   });
 
   it("report only mail that arrived in the inbox after they started", async () => {

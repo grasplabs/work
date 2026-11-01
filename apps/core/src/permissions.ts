@@ -42,6 +42,7 @@ import {
   requireBuilder,
   roleErrors,
 } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   and,
@@ -67,7 +68,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
-import { memberRole } from "./auth/identity.ts";
+import { activeStaffRole, memberRole } from "./auth/identity.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf, requireOfferedConnection } from "./connections.ts";
 import {
@@ -418,32 +419,20 @@ const parseId = (id: unknown): PermissionId => {
 };
 
 /**
- * An App's server code gets its env when it starts: restarting it after a
- * grant or revoke gives it an env as the records are now, and its screens'
- * live workflow watches read again. A revoked stub
- * it still holds is refused anyway, on its next call. Best effort: the
- * change stands if the App can't be reached.
+ * Tells App `subject`'s screens that what it may start changed, after a
+ * grant or revoke of one of its permissions, so their live workflow
+ * watches read again (screen-workflows.ts). Best effort: the change
+ * stands if the App's host can't be reached.
  */
-const restartApp = async (
+const tellPolicyChanged = async (
   env: Env,
   subject: PermissionSubject
 ): Promise<void> => {
   if (subject.type !== "app") {
     return;
   }
-  const host = appHost(env, subject.appId);
   try {
-    await host.restart("Its permissions changed.");
-  } catch (error) {
-    log.error("app.restart_failed", {
-      appId: subject.appId,
-      ...errorFields(error),
-    });
-  }
-  // Its screens' live workflow watches read again, whether or not it
-  // restarted: what the App may start changed (screen-workflows.ts).
-  try {
-    await host.workflowPolicyChanged();
+    await appHost(env, subject.appId).workflowPolicyChanged();
   } catch (error) {
     log.error("app.workflow_policy_tell_failed", {
       appId: subject.appId,
@@ -1294,7 +1283,7 @@ export const grantPermission = async (
   }
   await tellKept(env, madeSensitive);
   const permission = toPermission(granted);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   await tellChat(env, permission, "granted");
   return permission;
 };
@@ -1657,7 +1646,7 @@ export const revokePermission = async (
     return toPermission((await findRow(env, found.id)) ?? found);
   }
   const permission = toPermission(revoked);
-  await restartApp(env, permission.subject);
+  await tellPolicyChanged(env, permission.subject);
   // A chat's request that waited: revoking it decides it, so the chat's
   // agent is told, and its card goes.
   if (found.status === "requested") {
@@ -1760,14 +1749,33 @@ export const askedAgainBy = (
   permission.actions.some((action) => changesThings(permission.object, action));
 
 /**
+ * The role of the person work acts for, read now, while they may still
+ * have it done: a member's, or, for work a Grasp staff member started (its
+ * authority's server-set `staff` mark, GRA-1088), the staff role while
+ * their staff session is still valid (`activeStaffRole`). The mark is the
+ * only way past membership: staff on unmarked work count as no one, and a
+ * member on marked work as well. `undefined` for no one.
+ */
+export const personRole = async (
+  env: Env,
+  person: string,
+  staff: boolean | undefined
+): Promise<Role | undefined> =>
+  staff === true
+    ? await activeStaffRole(env, person)
+    : await memberRole(env.DB, person);
+
+/**
  * The person an App or agent acts for must still be in the organization:
- * nothing works for someone who has left or was removed.
+ * nothing works for someone who has left or was removed (`personRole`).
  */
 export const requireActivePerson = async (
   env: Env,
   authority: Authority
 ): Promise<void> => {
-  if (!(await memberRole(env.DB, authority.onBehalfOf))) {
+  if (
+    (await personRole(env, authority.onBehalfOf, authority.staff)) === undefined
+  ) {
     throw permissionErrors.create("permission.person_inactive");
   }
 };

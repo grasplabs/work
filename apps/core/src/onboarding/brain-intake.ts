@@ -51,7 +51,10 @@ import { inUnitOf } from "./work-drawing.ts";
 export const rosterSource = "src-roster";
 
 /** An id the onboarding owns, from what it stands for: the same thing is the same id. */
-const ownId = async (kind: string, ...parts: string[]): Promise<string> => {
+export const ownId = async (
+  kind: string,
+  ...parts: string[]
+): Promise<string> => {
   const hash = await sha256Hex(parts.join("\u0000"));
   return `${onboardingIdPrefix}${kind}-${hash.slice(0, 32)}`;
 };
@@ -384,7 +387,7 @@ const versionOf = (
 };
 
 /** A record as the brain keeps it, or none when it isn't one: logged, and left out. */
-const recordOf = (record: BrainRecordInput): BrainRecord[] => {
+export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
   const parsed = brainRecordSchema.safeParse(record);
   if (!parsed.success) {
     log.error("onboarding.brain_record_invalid", { type: record.type });

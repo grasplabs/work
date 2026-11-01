@@ -7,6 +7,7 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
@@ -82,6 +83,12 @@ export const ownerKey = keyOf;
 
 const ownerInputSchema = z.string().min(1).max(256);
 
+// `openTo`'s own reads, aliased: a caller's column of one of these tables
+// is that caller's row, never these reads'.
+const ownedApp = alias(apps, "open_to_app");
+const sharedWith = alias(appMembers, "open_to_share");
+const inTeam = alias(teamMembers, "open_to_team");
+
 /**
  * That the person `userId` (an ID, or a column holding one) has a role in
  * App `app` now, as SQL: an admin, its owner, or someone it is shared with,
@@ -91,14 +98,14 @@ const ownerInputSchema = z.string().min(1).max(256);
  */
 export const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
   ${activeMember(userId, ["admin"])}
-  OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${userId})
+  OR EXISTS (SELECT 1 FROM ${apps} AS ${ownedApp} WHERE ${ownedApp.id} = ${app} AND ${ownedApp.ownerId} = ${userId})
   OR EXISTS (
-    SELECT 1 FROM ${appMembers}
-    WHERE ${appMembers.appId} = ${app}
-      AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId})
-        OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (
-          SELECT ${teamMembers.teamId} FROM ${teamMembers}
-          WHERE ${teamMembers.userId} = ${userId})))
+    SELECT 1 FROM ${appMembers} AS ${sharedWith}
+    WHERE ${sharedWith.appId} = ${app}
+      AND ((${sharedWith.memberType} = 'person' AND ${sharedWith.memberId} = ${userId})
+        OR (${sharedWith.memberType} = 'team' AND ${sharedWith.memberId} IN (
+          SELECT ${inTeam.teamId} FROM ${teamMembers} AS ${inTeam}
+          WHERE ${inTeam.userId} = ${userId})))
   )
 )`;
 

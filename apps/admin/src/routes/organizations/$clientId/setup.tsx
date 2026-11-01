@@ -4,16 +4,19 @@ import { useAnsweredOrganization } from "../../../admin/organization.tsx";
 import { OrgSetup, setupTabs } from "../../../admin/setup.tsx";
 import type { SetupTab } from "../../../admin/setup.tsx";
 import {
-  fetchClientQuotaPolicy,
+  fetchClientAiStatus,
   fetchClientSetup,
 } from "../../../clients/functions.ts";
-import { fetchClientHosting } from "../../../hosting/functions.ts";
-import { hostingPolicyIds } from "../../../hosting/policy.ts";
+import {
+  fetchClientHosting,
+  fetchProvisioningProgress,
+} from "../../../hosting/functions.ts";
 import { fetchNewClientOptions } from "../../../provision/functions.ts";
 
 const Setup = () => {
   const { clientId } = Route.useParams();
-  const { setup, releases, hosting, quotaPolicy } = Route.useLoaderData();
+  const { setup, releases, hosting, progress, aiStatus } =
+    Route.useLoaderData();
   const { tab = "status" } = Route.useSearch();
   // Shown whether or not its core answered: being set up, it has none yet.
   const organization = useAnsweredOrganization();
@@ -21,7 +24,8 @@ const Setup = () => {
     <OrgSetup
       clientId={clientId}
       hosting={hosting}
-      quotaPolicy={quotaPolicy}
+      aiStatus={aiStatus}
+      progress={progress}
       releases={releases}
       setup={setup}
       tab={tab}
@@ -37,6 +41,8 @@ const Setup = () => {
  * (`/clients/$clientId`) was.
  */
 export const Route = createFileRoute("/organizations/$clientId/setup")({
+  // Being set up, or not answering, its core has nothing for it: it shows from what the admin recorded.
+  staticData: { withoutCore: true },
   // A tab it doesn't have is left out: the router keeps what this doesn't name.
   validateSearch: (search: Record<string, unknown>): { tab?: SetupTab } => {
     const tab = setupTabs.find((each) => each === search.tab);
@@ -46,26 +52,25 @@ export const Route = createFileRoute("/organizations/$clientId/setup")({
     // Not awaited: a slow or unreachable core never holds up the Setup. A
     // read that fails (the database included) shows no section, never the
     // route's error page in place of the Setup.
-    const quotaPolicy = (async () => {
+    const aiStatus = (async () => {
       try {
-        return await fetchClientQuotaPolicy({
+        return await fetchClientAiStatus({
           data: { clientId: params.clientId },
         });
       } catch {
         return null;
       }
     })();
-    const [setup, { releases }, hosting] = await Promise.all([
+    const [setup, { releases }, hosting, progress] = await Promise.all([
       fetchClientSetup({ data: { clientId: params.clientId } }),
       fetchNewClientOptions(),
-      fetchClientHosting({
-        data: { clientId: params.clientId, policyId: hostingPolicyIds[0] },
-      }),
+      fetchClientHosting({ data: { clientId: params.clientId } }),
+      fetchProvisioningProgress({ data: { clientId: params.clientId } }),
     ]);
     if (setup === null) {
       throw notFound();
     }
-    return { setup, releases, hosting, quotaPolicy };
+    return { setup, releases, hosting, progress, aiStatus };
   },
   component: Setup,
 });

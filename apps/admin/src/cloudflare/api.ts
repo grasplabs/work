@@ -114,6 +114,13 @@ export interface ApiCall {
    * request aborted, and no retry made or waited for after.
    */
   signal?: AbortSignal;
+  /**
+   * Checked before each time the call is sent, its retries included:
+   * throws to stop it unsent. A runner's check that it still holds its
+   * client, so a call it may no longer make is never sent again after a
+   * 429 or a lost answer (src/runners.ts).
+   */
+  beforeSend?: () => Promise<void>;
 }
 
 /** A result, with the page of a list it is. */
@@ -281,6 +288,7 @@ export const cloudflareApi = ({
     attempt = 0,
     waited = 0
   ): Promise<Page<T>> => {
+    await call.beforeSend?.();
     const response = await send(call);
     const status = response?.status ?? 0;
     const envelope = response === null ? null : await envelopeOf(response);

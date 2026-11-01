@@ -26,6 +26,18 @@ export const teamsBotSchema = z.object({
 });
 export type TeamsBot = z.output<typeof teamsBotSchema>;
 
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** Whole days from `now`'s UTC day to `day` (`YYYY-MM-DD`): negative once it's past. */
+export const daysUntil = (day: string, now: Date): number => {
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
+  return Math.round((Date.parse(`${day}T00:00:00Z`) - today) / dayMs);
+};
+
 /**
  * The bot a client's record keeps (`clients.teams_bot`, JSON), or null for
  * one without: a record that doesn't parse is none, so it can't put

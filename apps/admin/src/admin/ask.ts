@@ -10,9 +10,10 @@
  * read does, with a key derived for this purpose alone from Grasp's own
  * client's auth secret, naming the staff member Access let in.
  *
- * Which client is Grasp's own is deployment config (`GRASP_CLIENT_ID`):
- * without it, or while that client isn't deployed, the chat says it isn't
- * set up and asks nothing.
+ * Which client is Grasp's own staff choose on Platform
+ * (src/platform-settings.ts):
+ * without it, or while that client can't be reached, the chat says which
+ * of those it is and what to do next (`NotSetUp`), and asks nothing.
  */
 import {
   adminAskAnswerSchema,
@@ -33,10 +34,13 @@ import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import type { CoreAddress } from "../clients/core-address.ts";
-import { clientGrid, ifStored, routeOf } from "../clients/grid.ts";
-import { deploySecrets } from "../deploy/context.ts";
+import { clientGrid, routeOf } from "../clients/grid.ts";
+import { adminDatabase } from "../db/act.ts";
+import { deploySecrets, MissingStoreSecretError } from "../deploy/context.ts";
+import type { StoreSecret } from "../deploy/context.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import { graspClientIdOf } from "../platform-settings.ts";
 
 /** How long Grasp's core may take to answer: the model's own limit, and a little more. */
 export const askTimeoutMs = 100_000;
@@ -61,15 +65,39 @@ export const askInputSchema = z.object({
 });
 
 /**
- * Why there's no answer, as the page words it:
- * - `not_set_up`: no client is named as Grasp's own, or it isn't deployed;
+ * Why Grasp's own core can't be asked, each with its own next step, as
+ * the page words it:
+ * - `grasp_client_unset`: staff haven't chosen Grasp's own organization
+ *   on Platform;
+ * - `grasp_client_unknown`: the one chosen isn't one the admin has any
+ *   more, or it's offboarded: staff choose another;
+ * - `grasp_client_not_active`: it isn't live yet;
+ * - `secret_missing`: a Secrets Store secret the question is signed with
+ *   isn't there (`secret` names it);
+ * - `no_client_domain`: no client domain is set, so it has no hostname;
+ * - `not_routed`: the router's map has no route to it;
+ * - `core_unreachable`: it runs in the dispatch namespace, and the admin
+ *   has no dispatcher binding to reach it by.
+ */
+export type NotSetUp =
+  | "grasp_client_unset"
+  | "grasp_client_unknown"
+  | "grasp_client_not_active"
+  | "secret_missing"
+  | "no_client_domain"
+  | "not_routed"
+  | "core_unreachable";
+
+/**
+ * Why there's no answer, as the page words it: Grasp's own core can't be
+ * asked (`NotSetUp`), or
  * - `too_long`: the conversation is longer than core takes: start over;
  * - `refused`: Grasp's core turned the question away;
  * - `no_model`: Grasp's core has no model it may send the document to;
  * - `not_answered`: the model, or the request, failed or took too long.
  */
 export type AskRefusal =
-  | "not_set_up"
+  | NotSetUp
   | "too_long"
   | "refused"
   | "no_model"
@@ -78,37 +106,67 @@ export type AskRefusal =
 /** What the chat gets back. */
 export type AskAnswer =
   | { text: string; truncated: boolean; refused: null }
-  | { text: null; truncated: false; refused: AskRefusal };
+  | {
+      text: null;
+      truncated: false;
+      refused: AskRefusal;
+      /** For `secret_missing`, the secret's name; never a value. */
+      secret?: StoreSecret;
+    };
 
-const refusal = (refused: AskRefusal): AskAnswer => ({
+const refusal = (refused: AskRefusal, secret?: StoreSecret): AskAnswer => ({
   text: null,
   truncated: false,
   refused,
+  ...(secret === undefined ? {} : { secret }),
 });
 
 const encoder = new TextEncoder();
 
-/** Where Grasp's own core is, and the secret to sign for it with; null when it can't be asked. */
-const graspCore = async (
-  env: Env
-): Promise<{
+/** Grasp's own core, and the secret to sign for it with. */
+interface GraspCore {
   address: CoreAddress;
   routerSecret: string;
   authSecret: string;
-} | null> => {
-  const clientId = env.GRASP_CLIENT_ID ?? "";
-  if (clientId === "") {
-    return null;
+}
+
+/** The secrets a question is signed with, or the one missing from Secrets Store. */
+const signingSecrets = async (
+  env: Env
+): Promise<DeploySecrets | { missing: StoreSecret }> => {
+  try {
+    return await deploySecrets(env);
+  } catch (error) {
+    if (error instanceof MissingStoreSecretError) {
+      return { missing: error.secret };
+    }
+    throw error;
+  }
+};
+
+/** Where Grasp's own core is, and the secret to sign for it with; else why it can't be asked. */
+const graspCore = async (
+  env: Env
+): Promise<GraspCore | { notSetUp: NotSetUp; secret?: StoreSecret }> => {
+  const clientId = await graspClientIdOf(adminDatabase(env.DB));
+  if (clientId === null) {
+    return { notSetUp: "grasp_client_unset" };
   }
   const grid = await clientGrid(env);
-  const row = grid.find(
-    ({ id, status }) => id === clientId && status === "active"
-  );
-  const secrets = await ifStored(
-    async (): Promise<DeploySecrets> => await deploySecrets(env)
-  );
-  if (row === undefined || secrets === null) {
-    return null;
+  const row = grid.find(({ id }) => id === clientId);
+  // Offboarded, it's never deployed again: as good as gone.
+  if (row === undefined || row.status === "offboarded") {
+    return { notSetUp: "grasp_client_unknown" };
+  }
+  if (row.status !== "active") {
+    return { notSetUp: "grasp_client_not_active" };
+  }
+  const secrets = await signingSecrets(env);
+  if ("missing" in secrets) {
+    return { notSetUp: "secret_missing", secret: secrets.missing };
+  }
+  if (row.hostname === null) {
+    return { notSetUp: "no_client_domain" };
   }
   const route = await routeOf(
     env.ROUTER_HOSTS,
@@ -117,8 +175,12 @@ const graspCore = async (
     row.hostname,
     env.DISPATCHER
   );
-  if (route === "no_route" || route === "unknown") {
-    return null;
+  if (route === "no_route") {
+    return { notSetUp: "not_routed" };
+  }
+  // With a hostname and the router's key, only a script no dispatcher reaches.
+  if (route === "unknown") {
+    return { notSetUp: "core_unreachable" };
   }
   return {
     address: route.core,
@@ -149,8 +211,8 @@ export const askGrasp = async (
   input: z.input<typeof askInputSchema>
 ): Promise<AskAnswer> => {
   const core = await graspCore(env);
-  if (core === null) {
-    return refusal("not_set_up");
+  if ("notSetUp" in core) {
+    return refusal(core.notSetUp, core.secret);
   }
   const { document, said } = askInputSchema.parse(input);
   const request: AdminAskRequest = {

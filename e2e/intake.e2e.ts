@@ -65,8 +65,8 @@ const intakeFor = async (admin: Person): Promise<string> => {
     // The model its reading goes through: the `extractor` of the `extract`
     // workflow the copy got (the one it asked to start), approved as an
     // admin approves it on the workflow's page, for the stack's first model
-    // (e2e/stack.ts). The local stack reaches no model, so the reading's model call
-    // fails. Core's tests read notes with a scripted model
+    // (e2e/stack.ts). The local stack's provider refuses every key, so the
+    // reading waits for it. Core's tests read notes with a scripted model
     // (apps/core/test/intake.test.ts).
     const extract = created.permissions.find(
       ({ binding }) => binding === "EXTRACT"
@@ -164,14 +164,14 @@ test("an admin takes an interview as a draft, reviews it again, and saves its ta
   ]);
 });
 
-test("an admin sends notes to be read, and follows the reading to its end", async ({
+test("an admin sends notes to be read, and sees the reading wait while the AI provider refuses the key", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("intake");
   const title = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
-  // The local stack reaches no model, so the reading's model call fails
-  // (`intakeFor`).
+  // The local stack's provider refuses every key (e2e/model-fake.ts), so
+  // the reading's model call fails on the organization's key.
   const page = await pageOf(admin);
   const screen = await openIntake(page, app);
 
@@ -184,17 +184,17 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
     .fill("Closing the month takes three days.");
   await start.click();
 
-  // Followed live: the reading fails, saying why (the model the workflow's
-  // `extractor` is approved for can't be reached), and keeps no draft.
+  // Followed live: the reading waits rather than fail, as a run does while
+  // the organization's provider refuses its key, and goes on by itself once
+  // an admin replaces it (the banner that tells admins so is the web's
+  // tests', apps/web/src/frame/ai-key-banner.test.tsx).
   const reading = screen.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
-  await expect(item).toContainText(
-    "Failed: The model call failed. Try again later.",
-    { timeout: 30_000 }
-  );
-  await item.getByRole("button", { name: "Dismiss" }).click();
-  await expect(reading).toHaveCount(0);
-  await expect(screen.getByText(title)).toHaveCount(0);
+  await expect(item).toContainText("Waiting its turn to read the notes", {
+    timeout: 30_000,
+  });
+  // Nothing to dismiss: it hasn't ended, and keeps no draft.
+  await expect(item.getByRole("button", { name: "Dismiss" })).toHaveCount(0);
 });
 
 test("an admin invites a stakeholder, who opens the link without an account, writes, and finishes the chat", async ({
@@ -224,8 +224,8 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   ).toBeVisible();
   await guestPage.getByLabel("Your message").fill("I approve invoices.");
   await guestPage.getByRole("button", { name: "Send" }).click();
-  // The local stack reaches no model: the message isn't taken, and says
-  // so, and what was typed stays to send again.
+  // The local stack's provider refuses every key: the message isn't taken,
+  // and says so, and what was typed stays to send again.
   await expect(guestPage.getByRole("alert")).toHaveText(
     /^The chat can't answer right now\. Try sending it again in a while\. Reference: [\da-f-]{36}$/u
   );

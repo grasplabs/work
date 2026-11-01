@@ -35,7 +35,7 @@ export const CollectionMarkers = ({
   <span className="flex flex-wrap gap-1">
     <Badge variant="outline">{i18n._(accessLabels[collection.access])}</Badge>
     {collection.sensitive ? (
-      <Badge variant="destructive">
+      <Badge variant="attention">
         <Trans>Sensitive</Trans>
       </Badge>
     ) : null}

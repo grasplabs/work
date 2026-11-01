@@ -12,8 +12,8 @@ import Gateway from "../src/index.ts";
 // 3. An error names a script, the props or the namespace.
 // 4. A name that isn't one of connect's methods is forwarded.
 
-const own = "gabc123-grasp-os-connect";
-const other = "gdef456-grasp-os-connect";
+const own = "grasp-abcdefgh23-connect";
+const other = "grasp-ijklmnop45-connect";
 
 /** What each stand-in connect was asked, by script. */
 const asked = new Map<string, unknown[][]>();
@@ -36,8 +36,8 @@ const connectStandIn = (script: string) => ({
 const present: ReadonlySet<string> = new Set([
   own,
   other,
-  "grasp-os-router",
-  "gabc123-grasp-os-core",
+  "grasp-router",
+  "grasp-abcdefgh23-core",
 ]);
 
 const clients = {
@@ -121,10 +121,10 @@ describe("the connect gateway", () => {
         undefined,
         {},
         { script: 42 },
-        { script: "grasp-os-router" },
-        { script: "gabc123-grasp-os-core" },
+        { script: "grasp-router" },
+        { script: "grasp-abcdefgh23-core" },
         { script: `${own}/../x` },
-        { script: "gmissing-grasp-os-connect" },
+        { script: "grasp-qrstuvwx67-connect" },
       ].map(
         async (props) =>
           await failure(async () => await call(gatewayFor(props), "name"))

@@ -11,32 +11,25 @@ import type { ClientAdmin } from "../src/clients/admin.ts";
 import { fetchClientAdmins } from "../src/clients/functions.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clients } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import { livePlacedClient, placedRelease } from "./placed.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-admins-5c1e70";
-const tenantToken = "test-tenant-admin-token-admins-9a4d12";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
 const db = adminDatabase(env.DB);
 const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 
-/** A release, published and imported. */
-const importedRelease = async (notes: string): Promise<string> => {
-  const release = await publishRelease({ notes });
-  await importReleases(env.RELEASES, db);
-  return release.id;
-};
+/** A release a placed client runs, imported. */
+const importedRelease = async (notes: string): Promise<string> =>
+  await placedRelease(notes);
 
 /**
  * A client recorded as provisioning leaves it, on a new account in the
@@ -44,7 +37,7 @@ const importedRelease = async (notes: string): Promise<string> => {
  * among the test's others.
  */
 const recordClient = async (
-  status: "provisioning" | "active",
+  status: "provisioning",
   order = ""
 ): Promise<{ clientId: string; account: AccountState }> => {
   const clientId = `client-${order}${crypto.randomUUID().slice(0, 8)}`;
@@ -57,7 +50,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        accountId: account.id,
         status,
         createdAt: now,
         updatedAt: now,
@@ -68,14 +60,14 @@ const recordClient = async (
   return { clientId, account };
 };
 
-/** An active client running `releaseId`, as a deploy made it live. */
+/** A live placed client running `releaseId`, as its operation made it. */
 const liveClient = async (releaseId: string, order = "") => {
-  const client = await recordClient("active", order);
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, staff, client.clientId, releaseId)
-  );
-  return client;
+  const clientId = `client-${order}${crypto.randomUUID().slice(0, 8)}`;
+  const { account } = await livePlacedClient(cloudflare, 1, releaseId, {
+    id: clientId,
+    signIn: null,
+  });
+  return { clientId, account };
 };
 
 /** Client `clientId`'s entry in `read`. */
@@ -97,7 +89,7 @@ const storedReads = async (
 };
 
 describe("every client's admin snapshot", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // Only each test's own clients have a core: an earlier test's accounts
   // are gone from the fake.
   beforeEach(async () => {

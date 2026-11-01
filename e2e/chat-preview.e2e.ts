@@ -193,7 +193,7 @@ export default function Tally() {
  * than the default 5 seconds.
  */
 const openTally = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/engines/${app}/apps/tally/full`);
+  await page.goto(`/domains/${app}/apps/tally/full`);
   const screen = page.frameLocator('iframe[title="tally app"]');
   await expect(screen.getByRole("status")).toContainText("in the App", {
     timeout: 20_000,
@@ -251,13 +251,10 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     });
     const studio = page.getByRole("region", { name, exact: true });
     await expect(thread).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Fold the chats" })
-    ).toBeVisible();
     await expect(studio).toHaveCount(0);
 
-    // Its agent writes a draft: the App stands on the right, the chat
-    // moves to its left, and the sidebar folds to give it the room.
+    // Its agent writes a draft: the App stands on the right, and the chat
+    // moves to its left.
     await writeDraft(builder.userId, chat.id, app.id, version, {
       "operations/tally.ts":
         tallyFiles("in the preview")["operations/tally.ts"] ?? "",
@@ -278,9 +275,6 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
       thread.getByText("The domains this chat builds didn't load.")
     ).toHaveCount(0);
     await expect(studio).toContainText("Version 1 of 1");
-    await expect(
-      page.getByRole("button", { name: "Expand the chats" })
-    ).toBeVisible();
     const chatBox = await thread.boundingBox();
     const appBox = await studio.boundingBox();
     expect(chatBox).not.toBeNull();

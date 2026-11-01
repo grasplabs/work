@@ -43,14 +43,8 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { SearchIcon } from "lucide-react";
 import { useState } from "react";
 
-import {
-  BarList,
-  Dot,
-  Empty,
-  markOf,
-  Panel,
-  PeopleDots,
-} from "./interview-parts.tsx";
+import { BarList, Dot, markOf, PeopleDots } from "./interview-parts.tsx";
+import { EmptySection, Section } from "./section.tsx";
 import {
   formatDate,
   interviewPhaseWords,
@@ -243,9 +237,9 @@ const TeamRow = ({ view, team }: { view: OrgView; team: TeamView }) => {
 export const InterviewTeams = ({ view }: { view: OrgView }) => {
   if (view.teams.length === 0) {
     return (
-      <Empty>
+      <EmptySection>
         Nobody is known here yet. The people come with the company’s own list.
-      </Empty>
+      </EmptySection>
     );
   }
   const funnel = funnelOf(view);
@@ -259,7 +253,7 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
   }
   return (
     <>
-      <Panel
+      <Section
         description={`Team leads go first, then their team. One reminder after ${REMIND_AFTER} working days, then nothing. ${links}`}
         title="Where everyone stands"
       >
@@ -267,8 +261,8 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
           <FunnelBars funnel={funnel} />
           <TalkedDays asked={funnel.asked} view={view} />
         </div>
-      </Panel>
-      <Panel
+      </Section>
+      <Section
         description="Every team, whether it takes part or not."
         title="Teams"
       >
@@ -277,7 +271,7 @@ export const InterviewTeams = ({ view }: { view: OrgView }) => {
             <TeamRow key={team.team.id} team={team} view={view} />
           ))}
         </ul>
-      </Panel>
+      </Section>
     </>
   );
 };
@@ -317,14 +311,14 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
   const [query, setQuery] = useState("");
   if (view.people.length === 0) {
     return (
-      <Panel
+      <Section
         description="Names come with the company’s own list. Until it is in, nobody is known here."
         title="People"
       >
         <p className="text-muted-foreground border-t px-5 py-4">
           No people yet.
         </p>
-      </Panel>
+      </Section>
     );
   }
   const teams = new Map(view.teams.map((team) => [team.team.id, team]));
@@ -333,7 +327,7 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
     (each) => wanted === "" || each.person.name.toLowerCase().includes(wanted)
   );
   return (
-    <Panel
+    <Section
       action={
         <div className="flex min-w-0 items-center gap-3">
           <span
@@ -429,7 +423,7 @@ export const InterviewPeople = ({ view }: { view: OrgView }) => {
           </p>
         ) : null}
       </div>
-    </Panel>
+    </Section>
   );
 };
 
@@ -470,7 +464,7 @@ export const InterviewList = ({ view }: { view: OrgView }) => {
       .map((each) => each.person.id)
   );
   return (
-    <Panel
+    <Section
       description="Every interview, finished or stopped halfway. What anyone said stays in the company’s own Grasp: the admin is sent none of it, so no transcript is read here."
       title="Transcripts"
     >
@@ -535,6 +529,6 @@ export const InterviewList = ({ view }: { view: OrgView }) => {
           </Table>
         </div>
       )}
-    </Panel>
+    </Section>
   );
 };

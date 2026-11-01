@@ -4,7 +4,6 @@ import {
   inboundEmailMaxBytes,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
-import PostalMime from "postal-mime";
 import type { Attachment, Email } from "postal-mime";
 
 // A message with attachments that an email trigger received
@@ -51,6 +50,8 @@ const maxDeletedPerRun = 1000;
 
 /** `raw` parsed, or undefined for a message that doesn't parse. */
 export const parsedOf = async (raw: Uint8Array): Promise<Email | undefined> => {
+  // Loaded at the first message, not as core starts (GRA-1349).
+  const { default: PostalMime } = await import("postal-mime");
   try {
     return await PostalMime.parse(raw);
   } catch {

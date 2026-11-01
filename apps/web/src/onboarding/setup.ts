@@ -360,9 +360,39 @@ export type ReviewItemId = (typeof reviewItems)[number];
 export const isReviewItem = (value: unknown): value is ReviewItemId =>
   reviewItems.some((item) => item === value);
 
-/** What still needs the admin: every item they haven't settled. */
-export const openItems = (settled: readonly ReviewItemId[]): ReviewItemId[] =>
-  reviewItems.filter((item) => !settled.includes(item));
+/**
+ * What Grasp's AI has to call: the connected AI providers' names, and
+ * whether a model is ready for calls, a provider's model chosen (or,
+ * until there is none, the deployment's own gateway). Only the admin can
+ * make it ready (Settings › AI providers); core says once it is.
+ */
+export interface AiReadiness {
+  providers: string[];
+  ready: boolean;
+}
+
+/**
+ * What needs the admin besides what they settle: an AI provider, while
+ * no model is ready for calls.
+ */
+export type OpenItemId = ReviewItemId | "ai";
+
+/**
+ * What still needs the admin: every item they haven't settled, and an AI
+ * provider while no model is ready (`ai`; null when core can't say, which
+ * holds nothing up). Where Grasp sends no mail (`mailSends`), there's no
+ * mail to let through.
+ */
+export const openItems = (
+  settled: readonly ReviewItemId[],
+  mailSends: boolean,
+  ai: AiReadiness | null = null
+): OpenItemId[] => [
+  ...(ai?.ready === false ? ["ai" as const] : []),
+  ...reviewItems.filter(
+    (item) => !settled.includes(item) && (item !== "mail" || mailSends)
+  ),
+];
 
 /** What this browser keeps of an admin's onboarding: the furthest step they reached, the message they wrote, and what they settled. */
 export interface Kept {

@@ -13,21 +13,20 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import {
   answering,
   approveAgreed,
-  careful,
   openedFor,
   quick,
 } from "./interview-link.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { routed, unique } from "./sign-in.ts";
 
 // The onboarding's durability (GRA-339): its Worker restarted in the middle
 // of an interview's turn, and in the middle of a team's drawing, as a
 // deploy restarts it. Everything kept lives in the Onboarding object, so
-// that is what restarts here, the turn's request cut off with it; AI
-// Gateway, the outside system, is faked behind the AI binding. The
+// that is what restarts here, the turn's request cut off with it; the
+// model provider, the outside system, is faked behind connect. The
 // end-to-end journeys (e2e/*-journey.e2e.ts) can't do this: one local
 // server serves every Playwright test, and it can't be restarted under
 // them. What must not happen:
@@ -76,14 +75,14 @@ const restart = async (): Promise<void> => {
 };
 
 /** What his line's model answers: six named lines. */
-const line = (say: string): GatewayReply => ({
+const line = (say: string): ProviderReply => ({
   text: `TONE: none\nSAY: ${say}\nPART: steps\nWANTS: answer\nMORE: no\nAGREED: no\n`,
   inputTokens: 1500,
   outputTokens: 40,
 });
 
 /** What the notes' model answers: nothing new written down. */
-const noNotes: GatewayReply = {
+const noNotes: ProviderReply = {
   text: JSON.stringify({ facts: [], changes: [] }),
   inputTokens: 1600,
   outputTokens: 20,
@@ -220,13 +219,16 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       again,
       saved: [before.saved, after.saved, twice.saved],
       lines: kept?.progress?.lines.map(({ text }) => text),
-      // The turn cut off is counted for what it took, and the one asked again.
+      // The turn cut off is counted for what it took (his line, and the
+      // line asked once more, which the cut stopped before it was sent),
+      // and the one asked again (his line and his notes): one model, the
+      // organization's, for both.
       calls: (await callsFor("interviews", quick)) - counted,
     }).toStrictEqual({
       again: next,
       saved: [true, true, false],
       lines: [asked.text, answer.text, next],
-      calls: 2,
+      calls: 4,
     });
   });
 
@@ -291,7 +293,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
     );
     await save({ secret, key }, 0, agreed);
     await approveAgreed({ secret, key }, agreed.facts);
-    const map: GatewayReply = {
+    const map: ProviderReply = {
       text: JSON.stringify({
         does: "Answers customers' questions",
         works: [
@@ -308,7 +310,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       inputTokens: 2000,
       outputTokens: 300,
     };
-    const counted = await callsFor("drawing", careful);
+    const counted = await callsFor("drawing", quick);
 
     // The map is half written when the object restarts.
     // Noted as a flag, not a promise: what the object resolves goes on in
@@ -363,7 +365,7 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
       works: works.map(({ name }) => name),
       opened,
       openedAgain,
-      calls: (await callsFor("drawing", careful)) - counted,
+      calls: (await callsFor("drawing", quick)) - counted,
     }).toStrictEqual({
       first: [ids.lea],
       dueAfterRestart: true,

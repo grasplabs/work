@@ -222,6 +222,95 @@ describe("member and team changes", () => {
   });
 });
 
+/** A team named `name`, made with `session`: its ID. */
+const teamOf = async (session: string, name: string): Promise<string> => {
+  const created = await callAuth("/organization/create-team", session, {
+    name,
+  });
+  return z.object({ id: z.string() }).parse(await created.json()).id;
+};
+
+describe("teams, as admins manage them", () => {
+  it("are listed with their members for admins, also teams they aren't in", async () => {
+    const admin = await signedInAs("admin");
+    const person = await signedInAs("user");
+    const teamId = await teamOf(admin.session, "Sales");
+    const emptyId = await teamOf(admin.session, "Legal");
+    await callAuth("/organization/add-team-member", admin.session, {
+      teamId,
+      userId: person.userId,
+    });
+    const { core } = await openRpc(admin.session);
+
+    const listed = await core.authenticate().members.teams();
+
+    expect(listed).toContainEqual({
+      id: teamId,
+      name: "Sales",
+      memberIds: [person.userId],
+    });
+    expect(listed).toContainEqual({
+      id: emptyId,
+      name: "Legal",
+      memberIds: [],
+    });
+  });
+
+  it("aren't listed or changed by anyone but an admin", async () => {
+    const admin = await signedInAs("admin");
+    const teamId = await teamOf(admin.session, "Operations");
+    for (const role of ["user", "builder"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const person = await signedInAs(role);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      const { core } = await openRpc(person.session);
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await expect(outcome(core.authenticate().members.teams())).resolves.toBe(
+        "role.forbidden"
+      );
+      const changes: [path: string, body: unknown][] = [
+        ["/organization/update-team", { teamId, data: { name: "Mine" } }],
+        ["/organization/add-team-member", { teamId, userId: person.userId }],
+        ["/organization/remove-team-member", { teamId, userId: admin.userId }],
+        ["/organization/remove-team", { teamId }],
+      ];
+      for (const [path, body] of changes) {
+        // oxlint-disable-next-line no-await-in-loop -- one change at a time
+        const refused = await callAuth(path, person.session, body);
+        expect({ path, status: refused.status }).toStrictEqual({
+          path,
+          status: 403,
+        });
+      }
+    }
+    const { core } = await openRpc(admin.session);
+    await expect(core.authenticate().members.teams()).resolves.toContainEqual({
+      id: teamId,
+      name: "Operations",
+      memberIds: [],
+    });
+  });
+
+  it("can all be deleted, the last one too", async () => {
+    const admin = await signedInAs("admin");
+    const { core } = await openRpc(admin.session);
+    using session = core.authenticate();
+    await teamOf(admin.session, "Finance");
+    for (const { id } of await session.members.teams()) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time
+      const removed = await callAuth(
+        "/organization/remove-team",
+        admin.session,
+        {
+          teamId: id,
+        }
+      );
+      expect(removed.status).toBe(200);
+    }
+    await expect(session.members.teams()).resolves.toStrictEqual([]);
+  });
+});
+
 describe("Better Auth routes", () => {
   it("only serves the ones core chose", async () => {
     const admin = await signedInAs("admin");

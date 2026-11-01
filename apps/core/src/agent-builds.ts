@@ -31,8 +31,6 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
-import { isPlainData } from "./app.ts";
-import type { AppAnswer } from "./app.ts";
 import {
   appFor,
   applyChanges,
@@ -54,6 +52,8 @@ import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { appBindingKinds, requestPermission } from "./permissions.ts";
+import { isPlainData } from "./plain-data.ts";
+import type { AppAnswer } from "./plain-data.ts";
 import { draftSealFailures } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
 import { buildOnSave } from "./save-builds.ts";
@@ -1184,7 +1184,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           jobRequestSchema,
           request
         );
-        const { workspaceId, chatId, runId } = this.ctx.props;
+        const { workspaceId, chatId, runId, staff } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
         if (kind === "propose") {
           const draft = await draftOf(this.env, this.ctx.props, id);
@@ -1210,7 +1210,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           await runEngine(this.env).createInternal({
             id: opened.id,
             workflow: "build",
-            input: { workspaceId, chatId, jobId: opened.id },
+            // The run's own staff mark goes with the job, as core set it.
+            input: {
+              workspaceId,
+              chatId,
+              jobId: opened.id,
+              ...(staff === true ? { staff: true } : {}),
+            },
           });
         } catch (error) {
           // No instance runs it: it ends here, failed, with the engine's

@@ -9,7 +9,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
@@ -124,6 +124,16 @@ const appInUse = async (env: Env, appId: string) =>
     .from(apps)
     .where(eq(apps.id, appId))
     .get();
+
+/** Whether the App `appId` was removed (app-removal.ts). */
+const isRemovedApp = async (env: Env, appId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ removedAt: apps.removedAt })
+    .from(apps)
+    .where(eq(apps.id, appId))
+    .get();
+  return row !== undefined && row.removedAt !== null;
+};
 
 /** The AGENTS.md of version `version` of the App `appId`, as indexed. */
 const agentsOf = async (
@@ -301,6 +311,134 @@ const indexApp = async (env: Env, appId: string): Promise<void> => {
   await noteVersion(env, appId, version, described, null);
 };
 
+/** What a removed App's entry holds instead of its name and AGENTS.md. */
+const removedEntryText =
+  "---\ntitle: A removed App\n---\nThis App was removed.\n";
+
+/**
+ * Forgets the entry of the removed App `appId` (app-removal.ts): its
+ * text, its name, description and AGENTS.md, is replaced by one that
+ * says only that an App was removed, and its note goes, so the indexer
+ * never writes it again (the App has no current version). Nobody reads
+ * the entry any more either (app-entries.ts), its earlier versions
+ * included: they are kept history, reached only through the same
+ * per-path rule. A failure is logged: the entry is unreadable all the
+ * same, and `indexApps` forgets it on one of its next runs.
+ */
+export const forgetAppEntry = async (
+  env: Env,
+  appId: string
+): Promise<void> => {
+  try {
+    const knowledge = drizzle(env.KNOWLEDGE);
+    const stored = await knowledge
+      .select({
+        version: documents.currentVersion,
+        sha256: brainPayloads.sha256,
+      })
+      .from(documents)
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.documentId, documents.id),
+          eq(versions.number, documents.currentVersion)
+        )
+      )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          eq(documents.path, appEntryPath(appId))
+        )
+      )
+      .get();
+    // Already the tombstone (its note's deletion was what failed): no
+    // second version of it.
+    if (
+      stored !== undefined &&
+      stored.sha256 !== (await sha256Hex(removedEntryText))
+    ) {
+      const collection = await ensureCollection(
+        brainOf(env),
+        appsCollectionRow(),
+        appsActor
+      );
+      await writeVersion(brainOf(env), appsWriter, {
+        collection,
+        path: appEntryPath(appId),
+        text: removedEntryText,
+        ifVersion: stored.version,
+        message: "The App was removed",
+        restoredFrom: null,
+      });
+    }
+    await drizzle(env.DB).delete(appEntries).where(eq(appEntries.appId, appId));
+  } catch (error) {
+    log.error("apps.forget_failed", { appId, ...errorFields(error) });
+  }
+};
+
+/** Most entry paths one query of `unforgottenApps` names. */
+const pathsPerQuery = 50;
+
+/**
+ * The removed Apps whose entry wasn't forgotten yet: whose note is still
+ * there, or whose entry isn't the tombstone, read from the entry itself.
+ * An entry saved without its note (`noteVersion` failed after the save)
+ * whose forgetting failed too has no note to find it by, and isn't
+ * indexed again (the App has no current version).
+ */
+const unforgottenApps = async (env: Env): Promise<string[]> => {
+  const [removed, noted] = await Promise.all([
+    drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .where(isNotNull(apps.removedAt)),
+    drizzle(env.DB)
+      .select({ id: apps.id })
+      .from(apps)
+      .innerJoin(appEntries, eq(appEntries.appId, apps.id))
+      .where(isNotNull(apps.removedAt)),
+  ]);
+  const tombstone = await sha256Hex(removedEntryText);
+  const pages = Array.from(
+    { length: Math.ceil(removed.length / pathsPerQuery) },
+    (_, page) =>
+      removed
+        .slice(page * pathsPerQuery, (page + 1) * pathsPerQuery)
+        .map(({ id }) => appEntryPath(id))
+  );
+  const unforgotten = new Set(noted.map(({ id }) => id));
+  for (const paths of pages) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const held = await drizzle(env.KNOWLEDGE)
+      .select({ path: documents.path })
+      .from(documents)
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.documentId, documents.id),
+          eq(versions.number, documents.currentVersion)
+        )
+      )
+      .innerJoin(brainPayloads, eq(brainPayloads.key, versions.payloadKey))
+      .where(
+        and(
+          eq(documents.collectionId, appsCollectionId),
+          inArray(documents.path, paths),
+          ne(brainPayloads.sha256, tombstone)
+        )
+      );
+    for (const { path } of held) {
+      const appId = appOfEntry(path);
+      if (appId !== undefined) {
+        unforgotten.add(appId);
+      }
+    }
+  }
+  return [...unforgotten];
+};
+
 /**
  * `indexApp`, whose failure is logged and left to the clock (see
  * `indexApps`): a conflict, another indexing that wrote first, is left to
@@ -324,6 +462,10 @@ export const indexAppNow = async (env: Env, appId: string): Promise<void> => {
  * minutes.
  */
 export const indexApps = async (env: Env): Promise<void> => {
+  for (const id of await unforgottenApps(env)) {
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    await forgetAppEntry(env, id);
+  }
   const [noted, inUse] = await Promise.all([
     drizzle(env.DB)
       .select({
@@ -368,6 +510,23 @@ export const indexApps = async (env: Env): Promise<void> => {
 };
 
 /**
+ * What any indexing of the App `appId` would write from now on, as
+ * `entryNow` has it: for a removed App, its tombstone for good
+ * (`forgetAppEntry`), as nothing makes its entry from the App again, so a
+ * purge of its earlier versions lasts, and nobody can restore the App to
+ * unblock one.
+ */
+const entryToCome = async (
+  env: Env,
+  appId: string
+): ReturnType<typeof entryNow> => {
+  if (await isRemovedApp(env, appId)) {
+    return { text: removedEntryText, name: "", description: "", agents: "" };
+  }
+  return await entryNow(env, appId);
+};
+
+/**
  * Refuses with `knowledge.read_only` a purge of an App's entry while what
  * indexing would write now (`entryNow`) holds a term (`holds`), saying
  * where: the next indexing (a version made current, the clock catching up)
@@ -390,7 +549,7 @@ const requireIndexedWithout = async (
   const appId = appOfEntry(document.path);
   let now: Awaited<ReturnType<typeof entryNow>>;
   try {
-    now = appId === undefined ? undefined : await entryNow(env, appId);
+    now = appId === undefined ? undefined : await entryToCome(env, appId);
   } catch (error) {
     log.error("knowledge.purge.app_unreadable", {
       documentId: document.id,

@@ -21,43 +21,23 @@
  * costs a few reads a day and never holds up the releases after or before
  * it.
  *
- * A release that records platform limits has its limit evidence file
- * next to the manifest (`limitEvidenceKey`, written at publish), read once:
- * its SHA-256 checked against the one R2 checked on write, then the file
- * against the manifest (its release, its commit, and evidence for each
- * limit it raises over the release before it, `verifyLimitEvidence`), and
- * that release against the admin's own record of it when it holds one, all
- * before anything is stored. Its bytes and sha256 are recorded with the
- * release; each deploy then holds the release to the client's profile
- * (src/releases/limits.ts). A signature over both (GRA-891's pattern) is
- * what would stop a bucket writer forging evidence too: it would be
- * checked here, before any of this is read.
- *
  * Idempotent: an imported release is skipped, and one imported by a run
  * that overlapped this one is recorded, and audited, once.
  */
 
-import { toHex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   blobCount,
-  limitEvidenceFileSchema,
-  limitEvidenceKey,
-  limitRaises,
   manifestKey,
-  platformLimitsSchema,
-  releaseIdSchema,
   releaseManifestSchema,
   sha256OfBytes,
-  verifyLimitEvidence,
   verifyReleaseBlobs,
 } from "@grasp-os/shared/release";
-import type {
-  Bytes,
-  LimitEvidenceFile,
-  PlatformLimits,
-  ReleaseManifest,
-} from "@grasp-os/shared/release";
+import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
+import {
+  compareReleaseIds,
+  releaseIdSchema,
+} from "@grasp-os/shared/release-id";
 import { eq, sql } from "drizzle-orm";
 
 import { actIfChanged } from "../db/act.ts";
@@ -110,9 +90,6 @@ const READ_CONCURRENCY = 2;
 /** Largest manifest the import reads; today's is about 35 KB. */
 export const MAX_MANIFEST_BYTES = 1_000_000;
 
-/** Largest limit evidence file the import reads: a few entries a release. */
-export const MAX_LIMIT_EVIDENCE_BYTES = 100_000;
-
 /** The wait after a release's first failed attempt: the next run. */
 const FIRST_RETRY_MS = 5 * 60 * 1000;
 /** The longest wait between attempts. */
@@ -147,15 +124,8 @@ const publishedIds = async (store: ReleaseStore): Promise<string[]> => {
   return ids;
 };
 
-const ciRelease = /^r(?<run>\d+)-(?<sha>[0-9a-f]{7})$/u;
-
-/** A CI release's run number; -1 for a local build (`dev-`). */
-const runOf = (id: string): number =>
-  Number(ciRelease.exec(id)?.groups?.run ?? -1);
-
-/** CI releases by run number, newest first, then local builds. */
-const newestFirst = (a: string, b: string): number =>
-  runOf(b) - runOf(a) || b.localeCompare(a);
+/** Newest first, by id (`compareReleaseIds`): local builds last. */
+const newestFirst = (a: string, b: string): number => compareReleaseIds(b, a);
 
 /** Reads from `store`, counting the reads. */
 class Reader {
@@ -186,35 +156,6 @@ class Reader {
     }
     return new Uint8Array(await object.arrayBuffer());
   }
-
-  /**
-   * As `read`, with the SHA-256 R2 checked when it was written (hex), or
-   * undefined when it was written without one.
-   */
-  async readChecked(
-    key: string,
-    maxBytes: number
-  ): Promise<{ bytes: Bytes; storedSha256: string | undefined } | undefined> {
-    this.reads += 1;
-    const object = await this.#store.get(key);
-    if (object === null) {
-      return undefined;
-    }
-    if (object.size > maxBytes) {
-      await object.body.cancel();
-      throw new Error(`${key} is ${object.size} bytes; at most ${maxBytes}`);
-    }
-    // The checksum R2 verified on write (`x-amz-checksum-sha256`), or, as
-    // CI also sends it, the same value in the object's metadata.
-    const stored = object.checksums.sha256;
-    return {
-      bytes: new Uint8Array(await object.arrayBuffer()),
-      storedSha256:
-        stored === undefined
-          ? object.customMetadata?.sha256
-          : toHex(new Uint8Array(stored)),
-    };
-  }
 }
 
 /**
@@ -235,144 +176,7 @@ const parseManifest = (
       `The manifest at ${manifestKey(id)} names release ${manifest.releaseId}`
     );
   }
-  const sha = ciRelease.exec(id)?.groups?.sha;
-  if (sha !== undefined && !manifest.commit.startsWith(sha)) {
-    throw new Error(
-      `Release ${id} names commit ${manifest.commit}, not one starting ${sha}`
-    );
-  }
   return { manifest, text };
-};
-
-/** Whether two releases' limits are the same, name for name. */
-const sameLimits = (a: PlatformLimits, b: PlatformLimits): boolean => {
-  const names = Object.keys(a);
-  return (
-    names.length === Object.keys(b).length &&
-    names.every((name) => Object.hasOwn(b, name) && a[name] === b[name])
-  );
-};
-
-/**
- * Throws when the release `evidence` says came before `manifest`'s is one
- * the admin holds and isn't what it says: built later, or with other
- * limits than the file raises over. One the admin doesn't hold (yet) is
- * taken at its word here; what a client runs never is
- * (src/releases/limits.ts).
- */
-const checkPreviousRelease = async (
-  db: AdminDatabase,
-  manifest: ReleaseManifest,
-  evidence: LimitEvidenceFile
-): Promise<void> => {
-  const previous = evidence.previousRelease;
-  if (previous === null) {
-    return;
-  }
-  const [row] = await db
-    .select({
-      builtAt: releases.builtAt,
-      limits: sql<
-        string | null
-      >`json_extract(${releases.manifest}, '$.platformLimits')`,
-    })
-    .from(releases)
-    .where(eq(releases.id, previous.releaseId));
-  if (row === undefined) {
-    return;
-  }
-  if (row.builtAt >= new Date(manifest.createdAt)) {
-    throw new Error(
-      `Release ${manifest.releaseId} names ${previous.releaseId}, built after it, as previous`
-    );
-  }
-  const limits =
-    row.limits === null
-      ? undefined
-      : platformLimitsSchema.safeParse(JSON.parse(row.limits)).data;
-  if (limits === undefined) {
-    throw new Error(
-      `Release ${manifest.releaseId} names ${previous.releaseId} as previous, which records no limits`
-    );
-  }
-  if (!sameLimits(limits, previous.platformLimits)) {
-    throw new Error(
-      `Release ${manifest.releaseId} raises its limits over other values than ${previous.releaseId} has`
-    );
-  }
-};
-
-/**
- * The limit evidence file of `manifest`'s release, read once and checked
- * before anything is stored: its SHA-256 the one R2 checked on write, the
- * release's own, covering each raise (`verifyLimitEvidence`), over a
- * previous release the admin's records agree with. Undefined for a
- * release that records no limits.
- */
-const readLimitEvidence = async (
-  reader: Reader,
-  db: AdminDatabase,
-  manifest: ReleaseManifest
-): Promise<
-  { evidence: LimitEvidenceFile; text: string; sha256: string } | undefined
-> => {
-  if (manifest.platformLimits === undefined) {
-    return undefined;
-  }
-  const key = limitEvidenceKey(manifest.releaseId);
-  const read = await reader.readChecked(key, MAX_LIMIT_EVIDENCE_BYTES);
-  if (read === undefined) {
-    throw new Error(
-      `Release ${manifest.releaseId} records platform limits but has no ${key}`
-    );
-  }
-  const sha256 = await sha256OfBytes(read.bytes);
-  if (read.storedSha256 !== sha256) {
-    throw new Error(
-      `${key} is ${sha256}, not the ${read.storedSha256 ?? "unrecorded"} SHA-256 R2 checked on write`
-    );
-  }
-  const text = new TextDecoder("utf-8", {
-    fatal: true,
-    ignoreBOM: true,
-  }).decode(read.bytes);
-  const evidence = limitEvidenceFileSchema.parse(JSON.parse(text));
-  if (
-    evidence.releaseId !== manifest.releaseId ||
-    evidence.commit !== manifest.commit
-  ) {
-    throw new Error(
-      `${key} is for ${evidence.releaseId} at ${evidence.commit}, not ${manifest.releaseId} at ${manifest.commit}`
-    );
-  }
-  if (evidence.previousRelease?.releaseId === manifest.releaseId) {
-    throw new Error(`Release ${manifest.releaseId} names itself as previous`);
-  }
-  verifyLimitEvidence({
-    ...evidence,
-    platformLimits: manifest.platformLimits,
-  });
-  await checkPreviousRelease(db, manifest, evidence);
-  return { evidence, text, sha256 };
-};
-
-/** What `manifest`'s release raises, on which profiles, for the audit trail. */
-const raisedOf = (
-  manifest: ReleaseManifest,
-  evidence: LimitEvidenceFile | undefined
-): string => {
-  const limits = manifest.platformLimits;
-  if (limits === undefined || evidence === undefined) {
-    return "";
-  }
-  return limitRaises(evidence.previousRelease?.platformLimits ?? limits, limits)
-    .map(({ limit, raisedTo }) => {
-      const profiles = evidence.limitEvidence
-        .filter((entry) => entry.limit === limit)
-        .map((entry) => entry.profile);
-      return `${limit} to ${raisedTo ?? "unbounded"} on ${profiles.join("+")}`;
-    })
-    .join("; ");
 };
 
 /**
@@ -412,9 +216,8 @@ const importRelease = async (
     progress?.manifestSha256 === manifestSha256
       ? Math.min(progress.verifiedBlobs, blobs)
       : 0;
-  // What this run may still read, less one for the evidence file of a
-  // release that records limits, which its last batch reads.
-  const budget = MAX_READS_PER_RUN - reader.reads - 1;
+  // What this run may still read.
+  const budget = MAX_READS_PER_RUN - reader.reads;
   const to = Math.min(blobs, from + Math.max(budget, 0));
   if (budget < 0 || (to <= from && from < blobs)) {
     return "deferred";
@@ -436,10 +239,6 @@ const importRelease = async (
       });
     return "deferred";
   }
-  const limitEvidence = await readLimitEvidence(reader, db, manifest);
-  // What it raises, on which profiles: in the audit trail with the import,
-  // as `<limit> to <value> on <profile>+<profile>`, one per limit.
-  const raised = raisedOf(manifest, limitEvidence?.evidence);
   await actIfChanged(
     db,
     "system",
@@ -450,8 +249,6 @@ const importRelease = async (
         commitSha: manifest.commit,
         manifest: text,
         manifestSha256,
-        limitEvidence: limitEvidence?.text ?? null,
-        limitEvidenceSha256: limitEvidence?.sha256 ?? null,
         builtAt: new Date(manifest.createdAt),
         importedAt: new Date(),
         feature: startsMajor(manifest.notes),
@@ -463,10 +260,6 @@ const importRelease = async (
       detail: {
         commit: manifest.commit,
         manifestSha256,
-        ...(limitEvidence === undefined
-          ? {}
-          : { limitEvidenceSha256: limitEvidence.sha256 }),
-        ...(raised === "" ? {} : { raised }),
       },
     }
   );

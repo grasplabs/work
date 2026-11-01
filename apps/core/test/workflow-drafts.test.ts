@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   editWorkflowDraft,
+  editWorkflowStep,
   publishWorkflowDraft,
   workflowDraft,
 } from "../src/workflow-drafts.ts";
@@ -611,5 +612,210 @@ describe("a workflow's draft", () => {
     });
     await deleteWorkflowResource(env, ada, workflow.id);
     await expect(storedRevisions(workflow.id)).resolves.toStrictEqual([]);
+  });
+});
+
+// One step edited on the canvas (workflow-steps.ts, `editWorkflowStep`):
+// saved as the draft's next revision and checked like any edit, from the
+// draft before any edit too; only a task, or a list of tasks, as the
+// diagram names them, never anything else of the definition or a
+// prototype; a revision someone replaced refused.
+describe("a step edited on the canvas", () => {
+  it("inserts and changes a step as the draft's next revision, nested ones too, and audits which", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf(workflow.name, {
+        tasks: [
+          { group: { do: [{ inner: { set: { status: "inner" } } }] } },
+          { finish: { set: { status: "done" } } },
+        ],
+      }),
+      basedOn: null,
+    });
+    const inserted = await editWorkflowStep(env, ada, workflow.id, {
+      expectedRevision: 0,
+      edit: {
+        kind: "insert",
+        list: "/do",
+        index: 0,
+        id: "greet",
+        body: { set: { status: "greeted" } },
+      },
+    });
+    const changed = await editWorkflowStep(env, ada, workflow.id, {
+      expectedRevision: 1,
+      edit: {
+        kind: "change",
+        pointer: "/do/1/group/do/0/inner",
+        body: { set: { status: "changed" } },
+      },
+    });
+    const source: unknown = JSON.parse(changed.source);
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target }) =>
+          action === "workflow.draft.edited" && target?.id === workflow.id
+      )
+      .map(({ detail }) => detail);
+
+    expect({
+      inserted: {
+        revision: inserted.revision,
+        problems: inserted.problems,
+        steps: inserted.checkpoint?.diagram.tasks.map(({ id }) => id),
+      },
+      changed: {
+        revision: changed.revision,
+        problems: changed.problems,
+        checkpoint: changed.checkpoint?.revision,
+      },
+      steps:
+        typeof source === "object" && source !== null && "do" in source
+          ? source.do
+          : undefined,
+      audited,
+    }).toStrictEqual({
+      inserted: {
+        revision: 1,
+        problems: [],
+        steps: ["greet", "group", "finish"],
+      },
+      changed: { revision: 2, problems: [], checkpoint: 2 },
+      steps: [
+        { greet: { set: { status: "greeted" } } },
+        { group: { do: [{ inner: { set: { status: "changed" } } }] } },
+        { finish: { set: { status: "done" } } },
+      ],
+      audited: [
+        {
+          revision: 1,
+          checked: true,
+          problems: 0,
+          modules: 0,
+          step: "insert",
+          stepPointer: "/do/0",
+        },
+        {
+          revision: 2,
+          checked: true,
+          problems: 0,
+          modules: 0,
+          step: "change",
+          stepPointer: "/do/1/group/do/0/inner",
+        },
+      ],
+    });
+  });
+
+  it("keeps a step the profile refuses with its problems, never as a checkpoint", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: definitionOf(workflow.name),
+      modules: {},
+    });
+    const refused = await editWorkflowStep(env, ada, workflow.id, {
+      expectedRevision: 1,
+      edit: {
+        kind: "change",
+        pointer: "/do/0/finish",
+        body: { nonsense: true },
+      },
+    });
+
+    expect({
+      revision: refused.revision,
+      problems: refused.problems.length > 0,
+      checkpoint: refused.checkpoint?.revision,
+    }).toStrictEqual({ revision: 2, problems: true, checkpoint: 1 });
+  });
+
+  it("edits only a step or a list of steps, of the revision read, for the workflow's builders", async () => {
+    const ada = await person("builder");
+    const reader = await person("user");
+    const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: definitionOf(workflow.name),
+      modules: {},
+    });
+    const body = { set: { status: "x" } };
+    const change = async (pointer: string, expectedRevision = 1) => {
+      const refused = await outcome(
+        editWorkflowStep(env, ada, workflow.id, {
+          expectedRevision,
+          edit: { kind: "change", pointer, body },
+        })
+      );
+      return refused;
+    };
+    const insert = async (list: string, index = 0) => {
+      const refused = await outcome(
+        editWorkflowStep(env, ada, workflow.id, {
+          expectedRevision: 1,
+          edit: { kind: "insert", list, index, id: "added", body },
+        })
+      );
+      return refused;
+    };
+    const refusals = {
+      notATask: await change("/input/schema"),
+      wrongId: await change("/do/0/start"),
+      pastTheEnd: await change("/do/1/finish"),
+      leadingZero: await change("/do/00/finish"),
+      prototype: await change("/__proto__/0/finish"),
+      notAList: await insert("/document"),
+      notATaskList: await insert("/input/schema/document/required"),
+      beyondTheList: await insert("/do", 2),
+      stale: await change("/do/0/finish", 0),
+      user: await outcome(
+        editWorkflowStep(env, reader, workflow.id, {
+          expectedRevision: 1,
+          edit: { kind: "change", pointer: "/do/0/finish", body },
+        })
+      ),
+      invalid: await outcome(
+        editWorkflowStep(env, ada, workflow.id, {
+          expectedRevision: 1,
+          edit: { kind: "rename", pointer: "/do/0/finish" },
+        })
+      ),
+    };
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 1,
+      source: "{ not yet",
+      modules: {},
+    });
+    const notJson = await change("/do/0/finish", 2);
+
+    expect({
+      refusals,
+      notJson,
+      kept: await storedRevisions(workflow.id),
+    }).toStrictEqual({
+      refusals: {
+        notATask: "workflow.step_not_found",
+        wrongId: "workflow.step_not_found",
+        pastTheEnd: "workflow.step_not_found",
+        leadingZero: "workflow.step_not_found",
+        prototype: "workflow.step_not_found",
+        notAList: "workflow.step_not_found",
+        notATaskList: "workflow.step_not_found",
+        beyondTheList: "workflow.step_not_found",
+        stale: "workflow.draft_conflict",
+        user: "role.forbidden",
+        invalid: "workflow.resource_invalid",
+      },
+      notJson: "workflow.draft_not_json",
+      kept: [1, 2],
+    });
   });
 });

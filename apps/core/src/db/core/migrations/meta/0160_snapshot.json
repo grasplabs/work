@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "be598b01-abaa-4a4b-9877-471a45d4e9cd",
+  "id": "45955e19-4178-4523-a20a-974de6aaed06",
   "prevId": "8c6d5a1c-3f1c-4162-9c6a-c4d515234015",
   "tables": {
     "access_revocations": {
@@ -6447,6 +6447,43 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "proposals": {
+          "name": "proposals",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "unchecked": {
+          "name": "unchecked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         }
       },
       "indexes": {},
@@ -11510,23 +11547,6 @@
           ],
           "isUnique": false,
           "where": "\"workflow_resource_runs\".\"status\" = 'starting'"
-        },
-        "workflow_resource_runs_created_idx": {
-          "name": "workflow_resource_runs_created_idx",
-          "columns": [
-            "created_at",
-            "id"
-          ],
-          "isUnique": false
-        },
-        "workflow_resource_runs_status_ended_idx": {
-          "name": "workflow_resource_runs_status_ended_idx",
-          "columns": [
-            "status",
-            "ended_at",
-            "id"
-          ],
-          "isUnique": false
         },
         "workflow_resource_runs_newest_idx": {
           "name": "workflow_resource_runs_newest_idx",

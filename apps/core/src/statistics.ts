@@ -30,7 +30,7 @@ import { z } from "zod";
 
 import { appFor } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole, teamsOf } from "./auth/identity.ts";
+import { teamsOf } from "./auth/identity.ts";
 import {
   apps as appsTable,
   appStatistics,
@@ -39,12 +39,12 @@ import {
   improvementSignals,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
-import { authorize } from "./permissions.ts";
+import { authorize, personRole } from "./permissions.ts";
 import { runView } from "./workflows/run-view.ts";
 
-// Statistics (@grasp-os/shared/statistics): an App's server code records
-// named measures with a few dimensions, and reads aggregates of them over
-// the last days, through its `STATISTICS` stub (app-bindings.ts). Points
+// Statistics (@grasp-os/shared/statistics): an App's functions record
+// named measures with a few dimensions, and read aggregates of them over
+// the last days, through their statistics resource (resource-statistics.ts). Points
 // are added up as they come, by the UTC day (`app_statistics`), so a read
 // never counts more rows than a day holds for each day it covers.
 //
@@ -497,7 +497,9 @@ const unavailableCodes: ReadonlySet<string> = new Set([
  * Of the Apps `apps`, those whose runs the person `authority` acts for
  * may see added up (an admin, or a builder of it, `appFor`), and the rest,
  * which they may not see or which no longer exist. `permission.person_inactive`
- * for someone no longer a member.
+ * for someone no longer a member, or, for work a Grasp staff member
+ * started, once their staff session ended (`personRole`, GRA-1088): the
+ * read is audited as that work's, staff mark and all (`auditPlatformRead`).
  */
 const runsVisible = async (
   env: Env,
@@ -505,7 +507,7 @@ const runsVisible = async (
   apps: readonly string[]
 ): Promise<{ visible: string[]; unavailable: string[] }> => {
   const userId = authority.onBehalfOf;
-  const role = await memberRole(env.DB, userId);
+  const role = await personRole(env, userId, authority.staff);
   if (!role) {
     throw permissionErrors.create("permission.person_inactive");
   }

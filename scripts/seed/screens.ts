@@ -1,201 +1,172 @@
 /**
- * The demo domains' apps (core's screens): views their teams work from,
- * over the domain's own workflow runs, so the Domains page has apps to
- * open and admins have a screen to approve. Each reads only what the
- * screen SDK gives any screen of its App (`useWorkflow`): no permission,
- * no connection.
+ * The demo domains' apps (core's screens): a screen per domain that starts
+ * a run of one of the workflows its App binds and follows it, as the
+ * typed screen SDK does (`useWorkflow(workflows.x)`). Decisions are
+ * answered in the inbox and on the decision page, and a workflow's runs
+ * are in its overview and activity: a screen sees only the runs it
+ * starts. Each reads nothing else: no permission, no connection.
  */
+import { engines } from "./engines.ts";
+import type { WorkflowSeed } from "./engines.ts";
+
+/** A component's name for workflow alias `alias`: `mortgageFiles` → `MortgageFiles`. */
+const componentOf = (alias: string): string =>
+  `${alias.charAt(0).toUpperCase()}${alias.slice(1)}Run`;
 
 /**
- * A screen that follows one workflow's runs: how many ended how over
- * the last 30 days, the decisions waiting with their answers, and the
- * latest runs. `title` and `intro` name what it's for.
+ * A screen with a card for each workflow in `workflows`: a button that
+ * starts a run of it with its sample input, and the run as it goes on.
  */
-const workflowScreen = ({
-  name,
-  workflow,
+const domainScreen = ({
   title,
   intro,
-  waitingTitle,
+  workflows,
 }: {
-  name: string;
-  workflow: string;
   title: string;
   intro: string;
-  waitingTitle: string;
-}): string => `import { useWorkflow } from "@grasp-os/sdk/screen";
-import type { ScreenRun } from "@grasp-os/sdk/screen";
+  workflows: readonly WorkflowSeed[];
+}): string => `import { useWorkflow } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@grasp-os/ui/components/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@grasp-os/ui/components/table";
 import { useState } from "react";
 
-const dayMs = 24 * 60 * 60 * 1000;
+import { workflows } from "#grasp";
 
-const statusLabels: Record<ScreenRun["status"], string> = {
-  queued: "Queued",
+/** What a run is doing, in words, from its status. */
+const statusLabels: Record<string, string> = {
+  idle: "Starting",
+  loading: "Starting",
+  queued: "Waiting its turn",
   running: "Running",
-  waiting: "Waiting for a decision",
+  waiting: "Waiting for a decision: answer it in your inbox",
   paused: "Paused",
+  compensating: "Undoing what it did",
   completed: "Completed",
   failed: "Failed",
   cancelled: "Cancelled",
 };
-
-const day = (iso: string): string =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-
-/** How many of \`runs\` started in the last 30 days ended as \`status\`. */
-const countOf = (runs: ScreenRun[], status: ScreenRun["status"]): number =>
-  runs.filter((run) => run.status === status && Date.now() - Date.parse(run.createdAt) < 30 * dayMs).length;
-
-const Waiting = ({ run, decide }: { run: ScreenRun; decide: (approved: boolean) => Promise<void> }) => {
-  const [problem, setProblem] = useState("");
-  const answer = async (approved: boolean) => {
-    setProblem("");
-    try {
-      await decide(approved);
-    } catch (error) {
-      setProblem(error instanceof Error ? error.message : "That didn't work.");
-    }
-  };
+${workflows
+  .map(
+    ({ alias }) => `
+const ${componentOf(alias)} = ({ runId }: { runId: string }) => {
+  const run = useWorkflow(workflows.${alias}, { runId });
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 border-b py-2 last:border-b-0">
-      <span className="flex flex-col">
-        <span>{run.waitingFor[0]?.description ?? "A decision"}</span>
-        <span className="text-muted-foreground text-sm">Since {day(run.createdAt)}</span>
-        {problem === "" ? null : <span className="text-destructive text-sm">{problem}</span>}
-      </span>
-      <span className="flex gap-2">
-        <Button onClick={() => void answer(true)} size="sm">Approve</Button>
-        <Button onClick={() => void answer(false)} size="sm" variant="outline">Reject</Button>
-      </span>
-    </li>
+    <div className="flex flex-col gap-2">
+      <Badge variant="secondary">{statusLabels[run.status] ?? run.status}</Badge>
+      {run.status === "completed" ? (
+        <pre className="text-sm whitespace-pre-wrap">{JSON.stringify(run.output, null, 2)}</pre>
+      ) : null}
+      {run.status === "failed" ? <p className="text-sm text-destructive">{run.error.message}</p> : null}
+    </div>
   );
-};
+};`
+  )
+  .join("\n")}
 
-export default function ${name}() {
-  const { runs, decide } = useWorkflow(${JSON.stringify(workflow)});
-  const waiting = runs.filter((run) => run.waitingFor.length > 0);
-  const numbers = [
-    { label: "Completed", value: countOf(runs, "completed") },
-    { label: "Failed", value: countOf(runs, "failed") },
-    { label: "Waiting", value: waiting.length },
-  ];
+export default function Screen() {
+  const [problem, setProblem] = useState("");
+${workflows
+  .map(
+    ({ alias }) => `  const ${alias} = useWorkflow(workflows.${alias});
+  const [${alias}Run, set${componentOf(alias)}] = useState<string | null>(null);`
+  )
+  .join("\n")}
   return (
-    <main className="flex flex-col gap-4 p-4">
+    <main className="flex flex-col gap-4 p-6">
       <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-medium">${title}</h1>
+        <h1 className="text-2xl font-semibold">${title}</h1>
         <p className="text-muted-foreground">${intro}</p>
       </header>
-      <div className="grid grid-cols-3 gap-4">
-        {numbers.map(({ label, value }) => (
-          <Card key={label}>
-            <CardHeader>
-              <CardDescription>{label}, last 30 days</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-medium">{value}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <Card>
+      {problem === "" ? null : <p className="text-sm text-destructive">{problem}</p>}
+${workflows
+  .map(
+    ({ alias, title: name, sample }) => `      <Card>
         <CardHeader>
-          <CardTitle>${waitingTitle}</CardTitle>
+          <CardTitle>${name}</CardTitle>
+          <CardDescription>Starts a run on a sample and follows it.</CardDescription>
         </CardHeader>
         <CardContent>
-          {waiting.length === 0 ? (
-            <p className="text-muted-foreground">Nothing waits for a decision.</p>
-          ) : (
-            <ul>
-              {waiting.map((run) => (
-                <Waiting
-                  decide={async (approved) => {
-                    const name = run.waitingFor[0]?.name;
-                    if (name !== undefined) {
-                      await decide(run.id, name, { approved });
-                    }
-                  }}
-                  key={run.id}
-                  run={run}
-                />
-              ))}
-            </ul>
-          )}
+          <div className="flex flex-col gap-3">
+          <Button
+            className="self-start"
+            onClick={async () => {
+              setProblem("");
+              try {
+                const { runId } = await ${alias}.run(${JSON.stringify(sample)});
+                set${componentOf(alias)}(runId);
+              } catch (error) {
+                setProblem(error instanceof Error ? error.message : "That didn't start.");
+              }
+            }}
+          >
+            Try it on a sample
+          </Button>
+          {${alias}Run === null ? null : <${componentOf(alias)} runId={${alias}Run} />}
+          </div>
         </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Latest runs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Started</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Ended</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.slice(0, 15).map((run) => (
-                <TableRow key={run.id}>
-                  <TableCell>{day(run.createdAt)}</TableCell>
-                  <TableCell>
-                    <Badge variant={run.status === "failed" ? "destructive" : "secondary"}>{statusLabels[run.status]}</Badge>
-                  </TableCell>
-                  <TableCell>{run.endedAt === null ? "" : day(run.endedAt)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      </Card>`
+  )
+  .join("\n")}
     </main>
   );
 }
 `;
 
-/**
- * The screens of each domain, by domain name, then by screen name: the
- * prototype's apps (`apps` in noordkade.ts), each over the runs of one
- * workflow of its domain, since a screen reads only its own App's. The
- * prototype's charts of revenue, tickets and leads read systems no
- * connection brings yet.
- */
-export const engineScreens: Record<string, Record<string, string>> = {
+/** The screen of each domain that has one: its file's name, title and intro. */
+const domainScreens: Record<
+  string,
+  { name: string; title: string; intro: string }
+> = {
   "Purchase-to-Pay": {
-    "finance-cockpit": workflowScreen({
-      name: "FinanceCockpit",
-      workflow: "supplier-invoices",
-      title: "Finance cockpit",
-      intro:
-        "The invoices still waiting for an approval, and how the last month went.",
-      waitingTitle: "Waiting for an approval",
-    }),
+    name: "finance-cockpit",
+    title: "Finance cockpit",
+    intro:
+      "Try the invoice workflow on a sample. Approvals wait in the approvers' inbox.",
   },
   "Issue-to-Resolution": {
-    "service-desk": workflowScreen({
-      name: "ServiceDesk",
-      workflow: "complaints",
-      title: "Service desk",
-      intro:
-        "Every complaint registered, and the compensation waiting for compliance.",
-      waitingTitle: "Compensation to approve",
-    }),
+    name: "service-desk",
+    title: "Service desk",
+    intro:
+      "Try the service desk's workflows on a sample. Compensation to approve waits in compliance's inbox.",
   },
   "Opportunity-to-Cash": {
-    "advice-pipeline": workflowScreen({
-      name: "AdvicePipeline",
-      workflow: "mortgage-files",
-      title: "My advice pipeline",
-      intro: "Complete client files waiting for an adviser to take them over.",
-      waitingTitle: "Files to take over",
-    }),
+    name: "advice-pipeline",
+    title: "My advice pipeline",
+    intro:
+      "Try the onboarding and handover workflows on a sample. Files to take over wait in the advisers' inbox.",
   },
 };
+
+/**
+ * The screens of each domain, by domain name, then by screen name: the
+ * prototype's apps (`apps` in noordkade.ts), each over the workflows of
+ * its domain, since a screen starts only its own App's. The prototype's
+ * charts of revenue, tickets and leads read systems no connection brings
+ * yet, and its run histories are the workflows' own pages now.
+ */
+export const engineScreens: Record<
+  string,
+  Record<string, string>
+> = Object.fromEntries(
+  engines.flatMap(({ name, workflows }) => {
+    const screen = domainScreens[name];
+    return screen === undefined
+      ? []
+      : [
+          [
+            name,
+            {
+              [screen.name]: domainScreen({
+                title: screen.title,
+                intro: screen.intro,
+                workflows,
+              }),
+            },
+          ],
+        ];
+  })
+);
 
 /**
  * The domains whose screens an admin approves as the seed runs; the

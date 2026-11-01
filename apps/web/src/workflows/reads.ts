@@ -2,6 +2,7 @@ import type { App } from "@grasp-os/shared/apps";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type {
   AppWorkflowSummary,
+  RunActivity,
   RunFilter,
   RunsPage,
   WorkflowSummary,
@@ -17,10 +18,10 @@ import type { Session } from "../core.ts";
 const refused = (error: unknown): boolean =>
   roleErrors.codeOf(error) === "role.forbidden";
 
-/** The engines (core's Apps) core lets the person open: their own, those shared with them, and every one for admins. */
-export const openableApps = async (session: Session): Promise<App[]> => {
+/** What `read` lists, or none when core refuses it to the person's role. */
+export const noneIfRefused = async <T>(read: Promise<T[]>): Promise<T[]> => {
   try {
-    return await session.apps.list();
+    return await read;
   } catch (error) {
     if (refused(error)) {
       return [];
@@ -28,6 +29,10 @@ export const openableApps = async (session: Session): Promise<App[]> => {
     throw error;
   }
 };
+
+/** The engines (core's Apps) core lets the person open: their own, those shared with them, and every one for admins. */
+export const openableApps = async (session: Session): Promise<App[]> =>
+  await noneIfRefused(session.apps.list());
 
 /** The workflows core lists for the person. */
 export const listWorkflows = async (
@@ -66,6 +71,23 @@ export const listRuns = async (
   } catch (error) {
     if (refused(error)) {
       return { runs: [], more: false };
+    }
+    throw error;
+  }
+};
+
+/**
+ * The runs core counted for the person over its default window
+ * (`workflows.activity`); null where their role lists none.
+ */
+export const readActivity = async (
+  session: Session
+): Promise<RunActivity | null> => {
+  try {
+    return await session.workflows.activity();
+  } catch (error) {
+    if (refused(error)) {
+      return null;
     }
     throw error;
   }

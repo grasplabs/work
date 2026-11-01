@@ -20,7 +20,8 @@ import type { ShownVersion } from "./draft-versions.tsx";
 
 // "Version N of M" in the studio, against core's chats as the page reaches
 // them over RPC, faked: it counts the draft's versions, steps back to an
-// earlier one, which reads as read-only, and returns to the latest; a new
+// earlier one, which reads as read-only, and returns to the latest or
+// restores it; discards the draft only once the person confirms; a new
 // write of the draft brings the person back to the latest; versions that
 // don't load leave the count out.
 
@@ -56,11 +57,27 @@ const versionsUpTo = (count: number, revision: number): ChatDraftVersion[] =>
  */
 const shown = async (answer: () => ChatDraftVersion[]) => {
   const asked: string[] = [];
+  /** The changes the bar asked core for, in order. */
+  const changed: string[] = [];
   const chats = {
     draftVersions: async (chatId: string, app: string) => {
       await Promise.resolve();
       asked.push(`${chatId}:${app}`);
       return answer();
+    },
+    restoreDraftVersion: async (
+      chatId: string,
+      app: string,
+      version: number
+    ) => {
+      await Promise.resolve();
+      changed.push(`restore ${chatId}:${app}:${version}`);
+      const [restored] = versionsUpTo(1, 9);
+      return { ...restored, restoredFrom: version };
+    },
+    discardDraft: async (chatId: string, app: string) => {
+      await Promise.resolve();
+      changed.push(`discard ${chatId}:${app}`);
     },
   };
   const core = {
@@ -131,7 +148,7 @@ const shown = async (answer: () => ChatDraftVersion[]) => {
     );
     await router.load();
   });
-  return { asked };
+  return { asked, changed };
 };
 
 /** The harness's own buttons: what the studio around the bar does. */
@@ -198,26 +215,51 @@ describe(DraftVersionBar, () => {
 
     expect({ latest, first, second, back, written, asked }).toStrictEqual({
       latest: {
-        text: "Version 3 of 3",
-        enabled: ["Earlier version"],
+        text: "Version 3 of 3Discard draft",
+        enabled: ["Earlier version", "Discard draft"],
       },
       first: {
-        text: "Version 1 of 3Read-onlyBack to latest",
-        enabled: ["Later version", "Back to latest"],
+        text: "Version 1 of 3Read-onlyBack to latestRestore this version",
+        enabled: ["Later version", "Back to latest", "Restore this version"],
       },
       second: {
-        text: "Version 2 of 3Read-onlyBack to latest",
-        enabled: ["Earlier version", "Later version", "Back to latest"],
+        text: "Version 2 of 3Read-onlyBack to latestRestore this version",
+        enabled: [
+          "Earlier version",
+          "Later version",
+          "Back to latest",
+          "Restore this version",
+        ],
       },
       back: {
-        text: "Version 3 of 3",
-        enabled: ["Earlier version"],
+        text: "Version 3 of 3Discard draft",
+        enabled: ["Earlier version", "Discard draft"],
       },
       written: {
-        text: "Version 4 of 4",
-        enabled: ["Earlier version"],
+        text: "Version 4 of 4Discard draft",
+        enabled: ["Earlier version", "Discard draft"],
       },
       asked: ["chat-1:app-1", "chat-1:app-1"],
+    });
+  });
+
+  it("restores the earlier version opened, then shows the latest, and discards the draft only once confirmed", async () => {
+    const { changed } = await shown(() => versionsUpTo(3, 2));
+
+    await press("Earlier version");
+    await press("Earlier version");
+    await press("Restore this version");
+    const restored = bar();
+    await press("Discard draft");
+    const asking = [...changed];
+    await press("Cancel");
+    await press("Discard draft");
+    await press("Discard");
+
+    expect({ restored: restored.text, asking, changed }).toStrictEqual({
+      restored: "Version 3 of 3Discard draft",
+      asking: ["restore chat-1:app-1:1"],
+      changed: ["restore chat-1:app-1:1", "discard chat-1:app-1"],
     });
   });
 

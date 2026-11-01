@@ -16,16 +16,19 @@ import {
 import type {
   App,
   AppContents,
+  AppOverview,
   CurrentExports,
   AppFiles,
   AppRole,
   AppVersion,
+  ListedScreen,
   ViewedApp,
   CommittedVersion,
   FileDiff,
 } from "@grasp-os/shared/apps";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
@@ -37,7 +40,7 @@ import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -174,6 +177,7 @@ export const toApp = (row: AppRow): App => ({
   currentVersion: row.currentVersion,
   pendingVersion: row.pendingVersion,
   status: row.status,
+  process: storedProcessOf(row.process),
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -213,14 +217,17 @@ export const changeEntry = (
   detail,
 });
 
-/** The App `input` names, which must exist. */
+/**
+ * The App `input` names, which must exist and not be removed: a removed
+ * App (app-removal.ts) is answered as one that isn't there.
+ */
 export const findApp = async (env: Env, input: unknown): Promise<App> => {
   const id = appIdSchema.safeParse(input);
   const row = id.success
     ? await drizzle(env.DB)
         .select()
         .from(apps)
-        .where(eq(apps.id, id.data))
+        .where(and(eq(apps.id, id.data), isNull(apps.removedAt)))
         .get()
     : undefined;
   if (!row) {
@@ -456,7 +463,6 @@ const checkLimits = (
  * its limit, and only if it also grew, as with `checkLimits`.
  */
 const checkMemory = (
-  env: Env,
   before: string | undefined,
   after: string | undefined
 ): void => {
@@ -464,7 +470,7 @@ const checkMemory = (
     after !== undefined &&
     (before === undefined || after.length > before.length);
   if (grew) {
-    requireWithinLimit(env, "AGENTS.md", after);
+    requireWithinLimit("AGENTS.md", after);
   }
 };
 
@@ -580,6 +586,7 @@ export const createApp = async (
     responsibleId: null,
     audienceType: null,
     audienceId: null,
+    process: null,
     blueprint: blueprint ?? null,
     currentVersion: null,
     pendingVersion: null,
@@ -587,6 +594,8 @@ export const createApp = async (
     statusChangedAt: null,
     statusChangedBy: null,
     createdAt: new Date(),
+    removedAt: null,
+    removedBy: null,
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
@@ -724,6 +733,78 @@ export const appContents = async (
 };
 
 /**
+ * The Apps `by` has a role in, as `listApps` gives them, each with what
+ * `appContents` says of it: one query, from its current version's row
+ * (`app_versions.screens`, `workflows`), so no files are read.
+ */
+export const listAppOverviews = async (
+  env: Env,
+  by: Member
+): Promise<AppOverview[]> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      app: apps,
+      screens: appVersions.screens,
+      workflows: appVersions.workflows,
+    })
+    .from(apps)
+    .leftJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(appsFoundBy(env, by))
+    .orderBy(asc(apps.createdAt), asc(apps.id));
+  const found = rows.map((row) => ({ ...row, app: toApp(row.app) }));
+  const builds = await appsBuiltBy(
+    env,
+    by,
+    found.map(({ app }) => app.id)
+  );
+  return found.map(({ app, screens, workflows }) => ({
+    app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
+    // None without a current version, whose row the join doesn't find.
+    contents: {
+      version: app.currentVersion,
+      screens: (screens ?? []).toSorted(),
+      workflows: (workflows ?? []).toSorted(),
+    },
+  }));
+};
+
+/**
+ * Every screen of the current version of each App `by` has a role in
+ * (`appsFoundBy`, as `listApps`), newest App first, its screens by name:
+ * one query, the names its version's row keeps (`app_versions.screens`),
+ * so no files are read. An App with no current version has none.
+ */
+export const listScreens = async (
+  env: Env,
+  by: Member
+): Promise<ListedScreen[]> => {
+  const rows = await drizzle(env.DB)
+    .select({ app: apps, screens: appVersions.screens })
+    .from(apps)
+    .innerJoin(
+      appVersions,
+      and(
+        eq(appVersions.appId, apps.id),
+        eq(appVersions.version, apps.currentVersion)
+      )
+    )
+    .where(appsFoundBy(env, by))
+    .orderBy(desc(apps.createdAt), asc(apps.id));
+  return rows.flatMap(({ app, screens }) => {
+    const { id, name, status, process } = toApp(app);
+    return screens
+      .toSorted()
+      .map((screen) => ({ app: { id, name, status, process }, screen }));
+  });
+};
+
+/**
  * What an App's current version exports to other Apps, for anyone with a
  * role in it, people and the agent alike: read from its row alone, no
  * files.
@@ -787,7 +868,7 @@ export const applyChanges = (
   }
   checkLimits(files, before);
   checkPaths(files.keys(), added);
-  checkMemory(env, agentsBefore, files.get(appMemoryPath));
+  checkMemory(agentsBefore, files.get(appMemoryPath));
   return changes;
 };
 
@@ -872,6 +953,7 @@ export const commitFiles = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls,
     exports: exported,
     proposedBy: null,
@@ -1075,6 +1157,7 @@ export const proposeDraft = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    screens: screensIn(files),
     workflowCalls,
     exports: exported,
     proposedBy: by.via ?? null,
@@ -1591,14 +1674,11 @@ export const makeCurrent = async (
   // retention sweep's deletion lands in between. Its tests passed as its
   // candidate was verified (`verifyVersion`), on the same files.
   const sealedLayout = isAppLayout(files);
-  let sampleGate: SQL | undefined;
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
-    const { noFailedSampleSql, requireMigrationEvidence } =
+    const { requireMigrationEvidence } =
       await import("./migration-evidence.ts");
     await requireMigrationEvidence(env, appId, number);
-    // And again as the version is made current, below.
-    sampleGate = noFailedSampleSql(appId, number);
     await requireStoreSchemaActive(env, appId, number);
   }
   const triggers = await triggerRegistration(env, appId, number, files);
@@ -1622,22 +1702,6 @@ export const makeCurrent = async (
     // as such. Only a batch that keeps failing leaves the store switched
     // ahead of D1, until making it current is asked again.
     //
-    // A failed sample of its migrations is looked for once more first:
-    // the switch is where it is decided, since a store switched over
-    // supersedes the schema the version still current writes under, and
-    // refusing the version after it would only lock that one out of its
-    // store. Nothing a sample could fail on is left by then: the store
-    // switches only from ready, with no record left to transform (work
-    // queued again refuses it as `migration.pending`), and a sample of a
-    // ready store reads nothing, so it is `empty` and clears. A failure
-    // landing after this look read its records before the store was
-    // ready, and the backfill has since transformed and validated every
-    // one. Where nothing switched now (no ready migration, or a store a
-    // lost batch switched before), the change still refuses one
-    // (`sampleGate`).
-    const { requireMigrationEvidence } =
-      await import("./migration-evidence.ts");
-    await requireMigrationEvidence(env, appId, number);
     // Its candidate still verified, superseded by no commit meanwhile:
     // asked here, before the store switches, so a candidate refused below
     // never leaves the version current locked out of its store.
@@ -1647,11 +1711,7 @@ export const makeCurrent = async (
     // the candidate was verified, and a verified candidate never expires,
     // so an artifact changed in storage since must refuse it here.
     await requireReleaseAsReported(env, appId, number, candidate);
-    if (
-      await requireStoreSchemaActive(env, appId, number, { activate: true })
-    ) {
-      sampleGate = undefined;
-    }
+    await requireStoreSchemaActive(env, appId, number, { activate: true });
   }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
@@ -1677,7 +1737,6 @@ export const makeCurrent = async (
               sealedLayout
                 ? releaseAsReportedSql(appId, number, candidate)
                 : undefined,
-              sampleGate,
               verifiedCandidateSql(appId, number, candidate)
             )
           )
@@ -1775,15 +1834,8 @@ export const makeCurrent = async (
     }
     requireNotArchived(await findApp(env, appId));
     if (sealedLayout) {
-      // Revoked or deleted since it was checked, or a sample of its
-      // migrations failed since, where the change still checked that (its
-      // store didn't switch): refused as such.
+      // Revoked or deleted since it was checked: refused as such.
       await requireRunnableRelease(env, appId, number);
-      if (sampleGate !== undefined) {
-        const { requireMigrationEvidence } =
-          await import("./migration-evidence.ts");
-        await requireMigrationEvidence(env, appId, number);
-      }
     }
     // A verified candidate is never superseded (`supersededBy`), so what
     // is left is a conflict: the base moved, or the candidate ended.

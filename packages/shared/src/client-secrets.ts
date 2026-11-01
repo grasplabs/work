@@ -7,7 +7,7 @@ import { toHex } from "./encoding.ts";
  * a client's Workers, and the router derives the router secret on every
  * forward. Raising the client's generation rotates them.
  *
- * The master keys live in Secrets Store (grasp-os-ops): `ROUTER_KEY` for
+ * The master keys live in Secrets Store (Grasp's account): `ROUTER_KEY` for
  * the router secret, which the router holds too, and `CLIENT_KEY` for the
  * rest, which only the admin holds.
  */

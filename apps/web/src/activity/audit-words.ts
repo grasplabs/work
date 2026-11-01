@@ -36,6 +36,18 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`A connection needs signing in again`,
   },
   {
+    action: "connection.revoked",
+    text: msg`Revoked a disconnected account's access at its provider`,
+  },
+  {
+    action: "connection.revoke_superseded",
+    text: msg`Kept access at the provider for an account connected again`,
+  },
+  {
+    action: "connection.revoke_abandoned",
+    text: msg`Gave up revoking a disconnected account's access at its provider`,
+  },
+  {
     action: "connection.events.read",
     text: msg`Read what changed at a connection`,
   },

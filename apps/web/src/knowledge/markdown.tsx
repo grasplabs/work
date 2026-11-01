@@ -84,7 +84,11 @@ const OutsideLink = ({
   );
 
 const components: Components = {
-  h1: ({ children }) => <h1 className="text-2xl font-medium">{children}</h1>,
+  h1: ({ children }) => (
+    <h1 className="font-serif text-2xl font-light tracking-tight">
+      {children}
+    </h1>
+  ),
   h2: ({ children }) => <h2 className="text-xl font-medium">{children}</h2>,
   h3: ({ children }) => <h3 className="text-lg font-medium">{children}</h3>,
   h4: ({ children }) => <h4 className="font-medium">{children}</h4>,

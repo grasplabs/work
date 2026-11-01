@@ -42,23 +42,30 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   const { mine, expired } = seededConnections();
   const page = await pageOf(user);
 
-  // The list: Microsoft 365 is among its kind of app, connected for them,
-  // and needs signing in again; it stays so under Connected.
+  // The list: one of their Microsoft 365 connections ran out, but the
+  // ones beside it work, so it is listed as connected, not as needing
+  // someone to sign in again; its row offers to sign in again. It stays
+  // so when the filter keeps only what is connected.
   await page.goto("/integrations");
   const search = page.getByRole("searchbox", { name: "Search integrations" });
   await search.fill("micro");
   await expect(page).toHaveURL(/[?&]q=micro/u);
-  const mail = page.getByRole("region", { name: /^Email and calendar/u });
+  const row = page.getByRole("listitem").filter({
+    has: page.getByRole("link", { name: "Microsoft 365", exact: true }),
+  });
   await expect(
-    mail.getByRole("link", { name: "Microsoft 365", exact: true })
+    page
+      .getByRole("region", { name: /^Connected/u })
+      .getByRole("link", { name: "Microsoft 365", exact: true })
   ).toBeVisible();
-  await page
-    .getByRole("complementary", { name: "Filter integrations" })
-    .getByRole("link", { name: /^Connected/u })
-    .click();
+  await expect(
+    page.getByRole("region", { name: /^Needs someone to sign in again/u })
+  ).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Filter integrations" }).click();
+  await page.getByRole("option", { name: /^Connected/u }).click();
   await expect(page).toHaveURL(/show=connected/u);
   await expect(
-    mail.getByRole("button", { name: "Sign in to Microsoft 365 again" })
+    row.getByRole("button", { name: "Sign in to Microsoft 365 again" })
   ).toBeVisible();
   // A search that matches nothing says so.
   await search.fill("no such app at all");
@@ -73,12 +80,17 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     page.getByRole("heading", { level: 1, name: "Microsoft 365" })
   ).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
-  // Where core's callback sends the browser once a flow finished.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Where core's callback sends the browser once a flow finished: the
+  // success screen, with what was chosen, until it is closed.
   await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
-  await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
-  ).toBeVisible();
+  const done = page.getByRole("dialog", {
+    name: "Microsoft 365 is connected",
+  });
+  await expect(done.getByText("Just for you")).toBeVisible();
+  await done.getByRole("button", { name: "Close" }).click();
+  await expect(done).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
   // Its Overview's account card: where it stands, what it reaches, and
   // signing in again to the connection whose access ran out.
   const account = page.getByRole("region", { name: "Account" });
@@ -165,9 +177,6 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
     .click();
   await expect(expiredCard).toHaveCount(0);
   await expect(mineCard).toBeVisible();
-  // The notice was about the flow that came back, not about the page now.
-  await expect(page.getByText("Connected.", { exact: true })).toHaveCount(0);
-  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
 
   // Connecting another account: the test stack has no Microsoft tenant set
   // up, so core refuses the start, and the dialog says so.
@@ -183,23 +192,24 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   );
   await page.keyboard.press("Escape");
 
-  // A flow that failed comes back through the old address, refused, and
-  // says what to do; a code nobody knows says only the page's own words.
-  await page.goto("/connections?connectionError=connection.already_connected");
-  await expect(page).toHaveURL(/\/integrations\?connectionError=/u);
+  // A flow that failed comes back refused, and says what to do; a code
+  // nobody knows says only the page's own words.
+  await page.goto("/integrations?connectionError=connection.already_connected");
   await expect(page.getByRole("alert")).toHaveText(
     "That account is already connected here. Disconnect it first to connect it again."
   );
-  await page.goto("/connections?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E");
+  await page.goto(
+    "/integrations?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E"
+  );
   await expect(page.getByRole("alert")).toHaveText(
     "Connecting didn't work. Try again, or ask an admin."
   );
-  // A flow that finished, sent back through the old address, still says so.
-  await page.goto(`/connections?connection=${mine.id}`);
-  await expect(page).toHaveURL(/\/integrations\?connection=/u);
+  // A flow that finished, sent back without a page of its own, says so.
+  await page.goto(`/integrations?connection=${mine.id}`);
   await expect(
-    page.getByRole("status").filter({ hasText: "Connected." })
+    page.getByRole("dialog", { name: "Microsoft 365 is connected" })
   ).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // An integration there isn't is not found, in the frame.
   await page.goto("/integrations/native:no-such-app");

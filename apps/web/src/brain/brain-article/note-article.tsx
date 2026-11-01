@@ -65,7 +65,7 @@ export const NoteArticle = ({
           )}
         </div>
       </article>
-      <aside className="bg-sidebar hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-3 pb-28 2xl:flex">
+      <aside className="bg-muted/50 hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-3 pb-28 2xl:flex">
         <Tabs
           onValueChange={(value: string) => {
             setSide(value);

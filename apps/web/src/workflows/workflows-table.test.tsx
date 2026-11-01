@@ -85,13 +85,16 @@ describe("the Workflows page's table", () => {
 
   it("links an independent workflow's waiting and failed runs to its page's Runs tab", async () => {
     await shown([independent]);
-    const links = [...document.querySelectorAll("a")]
-      .filter((link) => /waiting|failed/u.test(link.textContent ?? ""))
-      .map((link) => link.getAttribute("href"));
+    const links = [...document.querySelectorAll("a")].flatMap((link) => {
+      const kind = /waiting|failed/u.exec(link.textContent ?? "")?.[0];
+      return kind === undefined ? [] : [`${kind} ${link.getAttribute("href")}`];
+    });
 
-    expect(links).toStrictEqual([
-      "/workflows/wf-1?tab=runs",
-      "/workflows/wf-1?tab=runs",
+    // Where it stands shows twice, under its name for a narrow table and
+    // in its own column: each place links alike.
+    expect([...new Set(links)]).toStrictEqual([
+      "waiting /workflows/wf-1?tab=runs",
+      "failed /workflows/wf-1?tab=runs",
     ]);
   });
 });

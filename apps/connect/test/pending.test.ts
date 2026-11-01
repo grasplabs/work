@@ -158,6 +158,12 @@ const appOrigin = {
   context: { type: "app" as const, appId: "app-crm" },
 };
 
+/** Where App `appId`'s call comes from, as core signs it. */
+const originOf = (appId: string) => ({
+  permissionId: "permission-mail",
+  context: { type: "app" as const, appId },
+});
+
 /** Where a run's call comes from, as core signs it. */
 const runOrigin = {
   permissionId: "permission-mail",
@@ -214,6 +220,30 @@ const eventsFor = async (connectionId: string) => {
 };
 
 describe("a side effect from chat", () => {
+  it("isn't held for someone whose erasure began as it was asked, on a shared connection too", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    // Their erasure began (connect's person-erasure.ts marks it first)
+    // while the call was on its way: nothing is held for them.
+    await env.DB.prepare(
+      "INSERT INTO erased_people (user_id, began_at) VALUES (?, ?)"
+    )
+      .bind(anna.userId, Date.now())
+      .run();
+
+    const asked = await outcome(hold(inChat(anna), mail(connectionId)));
+
+    expect({
+      asked,
+      ran: server.ran,
+      held: await waitingFor(anna),
+    }).toStrictEqual({
+      asked: "capability.invalid",
+      ran: [],
+      held: [],
+    });
+  });
+
   it("is held, not run, and its person sees the exact call", async () => {
     const anna = someone();
     const connectionId = await addConnection();
@@ -1180,6 +1210,45 @@ describe("a side effect from chat", () => {
       shown: { restricted: true, context: appOrigin.context },
       confirmed: '{"sent":"ben@acme.test"}',
       ran: 1,
+    });
+  });
+
+  it("of an App core removed are declined as expired, recorded, and its other Apps' wait on", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const removed = `app-${crypto.randomUUID()}`;
+    const inApp = (appId: string) => ({
+      ...appFor(anna.userId, appId),
+      mode: "interactive" as const,
+    });
+    await callAs(inApp(removed), mail(connectionId), {
+      restricted: true,
+      origin: originOf(removed),
+    });
+    await callAs(inApp("app-crm"), mail(connectionId, "cleo@acme.test"), {
+      restricted: true,
+      origin: appOrigin,
+    });
+    await exports.default.dropForRemovedApp({ appId: removed });
+    const waiting = await waitingFor(anna);
+    const events = await eventsFor(connectionId);
+
+    expect({
+      waiting: waiting.map(({ context }) => context),
+      expired: events.filter(
+        ({ action, outcome: why }) =>
+          action === "connection.action.expired" && why === "app.removed"
+      ).length,
+      refusesNonsense: await exports.default
+        .dropForRemovedApp({ appId: removed, more: true })
+        .then(
+          () => "ok",
+          (error: unknown) => connectErrors.codeOf(error)
+        ),
+    }).toStrictEqual({
+      waiting: [appOrigin.context],
+      expired: 1,
+      refusesNonsense: "connect.invalid",
     });
   });
 

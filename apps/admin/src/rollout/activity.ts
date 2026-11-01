@@ -38,19 +38,19 @@ import {
   deriveRouterSecret,
   routerSecretHeader,
 } from "@grasp-os/shared/router";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import type { ClientDispatcher, CoreAddress } from "../clients/core-address.ts";
 import { routeOf } from "../clients/grid.ts";
 import { audit } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clients, clientWorkers } from "../db/schema.ts";
+import { clients } from "../db/schema.ts";
 import { MissingStoreSecretError } from "../deploy/context.ts";
-import { errorCode } from "../deploy/deploy.ts";
-import { coreOrigin } from "../deploy/router.ts";
+import { errorCode } from "../deploy/errors.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import { coreOriginOf } from "./drift.ts";
 
 /** How long core may take to take a notice. */
 const noticeTimeoutMs = 10_000;
@@ -78,49 +78,43 @@ export interface ActivityContext {
 }
 
 /**
- * Where client `clientId`'s core answers, and the generation of the
- * secrets it runs with; null before its first deploy recorded them.
+ * Where client `clientId`'s core answers, as its operation's probe passed
+ * at it, and the generation of the secrets it runs with; null before its
+ * operation recorded one.
  */
 const coreOf = async (db: AdminDatabase, clientId: string) => {
-  const [row] = await db
-    .select({
-      subdomain: clients.workersSubdomain,
-      generation: clients.generation,
-      scriptName: clientWorkers.scriptName,
-    })
-    .from(clients)
-    .innerJoin(
-      clientWorkers,
-      and(
-        eq(clientWorkers.clientId, clients.id),
-        eq(clientWorkers.worker, "core")
-      )
-    )
-    .where(eq(clients.id, clientId));
-  return row ?? null;
+  const [client, origin] = await Promise.all([
+    db
+      .select({ generation: clients.generation })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .get(),
+    coreOriginOf(db, clientId),
+  ]);
+  return client === undefined || origin === null
+    ? null
+    : { generation: client.generation, origin };
 };
 
 /**
- * Where client `clientId`'s core answers: its account's workers.dev
- * origin, for a core with a recorded subdomain; else, for one placed on
- * Workers for Platforms, its script through the dispatch namespace, as its
- * hostname's map entry names it. Null when neither is known.
+ * Where client `clientId`'s core answers: as its hostname's entry in the
+ * router's map names it (its account's workers.dev origin, or its script
+ * through the dispatch namespace the router binds), at the generation it
+ * runs; else, without the router's map, the origin its probe passed at.
+ * Null when neither is known.
  */
 const addressOf = async (
   context: ActivityContext,
   clientId: string,
-  core: { subdomain: string | null; scriptName: string; generation: number },
+  core: { generation: number; origin: string },
   routerKey: string
 ): Promise<CoreAddress | null> => {
-  if (core.subdomain !== null) {
-    return {
-      origin: coreOrigin(core.scriptName, core.subdomain),
-      fetch: async (input, init) => await fetch(input, init),
-    };
-  }
   const { router } = context;
   if (router === undefined || router.domain === null) {
-    return null;
+    return {
+      origin: core.origin,
+      fetch: async (input, init) => await fetch(input, init),
+    };
   }
   const route = await routeOf(
     router.hosts,

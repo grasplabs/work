@@ -16,27 +16,28 @@ import {
 } from "../src/clients/functions.ts";
 import { SettingsError, setSealedSecret } from "../src/clients/settings.ts";
 import { slackAppManifest } from "../src/clients/slack-app.ts";
-import { act, adminDatabase } from "../src/db/act.ts";
+import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
-  clientDeploys,
+  clientProvisions,
   clients,
   clientSealedSecrets,
 } from "../src/db/schema.ts";
-import { deployContext } from "../src/deploy/context.ts";
-import { runDeploy, startDeploy } from "../src/deploy/deploy.ts";
-import { importReleases } from "../src/releases/import.ts";
 import { targetClient } from "../src/rollout/targets.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import type { AccountState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { callServerFn } from "./pages.ts";
-import { publishRelease } from "./releases.ts";
+import {
+  deployPlaced,
+  livePlacedClient,
+  placedRelease,
+  scriptsOf,
+} from "./placed.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 const token = "test-deployer-token-sealed-4f81c2";
-const tenantToken = "test-tenant-admin-token-sealed-93b0d7";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
 // After the fake API: Access's keys are served, the rest goes to the fake.
 mockAccess();
 
@@ -55,51 +56,40 @@ const slackToken = (): string =>
 /** A Slack app's signing secret: 32 hex characters. */
 const signingSecret = (): string => crypto.randomUUID().replaceAll("-", "");
 
-/** An active client on a new account in the fake, running a new release as a deploy made it. */
+/** A live placed client in a destination of its own, running a new release as its operation made it. */
 const liveClient = async () => {
-  const release = await publishRelease({ notes: "feat(connect): its bot" });
-  await importReleases(env.RELEASES, db);
+  const release = await placedRelease("feat(connect): its bot");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const account = cloudflare.addAccount();
-  const now = new Date();
-  await act(
-    db,
-    setup,
-    [
-      db.insert(clients).values({
-        id: clientId,
-        name: clientId,
-        accountId: account.id,
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      }),
-    ],
-    { action: "client.create", clientId }
-  );
-  await runDeploy(
-    await deployContext(env),
-    await startDeploy(db, setup, clientId, release.id)
-  );
-  return { clientId, account, releaseId: release.id };
-};
-
-/** Deploys client `clientId`'s release again, as applying its settings does. */
-const redeploy = async (clientId: string, releaseId: string) => {
-  const deployId = await startDeploy(
-    db,
-    setup,
+  const { account } = await livePlacedClient(cloudflare, 1, release, {
+    id: clientId,
+    name: clientId,
+    signIn: null,
+  });
+  return {
     clientId,
-    releaseId,
-    "settings"
-  );
-  await runDeploy(await deployContext(env), deployId);
-  return deployId;
+    account,
+    releaseId: release,
+    scripts: await scriptsOf(clientId),
+  };
 };
 
-/** The secrets of the version all of `script`'s traffic goes to in `account`. */
-const liveSecretsOf = (account: AccountState, script: string) => {
-  const state = account.scripts.get(script);
+/** Runs client `clientId`'s release again, as applying its settings does. */
+const redeploy = async (clientId: string, releaseId: string) => {
+  await deployPlaced(clientId, releaseId);
+};
+
+/** A live client's account and its scripts there. */
+interface LiveClient {
+  account: AccountState;
+  scripts: { core: string; connect: string };
+}
+
+/** The secrets of the version all of `worker`'s traffic goes to, for `client`. */
+const liveSecretsOf = (
+  { account, scripts }: LiveClient,
+  worker: "core" | "connect"
+) => {
+  const state = account.scripts.get(scripts[worker]);
   const [only] = state?.deployments[0]?.versions ?? [];
   const live = state?.versions.find(({ id }) => id === only?.version_id);
   return live?.secrets ?? new Map<string, string>();
@@ -170,7 +160,7 @@ const rawPage = async (path: string): Promise<string> => {
 };
 
 describe("a client's Teams bot secret", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   // An earlier test's clients are gone from the fake: offboarded, so
   // nothing reads their accounts.
   beforeEach(async () => {
@@ -196,24 +186,16 @@ describe("a client's Teams bot secret", () => {
     await redeploy(acme.clientId, acme.releaseId);
     await redeploy(other.clientId, other.releaseId);
     const deployed = {
-      connect: liveSecretsOf(acme.account, "grasp-os-connect").get(
-        "TEAMS_BOT_SECRET"
-      ),
-      core: liveSecretsOf(acme.account, "grasp-os-core").has(
-        "TEAMS_BOT_SECRET"
-      ),
-      other: liveSecretsOf(other.account, "grasp-os-connect").has(
-        "TEAMS_BOT_SECRET"
-      ),
+      connect: liveSecretsOf(acme, "connect").get("TEAMS_BOT_SECRET"),
+      core: liveSecretsOf(acme, "core").has("TEAMS_BOT_SECRET"),
+      other: liveSecretsOf(other, "connect").has("TEAMS_BOT_SECRET"),
     };
     await setSealedSecret(env, staff, {
       clientId: acme.clientId,
       name: "TEAMS_BOT_SECRET",
       value: second,
     });
-    const before = liveSecretsOf(acme.account, "grasp-os-connect").get(
-      "TEAMS_BOT_SECRET"
-    );
+    const before = liveSecretsOf(acme, "connect").get("TEAMS_BOT_SECRET");
     await redeploy(acme.clientId, acme.releaseId);
 
     expect({
@@ -221,9 +203,7 @@ describe("a client's Teams bot secret", () => {
       deployed,
       // A replacement waits for the next deploy, then is the only one.
       before,
-      after: liveSecretsOf(acme.account, "grasp-os-connect").get(
-        "TEAMS_BOT_SECRET"
-      ),
+      after: liveSecretsOf(acme, "connect").get("TEAMS_BOT_SECRET"),
     }).toStrictEqual({
       pending: true,
       deployed: { connect: first, core: false, other: false },
@@ -251,15 +231,15 @@ describe("a client's Teams bot secret", () => {
       .select()
       .from(auditEvents)
       .where(eq(auditEvents.clientId, acme.clientId));
-    const deploys = await db
+    const operations = await db
       .select()
-      .from(clientDeploys)
-      .where(eq(clientDeploys.clientId, acme.clientId));
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, acme.clientId));
     const base = `/organizations/${acme.clientId}/setup`;
     const pages = [
       await rawPage(base),
       await rawPage(`${base}?tab=settings`),
-      await rawPage(`${base}?tab=deploys`),
+      await rawPage(`${base}?tab=history`),
       await rawPage(`/organizations/${acme.clientId}/log`),
       await rawPage("/platform"),
     ].join("\n");
@@ -270,14 +250,12 @@ describe("a client's Teams bot secret", () => {
         { email: staff.email }
       )
     );
-    const kept = JSON.stringify([events, deploys]);
+    const kept = JSON.stringify([events, operations]);
 
     expect({
       // It reached connect, so everything below had the chance to leak it.
       deployed:
-        liveSecretsOf(acme.account, "grasp-os-connect").get(
-          "TEAMS_BOT_SECRET"
-        ) === value,
+        liveSecretsOf(acme, "connect").get("TEAMS_BOT_SECRET") === value,
       sealedInTheClear: sealed.includes(value),
       // The settings show who set it and when, and nothing else of it.
       shown: pages.includes(`by ${staff.email}`),
@@ -444,32 +422,27 @@ describe("a client's Teams bot secret", () => {
       setBy: staff.email,
       setAt: new Date(),
     });
-    const versions =
-      other.account.scripts.get("grasp-os-connect")?.versions.length;
+    const versions = other.account.scripts.get(other.scripts.connect)?.versions
+      .length;
 
-    const deployId = await startDeploy(
-      db,
-      setup,
-      other.clientId,
-      other.releaseId,
-      "settings"
-    );
     const logged = await loggedBy(async () => {
       await expect(
-        runDeploy(await deployContext(env), deployId)
+        deployPlaced(other.clientId, other.releaseId)
       ).rejects.toMatchObject({ code: "sealed_secret_unreadable" });
     });
     const [deploy] = await db
-      .select({ status: clientDeploys.status, error: clientDeploys.error })
-      .from(clientDeploys)
-      .where(eq(clientDeploys.id, deployId));
+      .select({
+        status: clientProvisions.status,
+        error: clientProvisions.error,
+      })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, other.clientId));
 
     expect({
       deploy,
-      versions: other.account.scripts.get("grasp-os-connect")?.versions.length,
-      connect: liveSecretsOf(other.account, "grasp-os-connect").has(
-        "TEAMS_BOT_SECRET"
-      ),
+      versions: other.account.scripts.get(other.scripts.connect)?.versions
+        .length,
+      connect: liveSecretsOf(other, "connect").has("TEAMS_BOT_SECRET"),
       logged: logged.includes(row?.sealed ?? "-"),
     }).toStrictEqual({
       deploy: { status: "failed", error: "sealed_secret_unreadable" },
@@ -481,7 +454,7 @@ describe("a client's Teams bot secret", () => {
 });
 
 describe("a client's Slack app", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(async () => {
     await db
       .update(clients)
@@ -508,8 +481,8 @@ describe("a client's Slack app", () => {
     await redeploy(acme.clientId, acme.releaseId);
     await redeploy(other.clientId, other.releaseId);
     const events = await sealedEventsOf(acme.clientId);
-    const slackOn = (account: AccountState, script: string) => {
-      const secrets = liveSecretsOf(account, script);
+    const slackOn = (client: LiveClient, worker: "core" | "connect") => {
+      const secrets = liveSecretsOf(client, worker);
       return {
         token: secrets.get("SLACK_BOT_TOKEN") ?? null,
         signing: secrets.get("SLACK_SIGNING_SECRET") ?? null,
@@ -517,10 +490,10 @@ describe("a client's Slack app", () => {
     };
 
     expect({
-      connect: slackOn(acme.account, "grasp-os-connect"),
-      core: slackOn(acme.account, "grasp-os-core"),
-      otherConnect: slackOn(other.account, "grasp-os-connect"),
-      otherCore: slackOn(other.account, "grasp-os-core"),
+      connect: slackOn(acme, "connect"),
+      core: slackOn(acme, "core"),
+      otherConnect: slackOn(other, "connect"),
+      otherCore: slackOn(other, "core"),
       events: events.map(({ target }) => target),
     }).toStrictEqual({
       connect: { token: bot, signing: null },

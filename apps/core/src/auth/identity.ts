@@ -4,10 +4,16 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
+import {
+  accounts,
+  members,
+  sessions,
+  teamMembers,
+  teams,
+} from "../db/core/schema.ts";
 import { staffMayStay } from "../onboarding/gate.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
@@ -113,6 +119,57 @@ export const staffRole = async (
     (oid) => oid.toLowerCase() === account?.oid?.toLowerCase()
   );
   return listed ? { role: config.staff.role, scope } : undefined;
+};
+
+/**
+ * The role of `userId` as a Grasp staff member whose staff session is
+ * still valid, read now (GRA-1088): an unexpired staff session of theirs, and
+ * full staff access (`staffRole`, not onboarding only). What core asks of
+ * the person of work staff started, at every step, in place of membership:
+ * once their window closes, they leave the staff list or their sessions
+ * end, that work stops as a departed member's does.
+ */
+export const activeStaffRole = async (
+  env: Env,
+  userId: string
+): Promise<Role | undefined> => {
+  const access = await staffRole(env, userId);
+  if (access?.scope !== "full") {
+    return undefined;
+  }
+  const [session] = await drizzle(env.DB)
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.userId, userId),
+        eq(sessions.staff, true),
+        gt(sessions.expiresAt, new Date())
+      )
+    )
+    .limit(1);
+  return session === undefined ? undefined : access.role;
+};
+
+/**
+ * The person work acts for, read now, as `memberOf` reads a member: for
+ * work a Grasp staff member started (its server-set mark, GRA-1088),
+ * the staff member while their staff session is still valid
+ * (`activeStaffRole`), with no teams. The mark is the only way past
+ * membership, as `personRole` holds it. `undefined` for no one.
+ */
+export const actingPerson = async (
+  env: Env,
+  userId: string,
+  staff: boolean | undefined
+): Promise<Member | undefined> => {
+  if (staff !== true) {
+    return await memberOf(env.DB, userId);
+  }
+  const role = await activeStaffRole(env, userId);
+  return role === undefined
+    ? undefined
+    : { userId, role, teams: [], staff: true };
 };
 
 /**

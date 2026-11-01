@@ -1,3 +1,4 @@
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -301,15 +302,7 @@ export const ReturnChartView = ({
           }
         >
           <Ring pieces={pieces}>
-            <span
-              className={
-                full
-                  ? "text-2xl font-medium tabular-nums"
-                  : "font-medium tabular-nums @sm:text-2xl"
-              }
-            >
-              {whole}
-            </span>
+            <Stat size={full ? "default" : "compact"}>{whole}</Stat>
             <span
               className={
                 full
@@ -497,15 +490,9 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                     label: i18n._(stageLabel[row.stage]),
                   }))}
                 >
-                  <span
-                    className={
-                      full
-                        ? "text-2xl font-medium tabular-nums"
-                        : "font-medium tabular-nums @sm:text-2xl"
-                    }
-                  >
+                  <Stat size={full ? "default" : "compact"}>
                     {t`${live} of ${count}`}
-                  </span>
+                  </Stat>
                   <span
                     className={
                       full

@@ -13,6 +13,8 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import { platformUpdateSignatureHeader } from "@grasp-os/shared/platform-change";
 import {
+  connectVersionPath,
+  connectVersionPurpose,
   provisionProbePath,
   provisionProbePurpose,
   provisionProbeSchema,
@@ -23,6 +25,7 @@ import type {
 } from "@grasp-os/shared/provision-probe";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 import { routerSecretHeader } from "@grasp-os/shared/router";
+import { z } from "zod";
 
 const encoder = new TextEncoder();
 
@@ -38,26 +41,34 @@ export interface ProbeRequest {
 }
 
 /**
- * What core at `origin` answers the admin's signed probe with;
- * undefined when it doesn't answer, answers anything but a probe (as a
- * core from before the probe does), or takes longer than `timeoutMs`.
+ * What core at `origin` answers at `path` to a request the admin signs
+ * with the key `purpose` derives from `authSecret` (the probe's request,
+ * `sentAt` alone), checked against `schema`; undefined when it doesn't
+ * answer, answers otherwise, or takes longer than `timeoutMs`.
  */
-export const probeCore = async ({
-  origin,
-  routerSecret,
-  authSecret,
-  fetch: fetchCore,
-  timeoutMs,
-}: ProbeRequest): Promise<ProvisionProbe | undefined> => {
+const askSigned = async <T>(
+  {
+    origin,
+    routerSecret,
+    authSecret,
+    fetch: fetchCore,
+    timeoutMs,
+  }: ProbeRequest,
+  {
+    path,
+    purpose,
+    schema,
+  }: { path: string; purpose: string; schema: z.ZodType<T> }
+): Promise<T | undefined> => {
   const body = JSON.stringify({ sentAt: new Date().toISOString() });
-  const key = await hkdfHmacKey(authSecret, provisionProbePurpose, ["sign"]);
+  const key = await hkdfHmacKey(authSecret, purpose, ["sign"]);
   const signature = toHex(
     new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(body)))
   );
   const limit = deadline(timeoutMs);
   try {
     const answer = async (): Promise<unknown> => {
-      const response = await fetchCore(`${origin}${provisionProbePath}`, {
+      const response = await fetchCore(`${origin}${path}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -74,7 +85,7 @@ export const probeCore = async ({
       }
       return await response.json();
     };
-    const parsed = provisionProbeSchema.safeParse(
+    const parsed = schema.safeParse(
       await Promise.race([answer(), whenAborted(limit.signal)])
     );
     return parsed.success ? parsed.data : undefined;
@@ -83,6 +94,42 @@ export const probeCore = async ({
   } finally {
     limit.clear();
   }
+};
+
+/**
+ * What core at `origin` answers the admin's signed probe with;
+ * undefined when it doesn't answer, answers anything but a probe (as a
+ * core from before the probe does), or takes longer than `timeoutMs`.
+ */
+export const probeCore = async (
+  request: ProbeRequest
+): Promise<ProvisionProbe | undefined> =>
+  await askSigned(request, {
+    path: provisionProbePath,
+    purpose: provisionProbePurpose,
+    schema: provisionProbeSchema,
+  });
+
+const connectVersionSchema = z.object({
+  ok: z.literal(true),
+  version: z.string().min(1),
+});
+
+/**
+ * The version core at `origin` names for its connect, to the admin's
+ * signed request (@grasp-os/shared/provision-probe `connectVersionPath`);
+ * undefined when it names none, doesn't answer, or takes longer than
+ * `timeoutMs`.
+ */
+export const connectVersionOf = async (
+  request: ProbeRequest
+): Promise<string | undefined> => {
+  const answered = await askSigned(request, {
+    path: connectVersionPath,
+    purpose: connectVersionPurpose,
+    schema: connectVersionSchema,
+  });
+  return answered?.version;
 };
 
 /**

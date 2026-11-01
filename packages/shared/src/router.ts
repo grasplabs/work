@@ -50,15 +50,6 @@ const isWorkersDevOrigin = (value: string): boolean => {
 };
 
 /**
- * The Workers for Platforms dispatch namespace the router and the admin
- * bind (`DISPATCHER`, both wrangler.jsonc files), in the account they run
- * in: every client placed on Workers for Platforms has its core's user
- * Worker there. A destination naming another namespace isn't reachable
- * through the binding, so the admin places no client in one.
- */
-export const clientDispatchNamespace = "grasp-os-clients";
-
-/**
  * A script's name in a Workers for Platforms dispatch namespace, as
  * Cloudflare takes one: lowercase letters, digits, `-` and `_`, starting
  * and ending with a letter or digit, at most 63 characters.
@@ -115,11 +106,13 @@ export const isCoreOrigin = (origin: string): boolean =>
 
 /**
  * Hostnames no client gets: the platform's own, under `<domain>`. `admin`
- * is the admin's own host (`ADMIN_HOST`); `console` stays reserved from
- * when the admin was called that.
+ * is the admin's own host (`ADMIN_HOST`), `auth` the auth relay's, and
+ * `staging` staging's domain below production's (@grasp-os/shared/names);
+ * `console` stays reserved from when the admin was called that.
  */
 export const reservedClientIds: ReadonlySet<string> = new Set([
   "admin",
+  "auth",
   "console",
   "internal",
   "staging",
@@ -148,7 +141,7 @@ export const routerHostKey = (hostname: string): string =>
  * as lowercase hex (`deriveClientSecret`). The router derives it on every
  * forward, the admin to set it on the client's core, so nothing per
  * client is stored anywhere. `routerKey` is the one `ROUTER_KEY` in
- * Secrets Store (grasp-os-ops).
+ * Secrets Store (Grasp's account).
  */
 export const deriveRouterSecret = async (
   routerKey: string,

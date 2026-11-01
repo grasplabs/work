@@ -12,6 +12,7 @@ import type { DecisionView } from "./decisions.ts";
 import { dependencyDecisionSchema } from "./dependencies.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type {
@@ -22,6 +23,7 @@ import type {
 import { grantReviewSchema } from "./permissions.ts";
 import type { Permission } from "./permissions.ts";
 import type { ScreensWaiting } from "./screen-trust.ts";
+import type { PendingWorkflowBindings } from "./workflow-resources.ts";
 
 // What waits on a person (core's waiting-rpc.ts): one feed of everything
 // that stops until they decide or do something, each item of a kind,
@@ -62,6 +64,13 @@ export interface HeldWriteItem extends ItemBase {
   kind: "heldWrite";
   verdicts: ("approve" | "decline")[];
   action: PendingAction;
+}
+
+/** A start of a workflow a chat's agent asked for, held until the person confirms it. */
+export interface HeldStartItem extends ItemBase {
+  kind: "heldStart";
+  verdicts: ("confirm" | "decline")[];
+  start: HeldStart;
 }
 
 /** A change sent for the person whose answer was lost: they say whether it happened. */
@@ -108,6 +117,23 @@ export interface GoLiveItem extends ItemBase {
   version: number;
 }
 
+/**
+ * A version of an independent workflow a builder asked to go live, for
+ * its owner or an admin to approve or send back; for whoever asked only
+ * while nobody else may (`selfApproval`).
+ */
+export interface WorkflowGoLiveItem extends ItemBase {
+  kind: "workflowGoLive";
+  verdicts: ("approve" | "reject")[];
+  workflow: { id: string; name: string };
+  version: number;
+  requestedBy: string;
+  /** The lifecycle revision it was read at: a verdict names it. */
+  revision: number;
+  /** The reader asked for it, and approves it themselves as nobody else may. */
+  selfApproval: boolean;
+}
+
 /** A workflow that failed while acting for the person, which they can ask the agent to fix. */
 export interface FailedRunItem extends ItemBase {
   kind: "failedRun";
@@ -128,6 +154,17 @@ export interface StoppedScheduleItem extends ItemBase {
   kind: "stoppedSchedule";
   verdicts: never[];
   notification: TriggerStoppedNotification;
+}
+
+/**
+ * A workflow version, live or asked to go live, whose bindings no admin
+ * approved, so its starts are refused: for the organization's own admins,
+ * who approve each binding on it (`WorkflowResourcesApi.approveBinding`).
+ */
+export interface BindingApprovalItem extends ItemBase {
+  kind: "bindingApproval";
+  verdicts: never[];
+  pending: PendingWorkflowBindings;
 }
 
 /** A connection whose access ran out, which the person can sign in to again on its page. */
@@ -153,11 +190,14 @@ export type WaitingItem =
   | PackagesItem
   | AppApprovalItem
   | GoLiveItem
+  | WorkflowGoLiveItem
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | BindingApprovalItem
   | SignInAgainItem
-  | DecisionItem;
+  | DecisionItem
+  | HeldStartItem;
 
 export type WaitingKind = WaitingItem["kind"];
 
@@ -172,9 +212,12 @@ export const waitingParts = [
   "packages",
   "screens",
   "versions",
+  "workflowGoLives",
   "notifications",
   "connections",
   "decisions",
+  "heldStarts",
+  "bindings",
 ] as const;
 export type WaitingPart = (typeof waitingParts)[number];
 
@@ -209,6 +252,18 @@ export const waitingVerdictSchema = z.union([
     verdict: z.literal("decline"),
   }),
   z.strictObject({
+    kind: z.literal("heldStart"),
+    id: identifierSchema,
+    verdict: z.literal("confirm"),
+    /** The hash of exactly the input the person was shown. */
+    inputHash: identifierSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("heldStart"),
+    id: identifierSchema,
+    verdict: z.literal("decline"),
+  }),
+  z.strictObject({
     kind: z.literal("unknownOutcome"),
     key: unknownOutcomeKeySchema,
     /** The call's claim, as shown: one sent again since is another item. */
@@ -231,6 +286,14 @@ export const waitingVerdictSchema = z.union([
     id: identifierSchema,
     verdict: z.enum(["approve", "reject"]),
     reviewed: dependencyDecisionSchema.shape.reviewed,
+  }),
+  z.strictObject({
+    kind: z.literal("workflowGoLive"),
+    workflow: identifierSchema,
+    version: z.int().min(1),
+    /** The lifecycle revision as shown: one changed since is refused. */
+    revision: z.int().min(0),
+    verdict: z.enum(["approve", "reject"]),
   }),
   z.strictObject({
     kind: z.literal("failedRun"),

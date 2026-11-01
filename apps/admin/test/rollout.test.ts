@@ -1,5 +1,5 @@
+import { clientsNamespace } from "@grasp-os/shared/names";
 import type { WorkerEntry } from "@grasp-os/shared/release";
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -8,7 +8,6 @@ import { z } from "zod";
 import { applySettings } from "../src/clients/apply.ts";
 import { setSignIn } from "../src/clients/settings.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
-import { deployVersion } from "../src/cloudflare/workers.ts";
 import {
   auditEvents,
   clientPlacements,
@@ -17,7 +16,6 @@ import {
   clients,
   clientWorkers,
   hostingDestinations,
-  releases as releaseRows,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -41,19 +39,27 @@ import type { StartRolloutInput } from "../src/rollout/control.ts";
 import { driftOf } from "../src/rollout/drift.ts";
 import { rollbackClient, rollbackRing } from "../src/rollout/rollback.ts";
 import { checkRevocation } from "../src/rollout/shared-secrets.ts";
-import {
-  isConfigPending,
-  skipReason,
-  targetClient,
-  targetClients,
-} from "../src/rollout/targets.ts";
+import { isConfigPending } from "../src/rollout/targets.ts";
 import { clientEndedEvent, fleetConcurrency } from "../src/rollout/workflow.ts";
+import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
+import type { AdminWorkflow } from "../src/workflow-runs.ts";
+import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { db, destination, staff } from "./hosting.ts";
+import { db, staff } from "./hosting.ts";
 import { deployPlaced, livePlacedClient, placedRelease } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
-import { evidenceFor, testLimits } from "./releases.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import {
+  deliverAlarm,
+  followAdminRuns,
+  holdBatchOf,
+  reached,
+  ended as runEnded,
+  startsOf,
+  stepResult,
+  timeOutAttempt,
+} from "./runs.ts";
+import type { FollowedRuns, LostWrite } from "./runs.ts";
+import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 // Rolling a release out to placed clients (GRA-388): ring 0 first, one
 // staff approval, then the fleet ring by ring, each client's operation
@@ -69,80 +75,129 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a rollout that goes on while paused or after it's cancelled.
 
 const token = "test-deployer-token-rollout-5d1e7a";
-const tenantToken = "test-tenant-admin-token-rollout-9c3f20";
-const cloudflare = mockCloudflareApi(token, tenantToken);
+const cloudflare = mockCloudflareApi(token);
+
+/** A script's own path, below an account or a dispatch namespace. */
+const scriptPath = /\/scripts\/[^/]+$/u;
+
+/**
+ * Holds the caller of the next Cloudflare call `matches` picks out, once
+ * it has its answer, until released: `read` waits until it is held there.
+ */
+const heldAfter = (matches: (call: ApiCall) => boolean) => {
+  let answered = false;
+  const released = Promise.withResolvers<unknown>();
+  cloudflare.afterAnswering(matches, async () => {
+    answered = true;
+    await released.promise;
+  });
+  return {
+    read: async () => {
+      await vi.waitFor(() => {
+        if (!answered) {
+          throw new Error("The call hasn't been answered yet");
+        }
+      });
+    },
+    release: () => {
+      released.resolve(true);
+    },
+  };
+};
 /** What staff confirm of a ring before approving the next (src/rollout/control.ts). */
 const ringChecked = { evalPassed: true, demoSent: true };
 
 /** A live client in `ring` on release `releaseId`. */
+/** The account a call to the API is about, from its path. */
+const accountPath = /^\/accounts\/(?<id>[^/]+)\//u;
+
+/** The account `path`, a call to the API, is about. */
+const accountOf = (path: string): string | undefined =>
+  accountPath.exec(path)?.groups?.id;
+
+/**
+ * How long a held call waits for another client's to arrive before it
+ * goes on alone, as it would if clients were deployed one at a time.
+ */
+const serialGraceMs = 2000;
+
 const live = async (ring: number, releaseId: string): Promise<PlacedClient> =>
   await livePlacedClient(cloudflare, ring, releaseId);
 
+/** The runs the test's followers share (`followAdminRuns`), while one follows. */
+let sharedRuns: { runs: FollowedRuns; users: number } | null = null;
+
+/** The runs every follower of the test reads, recorded once. */
+const joinRuns = (): FollowedRuns => {
+  sharedRuns ??= { runs: followAdminRuns(), users: 0 };
+  sharedRuns.users += 1;
+  return sharedRuns.runs;
+};
+
+/** Stops recording the test's runs once no follower reads them. */
+const leaveRuns = async (): Promise<void> => {
+  if (sharedRuns === null) {
+    return;
+  }
+  sharedRuns.users -= 1;
+  if (sharedRuns.users === 0) {
+    const { runs } = sharedRuns;
+    sharedRuns = null;
+    await runs[Symbol.asyncDispose]();
+  }
+};
+
 /**
- * The rollouts the test starts, as the test pool lets a test follow them,
- * with the children that deploy their fleet clients: pauses and retry
- * delays going at once. Each wait is on the latest rollout started.
+ * The rollouts the test starts, on Workerflow, with the runs that deploy
+ * their fleet clients: retries and sleeps going at once (`hurry`). Each
+ * wait is on the latest rollout started.
  */
 const followRollouts = async () => {
-  const runs = await introspectWorkflow(env.ROLLOUT);
-  const children = await introspectWorkflow(env.ROLLOUT_CLIENT);
-  for (const each of [runs, children]) {
-    // oxlint-disable-next-line no-await-in-loop -- set up before any run starts
-    await each.modifyAll(async (modifier) => {
-      await modifier.disableSleeps();
-      await modifier.disableRetryDelays();
-    });
-  }
-  const latest = async () => {
-    const all = await runs.get();
-    const last = all.at(-1);
+  const runs = joinRuns();
+  const latest = (): string => {
+    const last = runs.of(adminWorkflows.rollout).at(-1);
     if (last === undefined) {
       throw new Error("No rollout was started");
     }
     return last;
   };
+  await Promise.resolve();
   return {
     waitForStepResult: async (step: { name: string }) => {
-      const run = await latest();
-      return await run.waitForStepResult(step);
+      await vi.waitFor(latest, { timeout: 10_000 });
+      return await stepResult(adminWorkflows.rollout, latest(), step.name);
     },
     waitForStatus: async (
       status: "complete" | "errored" | "terminated" | "paused"
     ) => {
-      const run = await latest();
-      await run.waitForStatus(status);
+      await vi.waitFor(latest, { timeout: 10_000 });
+      await reached(adminWorkflows.rollout, latest(), status);
     },
-    /** The children started so far: one per fleet client it deployed. */
-    childRuns: async () => await children.get(),
+    /** The runs started so far for fleet clients: one per client and round. */
+    childRuns: () => runs.of(adminWorkflows.rolloutClient),
+    /** The runs of `workflow` started so far, while it follows. */
+    runsOf: (workflow: AdminWorkflow) => runs.of(workflow),
     [Symbol.asyncDispose]: async () => {
-      await runs.dispose();
-      await children.dispose();
+      await leaveRuns();
     },
   };
 };
 
-/** The rollbacks the test starts, retry delays going at once. */
+/** The rollbacks the test starts, retries and sleeps going at once. */
 const followRollbacks = async () => {
-  const runs = await introspectWorkflow(env.ROLLBACK_CLIENT);
-  await runs.modifyAll(async (modifier) => {
-    await modifier.disableRetryDelays();
-  });
+  const runs = joinRuns();
+  await Promise.resolve();
   return {
     /** Waits until every rollback started has ended, done or not. */
     settle: async (): Promise<void> => {
-      const all = await runs.get();
       await Promise.all(
-        all.map(async (run) => {
-          try {
-            await run.waitForStatus("complete");
-          } catch {
-            await run.waitForStatus("errored");
-          }
-        })
+        runs
+          .of(adminWorkflows.rollbackClient)
+          .map(async (id) => await runEnded(adminWorkflows.rollbackClient, id))
       );
     },
     [Symbol.asyncDispose]: async () => {
-      await runs.dispose();
+      await leaveRuns();
     },
   };
 };
@@ -282,7 +337,7 @@ const setAsideEarlierTests = async (): Promise<void> => {
 };
 
 describe("rolling a release out to placed clients", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it("runs ring 0's operations, waits for one approval, then the fleet's, ring by ring, audited", async () => {
@@ -448,7 +503,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -477,7 +532,7 @@ describe("rolling a release out to placed clients", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // The release's core answers the probe as another client; the
     // rollback's connect upload finds it answering as it should again.
     internal.account.coreProbe = { asClient: "someone-else" };
@@ -520,7 +575,7 @@ describe("rolling a release out to placed clients", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -684,12 +739,46 @@ describe("rolling a release out to placed clients", () => {
     await using run = await followRollouts();
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
+    // The fake answers every call at once, so two clients' deploys overlap
+    // only if one is held open: the first call to a fleet client's account
+    // waits until another fleet client's call has arrived. Side by side,
+    // that comes at once; one at a time, it never does, and the held call
+    // goes on after `serialGraceMs`, alone.
+    const fleetAccounts = new Set(fleet.map(({ account }) => account.id));
+    let firstClient: string | undefined;
+    const secondArrived = Promise.withResolvers<boolean>();
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        firstClient = accountOf(path);
+        return firstClient !== undefined && fleetAccounts.has(firstClient);
+      },
+      async () => {
+        await Promise.race([
+          secondArrived.promise,
+          scheduler.wait(serialGraceMs),
+        ]);
+      }
+    );
+    cloudflare.beforeAnswering(
+      ({ path }) => {
+        const account = accountOf(path);
+        return (
+          account !== undefined &&
+          fleetAccounts.has(account) &&
+          account !== firstClient
+        );
+      },
+      async () => {
+        secondArrived.resolve(true);
+        await secondArrived.promise;
+      }
+    );
     await approveRollout(env, staff, rolloutId, ringChecked);
     await run.waitForStatus("complete");
     // Each client's account its own: how many had a call being answered at
     // once is how many ran side by side (ring 0's alone, before).
     const peak = cloudflare.peakAccounts();
-    const children = await run.childRuns();
+    const children = run.childRuns();
 
     expect({
       sideBySide: peak > 1,
@@ -731,12 +820,14 @@ describe("rolling a release out to placed clients", () => {
     });
     // Its first round's child, as the rollout names it, ends without
     // telling the run; the run wakes, as its wait's timeout would wake it.
-    const child = await env.ROLLOUT_CLIENT.get(
+    const child = await adminWorkflow(env, adminWorkflows.rolloutClient).get(
       `${rolloutId}-${acme.clientId}-0`
     );
     await child.terminate();
     held.resolve(true);
-    const parent = await env.ROLLOUT.get(rolloutId);
+    const parent = await adminWorkflow(env, adminWorkflows.rollout).get(
+      rolloutId
+    );
     await parent.sendEvent({ type: clientEndedEvent, payload: {} });
     await run.waitForStepResult({ name: "retry 1 asked" });
     const ended = await targetOf(rolloutId, acme.clientId);
@@ -1017,27 +1108,320 @@ describe("rolling a release out to placed clients", () => {
   it("applies a client's settings by running its release again", async () => {
     const release = await placedRelease("feat(core): runs");
     const client = await live(0, release);
-    const runs = await introspectWorkflow(env.APPLY_CLIENT);
+    const uploads = uploadsOf(client);
+    const runId = await applySettings(env, staff, client.clientId);
+    const ended = await runEnded(adminWorkflows.applyClient, runId);
+    expect({
+      status: ended.status,
+      uploadedAgain: uploadsOf(client) > uploads,
+      releases: await releasesOf(client.clientId),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      status: "complete",
+      uploadedAgain: true,
+      releases: on(release),
+      runner: null,
+    });
+  });
+
+  it("records on its operation why applying stopped before it could run, a secret missing from Secrets Store by name, and gives the client back", async () => {
+    const release = await placedRelease("feat(core): runs");
+    const client = await live(0, release);
+    await emptyStoreSecret(env.ROUTER_KEY, "ROUTER_KEY");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runId = await applySettings(env, staff, client.clientId);
+    const ended = await runEnded(adminWorkflows.applyClient, runId);
+    errors.mockRestore();
+    expect({
+      status: ended.status,
+      operation: await db
+        .select({
+          status: clientProvisions.status,
+          error: clientProvisions.error,
+        })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, client.clientId))
+        .get(),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      status: "errored",
+      operation: {
+        status: "failed",
+        error: "store_secret_missing: ROUTER_KEY",
+      },
+      runner: null,
+    });
+  });
+
+  it("applies a client's settings once when its operation's attempt times out and its retry runs, the attempt that timed out acting no more", async () => {
+    const release = await placedRelease("feat(core): applied on a retry");
+    const client = await live(0, release);
+    // Each attempt is held once a script of the client was uploaded: the
+    // first times out there, and its retry starts.
+    const uploaded = (call: ApiCall): boolean =>
+      call.method === "PUT" &&
+      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      scriptPath.test(call.path);
+    const first = heldAfter(uploaded);
+    const retry = heldAfter(uploaded);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let ended: Awaited<ReturnType<typeof runEnded>>;
     try {
-      await runs.modifyAll(async (modifier) => {
-        await modifier.disableRetryDelays();
+      const runId = await applySettings(env, staff, client.clientId);
+      await first.read();
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.applyClient,
+        runId
+      );
+      // The retry takes the client, then waits, before it sends, for the
+      // call the one that timed out still has on its way. That one goes on
+      // and is refused at its next check.
+      await vi.waitFor(async () => {
+        const claim = await db
+          .select({ attempt: clientRuns.attempt })
+          .from(clientRuns)
+          .where(eq(clientRuns.clientId, client.clientId))
+          .get();
+        if ((claim?.attempt ?? 0) < 2) {
+          throw new Error("The retry hasn't taken the client yet");
+        }
       });
-      const uploads = uploadsOf(client);
+      first.release();
+      await vi.waitFor(() => {
+        const stopped = errors.mock.calls.some((logged) =>
+          JSON.stringify(logged).includes("runner_replaced")
+        );
+        if (!stopped) {
+          throw new Error("The attempt that timed out hasn't stopped yet");
+        }
+      });
+      await retry.read();
+      retry.release();
+      await retried;
+      ended = await runEnded(adminWorkflows.applyClient, runId);
+    } finally {
+      // Whatever failed, no run is left held, and console is itself again.
+      first.release();
+      retry.release();
+      errors.mockRestore();
+    }
+
+    expect({
+      status: ended.status,
+      releases: await releasesOf(client.clientId),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      status: "complete",
+      releases: on(release),
+      runner: null,
+    });
+  });
+
+  it("reports a client's settings applied when its attempt loses the step's result after the operation completed", async () => {
+    const release = await placedRelease("feat(core): applied, result lost");
+    const client = await live(0, release);
+    let held: LostWrite | undefined;
+    // Held once the apply's operation is done: its last write, which also
+    // gave the client's claim back.
+    using attempts = startsOf(adminWorkflows.applyClient, async (stub) => {
+      held = await holdBatchOf(stub, async (database) => {
+        const row = await database
+          .prepare(
+            "SELECT status, run_id AS runId FROM client_provisions WHERE client_id = ?"
+          )
+          .bind(client.clientId)
+          .first<{ status: string; runId: string }>();
+        return row?.status === "done" && row.runId.startsWith("apply-");
+      });
+    });
+    try {
       await applySettings(env, staff, client.clientId);
-      const [only] = await runs.get();
-      await only?.waitForStatus("complete");
+      const [finished] = attempts.started;
+      if (finished === undefined || held === undefined) {
+        throw new Error("No attempt was started");
+      }
+      await held.committed;
+      // The activation is lost before the step's result is kept: the step
+      // runs again, finds the operation done, and the run succeeds.
+      await deliverAlarm(adminWorkflows.applyClient, finished);
+      const ended = await runEnded(adminWorkflows.applyClient, finished);
+
       expect({
-        uploadedAgain: uploadsOf(client) > uploads,
+        status: ended.status,
         releases: await releasesOf(client.clientId),
         runner: await runnerOf(client.clientId),
       }).toStrictEqual({
-        uploadedAgain: true,
+        status: "complete",
         releases: on(release),
         runner: null,
       });
     } finally {
-      await runs.dispose();
+      held?.lose();
     }
+  });
+
+  it("counts a rollout's client done when its attempt loses the step's result after the operation completed", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(0, before);
+    const release = await placedRelease("feat(core): deployed, result lost");
+    let held: LostWrite | undefined;
+    // Held once the rollout's operation on the client is done: its last
+    // write, which also gave the client's claim back.
+    using rollouts_ = startsOf(adminWorkflows.rollout, async (stub) => {
+      held = await holdBatchOf(stub, async (database) => {
+        const row = await database
+          .prepare(
+            "SELECT status, release_id AS releaseId FROM client_provisions WHERE client_id = ?"
+          )
+          .bind(client.clientId)
+          .first<{ status: string; releaseId: string }>();
+        return row?.status === "done" && row.releaseId === release;
+      });
+    });
+    try {
+      const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+      const [started] = rollouts_.started;
+      if (started !== rolloutId || held === undefined) {
+        throw new Error("The rollout's run wasn't started");
+      }
+      await held.committed;
+      // The activation is lost before the step's result is kept: the step
+      // runs again, finds the rollout's operation done, and goes on.
+      await deliverAlarm(adminWorkflows.rollout, rolloutId);
+      const ended = await runEnded(adminWorkflows.rollout, rolloutId);
+
+      expect({
+        status: ended.status,
+        target: await targetOf(rolloutId, client.clientId),
+        releases: await releasesOf(client.clientId),
+        runner: await runnerOf(client.clientId),
+      }).toStrictEqual({
+        status: "complete",
+        target: { ring: 0, status: "done", error: null },
+        releases: on(release),
+        runner: null,
+      });
+    } finally {
+      held?.lose();
+    }
+  });
+
+  it("counts a rollback done when its attempt loses the step's result after the operation completed", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(0, before);
+    const release = await placedRelease("feat(core): rolled back, result lost");
+    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+    await reached(adminWorkflows.rollout, rolloutId, "complete");
+    let held: LostWrite | undefined;
+    // Held once the rollback's operation is done: its last write, which
+    // also gave the client's claim back.
+    using rollbacks_ = startsOf(adminWorkflows.rollbackClient, async (stub) => {
+      held = await holdBatchOf(stub, async (database) => {
+        const row = await database
+          .prepare(
+            "SELECT status, release_id AS releaseId FROM client_provisions WHERE client_id = ?"
+          )
+          .bind(client.clientId)
+          .first<{ status: string; releaseId: string }>();
+        return row?.status === "done" && row.releaseId === before;
+      });
+    });
+    try {
+      const runId = await rollbackClient(
+        env,
+        staff,
+        rolloutId,
+        client.clientId
+      );
+      if (held === undefined || !rollbacks_.started.includes(runId)) {
+        throw new Error("The rollback's run wasn't started");
+      }
+      await held.committed;
+      // The activation is lost before the step's result is kept: the step
+      // runs again, finds its operation done, and records the rollback.
+      await deliverAlarm(adminWorkflows.rollbackClient, runId);
+      const ended = await runEnded(adminWorkflows.rollbackClient, runId);
+
+      expect({
+        status: ended.status,
+        target: await targetOf(rolloutId, client.clientId),
+        releases: await releasesOf(client.clientId),
+        runner: await runnerOf(client.clientId),
+      }).toStrictEqual({
+        status: "complete",
+        target: { ring: 0, status: "rolled_back", error: null },
+        releases: on(before),
+        runner: null,
+      });
+    } finally {
+      held?.lose();
+    }
+  });
+
+  it("runs a rollout's client once when its operation's attempt times out and its retry runs, the attempt that timed out acting no more", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(0, before);
+    const release = await placedRelease("feat(core): on a retry");
+    // Each attempt is held once a script of the client was uploaded: the
+    // first times out there, and its retry starts.
+    const uploaded = (call: ApiCall): boolean =>
+      call.method === "PUT" &&
+      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      scriptPath.test(call.path);
+    const first = heldAfter(uploaded);
+    const retry = heldAfter(uploaded);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using run = await followRollouts();
+    let rolloutId = "";
+    try {
+      rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+      await first.read();
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.rollout,
+        rolloutId
+      );
+      // The retry takes the client, then waits, before it sends, for the
+      // call the one that timed out still has on its way. That one goes on
+      // and is refused at its next check.
+      await vi.waitFor(async () => {
+        const claim = await db
+          .select({ attempt: clientRuns.attempt })
+          .from(clientRuns)
+          .where(eq(clientRuns.clientId, client.clientId))
+          .get();
+        if ((claim?.attempt ?? 0) < 2) {
+          throw new Error("The retry hasn't taken the client yet");
+        }
+      });
+      first.release();
+      await vi.waitFor(() => {
+        const stopped = errors.mock.calls.some((logged) =>
+          JSON.stringify(logged).includes("runner_replaced")
+        );
+        if (!stopped) {
+          throw new Error("The attempt that timed out hasn't stopped yet");
+        }
+      });
+      await retry.read();
+      retry.release();
+      await retried;
+      await run.waitForStatus("complete");
+    } finally {
+      // Whatever failed, no run is left held, and console is itself again.
+      first.release();
+      retry.release();
+      errors.mockRestore();
+    }
+
+    expect({
+      target: await targetOf(rolloutId, client.clientId),
+      releases: await releasesOf(client.clientId),
+      runner: await runnerOf(client.clientId),
+    }).toStrictEqual({
+      target: { ring: 0, status: "done", error: null },
+      releases: on(release),
+      runner: null,
+    });
   });
 
   it("reads a client's drift live: in sync once its operation is done, off its pin, and drifted once changed outside the admin", async () => {
@@ -1066,10 +1450,18 @@ describe("rolling a release out to placed clients", () => {
       .get();
     const scriptName = connect?.scriptName ?? "";
     const [first] = client.account.scripts.get(scriptName)?.versions ?? [];
-    await deployVersion(api, client.account.id, scriptName, first?.id ?? "", {
-      message: "by hand",
-      force: true,
-    });
+    await api.call(
+      {
+        method: "POST",
+        path: `/accounts/${client.account.id}/workers/scripts/${scriptName}/deployments`,
+        query: { force: "true" },
+        json: {
+          strategy: "percentage",
+          versions: [{ version_id: first?.id ?? "", percentage: 100 }],
+        },
+      },
+      z.unknown()
+    );
     const changed = await driftOf(api, db, client.clientId);
 
     expect({
@@ -1249,7 +1641,7 @@ const crashedRollout = async (
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${client.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await runClientProvision(await deployContext(env), holder).catch(() => {
@@ -1293,7 +1685,7 @@ const platformChangeOf = (account: PlacedClient["account"], script: string) => {
 };
 
 describe("a client's changes, counted", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it("refuses a rollout's rollback once anything changed the client since, even back to the rollout's release", async () => {
@@ -1329,7 +1721,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     // Its first try's core answers the probe as another client; the
     // rollback's upload finds it answering as it should again.
     acme.account.coreProbe = { asClient: "someone-else" };
@@ -1373,7 +1765,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-core"),
+        call.path.endsWith("-core"),
       400
     );
     await using run = await followRollouts();
@@ -1428,31 +1820,22 @@ describe("a client's changes, counted", () => {
       .set({ rollbackChange: change })
       .where(eq(rolloutTargets.rolloutId, rolloutId));
     await runClientProvision(await deployContext(env), held);
-    const rollbacks = await introspectWorkflow(env.ROLLBACK_CLIENT);
-    try {
-      await rollbacks.modifyAll(async (modifier) => {
-        await modifier.disableRetryDelays();
-        await modifier.mockStepResult({ name: "plan" }, before);
-      });
-      await db.insert(clientRuns).values({
+    // Its run again, from its plan: what it did is its own change.
+    await db.insert(clientRuns).values({
+      clientId: internal.clientId,
+      runId,
+      kind: "rollback",
+      claimedAt: new Date(),
+    });
+    await adminWorkflow(env, adminWorkflows.rollbackClient).create({
+      id: runId,
+      params: {
+        rolloutId,
         clientId: internal.clientId,
-        runId,
-        kind: "rollback",
-        claimedAt: new Date(),
-      });
-      await env.ROLLBACK_CLIENT.create({
-        id: runId,
-        params: {
-          rolloutId,
-          clientId: internal.clientId,
-          startedBy: staff,
-        },
-      });
-      const [again] = await rollbacks.get();
-      await again?.waitForStatus("complete");
-    } finally {
-      await rollbacks.dispose();
-    }
+        startedBy: staff,
+      },
+    });
+    await reached(adminWorkflows.rollbackClient, runId, "complete");
 
     expect({
       target: await targetOf(rolloutId, internal.clientId),
@@ -1602,20 +1985,20 @@ describe("a client's changes, counted", () => {
     // asserted.
     const held = Promise.withResolvers<boolean>();
     let answered = false;
-    let rolledBack = false;
+    let uploading = false;
     let sentBeforeIt: boolean | undefined;
     cloudflare.beforeAnswering(isCoreUpload, async () => {
-      await rollbackClient(env, staff, await openRollout(), internal.clientId);
-      rolledBack = true;
-      // oxlint-disable-next-line require-await -- the fake waits on it
-      cloudflare.beforeAnswering(isCoreUpload, async () => {
-        sentBeforeIt = !answered;
-      });
+      uploading = true;
       await held.promise;
     });
 
     const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
-    await vi.waitUntil(() => rolledBack, { timeout: 20_000 });
+    await vi.waitUntil(() => uploading, { timeout: 20_000 });
+    await rollbackClient(env, staff, rolloutId, internal.clientId);
+    // oxlint-disable-next-line require-await -- the fake waits on it
+    cloudflare.beforeAnswering(isCoreUpload, async () => {
+      sentBeforeIt = !answered;
+    });
     // The rollback puts core back, or waits for the upload, for a while.
     await vi.waitUntil(coreBack, { timeout: 3000 }).catch(() => false);
     answered = true;
@@ -1718,7 +2101,7 @@ describe("a client's changes, counted", () => {
       });
     await using run = await followRollouts();
     try {
-      await env.ROLLOUT.create({
+      await adminWorkflow(env, adminWorkflows.rollout).create({
         id: rolloutId,
         params: {
           rolloutId,
@@ -1767,7 +2150,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await using run = await followRollouts();
@@ -1878,7 +2261,7 @@ describe("a client's changes, counted", () => {
     const isConnectUpload = (call: { method: string; path: string }) =>
       call.method === "PUT" &&
       call.path.startsWith(`/accounts/${acme.account.id}/`) &&
-      call.path.endsWith("-grasp-os-connect");
+      call.path.endsWith("-connect");
     await using run = await followRollouts();
     await using rollbacks = await followRollbacks();
     // The rollout's change fails on its first upload.
@@ -1926,7 +2309,7 @@ describe("a client's changes, counted", () => {
       (call) =>
         call.method === "PUT" &&
         call.path.startsWith(`/accounts/${internal.account.id}/`) &&
-        call.path.endsWith("-grasp-os-connect"),
+        call.path.endsWith("-connect"),
       400
     );
     await rollbackClient(env, staff, rolloutId, internal.clientId);
@@ -1951,64 +2334,201 @@ describe("a client's changes, counted", () => {
     });
   });
 
-  it("holds a shared secret's revocation while a Worker holding it isn't read, whatever its operation delivered", async () => {
-    const release = await placedRelease("feat(core): runs");
-    const internal = await live(0, release);
-    const { clientId } = internal;
-    const operation = await db
-      .select({ progress: clientProvisions.progress })
-      .from(clientProvisions)
-      .where(eq(clientProvisions.clientId, clientId))
-      .get();
-    const { shared } = z
-      .object({
-        shared: z.record(z.string(), z.record(z.string(), z.string())),
-      })
-      .parse(JSON.parse(operation?.progress ?? "{}"));
-    // Its connect in a namespace: drift reads only its core, through core's
-    // health, never connect's live version.
-    const placement = await db
-      .select({ destinationId: clientPlacements.destinationId })
-      .from(clientPlacements)
-      .where(eq(clientPlacements.clientId, clientId))
-      .get();
-    await db
-      .update(hostingDestinations)
-      .set({ kind: "workers_for_platforms", namespace: "production" })
-      .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
-    // A secrets rollout that rotated connect's Composio key: its operation
-    // delivered the store's value, as on record.
-    const rolloutId = crypto.randomUUID();
-    const at = longAgo();
-    await db.insert(rollouts).values({
-      id: rolloutId,
-      kind: "secrets",
-      releaseId: null,
-      status: "done",
-      ring: 0,
-      startedBy: staff.email,
-      sharedSecrets: JSON.stringify({ ...shared.core, ...shared.connect }),
-      createdAt: at,
-      updatedAt: at,
-    });
-    await db.insert(rolloutTargets).values({
-      rolloutId,
-      clientId,
-      ring: 0,
-      status: "done",
-      previous: JSON.stringify({
-        release,
-        generation: 1,
-        versions: {},
-        shared: { connect: { ...shared.connect, COMPOSIO_API_KEY: "before" } },
-      }),
-      updatedAt: at,
-    });
+  it.each([
+    {
+      connect: "names the version its operation recorded",
+      answering: "recorded" as const,
+      held: false,
+    },
+    {
+      connect: "answers as an earlier version, its upload's",
+      answering: "earlier" as const,
+      held: true,
+    },
+    {
+      // What the probe recorded was an isolate of a version made before
+      // the run's last secret: a later read names the newest.
+      connect: "names a newer version than its operation recorded",
+      answering: "newer" as const,
+      held: true,
+    },
+    {
+      connect: "names no version (down, or no version metadata)",
+      answering: null,
+      held: true,
+    },
+  ])(
+    "revokes a namespace connect's rotated secret only while core's health says connect $connect",
+    async ({ answering, held }) => {
+      const release = await placedRelease("feat(core): runs");
+      const internal = await live(0, release);
+      const { clientId } = internal;
+      const operation = await db
+        .select({ progress: clientProvisions.progress })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      const { shared } = z
+        .object({
+          shared: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(JSON.parse(operation?.progress ?? "{}"));
+      // Its connect in a namespace: drift reads it, as its core, through
+      // core's health, which names the version connect answers as.
+      const placement = await db
+        .select({ destinationId: clientPlacements.destinationId })
+        .from(clientPlacements)
+        .where(eq(clientPlacements.clientId, clientId))
+        .get();
+      await db
+        .update(hostingDestinations)
+        .set({
+          kind: "workers_for_platforms",
+          namespace: clientsNamespace("production"),
+        })
+        .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
+      // A secrets rollout that rotated connect's Composio key: its operation
+      // delivered the store's value, as on record.
+      const rolloutId = crypto.randomUUID();
+      const at = longAgo();
+      await db.insert(rollouts).values({
+        id: rolloutId,
+        kind: "secrets",
+        releaseId: null,
+        status: "done",
+        ring: 0,
+        startedBy: staff.email,
+        sharedSecrets: JSON.stringify({ ...shared.core, ...shared.connect }),
+        createdAt: at,
+        updatedAt: at,
+      });
+      await db.insert(rolloutTargets).values({
+        rolloutId,
+        clientId,
+        ring: 0,
+        status: "done",
+        previous: JSON.stringify({
+          release,
+          generation: 1,
+          versions: {},
+          shared: {
+            connect: { ...shared.connect, COMPOSIO_API_KEY: "before" },
+          },
+        }),
+        updatedAt: at,
+      });
 
-    await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({
-      rotated: ["COMPOSIO_API_KEY"],
-      revocable: [],
-      behind: { COMPOSIO_API_KEY: [clientId] },
+      if (answering === "earlier" || answering === "newer") {
+        const connect = await db
+          .select({ scriptName: clientWorkers.scriptName })
+          .from(clientWorkers)
+          .where(
+            and(
+              eq(clientWorkers.clientId, clientId),
+              eq(clientWorkers.worker, "connect")
+            )
+          )
+          .get();
+        const [first] =
+          internal.account.scripts.get(connect?.scriptName ?? "")?.versions ??
+          [];
+        if (answering === "earlier") {
+          internal.account.connectAnswering = first?.id ?? null;
+        } else {
+          await db
+            .update(clientWorkers)
+            .set({ versionId: first?.id ?? null })
+            .where(
+              and(
+                eq(clientWorkers.clientId, clientId),
+                eq(clientWorkers.worker, "connect")
+              )
+            );
+        }
+      } else if (answering === null) {
+        internal.account.connectAnswering = null;
+      }
+
+      await expect(checkRevocation(env, rolloutId)).resolves.toMatchObject({
+        rotated: ["COMPOSIO_API_KEY"],
+        revocable: held ? [] : ["COMPOSIO_API_KEY"],
+        behind: { COMPOSIO_API_KEY: held ? [clientId] : [] },
+      });
+    }
+  );
+
+  it("rolls a client back only once an upload a timed-out attempt still has on its way has answered, however its retry goes", async () => {
+    const before = await placedRelease("feat(core): before");
+    const internal = await live(0, before);
+    const release = await placedRelease("feat(core): rolled out");
+    const core = await coreScriptOf(internal.clientId);
+    await using rollbacks = await followRollbacks();
+    await using _rollouts = await followRollouts();
+    const isCoreUpload = (call: { method: string; path: string }) =>
+      call.method === "PUT" && call.path.endsWith(`/scripts/${core}`);
+    // The rollout's first attempt has core's upload on its way, held
+    // unanswered, when the attempt times out and its retry starts.
+    const held = Promise.withResolvers<boolean>();
+    let answered = false;
+    let uploading = false;
+    let sentBeforeIt: boolean | undefined;
+    cloudflare.beforeAnswering(isCoreUpload, async () => {
+      uploading = true;
+      await held.promise;
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let rolloutId = "";
+    try {
+      rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
+      await vi.waitUntil(() => uploading, { timeout: 20_000 });
+      const { retried } = await timeOutAttempt(
+        adminWorkflows.rollout,
+        rolloutId
+      );
+      await vi.waitFor(async () => {
+        const claim = await db
+          .select({ attempt: clientRuns.attempt })
+          .from(clientRuns)
+          .where(eq(clientRuns.clientId, internal.clientId))
+          .get();
+        if ((claim?.attempt ?? 0) < 2) {
+          throw new Error("The retry hasn't taken the client yet");
+        }
+      });
+      // Staff roll the client back; the next core upload, the rollback's,
+      // notes whether the held one was still on its way.
+      await rollbackClient(env, staff, rolloutId, internal.clientId);
+      // oxlint-disable-next-line require-await -- the fake waits on it
+      cloudflare.beforeAnswering(isCoreUpload, async () => {
+        sentBeforeIt = !answered;
+      });
+      // A while for the rollback to upload, were it to go on regardless.
+      await scheduler.wait(3000);
+      answered = true;
+      held.resolve(true);
+      await vi.waitUntil(() => sentBeforeIt !== undefined, {
+        timeout: 20_000,
+      });
+      await rollbacks.settle();
+      await retried.catch(() => {});
+    } finally {
+      held.resolve(true);
+      errors.mockRestore();
+    }
+
+    expect({
+      target: await targetOf(rolloutId, internal.clientId),
+      releases: await releasesOf(internal.clientId),
+      // What Cloudflare runs, not only what the admin recorded.
+      live: z
+        .looseObject({ release: z.string() })
+        .safeParse(platformChangeOf(internal.account, core)).data?.release,
+      sentBeforeIt,
+    }).toStrictEqual({
+      target: { ring: 0, status: "rolled_back", error: null },
+      releases: on(before),
+      live: before,
+      sentBeforeIt: false,
     });
   });
 
@@ -2021,12 +2541,22 @@ describe("a client's changes, counted", () => {
     await using rollbacks = await followRollbacks();
     const rolloutId = await rollOut(release, { scope: "all" });
     await run.waitForStepResult({ name: "ring 1 approved" });
-    // Marked sent ten minutes ago, by a run that never cleared it.
-    const sentAt = Date.now() - 10 * 60_000;
+    // Marked sent ten minutes ago, for the rollout's change, by a run that
+    // never cleared it.
+    const operation = await db
+      .select({ change: clientProvisions.change })
+      .from(clientProvisions)
+      .where(eq(clientProvisions.clientId, internal.clientId))
+      .get();
     await db
       .update(clientProvisions)
       .set({
-        progress: sql`json_set(${clientProvisions.progress}, '$.sending', ${sentAt})`,
+        sending: JSON.stringify({
+          "a-dead-run#1": {
+            change: operation?.change ?? 0,
+            at: Date.now() - 10 * 60_000,
+          },
+        }),
       })
       .where(eq(clientProvisions.clientId, internal.clientId));
 
@@ -2044,7 +2574,7 @@ describe("a client's changes, counted", () => {
 });
 
 describe("a rollout's run dying on a client, and staff acting on the client after", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
+  useStoreSecrets({ deployer: token });
   beforeEach(setAsideEarlierTests);
 
   it.each(
@@ -2065,388 +2595,67 @@ describe("a rollout's run dying on a client, and staff acting on the client afte
       const { clientId } = client;
       await using rollouts_ = await followRollouts();
       await using rollbacks = await followRollbacks();
-      const applies = await introspectWorkflow(env.APPLY_CLIENT);
-      const attempts = await introspectWorkflow(env.PROVISION_PLACED_CLIENT);
-      try {
-        for (const each of [applies, attempts]) {
-          // oxlint-disable-next-line no-await-in-loop -- set up before any run
-          await each.modifyAll(async (modifier) => {
-            await modifier.disableRetryDelays();
-          });
-        }
-        let acted: unknown;
-        if (action === "release") {
-          acted = await codeOf(
-            releasePlacedClient(env, staff, clientId, { releaseId: later })
+      let acted: unknown;
+      // How the run staff started ended, when one started: done, never
+      // errored or terminated.
+      let endedAs: string | null = null;
+      if (action === "release") {
+        acted = await codeOf(
+          releasePlacedClient(env, staff, clientId, { releaseId: later })
+        );
+        const [only] = rollouts_.runsOf(adminWorkflows.provisionPlacedClient);
+        if (only !== undefined) {
+          const ended = await runEnded(
+            adminWorkflows.provisionPlacedClient,
+            only
           );
-          const [only] = await attempts.get();
-          await only?.waitForStatus("complete");
-        } else if (action === "apply") {
-          acted = await codeOf(applySettings(env, staff, clientId));
-          const [only] = await applies.get();
-          await only?.waitForStatus("complete");
-        } else if (action === "rollback") {
-          acted = await codeOf(rollbackClient(env, staff, rolloutId, clientId));
-          await rollbacks.settle();
-        } else {
-          acted = await codeOf(rollOut(later, { scope: "ring", ring: 0 }));
-          await rollouts_.waitForStatus("complete");
+          endedAs = ended.status;
         }
-        const releases = await releasesOf(clientId);
-        // The dead rollout's rollback, after: only while its change is the
-        // client's latest.
-        const rollbackAfter =
-          action === "rollback"
-            ? "taken"
-            : await codeOf(rollbackClient(env, staff, rolloutId, clientId));
+      } else if (action === "apply") {
+        let runId: string | undefined;
+        acted = await codeOf(
+          (async () => {
+            runId = await applySettings(env, staff, clientId);
+          })()
+        );
+        if (runId !== undefined) {
+          const ended = await runEnded(adminWorkflows.applyClient, runId);
+          endedAs = ended.status;
+        }
+      } else if (action === "rollback") {
+        acted = await codeOf(rollbackClient(env, staff, rolloutId, clientId));
         await rollbacks.settle();
-        const expected = rolloutWalkExpected(crash, action, {
-          before,
-          release,
-          later,
-        });
-
-        expect({
-          acted,
-          releases,
-          rollbackAfter,
-          endsOn: await releasesOf(clientId),
-          runner: await runnerOf(clientId),
-        }).toMatchObject({
-          ...expected,
-          runner: expected.runner === "rollout" ? { runId: rolloutId } : null,
-        });
-      } finally {
-        await applies.dispose();
-        await attempts.dispose();
+      } else {
+        acted = await codeOf(rollOut(later, { scope: "ring", ring: 0 }));
+        await rollouts_.waitForStatus("complete");
       }
+      const releases = await releasesOf(clientId);
+      // The dead rollout's rollback, after: only while its change is the
+      // client's latest.
+      const rollbackAfter =
+        action === "rollback"
+          ? "taken"
+          : await codeOf(rollbackClient(env, staff, rolloutId, clientId));
+      await rollbacks.settle();
+      const expected = rolloutWalkExpected(crash, action, {
+        before,
+        release,
+        later,
+      });
+
+      expect({
+        acted,
+        releases,
+        rollbackAfter,
+        endsOn: await releasesOf(clientId),
+        runner: await runnerOf(clientId),
+        // A run staff started ended done, if one started at all.
+        endedAs: endedAs ?? "complete",
+      }).toMatchObject({
+        ...expected,
+        runner: expected.runner === "rollout" ? { runId: rolloutId } : null,
+        endedAs: "complete",
+      });
     }
   );
-});
-
-/** How many rollouts were ever started. */
-const rolloutCount = async (): Promise<number> => {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(rollouts);
-  return row?.count ?? 0;
-};
-
-/** The ring of the `index`th of 200 clients: one in ring 0, the last alone in ring 3. */
-const fleetRingOf = (index: number): number => {
-  if (index === 0) {
-    return 0;
-  }
-  return index === 199 ? 3 : 1 + (index % 2);
-};
-
-describe("rolling out a release that raises a platform limit", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
-  beforeEach(setAsideEarlierTests);
-
-  const raised = { ...testLimits, workflowSteps: 2000 };
-
-  /** A release raising `workflowSteps` over `previous`, with evidence on `profiles`. */
-  const raising = async (
-    previous: string,
-    profiles: ("cloudflare" | "workerd")[]
-  ): Promise<string> =>
-    await placedRelease("feat(core): more workflow steps", {
-      platformLimits: raised,
-      previousRelease: { releaseId: previous, platformLimits: testLimits },
-      limitEvidence: (release) =>
-        profiles.map((profile) =>
-          evidenceFor(release, "workflowSteps", 2000, profile)
-        ),
-    });
-
-  /** A release after `previous` that keeps its limits. */
-  const keeping = async (previous: string): Promise<string> =>
-    await placedRelease("feat(core): keeps the limits", {
-      platformLimits: raised,
-      previousRelease: { releaseId: previous, platformLimits: raised },
-    });
-
-  it("refuses to start one whose raise has evidence only for another profile than its clients', starting nothing", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    const onPremOnly = await raising(before, ["workerd"]);
-    const created = await rolloutCount();
-
-    const refused = await codeOf(rollOut(onPremOnly, { scope: "all" }));
-
-    expect({
-      refused,
-      created: (await rolloutCount()) - created,
-    }).toStrictEqual({ refused: "limit_evidence_missing", created: 0 });
-  });
-
-  it("refuses one that skips the release whose raise has no evidence for the client's profile", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    const skipped = await raising(before, ["workerd"]);
-    const later = await keeping(skipped);
-
-    await expect(codeOf(rollOut(later, { scope: "all" }))).resolves.toBe(
-      "limit_evidence_missing"
-    );
-  });
-
-  it("rolls out a release past a raise it skips when the skipped release's evidence covers the client's profile", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    const covered = await raising(before, ["cloudflare", "workerd"]);
-    const later = await keeping(covered);
-    await using run = await followRollouts();
-
-    const rolloutId = await rollOut(later, { scope: "all" });
-    await run.waitForStatus("complete");
-
-    expect({
-      target: await targetOf(rolloutId, clientId),
-      releases: await releasesOf(clientId),
-    }).toStrictEqual({
-      target: { ring: 0, status: "done", error: null },
-      releases: on(later),
-    });
-  });
-
-  it("refuses nothing of a release it skips every client of, as it checks only the clients it reaches", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    await pinClient(env, staff, { clientId, releaseId: before });
-    // Recorded before platform limits were: refused for a client it reaches.
-    const preLimits = await placedRelease("feat(core): no limits recorded", {
-      platformLimits: null,
-    });
-    await using run = await followRollouts();
-
-    const started = await codeOf(
-      rollOut(preLimits, { scope: "ring", ring: 0 })
-    );
-    await run.waitForStatus("complete");
-
-    expect({
-      started,
-      releases: await releasesOf(clientId),
-    }).toStrictEqual({ started: "resolved", releases: on(before) });
-  });
-
-  it("refuses one past a release on the way the admin hasn't imported, whatever older evidence there is", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    await live(0, before);
-    // Raised with evidence for Cloudflare, then lowered again.
-    const covered = await raising(before, ["cloudflare"]);
-    await placedRelease("feat(core): fewer workflow steps", {
-      platformLimits: testLimits,
-      previousRelease: { releaseId: covered, platformLimits: raised },
-    });
-    // Raised again by a release the admin never imported, then kept.
-    const later = await placedRelease("feat(core): keeps a raise", {
-      platformLimits: raised,
-      previousRelease: {
-        releaseId: "r999999999-abcdef0",
-        platformLimits: raised,
-      },
-    });
-
-    await expect(codeOf(rollOut(later, { scope: "all" }))).resolves.toBe(
-      "release_history_incomplete"
-    );
-  });
-
-  it("refuses a rollback to a release from before platform limits were recorded, and changes nothing", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    const { clientId } = await live(0, before);
-    const preLimits = await placedRelease("feat(core): no limits recorded", {
-      platformLimits: null,
-    });
-    const release = await placedRelease("feat(core): records limits");
-    await using run = await followRollouts();
-    const rolloutId = await rollOut(release, { scope: "ring", ring: 0 });
-    await run.waitForStatus("complete");
-    // What it ran before, as the rollout recorded it, made the release
-    // that records no limits.
-    const [target] = await db
-      .select({ previous: rolloutTargets.previous })
-      .from(rolloutTargets)
-      .where(
-        and(
-          eq(rolloutTargets.rolloutId, rolloutId),
-          eq(rolloutTargets.clientId, clientId)
-        )
-      );
-    const previous = z
-      .looseObject({})
-      .parse(JSON.parse(target?.previous ?? "{}"));
-    await db
-      .update(rolloutTargets)
-      .set({ previous: JSON.stringify({ ...previous, release: preLimits }) })
-      .where(
-        and(
-          eq(rolloutTargets.rolloutId, rolloutId),
-          eq(rolloutTargets.clientId, clientId)
-        )
-      );
-
-    expect({
-      refused: await codeOf(rollbackClient(env, staff, rolloutId, clientId)),
-      releases: await releasesOf(clientId),
-      runner: await runnerOf(clientId),
-    }).toStrictEqual({
-      refused: "release_without_limits",
-      releases: on(release),
-      runner: null,
-    });
-  });
-
-  it("checks a rollout to hundreds of clients within the reads one request may make, refusing the last one's raise", async () => {
-    const before = await placedRelease("feat(core): the release before");
-    // Raised with evidence for on-premises only: a client on it already
-    // goes on, one from before it can't go past it.
-    const onPremOnly = await raising(before, ["workerd"]);
-    const later = await keeping(onPremOnly);
-    // 199 clients on the raise, one of them in ring 0, and one, in the
-    // last ring, from before it: only that one is refused, after every
-    // other is checked. As many as the rollout's step budget takes.
-    const destinationId = await destination({ kind: "dedicated" });
-    const now = new Date();
-    const fleet = Array.from({ length: 200 }, (_, index) => ({
-      id: `fleet-${crypto.randomUUID().slice(0, 8)}`,
-      ring: fleetRingOf(index),
-      runs: index === 199 ? before : onPremOnly,
-    }));
-    for (const { id, ring, runs } of fleet) {
-      // oxlint-disable-next-line no-await-in-loop -- one client at a time
-      await db.batch([
-        db.insert(clients).values({
-          id,
-          name: id,
-          ring,
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-        }),
-        db.insert(clientPlacements).values({
-          clientId: id,
-          deploymentId: id.replace("fleet-", "d"),
-          destinationId,
-          policyId: "eu-storage",
-          placedBy: staff.email,
-          placedAt: now,
-        }),
-        ...(["core", "connect"] as const).map((worker) =>
-          db.insert(clientWorkers).values({
-            clientId: id,
-            worker,
-            scriptName: `${id}-grasp-os-${worker}`,
-            releaseId: runs,
-            versionId: crypto.randomUUID(),
-            deployedAt: now,
-          })
-        ),
-      ]);
-    }
-    // D1 counts every statement a request prepares against its limit.
-    let reads = 0;
-    const counted = new Proxy(env.DB, {
-      get: (target, property) => {
-        if (property === "prepare") {
-          return (query: string) => {
-            reads += 1;
-            return target.prepare(query);
-          };
-        }
-        const value: unknown = Reflect.get(target, property);
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
-
-    const refused = await codeOf(
-      startRollout({ ...env, DB: counted }, staff, {
-        kind: "release",
-        releaseId: later,
-        scope: { scope: "all" },
-      })
-    );
-
-    expect({ refused, withinLimit: reads < 1000 }).toStrictEqual({
-      refused: "limit_evidence_missing",
-      withinLimit: true,
-    });
-  });
-});
-
-describe("reading every client at once, as a rollout checks them", () => {
-  useStoreSecrets({ deployer: token, tenant: tenantToken });
-  beforeEach(setAsideEarlierTests);
-
-  it("reads each client as reading it alone does, so both skip alike", async () => {
-    const before = await placedRelease("feat(core): before");
-    const release = await placedRelease("feat(core): rolled out");
-    const settled = await live(0, before);
-    const changed = await live(1, before);
-    const pinned = await live(1, before);
-    const running = await live(1, before);
-    // Its sign-in changed since core went live; another pinned; another
-    // mid-change on the release, its operation not done.
-    await db
-      .update(clients)
-      .set({ configChangedAt: new Date() })
-      .where(eq(clients.id, changed.clientId));
-    await pinClient(env, staff, {
-      clientId: pinned.clientId,
-      releaseId: before,
-    });
-    await db
-      .update(clientProvisions)
-      .set({ status: "running", releaseId: release })
-      .where(eq(clientProvisions.clientId, running.clientId));
-    const [row] = await db
-      .select({ id: releaseRows.id, builtAt: releaseRows.builtAt })
-      .from(releaseRows)
-      .where(eq(releaseRows.id, release));
-    if (row === undefined) {
-      throw new Error("The release was imported");
-    }
-    const all = await targetClients(db);
-
-    const read = await Promise.all(
-      [settled, changed, pinned, running].map(async ({ clientId }) => {
-        const alone = await targetClient(db, clientId);
-        const together = all.get(clientId);
-        return {
-          equal: together,
-          alone,
-          skips: [
-            alone === undefined ? null : skipReason(alone, row),
-            together === undefined ? null : skipReason(together, row),
-          ],
-        };
-      })
-    );
-
-    for (const { alone, equal } of read) {
-      expect(equal).toStrictEqual(alone);
-    }
-    expect(read.map(({ skips }) => skips)).toStrictEqual([
-      [null, null],
-      [null, null],
-      ["pinned", "pinned"],
-      [null, null],
-    ]);
-    expect(
-      read.map(({ alone }) => ({
-        configPending: alone?.configPending,
-        operation: alone?.operation?.status,
-      }))
-    ).toStrictEqual([
-      { configPending: false, operation: "done" },
-      { configPending: true, operation: "done" },
-      { configPending: false, operation: "done" },
-      { configPending: false, operation: "running" },
-    ]);
-  });
 });

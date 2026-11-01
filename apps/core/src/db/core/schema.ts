@@ -8,7 +8,6 @@ import type {
   BlueprintWorkflow,
   DeclaredPermission,
 } from "@grasp-os/shared/permissions";
-import type { RuleCondition } from "@grasp-os/shared/policies";
 import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -38,23 +37,6 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
-
-/**
- * The oldest migration whose code still runs on this database's schema,
- * which each release declares (scripts/release): the admin won't put
- * the code of a release whose newest migration is older on it, by a
- * rollback or a deploy.
- *
- * Migrations expand, then contract in a later release (AGENTS.md), so the
- * code of the release before keeps working on a new schema, and a
- * migration that only expands leaves this where it is. One that drops or
- * renames what older code still uses raises it: to the migration of the
- * first release whose code no longer used it, or, when the code stopped
- * in the same release, to that migration's own number.
- *
- * 0120 dropped `admission_topics` in the release that stopped using it.
- */
-export const compatibleFromMigration = 120;
 
 /** A person. Found by their IdP account, never by email alone. */
 export const users = sqliteTable("users", {
@@ -174,7 +156,7 @@ export const organizations = sqliteTable("organizations", {
 
 /**
  * The organization's settings an admin keeps beside its name and time zone
- * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * (org-settings.ts): one row per kind (`billing`), its value as
  * JSON, checked again as it is read. None until an admin saves one.
  */
 export const orgSettings = sqliteTable("org_settings", {
@@ -694,6 +676,11 @@ export const apps = sqliteTable("apps", {
    */
   audienceType: text("audience_type", { enum: ["person", "team"] }),
   audienceId: text("audience_id"),
+  /**
+   * The business process it serves (@grasp-os/shared/business-processes),
+   * when a builder said; null otherwise. Grants nothing.
+   */
+  process: text(),
   blueprint: text(),
   currentVersion: integer("current_version"),
   pendingVersion: integer("pending_version"),
@@ -711,6 +698,13 @@ export const apps = sqliteTable("apps", {
     staff: boolean;
   }>(),
   createdAt: timestamp("created_at").notNull(),
+  /**
+   * When it was removed (app-removal.ts), and by whom: a removed App is a
+   * tombstone, kept so what names it stays history, and answers nothing.
+   * Null while it is an App.
+   */
+  removedAt: timestamp("removed_at"),
+  removedBy: text("removed_by"),
 });
 
 /**
@@ -739,18 +733,21 @@ export const appIntegrations = sqliteTable(
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
  * told again by the clock until it takes them, so a host away for
  * longer than its retries still clears the screens of whoever lost a
- * role. `user_ids` is null for everyone the host knows of.
+ * role. `user_ids` is null for everyone the host knows of. A null
+ * `app_id` is a revocation for every App (an admin's role lost), kept as
+ * one row so the change's batch stays one row however many Apps there
+ * are; it is expanded into one row per App a page at a time, in App ID
+ * order, `after_app_id` the last App it has expanded to (GRA-650).
  */
 export const accessRevocations = sqliteTable(
   "access_revocations",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
+    appId: text("app_id").references(() => apps.id, { onDelete: "cascade" }),
     userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
+    afterAppId: text("after_app_id"),
   },
   // The clock tells the least tried first, oldest first among them,
   // once it dropped those a day old.
@@ -980,6 +977,16 @@ export const appVersions = sqliteTable(
      * previous release writes gets none (the default).
      */
     workflows: text({ mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
+     * The names of the version's screens (JSON, `screensIn`), written when
+     * it is committed: so listing every screen someone can open, across
+     * their Apps, is one query and reads no files (`listScreens`). A row
+     * the previous release writes gets none (the default).
+     */
+    screens: text({ mode: "json" })
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
@@ -1222,11 +1229,15 @@ export const sdkReleasePins = sqliteTable(
  * writes, which only the host chose when it sealed the release, or, for a
  * workflow version (`resource_id` a workflow resource's), the exact version
  * of another workflow it runs (`kind` `workflow`, `schema_hash` that
- * version's contract hash, workflow-resources.ts).
+ * version's contract hash, workflow-resources.ts). A workflow version's
+ * catalog binding names its contract key, and, for an `operation` binding
+ * an admin approved with a store operation, the store, its definition and
+ * the path that serve it (`approval_id`, workflow-bindings.ts): the single
+ * binding inventory (spec 24).
  * Routing, not a grant: whoever calls is authorized on every call. Also
- * how a store finds the releases that still rely on it: it can't be
- * deleted while any release kept is bound to it (data-stores.ts), and
- * retention deletes a release's rows here with it.
+ * how a store finds the releases that still rely on it, and the consumers
+ * whose approvals resolve to it: it can't be deleted while either does
+ * (data-stores.ts), and retention deletes a release's rows here with it.
  */
 export const sdkResourceBindings = sqliteTable(
   "sdk_resource_bindings",
@@ -1239,6 +1250,7 @@ export const sdkResourceBindings = sqliteTable(
         "store",
         "workflow",
         "operation",
+        "storeResource",
         "connector",
         "model",
         "decision",
@@ -1261,6 +1273,22 @@ export const sdkResourceBindings = sqliteTable(
      * it (a workflow's `namespace/name/semver`); null for a store's.
      */
     contractId: text("contract_id"),
+    /**
+     * For a consumer's public store-operation dependency (GRA-680): the
+     * operation's path in the store its approval resolved, which
+     * `target_id` then names; null otherwise.
+     */
+    targetPath: text("target_path"),
+    /**
+     * The approval this row's target projects (`workflow_binding_approvals`
+     * for a workflow's `operation` binding): written in the approval's own
+     * batch and reset when it is revoked or replaced, so the row names what
+     * serves the binding only while an approval does. Null for a target the
+     * seal or publication chose. Set exactly when `target_path` is, which
+     * the database enforces (migration 0183), so no store an approval
+     * resolved is named without it.
+     */
+    approvalId: text("approval_id"),
   },
   (table) => [
     primaryKey({
@@ -1299,16 +1327,31 @@ export const businessStoreVersions = sqliteTable(
 );
 
 /**
- * The App a store serves, claimed by the first seal that binds it and kept
- * for good: retention deletes releases and their bindings, never this. So
- * a store an App stopped using never comes to serve another App, which
- * would read what the first left behind.
+ * The one canonical owner of a store's schema and operations (spec 40.8),
+ * claimed once and kept for good: retention deletes releases and their
+ * bindings, never this. So a store its owner stopped using never comes to
+ * serve another owner, which would read what the first left behind. The
+ * owner is an App (`appId`), claimed by the first seal that binds the
+ * store, or an independent workflow (`workflowId`, GRA-682), claimed when
+ * an admin activates a version that declares it: exactly one of the two.
+ * A workflow's store has no App, so nothing that looks a store's App up
+ * ever finds one for it.
  */
-export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
-  storeId: text("store_id").primaryKey(),
-  appId: text("app_id").notNull(),
-  claimedAt: timestamp("claimed_at").notNull(),
-});
+export const sdkStoreOwners = sqliteTable(
+  "sdk_store_owners",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id"),
+    workflowId: text("workflow_id"),
+    claimedAt: timestamp("claimed_at").notNull(),
+  },
+  () => [
+    check(
+      "sdk_store_owners_one_owner",
+      sql`(app_id IS NULL) <> (workflow_id IS NULL)`
+    ),
+  ]
+);
 
 /**
  * The store an App of spec 8's layout runs on, one per App: created by the
@@ -1338,78 +1381,6 @@ export const appTestFixtures = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("app_test_fixtures_created_at").on(table.createdAt)]
-);
-
-/**
- * The recovery index of screens' keyed submissions (spec 10.7.8,
- * screen-submissions.ts): one row per mutation or action a person's screen
- * sent under an idempotency key, written as core admits it and deleted
- * once the person's screen got an answer its receipt settled. A row left
- * is one whose answer may never have reached them: the shell reads its status from the
- * receipt its key names, never anything it changed or answered. Only the
- * descriptor and the key: no input, no result. A row goes with its
- * receipt's retention (`expires_at`), and a person keeps at most
- * `maxSubmissionsPerApp` of an App and `maxSubmissionsPerPerson` in all.
- */
-export const screenSubmissions = sqliteTable(
-  "screen_submissions",
-  {
-    id: text().primaryKey(),
-    personId: text("person_id").notNull(),
-    appId: text("app_id").notNull(),
-    kind: text({ enum: ["mutation", "action"] }).notNull(),
-    /** The function's contract ID, as the screen's reference names it. */
-    contractId: text("contract_id").notNull(),
-    fingerprint: text().notNull(),
-    /** The App version whose release resolved the call. */
-    appVersion: integer("app_version").notNull(),
-    /** The function's path in that release, for its receipt's scope. */
-    path: text().notNull(),
-    /**
-     * For a mutation, the store its receipt is in and the contract ID that
-     * scopes it (operations.ts `operationContractId`), as the release that
-     * ran it had them: null for an action, and for a release with no store.
-     */
-    storeId: text("store_id"),
-    storeContractId: text("store_contract_id"),
-    /**
-     * For a mutation core answered as run and failed (its handler's own
-     * failure, which commits nothing and leaves its receipt claimed), that
-     * failure's category: it reads as `failed` unless a later attempt
-     * under its key committed.
-     */
-    failedCategory: text("failed_category"),
-    /**
-     * The receipt fence the failed attempt itself claimed: a newer claim
-     * since is another attempt, which may still commit.
-     */
-    failedFence: integer("failed_fence"),
-    /**
-     * Which attempt under its key the row follows, from 1: each one noted
-     * moves it on, and core's answer marks the row only for its own.
-     */
-    attempt: integer().notNull().default(1),
-    idempotencyKey: text("idempotency_key").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    expiresAt: timestamp("expires_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("screen_submissions_key").on(
-      table.personId,
-      table.appId,
-      table.kind,
-      table.contractId,
-      table.fingerprint,
-      table.idempotencyKey
-    ),
-    index("screen_submissions_person").on(table.personId, table.createdAt),
-    index("screen_submissions_expires_at").on(table.expiresAt),
-    index("screen_submissions_app").on(table.personId, table.appId),
-    check(
-      "screen_submissions_kind",
-      sql`${table.kind} IN ('mutation', 'action')`
-    ),
-  ]
 );
 
 /**
@@ -1658,6 +1629,18 @@ export const workflowRuns = sqliteTable(
     workflowId: text("workflow_id").notNull(),
     version: integer().notNull(),
     startedBy: text("started_by"),
+    /**
+     * Whether a Grasp staff member started it (GRA-1088): `started_by` is
+     * then their user ID, not a member's. Written once, by `startRun`,
+     * from the starter's own session, never from what it was asked; never
+     * for a run another run, a trigger or an agent started. The run's
+     * authority carries it, so its person passes the active-member gate
+     * only while they are still staff, and what it does is audited as
+     * started by "(Grasp staff)".
+     */
+    startedByStaff: integer("started_by_staff", { mode: "boolean" })
+      .notNull()
+      .default(false),
     status: text({
       // `starting`: written, its engine instance not yet known to exist
       // (src/workflows/runs.ts, `startRun`).
@@ -1744,6 +1727,13 @@ export const workflowRuns = sqliteTable(
      * it (src/workflows/runs.ts). Null until the engine's first notification.
      */
     engineStatus: text("engine_status"),
+    /**
+     * Why the engine rolls the run back, as it began to (src/workflows/
+     * runs.ts): a JSON object of its cause (`failure` or `cancellation`)
+     * and, for a failure, its code. What its summary's compensation says
+     * (spec 10.7.3).
+     */
+    compensation: text(),
     /** When the engine first ran the run; null until it has. */
     startedAt: timestamp("started_at"),
     /**
@@ -1756,7 +1746,7 @@ export const workflowRuns = sqliteTable(
      * How deep in its lineage the run is: 0 for a root, its parent's depth
      * and one more for a run another started (src/workflows/quotas.ts).
      * Written once, with the row, from the parent's row, never from what
-     * the run is given: a lineage nests no deeper than the quota policy
+     * the run is given: a lineage nests no deeper than its limits
      * allows however its runs start one another.
      */
     depth: integer().notNull().default(0),
@@ -1815,7 +1805,7 @@ export const workflowRuns = sqliteTable(
  * run and every run started under it, at any depth, keyed by the root.
  * Created with the root's row, or with the lineage's first admission
  * after it, from the root's row. Every admission of the lineage's work
- * checks these against the quota policy as it is then, in one statement
+ * checks these against the quota limits, in one statement
  * that changes them only if the work fits, so admissions racing each
  * other never pass a limit, and nothing a retry, a restart, a child or a
  * branch does starts them afresh: they only grow (but for `active_held_ms`,
@@ -1829,8 +1819,6 @@ export const workflowRuns = sqliteTable(
  * - `active_used_ms`: wall time its steps' attempts used, settled.
  * - `active_held_ms`: what attempts under way hold, each its whole
  *   allowance until it settles (`run_lineage_attempts`).
- * - `policy_generation`: the quota policy's generation at the latest
- *   admission.
  * - `host_calls`: host calls its attempts reserved, in blocks; once an
  *   attempt settles, only those it made.
  */
@@ -1845,7 +1833,6 @@ export const runLineages = sqliteTable("run_lineages", {
   descendants: integer().notNull().default(0),
   activeUsedMs: integer("active_used_ms").notNull().default(0),
   activeHeldMs: integer("active_held_ms").notNull().default(0),
-  policyGeneration: integer("policy_generation").notNull().default(0),
   hostCalls: integer("host_calls").notNull().default(0),
 });
 
@@ -1882,7 +1869,6 @@ export const runLineageAttempts = sqliteTable(
     usedMs: integer("used_ms"),
     admittedAt: timestamp("admitted_at").notNull(),
     settledAt: timestamp("settled_at"),
-    policyGeneration: integer("policy_generation").notNull(),
     /**
      * Host calls the attempt reserved of its lineage while it runs, then,
      * once it settled, those it made; all it reserved if it never did.
@@ -1994,7 +1980,7 @@ export const workflowAdmissionQueue = sqliteTable(
 /**
  * The build jobs building now, a lease each (src/build-admission.ts): the
  * client's share of build jobs at once, and each App's, held to the quota
- * policy (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
+ * limits (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
  * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
  * of the step that took it. One row per lease a job's step took, in the
  * order of the job's own sequence (`seq`): its step, the round it waited
@@ -2012,7 +1998,6 @@ export const buildLeases = sqliteTable(
     admittedAt: timestamp("admitted_at").notNull(),
     reservedMs: integer("reserved_ms").notNull(),
     settledAt: timestamp("settled_at"),
-    policyGeneration: integer("policy_generation").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.jobId, table.seq] }),
@@ -2087,6 +2072,31 @@ export const buildAdmissionQueue = sqliteTable(
       table.seenAt
     ),
   ]
+);
+
+/**
+ * The steps of workflow runs, App runs and independent ones, held because
+ * the organization's AI provider refused its key, isn't answering, or is
+ * limiting requests
+ * (src/workflows/ai-waits.ts): one row per step from its first failed call
+ * until it runs again, so the run's summary says what it waits for, and
+ * replacing a key wakes it.
+ */
+export const workflowAiWaits = sqliteTable(
+  "workflow_ai_waits",
+  {
+    runId: text("run_id").notNull(),
+    /** An App's run (`workflow_runs`) or an independent one's (`workflow_resource_runs`). */
+    runKind: text("run_kind", { enum: ["app", "resource"] }).notNull(),
+    stepHash: text("step_hash").notNull(),
+    /** The provider its call went to (`AiProviderId`). */
+    provider: text().notNull(),
+    /** What its last call showed (`ProviderTrouble`). */
+    trouble: text().notNull(),
+    /** When its step's call first failed so. */
+    since: timestamp("since").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.stepHash] })]
 );
 
 /**
@@ -2284,23 +2294,6 @@ export const mailDomains = sqliteTable("mail_domains", {
 });
 
 /**
- * Each quota policy generation core has applied (src/workflows/quotas.ts):
- * the limits the deployment's `QUOTA_LIMITS` set under it, as canonical
- * JSON, and their SHA-256. Written the first time core sees a generation,
- * never changed after: a later var that sets other limits under a
- * generation recorded here, or a lower generation than the highest, is
- * refused, and core keeps the highest generation's limits. So two
- * policies never share a generation, and none goes back to an older one,
- * whatever is deployed.
- */
-export const quotaPolicies = sqliteTable("quota_policies", {
-  generation: integer().primaryKey(),
-  limits: text().notNull(),
-  limitsHash: text("limits_hash").notNull(),
-  recordedAt: timestamp("recorded_at").notNull(),
-});
-
-/**
  * Settled runs' outcomes still owed to the Brain (src/brain-capture.ts):
  * one row per eligible run, written with the write that ended it
  * (src/workflows/runs.ts, `projectStatus`), so a run never ends without
@@ -2360,8 +2353,17 @@ export const runBrainEvidence = sqliteTable(
      * in @grasp-os/brain/recall-store): changed by a purge.
      */
     pinned: text().notNull(),
-    /** The `brain` permission of the binding that recalled it. */
+    /**
+     * The permission of the binding it came through: an App's `brain`
+     * permission, or a JSON workflow's knowledge binding's.
+     */
     permissionId: text("permission_id").notNull(),
+    /**
+     * Whether a recall cited it, so the Brain must still admit the run:
+     * a JSON workflow's knowledge search or read pins it without (GRA-299).
+     * Only ever set, never cleared, as the rest only grows.
+     */
+    recalled: integer({ mode: "boolean" }).notNull().default(true),
     recordedAt: timestamp("recorded_at").notNull(),
   },
   (table) => [
@@ -2374,6 +2376,49 @@ export const runBrainEvidence = sqliteTable(
       ],
     }),
   ]
+);
+
+/**
+ * The runs whose evidence a run holds (GRA-1093; workflows/resource-reads.ts):
+ * a child whose output it took (resource-runs.ts, `tellParentOfEnd`), and
+ * every run that child held, since its output may carry what they
+ * recalled. Before each of the run's releases, the host checks each held
+ * run's evidence too, under that run's own authority as it stands now. A
+ * held run's details stay while a run that holds it hasn't passed its own
+ * retention (retention.ts). Identifiers only; goes with the holding run's
+ * details.
+ */
+export const runEvidenceHolds = sqliteTable(
+  "run_evidence_holds",
+  {
+    runId: text("run_id").notNull(),
+    heldRunId: text("held_run_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.heldRunId] }),
+    index("run_evidence_holds_held_run_id_idx").on(table.heldRunId),
+  ]
+);
+
+/**
+ * What the chat whose agent had a run started had read (GRA-1093;
+ * workflow-starts.ts): each of its sources still unwithheld then, with the
+ * chat's scope, copied once as the start is admitted. Before anything
+ * leaves the run, the host checks the chat's agent may still read them all
+ * for its person (history-access.ts, `readableSources`): a run is held to
+ * what its input may carry. Goes with the run's details.
+ */
+export const runChatSources = sqliteTable(
+  "run_chat_sources",
+  {
+    runId: text("run_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sourceId] })]
 );
 
 /**
@@ -3453,74 +3498,6 @@ export const guestMessages = sqliteTable(
 );
 
 /**
- * What an explicit migration's dry run on a sample of real records found
- * (migration-samples.ts): its receipt, kept with the version's migration
- * evidence, which the release's sealed manifest holds for its fixtures.
- * Counts and codes only: no record's values, fields or IDs. `outcome` is
- * `passed`, `failed` or `empty` (no record left for it to transform);
- * `reason` the failure's code. The release it ran (`manifest_hash`) and the
- * schemas it ran between name what the sample vouches for. The latest
- * receipt of a migration decides; earlier ones stay as history.
- */
-export const migrationSamples = sqliteTable(
-  "migration_samples",
-  {
-    id: text().primaryKey(),
-    appId: text("app_id").notNull(),
-    version: integer().notNull(),
-    migration: text().notNull(),
-    storeId: text("store_id").notNull(),
-    outcome: text({ enum: ["passed", "failed", "empty"] }).notNull(),
-    rows: integer().notNull(),
-    owners: integer().notNull(),
-    reason: text(),
-    manifestHash: text("manifest_hash").notNull(),
-    fromSchema: text("from_schema").notNull(),
-    toSchema: text("to_schema").notNull(),
-    sampledBy: text("sampled_by").notNull(),
-    sampledAt: timestamp("sampled_at").notNull(),
-  },
-  (table) => [
-    index("migration_samples_latest_idx").on(
-      table.appId,
-      table.version,
-      table.migration,
-      table.sampledAt
-    ),
-  ]
-);
-
-/**
- * The leases migration dry runs were granted (migration-samples.ts), one
- * row per run: taken before its sample is read, while no other run of
- * the same migration of a version holds one (`until` still ahead; a run
- * that died mid-way holds it until then) and fewer than a few were
- * granted in the last minute, counted here whether or not the run got
- * as far as its receipt. Let go as the run ends, `until` set to then.
- * `id` is the run's own token, so only it lets its lease go. Rows past
- * the minute and let go are pruned as the next lease is taken.
- */
-export const migrationSampleLeases = sqliteTable(
-  "migration_sample_leases",
-  {
-    id: text().primaryKey(),
-    appId: text("app_id").notNull(),
-    version: integer().notNull(),
-    migration: text().notNull(),
-    grantedAt: timestamp("granted_at").notNull(),
-    until: timestamp("until").notNull(),
-  },
-  (table) => [
-    index("migration_sample_leases_migration_idx").on(
-      table.appId,
-      table.version,
-      table.migration,
-      table.grantedAt
-    ),
-  ]
-);
-
-/**
  * The deployment's business stores (src/data-stores.ts): an inventory,
  * never a copy of their records. Each store's records, receipts and
  * outbox live in its own Durable Object (src/data-store.ts), named by
@@ -3855,6 +3832,61 @@ export const triggerSchedules = sqliteTable(
 );
 
 /**
+ * The starts of independent workflows a chat's agent asked for, held
+ * until the person it acts for confirms them in Grasp (src/held-starts.ts):
+ * the workflow and version, the input exactly as it would start (canonical
+ * JSON, with its SHA-256), the agent, its person and its chat, and the
+ * agent's key, scoped to the chat. One per chat and key: the agent asking
+ * again is the same start. Decided once: confirmed (with the start it
+ * made, or why that was refused) or declined; one not started past
+ * `expires_at` lapsed. The input is kept only while the start is open:
+ * emptied once it started (its run keeps it from then on, under run
+ * retention), was refused, declined or lapsed; and the row goes with its
+ * chat, or its person's erasure.
+ */
+export const agentHeldStarts = sqliteTable(
+  "agent_held_starts",
+  {
+    id: text().primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    personId: text("person_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    /** Null once the start is no longer open (held-starts.ts). */
+    input: text(),
+    inputHash: text("input_hash").notNull(),
+    key: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decision: text({ enum: ["confirmed", "declined"] }),
+    decidedAt: timestamp("decided_at"),
+    startId: text("start_id"),
+    /**
+     * Why its confirmed start was refused for good as it was admitted (the
+     * agent's grant or the person's role gone): it never starts. Null
+     * while it may: a confirmed start with neither this nor `start_id`
+     * stopped on the way, and its person may confirm it again.
+     */
+    refusal: text(),
+  },
+  (table) => [
+    uniqueIndex("agent_held_starts_key").on(table.chatId, table.key),
+    // A person's starts that wait.
+    index("agent_held_starts_person")
+      .on(table.personId, table.createdAt)
+      .where(sql`${table.decision} IS NULL`),
+    // Inputs still kept, by when they lapse: what the clock empties.
+    index("agent_held_starts_kept")
+      .on(table.expiresAt)
+      .where(sql`${table.input} IS NOT NULL`),
+  ]
+);
+
+/**
  * Where an event stands for a connector trigger that didn't start its run
  * (src/workflows/connector-triggers.ts), by the trigger and the event's
  * key: held back at its hourly limit since `held_since` (`settled` null),
@@ -4058,6 +4090,13 @@ export const workflowResourceRuns = sqliteTable(
      * own statement: the snapshot's revision is read from it.
      */
     summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * While the engine rolls the run back (its steps' compensations), why:
+     * a JSON object of its cause (`failure` or `cancellation`) and, for a
+     * failure, the code the run failed with. What a screen's snapshot shows
+     * of its compensation (spec 10.7.3); kept once it ended.
+     */
+    compensation: text(),
   },
   (table) => [
     // A run's children that haven't ended, for its end to stop them.
@@ -4073,10 +4112,9 @@ export const workflowResourceRuns = sqliteTable(
     index("workflow_resource_runs_starting_idx")
       .on(table.createdAt)
       .where(sql`${table.status} = 'starting'`),
-    // Runs across workflows, newest first, and those ended in a window
-    // by how they ended: the Workflows page's Runs tab and counts, as an
-    // App's runs are read (workflows/run-view.ts).
-    index("workflow_resource_runs_created_idx").on(table.createdAt, table.id),
+    // Runs across workflows ended in a window, by how they ended: the
+    // Workflows page's counts, as an App's runs are read
+    // (workflows/run-view.ts).
     index("workflow_resource_runs_status_ended_idx").on(
       table.status,
       table.endedAt,
@@ -4096,6 +4134,11 @@ export const workflowResourceRuns = sqliteTable(
       table.createdAt,
       table.id
     ),
+    // Runs across workflows since a moment: how many ran today, of
+    // workflows the reader may see or not (workflows/today.ts); and newest
+    // first, as an App's runs are read, its ID breaking a tie
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_created_idx").on(table.createdAt, table.id),
   ]
 );
 
@@ -4546,6 +4589,44 @@ export const workflowResourceDraftInspections = sqliteTable(
 );
 
 /**
+ * Where each independent workflow is in its life (src/workflow-lifecycle.ts):
+ * one row, once something about it was set, moved on by every write
+ * (`revision`), each write only over the revision it read. `stage` is the
+ * stage a builder set; null follows the workflow (drafted, published,
+ * live). `live_version` is the version that went live last, through an
+ * approval of `go_live_version` by someone other than who asked for it.
+ * While `paused_at` is set it starts no runs (workflow-starts.ts).
+ */
+export const workflowResourceLifecycles = sqliteTable(
+  "workflow_resource_lifecycles",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    stage: text({
+      enum: ["mapped", "designed", "testing", "live", "scaling"],
+    }),
+    liveVersion: integer("live_version"),
+    liveApprovedBy: text("live_approved_by"),
+    liveApprovedAt: timestamp("live_approved_at"),
+    /**
+     * Whether whoever asked for the live version approved it themselves,
+     * allowed only while nobody else could (GRA-1227).
+     */
+    liveSelfApproved: integer("live_self_approved", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    pausedBy: text("paused_by"),
+    pausedAt: timestamp("paused_at"),
+    goLiveVersion: integer("go_live_version"),
+    goLiveRequestedBy: text("go_live_requested_by"),
+    goLiveRequestedAt: timestamp("go_live_requested_at"),
+    updatedAt: timestamp("updated_at").notNull(),
+  }
+);
+
+/**
  * Which exact version of an independent workflow each App binds, by an
  * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
  * version and grants nothing: starting it still takes the App's own
@@ -4642,135 +4723,59 @@ export const workflowCandidateRuns = sqliteTable(
 );
 
 /**
- * The application landscape's syncs (src/landscape.ts), one row per
- * landscape connection: the sync under way, or the last one. A sync reads
- * the connection's grants a page at a time, `cursor` the next page's,
- * each page written with the cursor that follows it, so a sync that
- * stopped goes on from its last page. Every row of a sync is written as
- * seen at `started_at`, so writing a page again writes the same.
+ * Tests of a draft's checkpoint over recent real items (GRA-513,
+ * workflows/item-tests.ts): one row per item, the run whose input it took,
+ * and the test run that ran it, or why none did. A started item's row is
+ * written with its test run's, and none changes; swept with the test runs,
+ * after a week.
  */
-export const landscapeSyncs = sqliteTable("landscape_syncs", {
-  connectionId: text("connection_id").primaryKey(),
-  /** The UTC day it started, `YYYY-MM-DD`: one sync a day. */
-  day: text().notNull(),
-  startedAt: timestamp("started_at").notNull(),
-  cursor: text(),
-  reads: integer().notNull(),
-  state: text({
-    enum: ["running", "done", "partial", "failed"],
-  }).notNull(),
-  /** Why it failed, by code. */
-  reason: text(),
-  /** Throttled, or failed for now: not read again before. */
-  retryAt: timestamp("retry_at"),
-  finishedAt: timestamp("finished_at"),
-  /**
-   * When the last sync that read everything (`done`; never one stopped at
-   * its bound) started: what its rows were last seen at counts as current.
-   * Kept through later syncs until one of them reads everything; null
-   * before any did.
-   */
-  currentSince: timestamp("current_since"),
-});
-
-/**
- * Each app a landscape connection's tenant granted access, as last seen:
- * its name and publisher as the provider says (data, never an identifier:
- * `app_id`, its client ID, is), and when an admin's consent for everyone
- * was last seen, with its scopes.
- */
-export const landscapeApps = sqliteTable(
-  "landscape_apps",
+export const workflowItemTests = sqliteTable(
+  "workflow_item_tests",
   {
-    connectionId: text("connection_id").notNull(),
-    appId: text("app_id").notNull(),
-    name: text().notNull(),
-    /** As the provider verified it; null when unverified. */
-    publisher: text(),
-    /** The name an unverified app gives its publisher: its word only. */
-    unverifiedPublisher: text("unverified_publisher"),
-    verified: integer({ mode: "boolean" }).notNull(),
-    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
-    adminSeenAt: timestamp("admin_seen_at"),
-    firstSeen: timestamp("first_seen").notNull(),
-    lastSeen: timestamp("last_seen").notNull(),
+    id: text().primaryKey(),
+    testId: text("test_id").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    principalId: text("principal_id").notNull(),
+    draftRevision: integer("draft_revision").notNull(),
+    /** Its place in the test: 0 for the newest run's item. */
+    position: integer().notNull(),
+    sourceRunId: text("source_run_id").notNull(),
+    /** Its test run (`workflow_candidate_runs`); null when none started. */
+    candidateRunId: text("candidate_run_id"),
+    /** Why its test run never started, as an error code. */
+    refusalCode: text("refusal_code"),
+    createdAt: timestamp("created_at").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.connectionId, table.appId] }),
-    index("landscape_apps_last_seen_idx").on(table.lastSeen),
+    uniqueIndex("workflow_item_tests_position_idx").on(
+      table.testId,
+      table.position
+    ),
+    // The sweep of tests kept long enough.
+    index("workflow_item_tests_created_idx").on(table.createdAt),
+    // Whose test run of an item is (candidate-runs.ts, `readsItemRun`).
+    index("workflow_item_tests_candidate_idx").on(table.candidateRunId),
   ]
 );
 
 /**
- * Each person who granted an app access for themselves, by their ID at
- * the provider, as last seen: dropped once not seen for the landscape's
- * retention (src/landscape.ts).
+ * The business process each workflow serves (GRA-511,
+ * workflow-resources.ts `setWorkflowProcess`), when a builder said: one
+ * row per workflow, replaced when it changes and deleted when cleared.
+ * Who set which is in the audit log. Grants nothing.
  */
-export const landscapeAppPeople = sqliteTable(
-  "landscape_app_people",
+export const workflowResourceProcesses = sqliteTable(
+  "workflow_resource_processes",
   {
-    connectionId: text("connection_id").notNull(),
-    appId: text("app_id").notNull(),
-    personId: text("person_id").notNull(),
-    name: text(),
-    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
-    firstSeen: timestamp("first_seen").notNull(),
-    lastSeen: timestamp("last_seen").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.connectionId, table.appId, table.personId],
-    }),
-    index("landscape_app_people_last_seen_idx").on(table.lastSeen),
-  ]
-);
-
-/**
- * The apps a landscape sync under way has read so far (src/landscape.ts):
- * kept apart, by the sync's start, and published to `landscape_apps` all
- * at once only when the sync has read everything, so a sync that stops
- * part way changes nothing anyone sees.
- */
-export const landscapeStagedApps = sqliteTable(
-  "landscape_staged_apps",
-  {
-    connectionId: text("connection_id").notNull(),
-    startedAt: timestamp("started_at").notNull(),
-    appId: text("app_id").notNull(),
-    name: text().notNull(),
-    publisher: text(),
-    unverifiedPublisher: text("unverified_publisher"),
-    verified: integer({ mode: "boolean" }).notNull(),
-    adminScopes: text("admin_scopes", { mode: "json" }).$type<string[]>(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.connectionId, table.startedAt, table.appId],
-    }),
-  ]
-);
-
-/** The people a landscape sync under way has read so far, published with its apps. */
-export const landscapeStagedPeople = sqliteTable(
-  "landscape_staged_people",
-  {
-    connectionId: text("connection_id").notNull(),
-    startedAt: timestamp("started_at").notNull(),
-    appId: text("app_id").notNull(),
-    personId: text("person_id").notNull(),
-    name: text(),
-    scopes: text({ mode: "json" }).$type<string[]>().notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [
-        table.connectionId,
-        table.startedAt,
-        table.appId,
-        table.personId,
-      ],
-    }),
-  ]
+    workflowResourceId: text("workflow_resource_id")
+      .primaryKey()
+      .references(() => workflowResources.id),
+    process: text().notNull(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  }
 );
 
 /**
@@ -4800,6 +4805,7 @@ export const brainRecords = sqliteTable(
         "goal",
         "goalVersion",
         "goalLink",
+        "vision",
       ],
     }).notNull(),
     id: text().notNull(),
@@ -4812,10 +4818,56 @@ export const brainRecords = sqliteTable(
      * words put back.
      */
     purgedAt: timestamp("purged_at"),
+    /**
+     * When the record stopped counting (brain-records.ts
+     * `retireOnboardingRecords`): what a replaced kickoff transcript gave
+     * the brain. Kept, never deleted, and left out of `brain.read`.
+     */
+    retiredAt: timestamp("retired_at"),
+    /**
+     * When an admin took the record out of the brain (brain-forget.ts):
+     * its body is then a tombstone holding no words, only what a removed
+     * source still shows (its kind and day). Kept, never deleted, so its
+     * id stays taken and the same record sent again is left as removed.
+     */
+    forgottenAt: timestamp("forgotten_at"),
   },
   // One id is one record, whatever its type.
   (table) => [uniqueIndex("brain_records_id_idx").on(table.id)]
 );
+
+/**
+ * The company's groups of teams (brain-team-groups.ts): the brain's
+ * regions. One row per group, in the company's order. A group Grasp
+ * proposed has no `confirmedAt` until an admin confirms it, or changes it.
+ */
+export const brainTeamGroups = sqliteTable("brain_team_groups", {
+  id: text().primaryKey(),
+  /** The company's own name for it. */
+  name: text().notNull(),
+  /** The brain's team ids in it, as JSON: each team in one group at most. */
+  teamIds: text("team_ids").notNull(),
+  /** Its place in the company's order. */
+  position: integer().notNull(),
+  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  confirmedAt: timestamp("confirmed_at"),
+  savedAt: timestamp("saved_at").notNull(),
+});
+
+/**
+ * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
+ * the groups whole, as they were before and as confirmed, so an earlier
+ * set can be put back. Never changed or deleted; the audit event of the
+ * save names its id, and who saved it.
+ */
+export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
+  id: text().primaryKey(),
+  savedAt: timestamp("saved_at").notNull(),
+  /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
+  before: text().notNull(),
+  /** The groups as confirmed, as JSON, the same way. */
+  after: text().notNull(),
+});
 
 /**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
@@ -5031,53 +5083,126 @@ export const knowledgeSignalDismissals = sqliteTable(
 );
 
 /**
- * The company's policy documents (policies.ts): its own text, as uploaded,
- * so its rules can be drawn from it.
+ * One request Stephen took on outside Grasp (channels/stephen-requests.ts):
+ * labels and a day, never the words of the message or of his answer, and
+ * never the time of day. Kept by the place's own id for the message, so a
+ * resend counts once. Only `done` is billed. Kept 13 months, and gone with
+ * the person when they are erased (person-erasure.ts).
  */
-export const policyDocuments = sqliteTable("policy_documents", {
-  id: text().primaryKey(),
-  title: text().notNull(),
-  fileName: text("file_name").notNull(),
-  text: text().notNull(),
-  status: text({
-    enum: ["reading", "review", "published", "failed"],
-  }).notNull(),
-  uploadedBy: text("uploaded_by").notNull(),
-  uploadedAt: timestamp("uploaded_at").notNull(),
-  publishedAt: timestamp("published_at"),
-});
-
-/** The rules the company set for the apps its people use (policies.ts). */
-export const policyRules = sqliteTable(
-  "policy_rules",
+export const stephenRequests = sqliteTable(
+  "stephen_requests",
   {
+    /** `<platform>:<the platform's id for the message>`. */
     id: text().primaryKey(),
-    name: text().notNull(),
-    description: text().notNull(),
-    conditions: text({ mode: "json" }).$type<RuleCondition[]>().notNull(),
-    effect: text({ enum: ["flag", "block"] }).notNull(),
-    status: text({ enum: ["watching", "active", "paused"] }).notNull(),
-    /** The policy it comes from; null for a rule made by hand, or once its policy is removed. */
-    policyId: text("policy_id"),
-    excerpt: text(),
-    createdBy: text("created_by").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
+    /** `YYYY-MM-DD`, in the organization's time zone. */
+    day: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    teamId: text("team_id"),
+    /**
+     * The person's chat it was answered in, only to find the request a
+     * later press on one of its cards belongs to; never shown.
+     */
+    chatId: text("chat_id"),
+    kind: text({
+      enum: ["answered", "lookedUp", "changed", "workflow"],
+    }).notNull(),
+    outcome: text({
+      enum: ["done", "unanswered", "notPossible", "stopped", "failed"],
+    }).notNull(),
+    topicId: text("topic_id"),
+    questionId: text("question_id"),
+    /** `[{ id, ok }]`: the tools he called, in order. */
+    tools: text().notNull(),
+    /** `[{ id, why }]`: the tools it would have taken that are off or missing. */
+    missing: text().notNull(),
+    rating: text({ enum: ["up", "down"] }),
   },
-  (table) => [index("policy_rules_policy_idx").on(table.policyId)]
+  (table) => [
+    index("stephen_requests_day_idx").on(table.day),
+    index("stephen_requests_person_idx").on(table.personId, table.chatId),
+    index("stephen_requests_question_idx").on(table.questionId),
+  ]
 );
 
-/** An app allowed to break one rule until a day (policies.ts): one per rule and app. */
-export const policyExceptions = sqliteTable(
-  "policy_exceptions",
+/**
+ * The cards a request's answer posted that can be pressed later (a held
+ * change, a workflow's Start), each by `write:<id>` or `offer:<id>`, with
+ * the request it belongs to: a press on it updates that request, never
+ * another the person made in the same chat since. Swept with its request.
+ */
+export const stephenRequestCards = sqliteTable("stephen_request_cards", {
+  key: text().primaryKey(),
+  requestId: text("request_id").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/** The company's topics Stephen's requests are sorted into (channels/request-sorting.ts). */
+export const stephenRequestTopics = sqliteTable("stephen_request_topics", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * A question people ask Stephen, in Grasp's own wording, without names or
+ * details, with the role best placed to answer it. A page names it only
+ * once five or more people asked it.
+ */
+export const stephenRequestQuestions = sqliteTable(
+  "stephen_request_questions",
   {
-    ruleId: text("rule_id").notNull(),
-    appId: text("app_id").notNull(),
-    reason: text().notNull(),
-    /** Its last day, `YYYY-MM-DD`. */
-    until: text().notNull(),
-    grantedBy: text("granted_by").notNull(),
-    grantedAt: timestamp("granted_at").notNull(),
+    id: text().primaryKey(),
+    topicId: text("topic_id").notNull(),
+    wording: text().notNull(),
+    role: text(),
+    createdAt: timestamp("created_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.ruleId, table.appId] })]
+  (table) => [index("stephen_request_questions_topic_idx").on(table.topicId)]
+);
+
+/** What an owner or admin is doing about one thing Needs you lists (stephen-requests.ts). */
+export const stephenRequestNeeds = sqliteTable("stephen_request_needs", {
+  key: text().primaryKey(),
+  status: text({ enum: ["working", "fixed", "leftAsIs"] }).notNull(),
+  statusBy: text("status_by").notNull(),
+  statusAt: timestamp("status_at").notNull(),
+});
+
+/** Grasp's proposal for one thing Needs you lists, in one language, made once. */
+export const stephenRequestProposals = sqliteTable(
+  "stephen_request_proposals",
+  {
+    key: text().notNull(),
+    locale: text().notNull(),
+    text: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.key, table.locale] })]
+);
+
+/** Where an owner or admin has the weekly summary of Stephen's requests go. */
+export const stephenSummaryReaders = sqliteTable("stephen_summary_readers", {
+  personId: text("person_id").primaryKey(),
+  via: text({ enum: ["teams", "email"] }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/** One weekly summary, queued for one reader and sent from there once (stephen-summary.ts). */
+export const stephenSummaries = sqliteTable(
+  "stephen_summaries",
+  {
+    /** The Monday of the week it sums up. */
+    week: text().notNull(),
+    personId: text("person_id").notNull(),
+    via: text({ enum: ["teams", "email"] }).notNull(),
+    state: text({ enum: ["queued", "sent", "failed"] }).notNull(),
+    attempts: integer().notNull().default(0),
+    reason: text(),
+    queuedAt: timestamp("queued_at").notNull(),
+    /** While a run sends it: no other run takes it until then. */
+    claimedUntil: timestamp("claimed_until"),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [primaryKey({ columns: [table.week, table.personId] })]
 );

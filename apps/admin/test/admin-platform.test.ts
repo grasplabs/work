@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { ne } from "drizzle-orm";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { platformData, staffEvents } from "../src/admin/platform-data.ts";
-import { eventWords } from "../src/admin/platform-parts.tsx";
+import { eventWords, needWords } from "../src/admin/platform-parts.tsx";
 import {
   companiesOf,
   goingOut,
@@ -12,11 +12,14 @@ import {
   ringsOf,
   spreadOf,
 } from "../src/admin/platform.ts";
+import { clientGrid } from "../src/clients/grid.ts";
 import type { GridRow, LiveStatus } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
+  clientProvisions,
   clients,
+  hostingDestinations,
   rollouts,
   rolloutTargets,
 } from "../src/db/schema.ts";
@@ -72,11 +75,11 @@ const row = (id: string, input: Partial<GridRow> = {}): GridRow => ({
   name: id,
   status: "active",
   ring: 1,
-  accountId: `account-${id}`,
   hostname: null,
   release: "r3",
   pinnedReleaseId: null,
   lastDeploy: null,
+  setup: null,
   ...input,
 });
 
@@ -84,8 +87,6 @@ const live = (input: Partial<LiveStatus> = {}): LiveStatus => ({
   drift: "in_sync",
   sharedSecretsCurrent: true,
   reach: "reachable",
-  day: { requests: 1000, errors: 1 },
-  costUsd: null,
   onboarding: null,
   ...input,
 });
@@ -209,7 +210,7 @@ describe("the Platform page's model", () => {
     ]);
   });
 
-  it("lists the companies that need a look first: a failed deploy, drift, errors, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
+  it("lists the companies that need a look first: a failed deploy, drift, or two releases behind unpinned, older than every listed one included; one not read never as healthy", () => {
     const releases = [release("r1", 1), release("r2", 2), release("r3", 3)];
     const companies = companiesOf(
       [
@@ -218,11 +219,21 @@ describe("the Platform page's model", () => {
           lastDeploy: { releaseId: "r3", status: "failed", at: day(3) },
         }),
         row("split"),
-        row("noisy"),
         row("behind", { release: "r1" }),
         row("older", { release: "r0" }),
         row("pinned", { release: "r1", pinnedReleaseId: "r1" }),
         row("new", { status: "provisioning", release: null }),
+        row("waiting", {
+          status: "provisioning",
+          release: null,
+          setup: { state: "not_started", why: "no_release" },
+        }),
+        row("stalled", {
+          status: "provisioning",
+          release: null,
+          lastDeploy: { releaseId: "r3", status: "running", at: day(3) },
+          setup: { state: "stopped" },
+        }),
         row("unread"),
         row("timedout"),
         row("gone", { status: "offboarded", release: "r1" }),
@@ -231,11 +242,10 @@ describe("the Platform page's model", () => {
         zeta: live(),
         failed: live(),
         split: live({ drift: "split" }),
-        noisy: live({ day: { requests: 100, errors: 1 } }),
         behind: live(),
         older: live(),
         pinned: live(),
-        timedout: live({ drift: "unknown", day: null, reach: "unknown" }),
+        timedout: live({ drift: "unknown", reach: "unknown" }),
       },
       releases
     );
@@ -249,9 +259,10 @@ describe("the Platform page's model", () => {
     ).toStrictEqual([
       { id: "behind", standing: "attention", needs: ["behind"] },
       { id: "failed", standing: "attention", needs: ["failed"] },
-      { id: "noisy", standing: "attention", needs: ["errors"] },
       { id: "older", standing: "attention", needs: ["behind"] },
       { id: "split", standing: "attention", needs: ["drift"] },
+      { id: "stalled", standing: "attention", needs: ["stopped"] },
+      { id: "waiting", standing: "attention", needs: ["not_started"] },
       { id: "new", standing: "setup", needs: [] },
       { id: "timedout", standing: "unread", needs: [] },
       { id: "unread", standing: "unread", needs: [] },
@@ -259,6 +270,90 @@ describe("the Platform page's model", () => {
       { id: "zeta", standing: "healthy", needs: [] },
       { id: "gone", standing: "offboarded", needs: [] },
     ]);
+  });
+});
+
+describe("a company being set up, on the grid", () => {
+  it("says it hasn't started and why, or that it stopped, each with the next step", async () => {
+    const id = `setup-${crypto.randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    await db.update(hostingDestinations).set({ accountId: null });
+    await db
+      .insert(clients)
+      .values({ id, name: id, createdAt: now, updatedAt: now });
+
+    const grid = await clientGrid(env);
+    const setup = grid.find((each) => each.id === id)?.setup;
+    const words = [
+      needWords({ kind: "not_started", why: "no_destination" }),
+      needWords({ kind: "not_started", why: "no_release" }),
+      needWords({ kind: "not_started", why: null }),
+      needWords({ kind: "stopped" }),
+      needWords({ kind: "needs_attention", reason: "stuck" }),
+      needWords({ kind: "needs_attention", reason: "needs_person" }),
+    ];
+
+    expect({ setup, words }).toStrictEqual({
+      setup: { state: "not_started", why: "no_destination" },
+      words: [
+        "Not started: no hosting destination ready.",
+        "Not started: no release imported yet.",
+        "Not started: provision it from its Setup.",
+        "Stopped: Grasp is retrying it by itself.",
+        "Needs attention: Grasp's automatic retries haven't finished setting it up. Retry now from its Setup once it's fixed.",
+        "Needs attention: setting it up stopped for something Grasp can't fix by itself. Retry now from its Setup once it's fixed.",
+      ],
+    });
+  });
+});
+
+describe("a company whose setting up can't be read now, on the grid", () => {
+  it("shows its status as unavailable, and every other company as it is", async () => {
+    const now = new Date();
+    const published = await publishRelease({ notes: "feat(core): grid" });
+    const releaseId = published.id;
+    await importReleases(env.RELEASES, db);
+    const unreadable = `unread-${crypto.randomUUID().slice(0, 8)}`;
+    const fine = `fine-${crypto.randomUUID().slice(0, 8)}`;
+    for (const id of [unreadable, fine]) {
+      // oxlint-disable-next-line no-await-in-loop -- two companies
+      await db
+        .insert(clients)
+        .values({ id, name: id, createdAt: now, updatedAt: now });
+      // oxlint-disable-next-line no-await-in-loop -- two companies
+      await db.insert(clientProvisions).values({
+        id: crypto.randomUUID(),
+        clientId: id,
+        releaseId,
+        status: "running",
+        startedBy: "staff@grasp.test",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    // A runner the admin has no workflow for: reading its run throws, as
+    // an engine that answers with an error does. The other has none: gone.
+    await env.DB.prepare(
+      "INSERT INTO client_runs (client_id, run_id, claimed_at, kind) VALUES (?, ?, ?, ?)"
+    )
+      .bind(unreadable, `${unreadable}-p1`, now.getTime(), "unknown_kind")
+      .run();
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const grid = await clientGrid(env);
+    warned.mockRestore();
+    const setupOf = (id: string) => grid.find((each) => each.id === id)?.setup;
+
+    expect({
+      unreadable: setupOf(unreadable),
+      fine: setupOf(fine),
+      words: needWords({ kind: "setup_unread" }),
+    }).toStrictEqual({
+      unreadable: { state: "unread" },
+      fine: { state: "stopped" },
+      words:
+        "Being set up: status unavailable just now. Its Setup reads it again.",
+    });
   });
 });
 
@@ -281,7 +376,6 @@ describe("the Platform page's data", () => {
       clientIds.map((id, ring) => ({
         id,
         name: id,
-        accountId: `account-${id}`,
         ring,
         status: "active" as const,
         createdAt: now,

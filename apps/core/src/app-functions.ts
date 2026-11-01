@@ -25,6 +25,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
+import { callTimeoutMs } from "./app-call-timeout.ts";
 import {
   answerPreferences,
   isPreferencePath,
@@ -33,10 +34,8 @@ import {
 import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { callTimeoutMs } from "./app.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
@@ -46,7 +45,7 @@ import type {
   ResourceBindings,
   UseRefusal,
 } from "./operations.ts";
-import { requireApprovedVersion } from "./permissions.ts";
+import { personRole, requireApprovedVersion } from "./permissions.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
@@ -129,6 +128,12 @@ interface FunctionCaller {
   readonly runOrigin?: RunOrigin | undefined;
   /** Aborted once the call is cancelled (`BindingCaller.cancelled`). */
   readonly cancelled?: AbortSignal | undefined;
+  /**
+   * That the calling work is a Grasp staff member's (its authority's
+   * server-set mark, GRA-1088): the called App's authority carries it
+   * too, so its events say "(Grasp staff)". Core sets it, never a call.
+   */
+  readonly byStaff?: boolean;
 }
 
 /**
@@ -153,17 +158,27 @@ interface UseRefusalContext {
   readonly principal: string;
   readonly requestId: string;
   readonly runId: string | null;
+  /**
+   * The Grasp staff member whose work the call is, when staff started it
+   * (GRA-1088): core's own mark, never the App's word.
+   */
+  readonly staff?: string;
 }
 
 /** Writes `refusal` as `app.use.refused` for `context`; never throws. */
 const writeUseRefusal = async (
   env: Env,
-  { app, version, principal, requestId, runId }: UseRefusalContext,
+  { app, version, principal, requestId, runId, staff }: UseRefusalContext,
   refusal: UseRefusal
 ): Promise<void> => {
   try {
     await keepAuditEvent(env, drizzle(env.DB), {
-      actor: { type: "app", appId: app, part: "server" },
+      actor: {
+        type: "app",
+        appId: app,
+        part: "server",
+        ...(staff === undefined ? {} : { staff }),
+      },
       action: "app.use.refused",
       target: { type: "app", id: app },
       requestId,
@@ -227,6 +242,7 @@ export const invocationFor = async (
     requireHolds,
     runOrigin,
     cancelled,
+    byStaff = false,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -237,15 +253,26 @@ export const invocationFor = async (
     onBehalfOf: by.userId,
     mode: "interactive",
     appVersion: release.manifest.resourceVersion,
+    ...(byStaff ? { staff: true as const } : {}),
   };
   // Before every protected step: the call starts, each mutation commits
   // and each resource request (the operation host's one gate, `admit`).
   // A release revoked, a role lost or an agent's permission withdrawn
-  // meanwhile stops a call already running.
+  // meanwhile stops a call already running. Work Grasp staff started reads
+  // their staff role again each time, as a run does (`runInvocationFor`):
+  // the role the call began with isn't theirs once their staff session
+  // ends, however the call was reached.
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    return await operationRoles(env, by, app);
+    if (!byStaff) {
+      return await operationRoles(env, by, app);
+    }
+    const role = await personRole(env, by.userId, true);
+    if (role === undefined) {
+      throw permissionErrors.create("permission.person_inactive");
+    }
+    return await operationRoles(env, { userId: by.userId, role }, app);
   };
   const bindings = resourceBindingsFor(env, {
     app,
@@ -287,6 +314,7 @@ export const invocationFor = async (
       principal: by.userId,
       requestId,
       runId: null,
+      ...(byStaff ? { staff: by.userId } : {}),
     }),
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there. The
@@ -457,7 +485,7 @@ export const runInvocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
     await requireApprovedVersion(env, app, version, auditRefusal);
-    const role = await memberRole(env.DB, authority.onBehalfOf);
+    const role = await personRole(env, authority.onBehalfOf, authority.staff);
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
     }
@@ -507,6 +535,7 @@ export const runInvocationFor = async (
       principal: authority.onBehalfOf,
       requestId,
       runId,
+      ...(authority.staff === true ? { staff: authority.onBehalfOf } : {}),
     }),
     // No `workflows`: a run's call starts no workflow (operations.ts,
     // `Invocation.workflows`), so its step can't open a lineage of its own.
@@ -646,7 +675,7 @@ export const publicOperationOf = (
  *   call without a lease, an agent's, another App's or a workflow's names
  *   the version that runs.
  */
-export const pinnedReference = async (
+const pinnedReference = async (
   env: Env,
   release: Release,
   reference: FunctionRequest["reference"],
@@ -707,20 +736,6 @@ export const refusalOf = (
 /** How a call of an App's function is made, beyond who and what. */
 interface FunctionCallOptions {
   readonly deadline: number;
-  /**
-   * Told the fence of the receipt the call's mutation claimed, before its
-   * handler runs (`Invocation.observeClaim`).
-   */
-  readonly observeClaim?: (fence: number) => void;
-  /**
-   * Told of the call once it is resolved to `path`, a public function of
-   * `release`, before it runs (a screen's, to note its keyed submission).
-   */
-  readonly onAdmitted?: (
-    release: Release,
-    call: FunctionRequest,
-    path: string
-  ) => Promise<void>;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -763,6 +778,12 @@ interface FunctionCallOptions {
    * starts with its own.
    */
   readonly sources?: InvocationSources;
+  /**
+   * That the calling work is a Grasp staff member's (its authority's
+   * server-set mark, GRA-1088): the called App's authority carries it
+   * too, so its events say "(Grasp staff)". Core sets it, never a call.
+   */
+  readonly byStaff?: boolean;
 }
 
 /**
@@ -991,13 +1012,12 @@ const answeredPreferences = async (
 /** `callAppFunction`, with all of its options. */
 /**
  * `invocation`, telling `observeReads` what a query read of `release`'s
- * store and `observeClaim` the fence its mutation claimed, where given.
+ * store, where given.
  */
 const observedInvocation = (
   invocation: Invocation,
   release: Release,
-  observeReads: FunctionCallOptions["observeReads"],
-  observeClaim: FunctionCallOptions["observeClaim"]
+  observeReads: FunctionCallOptions["observeReads"]
 ): Invocation => {
   const { store } = release;
   return {
@@ -1009,31 +1029,21 @@ const observedInvocation = (
             observeReads(storeIdSchema.parse(store.storeId), readSet);
           },
         }),
-    ...(observeClaim === undefined ? {} : { observeClaim }),
   };
 };
 
 /**
- * Tells `onAdmitted` of `call` once it resolved to `path`, one of the
- * release's public functions, before it runs: a screen's keyed submission
- * is noted for recovery (screen-submissions.ts). A paginated window's read
- * is no submission.
+ * Whom a call acts for, with the server-set staff mark of their session
+ * when core read one (`Identity.staff`, `actingPerson`'s `staff`): work a
+ * Grasp staff member does keeps it in every App it reaches (GRA-1088).
  */
-const toldAdmitted = async (
-  onAdmitted: FunctionCallOptions["onAdmitted"],
-  release: Release,
-  call: FunctionRequest,
-  path: string
-): Promise<void> => {
-  if (call.window === undefined) {
-    await onAdmitted?.(release, call, path);
-  }
+export type StaffMarked = Pick<Identity, "userId" | "role" | "teams"> & {
+  readonly staff?: boolean;
 };
 
 const callFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams"> &
-    Partial<Pick<Identity, "staff">>,
+  by: StaffMarked,
   app: unknown,
   request: unknown,
   options: FunctionCallOptions
@@ -1044,7 +1054,6 @@ const callFunction = async (
     parentSession,
     kind,
     observeReads,
-    observeClaim,
     chargeWindow,
     pinnedVersion,
     agent,
@@ -1054,8 +1063,8 @@ const callFunction = async (
     requireHolds,
     runOrigin,
     cancelled,
-    onAdmitted,
     sources = invocationSources(),
+    byStaff,
   } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -1129,12 +1138,15 @@ const callFunction = async (
       deadline,
     });
   }
-  await toldAdmitted(onAdmitted, release, call, path);
   try {
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
       deadline,
+      // The calling work's staff mark (GRA-1088): the one a call between
+      // Apps hands on, else the caller's own, as core read their session
+      // (a staff chat turn's person, a staff session's screen).
+      ...((byStaff ?? by.staff) === true ? { byStaff: true } : {}),
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
       sources,
@@ -1149,12 +1161,7 @@ const callFunction = async (
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),
     });
-    const observed = observedInvocation(
-      invocation,
-      release,
-      observeReads,
-      observeClaim
-    );
+    const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
     const result =
@@ -1205,8 +1212,7 @@ const callFunction = async (
  */
 export const callAppFunction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams"> &
-    Partial<Pick<Identity, "staff">>,
+  by: StaffMarked,
   app: unknown,
   request: unknown,
   deadline = Date.now() + platformLimits.serverInvocationWallMs,
@@ -1322,10 +1328,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<
-    FunctionCallOptions,
-    "onAdmitted" | "observeClaim" | "pinnedVersion"
-  > = {}
+  options: Pick<FunctionCallOptions, "pinnedVersion"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)
@@ -1459,8 +1462,7 @@ export const evaluateAppQuery = async (
  */
 export const invokeAppAction = async (
   env: Env,
-  by: Pick<Identity, "userId" | "role" | "teams"> &
-    Partial<Pick<Identity, "staff">>,
+  by: StaffMarked,
   app: string,
   call: FunctionRequest,
   {
@@ -1500,6 +1502,8 @@ export const invokeAppAction = async (
       requestId,
       deadline,
       cancelled,
+      // A staff session's run keeps their mark (GRA-1088).
+      ...(by.staff === true ? { byStaff: true } : {}),
       // Another App's function, as a screen's call of it runs.
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),

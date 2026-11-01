@@ -1,12 +1,8 @@
 import { briefOf } from "./admin-brief.ts";
 import { ADMIN_PHASES, brainOf, healthOf, phaseOf } from "./admin-health.ts";
 import type { AdminPhase, HealthSignal } from "./admin-health.ts";
-import { askedBy, sortBuilds, waitsOn } from "./admin-integrations.ts";
-import type {
-  BuildStage,
-  IntegrationBuild,
-  Waiter,
-} from "./admin-integrations.ts";
+import { askedBy, sortAsked } from "./admin-integrations.ts";
+import type { AskedApp } from "./admin-integrations.ts";
 import {
   driftOf,
   errorRateOf,
@@ -26,8 +22,8 @@ import { LISTEN_DAYS } from "./onboarding.ts";
 
 /**
  * Grasp's admin as tools: what every chat about Grasp's companies can ask, whether it is the
- * admin's own chat, Claude or ChatGPT through the admin's MCP server, or a bot in Discord. One
- * list, answered from the same views the admin's pages show, so a chat and a page never disagree.
+ * admin's own chat, or Claude or ChatGPT through the admin's MCP server. One list, answered
+ * from the same views the admin's pages show, so a chat and a page never disagree.
  * Only reading: whatever changes something at a company stays a button a person presses in the
  * admin. The words are English and plain: they are read by a model, which says them on in the
  * language it is spoken to in. Pure.
@@ -154,10 +150,10 @@ export const ADMIN_TOOLS = [
     annotations: READS,
   },
   {
-    name: "integrations_to_build",
-    title: "Integrations to build",
+    name: "apps_asked",
+    title: "Apps asked for",
     description:
-      "The apps the companies’ workflows need that Composio does not have, which Grasp builds into the platform itself, once for every company that asked: each with where its build stands, who it waits on, and which companies and workflows asked for it.",
+      "The apps the companies asked Grasp to add that Composio does not have, once each: which companies asked for each, and when.",
     inputSchema: NOTHING,
     annotations: READS,
   },
@@ -173,7 +169,7 @@ export const ADMIN_TOOLS = [
     name: "sources",
     title: "Sources",
     description:
-      "The systems the admin reads (Grasp’s console, Rooms, Attio, Stripe, Composio, Discord): which are connected and which are still to come.",
+      "The systems the admin reads (Grasp’s console, Attio, Stripe, Composio): which are connected and which are still to come.",
     inputSchema: NOTHING,
     annotations: READS,
   },
@@ -230,28 +226,6 @@ const SOURCE: Record<KnowledgeSource, string> = {
   review: "workflows known",
 };
 
-const BUILD_STAGE: Record<BuildStage, string> = {
-  requested: "asked for, not started",
-  researching: "Grasp’s agent is researching the app and writing a plan",
-  plan: "the plan is ready for a person at Grasp to approve",
-  credentials: "waiting for a person at Grasp to add the credentials",
-  writing: "Grasp’s agent is writing it",
-  testing: "Grasp’s agent is testing it",
-  selfReview: "a second agent is reviewing the work",
-  review: "the pull request is in review",
-  merged: "merged, going into the next release",
-  rollout: "in a release, rolling out ring by ring",
-  live: "live for every company that asked",
-  declined: "Grasp does not build it",
-};
-
-const WAITER: Record<Waiter, string> = {
-  agent: "runs by itself",
-  grasp: "waits on a person at Grasp",
-  company: "waits on the companies to connect it",
-  nobody: "waits on nobody",
-};
-
 const AGREEMENT: Record<Extract<Need, { kind: "agreement" }>["what"], string> =
   {
     processing: "The data processing agreement is not signed.",
@@ -294,7 +268,7 @@ export interface Names {
   works: Map<string, { organization: string; id: string; name: string }>;
   /** A company's integrations (apps it connected), by organization id and integration id. */
   integrations: Map<string, { organization: string; id: string; name: string }>;
-  /** Integrations to build, by build id. */
+  /** Apps asked for, by their id. */
   apps: Map<string, string>;
 }
 
@@ -705,43 +679,18 @@ const nameOf = (
   return view === undefined ? id : orgRef(names, view);
 };
 
-/** One integration to build, in a line: where it stands, who it waits on, and who asked for it. */
-export const buildLine = (
-  build: IntegrationBuild,
+/** One app asked for, in a line: who asked for it, and when. */
+export const askedLine = (
+  app: AskedApp,
   views: readonly AdminView[],
   names: Names = newNames()
 ): string => {
-  names.apps.set(build.id, build.app);
-  // Workflows by how many, never their names: a company wrote those.
-  const asked = askedBy(build).map(
-    (org) =>
-      `${nameOf(views, org, names)} (${many(
-        build.requests
-          .filter((request) => request.org === org)
-          .flatMap((request) => request.workflows).length,
-        "workflow",
-        "workflows"
-      )})`
-  );
-  const pullRequest = build.work?.pr;
-  const pr =
-    pullRequest && (build.stage === "review" || build.stage === "merged")
-      ? ` Pull request #${pullRequest.number}.`
-      : "";
-  const liveAt =
-    (build.work?.rollout ?? [])
-      .filter((each) => given(each.live))
-      .map((each) => nameOf(views, each.org, names))
-      .join(", ") || "none yet";
-  const release =
-    build.stage === "rollout" && given(build.work?.release)
-      ? ` Release ${build.work.release}, live at ${liveAt}.`
-      : "";
-  const declined =
-    build.stage === "declined" && given(build.declined)
-      ? ` Why: ${build.declined}`
-      : "";
-  return `- app ${build.id}: ${BUILD_STAGE[build.stage]}; ${WAITER[waitsOn(build.stage)]}. Asked by ${asked.join("; ")}.${pr}${release}${declined}`;
+  names.apps.set(app.id, app.app);
+  const asked = askedBy(app).map((org) => {
+    const on = app.requests.find((request) => request.org === org)?.on ?? "";
+    return `${nameOf(views, org, names)} on ${on}`;
+  });
+  return `- app ${app.id}: asked for by ${asked.join("; ")}.`;
 };
 
 /** What the admin holds about every company's own platform, and the release going out: none until the admin reads it. */
@@ -802,21 +751,21 @@ const fleetLines = (
 
 /**
  * Everything the admin's chat reads before it answers: the digest, then
- * every organization, then the integrations Grasp builds and every
+ * every organization, then the apps the companies asked for and every
  * company's platform, by ids; then the names they stand for, as data.
  */
 export const adminDocument = (
   views: readonly AdminView[],
   today: string,
-  builds: readonly IntegrationBuild[] = [],
+  apps: readonly AskedApp[] = [],
   fleet: Fleet = NO_FLEET
 ): string => {
   const names = newNames();
-  const integrations =
-    builds.length > 0
+  const asked =
+    apps.length > 0
       ? [
-          "Integrations to build, for every company:",
-          ...sortBuilds(builds).map((build) => buildLine(build, views, names)),
+          "Apps the companies asked Grasp to add:",
+          ...sortAsked(apps).map((app) => askedLine(app, views, names)),
           "",
         ]
       : [];
@@ -834,7 +783,7 @@ export const adminDocument = (
     ...views
       .map((view) => summaryOf(view, names))
       .flatMap((summary) => [summary, ""]),
-    ...integrations,
+    ...asked,
     ...platforms,
   ];
   return [
@@ -927,12 +876,12 @@ const sourceLine = (source: AdminSource): string => {
   return `- ${source.id}: ${state}; ${way} ${source.reads.join(", ")}${tools}`;
 };
 
-/** What every tool answers from: the organizations as the admin has them on their day, the integrations to build and every company's platform. */
+/** What every tool answers from: the organizations as the admin has them on their day, the apps asked for and every company's platform. */
 interface Asked {
   input: Record<string, unknown>;
   views: readonly AdminView[];
   today: string;
-  builds: readonly IntegrationBuild[];
+  apps: readonly AskedApp[];
   fleet: Fleet;
   /** What the answer's text names by id, kept for its structured content. */
   names: Names;
@@ -1012,21 +961,18 @@ const ANSWERS: Record<AdminToolName, (asked: Asked) => AdminToolAnswer> = {
   daily_digest: ({ views, today, names }) => ({
     text: digestOf(views, today, names),
   }),
-  integrations_to_build: ({ views, builds, names }) => {
-    const sorted = sortBuilds(builds);
+  apps_asked: ({ views, apps, names }) => {
+    const sorted = sortAsked(apps);
     return {
       text:
         sorted.length > 0
-          ? sorted.map((build) => buildLine(build, views, names)).join("\n")
-          : "No integration is asked for that Composio does not have.",
+          ? sorted.map((app) => askedLine(app, views, names)).join("\n")
+          : "No company asked for an app Composio does not have.",
       structured: {
-        integrations: sorted.map((build) => ({
-          id: build.id,
-          stage: build.stage,
-          waitsOn: waitsOn(build.stage),
-          askedBy: build.requests.map((request) => ({
+        apps: sorted.map((app) => ({
+          id: app.id,
+          askedBy: app.requests.map((request) => ({
             organization: request.org,
-            workflows: request.workflows.length,
             on: request.on,
           })),
         })),
@@ -1087,14 +1033,14 @@ export const callAdminTool = (
   input: Record<string, unknown>,
   views: readonly AdminView[],
   today: string,
-  builds: readonly IntegrationBuild[] = [],
+  apps: readonly AskedApp[] = [],
   fleet: Fleet = NO_FLEET
 ): AdminToolAnswer => {
   if (!isToolName(name)) {
     return fail(`There is no tool ${name}.`);
   }
   const names = newNames();
-  const answer = ANSWERS[name]({ input, views, today, builds, fleet, names });
+  const answer = ANSWERS[name]({ input, views, today, apps, fleet, names });
   return anyName(names)
     ? {
         ...answer,
