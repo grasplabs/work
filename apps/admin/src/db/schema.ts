@@ -582,6 +582,19 @@ export const clientProvisions = sqliteTable("client_provisions", {
 });
 
 /**
+ * Unused: Ask Grasp calls Grasp's own AI directly, so nothing reads or
+ * writes this table any more. It stays for one release because "Deploy
+ * platform" applies migrations before the new admin is live, and the admin
+ * still running needs it (expand, then contract). A later release drops it.
+ */
+export const platformSettings = sqliteTable("platform_settings", {
+  id: integer().primaryKey(),
+  graspClientId: text("grasp_client_id"),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+/**
  * What the admin's watch last read of how each client's Stephen fares
  * (src/clients/watch.ts): the signals it reads from the client's admin
  * snapshot, as JSON, and when. Counts only. One row a client, replaced
