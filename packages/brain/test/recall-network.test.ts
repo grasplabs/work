@@ -749,4 +749,47 @@ describe("a recall's network route", () => {
       passages.uses.evidence
     );
   });
+
+  it("keeps two claims of one source that differ only in their dates, each with its passage and dates", async () => {
+    /** Ben led `thing` from `from` to `to`, as the history says. */
+    const led = (thing: string, from: string, to: string) => ({
+      ...stated(thing, "led_by", "Ben"),
+      validFrom: from,
+      validTo: to,
+      evidence: `From ${from} to ${to} ${thing} was led by Ben.`,
+    });
+    const { host, notes, query, extra, everyone } = await team((thing) => [
+      led(thing, "2020-01-01", "2020-12-31"),
+      led(thing, "2023-01-01", "2023-12-31"),
+    ]);
+    await saved(
+      host,
+      notes,
+      "history.md",
+      extra.map(({ evidence }) => evidence).join("\n")
+    );
+
+    const pack = await recall(host.brain, everyone, { query, network: {} });
+    const ledBy = pack.items
+      .filter(({ statement }) => statement.includes("led by Ben"))
+      .map(({ statement, validFrom, validTo }) => ({
+        statement,
+        validFrom,
+        validTo,
+      }))
+      .toSorted((a, b) => a.statement.localeCompare(b.statement));
+
+    expect(ledBy).toStrictEqual([
+      {
+        statement: extra[0]?.evidence,
+        validFrom: "2020-01-01T00:00:00.000Z",
+        validTo: "2020-12-31T00:00:00.000Z",
+      },
+      {
+        statement: extra[1]?.evidence,
+        validFrom: "2023-01-01T00:00:00.000Z",
+        validTo: "2023-12-31T00:00:00.000Z",
+      },
+    ]);
+  });
 });

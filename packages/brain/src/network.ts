@@ -79,13 +79,19 @@ const statementMaxLength = 4000;
 /** An entity a relation names, as its source names it. */
 type End = RelationView["subject"];
 
-/** A relation's identity: its source version and what it relates. */
+/**
+ * A relation's identity: its source version, what it relates, and when it
+ * holds. The dates are part of it, as the extractor keeps them apart
+ * (entities.ts): one source can say Anna owned a process in two periods.
+ */
 const keyOf = (view: RelationView): string =>
   JSON.stringify([
     view.sourceRef,
     view.subject.entityId,
     view.predicate,
     view.object.entityId,
+    view.validFrom,
+    view.validTo,
   ]);
 
 /** Whether `view` comes from a document version the recall found. */
