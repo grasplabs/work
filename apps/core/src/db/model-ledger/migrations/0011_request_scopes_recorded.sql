@@ -12,7 +12,7 @@ CREATE TABLE `__new_request_scopes` (
 	PRIMARY KEY(`request_id`, `scope`, `key`)
 );
 --> statement-breakpoint
-INSERT INTO `__new_request_scopes`("request_id", "scope", "key", "limit_micros", "alert_micros", "names", "period", "limit_requests", "reserved_micros") SELECT s."request_id", s."scope", s."key", s."limit_micros", s."alert_micros", s."names", coalesce(s."period", r."period"), s."limit_requests", coalesce(s."reserved_micros", r."reserved_micros") FROM `request_scopes` s JOIN `requests` r ON r."id" = s."request_id";--> statement-breakpoint
+INSERT INTO `__new_request_scopes`("request_id", "scope", "key", "limit_micros", "alert_micros", "names", "period", "limit_requests", "reserved_micros") SELECT "request_id", "scope", "key", "limit_micros", "alert_micros", "names", "period", "limit_requests", "reserved_micros" FROM `request_scopes` WHERE "period" IS NOT NULL AND "reserved_micros" IS NOT NULL;--> statement-breakpoint
 DROP TABLE `request_scopes`;--> statement-breakpoint
 ALTER TABLE `__new_request_scopes` RENAME TO `request_scopes`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
