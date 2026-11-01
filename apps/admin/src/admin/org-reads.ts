@@ -44,6 +44,8 @@ export interface OrgReads {
     clientId: string,
     read: () => Promise<ClientAdmin | null>
   ) => Promise<ClientAdmin | null>;
+  /** Whether a read of client `clientId` is under way. */
+  reading: (clientId: string) => boolean;
   /** Keeps `admin`'s answer, unless a later one is kept. */
   remember: (admin: ClientAdmin) => void;
   /** Client `clientId`'s last answer, while it is fresh at `now`. */
@@ -89,6 +91,7 @@ export const orgReads = (): OrgReads => {
       underWay.set(clientId, started);
       return await started;
     },
+    reading: (clientId) => underWay.has(clientId),
     remember,
     fresh: (clientId, now) => {
       const kept = answers.get(clientId);

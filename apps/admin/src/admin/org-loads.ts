@@ -182,13 +182,24 @@ export const readOrganization = async ({
     return { read: undefined };
   }
   const read = (async () => {
-    // The frame's read of every client, still under way, has this one in
-    // it: waited on, rather than asking its core, Stripe and Attio
-    // a second time, unless it holds up the page past `frameWaitMs`.
-    const framed = anew ? undefined : await framedAnswer(admins, client.id);
+    // When the frame reads this client alone (the open one), the page
+    // takes that read as soon as it answers (`readOne` joins it), never
+    // waiting on other cores. Otherwise the frame's read of every client,
+    // still under way, has this one in it: waited on, rather than asking
+    // its core, Stripe and Attio a second time, unless it holds up the
+    // page past `frameWaitMs`.
+    const framed =
+      anew || reads.reading(client.id)
+        ? undefined
+        : await framedAnswer(admins, client.id);
     if (framed !== undefined) {
       reads.remember(framed);
       return reads.settle(framed, Date.now());
+    }
+    // An answer kept while the page waited is not asked for again.
+    const kept = anew ? undefined : reads.fresh(client.id, Date.now());
+    if (kept !== undefined) {
+      return reads.settle(kept, Date.now());
     }
     let admin: ClientAdmin | null = null;
     try {
