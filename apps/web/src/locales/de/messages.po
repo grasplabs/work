@@ -5834,6 +5834,10 @@ msgstr "Exportieren"
 msgid "Export CSV"
 msgstr "CSV exportieren"
 
+#: src/engines/app-definition.tsx
+msgid "Export definition"
+msgstr "Definition exportieren"
+
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "JSON exportieren"
