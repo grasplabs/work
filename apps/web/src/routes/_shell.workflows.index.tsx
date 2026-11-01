@@ -62,10 +62,7 @@ import {
 } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
-import {
-  IndependentWorkflows,
-  NewWorkflow,
-} from "../workflows/independent-workflows.tsx";
+import { NewWorkflow } from "../workflows/independent-workflows.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
 import {
   listRuns,
@@ -80,6 +77,7 @@ import type { LaneProcesses } from "../workflows/today-lanes.tsx";
 import {
   WorkflowsOverview,
   WorkflowLists,
+  processOf,
 } from "../workflows/workflows-table.tsx";
 import type { AppProcesses } from "../workflows/workflows-table.tsx";
 
@@ -292,52 +290,34 @@ const RunFilters = ({
   );
 };
 
-/** The independent workflows serving `process`, or why they couldn't be read. */
-const Independent = ({
-  page,
-  process,
-}: {
-  page: Loaded<WorkflowResource[]>;
-  process: BusinessProcess | undefined;
-}) =>
-  page.state === "ready" ? (
-    <IndependentWorkflows
-      filtered={process !== undefined}
-      workflows={page.data.filter((workflow) =>
-        showsUnder(process, workflow.process)
-      )}
-    />
-  ) : (
-    <NotLoadedState page={page} />
-  );
-
 /**
  * The processes the lists' workflows serve: an App workflow its App's, an
  * independent one its own.
  */
 const offeredOf = (
   workflows: Loaded<WorkflowSummary[]>,
-  independent: Loaded<WorkflowResource[]>,
   processes: AppProcesses
 ): BusinessProcess[] =>
-  processesIn([
-    ...(workflows.state === "ready"
-      ? workflows.data.map((row) => processes.get(row.app) ?? null)
-      : []),
-    ...(independent.state === "ready"
-      ? independent.data.map((workflow) => workflow.process)
-      : []),
-  ]);
+  processesIn(
+    workflows.state === "ready"
+      ? workflows.data.map((row) => processOf(processes, row))
+      : []
+  );
 
-/** The App workflows serving `process`, at work and on the way. */
-const AppWorkflows = ({
+/**
+ * The workflows serving `process`, the domains' and the independent ones
+ * together, at work and on the way.
+ */
+const ListedWorkflows = ({
   rows,
   apps,
+  independent,
   processes,
   process,
 }: {
   rows: WorkflowSummary[];
   apps: Loaded<App[]>;
+  independent: Loaded<WorkflowResource[]>;
   processes: AppProcesses;
   process: BusinessProcess | undefined;
 }) => {
@@ -345,14 +325,17 @@ const AppWorkflows = ({
   if (domainsUnchecked(apps, process)) {
     return <NotLoadedState page={apps} />;
   }
+  if (domainsUnchecked(independent, process)) {
+    return <NotLoadedState page={independent} />;
+  }
   const shown = rows.filter((row) =>
-    showsUnder(process, processes.get(row.app) ?? null)
+    showsUnder(process, processOf(processes, row))
   );
   // Filtered to nothing: no invitation to make a first one.
   if (process !== undefined && shown.length === 0) {
     return (
       <EmptyCard>
-        <Trans>No workflow of a domain serves this process.</Trans>
+        <Trans>No workflow serves this process.</Trans>
       </EmptyCard>
     );
   }
@@ -388,7 +371,7 @@ const NeedsAttention = ({
       ? workflows.data.filter(
           (row) =>
             needsAttention(row) &&
-            showsUnder(process, processes.get(row.app) ?? null)
+            showsUnder(process, processOf(processes, row))
         )
       : [];
   const served = new Map(
@@ -560,20 +543,17 @@ const domainsUnchecked = (
 
 /**
  * Every workflow the lists show under `process`: the domains' and the
- * independent ones.
+ * independent ones, listed together.
  */
 const countAll = (
   lists: Lists,
   process: BusinessProcess | undefined
 ): number | undefined =>
   lists.workflows.state === "ready" &&
-  lists.independent.state === "ready" &&
+  !domainsUnchecked(lists.independent, process) &&
   !domainsUnchecked(lists.apps, process)
     ? lists.workflows.data.filter((row) =>
-        showsUnder(process, lists.processes.get(row.app) ?? null)
-      ).length +
-      lists.independent.data.filter((workflow) =>
-        showsUnder(process, workflow.process)
+        showsUnder(process, processOf(lists.processes, row))
       ).length
     : undefined;
 
@@ -610,7 +590,7 @@ const countNeeds = (
     lists.workflows.data.filter(
       (row) =>
         needsAttention(row) &&
-        showsUnder(process, lists.processes.get(row.app) ?? null)
+        showsUnder(process, processOf(lists.processes, row))
     ).length +
     lists.goLives.data.filter((each) =>
       showsUnder(process, served.get(each.workflowId) ?? null)
@@ -823,11 +803,7 @@ const Workflows = () => {
             </TabsList>
             {page.tab === "runs" ? null : (
               <ProcessFilter
-                offered={offeredOf(
-                  lists.workflows,
-                  lists.independent,
-                  lists.processes
-                )}
+                offered={offeredOf(lists.workflows, lists.processes)}
               />
             )}
           </div>
@@ -835,8 +811,9 @@ const Workflows = () => {
             {page.tab === "workflows" ? (
               <div className="mt-4 flex flex-col gap-8">
                 {lists.workflows.state === "ready" ? (
-                  <AppWorkflows
+                  <ListedWorkflows
                     apps={lists.apps}
+                    independent={lists.independent}
                     process={process}
                     processes={lists.processes}
                     rows={lists.workflows.data}
@@ -844,7 +821,6 @@ const Workflows = () => {
                 ) : (
                   <NotLoadedState page={lists.workflows} />
                 )}
-                <Independent page={lists.independent} process={process} />
               </div>
             ) : null}
           </TabsContent>
@@ -903,13 +879,21 @@ const laneProcessesOf = (lists: Lists): LaneProcesses => ({
   ),
 });
 
-/** The business process each App serves, by its ID. */
-const processesOf = (apps: Loaded<App[]>): AppProcesses =>
-  new Map(
-    apps.state === "ready"
-      ? apps.data.map((app) => [app.id, app.process ?? null])
-      : []
-  );
+/** The business process each App, and each independent workflow, serves, by its ID. */
+const processesOf = (
+  apps: Loaded<App[]>,
+  independent: Loaded<WorkflowResource[]>
+): AppProcesses =>
+  new Map([
+    ...(apps.state === "ready"
+      ? apps.data.map((app) => [app.id, app.process ?? null] as const)
+      : []),
+    ...(independent.state === "ready"
+      ? independent.data.map(
+          (workflow) => [workflow.id, workflow.process] as const
+        )
+      : []),
+  ]);
 
 /**
  * What the lists show, read on every tab, as the tabs count them: the
@@ -944,7 +928,7 @@ const readLists = async (core: CoreConnection): Promise<Lists> => {
     workflows,
     independent,
     apps,
-    processes: processesOf(apps),
+    processes: processesOf(apps, independent),
     goLives,
   };
 };

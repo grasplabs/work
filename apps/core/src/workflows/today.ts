@@ -34,7 +34,7 @@ import { inList } from "../db/d1.ts";
 import { answerableByNow, stillOpen } from "../decisions/decisions.ts";
 import { startOfCompanyDay } from "../organization.ts";
 import { listWorkflowResources } from "../workflow-resources.ts";
-import { visibleApps } from "./overview.ts";
+import { visibleApps } from "./run-view.ts";
 
 // The company's day at work (GRA-1255), for Runs › Today: every run
 // started since midnight in the organization's time zone, across the

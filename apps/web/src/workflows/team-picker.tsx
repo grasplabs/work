@@ -1,5 +1,5 @@
 import { failureText } from "@grasp-os/shared/errors";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { AppWorkflowSummary } from "@grasp-os/shared/workflows";
 import {
   Select,
   SelectContent,
@@ -112,7 +112,7 @@ export const WorkflowTeamView = ({
 export const WorkflowTeamPicker = ({
   workflow,
 }: {
-  workflow: WorkflowSummary;
+  workflow: AppWorkflowSummary;
 }) => {
   const core = useCore();
   const router = useRouter();

@@ -10,6 +10,7 @@ import {
   RouterProvider,
   useRouterState,
 } from "@tanstack/react-router";
+import type { AnyRouter } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -103,7 +104,8 @@ const opened = async (
   });
   // The bar as a page has it: the domain as its loader read it last.
   const DomainBar = () => {
-    const loaded: unknown = useRouterState({
+    // This test's own router, never the app's registered route tree.
+    const loaded: unknown = useRouterState<AnyRouter>({
       select: ({ matches }) => matches.at(0)?.loaderData,
     });
     if (!isApp(loaded)) {

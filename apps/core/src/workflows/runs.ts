@@ -932,7 +932,9 @@ const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
  * the engine has a step that sleeps between asks. A run that is paused or
  * has ended waits for no share, whatever place may still lapse.
  */
-export const queuedRun = <Run extends WorkflowRun>(
+export const queuedRun = <
+  Run extends Pick<WorkflowRun, "status" | "queued" | "aiProvider">,
+>(
   run: Run,
   wait: RunWait | undefined
 ): Run =>

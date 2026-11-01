@@ -44,7 +44,7 @@ export const workflowFiguresOf = (
   waiting: number
 ): RunFigures => {
   const counted = activity.workflows.find(
-    (row) => row.app === app && row.workflow === workflow
+    (row) => row.type === "app" && row.app === app && row.workflow === workflow
   );
   const runs = counted?.started ?? 0;
   return {

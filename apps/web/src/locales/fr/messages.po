@@ -161,10 +161,6 @@ msgstr "{app} n’est pas encore connecté."
 msgid "{app} needs someone to sign in again"
 msgstr "{app} a besoin que quelqu’un se reconnecte"
 
-#: src/workflows/workflows-table.tsx
-msgid "{appName} · Version {version}"
-msgstr "{appName} · Version {version}"
-
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "{approvals, plural, one {# approval} other {# approvals}}"
 msgstr "{approvals, plural, one {# approbation} other {# approbations}}"
@@ -1034,6 +1030,10 @@ msgstr "{name} : {shown} de la limite"
 #: src/settings/person-limits.tsx
 msgid "{name}: {shown} of their limit"
 msgstr "{name} : {shown} de sa limite"
+
+#: src/dashboard/report.ts
+msgid "{name}: {started} started, {completed} completed, {failed} failed"
+msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
@@ -4764,10 +4764,6 @@ msgstr "CRM"
 msgid "Current plan"
 msgstr "Abonnement actuel"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Current version"
-msgstr "Version actuelle"
-
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Sombre"
@@ -7114,9 +7110,15 @@ msgstr "Dans votre boîte de réception"
 msgid "Inbox"
 msgstr "Boîte de réception"
 
-#: src/workflows/independent-workflows.tsx
-msgid "Independent workflows"
-msgstr "Workflows indépendants"
+#: src/dashboard/runs-widget.tsx
+#: src/workflows/runs.tsx
+#: src/workflows/workflows-table.tsx
+msgid "Independent"
+msgstr "Indépendant"
+
+#: src/workflows/workflows-table.tsx
+msgid "Independent workflow"
+msgstr "Workflow indépendant"
 
 #: src/workflows/test-run.tsx
 msgid "Input"
@@ -8864,14 +8866,6 @@ msgstr "Pas encore d’objectifs."
 msgid "No group"
 msgstr "Aucun groupe"
 
-#: src/workflows/independent-workflows.tsx
-msgid "No independent workflow is shared with you yet."
-msgstr "Aucun workflow indépendant n'est encore partagé avec vous."
-
-#: src/workflows/independent-workflows.tsx
-msgid "No independent workflow of yours serves this process."
-msgstr "Aucun de vos workflows indépendants ne sert ce processus."
-
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
@@ -9113,13 +9107,13 @@ msgstr "Aucun workflow ne correspond."
 msgid "No workflow needs attention: nothing waits for a decision or to go live, nothing failed lately."
 msgstr "Aucun workflow n’est à traiter : rien n’attend de décision ni de mise en service, rien n’a échoué récemment."
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow of a domain serves this process."
-msgstr "Aucun workflow d’un domaine ne sert ce processus."
-
 #: src/dashboard/report.ts
 msgid "No workflow ran in this time."
 msgstr "Aucun workflow n’a été exécuté pendant cette période."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow serves this process."
+msgstr "Aucun workflow ne sert ce processus."
 
 #: src/connections/workflows-using.tsx
 msgid "No workflow uses {app} yet."
@@ -9475,7 +9469,7 @@ msgid "Not planned yet"
 msgstr "Pas encore prévu"
 
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/workflows/independent-workflows.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Not published"
 msgstr "Non publié"
 
@@ -10087,7 +10081,6 @@ msgctxt "column: a button that opens a run"
 msgid "Open"
 msgstr "Ouvrir"
 
-#: src/workflows/independent-workflows.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
 msgid "Open"
@@ -16832,7 +16825,6 @@ msgstr "A déterminé ce qui pourrait être amélioré"
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/go-lives-waiting.tsx
-#: src/workflows/independent-workflows.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"

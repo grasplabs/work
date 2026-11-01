@@ -4112,6 +4112,14 @@ export const workflowResourceRuns = sqliteTable(
     index("workflow_resource_runs_starting_idx")
       .on(table.createdAt)
       .where(sql`${table.status} = 'starting'`),
+    // Runs across workflows ended in a window, by how they ended: the
+    // Workflows page's counts, as an App's runs are read
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_status_ended_idx").on(
+      table.status,
+      table.endedAt,
+      table.id
+    ),
     // A workflow's runs, newest first, for its page (`listResourceRuns`).
     index("workflow_resource_runs_newest_idx").on(
       table.workflowResourceId,
@@ -4127,8 +4135,10 @@ export const workflowResourceRuns = sqliteTable(
       table.id
     ),
     // Runs across workflows since a moment: how many ran today, of
-    // workflows the reader may see or not (workflows/today.ts).
-    index("workflow_resource_runs_created_idx").on(table.createdAt),
+    // workflows the reader may see or not (workflows/today.ts); and newest
+    // first, as an App's runs are read, its ID breaking a tie
+    // (workflows/run-view.ts).
+    index("workflow_resource_runs_created_idx").on(table.createdAt, table.id),
   ]
 );
 

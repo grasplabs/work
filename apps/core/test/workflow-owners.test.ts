@@ -7,7 +7,7 @@ import { startRun } from "../src/workflows/runs.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { finished } from "./runs.ts";
+import { finished, ofApps } from "./runs.ts";
 import {
   auditedDuring,
   openRpc,
@@ -36,7 +36,7 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 
 /** The owner and whether `person` may change it, of each of `app`'s workflows. */
 const ownersFor = async (person: Person, app: string) => {
-  const all = await person.api.workflows.overview();
+  const all = ofApps(await person.api.workflows.overview());
   return all
     .filter((summary) => summary.app === app)
     .map(({ workflow, owner, changesOwner }) => ({
@@ -152,7 +152,7 @@ describe("a workflow's owner", slow, () => {
     // A new version keeps who owns each workflow.
     await release(owner, app, workflowFiles("pay", "  return 1;"));
     const { summary } = await user.api.workflows.get(app, "chase");
-    const asStaff = await staff.workflows.overview();
+    const asStaff = ofApps(await staff.workflows.overview());
 
     expect({
       before,

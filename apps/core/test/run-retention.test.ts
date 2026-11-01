@@ -28,6 +28,7 @@ import {
   aroundEngine,
   endLiveRuns,
   finished,
+  ofApps,
   runObject,
   runObjectId,
   sleeping,
@@ -287,7 +288,8 @@ describe("run retention", { timeout: 60_000 }, () => {
       after: (await receiptsOf(done.id)) + (await receiptsOf(failed.id)),
     };
     const listed = await builder.api.workflows.list(app);
-    const { runs: page } = await builder.api.workflows.runs({ app });
+    const runsPage = await builder.api.workflows.runs({ app });
+    const page = ofApps(runsPage.runs);
 
     expect({
       before: {
@@ -543,7 +545,8 @@ describe("run retention", { timeout: 60_000 }, () => {
       failed: await builder.api.workflows.status(failed.id),
     };
     const listed = await builder.api.workflows.list(app);
-    const { runs: page } = await builder.api.workflows.runs({ app });
+    const runsPage = await builder.api.workflows.runs({ app });
+    const page = ofApps(runsPage.runs);
     const onScreen = [
       await builder.api.screens.frame(app, "").run(done.id),
       await builder.api.screens.frame(app, "").run(failed.id),
