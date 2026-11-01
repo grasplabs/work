@@ -780,7 +780,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
     const ids = await Promise.all(
       Array.from({ length: 101 }, async () => {
         const clientId = await client();
-        await placeClient(db, staff, { clientId, destinationId, policyId });
+        await placeClient(db, staff, { clientId, destinationId });
         await db
           .update(clients)
           .set({ status: "offboarded", offboardedAt })
@@ -800,7 +800,7 @@ describe("placing a client and provisioning it, through the admin's entry", () =
   it("offers deleting an offboarded client's resources once its retention is over, and says on every read which bucket is still emptying", async () => {
     const destinationId = await destination();
     const clientId = await client();
-    await placeClient(db, staff, { clientId, destinationId, policyId });
+    await placeClient(db, staff, { clientId, destinationId });
     await allocateClientResources(db, staff, {
       clientId,
       manifest: await release(),
