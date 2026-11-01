@@ -10,7 +10,6 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
-import { EmailPreferencesRpc } from "./email-preferences-rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
@@ -86,7 +85,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
-  readonly #emailPreferences: EmailPreferencesRpc;
   readonly #sessions: SessionsRpc;
   readonly #channelAccounts: ChannelAccountsRpc;
   readonly #notifications: NotificationsRpc;
@@ -133,7 +131,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
-    this.#emailPreferences = new EmailPreferencesRpc(env, full);
     this.#sessions = new SessionsRpc(env, full, sessionId);
     this.#channelAccounts = new ChannelAccountsRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
@@ -204,10 +201,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get dashboard(): DashboardRpc {
     return this.#dashboard;
-  }
-
-  get emailPreferences(): EmailPreferencesRpc {
-    return this.#emailPreferences;
   }
 
   get apps(): AppsRpc {
