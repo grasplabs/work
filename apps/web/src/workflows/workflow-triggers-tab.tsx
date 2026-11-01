@@ -195,13 +195,12 @@ const TriggerRow = ({
       >[0]["workflowResources"]["triggers"]
     ) => Promise<unknown>
   ): Promise<void> => {
-    const done = await run(async (session) => {
+    await run(async (session) => {
       await action(session.workflowResources.triggers);
-      return true;
     });
-    if (done === true) {
-      await onChanged();
-    }
+    // Read again whatever came of it: a change core made can still fail
+    // as it reads the trigger back.
+    await onChanged();
   };
 
   return (
@@ -245,7 +244,9 @@ const TriggerRow = ({
               {trigger.stopped ? t`Turn on again` : t`Turn on`}
             </Button>
           ) : null}
-          {trigger.enabled && !trigger.stopped ? (
+          {/* A stopped trigger is still on in core: turned off, it stays
+              off once someone turns it on again elsewhere. */}
+          {trigger.enabled ? (
             <Button
               disabled={busy}
               onClick={() => {

@@ -94,17 +94,25 @@ const connection = (
   createdAt: "2026-10-01T09:00:00.000Z",
 });
 
+/** How often the tab last shown read its triggers. */
+let listReads = 0;
+
 /**
  * The tab for `me` (a builder when `builder`), with Connect down when
  * `connectFails`: what core was asked to do.
  */
 const shown = async (
   builder: boolean,
-  connectFails = false
+  connectFails = false,
+  changeFails = false
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
+  listReads = 0;
   const triggers = {
-    list: async () => await Promise.resolve([stoppedSchedule, othersMail]),
+    list: async () => {
+      listReads += 1;
+      return await Promise.resolve([stoppedSchedule, othersMail]);
+    },
     create: async (input: unknown) => {
       await Promise.resolve();
       asked.push({ create: input });
@@ -113,6 +121,9 @@ const shown = async (
     setEnabled: async (id: string, enabled: boolean) => {
       await Promise.resolve();
       asked.push({ setEnabled: id, enabled });
+      if (changeFails) {
+        throw new Error("The trigger couldn't be read back.");
+      }
       return stoppedSchedule;
     },
     setVersion: async (id: string, version: number) => {
@@ -263,8 +274,8 @@ describe("a workflow's Triggers tab", () => {
 
   it("lets a builder turn another's trigger off, and delete it only once they confirm", async () => {
     const asked = await shown(true);
-    // The other's trigger is the only one on and running.
-    await press("Turn off");
+    // The other's trigger: the second Turn off, after the stopped one's.
+    await press("Turn off", 1);
     // The second trigger's Delete, then the dialog's.
     await press("Delete", 1);
     const beforeConfirming = asked.length;
@@ -346,17 +357,17 @@ describe("a workflow's Triggers tab", () => {
     expect({
       add: buttons("Add the trigger").length,
       turnOff: buttons("Turn off").length,
-      // Their own stopped schedule they may still delete, but not turn on:
-      // core runs it only for someone who builds the workflow.
+      // Their own stopped schedule they may still turn off and delete, but
+      // not turn on: core runs it only for someone who builds the workflow.
       turnOnAgain: buttons("Turn on again").length,
       deletes: buttons("Delete").length,
-    }).toStrictEqual({ add: 0, turnOff: 0, turnOnAgain: 0, deletes: 1 });
+    }).toStrictEqual({ add: 0, turnOff: 1, turnOnAgain: 0, deletes: 1 });
   });
 
   it("keeps what the builder typed to add while they change another trigger", async () => {
     const asked = await shown(true);
     await fill("When, as a cron expression", "30 7 * * *");
-    await press("Turn off");
+    await press("Turn off", 1);
 
     expect({
       asked,
@@ -376,6 +387,27 @@ describe("a workflow's Triggers tab", () => {
       mail: says.includes("connection-ms"),
       why: says.includes("Connect isn't answering."),
       turnOff: buttons("Turn off").length,
-    }).toStrictEqual({ schedule: true, mail: true, why: true, turnOff: 1 });
+    }).toStrictEqual({ schedule: true, mail: true, why: true, turnOff: 2 });
+  });
+
+  it("offers to turn off a stopped schedule, which is still on in core", async () => {
+    const asked = await shown(true);
+    // The stopped schedule's Turn off comes first.
+    await press("Turn off");
+
+    expect(asked).toStrictEqual([
+      { setEnabled: "trigger-stopped", enabled: false },
+    ]);
+  });
+
+  it("reads the triggers again after a change that failed, as core may have made it", async () => {
+    await shown(true, false, true);
+    const before = listReads;
+    await press("Turn off", 1);
+
+    expect({
+      readAgain: listReads > before,
+      said: document.body.textContent.includes("couldn't be read back"),
+    }).toStrictEqual({ readAgain: true, said: true });
   });
 });
