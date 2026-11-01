@@ -5,8 +5,8 @@ import {
   openPurge,
   purgeAttemptLeaseMs,
   purgeStatus,
+  heldNow,
   runStep,
-  stillHeld,
   whileHeld,
 } from "@grasp-os/brain/purge-ledger";
 import { collections } from "@grasp-os/brain/schema";
@@ -23,7 +23,7 @@ import {
 import type { PurgeInput } from "@grasp-os/shared/knowledge";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -1406,8 +1406,9 @@ describe("a purge's record", setUpTime, () => {
     /** A data batch of the step: deletes collection `id`, guarded. */
     const deleting = async (held: typeof running, id: string) => {
       await db.batch([
-        stillHeld(brain, held),
-        db.delete(collections).where(eq(collections.id, id)),
+        db
+          .delete(collections)
+          .where(and(eq(collections.id, id), heldNow(brain, held))),
       ]);
     };
     const running = await open(false);

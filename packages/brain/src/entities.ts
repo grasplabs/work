@@ -469,10 +469,15 @@ export const unlinkMemoryWhere = (
  * Before a personal purge deletes `ownerId`'s memory records: the
  * entities only they mention.
  */
-export const forgetPersonEntities = (db: DrizzleD1Database, ownerId: string) =>
+export const forgetPersonEntities = (
+  db: DrizzleD1Database,
+  ownerId: string,
+  condition: SQL = sql`1`
+) =>
   forgetEntitiesOf(
     db,
-    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.memoryId} IN (SELECT ${brainMemories.id} FROM ${brainMemories} WHERE ${brainMemories.ownerId} = ${ownerId}))`
+    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.memoryId} IN (SELECT ${brainMemories.id} FROM ${brainMemories} WHERE ${brainMemories.ownerId} = ${ownerId}))`,
+    condition
   );
 
 /**
@@ -481,11 +486,13 @@ export const forgetPersonEntities = (db: DrizzleD1Database, ownerId: string) =>
  */
 export const forgetCollectionEntities = (
   db: DrizzleD1Database,
-  collectionId: string
+  collectionId: string,
+  condition: SQL = sql`1`
 ) =>
   forgetEntitiesOf(
     db,
-    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.documentId} IN (SELECT ${documents.id} FROM ${documents} WHERE ${documents.collectionId} = ${collectionId}))`
+    sql`(SELECT ${brainLinkJobs.source} FROM ${brainLinkJobs} WHERE ${brainLinkJobs.documentId} IN (SELECT ${documents.id} FROM ${documents} WHERE ${documents.collectionId} = ${collectionId}))`,
+    condition
   );
 
 // Extracting.

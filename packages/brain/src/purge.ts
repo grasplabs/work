@@ -1,9 +1,15 @@
 import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "./audit.ts";
 import type { Brain } from "./brain.ts";
 import type { CollectionRow } from "./collections.ts";
 import { inList } from "./db/d1.ts";
@@ -53,11 +59,11 @@ import {
   attemptHolds,
   attemptHoldsOrIdle,
   finishPurge,
+  heldNow,
   keepHold,
   openPurge,
   purgeUnfinished,
   runStep,
-  stillHeld,
   whileHeld,
 } from "./purge-ledger.ts";
 import type { StepCounts } from "./purge-ledger.ts";
@@ -553,7 +559,11 @@ const purgePersonal = async <C>(
       : ({ kind: "unknown" } as const);
   // The versions' payloads, unreferenced once they go, are collected right
   // after: erased from R2 too.
-  const released = releasing(db, inArray(versions.documentId, inCollection));
+  const releasedWhile = (holds: SQL) =>
+    releasing(
+      db,
+      and(inArray(versions.documentId, inCollection), holds) ?? sql`0`
+    );
   // What the records step deleted, over every run of it (purge-ledger.ts).
   let deleted: StepCounts = {};
   try {
@@ -561,8 +571,11 @@ const purgePersonal = async <C>(
       await onErase.forgetFiles(by, { collectionId });
     });
     deleted = await runStep(brain, open, "records", async (save) => {
+      // Each delete only while this run holds the purge: one that lost it
+      // changes nothing (purge-ledger.ts).
+      const holds = heldNow(brain, open);
+      const released = releasedWhile(holds);
       const writes: BatchItem<"sqlite">[] = [
-        save({ ...counts }),
         ...(plan.kind === "keys"
           ? [
               rebuildOwedIfChanged(
@@ -576,20 +589,29 @@ const purgePersonal = async <C>(
         ...released.before,
         // The entities only its documents name, with their keys, before the
         // documents take their mentions with them.
-        forgetCollectionEntities(db, collectionId),
-        db.delete(sections).where(inArray(sections.documentId, inCollection)),
-        db.delete(links).where(inArray(links.fromDocumentId, inCollection)),
+        forgetCollectionEntities(db, collectionId, holds),
+        db
+          .delete(sections)
+          .where(and(inArray(sections.documentId, inCollection), holds)),
+        db
+          .delete(links)
+          .where(and(inArray(links.fromDocumentId, inCollection), holds)),
         db
           .delete(transcripts)
-          .where(inArray(transcripts.documentId, inCollection)),
-        db.delete(versions).where(inArray(versions.documentId, inCollection)),
-        db.delete(documents).where(eq(documents.collectionId, collectionId)),
-        db.delete(collections).where(eq(collections.id, collectionId)),
+          .where(and(inArray(transcripts.documentId, inCollection), holds)),
+        db
+          .delete(versions)
+          .where(and(inArray(versions.documentId, inCollection), holds)),
+        db
+          .delete(documents)
+          .where(and(eq(documents.collectionId, collectionId), holds)),
+        db
+          .delete(collections)
+          .where(and(eq(collections.id, collectionId), holds)),
         ...released.after,
-        ...forgetPerson(db, input.userId, brain.ports.clock()),
+        ...forgetPerson(db, input.userId, brain.ports.clock(), holds),
       ];
-      // Nothing of it, unless this run still holds the purge.
-      await db.batch([stillHeld(brain, open), ...writes]);
+      await db.batch([save({ ...counts }), ...writes]);
       return { ...counts };
     });
   } finally {
@@ -1311,9 +1333,13 @@ const repointVersions = async <C>(
     changed: { text: string; message: string | null; unreadable: boolean };
   }[],
   actor: Json,
-  /** What its batch carries besides (the purge's hold, its count). */
-  also: readonly BatchItem<"sqlite">[] = []
+  /**
+   * The purge's hold, which each change is made only while it holds, and
+   * what its batch carries besides (the purge's count).
+   */
+  guarded?: { holds: SQL; also: readonly BatchItem<"sqlite">[] }
 ): Promise<void> => {
+  const holds = guarded?.holds ?? sql`1`;
   const stage = async () =>
     await Promise.all(
       changes.map(
@@ -1328,13 +1354,14 @@ const repointVersions = async <C>(
       inArray(
         versions.number,
         changes.map(({ number }) => number)
-      )
+      ),
+      holds
     ) ?? sql`0`
   );
   const replaced = changes
     .filter(({ changed }) => changed.unreadable)
     .map(({ number }) =>
-      outboxed(brain, replacedEntry(actor, document, number))
+      outboxedWhere(brain, replacedEntry(actor, document, number), holds)
     );
   const send = async (staged: StagedPayload[]): Promise<void> => {
     const updates = changes.flatMap(({ number, changed }, index) => {
@@ -1352,7 +1379,8 @@ const repointVersions = async <C>(
               .where(
                 and(
                   eq(versions.documentId, document.id),
-                  eq(versions.number, number)
+                  eq(versions.number, number),
+                  holds
                 )
               ),
           ];
@@ -1368,7 +1396,7 @@ const repointVersions = async <C>(
       ...updates,
       ...released.after,
       ...replaced,
-      ...also,
+      ...(guarded?.also ?? []),
     ]);
   };
   // A payload it reuses can be let go of and collected before the batch
@@ -1406,8 +1434,15 @@ const rewriteVersions = async <C>(
   write?: Json,
   /** Awaited before each page after the first: the purge renews its hold. */
   keep?: () => Promise<void>,
-  /** What each page's batch carries besides, given how many it changed so far. */
-  also: (changedSoFar: number) => BatchItem<"sqlite">[] = () => []
+  /**
+   * The purge's hold, which each page's changes are made only while it
+   * holds, and what each page's batch carries besides, given how many it
+   * changed so far.
+   */
+  guarded?: {
+    holds: () => SQL;
+    also: (changedSoFar: number) => BatchItem<"sqlite">[];
+  }
 ): Promise<{
   changed: number;
   removed: number;
@@ -1483,7 +1518,10 @@ const rewriteVersions = async <C>(
         document,
         changes,
         write,
-        also(changedVersions)
+        guarded && {
+          holds: guarded.holds(),
+          also: guarded.also(changedVersions),
+        }
       );
     }
     const last = page.at(-1);
@@ -1581,11 +1619,10 @@ const purgeDocument = async <C>(
   purgeId: string,
   /** Renews the purge's hold between pages of versions (`keepHold`). */
   keep: () => Promise<void>,
-  /**
-   * What each of its batches carries besides: given what it changed with
-   * it, in all, so far (the purge's hold on its step, and its count).
-   */
-  also: (soFar: Counts) => BatchItem<"sqlite">[]
+  /** Stores what it changed so far, in all, with the batch that changes it. */
+  save: (soFar: Counts) => BatchItem<"sqlite">,
+  /** The purge's hold: each of its changes is made only while it holds. */
+  holds: () => SQL
 ): Promise<Counts> => {
   const { document, collection } = named;
   // Before anything of it changes: one the host is saving now refuses, and
@@ -1601,7 +1638,10 @@ const purgeDocument = async <C>(
     matcher,
     actor,
     keep,
-    (changed) => also({ documents: 1, versions: changed })
+    {
+      holds,
+      also: (changed) => [save({ documents: 1, versions: changed })],
+    }
   );
   const current = await versionOf(brain, db, document, at);
   const changed = current && purgeChangeOf(current, matcher);
@@ -1620,14 +1660,20 @@ const purgeDocument = async <C>(
     // Written only over the transcript as it was read, and recorded only
     // when it was: another purge at once never has its removal undone.
     await auditedBatch(brain.ports, db, [
-      replaceTranscript(db, document.id, transcript.at, transcript.redacted),
+      replaceTranscript(
+        db,
+        document.id,
+        transcript.at,
+        transcript.redacted,
+        holds()
+      ),
       outboxedIfChanged(brain, {
         actor,
         action: "knowledge.transcript.purged",
         target: { type: "document", id: document.id },
         detail: { purgeId, version: transcript.version },
       }),
-      ...also(counts),
+      save(counts),
     ]);
   }
   if (current === undefined || changedVersions === 0) {
@@ -1638,9 +1684,14 @@ const purgeDocument = async <C>(
     return counts;
   }
   const text = changed?.text ?? current.text;
+  const holding = holds();
   const releasedCurrent = releasing(
     db,
-    and(eq(versions.documentId, document.id), eq(versions.number, at)) ?? sql`0`
+    and(
+      eq(versions.documentId, document.id),
+      eq(versions.number, at),
+      holding
+    ) ?? sql`0`
   );
   // The current version is pointed at the new version's payload, the
   // same text, committed earlier in the same batch.
@@ -1659,15 +1710,25 @@ const purgeDocument = async <C>(
               message: changed.message,
             })
             .where(
-              and(eq(versions.documentId, document.id), eq(versions.number, at))
+              and(
+                eq(versions.documentId, document.id),
+                eq(versions.number, at),
+                holding
+              )
             ),
           ...releasedCurrent.after,
           ...(changed.unreadable
-            ? [outboxed(brain, replacedEntry(actor, document, at))]
+            ? [
+                outboxedWhere(
+                  brain,
+                  replacedEntry(actor, document, at),
+                  holding
+                ),
+              ]
             : []),
         ];
   // The version it saves carries the document's count, in all.
-  pointCurrent.push(...also(counts));
+  pointCurrent.push(save(counts));
   await writeVersion(brain, by, {
     collection,
     path: document.path,
@@ -1871,7 +1932,8 @@ const purgeContent = async <C>(
           by.actor,
           purgeId,
           (statement) => erasedStatement(statement, matcher),
-          (soFar) => [stillHeld(brain, held), save(soFar)]
+          () => heldNow(brain, held),
+          (soFar) => [save(soFar)]
         )
     );
     // The host's copies hold people's words too: every one is rewritten,
@@ -1922,7 +1984,8 @@ const purgeContent = async <C>(
                   async () => {
                     await keepHold(brain, held);
                   },
-                  (soFar) => [stillHeld(brain, held), save({ ...soFar })]
+                  (soFar) => save({ ...soFar }),
+                  () => heldNow(brain, held)
                 )),
               }
       );

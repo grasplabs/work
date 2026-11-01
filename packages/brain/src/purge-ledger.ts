@@ -1,4 +1,5 @@
 import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { z } from "zod";
 
@@ -25,9 +26,10 @@ import type { PurgeStatus, purgeInputSchema } from "./knowledge.ts";
 // never changes one another finished or took over. Each attempt owes its
 // own rebuild. An admin may start a purge fresh instead: the
 // unfinished one is kept as it stood, superseded by the new one, once no
-// attempt holds it within its lease. A step's destructive batches carry
-// `stillHeld`, so an attempt that lost its purge writes nothing, and the
-// counts of what they changed (`runStep`'s `save`). The record holds who,
+// attempt holds it within its lease. Each destructive statement of a
+// step's batches holds only while its attempt does (`heldNow`), so one
+// that lost its purge changes nothing; its batches carry the counts of
+// what they changed (`runStep`'s `save`). The record holds who,
 // when, which documents (as its audit event does) and counts: never a
 // term, text or anything else the purge erased.
 
@@ -163,27 +165,14 @@ const attemptLive = ({ purgeId, attempt }: PurgeAttempt, now: Date) =>
   sql`EXISTS (SELECT 1 FROM ${brainPurges} WHERE ${brainPurges.id} = ${purgeId} AND ${brainPurges.attempt} = ${attempt} AND ${brainPurges.attemptAt} > ${now.getTime() - purgeAttemptLeaseMs} AND ${brainPurges.completedAt} IS NULL AND ${brainPurges.supersededBy} IS NULL)`;
 
 /**
- * A statement that fails the batch it is in, so nothing of it is written,
- * unless `held` still holds its purge (`attemptLive`): what a step's
- * destructive batch carries, so an attempt that lost its purge (taken
- * over, or begun fresh) deletes nothing. SQLite raises an error outside a
- * trigger only from a function: `json` of the purge's id, which isn't
- * JSON, read only when the attempt no longer holds it (a column, so it
- * isn't evaluated ahead). `runStep` answers `knowledge.conflict` then.
+ * The condition each destructive statement of a step's batch carries:
+ * `held` still holds its purge as the statement runs (`attemptLive`, now).
+ * An attempt that lost its purge (taken over, or begun fresh) changes
+ * nothing, and its step ends as `knowledge.conflict` at its ownership
+ * check after (`runStep`).
  */
-export const stillHeld = <C>(
-  brain: Brain<C>,
-  held: PurgeAttempt
-): BatchItem<"sqlite"> =>
-  brain.db
-    .select({ refused: sql`json(${brainPurges.id})` })
-    .from(brainPurges)
-    .where(
-      and(
-        eq(brainPurges.id, held.purgeId),
-        sql`NOT ${attemptLive(held, brain.ports.clock())}`
-      )
-    );
+export const heldNow = <C>(brain: Brain<C>, held: PurgeAttempt): SQL =>
+  attemptLive(held, brain.ports.clock());
 
 /**
  * `attemptHolds`, or the purge held by no attempt at all (`held` let it
@@ -490,8 +479,7 @@ export const runStep = async <C>(
       { state: "blocked", reason: reasonOf(error) },
       true
     );
-    // Lost to another attempt meanwhile (a batch `stillHeld` refused):
-    // that is what this attempt says.
+    // Lost to another attempt meanwhile: that is what this attempt says.
     if (blocked === undefined) {
       throw knowledgeErrors.create("knowledge.conflict");
     }

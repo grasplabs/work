@@ -223,15 +223,21 @@ export const withheldOwn = async <C, R extends MemoryRecord>(
 export const forgetPerson = (
   db: DrizzleD1Database,
   userId: string,
-  now: Date
+  now: Date,
+  /** Only while it holds (a purge's hold, say). */
+  condition: SQL = sql`1`
 ) =>
   [
     // The entities only their records name go first, with their keys.
-    forgetPersonEntities(db, userId),
-    db.delete(brainMemories).where(eq(brainMemories.ownerId, userId)),
-    db.delete(brainReceipts).where(eq(brainReceipts.caller, callerKey(userId))),
-    ...forgetPersonOutcomes(db, userId, now),
-    ...forgetPersonLessons(db, userId),
+    forgetPersonEntities(db, userId, condition),
+    db
+      .delete(brainMemories)
+      .where(and(eq(brainMemories.ownerId, userId), condition)),
+    db
+      .delete(brainReceipts)
+      .where(and(eq(brainReceipts.caller, callerKey(userId)), condition)),
+    ...forgetPersonOutcomes(db, userId, now, condition),
+    ...forgetPersonLessons(db, userId, condition),
   ] as const;
 
 /** How many records and receipts `forgetPerson` deletes. */
@@ -347,6 +353,8 @@ export const eraseStatements = async <C>(
   actor: Json,
   purgeId: string,
   erase: (statement: string) => string | null,
+  /** Each change is made only while it holds (a purge's hold, as it runs). */
+  holds: () => SQL = () => sql`1`,
   /**
    * What each batch carries besides: given what was changed with it, in
    * all, so far (a purge's hold on its step, and its count).
@@ -370,7 +378,8 @@ export const eraseStatements = async <C>(
   const write = ({ id, revision, now }: (typeof changes)[number]) => {
     const asRead = and(
       eq(brainMemories.id, id),
-      eq(brainMemories.revision, revision)
+      eq(brainMemories.revision, revision),
+      holds()
     );
     const event = outboxedWhere(
       brain,
