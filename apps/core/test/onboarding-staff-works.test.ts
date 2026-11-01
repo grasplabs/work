@@ -306,7 +306,10 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       byHand: { state: "complete", byHand: true },
       counted: true,
       left: { state: "mapping", byHand: false },
-      audited: [["onboarding.rules.set", 2]],
+      audited: [
+        ["admin.command", undefined],
+        ["onboarding.rules.set", 2],
+      ],
       // A command the admin couldn't have made is refused whole.
       invalid: "request.forbidden",
       unknown: "onboarding.no_work",

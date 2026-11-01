@@ -244,9 +244,13 @@ describe("the interviews in Grasp's onboarding area", () => {
       named: text.includes(ids.ona),
     }).toStrictEqual({
       reminded: [ids.ona],
-      again: 0,
+      // Given again, the command is on record, though nothing changed.
+      again: 1,
       logged: ["staff"],
-      audited: [["onboarding.reminded", { count: 1 }]],
+      audited: [
+        ["admin.command", { type: "onboarding.remind" }],
+        ["onboarding.reminded", { count: 1 }],
+      ],
       named: false,
     });
   });

@@ -5,7 +5,6 @@ import { identifierMaxLength } from "./identifier.ts";
 import { gateThresholds } from "./onboarding-gate.ts";
 import { orgRulesSchema, stephenSetupSchema } from "./onboarding-staff.ts";
 import {
-  agreementsSchema,
   onboardingPeopleMax,
   rosterPersonSchema,
   rosterTeamSchema,
@@ -16,6 +15,8 @@ import {
 // in one place (core's admin-command.ts), audited as the staff member
 // Cloudflare Access let into the admin. Steering is part of setting up a
 // deployment, so it lives in the admin, never in the company's own Grasp.
+// What the company itself decides isn't steering, and no command changes
+// it: the agreements, who works where, and deleting interviews.
 //
 // A command is delivered, not called: today the admin posts it straight to
 // the company's core, signed with the key both derive from the client's
@@ -63,8 +64,6 @@ const none = z.strictObject({});
 
 /** Every command, by type, with what it carries. */
 const commandPayloads = {
-  /** Where the agreements stand: until all are in, no link opens or goes out. */
-  "onboarding.agreements": z.strictObject({ agreements: agreementsSchema }),
   /** Notes the one reminder for each of these people. */
   "onboarding.remind": z.strictObject({
     people: z.array(personId).min(1).max(onboardingPeopleMax),
@@ -113,7 +112,6 @@ const commandOf = <T extends AdminCommandType>(type: T) =>
 
 /** A command as staff give it, before it is put in its envelope. */
 export const adminCommandSchema = z.discriminatedUnion("type", [
-  commandOf("onboarding.agreements"),
   commandOf("onboarding.remind"),
   commandOf("onboarding.ask_in"),
   commandOf("onboarding.send_mail_again"),
@@ -150,7 +148,6 @@ const envelopeOf = <T extends AdminCommandType>(type: T) =>
 
 /** A command as it is delivered: `{ id, type, payload, staff, issuedAt }`. */
 export const adminCommandEnvelopeSchema = z.discriminatedUnion("type", [
-  envelopeOf("onboarding.agreements"),
   envelopeOf("onboarding.remind"),
   envelopeOf("onboarding.ask_in"),
   envelopeOf("onboarding.send_mail_again"),

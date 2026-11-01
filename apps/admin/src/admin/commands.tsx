@@ -46,8 +46,6 @@ const refusals: Readonly<Record<CommandRefusal, string>> = {
   "onboarding.nothing_to_draw":
     "Nobody who does that work has agreed to anything yet.",
   "onboarding.invalid": "That isn’t something the onboarding takes.",
-  "onboarding.agreements_kept":
-    "The team is told: what was agreed stays as it was agreed.",
   not_answered: "The company’s Grasp didn’t answer. Try again in a moment.",
 };
 

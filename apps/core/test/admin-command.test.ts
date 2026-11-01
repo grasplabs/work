@@ -79,10 +79,13 @@ const gate = async () => {
   return { open: snapshot.gate.open, threshold: snapshot.gate.threshold };
 };
 
-/** What changed, and by whom: the snapshot's own reads left out. */
+/** What changed, and by whom: the snapshot's own reads and the commands as given left out. */
 const actionsBy = (events: AuditEvent[]) =>
   events
-    .filter(({ action }) => action !== "admin.snapshot.read")
+    .filter(
+      ({ action }) =>
+        action !== "admin.snapshot.read" && action !== "admin.command"
+    )
     .map(({ action, actor }) => ({ action, actor }));
 
 describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
@@ -224,53 +227,21 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
     });
   });
 
-  // Before any test sends a link: once one went out, the team is told.
-  it("keep what was agreed, and the links that are due go out at once, as the staff member", async () => {
-    const store = onboardingStore(env);
-    const ids = await team(["lea", "max"]);
-    await store.setAgreements(
-      { processing: false, assessment: false, council: "waiting" },
-      { type: "system" }
-    );
-    const agreements = {
-      processing: true,
-      assessment: true,
-      council: "none" as const,
-      processingOn: "2026-10-01",
-      assessmentOn: "2026-10-02",
-    };
+  it("put every command on record as given, before it applies, a refused one too, by its type alone", async () => {
+    const commands = adminCommands();
     const events = await auditedDuring(async () => {
-      await adminCommands().setAgreements(agreements);
+      await commands.pause();
+      await outcome(commands.newStart("nobody-by-this-id"));
     });
-    const snapshot = await adminSnapshot();
-    // Lea's link is out, so the team is told: what was agreed stays,
-    // though saving it again unchanged still applies.
-    const changedLater = await outcome(
-      adminCommands().setAgreements({ ...agreements, assessment: false })
-    );
-    const savedAgain = await outcome(adminCommands().setAgreements(agreements));
-    const kept = await adminSnapshot();
-    expect({
-      changedLater,
-      savedAgain,
-      keptAgreements: kept.agreements,
-      agreements: snapshot.agreements,
-      agreed: snapshot.agreed,
-      leaOut:
-        snapshot.links.find(({ person }) => person === ids.lea)?.sentAt !==
-        null,
-      events: actionsBy(events).filter(
-        ({ action }) => action === "onboarding.agreements.set"
-      ),
-    }).toStrictEqual({
-      changedLater: "onboarding.agreements_kept",
-      savedAgain: "ok",
-      keptAgreements: agreements,
-      agreements,
-      agreed: true,
-      leaOut: true,
-      events: [{ action: "onboarding.agreements.set", actor: staffActor }],
-    });
+    await commands.resume();
+    expect(
+      events
+        .filter(({ action }) => action === "admin.command")
+        .map(({ actor, detail }) => ({ actor, detail }))
+    ).toStrictEqual([
+      { actor: staffActor, detail: { type: "onboarding.pause" } },
+      { actor: staffActor, detail: { type: "onboarding.new_start" } },
+    ]);
   });
 
   it("apply a command delivered twice at once only once", async () => {

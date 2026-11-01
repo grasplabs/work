@@ -13,11 +13,12 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { log } from "@grasp-os/shared/log";
 import { onboardingErrors } from "@grasp-os/shared/onboarding";
-import type { Agreements } from "@grasp-os/shared/onboarding";
 import { and, eq, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { staffLetIn } from "./admin-kickoff.ts";
+import { appendAuditEvent } from "./audit-outbox.ts";
+import { organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { adminCommands } from "./db/core/schema.ts";
@@ -28,7 +29,8 @@ import { onboardingStore } from "./onboarding/store.ts";
 // Commands from Grasp's admin (`@grasp-os/shared/admin-command`, which
 // lists what can go wrong): every change staff make to this company's
 // onboarding, applied here and nowhere else, each as the staff member the
-// admin names, whom every change's own audit entry records.
+// admin names. Every command is in the audit log as given before it
+// applies (`admin.command`), and every change it makes in its own entry.
 //
 // - Only the admin's envelope, signed for this purpose with this
 //   company's key, reaches a command (console-signed.ts); anything else
@@ -74,40 +76,6 @@ const refuseUnless = (
   }
 };
 
-/** The agreements' fields in one order, to tell the same agreements apart from changed ones. */
-const agreementsKey = (agreements: Agreements | null): string =>
-  agreements === null
-    ? ""
-    : JSON.stringify([
-        agreements.processing,
-        agreements.processingOn ?? null,
-        agreements.assessment,
-        agreements.assessmentOn ?? null,
-        agreements.council,
-        agreements.councilOn ?? null,
-      ]);
-
-/**
- * Keeps what was agreed, and sends the links that are due once all of it
- * is in, at once rather than at the store's next alarm. It is the record
- * of what was agreed before the first interview: once a link went out,
- * it stays as it was. Saving it again unchanged still applies.
- */
-const keepAgreements = async (
-  env: Env,
-  agreements: Agreements,
-  by: AuditActor
-): Promise<void> => {
-  const store = onboardingStore(env);
-  const kept = await store.staffAgreements();
-  refuseUnless(
-    !kept.told || agreementsKey(kept.agreements) === agreementsKey(agreements),
-    "onboarding.agreements_kept"
-  );
-  await store.setAgreements(agreements, by);
-  await store.releaseDue();
-};
-
 /** Applies one command's change, as `by`; throws an onboarding error when it can't. */
 const applyChange = async (
   env: Env,
@@ -116,10 +84,6 @@ const applyChange = async (
 ): Promise<void> => {
   const store = onboardingStore(env);
   switch (command.type) {
-    case "onboarding.agreements": {
-      await keepAgreements(env, command.payload.agreements, by);
-      return;
-    }
     case "onboarding.remind": {
       await store.remind(command.payload.people, by);
       return;
@@ -242,6 +206,16 @@ export const applyCommand = async (
     via: "console",
   };
   try {
+    // On record before it applies, whatever it then does: a change, a
+    // refusal or nothing at all. By its type alone, never what it carries,
+    // which can name people; a log that can't take it fails the command.
+    await appendAuditEvent(env, {
+      actor: by,
+      action: "admin.command",
+      target: { type: "organization", id: organizationId },
+      requestId: command.id,
+      detail: { type: command.type },
+    });
     await applyChange(env, command, by);
   } catch (error) {
     // Let go, so the same command delivered again tries again.

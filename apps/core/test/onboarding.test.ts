@@ -1,6 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { OnboardingView, RosterInput } from "@grasp-os/shared/onboarding";
-import { onboardingPeopleMax } from "@grasp-os/shared/onboarding";
+import { onboardingPeopleMax, rosterSchema } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -281,11 +281,44 @@ describe("the admin's numbers", () => {
 
   it("keep agreements saved first on a store that is new", async () => {
     const store = env.ONBOARDING.getByName(`fresh-${crypto.randomUUID()}`);
-    const view = await store.setAgreements(
+    await store.setAgreements(
       { processing: true, assessment: true, council: "agreed" },
       { type: "system" }
     );
+    const view = await store.view();
     expect(view.agreed).toBeTruthy();
+  });
+
+  it("keep what was agreed once the team is told, though saving it again unchanged still applies", async () => {
+    const store = env.ONBOARDING.getByName(`told-${crypto.randomUUID()}`);
+    const by = { type: "system" } as const;
+    const agreed = {
+      processing: true,
+      assessment: true,
+      council: "none" as const,
+      processingOn: "2026-10-01",
+    };
+    await store.saveRoster(rosterSchema.parse(roster), by);
+    await store.savePlan(plan(), by);
+    const before = await store.setAgreements(
+      { ...agreed, council: "waiting" },
+      by
+    );
+    const first = await store.setAgreements(agreed, by);
+    await store.releaseDue();
+    expect({
+      before,
+      first,
+      changed: await store.setAgreements({ ...agreed, assessment: false }, by),
+      again: await store.setAgreements(agreed, by),
+      kept: await store.agreements(),
+    }).toStrictEqual({
+      before: true,
+      first: true,
+      changed: false,
+      again: true,
+      kept: agreed,
+    });
   });
 });
 
@@ -322,10 +355,11 @@ describe("Grasp's staff in the onboarding", () => {
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
     await staff.onboardingStaff.pause();
+    // As every later test keeps them: once the team is told, they stay.
     await staff.onboardingStaff.setAgreements({
       processing: true,
       assessment: true,
-      council: "agreed",
+      council: "none",
     });
     await expect(api.onboarding.view()).resolves.toMatchObject({
       agreed: true,

@@ -27,8 +27,8 @@ import { roleSchema } from "./roles.ts";
 // wrote down and the transcripts stay behind the audited staff transcript
 // read (`OnboardingStaffApi.transcript`). The work drawn from them is
 // here as the analyst drew it, for staff steer it from the admin: its
-// steps, and what each person told of it as counts and an example at
-// most. Nor is any interview link here:
+// steps, and what each person told of it as counts and yes or no, never
+// the example they shared. Nor is any interview link here:
 // a link is a credential. Nor any connection's: what the company connected
 // comes without tokens, server URLs or what Composio knows an account by,
 // and people's own connections, and chats' requests, only as counts by app.

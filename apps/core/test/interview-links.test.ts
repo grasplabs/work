@@ -376,20 +376,16 @@ describe("someone's own link", () => {
 });
 
 describe("when a link opens", () => {
-  it("opens nothing before it went out, or before the agreements are in (L5)", async () => {
-    const { store, secrets } = await running();
+  // No link goes out before the agreements are in, and once one did they
+  // stay as agreed (onboarding.test.ts): a link out without them can't be.
+  it("opens nothing before it went out (L5)", async () => {
+    const { secrets } = await running();
     // The lead hasn't talked: their team's other links wait.
     const waiting = await session(secrets.member);
-    await store.setAgreements(
-      { processing: true, assessment: true, council: "waiting" },
-      { type: "system" }
-    );
-    const noAgreements = await session(secrets.lead);
-    expect([
-      waiting.status,
-      await codeOf(waiting),
-      await codeOf(noAgreements),
-    ]).toStrictEqual([403, "interview.not_yet", "interview.not_yet"]);
+    expect([waiting.status, await codeOf(waiting)]).toStrictEqual([
+      403,
+      "interview.not_yet",
+    ]);
   });
 
   it("takes nothing while the interviews are paused, and opens again after (L8)", async () => {

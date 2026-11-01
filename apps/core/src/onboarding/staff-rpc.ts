@@ -149,7 +149,9 @@ export class OnboardingStaffRpc
         agreements
       );
       const store = onboardingStore(this.#env);
-      await store.setAgreements(parsed, actorOf(person));
+      if (!(await store.setAgreements(parsed, actorOf(person)))) {
+        throw onboardingErrors.create("onboarding.agreements_kept");
+      }
       await store.releaseDue();
       return await store.view();
     });
