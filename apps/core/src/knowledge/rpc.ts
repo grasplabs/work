@@ -33,7 +33,12 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
-import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
+import {
+  decideEntityMatch,
+  entitiesFor,
+  entityMatchProposals,
+  entitySources,
+} from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -63,6 +68,8 @@ import type {
   DocumentPage,
   DocumentRead,
   DocumentSummary,
+  EntityMatch,
+  EntityMatchDecision,
   FollowResult,
   HistoryOptions,
   HistoryPage,
@@ -303,6 +310,27 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async memoriesLineage(input: MemoriesLineageInput): Promise<MemoryLineage> {
     return await this.#asReader(
       async (reader) => await memoriesLineage(brainOf(this.#env), reader, input)
+    );
+  }
+
+  // Entity matches (GRA-1080), as the signed-in person alone reads them
+  // (`#asReader`: never a reader a request names). The Brain asks the
+  // recall grant first and records each call, a read or an audited
+  // decision; Grasp's staff are read as the person they are, open and
+  // audited (GRA-1087). Nothing here reaches a model, and neither takes a
+  // name to look for: a filter on a name would make probing targeted.
+
+  async entityMatches(options?: unknown): Promise<EntityMatch[]> {
+    return await this.#asReader(
+      async (reader) =>
+        await entityMatchProposals(brainOf(this.#env), reader, options)
+    );
+  }
+
+  async decideEntityMatch(input: unknown): Promise<EntityMatchDecision> {
+    return await this.#asReader(
+      async (reader) =>
+        await decideEntityMatch(brainOf(this.#env), reader, input)
     );
   }
 
