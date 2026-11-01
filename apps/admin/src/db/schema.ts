@@ -40,9 +40,6 @@ export const releases = sqliteTable("releases", {
    * they're kept; the record itself is kept for good.
    */
   bundleDeletedAt: timestamp("bundle_deleted_at"),
-  /** Read by nothing since release channels (src/rollout/): dropped once
-   * the admin that stopped reading it is live (expand, then contract). */
-  feature: integer({ mode: "boolean" }),
 });
 
 /**
@@ -111,9 +108,6 @@ export const clients = sqliteTable(
      * keys are kept for a window from here (src/deploy/secrets.ts).
      */
     rotationLiveAt: timestamp("rotation_live_at"),
-    /** Read by nothing since release channels (src/rollout/): dropped once
-     * the admin that stopped reading it is live (expand, then contract). */
-    ring: integer().notNull().default(1),
     /**
      * The release channel it follows (src/rollout/channels.ts): a release
      * promoted to it is deployed to it, unless it's pinned.
@@ -190,7 +184,6 @@ export const clients = sqliteTable(
   // What a promotion reaches: the active clients of a channel
   // (src/rollout/channels.ts).
   (table) => [
-    index("clients_status_ring_idx").on(table.status, table.ring),
     index("clients_status_channel_idx").on(table.status, table.channel),
   ]
 );
@@ -305,102 +298,6 @@ export const rolledOutSecrets = sqliteTable("rolled_out_secrets", {
   rolledOutBy: text("rolled_out_by").notNull(),
   rolledOutAt: timestamp("rolled_out_at").notNull(),
 });
-
-/**
- * The old rollout jobs. Read by nothing since release channels (src/rollout/): dropped once
- * the admin that stopped reading it is live (expand, then contract).
- */
-export const rollouts = sqliteTable(
-  "rollouts",
-  {
-    id: text().primaryKey(),
-    /** A release's code, or only new secrets on what runs. */
-    kind: text({ enum: ["release", "secrets"] }).notNull(),
-    releaseId: text("release_id").references(() => releases.id),
-    /**
-     * For a secrets rollout, the fingerprint of the shared secrets Secrets
-     * Store held for each app when it started: JSON, `{"connect": "<hex>"}`
-     * (src/rollout/shared-secrets.ts). What proves a rotation reached its
-     * clients; null for a release rollout.
-     */
-    sharedSecrets: text("shared_secrets"),
-    /** `waiting`: for a staff member's approval of the next ring. */
-    status: text({
-      enum: ["running", "waiting", "done", "failed", "cancelled"],
-    }).notNull(),
-    /** The ring it's rolling out to, or waiting after. */
-    ring: integer().notNull().default(0),
-    /** The staff member who started it. */
-    startedBy: text("started_by").notNull(),
-    createdAt: timestamp("created_at").notNull(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    index("rollouts_status_idx").on(table.status),
-    // The rollouts page lists the latest first (src/rollout/queries.ts).
-    index("rollouts_created_idx").on(table.createdAt),
-  ]
-);
-
-/** A client in an old rollout job: dropped with `rollouts`. */
-export const rolloutTargets = sqliteTable(
-  "rollout_targets",
-  {
-    rolloutId: text("rollout_id")
-      .notNull()
-      .references(() => rollouts.id),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id),
-    ring: integer().notNull(),
-    /**
-     * `pending` until its first step starts, claimed or not; `skipped`: on
-     * the release already, pinned to another, or the rollout cancelled
-     * before anything of it started; `stopped`: the rollout cancelled
-     * after something had.
-     */
-    status: text({
-      enum: [
-        "pending",
-        "deploying",
-        "done",
-        "failed",
-        "rolled_back",
-        "skipped",
-        "stopped",
-      ],
-    })
-      .notNull()
-      .default("pending"),
-    /** Why it failed or was skipped: a code, never a token or a response body. */
-    error: text(),
-    /** The client's deploy of the release, once the rollout started it. */
-    deployId: text("deploy_id"),
-    /**
-     * The client's change the rollout started (`client_provisions.change`):
-     * a rollback of it may go only while that is still the client's latest.
-     */
-    change: integer(),
-    /**
-     * The client's change a rollback of the client from the rollout
-     * started: one that failed is retried while it's still the latest.
-     */
-    rollbackChange: integer("rollback_change"),
-    /**
-     * What the client ran before the rollout reached it, which a rollback
-     * restores: JSON (`PreviousRun`, src/rollout/targets.ts). For a
-     * retry of a rollout that never finished the client, or a client left
-     * between releases, what it ran before that one
-     * (`unfinishedPrevious`).
-     */
-    previous: text(),
-    updatedAt: timestamp("updated_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.rolloutId, table.clientId] }),
-    index("rollout_targets_client_idx").on(table.clientId),
-  ]
-);
 
 /**
  * A secret of a client's own that can't be derived, such as its Teams
