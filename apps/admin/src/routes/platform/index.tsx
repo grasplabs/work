@@ -456,7 +456,7 @@ const PlatformPage = () => {
           Start a rollout
         </Link>
       }
-      description="Every company runs its own Grasp, in its own Cloudflare account in the EU. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
+      description="Every company runs its own Grasp, in the EU, apart from every other company’s. A release reaches them ring by ring, and waits after each ring for someone at Grasp."
       title="Platform"
     >
       {/* The panels' type, as the prototype's sections set it. */}
