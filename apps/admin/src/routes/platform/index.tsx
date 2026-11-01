@@ -15,7 +15,6 @@ import { ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PageLoading } from "../../admin/failure.tsx";
-import { GraspOrganization } from "../../admin/grasp-organization.tsx";
 import { AdminPage } from "../../admin/page.tsx";
 import { fetchPlatform } from "../../admin/platform-data.ts";
 import type { StaffEvent } from "../../admin/platform-data.ts";
@@ -46,7 +45,6 @@ import { Section } from "../../admin/section.tsx";
 import { formatDate, whole } from "../../admin/words.ts";
 import { fetchClientGrid, fetchGridLive } from "../../clients/functions.ts";
 import type { GridRow, LiveStatus } from "../../clients/grid.ts";
-import { fetchPlatformSettings } from "../../platform-settings.ts";
 import type { ReleaseSummary } from "../../releases/queries.ts";
 import { approveRolloutFn } from "../../rollout/functions.ts";
 import type { RolloutView } from "../../rollout/queries.ts";
@@ -429,7 +427,7 @@ const readLive = async (): Promise<Record<string, LiveStatus> | "failed"> => {
  * ring is the one thing done here.
  */
 const PlatformPage = () => {
-  const { rows, platform, readiness, settings } = Route.useLoaderData();
+  const { rows, platform, readiness } = Route.useLoaderData();
   const [live, setLive] = useState<Live>(null);
   useEffect(() => {
     let current = true;
@@ -466,7 +464,6 @@ const PlatformPage = () => {
         <GoingOut names={names} rollout={platform.rollout} />
         <WhoRunsWhat names={names} releases={platform.releases} rows={rows} />
         <EveryCompany live={live} releases={platform.releases} rows={rows} />
-        <GraspOrganization settings={settings} />
         <DoneHere events={platform.events} names={names} />
       </div>
     </AdminPage>
@@ -476,13 +473,12 @@ const PlatformPage = () => {
 /** Every company's own deployment, and the rollout going out. */
 export const Route = createFileRoute("/platform/")({
   loader: async () => {
-    const [rows, platform, readiness, settings] = await Promise.all([
+    const [rows, platform, readiness] = await Promise.all([
       fetchClientGrid(),
       fetchPlatform(),
       fetchReadiness(),
-      fetchPlatformSettings(),
     ]);
-    return { rows, platform, readiness, settings };
+    return { rows, platform, readiness };
   },
   component: PlatformPage,
   pendingComponent: PageLoading,

@@ -3395,8 +3395,10 @@ export const platformVersions = sqliteTable("platform_versions", {
  * What core tells a person in the product (src/notifications.ts): that a
  * workflow failed while acting for them (`run_failed`), or that an admin
  * asked them one of the brain's open questions (`gap_asked`,
- * src/brain-gaps.ts), or that connect stopped hearing a source their
- * triggers listen to (`events_stopped`). A `run_failed` row has its App, workflow, run and
+ * src/brain-gaps.ts), that connect stopped hearing a source their
+ * triggers listen to (`events_stopped`), or that packages of an App or
+ * workflow they build or approved were revoked as malware
+ * (`package_revoked`). A `run_failed` row has its App, workflow, run and
  * failures, and no gap; a `gap_asked` row its gap alone, once per person
  * and gap. One unread `run_failed` row per person, App and workflow:
  * another failure while it is unread counts on it (`failures`) and names
@@ -3411,7 +3413,13 @@ export const notifications = sqliteTable(
     id: text().primaryKey(),
     personId: text("person_id").notNull(),
     type: text({
-      enum: ["run_failed", "gap_asked", "trigger_stopped", "events_stopped"],
+      enum: [
+        "run_failed",
+        "gap_asked",
+        "trigger_stopped",
+        "package_revoked",
+        "events_stopped",
+      ],
     }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
@@ -3429,6 +3437,15 @@ export const notifications = sqliteTable(
      * resource the trigger starts.
      */
     triggerId: text("trigger_id"),
+    /**
+     * The package version a `package_revoked` row says was reported as
+     * malware, and the advisory that reported it
+     * (dependencies/requests.ts); its `app_id` or `workflow_id` is the
+     * App or workflow whose packages were revoked.
+     */
+    packageName: text("package_name"),
+    packageVersion: text("package_version"),
+    advisory: text(),
     /**
      * Where an `events_stopped` row says connect stopped hearing events
      * (notifications.ts): the connection, the event type, the part of it

@@ -16,6 +16,7 @@ import type {
 import type { WorkflowLifecycleApi } from "./workflow-lifecycle.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 import type { ActionUse } from "./workflow-modules.ts";
+import type { WorkflowTriggersApi } from "./workflow-triggers.ts";
 import type { RunAiProviderWait } from "./workflows.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
@@ -355,6 +356,12 @@ export const catalogContractSchema = z
            * native connector's JSON Schemas, as connect confirms it.
            */
           answersFile: z.literal(true).optional(),
+          /**
+           * That the operation attaches files an action names from its run
+           * (GRA-887): only on an operation described by its native
+           * connector's JSON Schemas, as connect confirms it.
+           */
+          takesFiles: z.literal(true).optional(),
         })
       )
       .optional(),
@@ -1382,4 +1389,6 @@ export interface WorkflowResourcesApi {
   publishContract: (input: unknown) => Promise<CatalogContractEntry>;
   /** Its stage, draft and live versions, pause and go-live. */
   readonly lifecycle: WorkflowLifecycleApi;
+  /** Its triggers: list, create, move to a version, enable and delete. */
+  readonly triggers: WorkflowTriggersApi;
 }

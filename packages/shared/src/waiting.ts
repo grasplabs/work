@@ -19,6 +19,7 @@ import type {
   EventsStoppedNotification,
   GapAskedNotification,
   RunFailedNotification,
+  PackageRevokedNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
@@ -157,6 +158,13 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
+/** Packages of an App or workflow the person builds or approved, revoked as malware: replaced where they build it. */
+export interface RevokedPackageItem extends ItemBase {
+  kind: "revokedPackage";
+  verdicts: never[];
+  notification: PackageRevokedNotification;
+}
+
 /**
  * A mailbox or drive the person's triggers listen to, which connect
  * stopped hearing: their triggers there start nothing new until it
@@ -212,6 +220,7 @@ export type WaitingItem =
   | FailedRunItem
   | OpenQuestionItem
   | StoppedScheduleItem
+  | RevokedPackageItem
   | StoppedEventsItem
   | BindingApprovalItem
   | SignInAgainItem
