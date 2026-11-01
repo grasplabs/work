@@ -3,6 +3,7 @@ import { compilerVersion } from "@grasp-os/compiler";
 import {
   acceptedUpdateSchema,
   appErrors,
+  appV1ServerFolder,
   fromBlueprintSchema,
 } from "@grasp-os/shared/apps";
 import type {
@@ -808,6 +809,11 @@ interface Merged {
  * file: what only one side changed comes from that side, and a file both
  * changed (to different content) stays as the App has it, listed as a
  * conflict. AGENTS.md is the App's own, whatever the blueprint holds.
+ *
+ * The v1 server's files (`app/`) are dropped, from either side: a copy
+ * made before the v1 server went may still hold them, and no version is
+ * committed with them any more (app-v1-server.ts). The update shows them
+ * deleted, and its version is one that commits.
  */
 const mergeOver = (
   base: ReadonlyMap<string, string>,
@@ -818,6 +824,9 @@ const mergeOver = (
   const conflicts: string[] = [];
   const paths = new Set([...base.keys(), ...ours.keys(), ...theirs.keys()]);
   for (const path of [...paths].toSorted()) {
+    if (path.startsWith(appV1ServerFolder)) {
+      continue;
+    }
     const mine = ours.get(path);
     const was = base.get(path);
     const now = theirs.get(path);

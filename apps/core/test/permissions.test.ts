@@ -13,6 +13,7 @@ import type {
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { createStore } from "../src/data-stores.ts";
 import {
@@ -38,6 +39,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // Apps and agents start with nothing: a person asks, an admin grants, and
 // every call is checked again on the server, down to connect, which only
@@ -599,6 +601,101 @@ describe("permissions", () => {
     await expect(
       outcome(admin.api.permissions.request(onApp(other.appId)))
     ).resolves.toBe("ok");
+  });
+
+  it("let only an agent ask for an App, to read or write its functions, and keep none of the v1 exports' grants", async () => {
+    const admin = await permissionApi("admin");
+    const [target, caller] = await Promise.all([
+      newApp(admin.api),
+      newApp(admin.api),
+    ]);
+    const asked = async (request: PermissionRequest) =>
+      await outcome(admin.api.permissions.request(request));
+    const agentWith = (actions: string[]): PermissionRequest => ({
+      ...onApp(target.appId),
+      actions,
+    });
+    const requested = {
+      read: await asked(agentWith(["read"])),
+      write: await asked(agentWith(["write"])),
+      // An export's name, as the v1 server let a permission name one.
+      exportName: await asked(agentWith(["listBooks"])),
+      byApp: await asked({
+        subject: caller,
+        object: { type: "app", appId: target.appId },
+        actions: ["read"],
+        binding: "INVOICES",
+      }),
+    };
+
+    // Grants from before the v1 server went, as 0189 found them: an App's
+    // on another App's exports, an agent's by an export's name, and the
+    // ones it keeps, an agent's `read` and an App's connection.
+    const legacy = {
+      byApp: ["app", caller.appId, "app", target.appId, ["read"]],
+      exportName: ["agent", "agent-old", "app", target.appId, ["listBooks"]],
+      agentRead: ["agent", "agent-old", "app", target.appId, ["read"]],
+      connection: [
+        "app",
+        caller.appId,
+        "connection",
+        "connection-outlook",
+        ["mail.list"],
+      ],
+    } as const;
+    const ids = Object.fromEntries(
+      Object.keys(legacy).map((name) => [name, `perm-${unique()}`])
+    );
+    await env.DB.batch(
+      Object.entries(legacy).map(
+        ([name, [subject, subjectId, object, objectId, actions]]) =>
+          env.DB.prepare(
+            "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, actions, binding, status, requested_by, requested_at, personal) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, 0)"
+          ).bind(
+            ids[name],
+            subject,
+            subjectId,
+            object,
+            objectId,
+            JSON.stringify(actions),
+            // A binding name of each grant's own: one per subject.
+            name.toUpperCase(),
+            admin.userId,
+            Date.now()
+          )
+      )
+    );
+    // 0189's own cleanup: its deletes, as the migration ran them.
+    const migrations = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"));
+    const cleanup = migrations
+      .find(({ name }) => name.startsWith("0189_"))
+      ?.queries.filter((query) => query.trimStart().startsWith("DELETE"));
+    if (cleanup === undefined || cleanup.length === 0) {
+      throw new Error("0189 deletes no permissions");
+    }
+    await env.DB.batch(cleanup.map((query) => env.DB.prepare(query)));
+    const { results } = await env.DB.prepare(
+      `SELECT id FROM permissions WHERE id IN (${Object.values(ids)
+        .map(() => "?")
+        .join(", ")})`
+    )
+      .bind(...Object.values(ids))
+      .all<{ id: string }>();
+    const kept = Object.keys(ids).filter((name) =>
+      results.some(({ id }) => id === ids[name])
+    );
+
+    expect({ requested, kept: kept.toSorted() }).toStrictEqual({
+      requested: {
+        read: "ok",
+        write: "ok",
+        exportName: "permission.invalid",
+        byApp: "permission.invalid",
+      },
+      kept: ["agentRead", "connection"],
+    });
   });
 
   it("can't take the name of any of core's own bindings", () => {
