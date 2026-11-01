@@ -7,6 +7,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
+import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -153,6 +154,7 @@ const MicStep = ({
             onStart("type");
           }}
           size="xl"
+          variant="highlight"
         >
           {t`Start by typing`}
         </Button>
@@ -186,6 +188,7 @@ const MicStep = ({
             onStart("talk");
           }}
           size="xl"
+          variant="highlight"
         >
           {t({ message: "Start", context: "begin the interview" })}
         </Button>
@@ -366,16 +369,23 @@ export const SoundCheck = ({
           aria-live="polite"
           className="flex min-h-16 w-full items-start justify-center"
         >
-          <h1
-            className="animate-in fade-in slide-in-from-bottom-2 max-w-lg text-2xl font-medium tracking-tight text-balance duration-500"
+          <div
+            className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
             key={check}
           >
-            <SpokenText said={said} text={line} />
-          </h1>
+            <PageHeaderTitle>
+              <SpokenText said={said} text={line} />
+            </PageHeaderTitle>
+          </div>
         </div>
         {check === "sound" ? (
           <div className="flex w-full max-w-sm flex-col items-center gap-3">
-            <Button className="w-full" onClick={toMic} size="xl">
+            <Button
+              className="w-full"
+              onClick={toMic}
+              size="xl"
+              variant="highlight"
+            >
               {t`Yes, I can hear you`}
             </Button>
             {replayed > 0 ? (

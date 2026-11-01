@@ -2,7 +2,7 @@
  * The release pages' server functions: read-only, behind the Access check
  * every request passes (src/access.ts).
  */
-import { releaseIdSchema } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import { createServerFn } from "@tanstack/react-start";
 import { env } from "cloudflare:workers";
 import { z } from "zod";

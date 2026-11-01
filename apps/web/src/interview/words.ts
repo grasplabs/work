@@ -77,6 +77,16 @@ export const useLoopWords = (locale: Locale): LoopWords => {
 };
 
 /** The parts of an interview, and what Stephen marks, in words. */
+/**
+ * The promise about their words (GRA-1286), as the first screen, the
+ * read-back's last part and the thanks say it, and as Stephen says it when
+ * asked: what the platform holds to (core's team-claims.ts, GRA-1084).
+ */
+export const usePromise = (): string => {
+  const { t } = useLingui();
+  return t`Your company never sees what one person said, or their name: only what five or more people told about the same work, put together by team.`;
+};
+
 export const useInterviewWords = () => {
   const { t } = useLingui();
   const phase: Record<InterviewPhase, string> = {
@@ -108,6 +118,7 @@ export const useInterviewWords = () => {
     term: t`Word`,
     next: t`Next person`,
     work: t`Work of the team`,
+    who: t`Who does it`,
   };
   return { phase, tag };
 };

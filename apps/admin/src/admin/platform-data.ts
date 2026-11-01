@@ -37,7 +37,7 @@ export const staffActions = [
   "client.create",
   "client.discard",
   "client.ring",
-  "client.model_spend_ceiling",
+  "platform.ai",
   "client.pin",
   "client.unpin",
   "client.rotate_secrets",
@@ -45,6 +45,7 @@ export const staffActions = [
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "platform.grasp_client",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

@@ -15,7 +15,7 @@ const reportOf = (broken?: string): StephenRunReport => ({
     cases: 1,
     casesDigest: "0123456789abcdef",
     model: "anthropic/claude-sonnet-5",
-    provider: "ai-gateway/stephen-ci",
+    provider: "anthropic",
     build: { sha: "a".repeat(40) },
   },
   passed: broken === undefined,

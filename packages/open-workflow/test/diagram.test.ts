@@ -6,12 +6,14 @@ import type {
 } from "@grasp-os/shared/workflow-diagrams";
 import { describe, expect, it } from "vite-plus/test";
 
-import { workflowDiagram } from "../src/diagram.ts";
+import { doorSourcesOf, workflowDiagram } from "../src/diagram.ts";
+import type { JsonValue } from "../src/json-text.ts";
 import { validateWorkflow } from "../src/validate.ts";
 import {
   approval,
   documentAround,
   eventRecovery,
+  everyKind,
   options,
   parallelChildren,
   polling,
@@ -79,6 +81,23 @@ const labelled = async (label: string) => {
     throw new Error(JSON.stringify(result.diagnostics));
   }
   return workflowDiagram(result.workflow.definition);
+};
+
+/** A definition whose one task names `section` as the part it begins. */
+const withSection = (section: unknown) =>
+  documentAround({ name: "in-parts", input: {}, required: [] }, [
+    {
+      read: { set: { status: "read" }, metadata: { grasp: { section } } },
+    },
+  ]);
+
+/** `definition`, checked by the profile, as its parsed JSON. */
+const checked = async (definition: unknown): Promise<JsonValue> => {
+  const result = await validateWorkflow(JSON.stringify(definition), options);
+  if (!result.ok) {
+    throw new Error(JSON.stringify(result.diagnostics));
+  }
+  return result.workflow.definition;
 };
 
 describe("a workflow's diagram", () => {
@@ -236,5 +255,168 @@ describe("a workflow's diagram", () => {
         do: [1, { x: {} }, { y: { set: {} } }],
       }).tasks.map(({ id, kind }) => `${id} ${kind}`),
     }).toStrictEqual({ notObject: [], noTasks: [], odd: ["y set"] });
+  });
+
+  it("carries the named part a task begins, and draws no parts where none is named", async () => {
+    const section = {
+      name: "Check the invoice",
+      purpose: "Make sure the invoice is complete before anyone pays it.",
+      summary:
+        "An agent reads the invoice and a person approves anything over the limit.",
+    };
+    const definition = documentAround(
+      { name: "in-parts", input: {}, required: [] },
+      [
+        {
+          read: {
+            set: { status: "read" },
+            metadata: { grasp: { section } },
+          },
+        },
+        { check: { set: { status: "checked" } } },
+        {
+          pay: {
+            set: { status: "paid" },
+            metadata: { grasp: { section: { name: "Pay" } } },
+          },
+        },
+      ]
+    );
+    const result = await validateWorkflow(JSON.stringify(definition), options);
+    if (!result.ok) {
+      throw new Error(JSON.stringify(result.diagnostics));
+    }
+    const { tasks } = workflowDiagram(result.workflow.definition);
+    expect(tasks.map((task) => task.section ?? null)).toStrictEqual([
+      section,
+      null,
+      { name: "Pay", purpose: null, summary: null },
+    ]);
+    expect(
+      workflowDiagram(await checked(parallelChildren)).tasks.some(
+        (task) => task.section !== undefined
+      )
+    ).toBeFalsy();
+  });
+
+  it("refuses a part with no name, or with what a part doesn't hold", async () => {
+    for (const section of [
+      { purpose: "No name" },
+      { name: "" },
+      { name: "Read", owner: "someone" },
+      "Read",
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one definition at a time
+      const result = await validateWorkflow(
+        JSON.stringify(withSection(section)),
+        options
+      );
+      expect(result.ok).toBeFalsy();
+    }
+  });
+
+  it("refuses a part named inside another task, where no drawing could show it", async () => {
+    const nested = documentAround(
+      { name: "nested-parts", input: {}, required: [] },
+      [
+        {
+          outer: {
+            do: [
+              {
+                read: {
+                  set: { status: "read" },
+                  metadata: { grasp: { section: { name: "Read" } } },
+                },
+              },
+            ],
+          },
+        },
+      ]
+    );
+    const result = await validateWorkflow(JSON.stringify(nested), options);
+    expect(
+      result.ok
+        ? []
+        : result.diagnostics.map(({ code, pointer }) => ({ code, pointer }))
+    ).toStrictEqual([
+      {
+        code: "profile.unsupported_feature",
+        pointer: "/do/0/outer/do/0/read/metadata/grasp/section",
+      },
+    ]);
+  });
+
+  it("finds each door: a child workflow it waits for, an event that starts another and goes on, or one it ends with", async () => {
+    const handing = documentAround(
+      {
+        name: "hand-over",
+        bindings: { jobEvents: { kind: "event", contract: "job-events" } },
+        input: {},
+        required: [],
+      },
+      [
+        { done: { set: { status: "done" } } },
+        {
+          announce: {
+            emit: { event: { with: { type: "grasp.job.completed" } } },
+            metadata: { grasp: { binding: "jobEvents" } },
+          },
+        },
+      ]
+    );
+    expect(doorSourcesOf(await checked(parallelChildren))).toStrictEqual([
+      {
+        pointer:
+          "/do/0/summaries/fork/branches/0/first-summary/do/0/summarize-first",
+        flow: "waits",
+        target: {
+          kind: "workflow",
+          namespace: "grasp",
+          name: "summarize-note",
+        },
+      },
+      {
+        pointer:
+          "/do/0/summaries/fork/branches/1/second-summary/do/0/summarize-second",
+        flow: "waits",
+        target: {
+          kind: "workflow",
+          namespace: "grasp",
+          name: "summarize-note",
+        },
+      },
+    ]);
+    expect(
+      doorSourcesOf(await checked(eventRecovery)).map(({ flow, target }) => ({
+        flow,
+        target,
+      }))
+    ).toStrictEqual([
+      {
+        flow: "starts",
+        target: {
+          kind: "event",
+          binding: "jobEvents",
+          type: "grasp.job.timeout",
+        },
+      },
+    ]);
+    expect(doorSourcesOf(await checked(handing))).toStrictEqual([
+      {
+        pointer: "/do/1/announce",
+        flow: "hands",
+        target: {
+          kind: "event",
+          binding: "jobEvents",
+          type: "grasp.job.completed",
+        },
+      },
+    ]);
+    // An emit with more after it starts the other workflow and goes on.
+    expect(
+      doorSourcesOf(await checked(everyKind))
+        .filter(({ target }) => target.kind === "event")
+        .map(({ flow }) => flow)
+    ).toStrictEqual(["starts"]);
   });
 });

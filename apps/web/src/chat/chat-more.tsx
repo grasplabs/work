@@ -20,6 +20,11 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Input } from "@grasp-os/ui/components/input";
 import { toast } from "@grasp-os/ui/components/toast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import {
@@ -235,12 +240,22 @@ export const ChatMore = ({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={t`More for this chat`}
-          render={<Button size="icon-sm" variant="outline" />}
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
+        {/* A quiet icon, named when pointed at, as the header's others. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                aria-label={t`More for this chat`}
+                render={<Button size="icon-sm" variant="ghost" />}
+              />
+            }
+          >
+            <EllipsisIcon />
+          </TooltipTrigger>
+          <TooltipContent>
+            <Trans>More for this chat</Trans>
+          </TooltipContent>
+        </Tooltip>
         <DropdownMenuContent align="end" className="w-60">
           {/* It stays open for a moment to say that it is copied. */}
           <DropdownMenuItem

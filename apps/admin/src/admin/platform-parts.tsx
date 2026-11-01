@@ -8,6 +8,7 @@ import { CheckIcon, LoaderCircleIcon, PauseIcon, XIcon } from "lucide-react";
  * and `platform-words.ts`): how a company stands, the rollout's rings as
  * steps, and the admin's own records in words staff read.
  */
+import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import type { TargetView } from "../rollout/queries.ts";
 import type { StaffEvent } from "./platform-data.ts";
@@ -52,7 +53,16 @@ const driftWords: Record<
 const notStartedLine: Record<NotStarted | "ready", string> = {
   no_destination: "Not started: no hosting destination ready.",
   no_release: "Not started: no release imported yet.",
+  on_prem: "On-premises: on-prem setup arrives with GRA-1291.",
   ready: "Not started: provision it from its Setup.",
+};
+
+/** Why setting a company up needs a person, in a line with the next step. */
+export const attentionWords: Record<AttentionReason, string> = {
+  stuck:
+    "Needs attention: Grasp's automatic retries haven't finished setting it up. Retry now from its Setup once it's fixed.",
+  needs_person:
+    "Needs attention: setting it up stopped for something Grasp can't fix by itself. Retry now from its Setup once it's fixed.",
 };
 
 /** What a company needs, in a line. */
@@ -61,8 +71,11 @@ export const needWords = (need: PlatformNeed): string => {
     case "not_started": {
       return notStartedLine[need.why ?? "ready"];
     }
+    case "needs_attention": {
+      return attentionWords[need.reason];
+    }
     case "stopped": {
-      return "Stopped: resume it from its Setup.";
+      return "Stopped: Grasp is retrying it by itself.";
     }
     case "setup_unread": {
       return "Being set up: status unavailable just now. Its Setup reads it again.";
@@ -109,7 +122,8 @@ export const eventWords = (
     "client.create": `added ${company}`,
     "client.discard": `discarded ${company}, which was never placed`,
     "client.ring": `moved ${company} to another ring`,
-    "client.model_spend_ceiling": `changed ${company}'s model spend ceiling`,
+    "platform.ai":
+      "changed which provider and model Grasp's own AI features use",
     "client.pin": `pinned ${company} to ${target}`,
     "client.unpin": `unpinned ${company}`,
     "client.rotate_secrets": `rotated ${company}'s secrets`,
@@ -117,6 +131,10 @@ export const eventWords = (
     "client.sign_in": `changed how ${company}'s people sign in`,
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
+    "platform.grasp_client":
+      company === ""
+        ? "chose no organization as Grasp's own"
+        : `chose ${company} as Grasp's own organization`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

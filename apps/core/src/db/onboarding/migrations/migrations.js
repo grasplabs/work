@@ -26,6 +26,8 @@ import m0023 from './0023_aggregated_statements.sql';
 import m0024 from './0024_checked_drawings.sql';
 import m0025 from './0025_checked_differences.sql';
 import m0026 from './0026_admission_revocations.sql';
+import m0027 from './0027_interview_referrals.sql';
+import m0028 from './0028_more_voices.sql';
 
   export default {
     journal,
@@ -56,7 +58,9 @@ m0022,
 m0023,
 m0024,
 m0025,
-m0026
+m0026,
+m0027,
+m0028
     }
   }
   

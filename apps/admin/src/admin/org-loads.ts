@@ -183,7 +183,7 @@ export const readOrganization = async ({
   }
   const read = (async () => {
     // The frame's read of every client, still under way, has this one in
-    // it: waited on, rather than asking its core, Stripe, Rooms and Attio
+    // it: waited on, rather than asking its core, Stripe and Attio
     // a second time, unless it holds up the page past `frameWaitMs`.
     const framed = anew ? undefined : await framedAnswer(admins, client.id);
     if (framed !== undefined) {

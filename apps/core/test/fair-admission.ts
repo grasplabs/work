@@ -1,7 +1,6 @@
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { admitAttempt } from "../src/workflows/quotas.ts";
@@ -10,6 +9,7 @@ import type {
   AttemptOwner,
 } from "../src/workflows/quotas.ts";
 import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { runObject, sleeping } from "./runs.ts";
 import type { signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -22,27 +22,17 @@ import { appWith, workflowFiles } from "./workflow-apps.ts";
 /** Someone signed in, with their API. */
 type Builder = Awaited<ReturnType<typeof signedInApi>>;
 
-/** The generation of the next policy a test sets: each higher than before. */
-let generations = 100;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
-/** Sets the operator's policy to the deployment's, with `limits` lowered. */
+/** Sets the quota limits to the deployment's, with `limits` lowered. */
 export const policyWith = (limits: Record<string, number>): void => {
-  generations += 1;
-  env.QUOTA_LIMITS = {
-    generation: generations,
-    limits: { ...configuredLimits, ...limits },
-  };
+  env.TEST_QUOTA_LIMITS = { ...configuredLimits, ...limits };
 };
 
 /** The admissions a test made: settled once it is over (`withShares`). */
 export const admitted: AttemptAdmission[] = [];
 
 /**
- * What `run` returns, with the operator's quota policy `limits` in force;
- * the deployment's own limits again after it, under a newer generation.
+ * What `run` returns, with the quota limits `limits` lowered; the
+ * deployment's own limits again after it.
  * The client's shares are the whole deployment's: once it is over, what
  * the test admitted settles and what it queued stops waiting, as its runs
  * would, so the next test starts with every share free.
@@ -251,6 +241,62 @@ export const loadWakesOf = async (run: string): Promise<number[]> =>
   );
 
 /**
+ * Once `run` waits in round `round` of waiting for load, or a later one:
+ * the engine has the run waiting, its latest round's wait under way. With
+ * `end`, round `round` then ends now, as its time passing would (`woken`):
+ * its deadline, and the run's alarm with it, moved to now; a round that
+ * already ended on its own (a runner stalled past it) is left be. Read and
+ * moved in one go in the run's object, so the round can't end on its own
+ * between the two. A test drives rounds so, round by round, instead of
+ * sleeping for as long as it guesses they take on a busy runner.
+ */
+export const inRound = async (
+  run: string,
+  round: number,
+  { end = false } = {}
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const waiting = await runInDurableObject(
+        runObject(run),
+        async (_object, state) => {
+          const { sql } = state.storage;
+          const [current] = sql
+            .exec<{ status: string }>("SELECT status FROM run")
+            .toArray();
+          const rounds = sql
+            .exec<{ ordinal: number; state: string }>(
+              "SELECT ordinal, state FROM steps WHERE type IN ('sleep', 'waitForEvent') AND name LIKE '%:busy:%' ORDER BY ordinal"
+            )
+            .toArray();
+          const latest = rounds.at(-1);
+          if (
+            current?.status !== "waiting" ||
+            rounds.length < round ||
+            latest?.state !== "waiting"
+          ) {
+            return false;
+          }
+          if (end && rounds.length === round) {
+            const now = Date.now();
+            sql.exec(
+              "UPDATE steps SET deadline = ? WHERE ordinal = ?",
+              now,
+              latest.ordinal
+            );
+            sql.exec("UPDATE run SET wake_at = ?", now);
+            await state.storage.setAlarm(now);
+          }
+          return true;
+        }
+      );
+      expect(waiting).toBeTruthy();
+    },
+    { timeout: 20_000, interval: 100 }
+  );
+};
+
+/**
  * Keeps the first lease of `run`'s attempts ending a second from now, again
  * and again, until the returned stop is called: as when those ahead take
  * each lease as it ends, so a step waiting for the share is told, round
@@ -283,35 +329,6 @@ export const holdingOf = async (run: string): Promise<number> =>
   )
     .bind(run)
     .first<number>("held")) ?? 0;
-
-/**
- * Core's environment, its database counting the statements that read the
- * quota policy (`policyReads`), as a settle would make them.
- */
-export const countingPolicyReads = (): {
-  env: Env;
-  policyReads: () => number;
-} => {
-  const database = env.DB;
-  let reads = 0;
-  const counted = new Proxy(database, {
-    get: (target, property) => {
-      if (property === "prepare") {
-        return (query: string) => {
-          if (query.includes("quota_policies")) {
-            reads += 1;
-          }
-          return target.prepare(query);
-        };
-      }
-      const value: unknown = Reflect.get(target, property);
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
-    },
-  });
-  return { env: { ...env, DB: counted }, policyReads: () => reads };
-};
 
 /** How `run` failed, as its `workflow.run.failed` event names it; none yet. */
 export const failedWith = async (run: string): Promise<unknown> => {

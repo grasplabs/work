@@ -174,13 +174,13 @@ describe("adding a client", () => {
         },
         attempts: 1,
         words: [
-          "Not started: no hosting destination ready. Record a shared destination on Platform, or choose one below.",
+          "Not started: no shared hosting destination yet. The admin records its own as soon as it is read.",
           "Not started: no release imported yet. CI publishes one per merge, and the admin imports it within 5 minutes.",
         ],
       });
     } finally {
       // The tests after choose among their own destinations alone.
-      await db.update(hostingDestinations).set({ policies: "[]" });
+      await db.update(hostingDestinations).set({ accountId: null });
     }
   });
 
@@ -231,7 +231,6 @@ describe("adding a client", () => {
       {
         clientId: input.clientId,
         releaseId,
-        policyId: "eu-storage",
         destinationId: null,
       },
       { email: staff.email }

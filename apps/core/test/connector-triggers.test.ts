@@ -5,7 +5,6 @@ import {
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
-import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -43,6 +42,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { configuredLimits } from "./quota-limits.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -329,12 +329,6 @@ const fillHour = async (receipt: string): Promise<void> => {
   );
 };
 
-/** Each policy a test sets, under a generation higher than any before. */
-let generations = 3000;
-
-/** The limits the tests' deployment sets (vite.config.ts). */
-const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
-
 describe("connector triggers", { timeout: 120_000 }, () => {
   it("start one run per event with the mapped input, however often it is delivered, and never again once cancelled", async () => {
     const admin = await person("admin");
@@ -584,11 +578,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     const shared = await connection();
     const mailbox = await accountOf(shared);
     const trigger = await connectorTrigger(admin, workflow.id, shared);
-    generations += 1;
-    env.QUOTA_LIMITS = {
-      generation: generations,
-      limits: { workflowNestingLevels: 3 },
-    };
+    env.TEST_QUOTA_LIMITS = { workflowNestingLevels: 3 };
     try {
       // Mail from outside: a root.
       await deliverConnectorEvent(env, mailEvent(shared));
@@ -618,8 +608,7 @@ describe("connector triggers", { timeout: 120_000 }, () => {
         );
       }
     } finally {
-      generations += 1;
-      env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+      env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     const lineage = await env.DB.prepare(
       "SELECT run.depth, run.root_run_id AS root FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE receipt.invoker_id = ? ORDER BY run.depth"

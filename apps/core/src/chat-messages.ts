@@ -1,6 +1,16 @@
-import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
-import { chatCitationsMax, citedQuoteMax } from "@grasp-os/shared/chat";
 import type {
+  AssistantMessage,
+  Message,
+  ToolResultMessage,
+  Usage,
+} from "@earendil-works/pi-ai";
+import {
+  chatAskSchema,
+  chatCitationsMax,
+  citedQuoteMax,
+} from "@grasp-os/shared/chat";
+import type {
+  ChatAsked,
   ChatCitation,
   ChatCode,
   ChatMessage,
@@ -9,13 +19,28 @@ import type {
   ChatReplyEnd,
   ChatReplyUsage,
 } from "@grasp-os/shared/chat";
+import { thinkingStepSchema } from "@grasp-os/shared/thinking";
+import type { ThinkingStep } from "@grasp-os/shared/thinking";
 
+import { showThinkingName } from "./agent-messages.ts";
 import { contextWindowOf, modelFailureOf } from "./models.ts";
 
 // A chat's transcript as pi keeps it (workspace.ts), shown as the person
 // reads it: their questions, the agent's answers with the code it ran and
 // what the model thought before them, and each code step's result. The
 // agent's instructions, and the APIs and the memory it was shown, stay out.
+
+/**
+ * The step of thinking a `show_thinking` call showed, as core accepted it
+ * (agent-thinking.ts); none for another call's result, or one refused.
+ */
+const thinkingOf = (message: ToolResultMessage): ThinkingStep | undefined => {
+  if (message.toolName !== showThinkingName || message.isError) {
+    return undefined;
+  }
+  const step = thinkingStepSchema.safeParse(message.details);
+  return step.success ? step.data : undefined;
+};
 
 /** The text parts of a message's content, joined. */
 const textOf = (
@@ -44,6 +69,23 @@ const codeOf = (message: AssistantMessage): ChatCode[] =>
     const { code } = part.arguments;
     return [{ callId: part.id, code: typeof code === "string" ? code : "" }];
   });
+
+/**
+ * The questions a response asked the person (`askQuestions`), as the tool
+ * took them: its first call the tool took; none when it asked none, or
+ * only in shapes the tool refused (the model was told why).
+ */
+const askedOf = (message: AssistantMessage): ChatAsked | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "askQuestions") {
+      const ask = chatAskSchema.safeParse(part.arguments);
+      if (ask.success) {
+        return { callId: part.id, ...ask.data };
+      }
+    }
+  }
+  return undefined;
+};
 
 /**
  * What a response thought, as far as it has streamed in: each thinking
@@ -408,14 +450,18 @@ export const noteLinksOf = (
  * A stored message as the person reads it; `undefined` for a system one.
  * An answer cites the notes `given` holds (`citedIn`): the documents its
  * chat's code was given before it; it thought for `thinkingMs`, as core
- * kept it.
+ * kept it. It asks the person questions only in a chat whose agent is
+ * offered `askQuestions` (`asking`, Grasp's own app): one a chat app's
+ * model calls anyway was never offered, so it shows as the failed call it
+ * is, never as questions.
  */
 export const chatMessageOf = (
   id: number,
   message: Message,
   createdAt: Date,
   given: (documentId: string) => boolean = givenNothing,
-  thinkingMs: number | null = null
+  thinkingMs: number | null = null,
+  asking = false
 ): ChatMessage | undefined => {
   const at = createdAt.toISOString();
   if (message.role === "user") {
@@ -425,6 +471,7 @@ export const chatMessageOf = (
     const usage = usageOf(message);
     const { text, citations } = citedIn(textOf(message.content), given);
     const reasoning = reasoningOf(message, thinkingMs);
+    const asked = asking ? askedOf(message) : undefined;
     return {
       id,
       role: "assistant",
@@ -432,6 +479,7 @@ export const chatMessageOf = (
       citations,
       code: codeOf(message),
       ...(reasoning === undefined ? {} : { reasoning }),
+      ...(asked === undefined ? {} : { asked }),
       end: ends[message.stopReason],
       ...(message.stopReason === "error"
         ? { failure: modelFailureOf(message.errorMessage) }
@@ -441,6 +489,7 @@ export const chatMessageOf = (
     };
   }
   if (message.role === "toolResult") {
+    const thinking = thinkingOf(message);
     return {
       id,
       role: "result",
@@ -448,6 +497,7 @@ export const chatMessageOf = (
       text: textOf(message.content),
       failed: message.isError,
       at,
+      ...(thinking === undefined ? {} : { thinking }),
     };
   }
   return undefined;

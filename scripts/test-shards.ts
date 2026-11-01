@@ -213,3 +213,41 @@ export const startsFirst = (a: TimedFile, b: TimedFile): number => {
   }
   return b.seconds - a.seconds || byKey(a.key, b.key);
 };
+
+/**
+ * How long a shard may take, by `shardSeconds`, before CI adds another: a
+ * run splits its files into the fewest shards that each end within it
+ * (`shardCountFor`). Every shard is a runner, with about a minute of
+ * checkout and install before its first test, and GitHub runs at most
+ * about 60 of the organization's jobs at once, so fewer, longer shards
+ * let more pull requests through. On GitHub's 4-CPU runners the model
+ * matched the shards' measured test steps (24 shards: at most 301 s
+ * modelled, 313 s measured, October 2026). Ten minutes keeps a shard well
+ * inside the test step's 15 and the stall reporter's 13: the whole suite
+ * in 13 shards instead of 24.
+ */
+export const shardTargetSeconds = 600;
+
+/** The most shards a run splits into, however long its files take. */
+export const maxShards = 16;
+
+/**
+ * The fewest shards, of at least one per group, that run `files` each
+ * within `shardTargetSeconds`, or `maxShards` if none do; none for no
+ * files.
+ */
+export const shardCountFor = (files: readonly ShardFile[]): number => {
+  if (files.length === 0) {
+    return 0;
+  }
+  const groups = new Set(files.map(({ group }) => group)).size;
+  for (let count = groups; count < maxShards; count += 1) {
+    const longest = Math.max(
+      ...splitIntoShards(files, count).map(shardSeconds)
+    );
+    if (longest <= shardTargetSeconds) {
+      return count;
+    }
+  }
+  return Math.max(groups, maxShards);
+};

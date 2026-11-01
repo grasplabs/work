@@ -1,4 +1,5 @@
 import type { RunActivity, RunActivityDay } from "@grasp-os/shared/workflows";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -45,7 +46,7 @@ const outcomeNames: Record<RunOutcome, MessageDescriptor> = {
 /** Each outcome's part of a column: green once done, orange where it failed, pale while it waits. */
 const outcomeFills: Record<RunOutcome, string> = {
   completed: "fill-status-agreed",
-  failed: "fill-destructive",
+  failed: "fill-status-attention",
   waiting: "fill-status-attention/40",
   other: "fill-muted-foreground/30",
 };
@@ -53,7 +54,7 @@ const outcomeFills: Record<RunOutcome, string> = {
 /** Each outcome's mark in the key, as its part of a column. */
 const outcomeSwatches: Record<RunOutcome, string> = {
   completed: "bg-status-agreed",
-  failed: "bg-destructive",
+  failed: "bg-status-attention",
   waiting: "bg-status-attention/40",
   other: "bg-muted-foreground/30",
 };
@@ -232,8 +233,7 @@ const Headline = ({ days }: { days: readonly RunActivityDay[] }) => {
     <p className="flex flex-wrap items-baseline gap-x-2">
       <span>
         <Trans>
-          <span className="text-2xl font-medium tabular-nums">{without}</span>{" "}
-          without a person
+          <Stat>{without}</Stat> without a person
         </Trans>
       </span>
       <span className="text-muted-foreground text-xs">
@@ -271,7 +271,7 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
         {counts.map(({ key, name, count }) => (
           <div className="flex flex-col" key={key}>
             <dt className="text-muted-foreground text-xs">{i18n._(name)}</dt>
-            <dd className="text-2xl font-medium tabular-nums">{count}</dd>
+            <Stat render={<dd />}>{count}</Stat>
           </div>
         ))}
       </dl>

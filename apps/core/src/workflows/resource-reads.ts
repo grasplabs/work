@@ -5,7 +5,13 @@ import type { PinnedVersion } from "@grasp-os/brain/recall-store";
 import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
-import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import {
+  chatIdSchema,
+  collectionIdSchema,
+  permissionIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
@@ -16,7 +22,12 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { permissions, runEvidenceHolds } from "../db/core/schema.ts";
+import {
+  permissions,
+  runChatSources,
+  runEvidenceHolds,
+} from "../db/core/schema.ts";
+import { readableSources } from "../history-access.ts";
 import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
@@ -425,11 +436,51 @@ export const callTemplate = async (
   };
 };
 
+/**
+ * Refuses, as `brain.revoked`, run `runId` once the chat whose agent had
+ * it started may no longer read, for its person, something it had read
+ * then (GRA-1093, workflow-starts.ts): as the chat's own history check
+ * decides it (`readableSources`), under the chat's agent and person as
+ * they are now.
+ */
+const requireChatPinsReadable = async (
+  env: Env,
+  runId: string
+): Promise<void> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(runChatSources)
+    .where(eq(runChatSources.runId, runId));
+  const [first] = rows;
+  if (first === undefined) {
+    return;
+  }
+  const readable = await readableSources(
+    env,
+    {
+      workspaceId: workspaceIdSchema.parse(first.workspaceId),
+      chatId: chatIdSchema.parse(first.chatId),
+      agentId: first.agentId,
+      personId: first.personId,
+    },
+    rows.map(({ sourceId }) => sourceId)
+  ).catch((error: unknown) => {
+    if (isAccessRefusal(error) || isExpectedError(error)) {
+      throw brainErrors.create("brain.revoked");
+    }
+    throw error;
+  });
+  if (rows.some(({ sourceId }) => !readable.has(sourceId))) {
+    throw brainErrors.create("brain.revoked");
+  }
+};
+
 /** `requireResourceRunEvidenceReadable` for `run`'s own evidence alone. */
 const requireOwnEvidenceReadable = async (
   env: Env,
   run: CallingRun
 ): Promise<void> => {
+  await requireChatPinsReadable(env, run.runId);
   const rows = await evidenceOf(env, run.runId);
   if (rows.length === 0) {
     return;

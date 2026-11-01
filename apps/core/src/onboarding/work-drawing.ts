@@ -16,7 +16,7 @@ import { orgRulesSchema } from "@grasp-os/shared/onboarding-staff";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
 import { z } from "zod";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 import type { Took } from "./store.ts";
 import { NoDrawingModelError } from "./team-map.ts";
 
@@ -474,7 +474,7 @@ export const drawWork = async (
   brief: WorkBrief,
   count: (took: Took) => void
 ): Promise<DrawnWork> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

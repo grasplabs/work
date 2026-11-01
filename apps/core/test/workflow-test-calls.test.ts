@@ -1,12 +1,11 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { activateVersion } from "../src/app-activation.ts";
@@ -20,7 +19,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { fakeGateway } from "./ai-gateway.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
 import { appWith, calledAs, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
@@ -259,17 +258,13 @@ const endedIn = async (app: RequestsApp): Promise<unknown> => {
   return ended;
 };
 
-/** The model gateway, faked: what it was asked. */
-const watchedGateway = () => {
-  const gateway = fakeGateway({
+/** The model's provider, faked: what it was asked. */
+const watchedProvider = async () =>
+  await fakeProvider({
     text: '{"line":"From a real model"}',
     inputTokens: 1,
     outputTokens: 1,
   });
-  const ai: AiBinding = env.AI;
-  vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  return gateway;
-};
 
 /** Activates version 1 of `app`: "current", or the refusal's failures. */
 const activated = async (
@@ -332,12 +327,8 @@ describe(
   "a workflow test's model and store calls",
   { timeout: 180_000 },
   () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-    });
-
     it("answer a model call with the fixture's answer, and never ask a model or leave a trace of one", async () => {
-      const gateway = watchedGateway();
+      const provider = await watchedProvider();
       const app = await requestsApp(
         [summarize, { finish: { set: { status: "${ $context.line }" } } }],
         { models: { summary: { line: "Hello from the fixture" } } },
@@ -357,7 +348,7 @@ describe(
       });
       expect({
         outcome,
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
         traces: events
           .map(({ action }) => action)
           .filter(
@@ -374,7 +365,7 @@ describe(
     });
 
     it("fail a model call the fixture gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
-      const gateway = watchedGateway();
+      const provider = await watchedProvider();
       const tasks = [
         summarize,
         { finish: { set: { status: "${ $context.line }" } } },
@@ -406,7 +397,7 @@ describe(
             { models: { summary: { line: "Hi" } } }
           )
         ),
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
       }).toMatchObject({
         unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
         otherBinding: { status: "failed", code: "workflow.test_unfixtured" },
@@ -527,7 +518,7 @@ describe(
     });
 
     it("write once and answer once, though the run stops after its calls and starts again", async () => {
-      const gateway = watchedGateway();
+      const provider = await watchedProvider();
       const app = await requestsApp(
         [
           save,
@@ -571,7 +562,7 @@ describe(
         ended,
         saved,
         completed,
-        asked: gateway.requests.length,
+        asked: provider.requests.length,
       }).toStrictEqual({
         ended: { status: "completed", output: { status: "Hello" } },
         saved: { ok: true, value: ["Ada"] },

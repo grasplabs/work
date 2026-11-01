@@ -13,9 +13,7 @@ import { z } from "zod";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
-import { pointAtGateway } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import { configureObject } from "./agent-chat.ts";
 import {
   botConnectorMembersUrl,
   botConnectorPostedUrl,
@@ -24,6 +22,8 @@ import {
   teamsBot,
 } from "./connect-providers.ts";
 import type { Idp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { FakeProvider, ProviderReply } from "./model-provider.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -268,25 +268,23 @@ export const kept = async (conversation: string) => {
 
 /**
  * A member of the client signed in once, writing to the bot on Teams,
- * whose chats `gateway` answers. Workspace objects share their
- * env, so people in one test share one gateway.
+ * whose chats `provider` answers. The organization has one provider at a
+ * time, so people in one test share it: answer them all from one.
  */
-export const memberAnsweredBy = async (
-  idp: Idp,
-  gateway: ReturnType<typeof fakeGateway>
-) => {
+export const memberAnsweredBy = async (idp: Idp, provider: FakeProvider) => {
   const signedIn = await signedInApi(idp, "user");
-  await pointAtGateway(
-    workspace(env, personalWorkspaceId(signedIn.userId)),
-    gateway
-  );
+  await configureObject(workspace(env, personalWorkspaceId(signedIn.userId)));
   const { oid } = signedIn.person;
   if (typeof oid !== "string") {
     throw new TypeError("Expected an Entra object id");
   }
-  return { ...signedIn, gateway, teams: teamsPerson(oid) };
+  return { ...signedIn, provider, teams: teamsPerson(oid) };
 };
 
-/** A member whose chats `replies` answer, in order. */
-export const member = async (idp: Idp, ...replies: GatewayReply[]) =>
-  await memberAnsweredBy(idp, fakeGateway(...replies));
+/**
+ * A member whose chats `replies` answer, in order. It connects a new
+ * provider, which stops the one before: a second person in the test is
+ * answered by `memberAnsweredBy` with the first one's provider.
+ */
+export const member = async (idp: Idp, ...replies: ProviderReply[]) =>
+  await memberAnsweredBy(idp, await fakeProvider(...replies));

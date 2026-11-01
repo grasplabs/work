@@ -1,18 +1,14 @@
 import type { Organization } from "@grasp-os/shared/organization";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@grasp-os/ui/components/sidebar";
+import { BrandHeader } from "@grasp-os/ui/components/brand-header";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { GraspMark } from "../grasp-mark.tsx";
 
-// The sidebar's header, as the prototype's (`app-sidebar.tsx`): the mark,
-// and the organization's name over "Grasp", the product it works in.
+// The sidebar's header, as the prototype's (`app-sidebar.tsx`): the kit's
+// BrandHeader, which the admin shows too, with the organization's name over
+// "Grasp", the product it works in.
 // Until core says the name, or when it has none, "Grasp" alone. Read from
 // core as the shell mounts, and changed at once when an admin renames the
 // organization on this page (`organizationRenamed`), so the header never
@@ -83,27 +79,12 @@ const readName = async (
 };
 
 /** The header's link home, with `name` over "Grasp" when there is one. */
-export const SidebarBrandView = ({ name }: { name?: string }) => (
-  <SidebarMenu>
-    <SidebarMenuItem>
-      <SidebarMenuButton render={<Link to="/" />} size="lg">
-        <span className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-          <GraspMark className="size-4" />
-        </span>
-        {name === undefined ? (
-          <span className="truncate font-medium">Grasp</span>
-        ) : (
-          <span className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-medium">{name}</span>
-            <span className="text-muted-foreground truncate text-xs">
-              Grasp
-            </span>
-          </span>
-        )}
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  </SidebarMenu>
-);
+export const SidebarBrandView = ({ name }: { name?: string }) =>
+  name === undefined ? (
+    <BrandHeader render={<Link to="/" />} title="Grasp" />
+  ) : (
+    <BrandHeader render={<Link to="/" />} subtitle="Grasp" title={name} />
+  );
 
 /**
  * The header, reading the organization's name once with `organization`,

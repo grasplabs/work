@@ -2,13 +2,10 @@ import type {
   AbandonBackfill,
   AbandonedBackfill,
   AppStoreBackfill,
-  MigrationSample,
-  SampleMigration,
   StoreBackfill,
   StoresApi,
 } from "@grasp-os/shared/stores";
 
-import { sampleMigration } from "./migration-samples.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -19,8 +16,7 @@ import {
 } from "./store-abandon.ts";
 
 // Business stores over `/rpc`, for admins: a store's failed schema change,
-// and abandoning it (store-abandon.ts, where who may is decided); an
-// explicit migration's dry run on a sample (migration-samples.ts, likewise).
+// and abandoning it (store-abandon.ts, where who may is decided).
 
 /** Business stores over `/rpc`, for admins, never Grasp staff. */
 export class StoresRpc extends CoreRpcTarget implements StoresApi {
@@ -51,13 +47,6 @@ export class StoresRpc extends CoreRpcTarget implements StoresApi {
     return await withPerson(
       this.#check,
       async (person) => await abandonStoreBackfill(this.#env, person, input)
-    );
-  }
-
-  async sampleMigration(input: SampleMigration): Promise<MigrationSample> {
-    return await withPerson(
-      this.#check,
-      async (person) => await sampleMigration(this.#env, person, input)
     );
   }
 }

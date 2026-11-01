@@ -58,8 +58,6 @@ export const settingsErrorCodes = [
   "secret_invalid",
   /** A Teams bot that isn't one: an app id or tenant that isn't a GUID, or no expiry day. */
   "teams_bot_invalid",
-  /** Others kept changing the setting while this change was made: read it again. */
-  "changed_meanwhile",
 ] as const;
 export type SettingsErrorCode = (typeof settingsErrorCodes)[number];
 
@@ -78,15 +76,6 @@ const clientIdSchema = z.string().min(1);
 export const ringInputSchema = z.object({
   clientId: clientIdSchema,
   ring: z.int().nonnegative(),
-});
-
-/** The most staff may set a client's monthly model spend ceiling to, in euros. */
-export const modelSpendCeilingMost = 100_000;
-
-export const modelSpendCeilingInputSchema = z.object({
-  clientId: clientIdSchema,
-  /** Whole euros a month, at least one. */
-  euros: z.int().min(1).max(modelSpendCeilingMost),
 });
 
 /**
@@ -133,72 +122,6 @@ export const setRing = async (
       .set({ ring, updatedAt: new Date() })
       .where(and(eq(clients.id, clientId), ne(clients.ring, ring))),
     { action: "client.ring", clientId, detail: { ring } }
-  );
-};
-
-/** How often setting a ceiling reads it again when another save got in between. */
-const ceilingTries = 3;
-
-/**
- * Sets client `clientId`'s monthly model spend ceiling to `euros`, as
- * `staff`, audited (`client.model_spend_ceiling`, with the ceiling before
- * and after) when it changes, and marks its config changed
- * (`configChangedAt`): its core's gateway enforces the new ceiling once
- * its next deploy or provisioning gives it (src/deploy/core-vars.ts).
- */
-export const setModelSpendCeiling = async (
-  env: Env,
-  staff: Staff,
-  input: z.input<typeof modelSpendCeilingInputSchema>
-): Promise<boolean> => {
-  const db = adminDatabase(env.DB);
-  const { clientId, euros } = modelSpendCeilingInputSchema.parse(input);
-  // Compare and set: the update holds only while the ceiling is still the
-  // one read, so the audited `from` is always what it replaced. A save in
-  // between makes it read again and try once more.
-  for (let tried = 0; tried < ceilingTries; tried += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- read again after a save in between
-    const [client] = await db
-      .select({ ceiling: clients.modelSpendCeiling })
-      .from(clients)
-      .where(eq(clients.id, clientId));
-    if (client === undefined) {
-      throw new SettingsError("unknown_client", `No client ${clientId}`);
-    }
-    if (client.ceiling === euros) {
-      return false;
-    }
-    const now = new Date();
-    // oxlint-disable-next-line no-await-in-loop -- one try at a time
-    const changed = await actIfChanged(
-      db,
-      staff,
-      db
-        .update(clients)
-        .set({
-          modelSpendCeiling: euros,
-          configChangedAt: now,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(clients.id, clientId),
-            eq(clients.modelSpendCeiling, client.ceiling)
-          )
-        ),
-      {
-        action: "client.model_spend_ceiling",
-        clientId,
-        detail: { from: client.ceiling, to: euros },
-      }
-    );
-    if (changed) {
-      return true;
-    }
-  }
-  throw new SettingsError(
-    "changed_meanwhile",
-    `${clientId}'s model spend ceiling kept changing while it was set`
   );
 };
 

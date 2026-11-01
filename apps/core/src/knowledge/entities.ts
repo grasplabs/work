@@ -6,8 +6,7 @@ import {
   relationsPerSource,
 } from "@grasp-os/brain/entities";
 
-import { gatewaySettings, modelForRole, models } from "../models.ts";
-import type { ModelsEnv } from "../models.ts";
+import { modelSettings, modelForRole, models } from "../models.ts";
 
 // Core's side of the Brain's `extractEntities` port (packages/brain's
 // entities.ts): reading a text for the entities it names, through the
@@ -55,10 +54,10 @@ Answer only with JSON: {"entities": [{"kind": "...", "name": "...", "identifiers
  * Refused as `brain.unavailable` when no model may read it.
  */
 export const extractEntities = async (
-  env: ModelsEnv,
+  env: Env,
   text: string
 ): Promise<unknown> => {
-  const model = modelForRole(gatewaySettings(env), "careful", {
+  const model = modelForRole(await modelSettings(env), "careful", {
     sensitive: true,
   });
   if (model === undefined) {

@@ -1,4 +1,3 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import type {
   InterviewFact,
@@ -11,22 +10,32 @@ import type { SessionApi } from "@grasp-os/shared/rpc";
 import { speechPath } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
   drawingErasure,
   interviewErasure,
 } from "../src/onboarding/interview-erasure.ts";
-import { speakerVoices, voiceModels } from "../src/onboarding/spoken-lines.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { keptLine } from "../src/speech-cache.ts";
-import { answeringGateway, fakeGateway } from "./ai-gateway.ts";
-import type { Answer, GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, approveAgreed, gatewayConfig } from "./interview-link.ts";
+import {
+  answering,
+  answeringWith as answeringWithRequests,
+  approveAgreed,
+  holdAlarm,
+} from "./interview-link.ts";
+import type { Answer, ProviderReply } from "./model-provider.ts";
 import { intakeAlike } from "./onboarding-team.ts";
+import {
+  carrying,
+  plan as planReplies,
+  release,
+} from "./platform-providers.ts";
 import { routed, signedInApi, unique } from "./sign-in.ts";
 import { wordFile } from "./word-file.ts";
 
@@ -36,7 +45,7 @@ import { wordFile } from "./word-file.ts";
 // sentinel), which its reading, the admin's answer and a drawing take up,
 // and the tests look for it everywhere it could be left: the store's
 // tables, both D1 databases, the audit log, and what an interview turn
-// knows. AI Gateway is the outside system, faked behind the AI binding.
+// knows. The model provider is the outside system, faked behind connect.
 // The ways it can fail, tried here:
 //
 // - The reading living on after its document is purged, in Stephen's
@@ -47,6 +56,8 @@ import { wordFile } from "./word-file.ts";
 // - A reading holding a purged term of a document the purge doesn't name.
 // - A drawing under way as the document goes, kept as it ends.
 
+/** The speech model lines are said in: the platform's default. */
+const speechModel = `${platformAi.speech.provider}/${platformAi.speech.model}`;
 const idp = mockIdp();
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -67,7 +78,7 @@ const documentWith = (word: string) =>
   ]);
 
 /** The model's reading of `documentWith(word)`: it says the word throughout. */
-const readingWith = (word: string): GatewayReply => ({
+const readingWith = (word: string): ProviderReply => ({
   text: JSON.stringify({
     about: `How claims are typed into ${word}.`,
     tools: [word, "Zendesk"],
@@ -86,19 +97,15 @@ const share = async (
   name: string,
   word: string
 ): Promise<{ upload: string; document: string }> => {
-  const fake = fakeGateway(readingWith(word));
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  let shared: { id: string };
-  try {
-    shared = await admin.onboarding.shareDocument({
-      locale: "en",
-      name,
-      bytes: documentWith(word),
-    });
-  } finally {
-    spy.mockRestore();
-  }
+  const { result: shared } = await answering(
+    [readingWith(word)],
+    async () =>
+      await admin.onboarding.shareDocument({
+        locale: "en",
+        name,
+        bytes: documentWith(word),
+      })
+  );
   await admin.onboarding.answerDocument(shared.id, `Only in ${word} now.`);
   const document = await vi.waitFor(
     async () => {
@@ -234,7 +241,7 @@ const agree = async (
 const mapReply = (
   ids: Ids,
   does = "Answers customers' questions"
-): GatewayReply => ({
+): ProviderReply => ({
   text: JSON.stringify({
     does,
     works: [
@@ -288,7 +295,7 @@ const ticketsReply = (ids: Ids, tool: string): Answer => ({
 });
 
 /** The rota as drawn, Lea's own. */
-const rotaReply = (ids: Ids): GatewayReply => ({
+const rotaReply = (ids: Ids): ProviderReply => ({
   text: JSON.stringify({ steps: [{ text: "Plan the rota.", by: [ids.lea] }] }),
   inputTokens: 1,
   outputTokens: 1,
@@ -316,37 +323,29 @@ const toldAll = async (ids: Ids, maxSays = "Tickets arrive in Zendesk.") => {
   await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
 };
 
-/** What `run` returns while the gateway answers each request with what `respond` makes. */
+/** What `run` returns while the provider answers each request with what `respond` makes. */
 const answeringWith = async <T>(
-  respond: () => Promise<GatewayReply>,
+  respond: () => Promise<ProviderReply>,
   run: () => Promise<T>
 ): Promise<T> => {
-  const gateway = answeringGateway(respond);
-  const before = env.MODEL_GATEWAY;
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    return await run();
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
+  const { result } = await answeringWithRequests(respond, run);
+  return result;
 };
 
 /**
  * A reply naming the purged word for the first request only, the drawing
- * already under way as the purge lands; `clean` for every one after. Any
+ * already under way as the purge lands (chosen as each request arrives,
+ * before it waits on the purge); `clean` for every one after. Any
  * drawing after the purge (the store's own alarm, which the purge arms,
- * may draw again while the test still answers the gateway) reads what the
+ * may draw again while the test still answers the provider) reads what the
  * purge left, so a model would never give the word back: answering it
  * with the word would put it back in the store, and the test would race
  * that alarm.
  */
 const namingFirst = (
-  naming: () => GatewayReply,
-  clean: () => GatewayReply
-): (() => GatewayReply) => {
+  naming: () => ProviderReply,
+  clean: () => ProviderReply
+): (() => ProviderReply) => {
   let asked = false;
   return () => {
     const first = !asked;
@@ -358,27 +357,21 @@ const namingFirst = (
 /** Draws whatever is due, the tickets with `tool`, until nothing is; whether a request carried `word`. */
 const drawAll = async (ids: Ids, tool: string, word: string) => {
   const store = onboardingStore(env);
-  const gateway = answeringGateway((requests) =>
-    JSON.stringify(requests.at(-1)?.body).includes("planning the rota")
-      ? rotaReply(ids)
-      : ticketsReply(ids, tool)
-  );
-  const before = env.MODEL_GATEWAY;
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(gateway.binding.fetch);
-  env.MODEL_GATEWAY = gatewayConfig;
-  try {
-    for (let round = 0; round < 5; round += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
-      if ((await store.drawNext()) === null) {
-        break;
+  const { requests } = await answeringWithRequests(
+    (sent) =>
+      JSON.stringify(sent.at(-1)?.body).includes("planning the rota")
+        ? rotaReply(ids)
+        : ticketsReply(ids, tool),
+    async () => {
+      for (let round = 0; round < 5; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one drawing at a time, as the alarm draws
+        if ((await store.drawNext()) === null) {
+          break;
+        }
       }
     }
-  } finally {
-    env.MODEL_GATEWAY = before;
-    spy.mockRestore();
-  }
-  return JSON.stringify(gateway.requests.map(({ body }) => body))
+  );
+  return JSON.stringify(requests.map(({ body }) => body))
     .toLowerCase()
     .includes(word);
 };
@@ -604,6 +597,11 @@ describe(
   "a document shared in the onboarding, purged from Knowledge",
   { timeout: 180_000 },
   () => {
+    // Each test draws step by step, as the alarm would: the store's own
+    // alarm, which agreeing and purging set, would otherwise race it for
+    // the drawing and the provider's replies (`holdAlarm`).
+    beforeEach(holdAlarm);
+
     it("takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns, and draws the work again", async () => {
       const { api: admin } = await signedInApi(idp, "admin");
       const word = sentinelOf();
@@ -697,7 +695,7 @@ describe(
       /**
        * Tickets drawn from what Max said, naming a word, while a content
        * purge of it reaches the interviews `when`: as the brief reads the
-       * company's name, or as the drawing's request reaches the gateway,
+       * company's name, or as the drawing's request reaches the provider,
        * each inside the store's call.
        */
       const purgedWhile = async (when: "brief" | "drawing") => {
@@ -773,7 +771,7 @@ describe(
         () => ticketsReply(ids, "Zendesk")
       );
       // The document goes while the tickets are drawn with it: as the
-      // drawing's request reaches the gateway, inside the store's call.
+      // drawing's request reaches the provider, inside the store's call.
       const drew = await answeringWith(
         async () => {
           // A stub of its own: the store's call is another I/O context.
@@ -854,8 +852,11 @@ const writers: Writer[] = [
       );
       await answeringWith(
         async () => {
+          // Chosen as the request arrives, before the purge it waits on:
+          // only the drawing already under way is answered with the word.
+          const answer = reply();
           await landing.once();
-          return reply();
+          return answer;
         },
         async () => await onboardingStore(env).drawNext()
       );
@@ -877,8 +878,11 @@ const writers: Writer[] = [
       );
       await answeringWith(
         async () => {
+          // Chosen as the request arrives, before the purge it waits on:
+          // only the drawing already under way is answered with the word.
+          const answer = reply();
           await landing.once();
-          return reply();
+          return answer;
         },
         async () => await store.drawNext()
       );
@@ -894,33 +898,26 @@ const writers: Writer[] = [
       const told = fact("l1", "work", `Tickets arrive in ${word}.`);
       const link = await openLink(ids.lea);
       await agree(ids.lea, [told], link);
-      const gateway = answeringGateway(async () => {
-        await landing.once();
-        return { speech: { audio: "mp3 bytes" } };
+      // ElevenLabs says the line once the purge has landed meanwhile.
+      const held = `line-${unique()}`;
+      await planReplies(platformElevenLabsKey, [{ release: held }]);
+      const saying = routed(speechPath, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: told.text, language: "en", link }),
       });
-      const before = env.MODEL_GATEWAY;
-      const ai: AiBinding = env.AI;
-      const spy = vi
-        .spyOn(ai, "fetch")
-        .mockImplementation(gateway.binding.fetch);
-      env.MODEL_GATEWAY = {
-        gateway: "grasp-os-test",
-        models: [voiceModels.said, voiceModels.quick],
-      };
-      try {
-        await routed(speechPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: told.text, language: "en", link }),
-        });
-      } finally {
-        env.MODEL_GATEWAY = before;
-        spy.mockRestore();
-      }
+      await vi.waitFor(async () => {
+        await expect(carrying(told.text)).resolves.toHaveLength(1);
+      });
+      await landing.once();
+      await release(held);
+      const said = await saying;
+      await said.body?.cancel();
       const kept = await keptLine(env, {
+        text: told.text,
         spoken: told.text,
-        voice: speakerVoices.stephen,
-        model: voiceModels.said,
+        voice: platformAi.speech.voices.stephen,
+        model: speechModel,
         language: "en",
       });
       return kept === undefined ? [] : ["speech cache"];
@@ -932,6 +929,11 @@ describe(
   "a writer under way as a content purge lands",
   { timeout: 60_000 },
   () => {
+    // Each writer runs as the alarm would: the store's own alarm, which
+    // agreeing and the purge set, would otherwise draw beside it, after
+    // the purge, and race it for the provider's replies (`holdAlarm`).
+    beforeEach(holdAlarm);
+
     it.each(writers)("keeps nothing purged: $name", async ({ run }) => {
       const word = sentinelOf();
       const landing = purgeOnce(word);
@@ -950,6 +952,8 @@ describe(
   "what was drawn, as a purge and a new drawing cross",
   { timeout: 120_000 },
   () => {
+    beforeEach(holdAlarm);
+
     it("drops a work's checked difference when the work is drawn again", async () => {
       const word = sentinelOf();
       const { ids, tickets } = await ticketsNaming(word);

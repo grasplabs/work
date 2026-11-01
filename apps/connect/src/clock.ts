@@ -2,6 +2,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { ClockObject } from "@grasp-os/workerflow/clock";
 import type { ClockReport, ClockTask } from "@grasp-os/workerflow/clock";
 
+import { resealAiProviderKeys } from "./ai-providers.ts";
 import {
   purgeExpiredToolkitFlows,
   retryComposioCleanups,
@@ -39,6 +40,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // What a rotated key sealed, sealed again.
   { name: "vault.tokens", period: "minute", run: resealTokens },
   { name: "vault.flows", period: "minute", run: resealFlows },
+  { name: "vault.ai_keys", period: "minute", run: resealAiProviderKeys },
 ];
 
 /** How connect logs a task that failed: its name and the error, nothing it worked on. */

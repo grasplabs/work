@@ -14,7 +14,6 @@ import onboardingMigrations from "../src/db/onboarding/migrations/migrations.js"
 import { intakeIds } from "../src/onboarding/brain-intake.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { claimChecksMax } from "../src/onboarding/team-claims.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
 import {
   answering,
@@ -22,6 +21,8 @@ import {
   holdAlarm,
   onLink,
 } from "./interview-link.ts";
+import { keyChanger } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import {
   agree,
   claimsReply,
@@ -51,8 +52,8 @@ import {
 // src/onboarding/brain-intake.ts): once a piece of work is drawn, its
 // team, one source for its interviews, the facts its people agreed to and
 // the drawing reach the brain's records, which every member reads.
-// AI Gateway is the outside system, faked behind the AI binding. The ways
-// it can fail, tried here:
+// The model provider is the outside system, faked behind connect. The
+// ways it can fail, tried here:
 //
 // - A record pointing at a person: their id, their name, their own words
 //   or quote, a source of their own, or the lead's facts, whose role alone
@@ -227,6 +228,20 @@ describe(
         rota: false,
         named: { ids: [], names: [], words: false, lead: false },
       });
+      // The interviews it learned from, counted by week, five or more a
+      // week, on the week's Monday: never who gave them, or on which day.
+      expect({
+        mondays: brain.interviewWeeks.every(
+          ({ week }) => new Date(`${week}T00:00:00Z`).getUTCDay() === 1
+        ),
+        fiveOrMore: brain.interviewWeeks.every(
+          ({ interviews }) => interviews >= 5
+        ),
+        counted: brain.interviewWeeks.reduce(
+          (sum, { interviews }) => sum + interviews,
+          0
+        ),
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
@@ -357,6 +372,39 @@ describe(
         earlier: 1,
         still: false,
         drawings: ["Close the ticket."],
+      });
+    });
+
+    it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
+      const store = onboardingStore(env);
+      const ids = await team();
+      await mapped(ids);
+      await told(ids);
+      await answering([fiveToldReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      // Six finished in the week of 5 October, Noor the week after.
+      await runInDurableObject(store, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE interview_states SET completed_at = CASE person WHEN ? THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
+          ids.noor
+        );
+      });
+      const member = await signedInApi(idp, "user");
+      const weeks = async () => {
+        const brain = await member.api.brain.read();
+        return brain.interviewWeeks;
+      };
+      const before = await weeks();
+      await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+      const oneWithdrew = await weeks();
+      await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
+      const twoWithdrew = await weeks();
+      expect({ before, oneWithdrew, twoWithdrew }).toStrictEqual({
+        before: [{ week: "2026-10-05", interviews: 6 }],
+        oneWithdrew: [{ week: "2026-10-05", interviews: 5 }],
+        // The four left of that week stay out, and never join Noor's week,
+        // where the five they would make would tell how many were left.
+        twoWithdrew: [],
       });
     });
 
@@ -779,7 +827,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes nothing when a check fails at the gateway", async () => {
+  it("writes nothing when a check fails at the provider", async () => {
     const ids = await drawnTeam();
     await intake(ids, [{ ...zendeskClaim, fails: true }]);
     const records = await kept(ids);
@@ -1319,8 +1367,9 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
 
   it("writes nothing while no model can put the claims together, never a person's fact on its own", async () => {
     const ids = await drawnTeam();
-    // No gateway: no model the deployment allows. A team an earlier test
-    // left due fails first, as this one does.
+    // No provider connected: no model at all. A team an earlier test left
+    // due fails first, as this one does.
+    await env.CONNECT.removeAiProviderKey("anthropic", keyChanger);
     let gave: string | null = null;
     for (let round = 0; round < 5 && gave !== `brain:${ids.team}`; round += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
@@ -1385,7 +1434,7 @@ const keptDrawing = z.looseObject({
 });
 
 /** A drawing the model answers with. */
-const drawingReply = (value: unknown): GatewayReply => ({
+const drawingReply = (value: unknown): ProviderReply => ({
   text: JSON.stringify(value),
   inputTokens: 100,
   outputTokens: 10,
@@ -1393,7 +1442,7 @@ const drawingReply = (value: unknown): GatewayReply => ({
 
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
 const givenWith = async (
-  reply: (ids: Ids) => GatewayReply,
+  reply: (ids: Ids) => ProviderReply,
   part?: PartJudge
 ) => {
   const ids = await team();
@@ -1420,6 +1469,10 @@ const givenWith = async (
 // - A question for the next interviews, written from what few said.
 // - Staff reading what the company's people told.
 describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
+  // The test draws and gives the brain each team itself, with a model
+  // faked: the store's own alarm would try first, and take its replies.
+  beforeEach(holdAlarm);
+
   it("counts a number only for the work it is about: one a person gave for other work never backs this one", async () => {
     // Each of the six gave numbers, but for the rota, not for tickets.
     const ids = await team();

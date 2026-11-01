@@ -9,30 +9,11 @@ import {
 } from "@grasp-os/ui/components/table";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 
 import { useOrganization } from "../../../admin/organization.tsx";
 import { BarList, Figure } from "../../../admin/parts.tsx";
+import { Section } from "../../../admin/section.tsx";
 import { knowledgeSourceWords, plural } from "../../../admin/words.ts";
-
-/** A part of the section: its title, what it is for, and what it shows. */
-const BrainPart = ({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex flex-col gap-0.5 px-5 py-4">
-      <h2 className="font-medium">{title}</h2>
-      <p className="text-muted-foreground">{description}</p>
-    </div>
-    {children}
-  </section>
-);
 
 /**
  * The company's brain, as the prototype shows it
@@ -102,7 +83,7 @@ const BrainSection = () => {
         {`${admin.client.name} doesn’t share its brain with Grasp’s staff, so only its counts show here. What people said stays in their own interviews.`}
       </p>
 
-      <BrainPart
+      <Section
         description="Each source of what Grasp knows, and how much of it is in. The largest gap is first."
         title="What it stands on"
       >
@@ -128,9 +109,9 @@ const BrainSection = () => {
             </p>
           )}
         </div>
-      </BrainPart>
+      </Section>
 
-      <BrainPart
+      <Section
         description="What each team’s people agreed to, and how much of its work Grasp knows."
         title="Team by team"
       >
@@ -207,7 +188,7 @@ const BrainSection = () => {
             No teams yet: they come with who works where.
           </p>
         )}
-      </BrainPart>
+      </Section>
     </>
   );
 };

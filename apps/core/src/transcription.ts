@@ -1,8 +1,8 @@
 import { toBase64 } from "@grasp-os/shared/encoding";
+import { log } from "@grasp-os/shared/log";
 import { transcriptionErrors } from "@grasp-os/shared/voice";
 import type {
   LiveTranscription,
-  SpokenWord,
   TranscriptionEvent,
   TranscriptionOptions,
   TranscriptionSession,
@@ -10,96 +10,102 @@ import type {
 import { z } from "zod";
 
 import type { Listening } from "./models.ts";
+import { Resampler } from "./resampler.ts";
 
-// Live transcription as core implements it (`elevenlabs-gateway`):
-// ElevenLabs's Scribe v2 realtime, over a WebSocket core opens to the
-// deployment's AI Gateway with `fetch` and `Upgrade: websocket`, on the
-// path speech takes, with the key the gateway stores: core sends none, and
-// the browser never sees the upstream. Only for a listening the model
-// gateway admitted (models.ts, `models(env).listen`): the allowlist, the
-// rules and the budgets let it through first, and the way to the upstream
-// is the one its admission hands over. The caller holds it to the seconds
-// admitted, and says what it heard (`Listening.heard`).
+// Live transcription as core implements it: Grasp's own transcription
+// feature (@grasp-os/shared/platform-ai), OpenAI's realtime transcription
+// session by default, over a WebSocket that connect opens to OpenAI with
+// Grasp's key and relays (connect's `modelSocket`): core sends no key,
+// and the browser never sees the upstream. Only for a listening the model
+// gateway admitted (models.ts, `models(env).listen`): the rules and the
+// budgets let it through first, and the socket is the one its admission
+// opens. The caller holds it to the seconds admitted, and says what it
+// heard (`Listening.heard`).
 //
-// Audio goes through as it comes, and nothing of it is kept: not here,
-// not in a log. ElevenLabs is asked to keep nothing either
-// (`enable_logging=false`).
+// Chosen over writing each stretch down from a recording as it closes:
+// the realtime session hears as it goes, settles at each pause by itself
+// and sends its words as they come, which the relay passes on as it did
+// before (`partial`, then `final`), at a stretch's end with little delay;
+// a recording each stretch would lose the partials, and wait for a whole
+// request at the end of each. Connect relays the socket, so the key stays
+// there.
+//
+// The session wants 16-bit PCM at 24 kHz; the page sends its own rate, so
+// the audio is resampled as it comes (`Resampler`). It goes through as it
+// comes (resampler.ts), and nothing of it is kept: not here, not in a log.
+//
+// Ordering: the page counts on exactly one `final` for each of its
+// commits, in order, holding the whole stretch it closed. The session
+// also settles at pauses by itself (server VAD), into items of their own,
+// and their transcripts may come after a later item's: a stretch split at
+// a pause can have its first part written down after the page committed
+// the rest. So the relay sends no final for an item the session settled
+// at a pause: each item goes into the page's stretch it was committed in
+// (the session commits in the order it takes the audio), and a stretch's
+// one final goes out once the page committed it and every item in it was
+// written down, its items' words in their order (`settlingOf`). An item
+// was settled at a pause when the session said its speech stopped
+// (`input_audio_buffer.speech_stopped`) before committing it; any other
+// commit answers the page's. A page's commit can find nothing left to
+// settle, which the session answers with its error
+// (`input_audio_buffer_commit_empty`) in its turn: that closes the stretch
+// with what its pauses settled, or an empty final.
 
-/** The longest an upstream may take to accept the socket. */
-const openTimeoutMs = 10_000;
+/** The sample rate the realtime session takes PCM at. */
+export const sessionSampleRate = 24_000;
 
-/** A word as Scribe times it, in seconds; `spacing` between words. */
-const scribeWordSchema = z.object({
-  text: z.string(),
-  start: z.number().nonnegative(),
-  end: z.number().nonnegative(),
-  type: z.string().optional(),
-});
+/** The session's own path and query at the provider, which connect allows. */
+const realtimePath = "/v1/realtime?intent=transcription";
 
-/** What Scribe sends, as far as the relay reads it: the first that fits. */
-const scribeMessageSchema = z.union([
-  z.object({ message_type: z.literal("partial_transcript"), text: z.string() }),
-  z.object({
-    message_type: z.literal("committed_transcript_with_timestamps"),
-    text: z.string(),
-    words: z.array(scribeWordSchema).default([]),
-  }),
-  z.object({ message_type: z.string() }),
-]);
+/** The commit the session refuses as empty: answered with an empty final. */
+const emptyCommit = "input_audio_buffer_commit_empty";
 
-/** A message type of Scribe's that says it stopped: an error, a limit. */
-const stoppedType = /error|exceeded|limit/u;
-
-/** A code safe to pass on: Scribe's own message type, never its text. */
+/** A code safe to pass on: the provider's own error code, never its text. */
 const safeCode = /^[a-z_]{1,64}$/u;
 
-/** Scribe's words, timed in ms, without the spacing between them. */
-const wordsOf = (words: readonly z.infer<typeof scribeWordSchema>[]) =>
-  words
-    .filter(({ type }) => type === undefined || type === "word")
-    .map(({ text, start, end }): SpokenWord => ({
-      text,
-      startMs: Math.round(start * 1000),
-      endMs: Math.round(end * 1000),
-    }));
+/** What the session sends, as far as the relay reads it: the first that fits. */
+const serverEventSchema = z.union([
+  z.object({
+    type: z.literal("input_audio_buffer.committed"),
+    item_id: z.string(),
+  }),
+  z.object({
+    type: z.literal("input_audio_buffer.speech_stopped"),
+    item_id: z.string(),
+  }),
+  z.object({
+    type: z.literal("conversation.item.input_audio_transcription.delta"),
+    item_id: z.string(),
+    delta: z.string(),
+  }),
+  z.object({
+    type: z.literal("conversation.item.input_audio_transcription.completed"),
+    item_id: z.string(),
+    transcript: z.string(),
+  }),
+  z.object({
+    type: z.literal("conversation.item.input_audio_transcription.failed"),
+    item_id: z.string(),
+  }),
+  z.object({
+    type: z.literal("error"),
+    error: z.object({ code: z.string().nullish() }).loose(),
+  }),
+  z.object({ type: z.string() }),
+]);
 
-/** What one of Scribe's messages is to the session; `undefined` for none. */
-const eventOf = (data: unknown): TranscriptionEvent | undefined => {
+type ServerEvent = z.infer<typeof serverEventSchema>;
+
+/** One of the session's events, read; `undefined` for none it reads. */
+const serverEventOf = (data: unknown): ServerEvent | undefined => {
   if (typeof data !== "string") {
     return undefined;
   }
-  let raw: unknown = undefined;
   try {
-    raw = JSON.parse(data);
+    return serverEventSchema.safeParse(JSON.parse(data)).data;
   } catch {
     return undefined;
   }
-  const parsed = scribeMessageSchema.safeParse(raw);
-  if (!parsed.success) {
-    return undefined;
-  }
-  const message = parsed.data;
-  if ("text" in message && message.message_type === "partial_transcript") {
-    return { type: "partial", text: message.text };
-  }
-  if ("words" in message) {
-    return {
-      type: "committed",
-      text: message.text,
-      words: wordsOf(message.words),
-    };
-  }
-  // A committed transcript without timings comes with the one with them
-  // (`include_timestamps`): only that one is passed on.
-  if (stoppedType.test(message.message_type)) {
-    return {
-      type: "failed",
-      code: safeCode.test(message.message_type)
-        ? message.message_type
-        : "upstream_error",
-    };
-  }
-  return undefined;
 };
 
 /** Events in the order they come, for one reader, until ended. */
@@ -140,68 +146,225 @@ class EventQueue implements AsyncIterable<TranscriptionEvent> {
   }
 }
 
-/** The realtime endpoint's query: the session's settings, and nothing kept. */
-const queryOf = (
-  modelId: string,
-  { language, keyterms, sampleRate }: TranscriptionOptions
-) => {
-  const query = new URLSearchParams({
-    model_id: modelId,
-    language_code: language,
-    audio_format: `pcm_${sampleRate}`,
-    // Settles at each pause as well as when the page commits.
-    commit_strategy: "vad",
-    include_timestamps: "true",
-    enable_logging: "false",
-  });
-  for (const term of keyterms) {
-    query.append("keyterms", term);
-  }
-  return query;
-};
+/** One of the page's stretches: the session's items in it, in order. */
+interface Stretch {
+  items: string[];
+  /** The page committed it, and the session answered that commit. */
+  closed: boolean;
+}
 
-/** Opens the upstream socket; throws `transcription.*` when it won't open. */
-const openUpstream = async (
-  { route, modelId }: Listening,
-  options: TranscriptionOptions
-): Promise<WebSocket> => {
-  let response: Response;
-  try {
-    response = await route.transport(
-      `${route.base}/v1/speech-to-text/realtime?${queryOf(modelId, options).toString()}`,
-      {
-        headers: { ...route.headers, Upgrade: "websocket" },
-        signal: AbortSignal.timeout(openTimeoutMs),
+/** Where a stretch's words wait for its one final (`settlingOf`). */
+interface Settling {
+  /** The page asked to settle what it sent so far. */
+  pageCommitted: () => void;
+  /** The session said the speech of `item` stopped: settled at a pause. */
+  speechStopped: (item: string) => void;
+  committed: (item: string) => void;
+  empty: () => void;
+  delta: (item: string, delta: string) => void;
+  completed: (item: string, transcript: string) => void;
+}
+
+/**
+ * One final for each of the page's commits, in order: the words of every
+ * item of its stretch, once the session answered the commit and wrote
+ * each item down, whatever order the transcripts came in.
+ */
+const settlingOf = (events: EventQueue): Settling => {
+  const stretches: Stretch[] = [];
+  const stretchOf = new Map<string, Stretch>();
+  const texts = new Map<string, string>();
+  const deltas = new Map<string, string>();
+  const atPause = new Set<string>();
+  const committedItems = new Set<string>();
+  /** The page's commits the session hasn't answered yet. */
+  let unanswered = 0;
+  /** The stretch being sent: the page hasn't committed it yet. */
+  const open = (): Stretch => {
+    const last = stretches.at(-1);
+    if (last !== undefined && !last.closed) {
+      return last;
+    }
+    const next: Stretch = { items: [], closed: false };
+    stretches.push(next);
+    return next;
+  };
+  /** What a stretch has said so far: each item's words, or its partial. */
+  const sayingOf = (stretch: Stretch): string =>
+    stretch.items
+      .map((item) => texts.get(item) ?? deltas.get(item) ?? "")
+      .filter((text) => text !== "")
+      .join(" ");
+  const flush = (): void => {
+    for (;;) {
+      const [first] = stretches;
+      if (
+        first === undefined ||
+        !first.closed ||
+        !first.items.every((item) => texts.has(item))
+      ) {
+        return;
       }
-    );
-  } catch {
-    throw transcriptionErrors.create("transcription.failed");
-  }
-  const socket = response.webSocket;
-  if (socket === null) {
-    await response.body?.cancel();
-    throw transcriptionErrors.create("transcription.failed");
-  }
-  socket.accept();
-  return socket;
+      stretches.shift();
+      const text = sayingOf(first);
+      for (const item of first.items) {
+        texts.delete(item);
+        deltas.delete(item);
+        stretchOf.delete(item);
+        atPause.delete(item);
+        committedItems.delete(item);
+      }
+      // The session times no words: a final carries its text alone.
+      events.push({ type: "committed", text, words: [] });
+    }
+  };
+  /** The stretch `item` is in, put in the one being sent when new. */
+  const placed = (item: string): Stretch => {
+    const known = stretchOf.get(item);
+    if (known !== undefined) {
+      return known;
+    }
+    const stretch = open();
+    stretch.items.push(item);
+    stretchOf.set(item, stretch);
+    return stretch;
+  };
+  /** The page's oldest unanswered commit is answered: its stretch closes. */
+  const answered = (stretch: Stretch): void => {
+    unanswered -= 1;
+    stretch.closed = true;
+  };
+  return {
+    pageCommitted: () => {
+      unanswered += 1;
+    },
+    speechStopped: (item) => {
+      atPause.add(item);
+    },
+    committed: (item) => {
+      if (committedItems.has(item)) {
+        return;
+      }
+      committedItems.add(item);
+      // Its partial may have placed it already: in the stretch being sent.
+      const stretch = placed(item);
+      if (!atPause.has(item) && unanswered > 0) {
+        answered(stretch);
+      }
+      flush();
+    },
+    empty: () => {
+      if (unanswered > 0) {
+        answered(open());
+      }
+      flush();
+    },
+    delta: (item, delta) => {
+      deltas.set(item, `${deltas.get(item) ?? ""}${delta}`);
+      events.push({ type: "partial", text: sayingOf(placed(item)) });
+    },
+    completed: (item, transcript) => {
+      placed(item);
+      texts.set(item, transcript.trim());
+      deltas.delete(item);
+      flush();
+    },
+  };
 };
 
 /**
- * Live transcription through the deployment's AI Gateway, for a listening
- * it admitted: a socket of its own to ElevenLabs's realtime endpoint.
+ * The session's settings: PCM at 24 kHz, the model the listening was
+ * admitted for, the language, and the words to listen out for with what
+ * was said before, as its prompt; settled at each pause as well as when
+ * the page commits.
  */
-export const gatewayTranscription = (
+const sessionUpdate = (
+  model: string,
+  { language, keyterms, previousText }: TranscriptionOptions
+): string => {
+  const prompt = [
+    keyterms.length === 0 ? "" : `Names and terms: ${keyterms.join(", ")}.`,
+    previousText ?? "",
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
+  return JSON.stringify({
+    type: "session.update",
+    session: {
+      type: "transcription",
+      audio: {
+        input: {
+          format: { type: "audio/pcm", rate: sessionSampleRate },
+          noise_reduction: { type: "near_field" },
+          transcription: {
+            model,
+            language,
+            ...(prompt === "" ? {} : { prompt }),
+          },
+          turn_detection: { type: "server_vad" },
+        },
+      },
+    },
+  });
+};
+
+/**
+ * Live transcription for a listening the gateway admitted: a realtime
+ * session of its own at the provider, through connect.
+ */
+export const platformTranscription = (
   listening: Listening
 ): LiveTranscription => ({
   open: async (options): Promise<TranscriptionSession> => {
-    const socket = await openUpstream(listening, options);
+    let socket: WebSocket;
+    try {
+      socket = await listening.socket(realtimePath);
+    } catch {
+      throw transcriptionErrors.create("transcription.failed");
+    }
+    socket.send(sessionUpdate(listening.modelId, options));
     const events = new EventQueue();
-    let { previousText } = options;
+    const settling = settlingOf(events);
+    const resampler = new Resampler(options.sampleRate, sessionSampleRate);
     let closed = false;
+    const stop = (code: string): void => {
+      if (!closed) {
+        events.push({ type: "failed", code });
+      }
+      closed = true;
+      events.end();
+      try {
+        socket.close(1000, "Done");
+      } catch {
+        // Closed already.
+      }
+    };
     socket.addEventListener("message", (event) => {
-      const heard = eventOf(event.data);
-      if (heard !== undefined) {
-        events.push(heard);
+      const heard = serverEventOf(event.data);
+      if (heard === undefined) {
+        return;
+      }
+      if ("delta" in heard) {
+        settling.delta(heard.item_id, heard.delta);
+      } else if ("transcript" in heard) {
+        settling.completed(heard.item_id, heard.transcript);
+      } else if ("error" in heard) {
+        const code = heard.error.code ?? "";
+        if (code === emptyCommit) {
+          settling.empty();
+          return;
+        }
+        // Only its code, which names no content.
+        log.warn("transcription.upstream_error", { code });
+        stop(safeCode.test(code) ? code : "upstream_error");
+      } else if ("item_id" in heard) {
+        if (heard.type === "input_audio_buffer.committed") {
+          settling.committed(heard.item_id);
+        } else if (heard.type === "input_audio_buffer.speech_stopped") {
+          settling.speechStopped(heard.item_id);
+        } else {
+          stop("transcription_failed");
+        }
       }
     });
     socket.addEventListener("close", (event) => {
@@ -218,35 +381,38 @@ export const gatewayTranscription = (
       closed = true;
       events.end();
     });
-    const chunk = (audio: Uint8Array, commit: boolean): void => {
-      if (closed) {
-        return;
+    const send = (event: object): void => {
+      if (!closed) {
+        socket.send(JSON.stringify(event));
       }
-      socket.send(
-        JSON.stringify({
-          message_type: "input_audio_chunk",
-          audio_base_64: toBase64(audio),
-          commit,
-          sample_rate: options.sampleRate,
-          // Only with the first chunk: what was said before it.
-          ...(previousText === undefined
-            ? {}
-            : { previous_text: previousText }),
-        })
-      );
-      previousText = undefined;
     };
     return {
       send: (audio) => {
-        chunk(audio, false);
+        const resampled = resampler.push(audio);
+        if (resampled.byteLength > 0) {
+          send({
+            type: "input_audio_buffer.append",
+            audio: toBase64(resampled),
+          });
+        }
       },
       commit: () => {
-        chunk(new Uint8Array(), true);
+        // The session answers one with nothing left to settle with its
+        // error, in its turn (`emptyCommit`): the stretch closes on what
+        // its pauses settled.
+        if (!closed) {
+          settling.pageCommitted();
+        }
+        send({ type: "input_audio_buffer.commit" });
       },
       close: () => {
         if (!closed) {
           closed = true;
-          socket.close(1000, "Done");
+          try {
+            socket.close(1000, "Done");
+          } catch {
+            // Closed already.
+          }
         }
         events.end();
       },

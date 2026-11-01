@@ -56,7 +56,9 @@
  *
  * Slack (slack.ts) comes in the same way, by its own signature and ids:
  * its people are known only by the Slack account they linked to Grasp, and
- * someone who hasn't linked one gets the link, once, and nothing more.
+ * someone who hasn't linked one gets the link, once, and nothing more. A
+ * press on a card's button comes the same way too, form-encoded, and is
+ * handled as a press in Teams is (`slackPressResponse`).
  *
  * Telegram (telegram.ts) does too, by the webhook's secret; its people
  * are known by the Telegram account they linked.
@@ -102,6 +104,8 @@ import { answerInChat } from "./answer.ts";
 import {
   cancelAction,
   confirmAction,
+  helpfulAction,
+  notHelpfulAction,
   signInCard,
   startAction,
 } from "./cards.tsx";
@@ -115,6 +119,7 @@ import type { GmailKeys } from "./gmail.ts";
 import { pressCard } from "./press.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
+import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
@@ -225,6 +230,14 @@ const seenTtlMs = 24 * 60 * 60 * 1000;
  */
 const messages = new TokenBuckets(messageRate);
 const told = new TokenBuckets(toldRate);
+
+/**
+ * The clock the door's limits count by: the real one. A test that sends
+ * one person's many messages in a row moves this one on
+ * (test/permission-probing.ts), not the whole clock, which also dates the
+ * grant core signs for each model call, which connect checks by its own.
+ */
+export const doorClock = { now: (): number => Date.now() };
 
 /** The lines the door sends: each instead of reading what was sent. */
 type DoorLine =
@@ -602,9 +615,11 @@ const gate = async (
   // Teams always says who wrote by their object id; without one, nobody
   // can be known.
   const sender = activity.from.aadObjectId ?? `id:${activity.from.id}`;
-  if (!messages.take(`teams:${sender}`)) {
+  if (!messages.take(`teams:${sender}`, doorClock.now())) {
     log.info("channel.limited", { platform: "teams" });
-    return told.take(`teams:${sender}`) ? { line: "tooFast" } : {};
+    return told.take(`teams:${sender}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (activity.from.aadObjectId === undefined) {
     return { line: "otherCompany" };
@@ -671,6 +686,132 @@ const gate = async (
 };
 
 /**
+ * What a press on a card's button does, on any platform, by the member
+ * the door let in, in their own private chat: Confirm or Cancel on a card
+ * of held writes (press.ts), or Start on a card offering a workflow
+ * (workflow-offers.ts), which starts it if it is theirs.
+ */
+const onPresses = (
+  env: Env,
+  chat: Chat,
+  {
+    platform,
+    userId,
+    state,
+    locale,
+  }: {
+    platform: "teams" | "slack";
+    userId: string;
+    state: StateAdapter;
+    locale: ChannelLocale;
+  }
+): void => {
+  chat.onAction([confirmAction, cancelAction], async (event) => {
+    await pressCard(env, { platform, userId, event, state });
+  });
+  chat.onAction(startAction, async (event) => {
+    if (event.thread === null) {
+      return;
+    }
+    const pressed = await pressOffer(env, {
+      offerId: event.value ?? "",
+      userId,
+      platform,
+      threadId: event.threadId,
+      locale,
+    });
+    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+  });
+};
+
+/**
+ * A press on a button in Slack, as far as the door reads one
+ * (`block_actions`, form-encoded as `payload=`): who pressed, where, and
+ * the interaction's own id; never what the button carries, which the
+ * press's handler reads.
+ */
+const slackPressSchema = z.object({
+  type: z.string(),
+  trigger_id: z.string().min(1).max(256),
+  user: z.object({ id: z.string().min(1).max(64) }),
+  channel: z.object({ id: z.string().min(1).max(64) }).optional(),
+});
+
+/** A Slack direct message's channel: its id starts with `D`. */
+const directMessagePattern = /^D[A-Z0-9]+$/u;
+
+/**
+ * Answers a press on a button of a card Stephen sent in Slack, signed by
+ * Slack for this client's app (the caller checked): as a message is let
+ * in (`slackGate`), only a linked member's, in their own direct message,
+ * taken once by its interaction's id, within their rate, while Settings ›
+ * Stephen lets him answer them in Slack; then the same handlers as a press
+ * in Teams (`onPresses`). Anything else is acknowledged and runs nothing,
+ * without a word: nobody else was ever sent a card to press.
+ */
+const slackPressResponse = async (
+  request: Request,
+  env: Env,
+  body: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
+): Promise<Response> => {
+  const acknowledged = new Response(null, { status: 200 });
+  const parsed = slackPressSchema.safeParse(
+    jsonOf(new URLSearchParams(body).get("payload") ?? "")
+  );
+  if (!parsed.success || parsed.data.type !== "block_actions") {
+    return acknowledged;
+  }
+  const { trigger_id: triggerId, user, channel } = parsed.data;
+  if (channel === undefined || !directMessagePattern.test(channel.id)) {
+    return acknowledged;
+  }
+  const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
+  const first = await state.setIfNotExists(
+    `door:slack:press:${triggerId}`,
+    true,
+    seenTtlMs
+  );
+  if (!first || !messages.take(`slack:${user.id}`)) {
+    return acknowledged;
+  }
+  const writer = await writerOf(env, "slack", user.id);
+  if (writer.kind !== "member") {
+    return acknowledged;
+  }
+  const reach = await stephenFor(env, writer.userId, "slack");
+  if (!reach.reaches) {
+    return acknowledged;
+  }
+  const chat = new Chat({
+    userName: "Stephen",
+    adapters: { slack: slackAdapter(env) },
+    state,
+    logger: "silent",
+    concurrency: "queue",
+  });
+  // Slack names no language a person reads: in English, as its lines are.
+  onPresses(env, chat, {
+    platform: "slack",
+    userId: writer.userId,
+    state,
+    locale: "en",
+  });
+  return await chat.webhooks.slack(
+    new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body,
+    }),
+    {
+      waitUntil: (promise) => {
+        ctx.waitUntil(promise);
+      },
+    }
+  );
+};
+
+/**
  * A Slack request, as far as the door reads one: Slack's URL check, or an
  * event's envelope and who sent it where, never its text.
  */
@@ -725,9 +866,11 @@ const slackGate = async (
   if (!first) {
     return {};
   }
-  if (!messages.take(`slack:${event.user}`)) {
+  if (!messages.take(`slack:${event.user}`, doorClock.now())) {
     log.info("channel.limited", { platform: "slack" });
-    return told.take(`slack:${event.user}`) ? { line: "tooFast" } : {};
+    return told.take(`slack:${event.user}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (event.channel_type !== "im") {
     return { line: "privateOnly" };
@@ -780,6 +923,14 @@ const slackResponse = async (
 ): Promise<Response> => {
   if (!(await verifiedSlackRequest(env, request, body))) {
     return new Response("Unauthorized", { status: 401 });
+  }
+  // A press on a button comes form-encoded, every event as JSON.
+  if (
+    request.headers
+      .get("content-type")
+      ?.startsWith("application/x-www-form-urlencoded") === true
+  ) {
+    return await slackPressResponse(request, env, body, ctx);
   }
   const parsed = slackPayloadSchema.safeParse(jsonOf(body));
   if (!parsed.success) {
@@ -920,9 +1071,11 @@ const whatsAppGate = async (
   if (!first) {
     return {};
   }
-  if (!messages.take(`whatsapp:${message.from}`)) {
+  if (!messages.take(`whatsapp:${message.from}`, doorClock.now())) {
     log.info("channel.limited", { platform: "whatsapp" });
-    return told.take(`whatsapp:${message.from}`) ? { line: "tooFast" } : {};
+    return told.take(`whatsapp:${message.from}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   const writer = await writerOf(env, "whatsapp", message.from);
   return writer.kind === "member" ? { userId: writer.userId } : { link: true };
@@ -1166,9 +1319,11 @@ const telegramGate = async (
     return {};
   }
   const sender = String(message.from.id);
-  if (!messages.take(`telegram:${sender}`)) {
+  if (!messages.take(`telegram:${sender}`, doorClock.now())) {
     log.info("channel.limited", { platform: "telegram" });
-    return told.take(`telegram:${sender}`) ? { line: "tooFast" } : {};
+    return told.take(`telegram:${sender}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (message.chat.type !== "private") {
     return { line: "privateOnly" };
@@ -1387,7 +1542,7 @@ const gmailResponse = async (
     if (message.author.isMe || address === setUp.mailbox) {
       return;
     }
-    if (!messages.take(`gmail:${address}`)) {
+    if (!messages.take(`gmail:${address}`, doorClock.now())) {
       log.info("channel.limited", { platform: "gmail" });
       return;
     }
@@ -1558,26 +1713,26 @@ export const channelResponse = async (
       afterward,
     });
   });
-  // A press on a card of held writes, by the member the gate let in, in
-  // their own private chat (press.ts).
-  chat.onAction([confirmAction, cancelAction], async (event) => {
-    await pressCard(env, { platform, userId, event, state });
+  onPresses(env, chat, {
+    platform,
+    userId,
+    state,
+    locale: localeOf(activity.locale),
   });
-  // A press on Start, on a card offering a workflow: the member who
-  // pressed it, as the door verified them, starts it, if it is theirs.
-  chat.onAction(startAction, async (event) => {
-    if (event.thread === null) {
+  // A thumb on one of his answers: kept on the request it is for, only
+  // when that request is the presser's own (stephen-requests.ts).
+  chat.onAction([helpfulAction, notHelpfulAction], async (event) => {
+    if (event.thread === null || event.value === undefined) {
       return;
     }
-    const locale = localeOf(activity.locale);
-    const pressed = await pressOffer(env, {
-      offerId: event.value ?? "",
+    const rated = await rateRequest(env, {
       userId,
-      platform,
-      threadId: event.threadId,
-      locale,
+      requestId: event.value,
+      rating: event.actionId === helpfulAction ? "up" : "down",
     });
-    await event.thread.post(pressSaid(pressed.line, locale, pressed.workflow));
+    if (rated) {
+      await event.thread.post(say("rated", localeOf(activity.locale)));
+    }
   });
   // A group chat's or channel's: only ever one that @mentioned the bot,
   // which the door let through with who is in it.

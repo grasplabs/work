@@ -199,9 +199,7 @@ describe("an organization's overview", () => {
     const brief = briefOf(html);
 
     expect({
-      stands: brief.includes(
-        "Agreed<!-- -->. <!-- -->85<!-- -->% of what Grasp needs is known."
-      ),
+      stands: brief.includes("Agreed. 85% of what Grasp needs is known."),
       // The go and both agreements; a contract core doesn't hold is nothing to bring up.
       bringUp: [
         "The company comes in once Grasp gives its go.",

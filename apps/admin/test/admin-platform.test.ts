@@ -277,7 +277,7 @@ describe("a company being set up, on the grid", () => {
   it("says it hasn't started and why, or that it stopped, each with the next step", async () => {
     const id = `setup-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date();
-    await db.update(hostingDestinations).set({ policies: "[]" });
+    await db.update(hostingDestinations).set({ accountId: null });
     await db
       .insert(clients)
       .values({ id, name: id, createdAt: now, updatedAt: now });
@@ -289,6 +289,8 @@ describe("a company being set up, on the grid", () => {
       needWords({ kind: "not_started", why: "no_release" }),
       needWords({ kind: "not_started", why: null }),
       needWords({ kind: "stopped" }),
+      needWords({ kind: "needs_attention", reason: "stuck" }),
+      needWords({ kind: "needs_attention", reason: "needs_person" }),
     ];
 
     expect({ setup, words }).toStrictEqual({
@@ -297,7 +299,9 @@ describe("a company being set up, on the grid", () => {
         "Not started: no hosting destination ready.",
         "Not started: no release imported yet.",
         "Not started: provision it from its Setup.",
-        "Stopped: resume it from its Setup.",
+        "Stopped: Grasp is retrying it by itself.",
+        "Needs attention: Grasp's automatic retries haven't finished setting it up. Retry now from its Setup once it's fixed.",
+        "Needs attention: setting it up stopped for something Grasp can't fix by itself. Retry now from its Setup once it's fixed.",
       ],
     });
   });

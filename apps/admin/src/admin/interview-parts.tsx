@@ -1,3 +1,8 @@
+import type {
+  LinkState,
+  PersonView,
+} from "@grasp-os/shared/admin/onboarding-admin";
+import { Progress } from "@grasp-os/ui/components/progress";
 /**
  * The marks the Interviews section draws its counts with, ported from the
  * prototype (grasplabs/prototype `components/admin/admin-parts.tsx` and
@@ -6,46 +11,9 @@
  * prototype sizes a bar with an inline style, a bar here is the UI's
  * progress bar, which is also announced as the share it is.
  */
-import type {
-  LinkState,
-  PersonView,
-} from "@grasp-os/shared/admin/onboarding-admin";
-import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { cn } from "@grasp-os/ui/lib/utils";
 import type { ReactNode } from "react";
-
-/** A block of the section: its title, a line under it, something beside it, and what it holds. */
-export const Panel = ({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description?: ReactNode;
-  action?: ReactNode;
-  children?: ReactNode;
-}) => (
-  <section className="bg-card overflow-hidden rounded-xl border">
-    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-5 py-4">
-      <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-        <h2 className="font-medium">{title}</h2>
-        {description === undefined ? null : (
-          <p className="text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
-/** A line where a panel has nothing to show yet. */
-export const Empty = ({ children }: { children: ReactNode }) => (
-  <p className="bg-card text-muted-foreground rounded-xl border px-5 py-4">
-    {children}
-  </p>
-);
 
 /** Where a share is kept between nothing and all of it. */
 const shareOf = (value: number, of: number): number =>
@@ -109,9 +77,7 @@ export const Figure = ({
     {ring !== undefined && ring.of > 0 ? (
       <Ring of={ring.of} value={ring.value} />
     ) : null}
-    <span className="col-span-2 row-start-2 text-2xl leading-tight font-medium tabular-nums">
-      {value}
-    </span>
+    <Stat className="col-span-2 row-start-2">{value}</Stat>
     {sub === undefined ? null : (
       <span className="text-muted-foreground col-span-2 row-start-3 text-xs">
         {sub}

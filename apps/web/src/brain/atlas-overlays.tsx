@@ -95,7 +95,7 @@ export const AtlasLegend = ({
     // One small panel, top left: inside a region the small brain is drawn in its upper part, to click on; under it the marks, and the zoom.
     <div
       className={cn(
-        "pointer-events-none absolute top-3 left-3 flex w-40 flex-col rounded-xl border p-1.5 text-sm transition-all duration-500 *:pointer-events-auto",
+        "pointer-events-none absolute top-3 left-3 flex w-40 flex-col rounded-xl border p-1.5 text-sm transition-all duration-300 *:pointer-events-auto",
         under && "pt-25",
         groups && "w-60"
       )}

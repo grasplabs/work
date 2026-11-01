@@ -17,7 +17,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
-import { OwnerAvatar } from "../landscape/owner.tsx";
+import { initials } from "../frame/person-menu.tsx";
 
 // Who owns a thing, and the people it can be handed to, as the prototype
 // draws it (`components/owner-picker.tsx`): the owner's portrait, and
@@ -33,6 +33,36 @@ export interface Pickable {
   name: string;
   email?: string;
 }
+
+/** Someone's portrait: their initials. */
+const PersonAvatar = ({ name }: { name: string }) => (
+  <Avatar size="sm">
+    <AvatarFallback>{initials(name)}</AvatarFallback>
+  </Avatar>
+);
+
+/**
+ * One person in a list of people to pick from: their portrait and name,
+ * found by either their name or their email as typed.
+ */
+export const PersonOption = ({
+  person,
+  checked = false,
+  onSelect,
+}: {
+  person: Pickable;
+  checked?: boolean;
+  onSelect: () => void;
+}) => (
+  <CommandItem
+    data-checked={checked}
+    onSelect={onSelect}
+    value={`${person.name} ${person.email ?? ""}`}
+  >
+    <PersonAvatar name={person.name} />
+    <span className="flex-1 truncate">{person.name}</span>
+  </CommandItem>
+);
 
 /**
  * The owner's button and its list. `people` is null while they're being
@@ -95,7 +125,7 @@ export const PersonPicker = ({
             <AvatarFallback>?</AvatarFallback>
           </Avatar>
         ) : (
-          <OwnerAvatar name={owner} />
+          <PersonAvatar name={owner} />
         )}
         {compact ? null : (owner ?? t`No owner yet`)}
         {compact || disabled ? null : (
@@ -122,8 +152,8 @@ export const PersonPicker = ({
                   <Trans>Nobody with that name.</Trans>
                 </CommandEmpty>
                 {people.map((person) => (
-                  <CommandItem
-                    data-checked={person.id === ownerId}
+                  <PersonOption
+                    checked={person.id === ownerId}
                     key={person.id}
                     onSelect={() => {
                       setOpen(false);
@@ -131,11 +161,8 @@ export const PersonPicker = ({
                         onPick(person);
                       }
                     }}
-                    value={`${person.name} ${person.email ?? ""}`}
-                  >
-                    <OwnerAvatar name={person.name} />
-                    <span className="flex-1 truncate">{person.name}</span>
-                  </CommandItem>
+                    person={person}
+                  />
                 ))}
               </>
             )}

@@ -145,7 +145,7 @@ export const Composer = ({
         {said === null ? null : (
           // It grows upward to the room kept over the box, newest words at its foot; its top fades out under the stage.
           <div
-            className="animate-in fade-in slide-in-from-bottom-2 flex max-h-20 w-full flex-col justify-end overflow-hidden mask-t-from-14 mask-t-to-20 duration-300"
+            className="animate-in fade-in slide-in-from-bottom-2 flex max-h-20 w-full flex-col justify-end overflow-hidden mask-t-from-14 mask-t-to-20 duration-300 motion-reduce:animate-none"
             key={said.text}
           >
             <Own>
@@ -159,7 +159,7 @@ export const Composer = ({
       </div>
       {bar ? (
         <div
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300"
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none"
           key="bar"
         >
           <VoiceBar doing={barDoing} mute>
@@ -176,7 +176,7 @@ export const Composer = ({
         </div>
       ) : (
         <div
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300"
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none"
           key="box"
         >
           <ChatBox

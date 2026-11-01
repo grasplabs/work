@@ -263,6 +263,81 @@ describe("who answers for an App", slow, () => {
   });
 });
 
+describe("who may answer for an App", slow, () => {
+  it("lists exactly whom core would accept, those reached through a team too, by name and ID, to its builders alone", async () => {
+    const [owner, builder, user, teamMate, outsider, removed, admin] =
+      await Promise.all([
+        personApi("builder"),
+        personApi("builder"),
+        personApi("user"),
+        personApi("user"),
+        personApi("builder"),
+        personApi("user"),
+        personApi("admin"),
+      ]);
+    const { core } = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = core.authenticate();
+    const app = await newApp(owner);
+    await share(owner, app, builder, "builder");
+    await share(owner, app, user, "user");
+    await share(owner, app, removed, "user");
+    const team = await newTeam(admin, [teamMate]);
+    await owner.api.apps.members.add(app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    await admin.api.members.remove(removed.userId);
+
+    const listed = await builder.api.apps.answerers(app);
+    const { name: teamMateName } = await teamMate.api.whoami();
+    const ours = [owner, builder, user, teamMate, outsider, removed];
+    // What core accepts as `responsible`, asked person by person.
+    const accepted: Record<string, boolean> = {};
+    for (const person of ours) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each named back
+      const named = await outcome(
+        owner.api.apps.update(app, { responsible: person.userId })
+      );
+      accepted[person.userId] = named === "ok";
+    }
+    const refused = {
+      user: await outcome(user.api.apps.answerers(app)),
+      staff: await outcome(staff.apps.answerers(app)),
+      outsider: await outcome(outsider.api.apps.answerers(app)),
+    };
+
+    expect({
+      matches: Object.fromEntries(
+        ours.map(({ userId }) => [
+          userId,
+          listed.some(({ id }) => id === userId),
+        ])
+      ),
+      fields: [...new Set(listed.flatMap((entry) => Object.keys(entry)))],
+      teamMateNamed: listed.find(({ id }) => id === teamMate.userId)?.name,
+      refused,
+    }).toStrictEqual({
+      matches: accepted,
+      fields: ["id", "name"],
+      teamMateNamed: teamMateName,
+      refused: {
+        user: "role.forbidden",
+        staff: "role.forbidden",
+        outsider: "app.not_found",
+      },
+    });
+    // Through the team, and never anyone removed.
+    expect({
+      teamMate: accepted[teamMate.userId],
+      removed: accepted[removed.userId],
+      outsider: accepted[outsider.userId],
+    }).toStrictEqual({ teamMate: true, removed: false, outsider: false });
+  });
+});
+
 describe("who answers for a draft", slow, () => {
   it("is only someone who builds it, as only they open a draft", async () => {
     const [owner, builder, user] = await Promise.all([

@@ -302,7 +302,7 @@ const runWorkflow = async (
   if (row.detailsRemovedAt !== null) {
     throw new Error(`Run ${runId} has ended: its details were removed`);
   }
-  const step = countedStep(engineStep, await stepLimitOf(env));
+  const step = countedStep(engineStep, stepLimitOf(env));
   let lastFailed: FailedStep | undefined;
   const stepFailed = (failure: FailedStep): void => {
     lastFailed = failure;

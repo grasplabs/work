@@ -2,19 +2,18 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { wordLesson } from "../src/knowledge/lesson-wording.ts";
-import { fakeGateway } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { fakeProviderFor, testModel } from "./model-provider.ts";
 
 // Core's side of a lesson's wording (GRA-301, slice 3; the threat model is
 // on the issue): one call through the model gateway, recorded as the
 // Brain's upkeep, given what the lesson holds and nothing else.
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const euModel = "openai/gpt-5.4";
 
 describe("a lesson's wording", () => {
   it("asks the gateway with the lesson's facts alone, recorded as the Brain's upkeep", async () => {
-    const gateway = fakeGateway({
+    const provider = await fakeProviderFor([testModel, euModel], {
       text: JSON.stringify({ wording: "Tidying invoices kept failing." }),
       inputTokens: 80,
       outputTokens: 10,
@@ -32,16 +31,13 @@ describe("a lesson's wording", () => {
     const wording = await wordLesson(
       {
         ...env,
-        AI: gateway.binding,
         MODEL_GATEWAY: {
-          gateway: "grasp-os-test",
-          models: [workersAi, euModel],
           sensitive: { models: [euModel], connections: [] },
         },
       },
       facts
     );
-    const sent = JSON.stringify(gateway.requests.map(({ body }) => body));
+    const sent = JSON.stringify(provider.requests.map(({ body }) => body));
     const events = await allEvents();
     const call = events.findLast(
       ({ action, detail }) =>

@@ -5,7 +5,10 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
-import { newestFittingRelease, provisionOf } from "../hosting/operation.ts";
+import { needsAttentionOf } from "../hosting/attention.ts";
+import type { NeedsAttention } from "../hosting/attention.ts";
+import { newestRelease, provisionOf } from "../hosting/operation.ts";
+import { clientHostingOf } from "../hosting/organization.ts";
 import { startDestination } from "../hosting/placement.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
@@ -52,25 +55,33 @@ export interface ProvisioningView {
    * start it from Hosting. Null in every other phase.
    */
   notStarted: NotStarted | null;
+  /**
+   * While it's `failed`: whether the admin's own retries gave up and a
+   * person needs to look (src/hosting/attention.ts); null otherwise, and
+   * once staff retried it.
+   */
+  needsAttention: NeedsAttention | null;
   phase: ProvisioningPhase;
 }
 
 /**
- * Why client `clientId`'s provisioning hasn't started: no shared
- * destination the admin picks by itself under the default policy, or no
- * imported release that fits it; null when nothing keeps it.
+ * Why client `clientId`'s provisioning hasn't started: it runs on its own
+ * premises, no shared destination the admin picks by itself, or no
+ * imported release; null when nothing keeps it.
  */
 export const notStartedOf = async (
   db: AdminDatabase,
   clientId: string
 ): Promise<NotStarted | null> => {
+  const { hosting } = await clientHostingOf(db, clientId);
+  if (hosting !== "grasp_cloud") {
+    return "on_prem";
+  }
   const destination = await startDestination(db);
   if (destination.destinationId === null) {
     return "no_destination";
   }
-  return (await newestFittingRelease(db, clientId)) === null
-    ? "no_release"
-    : null;
+  return (await newestRelease(db)) === null ? "no_release" : null;
 };
 
 /** Client `clientId`'s provisioning, or null when the admin has no record of it. */
@@ -100,7 +111,13 @@ export const getProvisioning = async (
     client,
   };
   if (client.status !== "provisioning") {
-    return { ...view, stopped: null, notStarted: null, phase: "active" };
+    return {
+      ...view,
+      stopped: null,
+      notStarted: null,
+      needsAttention: null,
+      phase: "active",
+    };
   }
   const operation = await provisionOf(db, clientId);
   if (operation === undefined) {
@@ -108,6 +125,7 @@ export const getProvisioning = async (
       ...view,
       stopped: null,
       notStarted: await notStartedOf(db, clientId),
+      needsAttention: null,
       phase: "placing",
     };
   }
@@ -119,13 +137,20 @@ export const getProvisioning = async (
         error: operation.error ?? "unknown",
       },
       notStarted: null,
+      needsAttention: await needsAttentionOf(db, clientId),
       phase: "failed",
     };
   }
   const run = await currentRun(env, clientId);
   const gone = run === null || isReplaceable(run.status);
   if (!gone || operation.status === "done") {
-    return { ...view, stopped: null, notStarted: null, phase: "provisioning" };
+    return {
+      ...view,
+      stopped: null,
+      notStarted: null,
+      needsAttention: null,
+      phase: "provisioning",
+    };
   }
   return {
     ...view,
@@ -135,6 +160,7 @@ export const getProvisioning = async (
       error: `run_${run?.status ?? "gone"}`,
     },
     notStarted: null,
+    needsAttention: await needsAttentionOf(db, clientId),
     phase: "failed",
   };
 };

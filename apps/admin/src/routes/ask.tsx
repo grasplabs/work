@@ -36,9 +36,8 @@ const AskPage = () => {
       : clients.find(({ id }) => id === about)?.name;
   return (
     <>
-      <AdminHeader page="Ask Grasp" />
-      <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col text-sm">
-        <div className="flex justify-end px-4 pt-3 md:px-6">
+      <AdminHeader
+        actions={
           <Button
             onClick={() => {
               setChat((each) => each + 1);
@@ -49,7 +48,10 @@ const AskPage = () => {
             <PlusIcon data-icon="inline-start" />
             New chat
           </Button>
-        </div>
+        }
+        page="Ask Grasp"
+      />
+      <div className="flex min-h-0 flex-1 flex-col text-sm">
         <h1 className="sr-only">Ask Grasp</h1>
         {/* Asked over every organization as its core answered, once they are in. */}
         <WithAdmins>

@@ -549,7 +549,6 @@ const callModel = async (
       // `maxModelCalls` allows (run-children.ts). Its spend counts against
       // its workflow's budget too.
       lineage: { rootRunId: run.rootRunId, workflowId: run.workflowId },
-      runStep: { runId: run.runId, step: task },
       connections: await connectionsOf(env, run),
       work: { authority: runAuthority(run), context: runContext(run) },
       // Once the ledger admitted each provider request, the run's authority

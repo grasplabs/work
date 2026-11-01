@@ -589,6 +589,7 @@ describe("audit log access", () => {
         outcome(api.audit.search()),
         outcome(api.audit.export({}, "json")),
         outcome(api.audit.verify()),
+        outcome(api.audit.lastVerification()),
       ]);
     };
     for (const role of ["builder", "user"] as const) {
@@ -597,8 +598,26 @@ describe("audit log access", () => {
         "role.forbidden",
         "role.forbidden",
         "role.forbidden",
+        "role.forbidden",
       ]);
     }
+  });
+
+  it("says when the whole chain was last verified, and how far, without recording that it was asked", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const pass = await verifyAll(api);
+    if (!pass.ok) {
+      throw new Error(`The chain breaks at ${pass.brokenAt}`);
+    }
+
+    await expect(api.audit.lastVerification()).resolves.toMatchObject({
+      ok: true,
+      through: pass.through,
+      head: pass.head,
+    });
+    await expect(
+      auditedDuring(async () => await api.audit.lastVerification())
+    ).resolves.toStrictEqual([]);
   });
 
   it("records every read in the log itself", async () => {

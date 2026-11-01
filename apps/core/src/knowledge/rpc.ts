@@ -1,6 +1,14 @@
 import type {
+  BrainSourceRef,
   ChangeOptions,
   CommandOptions,
+  EntitiesListInput,
+  EntitySourcesInput,
+  EntitySummary,
+  RelationsAnswer,
+  RelationsExplainInput,
+  RelationsExplanation,
+  RelationsGetInput,
   MemoriesProposeChangeInput,
   MemoriesPublishInput,
   MemoriesRetireInput,
@@ -25,6 +33,7 @@ import {
   listDocuments,
 } from "@grasp-os/brain/documents";
 import type { Writer } from "@grasp-os/brain/documents";
+import { entitiesFor, entitySources } from "@grasp-os/brain/entities";
 import {
   lessonLineage,
   lessonsFor,
@@ -43,6 +52,7 @@ import { memoriesLineage } from "@grasp-os/brain/memory-lineage";
 import { preparePurge, purge } from "@grasp-os/brain/purge";
 import type { OnErase } from "@grasp-os/brain/purge";
 import { recall } from "@grasp-os/brain/recall";
+import { relationsExplain, relationsFor } from "@grasp-os/brain/relations";
 import { search } from "@grasp-os/brain/search";
 import { follow, read } from "@grasp-os/brain/tools";
 import type {
@@ -68,6 +78,7 @@ import type {
   SaveInput,
   SearchOptions,
   SearchResults,
+  SharedChat,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -91,6 +102,7 @@ import { catalog } from "./catalog.ts";
 import { createCollection, listCollections } from "./collection-rules.ts";
 import { copySkill, skillCollections } from "./grasp-skills.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import { sharedChatsOf } from "./memory-publish.ts";
 import { personWriter, restoreVersion, saveDocument } from "./person-writes.ts";
 import { brainOf } from "./ports.ts";
 import { uploadErasure } from "./uploads.ts";
@@ -217,6 +229,13 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
     return await this.#asReader(
       async (reader) =>
         await memoriesPublish(brainOf(this.#env), reader, input, options)
+    );
+  }
+
+  /** The shared chats the person is in that a record can be published into. */
+  async sharedChats(): Promise<SharedChat[]> {
+    return await this.#asReader(
+      async (reader) => await sharedChatsOf(this.#env, reader)
     );
   }
 
@@ -363,6 +382,33 @@ export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   async recall(input: RecallInput): Promise<MemoryPack> {
     return await this.#asReader(
       async (reader) => await recall(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async entities(input?: EntitiesListInput): Promise<EntitySummary[]> {
+    return await this.#asReader(
+      async (reader) => await entitiesFor(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async entitySources(input: EntitySourcesInput): Promise<BrainSourceRef[]> {
+    return await this.#asReader(
+      async (reader) => await entitySources(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async relations(input: RelationsGetInput): Promise<RelationsAnswer> {
+    return await this.#asReader(
+      async (reader) => await relationsFor(brainOf(this.#env), reader, input)
+    );
+  }
+
+  async relationsExplain(
+    input: RelationsExplainInput
+  ): Promise<RelationsExplanation> {
+    return await this.#asReader(
+      async (reader) =>
+        await relationsExplain(brainOf(this.#env), reader, input)
     );
   }
 

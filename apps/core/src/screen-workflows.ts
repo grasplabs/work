@@ -46,6 +46,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { screenStartFiles } from "./screen-start-files.ts";
 import { coreStartKey } from "./workflow-start-intents.ts";
 import { appSendHoldsSql, appStartHoldsSql } from "./workflow-starts.ts";
+import { aiWaitsOf } from "./workflows/ai-waits.ts";
 import { runEngine } from "./workflows/engine.ts";
 import {
   applyCancel,
@@ -60,7 +61,7 @@ import type { ResourceControlRow, RunRow } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { AdmittedEvent } from "./workflows/run-events.ts";
-import { runWaits } from "./workflows/run-waits.ts";
+import { runWaits, withRespond } from "./workflows/run-waits.ts";
 
 // What an App's screen asks of the workflows its App binds, through the
 // typed `useWorkflow` (spec 10.4; the SDK's client-workflow.ts speaks the
@@ -299,7 +300,8 @@ const aliasPattern = /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
 
 /** Who asks, and through which App's current release. */
 interface Asking {
-  readonly by: Pick<Identity, "userId" | "role" | "teams">;
+  readonly by: Pick<Identity, "userId" | "role" | "teams"> &
+    Partial<Pick<Identity, "staff">>;
   readonly app: AppId;
   readonly version: number;
   readonly release: Release;
@@ -547,10 +549,32 @@ const runAndPending = async (
  * run (an App grant revoked or given again) is a revision of its own,
  * never a change under the same one. Everything else a snapshot holds is
  * the gate's to keep current (the person's role, the build's trust). One
- * more, so the first is 1.
+ * more, so the first is 1; and one more again once the App is in
+ * restricted mode (`appRestricted`), which is for good: what it may send
+ * the run changes with it, so a screen following the run is pushed it.
  */
-const revisionOf = (generation: number, row: RunRow): number =>
-  generation + row.summaryRevision + 1;
+const revisionOf = (
+  generation: number,
+  row: RunRow,
+  appRestricted = false
+): number => generation + row.summaryRevision + 1 + (appRestricted ? 1 : 0);
+
+/** Why a run compensates, as its row keeps it (resource-runs.ts). */
+const compensationSchema = z.object({
+  cause: z.enum(["failure", "cancellation"]),
+  code: z.string().nullable(),
+});
+
+/**
+ * Run `row`'s compensation while the engine rolls it back (spec 10.7.3):
+ * why, from its row; none once it ended, or while it doesn't.
+ */
+const compensationOf = (
+  row: RunRow
+): z.infer<typeof compensationSchema> | undefined =>
+  row.status === "running" && row.compensation !== null
+    ? compensationSchema.safeParse(JSON.parse(row.compensation)).data
+    : undefined;
 
 /** Workflow `id`'s policy generation now. */
 const generationOf = async (env: Env, id: string): Promise<number> => {
@@ -700,6 +724,26 @@ export const failureOf = (
 };
 
 /**
+ * A compensating run's snapshot's compensation (spec 10.7.3): its cause,
+ * its cleanup's activity (the engine reports it running), and, after a
+ * failure, what it failed with, as a failed run says it; none otherwise.
+ */
+const compensationShown = (
+  compensation: z.infer<typeof compensationSchema> | undefined
+): { compensation?: Json } =>
+  compensation === undefined
+    ? {}
+    : {
+        compensation: {
+          cause: compensation.cause,
+          activity: "running",
+          ...(compensation.cause === "failure"
+            ? { originalError: failureOf({ code: compensation.code }) }
+            : {}),
+        },
+      };
+
+/**
  * What a completed run returned, projected by the output the App declared:
  * `contract.invalid_return` for anything else, `workflow.run_details_removed`
  * past its retention.
@@ -748,6 +792,84 @@ const waitsOf = async (
       )
     : [];
 
+/**
+ * A run's status as its snapshot shows it: a running run held for its AI
+ * provider (ai-waits.ts) shows queued, as its summary does, since it goes
+ * on by itself once calls work; never with a wait open (`openWaits`),
+ * which a queued run has none of.
+ */
+const shownStatus = async (
+  env: Env,
+  row: RunRow,
+  openWaits: number
+): Promise<(typeof statusOf)[keyof typeof statusOf]> => {
+  if (row.status !== "running" || openWaits > 0) {
+    return statusOf[row.status];
+  }
+  const held = await aiWaitsOf(drizzle(env.DB), [row.id]);
+  return held.has(row.id) ? "queued" : "running";
+};
+
+/**
+ * What run `row` waits on, as `asking` is shown it in its snapshot: its
+ * events sendable while they may send it one, and never from a restricted
+ * App into a run that isn't restricted itself, as a send refuses it
+ * (`permission.restricted`); its decisions answerable as they may answer
+ * them there (`withRespond`).
+ */
+const snapshotWaits = async (
+  env: Env,
+  asking: Asking,
+  resolved: Resolved,
+  row: RunRow,
+  appRestricted: boolean
+): Promise<Json[]> => {
+  const canSend =
+    !isEnded(row.status) &&
+    !(appRestricted && !row.restricted) &&
+    (await holds(env, maySendSql(asking, resolved.alias, pinOf(resolved))));
+  return await withRespond(
+    env,
+    row.id,
+    await waitsOf(env, row, resolved, canSend),
+    {
+      userId: asking.by.userId,
+      ...(asking.by.staff === true ? { staff: true } : {}),
+      sameRestriction: row.restricted === appRestricted,
+    }
+  );
+};
+
+/**
+ * What a screen may ask of run `row` now: nothing that pauses, resumes or
+ * cuts its compensation short (spec 10.7.3), nor what the person may no
+ * longer start (`mayStart`), nor anything past a control applying.
+ */
+const controlOf = (
+  row: RunRow,
+  {
+    pending,
+    mayStart,
+    compensating,
+  }: {
+    pending: ResourceControlRow["kind"] | undefined;
+    mayStart: boolean;
+    compensating: boolean;
+  }
+): Json => {
+  const free = mayStart && !compensating;
+  return {
+    canPause:
+      free &&
+      pending === undefined &&
+      (row.status === "starting" || row.status === "running"),
+    canResume: free && pending === undefined && row.status === "paused",
+    canCancel: free && !isEnded(row.status) && pending !== "cancel",
+    pendingControl:
+      pending === undefined ? null : { kind: pending, stage: "applying" },
+  };
+};
+
 /** Run `runId`'s snapshot for the asking person, and its revision. */
 const runSnapshot = async (
   env: Env,
@@ -767,28 +889,26 @@ const runSnapshot = async (
   // it, under the revision its row says (`summary_revision`, which every
   // write that changes either moves on in that write).
   const [row, pending] = await runAndPending(env, seen.row);
-  const ended = isEnded(row.status);
   const mayStart = await holds(env, mayStartSql(asking, resolved.alias, pin));
-  const status = statusOf[row.status];
+  const appRestricted = await appHost(env, asking.app).isRestricted();
+  const compensation = compensationOf(row);
   // Read after the row: a wait opened or closed since moves its revision on.
-  const waits = await waitsOf(
-    env,
-    row,
-    resolved,
-    !ended && (await holds(env, maySendSql(asking, resolved.alias, pin)))
-  );
+  const waits = await snapshotWaits(env, asking, resolved, row, appRestricted);
+  const status =
+    compensation === undefined
+      ? await shownStatus(env, row, waits.length)
+      : "compensating";
   const contract = await startedContract(
     env,
     asking,
     resolved,
     originAppVersion
   );
-  const returned = row.status === "completed" || row.status === "failed";
-  if (
-    returned &&
-    row.restricted &&
-    !(await appHost(env, asking.app).isRestricted())
-  ) {
+  const returned =
+    row.status === "completed" ||
+    row.status === "failed" ||
+    compensation?.cause === "failure";
+  if (returned && row.restricted && !appRestricted) {
     // What a restricted run returned, or why it failed, only to an App in
     // restricted mode itself: never out through one that isn't.
     throw permissionErrors.create("permission.restricted");
@@ -805,23 +925,21 @@ const runSnapshot = async (
     manifestHash: row.manifestHash,
     fingerprint: contract.fingerprint,
     status,
-    startedAt: status === "queued" ? null : row.createdAt.getTime(),
+    startedAt: row.status === "starting" ? null : row.createdAt.getTime(),
     finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
     waits,
-    control: {
-      canPause:
-        mayStart &&
-        pending === undefined &&
-        (row.status === "starting" || row.status === "running"),
-      canResume: mayStart && pending === undefined && row.status === "paused",
-      canCancel: !ended && pending !== "cancel" && mayStart,
-      pendingControl:
-        pending === undefined ? null : { kind: pending, stage: "applying" },
-    },
+    control: controlOf(row, {
+      pending,
+      mayStart,
+      compensating: compensation !== undefined,
+    }),
     ...(output === undefined ? {} : { output }),
     ...(row.status === "failed" ? { error: failureOf(result.error) } : {}),
+    // Compensating after a failure: what it failed with, as a failed run
+    // says it; its cleanup's activity, which the engine reports as running.
+    ...compensationShown(compensation),
   };
-  return { value, revision: revisionOf(generation, row) };
+  return { value, revision: revisionOf(generation, row, appRestricted) };
 };
 
 /** The start `command` asks for, admitted: its run's handle. */

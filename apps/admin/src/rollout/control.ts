@@ -11,8 +11,7 @@
  * with its targets and audit event, in one batch.
  */
 import { log } from "@grasp-os/shared/log";
-import { releaseIdSchema } from "@grasp-os/shared/release";
-import type { LimitRaise } from "@grasp-os/shared/release";
+import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
   eq,
@@ -43,25 +42,15 @@ import {
   deploySecrets,
   MissingStoreSecretError,
 } from "../deploy/context.ts";
-import { clientRuntimeProfile } from "../deploy/core-config.ts";
-import { DeployError, errorCode } from "../deploy/errors.ts";
+import { errorCode } from "../deploy/errors.ts";
 import { importedManifest } from "../deploy/release.ts";
-import { limitRaiseCheck } from "../releases/limits.ts";
-import type { LimitRaiseCheck } from "../releases/limits.ts";
 import { hasEnded, instanceStatus } from "../runners.ts";
 import { adminWorkflow, adminWorkflows } from "../workflow-runs.ts";
 import { RolloutError } from "./errors.ts";
 import { goOnToStop } from "./rollback.ts";
 import { storePrints } from "./shared-secrets.ts";
 import type { SharedPrints } from "./shared-secrets.ts";
-import {
-  firstRing,
-  rolloutScopeSchema,
-  skipReason,
-  targetClients,
-  targetsOf,
-} from "./targets.ts";
-import type { ReleaseAt, RolloutTarget } from "./targets.ts";
+import { firstRing, rolloutScopeSchema, targetsOf } from "./targets.ts";
 import {
   approvalEvent,
   fleetTargets,
@@ -163,65 +152,6 @@ const startingPrints = async (env: Env): Promise<SharedPrints> => {
   }
 };
 
-/** A limit check's refusal as the rollout's: its code, or the release not imported. */
-const refusalOf = (error: unknown): unknown => {
-  if (!(error instanceof DeployError)) {
-    return error;
-  }
-  const code =
-    error.code === "limit_evidence_missing" ||
-    error.code === "release_without_limits" ||
-    error.code === "release_history_incomplete"
-      ? error.code
-      : "release_not_imported";
-  return new RolloutError(code, error.message);
-};
-
-/**
- * Refuses (`limit_evidence_missing`) a rollout of `release` that would
- * take a client in `targets` past a platform limit raise with no evidence
- * for its profile. Only what the client would get: one the rollout skips
- * (pinned elsewhere, on it already, on a newer one) is left out. Each
- * client's operation checks again as it runs (`validate`,
- * src/hosting/operation.ts), against what the client runs by then.
- */
-const assertTargetsEvidenced = async (
-  db: AdminDatabase,
-  release: ReleaseAt,
-  targets: readonly RolloutTarget[]
-): Promise<void> => {
-  // Read once for every client, so a rollout of hundreds stays within the
-  // reads one request may make (D1's limit per invocation).
-  const clientsById = await targetClients(db);
-  // Built for the first client the rollout reaches, as the per-client
-  // check was: a rollout that skips every client refuses nothing.
-  let check: LimitRaiseCheck | undefined;
-  for (const { clientId } of targets) {
-    const client = clientsById.get(clientId);
-    if (client === undefined || skipReason(client, release) !== null) {
-      continue;
-    }
-    const running = client.workers.flatMap(({ releaseId }) =>
-      releaseId === null ? [] : [releaseId]
-    );
-    let raise: LimitRaise | undefined;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- once, for the first reached
-      check ??= await limitRaiseCheck(db, release.id, clientRuntimeProfile);
-      // oxlint-disable-next-line no-await-in-loop -- answers kept per what runs
-      raise = await check(running);
-    } catch (error) {
-      throw refusalOf(error);
-    }
-    if (raise !== undefined) {
-      throw new RolloutError(
-        "limit_evidence_missing",
-        `Release ${release.id} raises ${raise.limit} to ${raise.raisedTo ?? "unbounded"} over what ${clientId} runs, without capacity and security evidence for ${clientRuntimeProfile}`
-      );
-    }
-  }
-};
-
 /**
  * The most Workers a client runs: what a secrets rollout, which deploys
  * each client's own release, budgets steps for.
@@ -235,9 +165,7 @@ const mostWorkers = clientWorkers.worker.enumValues.length;
  * another rollout is running or waiting (`rollout_running`), when no
  * active client is in scope, when a ring past 0 or a client it names adds
  * no one past ring 0 (`ring_zero_only`), when its run would take more
- * steps than `stepBudget` (`too_large`), and when the release raises a
- * platform limit without evidence for a client it would reach
- * (`limit_evidence_missing`).
+ * steps than `stepBudget` (`too_large`).
  */
 export const startRollout = async (
   env: Env,
@@ -254,10 +182,9 @@ export const startRollout = async (
       "Set CLIENT_DOMAIN on the admin before rolling out"
     );
   }
-  let release: ReleaseAt | undefined;
   if (releaseId !== null) {
-    [release] = await db
-      .select({ id: releases.id, builtAt: releases.builtAt })
+    const [release] = await db
+      .select({ id: releases.id })
       .from(releases)
       .where(eq(releases.id, releaseId));
     if (release === undefined) {
@@ -300,9 +227,6 @@ export const startRollout = async (
       "too_large",
       `${targets.length} clients would take about ${steps} steps, over ${stepBudget}: roll out one ring or client at a time`
     );
-  }
-  if (release !== undefined) {
-    await assertTargetsEvidenced(db, release, targets);
   }
   // What Secrets Store holds as a secrets rollout starts: what proves a
   // rotation reached its clients (src/rollout/shared-secrets.ts).

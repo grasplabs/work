@@ -35,6 +35,8 @@ import { answeringVersion, mappedRoute } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
 import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
+import { needsAttentionOf } from "../hosting/attention.ts";
+import type { AttentionReason } from "../hosting/attention.ts";
 import type { NotStarted } from "../hosting/placement.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
@@ -96,13 +98,15 @@ export interface GridRow {
   /**
    * While it's being provisioned, what waits for staff: it hasn't started
    * (and why, `notStartedOf`; null when nothing keeps it), or it stopped
-   * (its operation failed, or its attempt ended without saying why), for
-   * staff to resume. Null while it's going, and once it's live.
+   * (its operation failed, or its attempt ended without saying why), which
+   * the admin resumes by itself (src/hosting/reconcile.ts), or it needs a
+   * person as the admin gave up. Null while it's going, and once it's live.
    */
   setup:
     | { state: "not_started"; why: NotStarted | null }
     | { state: "stopped" }
     | { state: "unread" }
+    | { state: "needs_attention"; reason: AttentionReason }
     | null;
 }
 
@@ -454,26 +458,30 @@ const setupOf = async (
   if (row.lastDeploy === null) {
     return { state: "not_started", why: await notStartedOf(db, row.id) };
   }
-  if (row.lastDeploy.status === "failed") {
-    return { state: "stopped" };
-  }
   if (row.lastDeploy.status === "done") {
     return null;
   }
-  // Its run read within a short deadline, a failure this row's alone: a
-  // slow or failing read never stalls or breaks the grid (`unread`).
-  const read = await within(
-    runReadMs,
-    async () => ({ run: await currentRun(env, row.id) }),
-    null
-  );
-  if (read === null) {
-    log.warn("grid.run_unread", { clientId: row.id });
-    return { state: "unread" };
+  if (row.lastDeploy.status !== "failed") {
+    // Its run read within a short deadline, a failure this row's alone: a
+    // slow or failing read never stalls or breaks the grid (`unread`).
+    const read = await within(
+      runReadMs,
+      async () => ({ run: await currentRun(env, row.id) }),
+      null
+    );
+    if (read === null) {
+      log.warn("grid.run_unread", { clientId: row.id });
+      return { state: "unread" };
+    }
+    if (read.run !== null && !isReplaceable(read.run.status)) {
+      return null;
+    }
   }
-  return read.run === null || isReplaceable(read.run.status)
+  // Stopped: the admin resumes it by itself, unless it gave up.
+  const attention = await needsAttentionOf(db, row.id);
+  return attention === null
     ? { state: "stopped" }
-    : null;
+    : { state: "needs_attention", reason: attention.reason };
 };
 
 /** Every client, as the admin recorded it, for the grid to show at once. */

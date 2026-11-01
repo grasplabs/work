@@ -6,12 +6,13 @@ import {
   LogExport,
   LogFilters,
   LogRecords,
-  logSearchOf,
   readLog,
 } from "../activity/audit-log.tsx";
-import type { LogSearch } from "../activity/audit-log.tsx";
+import { logSearchOf } from "../activity/log-search.ts";
+import type { LogSearch } from "../activity/log-search.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { AuditChainCheck } from "../settings/audit-chain.tsx";
 import {
   SettingsBody,
   SettingsError,
@@ -21,7 +22,7 @@ import {
 // Settings → Audit trail, for admins, as in the prototype
 // (`routes/settings/audit.tsx`): core's audit log, searched by its filters
 // (in the address), page by page, each record in words, with its export
-// and its chain check. Core checks the role on every call; every search
+// and its chain check (settings/audit-chain.tsx). Core checks the role on every call; every search
 // of the log is itself recorded in it.
 
 /**
@@ -34,31 +35,34 @@ const logKey = (filters: LogSearch, { records, next }: AuditPage): string =>
 
 const AuditTrail = () => {
   const { t } = useLingui();
-  const log = Route.useLoaderData();
+  const { log, last } = Route.useLoaderData();
   const filters = Route.useSearch();
   return (
-    <SettingsSection
-      action={<LogExport search={filters} />}
-      description={t`Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen.`}
-      title={t`Audit trail`}
-    >
-      <SettingsBody>
-        {/* Filters and records start again from new filters. */}
-        <LogFilters key={JSON.stringify(filters)} search={filters} />
-      </SettingsBody>
-      {log.state === "ready" ? (
-        <LogRecords
-          directory={log.data.directory}
-          first={log.data.page}
-          key={logKey(filters, log.data.page)}
-          search={filters}
-        />
-      ) : (
-        <div className="border-t">
-          <NotLoadedState heading="h3" page={log} />
-        </div>
-      )}
-    </SettingsSection>
+    <>
+      <SettingsSection
+        action={<LogExport search={filters} />}
+        description={t`Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen.`}
+        title={t`Audit trail`}
+      >
+        <SettingsBody>
+          {/* Filters and records start again from new filters. */}
+          <LogFilters key={JSON.stringify(filters)} search={filters} />
+        </SettingsBody>
+        {log.state === "ready" ? (
+          <LogRecords
+            directory={log.data.directory}
+            first={log.data.page}
+            key={logKey(filters, log.data.page)}
+            search={filters}
+          />
+        ) : (
+          <div className="border-t">
+            <NotLoadedState heading="h3" page={log} />
+          </div>
+        )}
+      </SettingsSection>
+      <AuditChainCheck last={last} />
+    </>
   );
 };
 
@@ -66,8 +70,16 @@ export const Route = createFileRoute("/_shell/settings/audit")({
   validateSearch: (search: Record<string, unknown>): LogSearch =>
     logSearchOf(search),
   loaderDeps: ({ search }) => search,
-  loader: async ({ context: { core }, deps }) =>
-    await loadFromCore(core, async (session) => await readLog(session, deps)),
+  loader: async ({ context: { core }, deps }) => {
+    const [log, last] = await Promise.all([
+      loadFromCore(core, async (session) => await readLog(session, deps)),
+      loadFromCore(
+        core,
+        async (session) => await session.audit.lastVerification()
+      ),
+    ]);
+    return { log, last };
+  },
   errorComponent: SettingsError,
   component: AuditTrail,
 });

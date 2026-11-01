@@ -46,6 +46,7 @@ import { codeResults, codeStep, chatOf, model, says } from "./agent-chat.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -1253,6 +1254,8 @@ export default workflowTests(definition, [{ name: "runs", mocks: { kick: null },
   });
 
   it("never invite a guest through another App, from a screen's call or a run's", async () => {
+    // The company connected an AI provider: a guest chat needs a model.
+    await fakeProvider();
     const builder = await signedInApi(idp, "builder");
     const admin = await person("admin");
     const inviter = await sealedApp(inviterFiles, "Inviter");

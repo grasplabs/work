@@ -25,8 +25,12 @@ import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { WithAdmins } from "../admin/admins.tsx";
+import { PageLoading } from "../admin/failure.tsx";
 import { AdminPage } from "../admin/page.tsx";
 import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
+import { ReadinessBanner } from "../admin/readiness-parts.tsx";
+import { fetchReadiness } from "../admin/readiness.ts";
+import { Section } from "../admin/section.tsx";
 import { organizationsOf, unreadWords } from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
@@ -485,13 +489,10 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
   }
   const more = waiting.length - todayItems;
   return (
-    <section className="bg-card overflow-hidden rounded-xl border text-sm">
-      <div className="flex flex-col gap-0.5 px-5 py-4">
-        <h2 className="font-medium">Needs Grasp today</h2>
-        <p className="text-muted-foreground">
-          At every organization, the most pressing first.
-        </p>
-      </div>
+    <Section
+      title="Needs Grasp today"
+      description="At every organization, the most pressing first."
+    >
       <ul className="flex flex-col">
         {waiting.slice(0, todayItems).map(({ id, name, text }, index) => (
           <li
@@ -531,7 +532,7 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
             : `${more} more, on the organizations’ own overviews.`}
         </p>
       ) : null}
-    </section>
+    </Section>
   );
 };
 
@@ -645,22 +646,26 @@ const Organizations = ({ admins }: { admins: readonly ClientAdmin[] }) => {
   );
 };
 
-/** The overview's title and its action at once; the organizations once their cores answered. */
-const Overview = () => (
-  <AdminPage
-    action={
-      <Button nativeButton={false} render={<Link to="/new-organization" />}>
-        <PlusIcon data-icon="inline-start" />
-        New organization
-      </Button>
-    }
-    description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
-    overview
-    title="Organizations"
-  >
-    <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
-  </AdminPage>
-);
+/** The overview's title, its action and readiness at once; the organizations once their cores answered. */
+const Overview = () => {
+  const readiness = Route.useLoaderData();
+  return (
+    <AdminPage
+      action={
+        <Button nativeButton={false} render={<Link to="/new-organization" />}>
+          <PlusIcon data-icon="inline-start" />
+          New organization
+        </Button>
+      }
+      description="Every company with Grasp, from its first conversation on. Only Grasp sees this: a company sees numbers per team, never names."
+      overview
+      title="Organizations"
+    >
+      <ReadinessBanner readiness={readiness} />
+      <WithAdmins>{(admins) => <Organizations admins={admins} />}</WithAdmins>
+    </AdminPage>
+  );
+};
 
 /** The admin's overview: every organization together. */
 export const Route = createFileRoute("/")({
@@ -668,5 +673,7 @@ export const Route = createFileRoute("/")({
     const phase = ADMIN_PHASES.find((each) => each === search.phase);
     return phase === undefined ? {} : { phase };
   },
+  loader: async () => await fetchReadiness(),
   component: Overview,
+  pendingComponent: PageLoading,
 });

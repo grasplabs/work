@@ -10,7 +10,6 @@
  * | Releases bucket (R2)         | `grasp-releases`        | `grasp-releases-staging`         |
  * | Router's hostname map (KV)   | `grasp-router-hosts`    | `grasp-router-hosts-staging`     |
  * | Clients' dispatch namespace  | `grasp-clients`         | `grasp-clients-staging`          |
- * | Placed clients' AI Gateway   | `grasp-models`          | `grasp-models-staging`           |
  * | A Secrets Store secret       | `NAME`                  | `NAME_STAGING`                   |
  * | Clients' domain              | `ongrasp.app`           | `staging.ongrasp.app`            |
  * | Admin's host                 | `admin.ongrasp.app`     | `admin.staging.ongrasp.app`      |
@@ -167,16 +166,6 @@ export const storeSecretName = (name: string, stage: Stage): string =>
  */
 export const clientsNamespace = (stage: Stage): string =>
   staged(`${namePrefix}clients`, stage);
-
-/**
- * The AI Gateway `stage`'s placed clients' model calls go through, one per
- * destination account (spec 37.5). It caches nothing, and core turns
- * payload logging off on every call, so no client's prompts or replies
- * are kept beside another's. What each client may spend is its own core's
- * budget, which core's model gateway enforces.
- */
-export const placedModelGateway = (stage: Stage): string =>
-  staged(`${namePrefix}models`, stage);
 
 /** The stage whose clients' namespace `namespace` is, if it's either's. */
 export const stageOfNamespace = (namespace: unknown): Stage | undefined =>
