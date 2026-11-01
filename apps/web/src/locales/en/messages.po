@@ -3691,6 +3691,7 @@ msgstr "Can’t be read"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5043,6 +5044,18 @@ msgstr "Did this happen? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Discard"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Discard draft"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Discard this draft?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -11621,6 +11634,10 @@ msgstr "Resources"
 msgid "Restore"
 msgstr "Restore"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Restore this version"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restore version {number}"
@@ -14037,6 +14054,10 @@ msgstr "The domains and workflows that may use approved npm packages. Open one t
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "The domains this chat builds didn't load."
+
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
 
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."

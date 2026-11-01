@@ -3691,6 +3691,7 @@ msgstr "No se puede leer"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5043,6 +5044,18 @@ msgstr "¿Ocurrió esto? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directorio"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Descartar"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Descartar borrador"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "¿Descartar este borrador?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -11621,6 +11634,10 @@ msgstr "Recursos"
 msgid "Restore"
 msgstr "Restaurar"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Restaurar esta versión"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Restaurar la versión {number}"
@@ -14037,6 +14054,10 @@ msgstr "Los dominios y flujos de trabajo que pueden usar paquetes npm aprobados.
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "Los dominios que crea este chat no se cargaron."
+
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "Los cambios del borrador se pierden, y el próximo cambio del agente empieza de nuevo desde la app tal como está. Sus versiones se conservan, así que puedes restaurar una."
 
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."

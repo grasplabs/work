@@ -3691,6 +3691,7 @@ msgstr "Niet leesbaar"
 #: src/brain/share-record.tsx
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/draft-versions.tsx
 #: src/chat/project-dialog.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/request-app-dialog.tsx
@@ -5043,6 +5044,18 @@ msgstr "Is dit gebeurd? {who}"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard"
+msgstr "Verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard draft"
+msgstr "Concept verwerpen"
+
+#: src/chat/draft-versions.tsx
+msgid "Discard this draft?"
+msgstr "Dit concept verwerpen?"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -11621,6 +11634,10 @@ msgstr "Resources"
 msgid "Restore"
 msgstr "Herstellen"
 
+#: src/chat/draft-versions.tsx
+msgid "Restore this version"
+msgstr "Deze versie herstellen"
+
 #: src/knowledge/timeline.tsx
 msgid "Restore version {number}"
 msgstr "Versie {number} herstellen"
@@ -14037,6 +14054,10 @@ msgstr "De domeinen en workflows die goedgekeurde npm-pakketten mogen gebruiken.
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "De domeinen die deze chat bouwt, zijn niet geladen."
+
+#: src/chat/draft-versions.tsx
+msgid "The draft's changes go, and the agent's next change starts over from the app as it is. Its versions are kept, so you can restore one."
+msgstr "De wijzigingen van het concept verdwijnen, en de volgende wijziging van de agent begint opnieuw bij de app zoals die is. De versies blijven bewaard, zodat je er een kunt herstellen."
 
 #: src/brain/goals-editor.tsx
 msgid "The earlier wording stays in the goal's history."
