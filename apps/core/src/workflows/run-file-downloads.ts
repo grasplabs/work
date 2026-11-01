@@ -55,12 +55,13 @@ import { detailsRemoved } from "./retention.ts";
 //   the sweep has marked them yet.
 // - Access lost partway: core streams the file's chunks from R2 itself,
 //   on its own origin, and hands out no address of R2's, so no link
-//   outlives a revocation. Before each chunk, the session, who may
+//   outlives a revocation. Before each chunk is read from R2, and again
+//   after, before it is sent, the session, who may
 //   download and the file's state are decided again, so a lost role,
 //   removed details or a deleted file end the stream; each chunk's bytes
 //   must match the SHA-256 recorded when they were written; and the whole
 //   download ends after `fileLimits.downloadMs`. A file is at most 30
-//   chunks, so the checks cost at most 30 times a few indexed reads.
+//   chunks, so the checks cost at most 60 times a few indexed reads.
 // - Another site: only a request the page itself sends, or a link the
 //   person opened themselves (`Sec-Fetch-Site` `same-origin` or `none`),
 //   and never read by another site (`Cross-Origin-Resource-Policy`, with
@@ -384,26 +385,32 @@ export const runFileResponse = async (
           next += 1;
           // Decided again before each chunk: the session as it is now, its
           // person's role, the run's details and the file's state.
-          const now = await identifyFull(env, request.headers);
-          const still =
-            now?.userId === person.userId
-              ? await downloadable(
-                  env,
-                  now,
-                  route.workflow,
-                  route.run,
-                  route.file
-                )
-              : undefined;
-          if (still === undefined || Date.now() > endsAt) {
-            throw fileErrors.create("file.not_found");
-          }
+          const stillAllowed = async (): Promise<void> => {
+            const now = await identifyFull(env, request.headers);
+            const still =
+              now?.userId === person.userId
+                ? await downloadable(
+                    env,
+                    now,
+                    route.workflow,
+                    route.run,
+                    route.file
+                  )
+                : undefined;
+            if (still === undefined || Date.now() > endsAt) {
+              throw fileErrors.create("file.not_found");
+            }
+          };
+          await stillAllowed();
           const bytes = await byDeadline(endsAt, async () => {
             const object = await env.FILES.get(chunk.key);
             return object === null
               ? undefined
               : new Uint8Array(await object.bytes());
           });
+          // And again once read: access lost, the file deleted or its
+          // details gone while R2 answered holds the chunk back.
+          await stillAllowed();
           // The bytes written, or none: a chunk changed in R2 ends it.
           if (
             bytes === undefined ||

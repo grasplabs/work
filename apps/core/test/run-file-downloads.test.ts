@@ -591,5 +591,84 @@ describe(
         }),
       }).toStrictEqual({ deleted: stopped, swept: stopped, revoked: stopped });
     });
+
+    it("hold back a chunk whose reader loses access, or whose file is deleted or details go, while it is read from storage", async () => {
+      const [admin, ada] = await Promise.all([
+        member("admin"),
+        member("builder"),
+      ]);
+      const id = await filesWorkflow(ada, admin);
+      /** A download by `reader` of a new run's one-chunk file, `meanwhile` done as storage reads it. */
+      const whileRead = async (
+        reader: Member,
+        meanwhile: (made: { run: string; file: string }) => Promise<unknown>
+      ) => {
+        const made = await ranOnce(ada, id);
+        // Storage answers only once `meanwhile` is done: the change lands
+        // after every check before the read, and before the bytes go out.
+        const files = new Proxy(env.FILES, {
+          get: (target, property) => {
+            if (property === "get") {
+              return async (key: string) => {
+                const object = await target.get(key);
+                await meanwhile(made);
+                return object;
+              };
+            }
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function"
+              ? (...args: unknown[]): unknown =>
+                  Reflect.apply(value, target, args)
+              : value;
+          },
+        });
+        const response = await routed(
+          runFileContentPath(id, made.run, made.file),
+          {
+            headers: {
+              cookie: reader.session,
+              "sec-fetch-site": "same-origin",
+            },
+          },
+          { ...env, FILES: files }
+        );
+        return {
+          status: response.status,
+          body: await outcome(response.text()),
+        };
+      };
+      const refused = { status: 200, body: "file.not_found" };
+
+      expect({
+        deleted: await whileRead(ada, async ({ file }) => {
+          await env.DB.prepare(
+            "UPDATE workflow_run_files SET state = 'deleted', deleted_at = ? WHERE id = ?"
+          )
+            .bind(Date.now(), file)
+            .run();
+        }),
+        // The run's details past their retention: the file has expired.
+        expired: await whileRead(ada, async () => {
+          const now = new Date();
+          await sweepWorkflowStartDetails(
+            env,
+            new Date(now.getTime() + 1000),
+            new Date(now.getTime() - 2 * sweepGraceMs)
+          );
+        }),
+        // Last, as it changes who reads.
+        revoked: await whileRead(admin, async () => {
+          await env.DB.prepare(
+            "UPDATE members SET role = 'user' WHERE user_id = ?"
+          )
+            .bind(admin.userId)
+            .run();
+        }),
+      }).toStrictEqual({
+        deleted: refused,
+        expired: refused,
+        revoked: refused,
+      });
+    });
   }
 );
