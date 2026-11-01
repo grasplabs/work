@@ -582,6 +582,32 @@ describe(officeTypeOf, () => {
     await expect(officeTypeOf(commentOnly)).resolves.toBeUndefined();
   });
 
+  it("refuses an entry whose local header gives other sizes than its central record", async () => {
+    const whole = await zipOf([
+      types(override("/main.xml", `${word}.main+xml`)),
+      body,
+    ]);
+    /** `whole` with its first entry's local size at `offset` one more. */
+    const grown = (offset: number) => {
+      const changed = new Uint8Array(whole);
+      const view = new DataView(changed.buffer);
+      view.setUint32(offset, view.getUint32(offset, true) + 1, true);
+      return changed;
+    };
+
+    await expect(
+      typed({
+        whole,
+        compressed: grown(18),
+        uncompressed: grown(22),
+      })
+    ).resolves.toStrictEqual({
+      whole: word,
+      compressed: undefined,
+      uncompressed: undefined,
+    });
+  });
+
   it("names no type for a package whose content types inflate past the bound, or a broken ZIP", async () => {
     // A small entry claiming a small size that inflates to far more.
     const bomb = await zipOf([

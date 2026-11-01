@@ -34,7 +34,8 @@ import type { RunFileType } from "@grasp-os/shared/run-files";
 //   directory exactly before it, no ZIP64 locator and no entry comment (in
 //   which another directory could sit), every record counted, each local
 //   header naming its entry as the central record does (flags alike but
-//   for the deflate-speed and UTF-8 bits), none encrypted, and the
+//   for the deflate-speed and UTF-8 bits, sizes alike unless they follow
+//   the data), none encrypted, and the
 //   entries back to back from the start, so none hides outside the
 //   directory. An entry's size must be the bytes it holds or inflates to,
 //   within the bound.
@@ -240,7 +241,8 @@ const centralsOf = (
 
 /**
  * Where entry `central`'s data starts and ends, if its local header is
- * its central record's: the same name, method and flags (none encrypted).
+ * its central record's: the same name, method and flags (none encrypted),
+ * and the same sizes unless they follow the data (bit 3).
  */
 const localOf = (
   view: DataView,
@@ -265,6 +267,13 @@ const localOf = (
     !sameBytes(name, central.nameBytes) ||
     !sameFlags(view.getUint16(local + 6, true), central.flags) ||
     view.getUint16(local + 8, true) !== central.method
+  ) {
+    return undefined;
+  }
+  if (
+    !hasFlag(central.flags, sizesAfterFlag) &&
+    (view.getUint32(local + 18, true) !== central.compressed ||
+      view.getUint32(local + 22, true) !== central.size)
   ) {
     return undefined;
   }
