@@ -1599,6 +1599,7 @@ describe("a purge of content", setUpTime, () => {
       first,
       afterFirst: afterFirst.map((text) => text.includes(name)),
       again: again.result.versions,
+      documents: again.result.documents,
       afterAgain: await versionTexts(note.id),
     }).toStrictEqual({
       saved: true,
@@ -1609,6 +1610,8 @@ describe("a purge of content", setUpTime, () => {
       // In all: the earlier version the first run rewrote, its count kept
       // with it, and the two the run again rewrote.
       again: 3,
+      // One document, though two runs changed it.
+      documents: 1,
       afterAgain: [
         "# Note\n(removed) one.",
         "# Note\n(removed) two.",

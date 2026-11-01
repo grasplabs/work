@@ -1968,26 +1968,34 @@ const purgeContent = async <C>(
         brain,
         held,
         documentStep(documentId),
-        async (save) =>
+        async (save, stored) => {
           // Gone since a run before: nothing of it is left to erase.
-          one === undefined
-            ? {}
-            : {
-                ...(await purgeDocument(
-                  brain,
-                  db,
-                  by,
-                  one,
-                  matcher,
-                  onErase,
-                  purgeId,
-                  async () => {
-                    await keepHold(brain, held);
-                  },
-                  (soFar) => save({ ...soFar }),
-                  () => heldNow(brain, held)
-                )),
-              }
+          if (one === undefined) {
+            return {};
+          }
+          // The step is one document: counted once, however many runs
+          // changed it; its versions add up.
+          const once = (made: Counts): Counts => ({
+            ...made,
+            documents: (stored.documents ?? 0) > 0 ? 0 : made.documents,
+          });
+          return once(
+            await purgeDocument(
+              brain,
+              db,
+              by,
+              one,
+              matcher,
+              onErase,
+              purgeId,
+              async () => {
+                await keepHold(brain, held);
+              },
+              (soFar) => save({ ...once(soFar) }),
+              () => heldNow(brain, held)
+            )
+          );
+        }
       );
       done.push(counts);
     }
