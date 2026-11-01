@@ -1,4 +1,6 @@
+import { failureText } from "@grasp-os/shared/errors";
 import { rememberTextMaxLength } from "@grasp-os/shared/knowledge";
+import type { SharedChat } from "@grasp-os/shared/knowledge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -24,39 +26,109 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { UsersIcon } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { keyOf, recordOf } from "./memory-parts.tsx";
 
-// Sharing one of the person's own records with a team they are in, or,
-// for an admin of the organization, with the company (`memoriesPublish`):
+// Sharing one of the person's own records with a team they are in, a chat
+// others share that they are in (`sharedChats`: only one Grasp knows
+// everyone in), or, for an admin of the organization, with the company
+// (`memoriesPublish`):
 // a new record in that scope, accepted, which rests on theirs. They may
 // reword it first: what is shared is what the form says. Core decides who
 // may publish where, and refuses one resting on what the scope's whole
 // audience may not read; the form offers only the scopes it would take.
-// Sharing into a chat waits for a way to list the shared chats a person is
-// in.
+// A chat is named by who else is in it: platforms give Grasp no name for
+// a channel.
 
 type Knowledge = Session["knowledge"];
 type Shown = Awaited<ReturnType<Knowledge["memoriesLineage"]>>["record"];
 
-/** Where a record can be shared: a team, by its ID, or the company. */
-type Target = { scope: "team"; teamId: string } | { scope: "company" };
+/** Where a record can be shared: a team, a shared chat, or the company. */
+type Target =
+  | { scope: "team"; teamId: string }
+  | { scope: "session"; chat: SharedChat }
+  | { scope: "company" };
 
-const targetKey = (target: Target): string =>
-  target.scope === "company" ? "company" : `team:${target.teamId}`;
+const targetKey = (target: Target): string => {
+  if (target.scope === "team") {
+    return `team:${target.teamId}`;
+  }
+  return target.scope === "session" ? `chat:${target.chat.chatId}` : "company";
+};
 
 /** Where the person may share a record, as core would take it. */
-export const shareTargets = (
+const shareTargets = (
   teams: readonly { id: string }[],
+  chats: readonly SharedChat[],
   admin: boolean
 ): Target[] => [
   ...teams.map(({ id }): Target => ({ scope: "team", teamId: id })),
+  ...chats.map((chat): Target => ({ scope: "session", chat })),
   ...(admin ? [{ scope: "company" } as const] : []),
 ];
+
+/** The shared chats the person is in: read when the form opens. */
+type Chats =
+  | { state: "loading" }
+  | { state: "ready"; chats: SharedChat[] }
+  | { state: "failed"; reason: string };
+
+const useSharedChats = (): Chats => {
+  const core = useCore();
+  const [chats, setChats] = useState<Chats>({ state: "loading" });
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      let next: Chats;
+      try {
+        next = {
+          state: "ready",
+          chats: await core.withSession(
+            async (session) => await session.knowledge.sharedChats()
+          ),
+        };
+      } catch (error) {
+        next = { state: "failed", reason: failureText(error) };
+      }
+      if (!left) {
+        setChats(next);
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+  return chats;
+};
+
+/** A shared chat, by who else is in it. */
+const ChatLabel = ({ chat }: { chat: SharedChat }) => {
+  const { t } = useLingui();
+  if (chat.others.length === 0) {
+    return t`A shared chat with only you in it`;
+  }
+  const people = formatList(chat.others);
+  return t`A shared chat with ${people}`;
+};
+
+/** A target as `memoriesPublish` takes it. */
+const scopeOf = (
+  to: Target
+): { scope: "company" } | { scope: "team" | "session"; scopeId: string } => {
+  if (to.scope === "company") {
+    return { scope: "company" };
+  }
+  return to.scope === "team"
+    ? { scope: "team", scopeId: to.teamId }
+    : { scope: "session", scopeId: to.chat.chatId };
+};
 
 const ShareForm = ({
   record,
@@ -72,7 +144,12 @@ const ShareForm = ({
   const { t } = useLingui();
   const ids = useId();
   const { busy, failure, run } = useCoreAction();
-  const targets = shareTargets(teams, admin);
+  const chats = useSharedChats();
+  const targets = shareTargets(
+    teams,
+    chats.state === "ready" ? chats.chats : [],
+    admin
+  );
   const [chosen, setChosen] = useState(
     targets[0] === undefined ? "" : targetKey(targets[0])
   );
@@ -88,9 +165,7 @@ const ShareForm = ({
       async (session) =>
         await session.knowledge.memoriesPublish(
           {
-            ...(to.scope === "company"
-              ? { scope: "company" }
-              : { scope: "team", scopeId: to.teamId }),
+            ...scopeOf(to),
             kind: record.kind,
             text: text.trim(),
             // It rests on the person's own record, at the revision shared.
@@ -142,14 +217,27 @@ const ShareForm = ({
               <Field key={key} orientation="horizontal">
                 <RadioGroupItem id={`${ids}-${key}`} value={key} />
                 <FieldLabel htmlFor={`${ids}-${key}`}>
-                  {one.scope === "company"
-                    ? t`The whole company`
-                    : teamName(one.teamId)}
+                  {one.scope === "company" ? t`The whole company` : null}
+                  {one.scope === "team" ? teamName(one.teamId) : null}
+                  {one.scope === "session" ? (
+                    <ChatLabel chat={one.chat} />
+                  ) : null}
                 </FieldLabel>
               </Field>
             );
           })}
         </RadioGroup>
+        {chats.state === "failed" ? (
+          <ErrorText>{chats.reason}</ErrorText>
+        ) : null}
+        {chats.state === "ready" && targets.length === 0 ? (
+          <FieldDescription>
+            <Trans>
+              There&apos;s nowhere to share it yet: you&apos;re in no team, and
+              in no chat others share.
+            </Trans>
+          </FieldDescription>
+        ) : null}
       </FieldSet>
       <Field>
         <FieldLabel htmlFor={`${ids}-text`}>
