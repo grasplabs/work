@@ -57,6 +57,7 @@ import {
   requireWorkflowRole,
 } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
+import { storeAlias } from "./workflow-store-host.ts";
 import {
   callWorkflowStoreOperation,
   workflowStoreOperationFor,
@@ -741,6 +742,30 @@ const unprojected = (
     .where(and(eq(sdkResourceBindings.approvalId, approval), when));
 
 /**
+ * The definition of the store that serves `served` now, for the binding
+ * inventory: an App's default store as the App's current version binds it,
+ * or a standalone workflow's store as its owner's current version binds it
+ * (workflow-stores.ts, `store:<name>`).
+ */
+const servedDefinitionSql = (
+  served: ServedStoreOperation | ServedWorkflowStoreOperation
+): SQL =>
+  "owner" in served
+    ? sql`(SELECT store.target_version
+        FROM sdk_resource_bindings AS store
+        JOIN apps ON apps.id = store.resource_id
+          AND apps.current_version = store.resource_version
+        WHERE store.resource_id = ${served.owner}
+          AND store.kind = 'store' AND store.alias = 'default')`
+    : sql`(SELECT store.target_version
+        FROM sdk_resource_bindings AS store
+        JOIN workflow_resources ON workflow_resources.id = store.resource_id
+          AND workflow_resources.current_version = store.resource_version
+        WHERE store.resource_id = ${served.server.workflowId}
+          AND store.kind = 'store'
+          AND store.alias = ${storeAlias(served.server.name)})`;
+
+/**
  * Approves `input` for workflow `id`, for `by`, one of the organization's
  * own admins: the alias, its target and the version they reviewed, which
  * must declare the alias as a catalog binding of the target's kind, and
@@ -853,12 +878,7 @@ export const approveWorkflowBinding = async (
             .update(sdkResourceBindings)
             .set({
               targetId: served.storeId,
-              targetVersion: sql`(SELECT store.target_version
-                FROM sdk_resource_bindings AS store
-                JOIN apps ON apps.id = store.resource_id
-                  AND apps.current_version = store.resource_version
-                WHERE store.resource_id = ${served.owner}
-                  AND store.kind = 'store' AND store.alias = 'default')`,
+              targetVersion: servedDefinitionSql(served),
               targetPath: target.operation,
               approvalId: row.id,
             })
