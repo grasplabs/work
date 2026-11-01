@@ -420,6 +420,24 @@ export const journeyStacks = {
 
 export type JourneySuite = keyof typeof journeyStacks;
 
+/** Each journey suite's Playwright config, from the root. */
+export const journeyConfigs: Readonly<Record<JourneySuite, string>> = {
+  e2e: "playwright.config.ts",
+  "admin-e2e": "playwright.admin.config.ts",
+};
+
+/**
+ * Whether one of `files` (absolute, outside every package) is imported,
+ * directly or not, by `suite`'s config in the repository at `root`: a
+ * file both configs import (e2e/stack.ts, which the admin's takes
+ * `corePort` from) runs both suites, wherever it sits.
+ */
+export const configImports =
+  (root: string) =>
+  (suite: JourneySuite, files: readonly string[]): boolean =>
+    files.length > 0 &&
+    filesImporting(files, root).has(path.join(root, journeyConfigs[suite]));
+
 /**
  * The suites a changed file outside every package runs, by its path from
  * the root: a suite's own journeys or config run that suite alone (the
@@ -448,7 +466,8 @@ const suitesOf = (file: string): JourneySuite[] => {
  * Which journey suites a pull request's changes reach. A suite runs when a
  * changed file sits in a package its stack runs or depends on, directly or
  * not, by every dependency (web's build included, which core serves), or
- * when one of its own journeys or its config changed (`suitesOf`). Two
+ * when one of its own journeys or its config changed (`suitesOf`), or a
+ * file its config imports (`configImports`). Two
  * kinds of change never reach a stack: a Vitest test file (`testFiles`),
  * which no build bundles, and a file in a package no stack depends on (the
  * admin's, for e2e; the router's, for both). In 150
@@ -461,6 +480,7 @@ export const journeysReached = ({
   testFiles,
   packages,
   root,
+  importedByConfig,
 }: {
   /** Every file changed since the base, absolute. */
   readonly changedFiles: readonly string[];
@@ -468,12 +488,18 @@ export const journeysReached = ({
   readonly testFiles: ReadonlySet<string>;
   readonly packages: readonly WorkspacePackage[];
   readonly root: string;
+  /** Whether a suite's config imports one of the files (`configImports`). */
+  readonly importedByConfig: (
+    suite: JourneySuite,
+    files: readonly string[]
+  ) => boolean;
 }): Record<JourneySuite, boolean> => {
   const dirs = packages.map(({ dir }) => dir).filter((dir) => dir !== root);
   const built = changedFiles.filter((file) => !testFiles.has(file));
-  const outside = built
-    .filter((file) => packageOf(file, dirs) === undefined)
-    .map((file) => path.relative(root, file));
+  const outsideFiles = built.filter(
+    (file) => packageOf(file, dirs) === undefined
+  );
+  const outside = outsideFiles.map((file) => path.relative(root, file));
   const reached = reachedPackages(
     packages,
     built
@@ -484,6 +510,7 @@ export const journeysReached = ({
   const dirOf = new Map(packages.map(({ name, dir }) => [name, dir]));
   const runs = (suite: JourneySuite): boolean =>
     outside.some((file) => suitesOf(file).includes(suite)) ||
+    importedByConfig(suite, outsideFiles) ||
     journeyStacks[suite].some((name) => reached.has(dirOf.get(name) ?? ""));
   return { e2e: runs("e2e"), "admin-e2e": runs("admin-e2e") };
 };
@@ -566,6 +593,22 @@ const plan = async (base: string | undefined): Promise<void> => {
     e2e: true,
     "admin-e2e": true,
   };
+  const tests = specs.map((spec) => ({
+    project: spec.project.name,
+    file: spec.moduleId,
+  }));
+  if (base !== undefined) {
+    // Before the shortcut below: a change to the root's own Vitest tests
+    // alone (scripts/test-plan.test.ts) runs every project, but no
+    // journey, as no build bundles a test file.
+    journeys = journeysReached({
+      changedFiles: filesChangedSince(base, root),
+      testFiles: new Set(tests.map(({ file }) => file)),
+      packages: workspacePackages(root),
+      root,
+      importedByConfig: configImports(root),
+    });
+  }
   if (base === undefined) {
     why =
       "No base to compare with (the merge queue, or a run by hand): every project.";
@@ -576,10 +619,6 @@ const plan = async (base: string | undefined): Promise<void> => {
     } else {
       const { changed, affected, journeys: journeyChanges, importers } = reach;
       const packages = packagesSelected(undefined, root);
-      const tests = specs.map((spec) => ({
-        project: spec.project.name,
-        file: spec.moduleId,
-      }));
       const importing = [
         ...new Set(
           tests
@@ -594,12 +633,6 @@ const plan = async (base: string | undefined): Promise<void> => {
         ]),
       ].toSorted(byKey);
       const changedFiles = filesChangedSince(base, root);
-      journeys = journeysReached({
-        changedFiles,
-        testFiles: new Set(tests.map(({ file }) => file)),
-        packages: workspacePackages(root),
-        root,
-      });
       const missed = missedByPlan({
         changedFiles,
         packages,

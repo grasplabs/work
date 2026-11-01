@@ -18,6 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   affectedProjects,
+  configImports,
   packageOf,
   packagesSelected,
   filesImporting,
@@ -458,12 +459,19 @@ const stackPackages = [
   },
 ];
 
+/** What both journey configs import, as e2e/stack.ts is. */
+const sharedByConfigs = "/repo/e2e/stack.ts";
+
 const journeysFor = (...changedFiles: string[]) =>
   journeysReached({
     changedFiles,
-    testFiles: new Set(["/repo/apps/core/test/agent.test.ts"]),
+    testFiles: new Set([
+      "/repo/apps/core/test/agent.test.ts",
+      "/repo/scripts/test-plan.test.ts",
+    ]),
     packages: stackPackages,
     root,
+    importedByConfig: (_suite, changed) => changed.includes(sharedByConfigs),
   });
 
 describe("choosing which journey suites a change reaches", () => {
@@ -522,5 +530,30 @@ describe("choosing which journey suites a change reaches", () => {
       e2e: true,
       "admin-e2e": true,
     });
+  });
+
+  it("runs both for a file of e2e's folder that both configs import", () => {
+    expect(journeysFor(sharedByConfigs)).toStrictEqual({
+      e2e: true,
+      "admin-e2e": true,
+    });
+  });
+
+  it("runs neither for a change to the root's own Vitest tests alone", () => {
+    expect(journeysFor("/repo/scripts/test-plan.test.ts")).toStrictEqual({
+      e2e: false,
+      "admin-e2e": false,
+    });
+  });
+
+  it("finds what each config imports in this repository: e2e/stack.ts for both, a journey for neither", () => {
+    const repo = path.resolve(import.meta.dirname, "..");
+    const imports = configImports(repo);
+    const stack = [path.join(repo, "e2e/stack.ts")];
+    const journey = [path.join(repo, "e2e/chat.e2e.ts")];
+    expect({
+      stack: [imports("e2e", stack), imports("admin-e2e", stack)],
+      journey: [imports("e2e", journey), imports("admin-e2e", journey)],
+    }).toStrictEqual({ stack: [true, true], journey: [false, false] });
   });
 });
