@@ -169,7 +169,6 @@
   "@grasp-os/core test/draft-versions.test.ts": 6.8,
   "@grasp-os/core test/durable-object-construction.test.ts": 7.9,
   "@grasp-os/core test/effect-lineage.test.ts": 85.3,
-  "@grasp-os/core test/email-preferences.test.ts": 0.8,
   "@grasp-os/core test/entry.test.ts": 0,
   "@grasp-os/core test/error-reports.test.ts": 0.4,
   "@grasp-os/core test/extraction-deadline.test.ts": 0,

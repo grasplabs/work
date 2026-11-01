@@ -156,7 +156,7 @@ export const organizations = sqliteTable("organizations", {
 
 /**
  * The organization's settings an admin keeps beside its name and time zone
- * (org-settings.ts): one row per kind (`billing`, `pulse`), its value as
+ * (org-settings.ts): one row per kind (`billing`), its value as
  * JSON, checked again as it is read. None until an admin saves one.
  */
 export const orgSettings = sqliteTable("org_settings", {

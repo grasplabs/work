@@ -656,20 +656,6 @@ export const customWidgets = sqliteTable(
 );
 
 /**
- * A person's own choice of the emails Grasp sends them, once they changed
- * it: a row for each person who saved theirs; one never saved gets every
- * email (`defaultEmailPreferences`). Kept in their own Workspace object,
- * as their dashboard is.
- */
-export const emailPreferences = sqliteTable("email_preferences", {
-  personId: text("person_id").primaryKey(),
-  needsYou: integer("needs_you", { mode: "boolean" }).notNull(),
-  weeklySummary: integer("weekly_summary", { mode: "boolean" }).notNull(),
-  billingProblems: integer("billing_problems", { mode: "boolean" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
-
-/**
  * The draft release a chat's preview of its draft of an App runs
  * (sealed-previews.ts): the draft sealed at `revision` as the version it
  * would become (`version`), its manifest's canonical text and that text's
