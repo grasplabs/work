@@ -40,6 +40,7 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import type { WorkflowLifecycleRpc } from "./workflow-lifecycle-rpc.ts";
+import type { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 
 // What waits on a person, in one feed (@grasp-os/shared/waiting). It
 // keeps nothing of its own: each part is read through the namespace the
@@ -70,6 +71,8 @@ export interface WaitingSources {
   chats: ChatsRpc;
   /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
   lifecycles: WorkflowLifecycleRpc;
+  /** Independent workflows' bindings that wait on an admin (`workflowResources.pendingBindings`). */
+  bindings: Pick<WorkflowResourcesRpc, "pendingBindings">;
 }
 
 /** Who reads the feed: whom each item is for follows from it. */
@@ -365,6 +368,25 @@ const parts: Parts = {
   },
   notifications: notificationItems,
   connections: connectionItems,
+  // Workflow versions whose bindings no admin approved: their starts are
+  // refused, so the live version's are urgent.
+  bindings: async ({ bindings }, { admin }) => {
+    if (!admin) {
+      return { items: [] };
+    }
+    const pending = await bindings.pendingBindings();
+    return {
+      items: pending.map((each) => ({
+        kind: "bindingApproval",
+        id: `bindingApproval:${each.workflow.id}:${each.version}`,
+        at: null,
+        urgent: each.live,
+        waitsOn: { type: "admin" },
+        verdicts: [],
+        pending: each,
+      })),
+    };
+  },
   decisions: async ({ decisions }, { forMe }) => {
     const waiting = await decisions.waiting();
     return {
