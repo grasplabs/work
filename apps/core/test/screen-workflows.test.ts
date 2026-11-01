@@ -1,6 +1,7 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import type { ScreenRun } from "@grasp-os/shared/screens";
 import type { RunStatus, WorkflowRun } from "@grasp-os/shared/workflows";
+import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { toScreenRun } from "../src/workflows/screen-runs.ts";
@@ -8,7 +9,7 @@ import { allEvents } from "./audit-events.ts";
 import { approvalApp, confirmedDecide, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { gate, rollingBackRun, withRollbacks } from "./rollbacks.ts";
+import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { endLiveRuns, finished, runInstance, sleeping, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
@@ -665,6 +666,58 @@ describe("an App run while it compensates", { timeout: 120_000 }, () => {
         compensation: { cause: "cancellation", activity: "running" },
         ended: { status: "cancelled", error: undefined },
       },
+    });
+  });
+
+  it("ends a run whose compensation failed as failed, though a cancel reaches it before its end is told", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "napping",
+        `  await step.sleep("nap", { description: "Wait a day", duration: "1 day" });
+  return 1;`
+      )
+    );
+    const run = await builder.api.screens.frame(app, "").startRun("napping");
+    await sleeping(run.id, "nap");
+    const holds = gate();
+    rollingBackRun(run.id, {
+      ends: "sleeps",
+      rollbackFails: true,
+      holds,
+      held: { name: "nap", ms: 86_400_000 },
+    });
+    await woken(run.id, "nap");
+    await sleeping(run.id, "after-charge");
+    const release = heldEnd(run.id);
+    await runInstance(run.id).terminate({ rollback: true });
+    holds.open();
+    // Ended in the engine, its refund failed; core not told of it yet.
+    await vi.waitFor(
+      async () => {
+        await expect(runInstance(run.id).status()).resolves.toMatchObject({
+          status: "terminated",
+          rollback: { status: "errored" },
+        });
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const rowOf = async () =>
+      await env.DB.prepare(
+        "SELECT status, json_extract(failure, '$.error.code') AS code FROM workflow_runs WHERE id = ?"
+      )
+        .bind(run.id)
+        .first<{ status: string; code: string | null }>();
+    const before = await rowOf();
+    await builder.api.workflows.cancel(run.id);
+    const cancelled = await rowOf();
+    release();
+    expect({ before: before?.status, cancelled }).toStrictEqual({
+      before: "running",
+      // Ended as the engine has it: an ended row never changes again, so
+      // the late end can't put a failed compensation right.
+      cancelled: { status: "failed", code: "workflow.compensation_failed" },
     });
   });
 });

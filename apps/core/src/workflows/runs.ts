@@ -1424,6 +1424,26 @@ export const projectStatus = async (
 };
 
 /**
+ * Brings run `run`'s row to its end as the engine found it ended (`live`;
+ * none for a run it has no record of, which ends terminated), with how
+ * its rollback went, if it rolled back: one that failed ends the run
+ * failed (spec 10.7.3), whatever ended it.
+ */
+export const projectEnded = async (
+  env: Env,
+  run: string,
+  live: InstanceStatus | undefined
+): Promise<void> => {
+  const rollback =
+    live !== undefined && "rollback" in live ? live.rollback : undefined;
+  await projectStatus(env, run, {
+    status: live?.status ?? "terminated",
+    at: Date.now(),
+    ...(rollback === undefined ? {} : { rollback: rollback.status }),
+  });
+};
+
+/**
  * Ends a run cancelled while its start was pending (`completeCancel`
  * keeps the start, so the repair finds the row): its start isn't sent
  * again, the engine is told to terminate whatever it has of it, and once
@@ -1438,15 +1458,7 @@ const endCancelledStart = async (env: Env, row: RunRow): Promise<void> => {
     await engine.terminate(row.id);
     const live = await engine.status(row.id);
     if (live === undefined || endedLive.has(live.status)) {
-      // With how its rollback went, if it rolled back: one that failed
-      // ends the run failed (spec 10.7.3), whatever ended it.
-      const rollback =
-        live !== undefined && "rollback" in live ? live.rollback : undefined;
-      await projectStatus(env, row.id, {
-        status: live?.status ?? "terminated",
-        at: Date.now(),
-        ...(rollback === undefined ? {} : { rollback: rollback.status }),
-      });
+      await projectEnded(env, row.id, live);
     }
   } catch (error) {
     log.error("workflow.start_cancel_failed", {
