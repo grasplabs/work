@@ -153,6 +153,11 @@ export type TokenCheck =
       reason: "another_app" | "session_ended" | "no_access";
       userId: string;
       sessionId: string;
+      /**
+       * The Grasp staff member refused (`no_access`), whose attempt goes
+       * in the client's audit log all the same (`auditStaffRoute`).
+       */
+      staff?: Identity;
     };
 
 /**
@@ -203,8 +208,20 @@ export const checkAppToken = async (
     return { ok: false, reason: "session_ended", userId, sessionId };
   }
   const person = await sessionIdentity(env, { userId, ...session });
-  // Grasp staff reach no App (session-check.ts `reachesWorkspace`).
-  return person === undefined || !reachesWorkspace(person)
-    ? { ok: false, reason: "no_access", userId, sessionId }
-    : { ok: true, person, sessionId, expiresAt: read.data.exp * 1000 };
+  if (person === undefined) {
+    return { ok: false, reason: "no_access", userId, sessionId };
+  }
+  // Grasp staff reach no App (session-check.ts `reachesWorkspace`), even
+  // with a token from before that held: refused, and named, so whoever
+  // refuses it records the attempt.
+  if (!reachesWorkspace(person)) {
+    return {
+      ok: false,
+      reason: "no_access",
+      userId,
+      sessionId,
+      ...(person.staff ? { staff: person } : {}),
+    };
+  }
+  return { ok: true, person, sessionId, expiresAt: read.data.exp * 1000 };
 };

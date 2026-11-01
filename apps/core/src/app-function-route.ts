@@ -796,6 +796,12 @@ export const portableFunctionResponse = async (
     return refused(503, authErrors.create("auth.token_unavailable"), requestId);
   }
   if (!checked.ok) {
+    // A staff member's refused call is in the client's audit log too.
+    if ("staff" in checked && checked.staff !== undefined) {
+      await auditStaffRoute(env, checked.staff, "app.functions.portable", {
+        app,
+      });
+    }
     if (checked.reason !== "invalid") {
       logRefusedToken({
         requestId,

@@ -440,6 +440,12 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
       }
       const checked = await checkAppToken(this.#env, token, this.#app);
       if (!checked.ok) {
+        // A staff member's refused connection is on record all the same.
+        if ("staff" in checked && checked.staff !== undefined) {
+          await auditStaffRoute(this.#env, checked.staff, "app.live.connect", {
+            app: this.#app,
+          });
+        }
         throw tokenRefusal(checked, this.#app);
       }
       const { person, sessionId, expiresAt } = checked;

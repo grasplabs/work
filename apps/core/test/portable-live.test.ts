@@ -9,6 +9,7 @@ import {
   appTokenMs,
   appTokenPath,
   connectAgainCloseCode,
+  portableFunctionPath,
   portableLivePath,
   tokenExpiredCloseCode,
 } from "@grasp-os/shared/portable";
@@ -25,6 +26,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { issueAppToken } from "../src/auth/app-tokens.ts";
+import { signedInSession } from "../src/auth/identity.ts";
 import { portableLiveAccounting } from "../src/portable-live.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
@@ -956,6 +959,47 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     expect({ status, surfaces }).toStrictEqual({
       status: 401,
       surfaces: [["app.token", [notes.app]]],
+    });
+  });
+
+  it("refuses a staff member's token from before staff lost the workspace, and puts each try in the client's audit log", async () => {
+    const notes = await notesApp();
+    const cookie = await signedIn(idp, "grasp-staff", staffPerson());
+    // Issued while staff still reached Apps: it is still within its time.
+    const session = await signedInSession(env, new Headers({ cookie }));
+    const issued =
+      session === undefined
+        ? undefined
+        : await issueAppToken(env, session, appIdSchema.parse(notes.app));
+    if (issued === undefined) {
+      throw new Error("No staff token");
+    }
+
+    const tried: Record<string, unknown> = {};
+    const events = await auditedDuring(
+      async () => {
+        const called = await routed(`${portableFunctionPath}/${notes.app}`, {
+          method: "POST",
+          headers: {
+            origin: hostOrigin,
+            "content-type": "application/json",
+            authorization: `Bearer ${issued.token}`,
+          },
+          body: "{}",
+        });
+        tried.call = called.status;
+        const { live } = await openLive(notes.app);
+        tried.connect = await outcome(live.connect(issued.token));
+      },
+      { staffAccesses: true }
+    );
+    const surfaces = events
+      .filter(({ action }) => action === "staff.accessed")
+      .map(({ detail }) => detail.surface);
+
+    expect({ tried, surfaces }).toStrictEqual({
+      tried: { call: 401, connect: "auth.unauthenticated" },
+      surfaces: ["app.functions.portable", "app.live.connect"],
     });
   });
 });
