@@ -142,6 +142,7 @@ const view = (more: Partial<OnboardingView> = {}): OnboardingView => ({
   context: noContext,
   waiting: 0,
   mailSends: true,
+  mailDomain: null,
   ...more,
 });
 

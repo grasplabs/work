@@ -138,7 +138,7 @@ export const TestRun = ({
   return (
     <section aria-labelledby="test-run" className="flex flex-col gap-3">
       <h2 className="font-medium" id="test-run">
-        <Trans>Test run of version {version}</Trans>
+        <Trans>Run version {version}</Trans>
       </h2>
       <div className="flex flex-col gap-2">
         <Label htmlFor="test-run-input">
@@ -162,7 +162,7 @@ export const TestRun = ({
           }}
           variant="outline"
         >
-          {busy ? t`Starting…` : t`Start a test run`}
+          {busy ? t`Starting…` : t`Start a run`}
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>

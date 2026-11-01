@@ -40,6 +40,36 @@ const scopeOf = (window: ReturnType<Page["getByRole"]>, name: string) =>
   });
 
 /**
+ * Waits until the page reads nothing from core for its pages: the router it
+ * keeps on `window.__TSR_ROUTER__` neither loads a page nor reads one
+ * again behind the page shown (a match's `isFetching`, which outlasts
+ * `isLoading` when a page already shown is read again).
+ */
+const readsNothing = async (page: Page): Promise<void> => {
+  await page.waitForFunction(() => {
+    const router: unknown = Reflect.get(window, "__TSR_ROUTER__");
+    return (
+      typeof router === "object" &&
+      router !== null &&
+      "state" in router &&
+      typeof router.state === "object" &&
+      router.state !== null &&
+      "isLoading" in router.state &&
+      router.state.isLoading === false &&
+      "matches" in router.state &&
+      Array.isArray(router.state.matches) &&
+      router.state.matches.every(
+        (match: unknown) =>
+          typeof match === "object" &&
+          match !== null &&
+          "isFetching" in match &&
+          match.isFetching === false
+      )
+    );
+  });
+};
+
+/**
  * A write the chat's agent asked for, as connect holds it for `person`:
  * written straight into connect's local database, as a call from the
  * chat's code would leave it (held-writes are core's tests too).
@@ -497,6 +527,11 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     `Out of reach ${tag}.`
   );
+  // Sent, the question has Chat read its list again (use-ask.ts), behind
+  // what the page already shows. A read the drop cuts off fails the page,
+  // not the follow, so the drop waits for that read: under load it is
+  // still on its way once the turn has ended.
+  await readsNothing(page);
 
   // The page's connection drops and none gets in: following stops, and
   // says why, once the page has waited its few seconds for a connection.
