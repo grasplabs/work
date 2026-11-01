@@ -116,6 +116,9 @@ const shown = async (
     create: async (input: unknown) => {
       await Promise.resolve();
       asked.push({ create: input });
+      if (changeFails) {
+        throw new Error("The trigger couldn't be read back.");
+      }
       return stoppedSchedule;
     },
     setEnabled: async (id: string, enabled: boolean) => {
@@ -404,10 +407,34 @@ describe("a workflow's Triggers tab", () => {
     await shown(true, false, true);
     const before = listReads;
     await press("Turn off", 1);
+    const afterChange = listReads;
+    // An added trigger too: one core saved shows, and isn't added twice.
+    await fill("Version it starts", "1");
+    await fill("When, as a cron expression", "30 7 * * *");
+    await fill("Time zone", "Europe/Amsterdam");
+    await submit();
 
     expect({
-      readAgain: listReads > before,
+      readAgain: afterChange > before,
+      readAfterAdding: listReads > afterChange,
       said: document.body.textContent.includes("couldn't be read back"),
-    }).toStrictEqual({ readAgain: true, said: true });
+    }).toStrictEqual({ readAgain: true, readAfterAdding: true, said: true });
+  });
+
+  it("says a stopped trigger someone turned off is off", async () => {
+    stoppedSchedule.enabled = false;
+    try {
+      await shown(true);
+      const row = [...document.querySelectorAll("li")].find((item) =>
+        item.textContent.includes("0 9 * * 1-5")
+      );
+
+      expect({
+        off: row?.textContent.includes("Off"),
+        stopped: row?.textContent.includes("Stopped"),
+      }).toStrictEqual({ off: true, stopped: false });
+    } finally {
+      stoppedSchedule.enabled = true;
+    }
   });
 });

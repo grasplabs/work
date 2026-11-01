@@ -137,19 +137,22 @@ const KindIcon = ({ kind }: { kind: WorkflowTrigger["kind"] }) => {
   );
 };
 
-/** Where `trigger` stands: stopped, off, or when it next starts a run. */
+/**
+ * Where `trigger` stands: off, stopped, or when it next starts a run. Off
+ * wins: a stopped trigger someone turned off says so, not that it stopped.
+ */
 const TriggerState = ({ trigger }: { trigger: WorkflowTrigger }) => {
-  if (trigger.stopped) {
-    return (
-      <Badge variant="attention">
-        <Trans>Stopped</Trans>
-      </Badge>
-    );
-  }
   if (!trigger.enabled) {
     return (
       <Badge variant="outline">
         <Trans context="a trigger that is turned off">Off</Trans>
+      </Badge>
+    );
+  }
+  if (trigger.stopped) {
+    return (
+      <Badge variant="attention">
+        <Trans>Stopped</Trans>
       </Badge>
     );
   }
@@ -422,8 +425,11 @@ const AddTrigger = ({
       setCron("");
       setInput("{}");
       setMapping("{}");
-      await onAdded();
     }
+    // Read again however it ended, as the rows' own changes are: a trigger
+    // core saved before its answer was lost shows, rather than being added
+    // twice on a retry.
+    await onAdded();
   };
 
   return (
