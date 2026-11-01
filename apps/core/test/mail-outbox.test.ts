@@ -135,7 +135,7 @@ describe("the mail outbox", () => {
     });
   });
 
-  it("sends nothing, and says why, with no sender or nobody to send from", async () => {
+  it("sends nothing, and says why, with no sender or nobody to send from, and names the sending domain only while a sender is set", async () => {
     const store = newStore();
     await captureMail(store);
     const bound = await store.view();
@@ -166,6 +166,9 @@ describe("the mail outbox", () => {
       sends: bound.mailSends,
       unbound: unbound?.mailSends,
       noSenderSet: unsent?.mailSends,
+      // The domain its admin lets through, from MAIL_FROM, never guessed.
+      domain: bound.mailDomain,
+      noDomain: unsent?.mailDomain,
       noSender: noSender?.reason,
       noFrom: noFrom?.reason,
       log: log.map(({ what }) => what),
@@ -173,6 +176,8 @@ describe("the mail outbox", () => {
       sends: true,
       unbound: false,
       noSenderSet: true,
+      domain: "mail.grasp.test",
+      noDomain: null,
       noSender: "mail.no_sender",
       noFrom: "mail.no_from",
       log: ["mail.note.failed.no_sender", "mail.note.failed.no_from"],
