@@ -33,6 +33,7 @@ import { onboardingErrors, planDays } from "@grasp-os/shared/onboarding";
 import { organizationErrors } from "@grasp-os/shared/organization";
 
 import { localStaff } from "../apps/core/test/sign-in-config.ts";
+import { adminCommand } from "./seed/admin-command.ts";
 import { companyName, people, roster } from "./seed/company.ts";
 import { localD1, localObject, sessionOf } from "./seed/local.ts";
 
@@ -224,13 +225,21 @@ const main = async (): Promise<void> => {
     });
 
     // The agreements, which staff put in place: the leads' links go out.
-    await staff.api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
     // Grasp's staff close the platform to the company until their go.
-    await staff.api.onboardingGate.close();
+    await adminCommand(
+      { type: "onboarding.gate.close", payload: {} },
+      staff.email
+    );
 
     // A week gone by: the plan began seven days ago, the leads' links went
     // out on its first day and everyone else's three working days later,

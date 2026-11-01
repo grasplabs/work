@@ -22,14 +22,7 @@ import {
   realtimeSockets,
 } from "./platform-providers.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import {
-  openRpc,
-  routed,
-  signedIn,
-  signedInWithRole,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { routed, signedInWithRole, unique } from "./sign-in.ts";
 
 // What someone says, written down as they say it, relayed through core
 // over a WebSocket on the page's own origin (src/onboarding/
@@ -856,8 +849,6 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     const month = newMonth();
     const minute = heardMicros(60);
     const head = await logHead();
-    const staff = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(staff);
     const before = await heardCounted("interviews");
     const { upstream, result } = await relaying(
       async () => {
@@ -904,18 +895,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         action === "model.refused" &&
         detail?.purpose === "onboarding.transcription"
     );
-    const numbers = await core.authenticate();
-    // What staff see heard for interviews, once Ada's socket is counted.
+    // What the onboarding counts heard for interviews, once Ada's socket is counted.
     const heard = await vi.waitFor(
       async () => {
-        const rows = await numbers.onboardingStaff.aiUse();
-        const seconds =
-          rows
-            .filter(
-              ({ purpose, model }) =>
-                purpose === "interviews" && model === "transcription"
-            )
-            .reduce((sum, row) => sum + row.seconds, 0) - before;
+        const seconds = (await heardCounted("interviews")) - before;
         if (seconds < 60) {
           throw new Error(`Expected a minute heard, got ${seconds}`);
         }

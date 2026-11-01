@@ -2,6 +2,7 @@ import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
@@ -94,9 +95,8 @@ describe("staff with the onboarding scope", () => {
   it("keep their access until 7 days after Grasp's go, and not a day longer; full-scope staff keep theirs", async () => {
     const { session } = await staffOn();
     const { session: full } = await staffOn(env);
-    const { api: staff } = await staffOn();
-    await staff.onboardingGate.close();
-    await staff.onboardingGate.open();
+    await adminCommands().close();
+    await adminCommands().open();
     const sixDays = Date.now() - 6 * 24 * 60 * 60 * 1000;
     await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
       .bind(sixDays)
@@ -123,21 +123,20 @@ describe("staff with the onboarding scope, after Grasp's go", () => {
 
   it("don't get access back when the gate closes and opens again, and see when theirs ends", async () => {
     const { session, api: staff } = await staffOn();
-    await staff.onboardingGate.close();
-    await staff.onboardingGate.open();
+    await adminCommands().close();
+    await adminCommands().open();
     const sixDays = Date.now() - 6 * 24 * 60 * 60 * 1000;
     await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
       .bind(sixDays)
       .run();
     const view = await staff.onboardingGate.view();
-    await staff.onboardingGate.close();
+    await adminCommands().close();
     const eightDays = Date.now() - 8 * 24 * 60 * 60 * 1000;
     await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
       .bind(eightDays)
       .run();
-    // Opening again, by staff with the full scope, keeps the go's time.
-    const { api: full } = await staffOn(env);
-    await full.onboardingGate.open();
+    // Opening again, from Grasp's admin, keeps the go's time.
+    await adminCommands().open();
     const again = await outcome(
       signedIn(idp, "grasp-staff", staffPerson(), { coreEnv: onboardingScope })
     );

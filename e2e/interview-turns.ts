@@ -16,6 +16,7 @@ import type {
 import type { Page, Route } from "@playwright/test";
 import { z } from "zod";
 
+import { adminCommand, adminSnapshot } from "./admin-steering.ts";
 import { interviewLinkOf } from "./interview-link.ts";
 import { apiOf } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -137,18 +138,16 @@ export const answerTo = (asked: InterviewTurnRequest): StephenTurn => {
   }
 };
 
-/** Where `person` stands, as core keeps their interview. */
-export const personIn = async (
-  staff: Person,
-  person: string
-): Promise<string | undefined> => {
-  const { core, api } = apiOf(staff);
-  try {
-    const { state } = await api.onboardingStaff.interview(person);
-    return state ?? undefined;
-  } finally {
-    core[Symbol.dispose]();
+/**
+ * Where `person` stands, as Grasp's admin reads it: their link's standing
+ * once core keeps an interview of theirs; undefined while it keeps none.
+ */
+export const personIn = async (person: string): Promise<string | undefined> => {
+  const { interviews, links } = await adminSnapshot();
+  if (!interviews.some((interview) => interview.person === person)) {
+    return undefined;
   }
+  return links.find((link) => link.person === person)?.state;
 };
 
 /** Someone in a team of their own, with their interview link out; their link's path. */
@@ -164,10 +163,15 @@ export const invited = async (
       people: [{ id: person, name, team: `team-${person}` }],
     });
     await api.onboarding.savePlan({ start: today() });
-    await api.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
+    await adminCommand({
+      type: "onboarding.agreements",
+      payload: {
+        agreements: {
+          processing: true,
+          assessment: true,
+          council: "none",
+        },
+      },
     });
   } finally {
     core[Symbol.dispose]();

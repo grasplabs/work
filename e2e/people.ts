@@ -376,7 +376,6 @@ const cast = {
   workflowTeam: { admin: "admin", builder: "builder", member: "user" },
   brainChat: { member: "user" },
   contexts: { member: "user" },
-  staffInterviews: { admin: "admin" },
   tour: { member: "user" },
   setupVoice: { admin: "admin" },
   setupConnect: { admin: "admin" },

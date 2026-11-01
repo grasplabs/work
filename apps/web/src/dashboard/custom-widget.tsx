@@ -33,7 +33,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 
 import { formatNumber } from "../format.ts";
-import { BarList } from "../onboarding/staff-figures.tsx";
+import { BarList } from "./bar-list.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
 // A widget Grasp made from what the person asked (@grasp-os/shared's

@@ -6,6 +6,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { gateView } from "../src/onboarding/gate.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -28,7 +29,8 @@ import {
 //
 // - Someone in the company signing in before Grasp's go, or keeping a
 //   session from before the gate closed.
-// - Anyone but staff closing or opening it, or doing so without a trace.
+// - Closing or opening it without a trace of the staff member, from
+//   Grasp's admin (admin-command.ts tries who may give a command).
 
 const idp = mockIdp();
 
@@ -57,16 +59,20 @@ const actionsOf = (events: AuditEvent[]) => events.map(({ action }) => action);
 
 /** Every test leaves the deployment open, as it found it. */
 const reopen = async () => {
-  const staff = await asStaff();
-  await staff.onboardingGate.open();
+  await adminCommands().open();
+};
+
+/** The gate as Grasp's admin reads it, in the snapshot. */
+const gateNow = async () => {
+  const { gate } = await adminSnapshot();
+  return gate;
 };
 
 describe("while the company is onboarding", () => {
   afterEach(reopen);
 
   it("lets in only the configured admins and staff: anyone else gets no user, no session, and the waiting page", async () => {
-    const staff = await asStaff();
-    await staff.onboardingGate.close();
+    await adminCommands().close();
     const member = entraPerson(acmeTenant);
     const refused = await signIn(idp, "microsoft", member);
     const admin = await signIn(idp, "microsoft", configuredAdmin());
@@ -96,8 +102,7 @@ describe("while the company is onboarding", () => {
     const member = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
     const admin = await signedIn(idp, "microsoft", configuredAdmin());
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(staffSession);
-    await core.authenticate().onboardingGate.close();
+    await adminCommands().close();
     expect({
       member: await signedInStill(member),
       admin: await signedInStill(admin),
@@ -110,12 +115,12 @@ describe("Grasp's go", () => {
   afterEach(reopen);
 
   it("lets everyone in, and closing and opening are on record as the staff member", async () => {
-    const staff = await asStaff();
+    const commands = adminCommands();
     const events = await auditedDuring(async () => {
-      await staff.onboardingGate.close();
+      await commands.close();
       // Closed twice is closed once.
-      await staff.onboardingGate.close();
-      await staff.onboardingGate.open();
+      await commands.close();
+      await commands.open();
     });
     const member = await signIn(idp, "microsoft", entraPerson(acmeTenant));
     expect(member.session).toBeDefined();
@@ -130,11 +135,14 @@ describe("Grasp's go", () => {
   });
 
   it("keeps when it was first given, through taking it back and giving it again", async () => {
-    const staff = await asStaff();
-    await staff.onboardingGate.close();
-    const given = await staff.onboardingGate.open();
-    const takenBack = await staff.onboardingGate.close();
-    const again = await staff.onboardingGate.open();
+    const commands = adminCommands();
+    await commands.close();
+    await commands.open();
+    const given = await gateNow();
+    await commands.close();
+    const takenBack = await gateNow();
+    await commands.open();
+    const again = await gateNow();
     expect({
       given: given.openedAt !== null,
       takenBack: [takenBack.open, takenBack.openedAt === given.openedAt],
@@ -142,21 +150,12 @@ describe("Grasp's go", () => {
     }).toStrictEqual({ given: true, takenBack: [false, true], again: true });
   });
 
-  it("is staff's alone: the company's admin reads the gate but can't move it", async () => {
+  it("is read by the company's admin, never by a member", async () => {
     const { api } = await signedInApi(idp, "admin");
     const view = await api.onboardingGate.view();
-    expect({
-      open: view.open,
-      threshold: view.threshold,
-      close: await outcome(api.onboardingGate.close()),
-      go: await outcome(api.onboardingGate.open()),
-      threshold70: await outcome(api.onboardingGate.setThreshold(70)),
-    }).toStrictEqual({
+    expect({ open: view.open, threshold: view.threshold }).toStrictEqual({
       open: true,
       threshold: 80,
-      close: "onboarding.staff_only",
-      go: "onboarding.staff_only",
-      threshold70: "onboarding.staff_only",
     });
     const { api: user } = await signedInApi(idp, "user");
     await expect(outcome(user.onboardingGate.view())).resolves.toBe(
@@ -222,16 +221,21 @@ describe("Grasp's go", () => {
     });
   });
 
-  it("takes only the thresholds there are, from staff", async () => {
-    const staff = await asStaff();
-    const view = await staff.onboardingGate.setThreshold(70);
-    expect(view.threshold).toBe(70);
+  it("takes only the thresholds there are, from Grasp's admin", async () => {
+    await adminCommands().setThreshold(70);
+    const set = await gateNow();
     // Only the thresholds there are.
     // SAFETY: a threshold the type refuses, as a client could still send it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const unknownThreshold = 75 as GateThreshold;
-    await expect(
-      outcome(staff.onboardingGate.setThreshold(unknownThreshold))
-    ).resolves.toBe("onboarding.invalid");
+    const refused = await outcome(
+      adminCommands().setThreshold(unknownThreshold)
+    );
+    await adminCommands().setThreshold(80);
+    expect({ threshold: set.threshold, refused }).toStrictEqual({
+      threshold: 70,
+      // A command the admin couldn't have made is refused whole.
+      refused: "request.forbidden",
+    });
   });
 });

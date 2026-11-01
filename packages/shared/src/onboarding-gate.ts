@@ -72,11 +72,6 @@ export interface GateView {
 /** The gate over `/rpc`: read by the company's admin and staff, moved by staff only. */
 export interface OnboardingGateApi {
   view: () => Promise<GateView>;
-  /** Closes the deployment to all but its admins and staff, for the onboarding. */
-  close: () => Promise<GateView>;
-  /** Grasp's go: everyone in the company comes in. */
-  open: () => Promise<GateView>;
-  setThreshold: (threshold: GateThreshold) => Promise<GateView>;
   /**
    * Ends Grasp's staff access, as the company's admin (never staff): every
    * staff session ends now, and the window the admin opened lets nobody

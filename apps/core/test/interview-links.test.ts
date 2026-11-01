@@ -15,17 +15,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  routed,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { adminCommands } from "./admin-command.ts";
+import { auditedDuring, routed, unique } from "./sign-in.ts";
 
 // Everyone's own interview link (src/onboarding/links.ts): it opens one
 // person's interview, on the first device that opens it, while the
@@ -60,8 +51,6 @@ import {
 //   again after it: not after a delete, nor a new start from staff.
 // - T6: after the last day nothing is approved any more.
 // - T7: taking part and withdrawing asked again answer as the first time.
-
-const idp = mockIdp();
 
 /** Words nobody else uses, to look for where they must not be. */
 const sentinel = "Quillfeather ledger seventeen";
@@ -530,25 +519,18 @@ describe("deleting and starting again", () => {
     await expect(store.linkOf("nobody")).resolves.toBeNull();
   });
 
-  it("gives someone who lost their device a new start, by staff only (L9)", async () => {
+  it("gives someone who lost their device a new start, from Grasp's admin (L9)", async () => {
     const { ids, secrets } = await running();
     const { key: lost } = await opened(secrets.oli);
     await save(secrets.oli, lost, 0);
-    const { api: admin } = await signedInApi(idp, "admin");
-    const notStaff = await outcome(admin.onboardingStaff.newStart(ids.oli));
-    const staff = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(staff);
-    const api = await core.authenticate();
-    await api.onboardingStaff.newStart(ids.oli);
+    await adminCommands().newStart(ids.oli);
     const { session: fresh, key } = await opened(secrets.oli);
     const old = await session(secrets.oli, lost);
     expect({
-      notStaff,
       fresh: fresh.progress,
       newKey: key !== "" && key !== lost,
       old: await old.json(),
     }).toStrictEqual({
-      notStaff: "onboarding.staff_only",
       fresh: null,
       newKey: true,
       old: { state: "elsewhere" },
@@ -661,7 +643,7 @@ describe("taking part, approving and withdrawing", () => {
 
   it.each([
     ["deleting it from the link", "delete"],
-    ["a new start from staff", "newStart"],
+    ["a new start from Grasp's admin", "newStart"],
   ] as const)(
     "keeps a withdrawal final through %s: nobody takes part again (T5)",
     async (_, how) => {

@@ -5,15 +5,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  signedIn,
-  signedInApi,
-  staffPerson,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // The onboarding's store (src/onboarding/store.ts), over `/rpc`: the
 // company's admin gives it who works where and the plan, and reads back
@@ -62,12 +56,6 @@ const roster: RosterInput = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const plan = () => ({ start: today(), days: 14 });
-
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
 
 /** The first team's numbers, as the admin reads them. */
 const numbers = (view: OnboardingView) => ({
@@ -290,50 +278,39 @@ describe("the admin's numbers", () => {
 });
 
 describe("Grasp's staff in the onboarding", () => {
-  it("are the only ones who pause it or say the agreements are in", async () => {
-    const { api } = await signedInApi(idp, "admin");
-    await expect(outcome(api.onboardingStaff.pause())).resolves.toBe(
-      "onboarding.staff_only"
-    );
-    await expect(
-      outcome(
-        api.onboardingStaff.setAgreements({
-          processing: true,
-          assessment: true,
-          council: "none",
-        })
-      )
-    ).resolves.toBe("onboarding.staff_only");
-  });
-
   it("let no link out before the agreements are in, nor while the interviews are paused", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan(plan());
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "waiting",
-    });
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "waiting",
+      },
+      { type: "system" }
+    );
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.pause();
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "agreed",
-    });
+    await adminCommands().pause();
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "agreed",
+      },
+      { type: "system" }
+    );
     await expect(api.onboarding.view()).resolves.toMatchObject({
       agreed: true,
       paused: true,
     });
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
-    await staff.onboardingStaff.resume();
+    await adminCommands().resume();
     // At once: the lead's, and a team without a lead; Sales waits for its lead.
     const sent = await store.sentLinks();
     expect(sent.map(({ person: id }) => id)).toStrictEqual([
@@ -345,7 +322,6 @@ describe("Grasp's staff in the onboarding", () => {
 
   it("send the links already due as the admin plans them, from a moment that has passed", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     const run = crypto.randomUUID().slice(0, 8);
     const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
@@ -366,12 +342,15 @@ describe("Grasp's staff in the onboarding", () => {
       start: weekOn.toISOString().slice(0, 10),
       days: 14,
     });
-    await staff.onboardingStaff.resume();
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    await adminCommands().resume();
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "none",
+      },
+      { type: "system" }
+    );
     // Then today, from its first moment: the lead's and Ops' are due, and go.
     await api.onboarding.savePlan({
       start: today(),
@@ -388,12 +367,11 @@ describe("Grasp's staff in the onboarding", () => {
 
   it("put every change in the audit log, as who made it, with no name in it", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const events = await auditedDuring(async () => {
       await api.onboarding.saveRoster(roster);
       await api.onboarding.savePlan(plan());
-      await staff.onboardingStaff.pause();
-      await staff.onboardingStaff.resume();
+      await adminCommands().pause();
+      await adminCommands().resume();
     });
     // The admin's and staff's changes; links the alarm sends are Grasp's own.
     const ours = events.filter(
@@ -440,7 +418,6 @@ const sharedAgain: RosterInput = {
 describe("a list shared again while the plan runs", () => {
   it("sends nobody new on it a link until the admin confirms the organization, and then each team as it goes", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     const now = new Date().toISOString();
     await api.onboarding.confirmRoster(confirmedFirst);
@@ -449,11 +426,14 @@ describe("a list shared again while the plan runs", () => {
       { start: weeksAgo(now), days: 42 },
       { type: "system" }
     );
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "none",
+      },
+      { type: "system" }
+    );
     await store.releaseDue(now);
     const sentFirst = await store.sentLinks();
     const first = sentFirst.map(({ person: id }) => id);
@@ -497,15 +477,17 @@ describe("a list shared again while the plan runs", () => {
 describe("someone taken off the list", () => {
   it("keeps no link and nothing of where their interview stood", async () => {
     const { api } = await signedInApi(idp, "admin");
-    const staff = await asStaff();
     const store = onboardingStore(env);
     await api.onboarding.saveRoster(roster);
     await api.onboarding.savePlan(plan());
-    await staff.onboardingStaff.setAgreements({
-      processing: true,
-      assessment: true,
-      council: "none",
-    });
+    await onboardingStore(env).setAgreements(
+      {
+        processing: true,
+        assessment: true,
+        council: "none",
+      },
+      { type: "system" }
+    );
     await store.releaseDue();
     await store.noteInterview({
       person: "oli",

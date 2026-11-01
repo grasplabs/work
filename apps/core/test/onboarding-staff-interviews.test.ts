@@ -9,42 +9,22 @@ import { z } from "zod";
 
 import { labMarks } from "../src/onboarding/lab-marks.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { adminCommands } from "./admin-command.ts";
-import { mockIdp } from "./idp.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { answering, openedFor } from "./interview-link.ts";
-import {
-  auditedDuring,
-  openRpc,
-  outcome,
-  routed,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  unique,
-} from "./sign-in.ts";
+import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
 
-// The interviews by name in Grasp's onboarding area (staff-rpc.ts): where
-// everyone stands, someone's own link, the one reminder, a team asked in,
-// an interview deleted on its person's request, and who held a transcript
-// on which text. The ways it can fail, tried here:
+// The interviews by name as Grasp's admin reads and steers them (the
+// admin snapshot and admin commands): where everyone stands, the one
+// reminder, a team asked in, and who held a transcript on which text.
+// The ways it can fail, tried here:
 //
-// - Anyone but staff reaching any of it: a member, the company's admin.
-// - A read that names people, or holds a link, without a trace in the
-//   audit log; or a trace that names the person, or holds the link or
-//   their words (the company's admin reads the audit log).
+// - A read that names people without a trace in the audit log; or a trace
+//   that names the person, or holds their words (the company's admin
+//   reads the audit log).
 // - The one reminder going twice, or to someone who already talked.
-// - A deleted interview coming back from a copy left open.
-
-const idp = mockIdp();
 
 /** Words nobody else uses, to look for where they must not be. */
 const sentinel = "Quince barometer satchel";
-
-const asStaff = async () => {
-  const session = await signedIn(idp, "grasp-staff", staffPerson());
-  const { core } = await openRpc(session);
-  return await core.authenticate();
-};
 
 const progress = (): InterviewProgress => ({
   person: "completed",
@@ -129,35 +109,14 @@ const running = async () => {
   return { store, ids, oli: { secret, key } };
 };
 
-describe("the interviews in Grasp's onboarding area", () => {
-  it("are staff's alone: a member and the company's admin reach none of it", async () => {
-    const { ids } = await running();
-    const { api: admin } = await signedInApi(idp, "admin");
-    const { api: user } = await signedInApi(idp, "user");
-    const refused = await Promise.all(
-      [admin, user].flatMap((api) => [
-        outcome(api.onboardingStaff.interviews()),
-        outcome(api.onboardingStaff.link(ids.oli)),
-        outcome(api.onboardingStaff.remind([ids.ona])),
-        outcome(api.onboardingStaff.askIn("labs")),
-        outcome(api.onboardingStaff.deleteInterview(ids.oli)),
-        outcome(api.onboardingStaff.interview(ids.oli)),
-      ])
-    );
-    expect(new Set(refused)).toStrictEqual(new Set(["onboarding.staff_only"]));
-  });
-
+describe("the interviews, as Grasp's admin sees and steers them", () => {
   it("show staff where everyone stands by name, without a word anyone said, and every read is on record", async () => {
     const { ids } = await running();
-    const staff = await asStaff();
 
     const reads: AdminSnapshot[] = [];
-    const events = await auditedDuring(
-      async () => {
-        reads.push(await staff.onboardingStaff.interviews());
-      },
-      { staffAccesses: true }
-    );
+    const events = await auditedDuring(async () => {
+      reads.push(await adminSnapshot());
+    });
     const links = reads[0]?.links ?? [];
     const stateOf = (person: string) =>
       links.find((link) => link.person === person)?.state;
@@ -175,49 +134,13 @@ describe("the interviews in Grasp's onboarding area", () => {
       states: ["completed", "invited", "waiting"],
       oli: [4, "claire", true],
       words: false,
-      // On record as a staff look (staff-audit.ts), naming no one.
-      audited: [["staff.accessed", "staff", undefined]],
-    });
-  });
-
-  it("give staff someone's own link to send by hand, on record by its random id alone", async () => {
-    const { ids } = await running();
-    const staff = await asStaff();
-
-    const paths: string[] = [];
-    const events = await auditedDuring(
-      async () => {
-        paths.push(await staff.onboardingStaff.link(ids.ona));
-      },
-      { staffAccesses: true }
-    );
-    const path = paths[0] ?? "";
-    const secret = path.split("#")[1] ?? "";
-    // The link staff were given opens Ona's interview, and nobody else's.
-    const key = await openOn(path);
-    const text = JSON.stringify(events);
-    expect({
-      path: path.startsWith("/interview#"),
-      opens: key.length > 0,
-      audited: events.map(({ action, target }) => [action, target?.type]),
-      secretInLog: text.includes(secret),
-      named: text.includes(ids.ona) || text.includes("Ona Ek"),
-      nobody: await outcome(staff.onboardingStaff.link("nobody")),
-    }).toStrictEqual({
-      path: true,
-      opens: true,
-      // On record as a staff look before anything was read, by the kind of
-      // what was asked alone (staff-audit.ts).
-      audited: [["staff.accessed", undefined]],
-      secretInLog: false,
-      named: false,
-      nobody: "onboarding.not_found",
+      // On record as the admin's read, naming no one.
+      audited: [["admin.snapshot.read", "staff", "organization"]],
     });
   });
 
   it("note the one reminder once, only for whom the link is out and who hasn't talked", async () => {
     const { ids } = await running();
-    const staff = await asStaff();
 
     const events = await auditedDuring(async () => {
       await adminCommands().remind([ids.oli, ids.ona, ids.lia]);
@@ -225,12 +148,12 @@ describe("the interviews in Grasp's onboarding area", () => {
     const again = await auditedDuring(async () => {
       await adminCommands().remind([ids.ona]);
     });
-    const { links } = await staff.onboardingStaff.interviews();
+    const { links } = await adminSnapshot();
     const reminded = links
       .filter(({ remindedAt }) => remindedAt !== null)
       .map(({ person }) => person)
       .filter((person) => Object.values(ids).includes(person));
-    const { entries } = await staff.onboardingStaff.log({
+    const { entries } = await onboardingStore(env).staffLog({
       what: "interview.reminded",
     });
     const text = JSON.stringify(events);
@@ -253,13 +176,11 @@ describe("the interviews in Grasp's onboarding area", () => {
 
   it("ask a team in that didn't take part: its lead's link goes out", async () => {
     const { ids } = await running();
-    const staff = await asStaff();
 
     await adminCommands().askIn("labs");
-    const view = await onboardingStore(env).view();
-    const { links } = await staff.onboardingStaff.interviews();
+    const { roster, links } = await adminSnapshot();
     expect({
-      off: view.roster?.teams.find(({ id }) => id === "labs")?.off,
+      off: roster?.teams.find(({ id }) => id === "labs")?.off,
       lia: links.find(({ person }) => person === ids.lia)?.state,
       unknown: await outcome(adminCommands().askIn("nowhere")),
     }).toStrictEqual({
@@ -269,49 +190,10 @@ describe("the interviews in Grasp's onboarding area", () => {
     });
   });
 
-  it("delete someone's interview on their request: gone for staff, and a copy left open can't save it back", async () => {
-    const { ids, oli } = await running();
-    const staff = await asStaff();
-
-    const events = await auditedDuring(async () => {
-      await staff.onboardingStaff.deleteInterview(ids.oli);
-    });
-    const read = await staff.onboardingStaff.interview(ids.oli);
-    const resaved = await routed(interviewApiPath, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "save",
-        secret: oli.secret,
-        key: oli.key,
-        version: 1,
-        progress: progress(),
-      }),
-    });
-    const { links } = await staff.onboardingStaff.interviews();
-    expect({
-      state: read.state,
-      resaved: resaved.status,
-      deleted:
-        (links.find(({ person }) => person === ids.oli)?.deletedAt ?? null) !==
-        null,
-      audited: events.map(({ action }) => action),
-      named: JSON.stringify(events).includes(ids.oli),
-      nobody: await outcome(staff.onboardingStaff.deleteInterview(ids.lia)),
-    }).toStrictEqual({
-      state: null,
-      resaved: 410,
-      deleted: true,
-      audited: ["onboarding.interview.deleted"],
-      named: false,
-      nobody: "onboarding.no_link",
-    });
-  });
-
   it("show who held an interview, and the text it was held with, by its mark", async () => {
     const { link, person } = await openedFor();
-    const staff = await asStaff();
-    const before = await staff.onboardingStaff.interview(person);
+    const store = onboardingStore(env);
+    const before = await store.interviewOf(person);
     await answering(
       [
         {
@@ -343,8 +225,8 @@ describe("the interviews in Grasp's onboarding area", () => {
         await turn.text();
       }
     );
-    const after = await staff.onboardingStaff.interview(person);
-    expect({ before: before.texts, after: after.texts }).toStrictEqual({
+    const after = await store.interviewOf(person);
+    expect({ before: before?.texts, after: after?.texts }).toStrictEqual({
       before: [],
       after: [labMarks.claire.own.nl],
     });
