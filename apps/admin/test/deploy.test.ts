@@ -1,16 +1,26 @@
+import { clientsNamespace } from "@grasp-os/shared/names";
 import { env } from "cloudflare:workers";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   channels,
   clientDeploys,
+  clientPlacements,
+  clientProvisions,
   clientRuns,
   clients,
   clientWorkers,
+  hostingDestinations,
+  rolledOutSecrets,
 } from "../src/db/schema.ts";
 import { releaseToEdge, retryChannel } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
+import {
+  checkRevocation,
+  rollOutSecrets,
+} from "../src/rollout/shared-secrets.ts";
 import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -27,7 +37,7 @@ import {
   timeOutAttempt,
 } from "./runs.ts";
 import type { LostWrite } from "./runs.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
 // One client's deploy, as the reconciler starts it (src/rollout/deploy.ts,
 // src/rollout/reconciler.ts), broken where it can break. How it can fail,
@@ -36,7 +46,9 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a client deployed while another runner (an apply, provisioning) has it;
 // - an attempt that timed out, or lost its step's result, acting twice or
 //   counted failed;
-// - a deploy whose run was terminated left deploying for good.
+// - a deploy whose run was terminated left deploying for good;
+// - shared secrets rolled out never reaching a client, or an old one
+//   called revocable while a client still runs it.
 
 const token = "test-deployer-token-deploy-8c4e1b";
 const cloudflare = mockCloudflareApi(token);
@@ -71,7 +83,7 @@ const heldAfter = (matches: (call: ApiCall) => boolean) => {
 
 /** A live client on `releaseId`, following Edge. */
 const live = async (releaseId: string): Promise<PlacedClient> =>
-  await livePlacedClient(cloudflare, 1, releaseId, { channel: "edge" });
+  await livePlacedClient(cloudflare, releaseId, { channel: "edge" });
 
 /** The release each of the client's Workers runs, by Worker. */
 const releasesOf = async (clientId: string) => {
@@ -166,8 +178,8 @@ const followRuns = () => {
 };
 
 /**
- * Sets aside what earlier tests left: their clients offboarded, and no
- * release on any channel.
+ * Sets aside what earlier tests left: their clients offboarded, no
+ * release on any channel, and no shared secrets rolled out.
  */
 const setAsideEarlierTests = async (): Promise<void> => {
   await db
@@ -175,6 +187,7 @@ const setAsideEarlierTests = async (): Promise<void> => {
     .set({ status: "offboarded" })
     .where(inArray(clients.status, ["active", "provisioning"]));
   await db.delete(channels);
+  await db.delete(rolledOutSecrets);
 };
 
 describe("a client's deploy", () => {
@@ -403,4 +416,170 @@ describe("a client's deploy", () => {
       releases: on(release),
     });
   });
+});
+
+describe("rolling shared secrets out", () => {
+  useStoreSecrets({ deployer: token });
+  beforeEach(setAsideEarlierTests);
+
+  it("deploys each client again whose shared secrets differ from the ones rolled out, then calls the rotated secret revocable", async () => {
+    const release = await placedRelease("feat(core): runs");
+    await releaseToEdge(env, [release]);
+    const first = await live(release);
+    const second = await live(release);
+    await using runs = followRuns();
+    await runs.converge();
+    const before = [
+      await deployOf(first.clientId),
+      await deployOf(second.clientId),
+    ];
+    // Deploy platform copied a new Composio key into the store.
+    await setStoreSecret(
+      env.COMPOSIO_API_KEY,
+      "COMPOSIO_API_KEY",
+      "composio-key-rotated"
+    );
+    const beforeRollOut = await checkRevocation(env);
+
+    await rollOutSecrets(env, staff);
+    await runs.converge();
+
+    expect({
+      before,
+      beforeRollOut,
+      deploys: [
+        await deployOf(first.clientId),
+        await deployOf(second.clientId),
+      ],
+      revocation: await checkRevocation(env),
+    }).toStrictEqual({
+      // Up to date on their release: nothing deployed them.
+      before: [null, null],
+      beforeRollOut: "nothing_rolled_out",
+      deploys: [
+        { releaseId: release, status: "done", error: null },
+        { releaseId: release, status: "done", error: null },
+      ],
+      revocation: {
+        revocable: ["COMPOSIO_API_KEY"],
+        rotated: ["COMPOSIO_API_KEY"],
+        storeChanged: [],
+        behind: { COMPOSIO_API_KEY: [] },
+      },
+    });
+  });
+
+  it.each([
+    {
+      connect: "names the version its operation recorded",
+      answering: "recorded" as const,
+      held: false,
+    },
+    {
+      connect: "answers as an earlier version, its upload's",
+      answering: "earlier" as const,
+      held: true,
+    },
+    {
+      // What the probe recorded was an isolate of a version made before
+      // the run's last secret: a later read names the newest.
+      connect: "names a newer version than its operation recorded",
+      answering: "newer" as const,
+      held: true,
+    },
+    {
+      connect: "names no version (down, or no version metadata)",
+      answering: null,
+      held: true,
+    },
+  ])(
+    "revokes a namespace connect's rotated secret only while core's health says connect $connect",
+    async ({ answering, held }) => {
+      const release = await placedRelease("feat(core): runs");
+      const internal = await live(release);
+      const { clientId } = internal;
+      const operation = await db
+        .select({ progress: clientProvisions.progress })
+        .from(clientProvisions)
+        .where(eq(clientProvisions.clientId, clientId))
+        .get();
+      const { shared } = z
+        .object({
+          shared: z.record(z.string(), z.record(z.string(), z.string())),
+        })
+        .parse(JSON.parse(operation?.progress ?? "{}"));
+      // Its Workers in a namespace: drift reads connect, as its core,
+      // through core's health, asked through the admin's binding of the
+      // namespace, which names the version connect answers as.
+      const placement = await db
+        .select({ destinationId: clientPlacements.destinationId })
+        .from(clientPlacements)
+        .where(eq(clientPlacements.clientId, clientId))
+        .get();
+      await db
+        .update(hostingDestinations)
+        .set({
+          kind: "workers_for_platforms",
+          namespace: clientsNamespace("production"),
+        })
+        .where(eq(hostingDestinations.id, placement?.destinationId ?? ""));
+      internal.account.namespaces.set(
+        clientsNamespace("production"),
+        new Map(internal.account.scripts)
+      );
+      const dispatcher = cloudflare.dispatcher(
+        internal.account.id,
+        clientsNamespace("production")
+      );
+      vi.spyOn(env.DISPATCHER, "get").mockImplementation(
+        (name) =>
+          // SAFETY: a stand-in user Worker: only `fetch`, which the admin calls.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          dispatcher.get(name) as Fetcher
+      );
+      // A secrets rollout that rotated connect's Composio key: its operation
+      // delivered the store's value, as on record.
+      await db.insert(rolledOutSecrets).values({
+        id: 1,
+        prints: JSON.stringify({ ...shared.core, ...shared.connect }),
+        rotated: JSON.stringify(["COMPOSIO_API_KEY"]),
+        rolledOutBy: staff.email,
+        rolledOutAt: new Date(),
+      });
+
+      const connect = await db
+        .select({ scriptName: clientWorkers.scriptName })
+        .from(clientWorkers)
+        .where(
+          and(
+            eq(clientWorkers.clientId, clientId),
+            eq(clientWorkers.worker, "connect")
+          )
+        )
+        .get();
+      const [first] =
+        internal.account.scripts.get(connect?.scriptName ?? "")?.versions ?? [];
+      if (answering === "earlier") {
+        internal.account.connectAnswering = first?.id ?? null;
+      } else if (answering === "newer") {
+        await db
+          .update(clientWorkers)
+          .set({ versionId: first?.id ?? null })
+          .where(
+            and(
+              eq(clientWorkers.clientId, clientId),
+              eq(clientWorkers.worker, "connect")
+            )
+          );
+      } else if (answering === null) {
+        internal.account.connectAnswering = null;
+      }
+
+      await expect(checkRevocation(env)).resolves.toMatchObject({
+        rotated: ["COMPOSIO_API_KEY"],
+        revocable: held ? [] : ["COMPOSIO_API_KEY"],
+        behind: { COMPOSIO_API_KEY: held ? [clientId] : [] },
+      });
+    }
+  );
 });

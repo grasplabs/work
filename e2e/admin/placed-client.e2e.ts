@@ -3,9 +3,9 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { z } from "zod";
 
 /**
- * How long provisioning, a release or a rollback may take: its attempt's
- * steps against the fake Cloudflare API (apps/admin/test/e2e-worker.ts),
- * and the Setup's 5 s refreshes, on a loaded machine.
+ * How long a deploy may take: its run's steps against the fake Cloudflare
+ * API (apps/admin/test/e2e-worker.ts), and the Setup's 5 s refreshes, on
+ * a loaded machine.
  */
 const operationMs = 90_000;
 
@@ -15,7 +15,7 @@ const seededSchema = z.object({
   releaseIds: z.tuple([z.string(), z.string()]),
 });
 
-/** A client live on the first of two releases, in a dedicated destination of its own. */
+/** A client live on Stable's release, in a dedicated destination of its own, and a newer release on Edge. */
 const seed = async (
   request: APIRequestContext
 ): Promise<z.infer<typeof seededSchema>> => {
@@ -35,46 +35,63 @@ const visit = async (page: Page, path: string): Promise<void> => {
 /** The Setup's Hosting section. */
 const hosting = (page: Page) => page.getByRole("region", { name: "Hosting" });
 
-/** Waits until the client's operation is done on `releaseId`, as the Setup follows it. */
-const doneOn = async (page: Page, releaseId: string): Promise<void> => {
-  const facts = hosting(page).getByRole("definition");
-  await expect(
-    facts.filter({ hasText: new RegExp(`^${releaseId}$`, "u") })
-  ).toBeVisible({
-    timeout: operationMs,
-  });
-  await expect(facts.filter({ hasText: /^done$/u })).toBeVisible({
-    timeout: operationMs,
-  });
+/**
+ * Waits until the client's operation is done on `releaseId`, ticking the
+ * reconciler as the admin's cron does and reading its Setup again.
+ */
+const doneOn = async (
+  page: Page,
+  request: APIRequestContext,
+  clientId: string,
+  releaseId: string
+): Promise<void> => {
+  await expect(async () => {
+    const ticked = await request.post("/__e2e/tick");
+    expect(ticked.status()).toBe(204);
+    await visit(page, `/organizations/${clientId}/setup`);
+    await hosting(page)
+      .getByRole("button", { name: "Show hosting details" })
+      .click();
+    const facts = hosting(page).getByRole("definition");
+    await expect(
+      facts.filter({ hasText: new RegExp(`^${releaseId}$`, "u") })
+    ).toBeVisible({ timeout: 1000 });
+    await expect(facts.filter({ hasText: /^done$/u })).toBeVisible({
+      timeout: 1000,
+    });
+  }).toPass({ timeout: operationMs });
 };
 
-// Staff release a live client to a later release, roll it back and
-// offboard it, from the console alone (GRA-387, GRA-384): no engineer,
-// no command line. Adding one is the create journey's.
-test("staff release a placed client, roll it back and offboard it", async ({
+// Staff pin a live client to another release, unpin it back to its
+// channel's and offboard it, from the admin alone (GRA-387, GRA-384): no
+// engineer, no command line. Adding one is the create journey's.
+test("staff pin a placed client, unpin it and offboard it", async ({
   page,
   request,
 }) => {
   const { clientId, releaseIds } = await seed(request);
-  const [first, second] = releaseIds;
+  const [stable, newer] = releaseIds;
+  const pinning = async (releaseId: string | null): Promise<void> => {
+    await visit(page, `/organizations/${clientId}/setup?tab=releases`);
+    if (releaseId === null) {
+      await page.getByRole("button", { name: "Unpin" }).click();
+      return;
+    }
+    await page.getByLabel("Pin it to").selectOption(releaseId);
+    await page.getByRole("button", { name: "Pin", exact: true }).click();
+  };
+  const hostingDone = async (releaseId: string): Promise<void> => {
+    await doneOn(page, request, clientId, releaseId);
+  };
 
-  // Live on the first, its hosting folded away under its Setup.
-  await visit(page, `/organizations/${clientId}/setup`);
+  await hostingDone(stable);
+  // Pinned: the admin deploys it to the pinned release by itself.
+  await pinning(newer);
+  await hostingDone(newer);
+  // Unpinned: back to its channel's release.
+  await pinning(null);
+  await hostingDone(stable);
   const section = hosting(page);
-  await section.getByRole("button", { name: "Show hosting details" }).click();
-  await doneOn(page, first);
-
-  // Released to the later one.
-  await section.getByLabel("Release").selectOption(second);
-  await section.getByRole("button", { name: "Release it" }).click();
-  await doneOn(page, second);
-
-  // Rolled back to the one before.
-  await section.getByRole("button", { name: `Roll back to ${first}` }).click();
-  await doneOn(page, first);
-  await expect(
-    section.getByRole("button", { name: `Roll back to ${second}` })
-  ).toBeVisible();
 
   // Offboarded: unrouted at once, and listed for deletion once its
   // retention is over, which it isn't yet.

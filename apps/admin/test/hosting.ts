@@ -9,7 +9,8 @@ import type { ReleaseManifest } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 
 import { adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
+import { channels, clients } from "../src/db/schema.ts";
+import type { Channel } from "../src/db/schema.ts";
 import { placeClient, saveDestination } from "../src/hosting/inventory.ts";
 import type { DestinationInput } from "../src/hosting/inventory.ts";
 import { buildRelease } from "./releases.ts";
@@ -90,4 +91,22 @@ export const placedClient = async (destinationId: string) => {
     destinationId,
   });
   return { clientId, placement };
+};
+
+/**
+ * Points `channel` at release `releaseId`, as promoting it there leaves
+ * it: what a client following the channel is provisioned on. Stable by
+ * default, which a new client follows.
+ */
+export const onChannel = async (
+  releaseId: string,
+  channel: Channel = "stable"
+): Promise<void> => {
+  await db
+    .insert(channels)
+    .values({ id: channel, releaseId, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: channels.id,
+      set: { releaseId, updatedAt: new Date() },
+    });
 };

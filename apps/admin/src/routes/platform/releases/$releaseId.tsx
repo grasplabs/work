@@ -16,7 +16,6 @@ import {
   PlatformNav,
   platformCrumb,
   releasesCrumb,
-  startRolloutId,
 } from "../../../admin/platform-nav.tsx";
 import { Facts, listed, Quiet } from "../../../admin/release-parts.tsx";
 import { Section } from "../../../admin/section.tsx";
@@ -122,11 +121,7 @@ const ReleasePage = () => {
   return (
     <AdminPage
       action={
-        <Link
-          className={buttonVariants()}
-          hash={startRolloutId}
-          to="/platform/rollouts"
-        >
+        <Link className={buttonVariants()} to="/platform">
           Start a rollout
         </Link>
       }

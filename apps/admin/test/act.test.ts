@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { act, actIfChanged, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clientAdminReads, clients } from "../src/db/schema.ts";
+import type { Channel } from "../src/db/schema.ts";
 
 const db = adminDatabase(env.DB);
 const staff = { email: "staff@grasp.test", sub: "sub-staff" };
@@ -31,7 +32,7 @@ describe(act, () => {
       action: "client.create",
       clientId: client.id,
       target: "eu-dedicated",
-      detail: { ring: 1 },
+      detail: { channel: "stable" },
     });
 
     const [row] = await db
@@ -45,7 +46,7 @@ describe(act, () => {
       actor: staff.email,
       action: "client.create",
       target: "eu-dedicated",
-      detail: JSON.stringify({ ring: 1 }),
+      detail: JSON.stringify({ channel: "stable" }),
     });
     expect(events[0]?.at).toBeInstanceOf(Date);
   });
@@ -121,22 +122,22 @@ describe(act, () => {
 });
 
 describe(actIfChanged, () => {
-  /** Moves `client` to `ring` only while it's still in ring 1. */
-  const promote = (clientId: string, ring: number) =>
+  /** Moves `client` to `channel` only while it still follows Stable. */
+  const promote = (clientId: string, channel: Channel) =>
     db
       .update(clients)
-      .set({ ring })
-      .where(and(eq(clients.id, clientId), eq(clients.ring, 1)));
+      .set({ channel })
+      .where(and(eq(clients.id, clientId), eq(clients.channel, "stable")));
 
   it("records a conditional change that happened", async () => {
     const client = newClient();
     await db.insert(clients).values(client);
 
     await expect(
-      actIfChanged(db, staff, promote(client.id, 0), {
-        action: "client.ring",
+      actIfChanged(db, staff, promote(client.id, "edge"), {
+        action: "client.channel",
         clientId: client.id,
-        detail: { ring: 0 },
+        detail: { channel: "edge" },
       })
     ).resolves.toBeTruthy();
 
@@ -144,9 +145,9 @@ describe(actIfChanged, () => {
     expect(events).toMatchObject([
       {
         actor: staff.email,
-        action: "client.ring",
+        action: "client.channel",
         target: null,
-        detail: JSON.stringify({ ring: 0 }),
+        detail: JSON.stringify({ channel: "edge" }),
       },
     ]);
     expect(events[0]?.at).toBeInstanceOf(Date);
@@ -154,21 +155,21 @@ describe(actIfChanged, () => {
 
   it("records nothing when the change matched no row", async () => {
     const client = newClient();
-    await db.insert(clients).values({ ...client, ring: 2 });
+    await db.insert(clients).values({ ...client, channel: "beta" });
 
     await expect(
-      actIfChanged(db, staff, promote(client.id, 0), {
-        action: "client.ring",
+      actIfChanged(db, staff, promote(client.id, "edge"), {
+        action: "client.channel",
         clientId: client.id,
       })
     ).resolves.toBeFalsy();
 
     await expect(eventsFor(client.id)).resolves.toStrictEqual([]);
     const [row] = await db
-      .select({ ring: clients.ring })
+      .select({ channel: clients.channel })
       .from(clients)
       .where(eq(clients.id, client.id));
-    expect(row).toStrictEqual({ ring: 2 });
+    expect(row).toStrictEqual({ channel: "beta" });
   });
 
   it("records one change once, when two race for it", async () => {
@@ -176,12 +177,12 @@ describe(actIfChanged, () => {
     await db.insert(clients).values(client);
 
     const results = await Promise.all([
-      actIfChanged(db, staff, promote(client.id, 0), {
-        action: "client.ring",
+      actIfChanged(db, staff, promote(client.id, "edge"), {
+        action: "client.channel",
         clientId: client.id,
       }),
-      actIfChanged(db, "system", promote(client.id, 3), {
-        action: "client.ring",
+      actIfChanged(db, "system", promote(client.id, "beta"), {
+        action: "client.channel",
         clientId: client.id,
       }),
     ]);

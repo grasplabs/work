@@ -24,6 +24,7 @@ import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
   clientAdminReads,
+  clientDeploys,
   clientPlacements,
   clientProvisions,
   clientResources,
@@ -32,7 +33,6 @@ import {
   clientSealedSecrets,
   clientWatch,
   clientWorkers,
-  rolloutTargets,
 } from "../db/schema.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 
@@ -154,8 +154,8 @@ export const discardClient = async (
       .delete(clientWatch)
       .where(and(eq(clientWatch.clientId, clientId), still)),
     db
-      .delete(rolloutTargets)
-      .where(and(eq(rolloutTargets.clientId, clientId), still)),
+      .delete(clientDeploys)
+      .where(and(eq(clientDeploys.clientId, clientId), still)),
     db.delete(clientRuns).where(and(eq(clientRuns.clientId, clientId), still)),
     // Last, as its placement, operation, resources and Workers reference
     // it too: one written between the guard and this fails the batch.

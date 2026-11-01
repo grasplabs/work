@@ -55,7 +55,7 @@ const recordClient = async (
 /** A live placed client running a new release, as its operation made it. */
 const liveClient = async () => {
   const release = await placedRelease("feat(core): the frame");
-  const { clientId, account } = await livePlacedClient(cloudflare, 1, release, {
+  const { clientId, account } = await livePlacedClient(cloudflare, release, {
     signIn: null,
   });
   return { clientId, name: `Acme ${clientId}`, account };

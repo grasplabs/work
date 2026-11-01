@@ -1,7 +1,8 @@
 /**
  * The one reconciler: on the admin's cron (src/server.ts), every minute,
  * it deploys each active client whose Workers run something other than
- * its target release (src/rollout/desired.ts).
+ * its target (src/rollout/desired.ts): another release, or shared secrets
+ * other than the ones staff rolled out. Nothing else deploys a release.
  *
  * Per channel, at most `parallelDeploys` deploys are out at once, each a
  * run of its own (src/rollout/deploy.ts). Once a client following the
@@ -50,6 +51,7 @@ import {
   targetOf,
 } from "./desired.ts";
 import type { ChannelReleases, ClientFacts } from "./desired.ts";
+import { rolledOutPrints } from "./shared-secrets.ts";
 import { channelReleases, deliveredShared } from "./targets.ts";
 
 /** How many clients a tick reads at once. */
@@ -388,10 +390,11 @@ export const reconcile = async (env: Env): Promise<void> => {
   }
   const db = adminDatabase(env.DB);
   const releases = await channelReleases(db);
+  const rolledOut = await rolledOutPrints(db);
   for (const channel of channelIds) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one channel at a time
-      await reconcileChannel(env, channel, releases, null);
+      await reconcileChannel(env, channel, releases, rolledOut);
     } catch (error) {
       log.error("reconcile.channel_failed", {
         channel,

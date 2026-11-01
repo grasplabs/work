@@ -11,10 +11,9 @@ import type { TeamsBot } from "./teams-bot.ts";
 
 /** A client's settings, as its page shows them. */
 export interface ClientSettingsView {
-  ring: number;
   /** Whether it's live: only then can its settings be applied now. */
   active: boolean;
-  /** The release rollouts leave it on, if it's pinned. */
+  /** The release promotions leave it on, if it's pinned. */
   pinnedReleaseId: string | null;
   /** Its record's sign-in; null when it has none, or one that doesn't parse. */
   signIn: ClientSignInRecord | null;
@@ -40,7 +39,6 @@ export const clientSettings = async (
 ): Promise<ClientSettingsView | null> => {
   const [client] = await db
     .select({
-      ring: clients.ring,
       status: clients.status,
       pinnedReleaseId: clients.pinnedReleaseId,
       signIn: clients.signIn,
@@ -54,7 +52,6 @@ export const clientSettings = async (
   }
   const signIn = clientSignInSchema.safeParse(parsedJson(client.signIn));
   return {
-    ring: client.ring,
     active: client.status === "active",
     pinnedReleaseId: client.pinnedReleaseId,
     signIn: signIn.success ? signIn.data : null,
@@ -78,7 +75,7 @@ export interface HistoryEntry {
 
 /**
  * Client `clientId`'s latest admin actions, newest first: staff's
- * changes, and its provisioning, deploys and rollouts, as the audit log
+ * changes, and its provisioning and deploys, as the audit log
  * recorded them.
  */
 export const clientHistory = async (

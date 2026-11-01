@@ -25,19 +25,15 @@ import {
   clientPlacements,
   clients,
   hostingDestinations,
-  releases,
 } from "../db/schema.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { ProvisionError } from "../provision/errors.ts";
+import { targetReleaseOf } from "../rollout/targets.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import type { RunStatus } from "../runners.ts";
 import { InventoryError, placeClient, placementOf } from "./inventory.ts";
 import type { InventoryErrorCode } from "./inventory.ts";
-import {
-  newestRelease,
-  ProvisionOperationError,
-  provisionOf,
-} from "./operation.ts";
+import { ProvisionOperationError, provisionOf } from "./operation.ts";
 import type { ProvisionOperationErrorCode } from "./operation.ts";
 import { clientHostingOf } from "./organization.ts";
 import type { OrganizationHosting } from "./organization.ts";
@@ -107,8 +103,9 @@ export interface ClientHostingView {
     updatedAt: Date;
   } | null;
   /**
-   * The newest imported release (`newestRelease`): what starting or
-   * resuming offers first; null when none is imported.
+   * The release it should run (src/rollout/desired.ts): its pin, or its
+   * channel's, what provisioning starts it on; null while its channel
+   * has none.
    */
   suggestedReleaseId: string | null;
   /**
@@ -322,9 +319,10 @@ export const getClientHosting = async (
     placement === undefined
       ? automaticChoice(destinations)
       : { destinationId: placement.destinationId, reason: null };
+  const target = await targetReleaseOf(db, clientId);
   const suggestedReleaseId =
     client.status === "provisioning" && hosting.hosting === "grasp_cloud"
-      ? await newestRelease(db)
+      ? (target?.releaseId ?? null)
       : null;
   return {
     clientId,
@@ -371,7 +369,7 @@ export const placementErrorCodes = [
    * its own): placing it would take that run's claim, so it could never resume.
    */
   "other_run_held",
-  /** No release was chosen, and none is imported (`newestRelease`). */
+  /** Its channel has no release yet: one must be promoted to it first. */
   "no_release",
   /** It runs on its own premises: Grasp's cloud provisions nothing for it. */
   "hosted_on_prem",
@@ -397,45 +395,22 @@ export type PlaceRefusal =
   | Extract<ProvisionError["code"], "already_running" | "not_provisioning">;
 
 /**
- * What staff ask: provision `clientId` with `releaseId` (null: the newest
- * imported), in `destinationId` or the automatic one (null).
+ * What staff ask: provision `clientId`, on the release it should run, in
+ * `destinationId` or the automatic one (null).
  */
 export const placeInputSchema = z.object({
   clientId: z.string().min(1),
-  releaseId: z.string().min(1).nullable(),
   destinationId: z.string().min(1).nullable(),
 });
 
 export type PlaceInput = z.infer<typeof placeInputSchema>;
 
 /**
- * The release a provisioning started or tried again without one picked
- * runs with: the newest imported release (`newestRelease`). For one with
- * an operation, the newest built after its recorded release, so a fix
- * released since moves it forward; with none newer, its recorded release,
- * so it is never left without one.
- */
-const resumeRelease = async (
-  db: AdminDatabase,
-  clientId: string
-): Promise<string | null> => {
-  const operation = await provisionOf(db, clientId);
-  if (operation === undefined) {
-    return await newestRelease(db);
-  }
-  const recorded = await db
-    .select({ id: releases.id, builtAt: releases.builtAt })
-    .from(releases)
-    .where(eq(releases.id, operation.releaseId))
-    .get();
-  const newer = await newestRelease(db, recorded);
-  return newer ?? operation.releaseId;
-};
-
-/**
  * Places client `input.clientId`, as `staff`, unless it's placed already,
- * and starts provisioning it with `input.releaseId`, or resumes the
- * operation it has (`provisionPlacedClient`). Without a destination, the
+ * and starts provisioning it on the release it should run, its pin or
+ * its channel's (src/rollout/desired.ts), or resumes the operation it has
+ * on that release (`provisionPlacedClient`). Refused while its channel has
+ * no release (`no_release`). Without a destination, the
  * automatic one (`automaticChoice`); a placed client stays where it is,
  * and another destination is refused (`placement_changed`). Everything is
  * checked before the client is placed, since a placement is for good:
@@ -491,11 +466,12 @@ export const placeAndProvision = async (
       `Client ${clientId}'s last run, ${run.runId}, is a ${run.kind} run`
     );
   }
-  const releaseId = input.releaseId ?? (await resumeRelease(db, clientId));
+  const target = await targetReleaseOf(db, clientId);
+  const releaseId = target?.releaseId ?? null;
   if (releaseId === null) {
     throw new PlacementError(
       "no_release",
-      `No release is imported to provision ${clientId} with`
+      `Promote a release to ${target?.channel ?? "its channel"} first`
     );
   }
   if ((await importedManifest(db, releaseId)) === null) {
@@ -555,7 +531,7 @@ export const startDestination = async (
 
 /**
  * Starts provisioning client `clientId`, as `staff`, when nothing keeps
- * it: in the automatic destination, with the newest release
+ * it: in the automatic destination, on the release it should run
  * (`placeAndProvision`). What adding a client does at once, so a client
  * with somewhere to go and a release to go with is never left waiting
  * for a click. Answers the attempt's id, or why it didn't start: no
@@ -571,7 +547,6 @@ export const provisionIfReady = async (
   try {
     const runId = await placeAndProvision(env, staff, {
       clientId,
-      releaseId: null,
       destinationId: null,
     });
     return { runId, notStarted: null };

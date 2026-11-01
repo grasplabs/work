@@ -3,12 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { setSignIn } from "../src/clients/settings.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
-import {
-  clientProvisions,
-  clients,
-  rollouts,
-  rolloutTargets,
-} from "../src/db/schema.ts";
+import { clientDeploys, clientProvisions, clients } from "../src/db/schema.ts";
 import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
@@ -39,7 +34,7 @@ const recordClient = async (
       db.insert(clients).values({
         id,
         name: `Acme ${id}`,
-        ring: 3,
+        channel: "beta",
         status,
         pinnedReleaseId,
         createdBy: staff.email,
@@ -183,7 +178,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("shows a company's ring and sign-in to change, what waits for its next deploy, rotating its secrets, and its history", async () => {
+  it("shows a company's channel and sign-in to change, what waits for its next deploy, rotating its secrets, and its history", async () => {
     const client = await recordClient("active");
     // The key a sign-in change fingerprints its admins with, for its audit.
     const store = await adminOf(env.CLIENT_KEY);
@@ -208,9 +203,9 @@ describe("the company pages, in the admin", () => {
 
     expect({
       statuses: [releases.status, settings.status, historyTab.status],
-      ring:
-        releases.html.includes('name="ring"') &&
-        releases.html.includes('value="3"'),
+      channel:
+        releases.html.includes('name="channel"') &&
+        releases.html.includes('value="beta"'),
       signIn:
         settings.html.includes('value="acme.test"') &&
         settings.html.includes('value="ada@acme.test"'),
@@ -226,7 +221,7 @@ describe("the company pages, in the admin", () => {
       ),
     }).toStrictEqual({
       statuses: [200, 200, 200],
-      ring: true,
+      channel: true,
       signIn: true,
       pending: true,
       apply: true,
@@ -253,7 +248,7 @@ describe("the company pages, in the admin", () => {
       },
       unpinned: {
         says: unpinnedPage.html.includes(
-          "Not pinned: every rollout reaches it."
+          "Not pinned: it gets each release promoted to its channel."
         ),
         unpin: unpinnedPage.html.includes("Unpin"),
       },
@@ -265,48 +260,47 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("offers to roll a company back from the rollout that reached it, and not from one that didn't", async () => {
-    const release = await importedRelease("feat(core): rolled out");
-    const reached = await recordClient("active");
-    const waiting = await recordClient("active");
+  it("says when its deploy of the release it should run failed, and why, sending staff to Platform; never for a release it no longer should run", async () => {
+    const release = await importedRelease("feat(core): fails to deploy");
+    const other = await importedRelease("feat(core): no longer its target");
+    const failed = await recordClient("active", release);
+    const moved = await recordClient("active", release);
     const now = new Date();
-    const rolloutId = crypto.randomUUID();
-    await db.insert(rollouts).values({
-      id: rolloutId,
-      kind: "release",
-      releaseId: release,
-      status: "waiting",
-      startedBy: staff.email,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await db.insert(rolloutTargets).values([
+    await db.insert(clientDeploys).values([
       {
-        rolloutId,
-        clientId: reached.id,
-        ring: 3,
-        status: "done",
-        updatedAt: now,
+        clientId: failed.id,
+        releaseId: release,
+        runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+        status: "failed",
+        error: "cloudflare_400_10000",
+        startedAt: now,
+        endedAt: now,
       },
       {
-        rolloutId,
-        clientId: waiting.id,
-        ring: 3,
-        status: "pending",
-        updatedAt: now,
+        clientId: moved.id,
+        releaseId: other,
+        runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+        status: "failed",
+        error: "cloudflare_400_10000",
+        startedAt: now,
+        endedAt: now,
       },
     ]);
 
-    const reachedPage = await setupOf(reached.id, "releases");
-    const waitingPage = await setupOf(waiting.id, "releases");
+    const failedPage = await setupOf(failed.id);
+    const movedPage = await setupOf(moved.id);
 
     expect({
-      reached: reachedPage.html.includes("Roll it back"),
-      waiting: waitingPage.html.includes("Roll it back"),
-      rollout: reachedPage.html.includes(
-        `href="/platform/rollouts/${rolloutId}"`
-      ),
-    }).toStrictEqual({ reached: true, waiting: false, rollout: true });
+      failed: failedPage.html.includes(`Its deploy of ${release} failed`),
+      why: failedPage.html.includes("cloudflare_400_10000"),
+      platform: failedPage.html.includes('href="/platform"'),
+      moved: movedPage.html.includes(`Its deploy of ${other} failed`),
+    }).toStrictEqual({
+      failed: true,
+      why: true,
+      platform: true,
+      moved: false,
+    });
   });
 
   it("answers 404 for a company that doesn't exist, or can't be one", async () => {

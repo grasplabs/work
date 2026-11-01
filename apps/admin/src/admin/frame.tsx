@@ -9,8 +9,7 @@
  * Beside each organization, as the prototype has it, how many things need
  * Grasp there, as the admin's model works it out of what its core answered
  * (src/admin/views.ts). Beside Platform, how many companies' platforms
- * need a look and a rollout waiting for approval, as the admin recorded
- * them (`platformCounts`), and under it its releases and rollouts.
+ * need a look, as the admin recorded them (`platformCounts`), and under it its releases.
  * Beside Apps asked for, how many apps the companies asked for
  * (`askedApps`).
  */
@@ -70,7 +69,7 @@ interface Place {
 
 /** A page under one of the admin's places, nested beneath its entry. */
 interface SubPlace {
-  to: "/platform/releases" | "/platform/rollouts";
+  to: "/platform/releases";
   label: string;
 }
 
@@ -85,10 +84,7 @@ const places: readonly Place[] = [
     to: "/platform",
     label: "Platform",
     icon: ServerIcon,
-    under: [
-      { to: "/platform/releases", label: "Releases" },
-      { to: "/platform/rollouts", label: "Rollouts" },
-    ],
+    under: [{ to: "/platform/releases", label: "Releases" }],
   },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
@@ -132,24 +128,14 @@ interface PlaceBadge {
   words: string;
 }
 
-/** Platform's badge: companies that need a look, and a rollout that waits, as one count. */
-const platformBadge = ({
-  needLook,
-  waiting,
-}: PlatformCounts): PlaceBadge | null => {
-  const count = needLook + (waiting ? 1 : 0);
-  if (count === 0) {
-    return null;
-  }
-  const look =
-    needLook === 0
-      ? []
-      : [
-          `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
-        ];
-  const waits = waiting ? ["a rollout waits for approval"] : [];
-  return { count, words: [...look, ...waits].join("; ") };
-};
+/** Platform's badge: how many companies need a look. */
+const platformBadge = ({ needLook }: PlatformCounts): PlaceBadge | null =>
+  needLook === 0
+    ? null
+    : {
+        count: needLook,
+        words: `${needLook} ${needLook === 1 ? "company needs" : "companies need"} a look`,
+      };
 
 /** Apps asked for's badge: how many apps the companies asked for. */
 const integrationsBadge = (asked: number): PlaceBadge | null =>

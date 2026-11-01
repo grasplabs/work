@@ -30,7 +30,6 @@ import {
 import type { PlaceRefusal } from "./placement.ts";
 import { provisioningProgress } from "./progress.ts";
 import { resumeProvisioning } from "./reconcile.ts";
-import { releasePlacedClient } from "./workflow.ts";
 
 /** What placing and provisioning answers: the attempt it started, or why it was refused. */
 export type PlaceResult =
@@ -76,34 +75,6 @@ const attempt = async (start: () => Promise<string>): Promise<PlaceResult> => {
     return refusal;
   }
 };
-
-/** Releasing a live placed client to `releaseId`, or resuming that release. */
-export const releasePlacedClientFn = createServerFn({ method: "POST" })
-  .validator(
-    z.object({ clientId: z.string().min(1), releaseId: z.string().min(1) })
-  )
-  .handler(
-    async ({ data, context }): Promise<PlaceResult> =>
-      await attempt(
-        async () =>
-          await releasePlacedClient(env, context.staff, data.clientId, {
-            releaseId: data.releaseId,
-          })
-      )
-  );
-
-/** Rolling a live placed client back to the release it ran before. */
-export const rollbackPlacedClientFn = createServerFn({ method: "POST" })
-  .validator(z.object({ clientId: z.string().min(1) }))
-  .handler(
-    async ({ data, context }): Promise<PlaceResult> =>
-      await attempt(
-        async () =>
-          await releasePlacedClient(env, context.staff, data.clientId, {
-            rollback: true,
-          })
-      )
-  );
 
 export const placeAndProvisionFn = createServerFn({ method: "POST" })
   .validator(placeInputSchema)

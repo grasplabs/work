@@ -10,6 +10,8 @@ import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { coreAddressOf } from "../clients/core-address.ts";
+import type { ClientDispatcher } from "../clients/core-address.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import { listDeployments } from "../cloudflare/workers.ts";
 import type { WorkerDeployment } from "../cloudflare/workers.ts";
@@ -103,7 +105,12 @@ export type ManifestOf = (
  * namespace, whose versions Cloudflare's API doesn't list.
  */
 export interface HealthReads {
-  fetch: typeof fetch;
+  /**
+   * The dispatch namespace the router binds (`DISPATCHER`): core is asked
+   * through it, never over the internet (src/clients/core-address.ts).
+   * Without it, a Worker in a namespace is `unknown`.
+   */
+  dispatcher: ClientDispatcher | undefined;
   /**
    * The keys the client's router secret and auth secret are derived from:
    * the router's, for every request to core, and the client key, which
@@ -204,7 +211,7 @@ export const coreOriginOf = async (
  */
 const healthDrift = async (
   worker: { worker: string; scriptName: string; versionId: string | null },
-  origin: string | null,
+  core: { origin: string; fetch: typeof fetch } | undefined,
   health: HealthReads | undefined,
   client: { clientId: string; generation: number }
 ): Promise<WorkerDrift> => {
@@ -216,12 +223,12 @@ const healthDrift = async (
     state: "unknown",
   };
   const read = namespaceReads[worker.worker];
-  if (origin === null || health === undefined || read === undefined) {
+  if (core === undefined || health === undefined || read === undefined) {
     return unknown;
   }
   const version = await read({
-    fetch: health.fetch,
-    origin,
+    fetch: core.fetch,
+    origin: core.origin,
     routerSecret: await deriveRouterSecret(
       health.secrets.routerKey,
       client.clientId,
@@ -249,8 +256,8 @@ const healthDrift = async (
  * admin has no such client, or it isn't placed. Each Worker the admin
  * recorded is read: in an account's own Workers, from its deployments; in
  * a Workers for Platforms namespace, core and connect, from the version
- * core names for each through its origin (`health`), as its probe found
- * it, and `unknown` without `health`. A Worker of its inventory the admin has no
+ * core names for each, asked through the namespace's binding at the
+ * origin its probe passed at (`health`), and `unknown` without it. A Worker of its inventory the admin has no
  * record of (an operation that stopped part way) is never in sync. A
  * Worker that can't be read is `unknown`, and logged.
  */
@@ -303,13 +310,24 @@ export const driftOf = async (
     ({ worker }) => !inNamespace || Object.hasOwn(namespaceReads, worker)
   );
   const origin = inNamespace ? await coreOriginOf(db, clientId) : null;
+  const coreScript = recorded.find(
+    ({ worker }) => worker === "core"
+  )?.scriptName;
+  const core =
+    origin === null || coreScript === undefined
+      ? undefined
+      : coreAddressOf(
+          { kind: "dispatch", script: coreScript },
+          new URL(origin).hostname,
+          health?.dispatcher
+        );
   const workers = await Promise.all(
     read.map(async ({ worker, scriptName, versionId }) => {
       try {
         if (inNamespace) {
           return await healthDrift(
             { worker, scriptName, versionId },
-            origin,
+            core,
             health,
             { clientId, generation: client.generation }
           );

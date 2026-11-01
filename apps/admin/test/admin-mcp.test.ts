@@ -1,6 +1,6 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { env, exports } from "cloudflare:workers";
-import { and, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -35,7 +35,7 @@ const staff = { email: "ops@grasp.test", sub: "sub-ops" };
 const liveClient = async () => {
   const release = await placedRelease("feat(core): the admin");
   const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { account } = await livePlacedClient(cloudflare, 1, release, {
+  const { account } = await livePlacedClient(cloudflare, release, {
     id: clientId,
     name: `Acme ${clientId}`,
     signIn: null,
@@ -132,7 +132,9 @@ const mcpCalls = async () => {
       detail: auditEvents.detail,
     })
     .from(auditEvents)
-    .where(eq(auditEvents.action, "admin.mcp.call"));
+    .where(eq(auditEvents.action, "admin.mcp.call"))
+    // In the order they were made: an event's id is random.
+    .orderBy(asc(auditEvents.at));
   return rows.map(({ actor, target, detail }) => ({
     actor,
     target,

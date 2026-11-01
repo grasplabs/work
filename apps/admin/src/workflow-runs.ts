@@ -22,12 +22,6 @@ export const adminWorkflows = {
   provisionPlacedClient: "provision-placed-client",
   /** One client's deploy to its target release (src/rollout/deploy.ts). */
   deploy: "deploy",
-  /** A rollout of a release or of secrets (src/rollout/workflow.ts). */
-  rollout: "rollout",
-  /** One fleet client of a rollout (src/rollout/fleet-client.ts). */
-  rolloutClient: "rollout-client",
-  /** Rolling a client back from a rollout (src/rollout/rollback.ts). */
-  rollbackClient: "rollback-client",
 } as const;
 
 /** One of the admin's workflows, by name. */

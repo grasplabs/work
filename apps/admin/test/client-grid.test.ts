@@ -47,7 +47,6 @@ const recordClient = async (
       db.insert(clients).values({
         id: clientId,
         name: `Acme ${clientId}`,
-        ring: 2,
         status,
         createdAt: now,
         updatedAt: now,
@@ -60,7 +59,7 @@ const recordClient = async (
 
 /** An active client placed in a destination of its own, live on `releaseId`. */
 const liveClient = async (releaseId: string) =>
-  await livePlacedClient(cloudflare, 2, releaseId);
+  await livePlacedClient(cloudflare, releaseId);
 
 /** Client `clientId`'s row in `grid`. */
 const rowOf = (grid: GridRow[], clientId: string): GridRow | undefined =>
@@ -92,7 +91,7 @@ describe("the client grid", () => {
     vi.useRealTimers();
   });
 
-  it("shows each client's release, ring and its operation's latest run from what the admin recorded, reading no account", async () => {
+  it("shows each client's release, channel and its operation's latest run from what the admin recorded, reading no account", async () => {
     const release = await importedRelease("feat(core): on the grid");
     const acme = await liveClient(release);
     const waiting = await recordClient("provisioning");
@@ -107,7 +106,7 @@ describe("the client grid", () => {
     }).toMatchObject({
       acme: {
         status: "active",
-        ring: 2,
+        channel: "stable",
         release,
         hostname: `${acme.clientId}.grasp.test`,
         lastDeploy: { releaseId: release, status: "done" },

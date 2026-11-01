@@ -4,9 +4,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { clientHistory, clientSettings } from "../src/clients/queries.ts";
-import { SettingsError, setRing, setSignIn } from "../src/clients/settings.ts";
+import { SettingsError, setSignIn } from "../src/clients/settings.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
+import { setClientChannel } from "../src/rollout/channels.ts";
 import { racingDb } from "./racing-db.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
 
@@ -20,7 +21,7 @@ const signIn = {
   googleHostedDomain: "acme.test",
 };
 
-/** An active client in ring 1, recorded as provisioning records one. */
+/** An active client, recorded as provisioning records one. */
 const recordClient = async (): Promise<string> => {
   const id = `client-${crypto.randomUUID().slice(0, 8)}`;
   const now = new Date();
@@ -31,7 +32,6 @@ const recordClient = async (): Promise<string> => {
       db.insert(clients).values({
         id,
         name: id,
-        ring: 1,
         status: "active",
         signIn: JSON.stringify(signIn),
         createdAt: now,
@@ -71,7 +71,7 @@ const codeOf = async (task: Promise<unknown>): Promise<string> => {
 const recordOf = async (clientId: string) => {
   const [row] = await db
     .select({
-      ring: clients.ring,
+      channel: clients.channel,
       signIn: clients.signIn,
       configChangedAt: clients.configChangedAt,
     })
@@ -100,23 +100,18 @@ const signInDetailsOf = async (clientId: string) => {
 describe("a client's settings", () => {
   useStoreSecrets({ deployer: "test-deployer-token-settings-2b9d41" });
 
-  it("move a client to another ring, audited once per change, and leave its config as it was", async () => {
+  it("move a client to another channel, audited once per change, and leave its config as it was", async () => {
     const clientId = await recordClient();
 
-    const changed = [
-      await setRing(env, staff, { clientId, ring: 3 }),
-      await setRing(env, staff, { clientId, ring: 3 }),
-    ];
+    await setClientChannel(env, staff, { clientId, channel: "beta" });
+    await setClientChannel(env, staff, { clientId, channel: "beta" });
 
     expect({
-      changed,
       record: await recordOf(clientId),
-      events: await eventsOf(clientId, "client.ring"),
-      settings: await clientSettings(db, clientId),
+      events: await eventsOf(clientId, "client.channel"),
     }).toMatchObject({
-      changed: [true, false],
       record: {
-        ring: 3,
+        channel: "beta",
         signIn: JSON.stringify(signIn),
         configChangedAt: null,
       },
@@ -124,16 +119,15 @@ describe("a client's settings", () => {
         {
           actor: staff.email,
           target: null,
-          detail: JSON.stringify({ ring: 3 }),
+          detail: JSON.stringify({ channel: "beta" }),
         },
       ],
-      settings: { ring: 3 },
     });
   });
 
   it("refuse a client that doesn't exist", async () => {
     await expect(
-      codeOf(setRing(env, staff, { clientId: "no-such-client", ring: 2 }))
+      codeOf(setSignIn(env, staff, { clientId: "no-such-client", signIn }))
     ).resolves.toBe("unknown_client");
   });
 
@@ -367,7 +361,7 @@ describe("a client's settings", () => {
         noApp: "sign_in_app_missing",
       },
       record: {
-        ring: 1,
+        channel: "stable",
         signIn: JSON.stringify(signIn),
         configChangedAt: null,
       },
@@ -378,16 +372,19 @@ describe("a client's settings", () => {
   it("list a client's admin actions newest first, and no other client's", async () => {
     const clientId = await recordClient();
     const otherClient = await recordClient();
-    await setRing(env, staff, { clientId, ring: 2 });
-    await setRing(env, staff, { clientId, ring: 3 });
-    await setRing(env, staff, { clientId: otherClient, ring: 4 });
+    await setClientChannel(env, staff, { clientId, channel: "beta" });
+    await setClientChannel(env, staff, { clientId, channel: "edge" });
+    await setClientChannel(env, staff, {
+      clientId: otherClient,
+      channel: "beta",
+    });
 
     const history = await clientHistory(db, clientId);
 
     expect(history.map(({ action, detail }) => [action, detail])).toStrictEqual(
       [
-        ["client.ring", JSON.stringify({ ring: 3 })],
-        ["client.ring", JSON.stringify({ ring: 2 })],
+        ["client.channel", JSON.stringify({ channel: "edge" })],
+        ["client.channel", JSON.stringify({ channel: "beta" })],
         ["client.create", null],
       ]
     );

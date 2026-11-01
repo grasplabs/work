@@ -1,6 +1,6 @@
 /**
  * The client grid: every client with what the admin recorded of it
- * (release, ring, last deploy), read from D1 and shown at once, and, for
+ * (release, channel, last deploy), read from D1 and shown at once, and, for
  * each active one, what its destination shows now: drift, whether it runs
  * the shared secrets in Secrets Store, whether the router reaches its
  * core, and where its onboarding stands (onboarding.ts).
@@ -23,6 +23,7 @@ import type { CloudflareApi } from "../cloudflare/api.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
+import type { Channel } from "../db/schema.ts";
 import {
   clientDomain,
   deployerToken,
@@ -80,7 +81,8 @@ export interface GridRow {
   id: string;
   name: string;
   status: "provisioning" | "active" | "offboarded";
-  ring: number;
+  /** The release channel it follows (src/rollout/channels.ts). */
+  channel: Channel;
   /** `<id>.<domain>`; null while the admin has no domain. */
   hostname: string | null;
   /** The release the admin made live on every Worker; null when none, or they differ. */
@@ -166,7 +168,7 @@ const recordedClients = async (db: AdminDatabase) => {
       id: clients.id,
       name: clients.name,
       status: clients.status,
-      ring: clients.ring,
+      channel: clients.channel,
       pinnedReleaseId: clients.pinnedReleaseId,
       lastDeploy: {
         releaseId: clientProvisions.releaseId,
@@ -336,7 +338,9 @@ const liveOf = async (
               apiFor(signal),
               db,
               row.id,
-              secrets === null ? undefined : { fetch, secrets }
+              secrets === null
+                ? undefined
+                : { dispatcher: env.DISPATCHER, secrets }
             ),
           null,
           "grid.drift_unread",

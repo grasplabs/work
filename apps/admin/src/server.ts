@@ -13,15 +13,13 @@
  * takes Edge to the newest (src/rollout/channels.ts), deploys each client
  * whose Workers run something other than its target
  * (src/rollout/reconciler.ts), then resumes provisioning that isn't
- * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads how Stephen
- * fares at every client every hour (src/clients/watch.ts).
+ * getting anywhere (src/hosting/reconcile.ts); the watch's own cron reads
+ * how Stephen fares at every client every hour (src/clients/watch.ts).
  * `AdminRuns` holds the admin's runs on Workerflow (src/workflow-runs.ts):
  * applying a client's settings now
  * (src/clients/apply.ts), attempts at provisioning a client placed in a
- * hosting destination (src/hosting/workflow.ts), clients' deploys
- * (src/rollout/deploy.ts), rollouts and the runs
- * that deploy their fleet clients (src/rollout/workflow.ts,
- * src/rollout/fleet-client.ts), and rollbacks (src/rollout/rollback.ts).
+ * hosting destination (src/hosting/workflow.ts), and clients' deploys
+ * (src/rollout/deploy.ts).
  *
  * `/mcp` is the admin's MCP server for Grasp's staff (src/admin/mcp.ts),
  * behind the same Access check.
