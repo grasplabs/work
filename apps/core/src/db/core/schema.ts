@@ -1284,7 +1284,7 @@ export const sdkResourceBindings = sqliteTable(
      * batch and reset when it is revoked or replaced, so the row names what
      * serves the binding only while an approval does. Null for a target the
      * seal or publication chose. Set exactly when `target_path` is, which
-     * the database enforces (migration 0182), so no store an approval
+     * the database enforces (migration 0183), so no store an approval
      * resolved is named without it.
      */
     approvalId: text("approval_id"),
