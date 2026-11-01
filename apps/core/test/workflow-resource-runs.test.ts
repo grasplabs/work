@@ -1059,6 +1059,113 @@ const attempted = async (
 };
 
 describe("an activation's share of core's CPU", () => {
+  it("admits nothing of an attempt it cuts off: the step's retry, under its key, is admitted with the engine's next number", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(name, [
+        { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+        { again: { set: { status: '${ "Hi, " + $workflow.input.who }' } } },
+      ])
+    );
+    const manifest = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const build = await loadWorkflowBuild(
+      env,
+      workflow.id,
+      1,
+      manifest?.hash ?? ""
+    );
+    const runId = crypto.randomUUID();
+    // What the lineage's admission was asked to admit, as it would record
+    // each attempt it admits (quotas.ts, `admitAttempt`).
+    const admitted: { key: string; number: number }[] = [];
+    // An activation of the run, its engine claiming each step's attempt
+    // `attempt` under the step's one key, its fuel `fuel`.
+    const activation = (attempt: number, fuel: number) =>
+      new ResourceRunHost(
+        env,
+        {
+          do: async (name, _config, fn) =>
+            await fn({ attempt, idempotencyKey: `key:${name}` }),
+          sleep: async () => {
+            await Promise.resolve();
+          },
+          sleepUntil: async () => {
+            await Promise.resolve();
+          },
+          waitForEvent: async () =>
+            await Promise.reject(new Error("No waits here")),
+          waitForMatch: async () =>
+            await Promise.reject(new Error("No waits here")),
+        },
+        {
+          runId,
+          workflowId: workflow.id,
+          version: 1,
+          principal: by.userId,
+          input: { who: "Ada" },
+          params: {},
+          createdAt: Date.now(),
+          build,
+          calling: {
+            runId,
+            rootRunId: runId,
+            workflowId: workflow.id,
+            version: 1,
+            principal: by.userId,
+            invoker: { type: "person", id: by.userId, appVersion: null },
+            bindings: new Map(),
+            restricted: false,
+          },
+          maxModelCalls: 1,
+        },
+        {
+          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+          tampered: () => {},
+          activationFuel: fuel,
+          admitAttempt: async (asked) => {
+            admitted.push({ key: asked.key, number: asked.number });
+            return await admittedFreely();
+          },
+        }
+      );
+    // Room for one attempt's worth: `greet` runs, `again` is cut off.
+    const first = activation(1, 2 ** 27);
+    const ranFirst = [
+      await attempted(first, "greet", 0),
+      await attempted(first, "again", 1),
+    ];
+    // The next activation: the engine's second attempt at `again`, which
+    // runs its expression to the end.
+    let retried: unknown;
+    await activation(2, 2 ** 28).do(
+      "task:again",
+      adaCaptured,
+      async (attempt) => {
+        retried = settledCode(
+          await attempt.evaluate(1, { input: { who: "Ada" }, output: null })
+        );
+        return null;
+      }
+    );
+
+    expect({ ranFirst, retried, admitted }).toStrictEqual({
+      ranFirst: [true, false],
+      retried: { ok: "Hi, Ada" },
+      // The cut-off attempt holds nothing of the lineage and records no
+      // receipt: the receipts skip its number, as CI saw attempt 3 follow
+      // 1 after a CPU kill (GRA-1096). It did spend one of the engine's
+      // attempts at the step (`stepConfig.retries`), as a kill does.
+      admitted: [
+        { key: "key:task:greet", number: 1 },
+        { key: "key:task:again", number: 2 },
+      ],
+    });
+  });
+
   it("cuts off an attempt the activation's expression fuel can't fund, as a CPU stop the next activation retries", async () => {
     const by = await builder();
     const workflow = await published(by, (name) =>

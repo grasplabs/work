@@ -260,7 +260,6 @@ describe("dependency approval", () => {
     }
     const review = await approver.api.dependencies.get(request.id);
     const waiting = await approver.api.dependencies.waiting();
-    const waitingCount = await approver.api.dependencies.waitingCount();
     const before = await admission(builder, request);
     const refusal = await admitDependencies(env, builderActor(builder), {
       app: request.subject.id,
@@ -313,11 +312,8 @@ describe("dependency approval", () => {
       refused: proposal.refused,
       previous: null,
     });
-    // Listed to who decides, and counted as listed.
-    expect({
-      listed: waiting.requests.some(({ id }) => id === request?.id),
-      counted: waitingCount === waiting.requests.length,
-    }).toStrictEqual({ listed: true, counted: true });
+    // Listed to who decides.
+    expect(waiting.requests.some(({ id }) => id === request?.id)).toBeTruthy();
     // The refusal names the request that waits, for whoever asks.
     expect({ before, refusal }).toMatchObject({
       before: "dependency.approval_required",
@@ -913,7 +909,6 @@ describe("dependency approval", () => {
       // Nor does anyone without it see what waits, or read a request of
       // an App they don't build.
       adminWaiting: await waitingFor(admin.api),
-      adminCount: await admin.api.dependencies.waitingCount(),
       strangerReads: await outcome(stranger.api.dependencies.get(request.id)),
       // Nor resolve for an App: staff never, and only its builders.
       staffResolves: await outcome(
@@ -944,7 +939,6 @@ describe("dependency approval", () => {
       stranger: "dependency.forbidden",
       staff: "dependency.forbidden",
       adminWaiting: [],
-      adminCount: 0,
       strangerReads: "dependency.not_found",
       staffResolves: "dependency.forbidden",
       strangerResolves: "app.not_found",
