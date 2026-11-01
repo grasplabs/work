@@ -915,8 +915,15 @@ export interface WorkflowLink {
   ) => Promise<unknown>;
   /** How decisions are answered through the trusted host; none without one. */
   readonly decisions: DecisionTransport | undefined;
-  /** Clears everything the client holds: the person or build lost access. */
-  readonly fence: (refusal: GraspError) => void;
+  /**
+   * Clears everything the client holds: the person or build lost access.
+   * Given `startedUnder`, the generation a request began under
+   * (`generation`), only if no fence came since: a late refusal of an
+   * older request would clear what was recovered after it.
+   */
+  readonly fence: (refusal: GraspError, startedUnder?: number) => void;
+  /** The fence generation now: what a request begins under. */
+  readonly generation: () => number;
   /** Calls `listener` at every fence; answers what stops calling it. */
   readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
 }
@@ -1670,9 +1677,15 @@ export class GraspClient {
             },
             events
           ),
-        fence: (refusal) => {
-          client.#fence(refusal);
+        fence: (refusal, startedUnder) => {
+          if (
+            startedUnder === undefined ||
+            startedUnder === client.#generation
+          ) {
+            client.#fence(refusal);
+          }
         },
+        generation: () => client.#generation,
         onFence: (listener) => {
           client.#fenceListeners.add(listener);
           return () => {

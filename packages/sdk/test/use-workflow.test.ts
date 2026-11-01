@@ -7,9 +7,9 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
+import { clientInternals, GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
-import { GraspError } from "../src/client-error.ts";
+import { clientError, GraspError } from "../src/client-error.ts";
 import {
   maxWaits,
   readWorkflowReference,
@@ -1682,6 +1682,25 @@ const reviewing = {
   canRespond: true,
 } as const;
 
+/** A draft the person keeps, under `key`. */
+const keep = (client: GraspClient, key: string) => {
+  clientInternals(client).drafts.put(key, {
+    fingerprint: "save-note",
+    id: "note-1",
+    rev: 1,
+    rest: null,
+    base: { body: "" },
+    values: { body: "Kept" },
+    conflict: false,
+    at: Date.now(),
+  });
+};
+/** A sign-in refusal, as the page rejects an answer with it. */
+const refusedSignIn = () =>
+  Object.assign(new Error("Signed out."), {
+    code: "auth.principal_changed",
+  });
+
 describe("answering a decision the selected run is held at", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1796,6 +1815,54 @@ describe("answering a decision the selected run is held at", () => {
       cancelled: "decision.cancelled",
       lost: "decision.outcome_unknown",
       asked: 2,
+    });
+  });
+
+  it("fences on a sign-in refusal of its answer, unless a fence came since it was sent", async () => {
+    const answer = { approved: true, value: { comment: "Fine" } };
+
+    // Refused as the latest thing that happened: the client is fenced.
+    const plain = host();
+    const shown = await showing(plain);
+    keep(plain.client, "before");
+    plain.decideWith(async () => {
+      await Promise.resolve();
+      throw refusedSignIn();
+    });
+    const plainCode = await codeOf(shown.store.respond(reviewing, answer));
+
+    // Refused late: a fence came while it waited, and a draft was kept
+    // after it, which the old refusal must not clear.
+    const raced = host();
+    const racing = await showing(raced);
+    const pending = Promise.withResolvers<never>();
+    raced.decideWith(async () => await pending.promise);
+    const late = codeOf(racing.store.respond(reviewing, answer));
+    await flush();
+    clientInternals(raced.client).workflowLink.fence(
+      clientError("auth.principal_changed")
+    );
+    keep(raced.client, "after");
+    pending.reject(refusedSignIn());
+    const lateCode = await late;
+
+    expect({
+      plain: {
+        code: plainCode,
+        draft: clientInternals(plain.client).drafts.get("before"),
+      },
+      raced: {
+        code: lateCode,
+        kept: clientInternals(raced.client).drafts.get("after")?.values,
+        fences: clientInternals(raced.client).fences(),
+      },
+    }).toStrictEqual({
+      plain: { code: "auth.principal_changed", draft: undefined },
+      raced: {
+        code: "auth.principal_changed",
+        kept: { body: "Kept" },
+        fences: 1,
+      },
     });
   });
 

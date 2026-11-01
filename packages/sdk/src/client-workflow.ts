@@ -1127,6 +1127,8 @@ export class WorkflowChannel {
     if (decisions === undefined) {
       throw clientError("decision.unavailable");
     }
+    // A refusal fences only if no fence came since this answer was sent.
+    const startedUnder = this.#link.generation();
     try {
       await decisions.respond(runId, wait.id, {
         approved: response.approved,
@@ -1138,7 +1140,7 @@ export class WorkflowChannel {
         throw clientError("decision.outcome_unknown");
       }
       if (fences(settled.error.code)) {
-        this.#link.fence(settled.error);
+        this.#link.fence(settled.error, startedUnder);
       }
       throw settled.error;
     }
