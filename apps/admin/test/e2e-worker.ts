@@ -6,8 +6,9 @@
  * - Cloudflare's API answers from the fake the tests use
  *   (test/cloudflare-api.ts), in place of `fetch` in this isolate, where
  *   the runs' steps run too, and clients' cores from its dispatch
- *   namespace, in place of the admin's `DISPATCHER`. Requests to this
- *   machine (Vite's dev server) go out as usual; anything else is refused.
+ *   namespace, through the admin's `DISPATCHER` and at their hostnames
+ *   as the router routes them. Requests to this machine (Vite's dev
+ *   server) go out as usual; anything else is refused.
  * - Each Worker upload takes seconds, as a real one may: a journey sees
  *   a rollout run before it's done.
  * - Access: the dev bypass (`DEV_ACCESS_EMAIL`, src/access.ts), which holds
@@ -82,17 +83,25 @@ if (held === undefined) {
         Answer: [{ type: 15, data: "1 aspmx.l.google.com." }],
       });
     }
-    throw new Error(`Unexpected outbound request to ${url.href}`);
+    // A client's hostname answers as the router routes it to the core
+    // the fake's namespace holds for it (a drift check reads core's
+    // version there); the fake refuses any other host, as this did.
+    return await cloudflare.fetch(input, init);
   };
 }
 
 // Clients' cores answer from the fake's namespace in Grasp's account, as
-// the admin reaches them through its own binding of the namespace.
+// the admin reaches them through its own binding of the namespace. The
+// binding's `get` is replaced, not the binding: a workflow's steps get
+// their own env, which shares the binding but not this module's object,
+// so a binding swapped in here is one they never see, and they would ask
+// the real (empty) namespace. The unit tests' mock does the same
+// (cloudflare-api-mock.ts).
 const namespace = cloudflare.dispatcher(
   platformAccountId,
   clientsNamespace("production")
 );
-Reflect.set(adminEnv, "DISPATCHER", namespace);
+Reflect.set(adminEnv.DISPATCHER, "get", namespace.get);
 
 /** The organizations seed's cores, by client, kept as the fake is. */
 const coresKey = Symbol.for("grasp-os.admin-e2e.cores");
