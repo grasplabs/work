@@ -542,19 +542,6 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
 
-  # Stephen's eval against a real model runs by hand only (stephen-eval.yml),
-  # and weekly on main (stephen-weekly.yml); every change is checked against
-  # the scripted model in `vp test`. This job only keeps the required
-  # `stephen` check passing: delete it once branch protection no longer
-  # requires it.
-  stephen:
-    name: stephen
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "Stephen's eval with a real model runs by hand, from the Actions tab."
-
   # Every merge to main is a release: built once (the release job),
   # verified against its manifest and published to staging's releases
   # bucket, where the staging admin imports it and rolls it out to
