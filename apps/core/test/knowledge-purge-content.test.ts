@@ -482,7 +482,8 @@ describe("a purge of content", setUpTime, () => {
       found: true,
       first: "knowledge.purge_index_pending",
       rewrittenFirst: true,
-      again: 0,
+      // The same purge, gone on with (GRA-1122): what it rewrote in all.
+      again: 1,
       entriesLeft: 0,
     });
   });
@@ -1598,6 +1599,7 @@ describe("a purge of content", setUpTime, () => {
       first,
       afterFirst: afterFirst.map((text) => text.includes(name)),
       again: again.result.versions,
+      documents: again.result.documents,
       afterAgain: await versionTexts(note.id),
     }).toStrictEqual({
       saved: true,
@@ -1605,7 +1607,11 @@ describe("a purge of content", setUpTime, () => {
       // The earlier version was rewritten; the current one, and the one
       // saved meanwhile, weren't.
       afterFirst: [false, true, true],
-      again: 2,
+      // In all: the earlier version the first run rewrote, its count kept
+      // with it, and the two the run again rewrote.
+      again: 3,
+      // One document, though two runs changed it.
+      documents: 1,
       afterAgain: [
         "# Note\n(removed) one.",
         "# Note\n(removed) two.",
