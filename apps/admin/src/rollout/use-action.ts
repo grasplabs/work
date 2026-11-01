@@ -1,41 +1,19 @@
 import { useAction } from "../use-action.ts";
 import type { RolloutErrorCode } from "./errors.ts";
 
-/** What staff read when the admin refuses a rollout action, by its code. */
+/** What staff read when the admin refuses a channel or release action, by its code. */
 const refusals: Readonly<Record<RolloutErrorCode, string>> = {
   domain_not_set:
     "The admin has no CLIENT_DOMAIN yet, so no client can be deployed.",
   release_not_imported: "That release isn't imported.",
-  no_targets: "No active client is in that scope.",
-  ring_zero_only:
-    "No active client past Alpha is in that scope, so it would reach only our own deployments: pick a ring or client that has one.",
-  too_large:
-    "That's more clients than one rollout takes: roll out one ring or client at a time.",
-  rollout_running:
-    "Another rollout is running or waiting for approval: finish or cancel it first.",
-  not_waiting: "It isn't waiting for approval or a retry.",
-  ring_checks_missing:
-    "Before the next ring: run Stephen's eval on this release, and send the five demo messages in real Teams on this ring. Tick both once they passed.",
-  not_running: "Its run isn't going, so there's nothing to pause.",
-  not_paused: "It isn't paused.",
-  unknown_client: "There's no such client.",
-  nothing_to_roll_back:
-    "The rollout didn't reach that client, so there's nothing to roll back.",
-  superseded:
-    "Something newer was deployed to that client since: roll out the release you want instead.",
-  client_busy:
-    "Something else is deploying to that client right now: try again in a moment.",
-  rollback_past_migration:
-    "Its release added Durable Object migrations, which a client never goes back past: roll a fix out instead.",
-  rollback_failed:
-    "The rollback didn't finish: check the client's drift, then try again.",
-  secrets_store_incomplete:
-    "Secrets Store is missing a shared secret: run Deploy platform with secrets only first.",
   promotion_not_allowed:
     "A release goes Edge, then Beta, then Stable, and a channel goes back only to a release it had.",
   channel_changed:
     "The channel changed just now: look at it again before promoting.",
+  unknown_client: "There's no such company.",
+  secrets_store_incomplete:
+    "Secrets Store is missing a shared secret: run Deploy platform with secrets only first.",
 };
 
-/** A staff action on a rollout (`useAction`), its refusals worded. */
+/** A staff action on a channel or a client's release (`useAction`), its refusals worded. */
 export const useRolloutAction = () => useAction(refusals);

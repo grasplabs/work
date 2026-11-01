@@ -13,7 +13,6 @@
 import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
-import type { Staff } from "../access.ts";
 import { adminDatabase } from "../db/act.ts";
 import type { Actor } from "../db/act.ts";
 import { deployContext } from "../deploy/context.ts";
@@ -37,7 +36,6 @@ import {
   recordUnstarted,
   runClientProvision,
   startClientProvision,
-  startClientRelease,
 } from "./operation.ts";
 
 /** What an attempt is started with. */
@@ -199,30 +197,5 @@ export const provisionPlacedClient = async (
     { action: "client.provision_placed", target: releaseId },
     async (held) => {
       await startClientProvision(adminDatabase(env.DB), staff, held, releaseId);
-    }
-  );
-
-/**
- * Takes active placed client `clientId` to release `releaseId`, or with
- * `rollback` back to the release it ran before, as `staff`
- * (`startClientRelease`), and starts an attempt that runs its operation
- * for it, as provisioning does. Starting it again after it stopped
- * resumes it. Returns the attempt's id.
- */
-export const releasePlacedClient = async (
-  env: Env,
-  staff: Staff,
-  clientId: string,
-  to: { releaseId: string } | { rollback: true }
-): Promise<string> =>
-  await startAttempt(
-    env,
-    staff,
-    clientId,
-    "rollback" in to
-      ? { action: "client.rollback_placed", target: "previous" }
-      : { action: "client.release_placed", target: to.releaseId },
-    async (held) => {
-      await startClientRelease(adminDatabase(env.DB), staff, held, to);
     }
   );

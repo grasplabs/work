@@ -1,49 +1,9 @@
-/** Why staff's action on a rollout was refused, as the page words it. */
+/** Why staff's action on a channel, a client's release or the shared secrets was refused, as the page words it. */
 export const rolloutErrorCodes = [
   /** The admin has no CLIENT_DOMAIN, so no client can be deployed. */
   "domain_not_set",
   /** The release isn't imported. */
   "release_not_imported",
-  /** No active client is in what the rollout was started for. */
-  "no_targets",
-  /**
-   * The ring past 0, or the client, it was started for adds no one past
-   * ring 0: it would reach only Grasp's own deployments.
-   */
-  "ring_zero_only",
-  /** It would take its run past the step budget: roll out to fewer clients at a time. */
-  "too_large",
-  /** Another rollout is running or waiting for approval. */
-  "rollout_running",
-  /** The rollout isn't waiting for approval. */
-  "not_waiting",
-  /** The rollout's run isn't going, so it can't be paused. */
-  "not_running",
-  /** The rollout's run isn't paused. */
-  "not_paused",
-  /** No such client. */
-  "unknown_client",
-  /** The rollout didn't reach the client, or recorded nothing to go back to. */
-  "nothing_to_roll_back",
-  /** Something newer was deployed to the client after the rollout. */
-  "superseded",
-  /** Another runner (provisioning, another rollout, a rollback) has the client. */
-  "client_busy",
-  /** The rollback's run failed or was ended before it finished. */
-  "rollback_failed",
-  /**
-   * The rollout's release added a Durable Object migration since the
-   * release before, which a script never goes back past.
-   */
-  "rollback_past_migration",
-  /** A secrets rollout can't start while Secrets Store is missing a shared secret. */
-  "secrets_store_incomplete",
-  /**
-   * The next ring was approved without saying the eval passed and the
-   * demo messages were sent in real Teams on the ring before
-   * (src/rollout/control.ts, `RingChecks`).
-   */
-  "ring_checks_missing",
   /**
    * Not a move a channel may make: a release goes Edge, then Beta, then
    * Stable, and a channel goes back only to a release it had.
@@ -51,6 +11,10 @@ export const rolloutErrorCodes = [
   "promotion_not_allowed",
   /** The channel's release changed as it was set: read it again. */
   "channel_changed",
+  /** No such client. */
+  "unknown_client",
+  /** Secrets can't be rolled out while Secrets Store is missing a shared secret. */
+  "secrets_store_incomplete",
 ] as const;
 export type RolloutErrorCode = (typeof rolloutErrorCodes)[number];
 
