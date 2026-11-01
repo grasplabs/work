@@ -35,6 +35,7 @@ const made = (input: NewApp): App => ({
   currentVersion: null,
   pendingVersion: null,
   status: "draft",
+  link: null,
   process: null,
   createdAt: "2026-10-30T08:00:00.000Z",
 });

@@ -659,53 +659,63 @@ export const permissions = sqliteTable(
  * `pending_version` one put up for review. Both only ever name a version
  * the App has.
  */
-export const apps = sqliteTable("apps", {
-  id: text().primaryKey(),
-  name: text().notNull(),
-  description: text().notNull(),
-  /** The user who created it, whom its triggered runs act for. */
-  ownerId: text("owner_id").notNull(),
-  /**
-   * Who answers for it (apps.ts `updateApp`), when a builder named someone
-   * other than its owner; null for its owner. Grants nothing.
-   */
-  responsibleId: text("responsible_id"),
-  /**
-   * Whom it is made for, a person or a team, when a builder said; both
-   * null otherwise. Grants nothing.
-   */
-  audienceType: text("audience_type", { enum: ["person", "team"] }),
-  audienceId: text("audience_id"),
-  /**
-   * The business process it serves (@grasp-os/shared/business-processes),
-   * when a builder said; null otherwise. Grants nothing.
-   */
-  process: text(),
-  blueprint: text(),
-  currentVersion: integer("current_version"),
-  pendingVersion: integer("pending_version"),
-  /**
-   * Where it is in its life (app-status.ts): a new App is a draft, open to
-   * its builders alone, until one publishes it.
-   */
-  status: text({ enum: ["draft", "published", "archived"] })
-    .notNull()
-    .default("draft"),
-  /** When its status last changed, and who changed it; null until then. */
-  statusChangedAt: timestamp("status_changed_at"),
-  statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
-    userId: string;
-    staff: boolean;
-  }>(),
-  createdAt: timestamp("created_at").notNull(),
-  /**
-   * When it was removed (app-removal.ts), and by whom: a removed App is a
-   * tombstone, kept so what names it stays history, and answers nothing.
-   * Null while it is an App.
-   */
-  removedAt: timestamp("removed_at"),
-  removedBy: text("removed_by"),
-});
+export const apps = sqliteTable(
+  "apps",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    description: text().notNull(),
+    /** The user who created it, whom its triggered runs act for. */
+    ownerId: text("owner_id").notNull(),
+    /**
+     * Who answers for it (apps.ts `updateApp`), when a builder named someone
+     * other than its owner; null for its owner. Grants nothing.
+     */
+    responsibleId: text("responsible_id"),
+    /**
+     * Whom it is made for, a person or a team, when a builder said; both
+     * null otherwise. Grants nothing.
+     */
+    audienceType: text("audience_type", { enum: ["person", "team"] }),
+    audienceId: text("audience_id"),
+    /**
+     * The business process it serves (@grasp-os/shared/business-processes),
+     * when a builder said; null otherwise. Grants nothing.
+     */
+    process: text(),
+    blueprint: text(),
+    currentVersion: integer("current_version"),
+    pendingVersion: integer("pending_version"),
+    /**
+     * Where it is in its life (app-status.ts): a new App is a draft, open to
+     * its builders alone, until one publishes it.
+     */
+    status: text({ enum: ["draft", "published", "archived"] })
+      .notNull()
+      .default("draft"),
+    /** When its status last changed, and who changed it; null until then. */
+    statusChangedAt: timestamp("status_changed_at"),
+    statusChangedBy: text("status_changed_by", { mode: "json" }).$type<{
+      userId: string;
+      staff: boolean;
+    }>(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * The last part of its own address under the workspace's (app-own-links.ts),
+     * one App's at most; null while its builders gave it none. It opens the
+     * App only while it is published.
+     */
+    link: text(),
+    /**
+     * When it was removed (app-removal.ts), and by whom: a removed App is a
+     * tombstone, kept so what names it stays history, and answers nothing.
+     * Null while it is an App.
+     */
+    removedAt: timestamp("removed_at"),
+    removedBy: text("removed_by"),
+  },
+  (table) => [uniqueIndex("apps_link").on(table.link)]
+);
 
 /**
  * The integrations a builder added to an App by hand (app-integrations.ts):
