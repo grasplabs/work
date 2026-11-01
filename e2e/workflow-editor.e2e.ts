@@ -64,6 +64,13 @@ const definition = (
     2
   );
 
+/** Creates workflow `name` from the Workflows page's New workflow. */
+const create = async (page: Page, name: string): Promise<void> => {
+  await page.getByRole("button", { name: "New workflow" }).click();
+  await page.getByLabel("Name of a new workflow").fill(name);
+  await page.getByRole("button", { name: "Create" }).click();
+};
+
 /** Saves `text` as the draft on `page`. */
 const save = async (page: Page, text: string): Promise<void> => {
   await page.getByLabel("workflow.json").fill(text);
@@ -78,8 +85,7 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   const reads = await callGate(page, '["workflowResources","draft"]');
   const name = `edited-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await page.getByLabel("Name of a new workflow").fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
+  await create(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByText("Not published")).toBeVisible();
 
@@ -159,8 +165,7 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   const page = await pageOf(builder);
   const name = `racing-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await page.getByLabel("Name of a new workflow").fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
+  await create(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   // The definition it starts from saves as it is.
   await page.getByRole("button", { name: "Check and save" }).click();
@@ -235,8 +240,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   const page = await pageOf(builder);
   const name = `routed-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await page.getByLabel("Name of a new workflow").fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
+  await create(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   await save(page, routing(name));
@@ -412,8 +416,7 @@ test("a builder writes a module beside the definition, calls it through a local 
   const page = await pageOf(builder);
   const name = `totalled-${crypto.randomUUID().slice(0, 8)}`;
   await page.goto("/workflows");
-  await page.getByLabel("Name of a new workflow").fill(name);
-  await page.getByRole("button", { name: "Create" }).click();
+  await create(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   // Without its module, the binding names nothing the workflow has.

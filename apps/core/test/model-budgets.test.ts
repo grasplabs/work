@@ -11,48 +11,50 @@ import { budgetPeriods } from "../src/model-budgets.ts";
 import type { ModelLedger } from "../src/model-ledger.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
-import type { ModelCall, ModelsEnv } from "../src/models.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
+import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
+import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { answeringProvider, streamText } from "./model-provider.ts";
+import type { FakeProvider, ProviderReply } from "./model-provider.ts";
+import { plan } from "./platform-providers.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // Model budgets, enforced by the model ledger: every provider request is
 // admitted before it is sent, reserving the most it can cost against all
-// of its scopes at once, and settled once it ends. AI Gateway is the
-// outside system: a fake behind the AI binding. The ledger, the audit log
-// and the runs are real; where a test needs the ledger to fail, its
+// of its scopes at once, and settled once it ends. The model provider
+// behind connect is the outside system (test/model-provider.ts). The
+// ledger, the audit log and the runs are real; where a test needs the ledger to fail, its
 // binding fails, as an unreachable Durable Object would.
 
 const idp = mockIdp();
 
-const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const mistral = "mistral/mistral-large-latest";
 const anthropic = "anthropic/claude-sonnet-4-5";
 
-const gateway = "grasp-os-test";
 /** Priced in tiers: twice the input and half again the output past 272K. */
 const tiered = "openai/gpt-5.4";
-const allowed = [workersAi, anthropic, tiered];
+/** The models the organization chose: Mistral Large its default. */
+const chosen = [mistral, anthropic, tiered];
 
 /**
- * Costs 519 micros from Llama 3.3, at its list prices of $0.293 per
- * million tokens in and $2.253 out, each rounded up to whole micros.
+ * Costs 650 micros from Mistral Large, at its list prices of $0.50 per
+ * million tokens in and $1.50 out, each rounded up to whole micros.
  */
 const pricedAnswer = { text: "Hi.", inputTokens: 1000, outputTokens: 100 };
-const pricedMicros = 293 + 226;
+const pricedMicros = 500 + 150;
 
-/** A prompt of 10,000 bytes, which Llama 3.3 reserves some $0.0035 for. */
+/** A prompt of 10,000 bytes, which Mistral Large reserves some $0.0058 for. */
 const nextPrompt = "word ".repeat(2000);
 
-/** Costs $0.029526 from Llama 3.3: far more than a capped request reserves. */
-const dearAnswer = { text: "Hi.", inputTokens: 100_000, outputTokens: 100 };
+/** Costs $0.02965 from Mistral Large: far more than a capped request reserves. */
+const dearAnswer = { text: "Hi.", inputTokens: 59_000, outputTokens: 100 };
 
 /**
- * The answer's cap the budget tests ask for: a Llama request then reserves
- * well under a tenth of a cent, so what decides is what was spent.
+ * The answer's cap the budget tests ask for: a Mistral Large request then
+ * reserves well under a cent, so what decides is what was spent.
  */
 const smallCap = 100;
 
@@ -65,29 +67,43 @@ const newMonth = (): string => {
 };
 
 /**
- * Core's env with the fake gateway answering with `replies`, and the rules
- * `config` adds; budgets count in `month`.
+ * The test's provider, for the `chosen` models, and the replies it has
+ * left, in order: each test connects its own (`beforeEach`).
+ */
+let provider: FakeProvider | undefined;
+let replies: ProviderReply[] = [];
+
+const requireProvider = (): FakeProvider => {
+  if (provider === undefined) {
+    throw new Error("The test's provider isn't connected yet");
+  }
+  return provider;
+};
+
+/**
+ * Core's env with the rules `config`, and the test's provider answering
+ * with `replies` after what it was given to answer before; budgets count
+ * in `month`.
  */
 const withRules = (
   config: Record<string, unknown>,
-  replies: GatewayReply[],
-  more: Partial<ModelsEnv> = {}
+  more: ProviderReply[],
+  overrides: Partial<Env> = {}
 ) => {
-  const fake = fakeGateway(...replies);
+  replies.push(...more);
   const month = newMonth();
-  const rulesEnv: ModelsEnv = {
+  const rulesEnv: Env = {
     ...env,
-    AI: fake.binding,
-    MODEL_GATEWAY: { gateway, models: allowed, ...config },
+    MODEL_GATEWAY: config,
     MODEL_BUDGET_MONTH: month,
-    ...more,
+    ...overrides,
   };
   const { call, agent } = models(rulesEnv);
-  return { fake, call, agent, month };
+  return { fake: requireProvider(), call, agent, month };
 };
 
 /** `count` of `reply`. */
-const times = (count: number, reply: GatewayReply): GatewayReply[] =>
+const times = (count: number, reply: ProviderReply): ProviderReply[] =>
   Array.from({ length: count }, () => reply);
 
 /** A person no other test uses, so their audit events are this test's. */
@@ -103,11 +119,11 @@ const requireWork = (): ModelCall<undefined>["work"] => {
   return appWork;
 };
 
-/** A capped call to Llama, unless `more` says otherwise. */
+/** A capped call to Mistral Large, unless `more` says otherwise. */
 const hello = (
   more: Partial<ModelCall<undefined>> = {}
 ): ModelCall<undefined> => ({
-  model: workersAi,
+  model: mistral,
   maxTokens: smallCap,
   input: "Hello.",
   purpose: "chat.turn",
@@ -243,14 +259,14 @@ const said = (event: AuditEvent | undefined) => [
   Math.round(Number(event?.detail.ledgerHeld) * 1_000_000),
 ];
 
-/** The provider request IDs the gateway's log was told, in order. */
-const requestIds = (fake: ReturnType<typeof fakeGateway>): unknown[] =>
-  fake.requests.map(
-    ({ headers }) =>
-      z
-        .object({ providerRequest: z.unknown() })
-        .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "{}"))
-        .providerRequest
+/** The provider requests the ledger admitted for `userId`. */
+const requestsOf = async (userId: string): Promise<number> =>
+  await runInDurableObject(modelLedger(env), (_instance, state) =>
+    Number(
+      state.storage.sql
+        .exec("SELECT count(*) AS n FROM requests WHERE subject = ?", userId)
+        .one().n
+    )
   );
 
 /** The month and day a request at `iso` counts in. */
@@ -270,6 +286,9 @@ describe("budget periods", () => {
 
 describe("model budgets", { timeout: 60_000 }, () => {
   beforeEach(async () => {
+    const left: ProviderReply[] = [];
+    replies = left;
+    provider = await answeringProvider(() => left.shift(), { models: chosen });
     if (appWork !== undefined) {
       return;
     }
@@ -295,7 +314,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     const trigger = newPerson();
     const ada = hello({ trigger });
 
-    // $0.0295 a call: past 40% with the second, past the limit with the fourth.
+    // $0.02965 a call: past 40% with the second, past the limit with the fourth.
     await expect(
       inTurn(Array.from({ length: 5 }, () => async () => await call(ada)))
     ).resolves.toStrictEqual(["ok", "ok", "ok", "ok", "model.over_budget"]);
@@ -312,7 +331,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       message:
         "The model budget for the month of the person this call is made for is used up, so no more model calls can be made for them until it resets at the start of next month (UTC). Ask your admin to have Grasp raise the budget.",
       details: {
-        model: workersAi,
+        model: mistral,
         because: "user",
         retryAfterSeconds: usedUp.details.retryAfterSeconds,
       },
@@ -340,7 +359,139 @@ describe("model budgets", { timeout: 60_000 }, () => {
         { detail: { reason: "model.over_budget", because: "user" } },
       ],
       // Four answers' cost, and nothing held.
-      ledger: { spentMicros: 4 * (29_300 + 226), reservedMicros: 0 },
+      ledger: { spentMicros: 4 * (29_500 + 150), reservedMicros: 0 },
+    });
+  });
+
+  it("never count or stop a call on Grasp's own key: with the deployment's and the person's budgets used up, their next call is refused while a document converted for them still is, charged to Grasp", async () => {
+    const { call, month } = withRules(
+      { budgets: { deployment: { limit: 0.1 }, user: { limit: 0.1 } } },
+      times(4, dearAnswer)
+    );
+    const trigger = newPerson();
+    const ada = hello({ trigger });
+    const rulesEnv: Env = {
+      ...env,
+      MODEL_GATEWAY: {
+        budgets: { deployment: { limit: 0.1 }, user: { limit: 0.1 } },
+      },
+      MODEL_BUDGET_MONTH: month,
+    };
+
+    // $0.02965 a call on the organization's key: the fifth has no room.
+    await expect(
+      inTurn(Array.from({ length: 5 }, () => async () => await call(ada)))
+    ).resolves.toStrictEqual(["ok", "ok", "ok", "ok", "model.over_budget"]);
+    const before = await ledgerOf(month, trigger.userId);
+    await plan(platformOpenAiKey, [
+      {
+        sse: streamText("openai-responses", {
+          text: "# Expense policy",
+          inputTokens: 2000,
+          outputTokens: 100,
+        }),
+      },
+    ]);
+    const converted = await outcome(
+      models(rulesEnv).platformCall({
+        model: "openai/gpt-5.4-mini",
+        purpose: "knowledge.conversion",
+        trigger,
+        work: { platform: "document_conversion" },
+        input: "Write out this document as Markdown.",
+        document: {
+          name: "policy.pdf",
+          mediaType: "application/pdf",
+          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
+        },
+      })
+    );
+    const deployment = await modelLedger(env).spendOf(
+      month,
+      ["deployment"],
+      10
+    );
+    const grasp = await modelLedger(env).platformSpend([month]);
+
+    expect({
+      converted,
+      // Still refused on the organization's key.
+      after: await outcome(call(ada)),
+      user: await ledgerOf(month, trigger.userId),
+      deployment: deployment.deployment?.[0]?.spentMicros,
+      grasp: grasp.map(({ feature, model, micros }) => ({
+        feature,
+        model,
+        charged: micros > 0,
+      })),
+    }).toStrictEqual({
+      converted: "ok",
+      after: "model.over_budget",
+      user: before,
+      deployment: before.spentMicros,
+      grasp: [
+        { feature: "conversion", model: "openai/gpt-5.4-mini", charged: true },
+      ],
+    });
+  });
+
+  it("count a run's call on Grasp's own key as a request of its lineage, never as money against the run's budget", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
+    const run = await builder.api.workflows.start(app, "idle");
+    await finished(run.id);
+    const month = newMonth();
+    const rulesEnv: Env = {
+      ...env,
+      MODEL_GATEWAY: { budgets: { run: { limit: 0.1 } } },
+      MODEL_BUDGET_MONTH: month,
+    };
+    await plan(platformOpenAiKey, [
+      {
+        sse: streamText("openai-responses", {
+          text: "# Expense policy",
+          inputTokens: 2000,
+          outputTokens: 100,
+        }),
+      },
+    ]);
+
+    // A document the run's step converts, on Grasp's key.
+    const converted = await outcome(
+      models(rulesEnv).platformCall({
+        model: "openai/gpt-5.4-mini",
+        purpose: "knowledge.conversion",
+        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
+        work: { platform: "document_conversion" },
+        input: "Write out this document as Markdown.",
+        document: {
+          name: "policy.pdf",
+          mediaType: "application/pdf",
+          bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
+        },
+      })
+    );
+    const { run: lineage = [] } = await modelLedger(env).spendOf(
+      month,
+      ["run"],
+      10
+    );
+    const grasp = await modelLedger(env).platformSpend([month]);
+
+    expect({
+      converted,
+      // Counted in the lineage, as a request: no money held or spent.
+      run: lineage
+        .filter(({ key }) => key === run.id)
+        .map(({ spentMicros, reservedMicros }) => ({
+          spentMicros,
+          reservedMicros,
+        })),
+      grasp: grasp.some(({ micros }) => micros > 0),
+    }).toStrictEqual({
+      converted: "ok",
+      run: [{ spentMicros: 0, reservedMicros: 0 }],
+      grasp: true,
     });
   });
 
@@ -416,24 +567,24 @@ describe("model budgets", { timeout: 60_000 }, () => {
   });
 
   it("tell a call to try again only when the calls under way would leave it room once they finish, never when what was spent leaves none", async () => {
-    // Sonnet 4.5 reserves some $0.56 while it answers; Llama's answer
-    // costs $0.586, far past the little it reserves. With $1 there is room
-    // for a small Llama request once Sonnet's answer is in, never for
-    // another Sonnet request.
+    // Sonnet 4.5 reserves some $0.56 while it answers; Mistral Large's
+    // answer costs $0.50, far past the little it reserves. With $1 there is
+    // room for a small Mistral Large request once Sonnet's answer is in,
+    // never for another Sonnet request.
     const release = Promise.withResolvers<boolean>();
     const paused = {
       ...pricedAnswer,
       text: "Hello there.",
       pause: { at: 3, until: release.promise },
     };
-    const costly = { text: "Hi.", inputTokens: 2_000_000, outputTokens: 100 };
+    const costly = { text: "Hi.", inputTokens: 1_000_000, outputTokens: 100 };
     const { call, agent, month } = withRules(
       { budgets: { user: { limit: 1 } } },
       [paused, costly, pricedAnswer]
     );
     const trigger = newPerson();
     const sonnet = hello({ trigger, model: anthropic, maxTokens: undefined });
-    const llama = hello({ trigger });
+    const small = hello({ trigger });
 
     const answering = outcome(call(sonnet));
     let held = await ledgerOf(month, trigger.userId);
@@ -443,14 +594,14 @@ describe("model budgets", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- until Sonnet's request is in
       held = await ledgerOf(month, trigger.userId);
     }
-    const before = await outcome(call(llama));
+    const before = await outcome(call(small));
     const whileAnswering = {
       sonnet: await toldBy(call(sonnet)),
-      llama: await toldBy(call(llama)),
+      small: await toldBy(call(small)),
     };
     // An agent's turn hears the same, in its stream's error.
     const session = await agent({
-      model: workersAi,
+      model: mistral,
       purpose: "chat.turn",
       trigger,
       work: requireWork(),
@@ -466,7 +617,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     const answered = await answering;
     // Sonnet's answer is in, at $0.0045: the room it held is back.
     const after = {
-      llama: await outcome(call(llama)),
+      small: await outcome(call(small)),
       sonnet: await outcome(call(sonnet)),
     };
 
@@ -491,12 +642,12 @@ describe("model budgets", { timeout: 60_000 }, () => {
             retryAfterSeconds: whileAnswering.sonnet.details.retryAfterSeconds,
           },
         },
-        llama: {
+        small: {
           code: "model.budget_busy",
           message:
             "Model calls still under way hold what's left of the model budget for the month of the person this call is made for. Try again once they finish.",
           details: {
-            model: workersAi,
+            model: mistral,
             because: "user",
             retryAfterSeconds: 180,
           },
@@ -507,7 +658,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
         "The model call was refused (model.budget_busy). Try again in 180 seconds.",
       ],
       answered: "ok",
-      after: { llama: "ok", sonnet: "model.over_budget" },
+      after: { small: "ok", sonnet: "model.over_budget" },
     });
   });
 
@@ -761,7 +912,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
 
   it("charge what a model thought, as the provider counts it in the answer's output", async () => {
     // 900 tokens of thinking on top of the answer's 100: 1,000 out at
-    // Llama 3.3's $2.253 a million, beside the 1,000 in.
+    // Mistral Large's $1.50 a million, beside the 1,000 in.
     const thought = {
       ...pricedAnswer,
       outputTokens: pricedAnswer.outputTokens + 900,
@@ -774,7 +925,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
 
     await expect(outcome(call(hello({ trigger: ada })))).resolves.toBe("ok");
     await expect(ledgerOf(month, ada.userId)).resolves.toMatchObject({
-      spentMicros: 293 + 2253,
+      spentMicros: 500 + 1500,
       reservedMicros: 0,
     });
   });
@@ -789,15 +940,11 @@ describe("model budgets", { timeout: 60_000 }, () => {
       outputTokens: 100,
       pause: { at: 12, until: rest.promise },
     };
-    // Some 50,000 tokens at four characters each, and as many bytes: Llama
-    // 3.3 reserves some $0.059 for it (pi caps its answer at a token, as
-    // the prompt leaves no room in its window). Charged that prompt's
-    // bound, a budget of $0.06 has no room left for a request of 10,000
-    // bytes.
-    const limited = withRules({ budgets: { user: { limit: 0.06 } } }, [
-      cut,
-      pricedAnswer,
-    ]);
+    // Some 50,000 tokens at four characters each, and four times as many
+    // bytes: Mistral Large reserves some $0.10 for it, its answer capped
+    // at 100 tokens. Charged that prompt's bound, a budget of $0.103 has
+    // no room left for a request of 10,000 bytes.
+    const limited = withRules({ budgets: { user: { limit: 0.103 } } }, [cut]);
     const open = withRules({}, [cut]);
     const prompt = "word ".repeat(40_000);
     /** A request of `trigger`'s to `model`, cancelled once text came. */
@@ -808,6 +955,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     ) => {
       const session = await agent({
         model,
+        maxTokens: smallCap,
         purpose: "chat.turn",
         trigger,
         work: requireWork(),
@@ -834,7 +982,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       // Chat completions count nothing until their last chunk; Anthropic
       // counts the prompt at the start, and the answer at its end.
       const stopped = [
-        await cancelled(limited.agent, workersAi, ada),
+        await cancelled(limited.agent, mistral, ada),
         await cancelled(open.agent, anthropic, ben),
       ];
       const held = await ledgerOf(limited.month, ada.userId);
@@ -848,7 +996,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       const tokens = adas?.model?.inputTokens ?? 0;
       expect({
         stopped,
-        charged: held.spentMicros > 58_000 && held.reservedMicros === 0,
+        charged: held.spentMicros > 100_000 && held.reservedMicros === 0,
         after,
         ada: [adas?.action, adas?.detail, adas?.model?.outputTokens],
         prompt: tokens >= prompt.length / 4 && tokens < prompt.length / 4 + 200,
@@ -881,7 +1029,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       });
       // At the models' list prices, per million tokens in and out.
       expect(adas?.cost?.amount).toBeCloseTo(
-        (tokens * 0.293 + 3 * 2.253) / 1_000_000,
+        (tokens * 0.5 + 3 * 1.5) / 1_000_000,
         6
       );
       expect(bens?.cost?.amount).toBeCloseTo(
@@ -965,14 +1113,18 @@ describe("model budgets", { timeout: 60_000 }, () => {
       outputTokens: 100,
       cut: 12,
     };
+    // Mistral Large reserves some $0.10 for the prompt below, its answer
+    // capped at 100 tokens: held in full, a budget of $0.103 has no room
+    // left for a request of 10,000 bytes.
     const { agent, call, month } = withRules(
-      { budgets: { user: { limit: 0.06 } } },
-      [brokenOff, pricedAnswer]
+      { budgets: { user: { limit: 0.103 } } },
+      [brokenOff]
     );
     const prompt = "word ".repeat(40_000);
     const ada = newPerson();
     const session = await agent({
-      model: workersAi,
+      model: mistral,
+      maxTokens: smallCap,
       purpose: "chat.turn",
       trigger: ada,
       work: requireWork(),
@@ -998,7 +1150,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
 
     expect({
       ended: [stopReason, streamed],
-      held: held.spentMicros === 0 && held.reservedMicros > 58_000,
+      held: held.spentMicros === 0 && held.reservedMicros > 100_000,
       after,
       events: events.map(({ action, detail }) => [
         action,
@@ -1016,62 +1168,72 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
-  it("reserve a provider's retry anew, keeping the reservation of a request that failed after it may have been taken on", async () => {
+  it("reserve a rate-limited request's retry anew, and keep the reservation of a request that failed after it may have been taken on", async () => {
     // A server error may have come after the provider took the request on:
-    // its reservation stays held, and the SDK's retry reserves its own.
+    // its reservation stays held, and the call fails, not retried.
     const failedLate = withRules({ budgets: { user: { limit: 1 } } }, [
       { status: 500 },
-      pricedAnswer,
     ]);
-    // A refusal before the provider took it on costs nothing.
+    // A refusal for the provider's rate before it took the request on
+    // costs nothing: the gateway asks again once the wait is over, the
+    // retry reserving its own.
     const refused = withRules({ budgets: { user: { limit: 1 } } }, [
-      { status: 429, errorType: "rate_limit_error" },
+      {
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after": "1" },
+      },
       pricedAnswer,
     ]);
     const ada = hello();
     const ben = hello();
 
     await expect(
-      Promise.all([outcome(failedLate.call(ada)), outcome(refused.call(ben))])
-    ).resolves.toStrictEqual(["ok", "ok"]);
+      inTurn([
+        async () => await failedLate.call(ada),
+        async () => await refused.call(ben),
+      ])
+    ).resolves.toStrictEqual(["model.provider_unavailable", "ok"]);
     const [adas, bens] = await Promise.all([
       ledgerOf(failedLate.month, userOf(ada)),
       ledgerOf(refused.month, userOf(ben)),
     ]);
-    const ids = [...requestIds(failedLate.fake), ...requestIds(refused.fake)];
     expect({
       ada: [adas.spentMicros, adas.reservedMicros > 0],
       ben: [bens.spentMicros, bens.reservedMicros],
-      // Each provider request has its own ID, which the gateway's log keeps.
-      ids: [
-        ids.length,
-        new Set(ids).size,
-        ids.every((id) => z.uuid().safeParse(id).success),
-      ],
+      admitted: await Promise.all([
+        requestsOf(userOf(ada)),
+        requestsOf(userOf(ben)),
+      ]),
     }).toStrictEqual({
-      ada: [pricedMicros, true],
+      ada: [0, true],
       ben: [pricedMicros, 0],
-      ids: [4, 4, true],
+      admitted: [1, 2],
     });
   });
 
-  it("say on a call's audit event what every one of its provider requests charged or holds, a failed retry's too", async () => {
+  it("say on a call's audit event what every one of its provider requests charged or holds, a refused one's and a failed one's too", async () => {
     const retried = withRules({ budgets: { user: { limit: 1 } } }, [
-      { status: 500 },
+      {
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after": "1" },
+      },
       pricedAnswer,
     ]);
-    // Three server errors: the SDK's two retries fail too.
+    // A server error: neither retried nor fallen back from.
     const failed = withRules({ budgets: { user: { limit: 1 } } }, [
-      { status: 500 },
-      { status: 500 },
       { status: 500 },
     ]);
     const ada = hello();
     const ben = hello();
 
     await expect(
-      Promise.all([outcome(retried.call(ada)), outcome(failed.call(ben))])
-    ).resolves.toStrictEqual(["ok", "model.failed"]);
+      inTurn([
+        async () => await retried.call(ada),
+        async () => await failed.call(ben),
+      ])
+    ).resolves.toStrictEqual(["ok", "model.provider_unavailable"]);
     const [adas, bens] = await Promise.all([
       ledgerOf(retried.month, userOf(ada)),
       ledgerOf(failed.month, userOf(ben)),
@@ -1079,11 +1241,15 @@ describe("model budgets", { timeout: 60_000 }, () => {
     const [adaEvent] = await eventsOf(ada.trigger);
     const [benEvent] = await eventsOf(ben.trigger);
     expect({ ada: said(adaEvent), ben: said(benEvent) }).toStrictEqual({
-      // The answer charged; the failed first try's reservation still held.
-      ada: ["settled", 2, pricedMicros, adas.reservedMicros],
-      ben: ["unknown", 3, 0, bens.reservedMicros],
+      // The answer charged; the refused first try's reservation given back.
+      ada: ["settled", 2, pricedMicros, 0],
+      // The failed try's reservation still held.
+      ben: ["unknown", 1, 0, bens.reservedMicros],
     });
-    expect(adas.reservedMicros > 0 && bens.reservedMicros > 0).toBeTruthy();
+    expect([adas.reservedMicros, bens.reservedMicros > 0]).toStrictEqual([
+      0,
+      true,
+    ]);
   });
 
   it("charge a prompt past a tier's threshold at that tier's prices, as its audit event counts it", async () => {
@@ -1320,7 +1486,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     await expect(outcome(unbudgeted.call(hello()))).resolves.toBe(
       "model.ledger_unavailable"
     );
-    expect([...fake.requests, ...unbudgeted.fake.requests]).toStrictEqual([]);
+    expect(fake.requests).toStrictEqual([]);
     await expect(eventsOf(ada.trigger)).resolves.toMatchObject([
       {
         action: "model.refused",
@@ -1360,7 +1526,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       dearAnswer,
     ]);
 
-    // $0.0886: under the first limit, over the lowered one.
+    // $0.0890: under the first limit, over the lowered one.
     await expect(
       inTurn([
         async () => await spend.call(ada),
@@ -1404,7 +1570,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     );
     const ada = hello();
 
-    // $0.0886 spent, under 90% of $0.20; then 40% is $0.08, already passed.
+    // $0.0890 spent, under 90% of $0.20; then 40% is $0.08, already passed.
     await expect(
       inTurn([
         async () => await early.call(ada),
@@ -1427,7 +1593,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
   it("admit a call's retry on its own: an attempt that used the budget up stops the call before anything more is sent", async () => {
     const { fake, call } = withRules(
       { budgets: { user: { limit: 0.04 } } },
-      // An answer that doesn't fit, and costs $0.0442: past the limit, so
+      // An answer that doesn't fit, and costs $0.0752: past the limit, so
       // the retry has no room left, however little it may cost.
       [{ text: "No JSON here.", inputTokens: 150_000, outputTokens: 100 }]
     );
@@ -1449,14 +1615,14 @@ describe("model budgets", { timeout: 60_000 }, () => {
 
   it("alert once per limit value a month, however the limit changes back and forth", async () => {
     const month = newMonth();
-    const withLimit = (limit: number, replies: GatewayReply[] = []) =>
-      withRules({ budgets: { user: { limit } } }, replies, {
+    const withLimit = (limit: number, answers: ProviderReply[] = []) =>
+      withRules({ budgets: { user: { limit } } }, answers, {
         MODEL_BUDGET_MONTH: month,
       }).call;
     const ada = hello();
     const spend = withLimit(0.3, times(3, dearAnswer));
 
-    // $0.0886 spent under $0.30; then $0.07, $0.06 and $0.07 again.
+    // $0.0890 spent under $0.30; then $0.07, $0.06 and $0.07 again.
     await expect(
       inTurn([
         async () => await spend(ada),
@@ -1485,20 +1651,16 @@ describe("model budgets", { timeout: 60_000 }, () => {
   it("admit and count a retry in the month it is sent in, when the month turns between attempts", async () => {
     const [before, after] = [newMonth(), newMonth()];
     const dearer = { ...dearAnswer, inputTokens: 150_000 };
-    const fake = fakeGateway(
+    replies.push(
       dearAnswer,
       dearAnswer,
       { ...dearer, text: "No JSON here." },
       { ...dearer, text: '{ "total": 1 }' }
     );
-    const turningEnv: ModelsEnv = {
+    const fake = requireProvider();
+    const turningEnv: Env = {
       ...env,
-      AI: fake.binding,
-      MODEL_GATEWAY: {
-        gateway,
-        models: allowed,
-        budgets: { user: { limit: 0.1, alertAt: 40 } },
-      },
+      MODEL_GATEWAY: { budgets: { user: { limit: 0.1, alertAt: 40 } } },
       // The month turns once the call's first attempt was sent.
       get MODEL_BUDGET_MONTH() {
         return fake.requests.length < 3 ? before : after;
@@ -1508,7 +1670,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     const call = async (more: Partial<ModelCall<undefined>> = {}) =>
       await outcome(models(turningEnv).call({ ...ada, ...more }));
 
-    // $0.059 of the old month's $0.10.
+    // $0.0593 of the old month's $0.10.
     await expect(Promise.all([call(), call()])).resolves.toStrictEqual([
       "ok",
       "ok",
@@ -1537,7 +1699,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
   it("give every provider request of a call the call's own cut-off as its deadline, a second ask's too, never a whole timeout from when it is sent", async () => {
     const timeoutMs = 60_000;
     const release = Promise.withResolvers<boolean>();
-    const { fake, call } = withRules({}, [
+    const { call } = withRules({}, [
       // The first answer takes its time, and doesn't fit: asked again.
       {
         ...pricedAnswer,
@@ -1546,26 +1708,24 @@ describe("model budgets", { timeout: 60_000 }, () => {
       },
       { ...pricedAnswer, text: '{ "total": 1 }' },
     ]);
+    const ada = hello();
     const started = Date.now();
     const asking = outcome(
-      call({ ...hello(), schema: z.object({ total: z.number() }), timeoutMs })
+      call({ ...ada, schema: z.object({ total: z.number() }), timeoutMs })
     );
     await scheduler.wait(1500);
     release.resolve(true);
     const answered = await asking;
-    const ids = requestIds(fake).map(String);
     const deadlines = await runInDurableObject(
       modelLedger(env),
       (_instance, state) =>
-        ids.map(
-          (id) =>
-            state.storage.sql
-              .exec<{ deadline: number }>(
-                "SELECT deadline FROM requests WHERE id = ?",
-                id
-              )
-              .one().deadline
-        )
+        state.storage.sql
+          .exec<{ deadline: number }>(
+            "SELECT deadline FROM requests WHERE subject = ?",
+            userOf(ada)
+          )
+          .toArray()
+          .map(({ deadline }) => deadline)
     );
 
     expect({

@@ -18,24 +18,22 @@ import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
-import { renewGmailWatch } from "./channels/gmail.ts";
 import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
+import { sweepHeldStartInputs } from "./held-starts.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
-import { syncLandscapes } from "./landscape.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepScreenSubmissions } from "./screen-submissions.ts";
 import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
@@ -249,11 +247,25 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: sendStephenSummaries,
   },
   // Gmail's watch on Stephen's mailbox, renewed daily (channels/gmail.ts).
-  { name: "channels.gmail_watch", period: "quarterHour", run: renewGmailWatch },
+  // Loaded when it runs, not as core starts: it brings the Chat SDK.
+  {
+    name: "channels.gmail_watch",
+    period: "quarterHour",
+    run: async (env) => {
+      const { renewGmailWatch } = await import("./channels/gmail.ts");
+      await renewGmailWatch(env);
+    },
+  },
   {
     name: "workflows.run_details",
     period: "quarterHour",
     run: sweepRunDetails,
+  },
+  // What a lapsed held start was asked to run with (held-starts.ts).
+  {
+    name: "workflows.held_start_inputs",
+    period: "quarterHour",
+    run: sweepHeldStartInputs,
   },
   {
     name: "workflows.candidate_runs",
@@ -302,19 +314,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepTestFixtures,
   },
-  {
-    name: "screens.submissions",
-    period: "quarterHour",
-    run: sweepScreenSubmissions,
-  },
   { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
-  // The application landscape: each connection read once a day, a bounded
-  // number of pages a run (src/landscape.ts).
-  {
-    name: "landscape.sync",
-    period: "quarterHour",
-    run: syncLandscapes,
-  },
   // The audit log's retention alarm armed, if it isn't yet: retention
   // itself runs on that alarm (src/audit-log.ts), and a deployment that
   // appends nothing after a release still gets it.

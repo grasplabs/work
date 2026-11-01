@@ -1,20 +1,19 @@
-import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { offeredWidgets } from "@grasp-os/shared/dashboard";
 import type { WidgetProgress, WidgetSpec } from "@grasp-os/shared/widgets";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { codeStep, chatOf, says } from "./agent-chat.ts";
-import { fakeGateway } from "./ai-gateway.ts";
-import type { GatewayReply } from "./ai-gateway.ts";
 import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { fakeProvider } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // Widgets Grasp makes from what a person asks (dashboard-widgets.ts),
 // through `/rpc` as the dashboard reaches them and from a chat's code, with
-// the model provider behind the gateway faked. The ways it can fail come
+// the model provider behind connect faked. The ways it can fail come
 // first: a widget showing what its person can't see, or no longer can; an
 // answer that isn't a widget, or doesn't fit, kept anyway or sent back
 // without end; a widget changed or removed by someone else; a change no
@@ -88,20 +87,17 @@ const engines = async () => {
   return { owner, user, app, name, hidden };
 };
 
-/** What `run` returns while the gateway answers with `replies`, and what was sent to it. */
-const answering = async <T>(replies: GatewayReply[], run: () => Promise<T>) => {
-  const fake = fakeGateway(...replies);
-  const ai: AiBinding = env.AI;
-  const spy = vi.spyOn(ai, "fetch").mockImplementation(fake.binding.fetch);
-  try {
-    return { requests: fake.requests, result: await run() };
-  } finally {
-    spy.mockRestore();
-  }
+/** What `run` returns while the provider answers with `replies`, and what was sent to it. */
+const answering = async <T>(
+  replies: ProviderReply[],
+  run: () => Promise<T>
+) => {
+  const { requests } = await fakeProvider(...replies);
+  return { requests, result: await run() };
 };
 
 /** The model's answer: `widget`, as JSON, with a note when given. */
-const answer = (widget: unknown, note?: string): GatewayReply => ({
+const answer = (widget: unknown, note?: string): ProviderReply => ({
   text: JSON.stringify({ widget, ...(note === undefined ? {} : { note }) }),
   inputTokens: 900,
   outputTokens: 80,
@@ -351,7 +347,7 @@ describe("widgets Grasp makes from what a person asks", () => {
 
   it("gives up after the answer is sent back twice, keeping nothing and recording no widget", async () => {
     const { owner } = await engines();
-    const nonsense: GatewayReply = {
+    const nonsense: ProviderReply = {
       text: "I'd make a pie chart.",
       inputTokens: 10,
       outputTokens: 10,
@@ -551,9 +547,9 @@ describe("widgets Grasp makes from what a person asks", () => {
 
   it("makes one from a chat for its person, telling the agent only its ID and what was asked", async () => {
     const { owner, app } = await engines();
-    // One gateway for the chat and the widget: the code step, the widget it
+    // One provider for the chat and the widget: the code step, the widget it
     // asks for, then the chat's answer.
-    const { ask, gateway } = await chatOf(
+    const { ask, provider } = await chatOf(
       owner.userId,
       codeStep(
         "export default async (self, env) => await env.dashboard.makeWidget({ request: 'What failed lately' });"
@@ -564,7 +560,7 @@ describe("widgets Grasp makes from what a person asks", () => {
     await ask("Put this week's failures on my dashboard");
     const [kept] = await owner.api.dashboard.widgets();
     // What the code's step returned to the agent: its next request carries it.
-    const toAgent = JSON.stringify(gateway.requests.at(-1)?.body ?? null);
+    const toAgent = JSON.stringify(provider.requests.at(-1)?.body ?? null);
     const events = await allEvents();
     const call = events.findLast(
       ({ action, detail }) =>
@@ -572,7 +568,7 @@ describe("widgets Grasp makes from what a person asks", () => {
     );
 
     expect({
-      calls: gateway.requests.length,
+      calls: provider.requests.length,
       asked: kept?.asked,
       agentGotId: kept !== undefined && toAgent.includes(kept.id),
       // The widget's title, written from the person's workflows, stays on the dashboard.

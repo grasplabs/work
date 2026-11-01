@@ -1,7 +1,7 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App, AppStatus } from "@grasp-os/shared/apps";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -15,7 +15,6 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { apps } from "./db/core/schema.ts";
-import { appHost } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { cancelRunsOf } from "./workflows/controls.ts";
 import { stopsUnsettled } from "./workflows/resource-runs.ts";
@@ -73,20 +72,6 @@ const transitions = {
 } as const satisfies Record<string, Transition>;
 
 export type AppTransition = keyof typeof transitions;
-
-/**
- * Tells the App's host its people's access may have changed, so open
- * screens look again (access-revocations.ts), and restarts its server
- * code, which lets go of what they subscribed to. Best effort: every push
- * checks again anyway.
- */
-const closeScreens = async (env: Env, app: App): Promise<void> => {
-  try {
-    await appHost(env, app.id).restart("Its status changed.");
-  } catch (error) {
-    log.error("app.restart_failed", { appId: app.id, ...errorFields(error) });
-  }
-};
 
 /**
  * App `app`'s status, with when it last changed in ms (null while it never
@@ -276,8 +261,9 @@ export const changeStatus = async (
   }
   const app = toApp(changed);
   if (found.status === "published" || to === "archived") {
+    // Open screens look again (access-revocations.ts), and stop where the
+    // status no longer serves them.
     await tellKept(env, revocations);
-    await closeScreens(env, app);
   }
   if (to === "archived") {
     await cancelRunsOf(env, by, app.id, now);

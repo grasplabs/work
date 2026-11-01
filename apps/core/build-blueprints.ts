@@ -34,6 +34,7 @@
  * files as any App's write checks them (paths, no hidden files, each
  * file's size and their number), and their total size as any version's.
  */
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -56,6 +57,8 @@ import { z } from "zod";
 
 import type { BuiltinBlueprint } from "#blueprints";
 
+import { blueprintsDigestText } from "./src/builtin-digest.ts";
+
 /** Where the built-ins that ship with each release are. */
 export const blueprintsDir = path.join(import.meta.dirname, "blueprints");
 
@@ -70,6 +73,14 @@ export const testBlueprintsModule = path.join(
   import.meta.dirname,
   "dist/test-blueprints.js"
 );
+
+/**
+ * The module next to a blueprints module `out` that holds their digest:
+ * core imports dist/blueprints-digest.js as `#blueprints-digest`, its
+ * tests dist/test-blueprints-digest.js.
+ */
+export const digestModuleOf = (out: string): string =>
+  out.replace(/\.js$/u, "-digest.js");
 
 /** Most permissions one built-in declares: each is one install statement. */
 export const declaredMaxPermissions = 16;
@@ -237,9 +248,9 @@ const blueprintsIn = (dir: string): BuiltinBlueprint[] =>
     });
 
 /**
- * Writes the built-ins in `dirs` into `out`, in id order, or refuses when
- * two share an id. Leaves an unchanged module as it is, so its time stays
- * the same.
+ * Writes the built-ins in `dirs` into `out`, in id order, and their digest
+ * (src/builtin-digest.ts) next to it, or refuses when two share an id.
+ * Leaves an unchanged module as it is, so its time stays the same.
  */
 export const writeBlueprints = (
   dirs: readonly string[],
@@ -253,11 +264,18 @@ export const writeBlueprints = (
   if (repeated !== undefined) {
     throw new Error(`Two built-in blueprints are named ${repeated}`);
   }
-  const text = `export default ${JSON.stringify(blueprints)};\n`;
-  const unchanged = existsSync(out) && readFileSync(out, "utf-8") === text;
-  if (!unchanged) {
-    mkdirSync(path.dirname(out), { recursive: true });
-    writeFileSync(out, text);
+  const digest = createHash("sha256")
+    .update(blueprintsDigestText(blueprints))
+    .digest("hex");
+  for (const [file, text] of [
+    [out, `export default ${JSON.stringify(blueprints)};\n`],
+    [digestModuleOf(out), `export default ${JSON.stringify(digest)};\n`],
+  ] as const) {
+    const unchanged = existsSync(file) && readFileSync(file, "utf-8") === text;
+    if (!unchanged) {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, text);
+    }
   }
   return blueprints.length;
 };

@@ -229,6 +229,14 @@ const seenTtlMs = 24 * 60 * 60 * 1000;
 const messages = new TokenBuckets(messageRate);
 const told = new TokenBuckets(toldRate);
 
+/**
+ * The clock the door's limits count by: the real one. A test that sends
+ * one person's many messages in a row moves this one on
+ * (test/permission-probing.ts), not the whole clock, which also dates the
+ * grant core signs for each model call, which connect checks by its own.
+ */
+export const doorClock = { now: (): number => Date.now() };
+
 /** The lines the door sends: each instead of reading what was sent. */
 type DoorLine =
   | "tooFast"
@@ -605,9 +613,11 @@ const gate = async (
   // Teams always says who wrote by their object id; without one, nobody
   // can be known.
   const sender = activity.from.aadObjectId ?? `id:${activity.from.id}`;
-  if (!messages.take(`teams:${sender}`)) {
+  if (!messages.take(`teams:${sender}`, doorClock.now())) {
     log.info("channel.limited", { platform: "teams" });
-    return told.take(`teams:${sender}`) ? { line: "tooFast" } : {};
+    return told.take(`teams:${sender}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (activity.from.aadObjectId === undefined) {
     return { line: "otherCompany" };
@@ -728,9 +738,11 @@ const slackGate = async (
   if (!first) {
     return {};
   }
-  if (!messages.take(`slack:${event.user}`)) {
+  if (!messages.take(`slack:${event.user}`, doorClock.now())) {
     log.info("channel.limited", { platform: "slack" });
-    return told.take(`slack:${event.user}`) ? { line: "tooFast" } : {};
+    return told.take(`slack:${event.user}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (event.channel_type !== "im") {
     return { line: "privateOnly" };
@@ -923,9 +935,11 @@ const whatsAppGate = async (
   if (!first) {
     return {};
   }
-  if (!messages.take(`whatsapp:${message.from}`)) {
+  if (!messages.take(`whatsapp:${message.from}`, doorClock.now())) {
     log.info("channel.limited", { platform: "whatsapp" });
-    return told.take(`whatsapp:${message.from}`) ? { line: "tooFast" } : {};
+    return told.take(`whatsapp:${message.from}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   const writer = await writerOf(env, "whatsapp", message.from);
   return writer.kind === "member" ? { userId: writer.userId } : { link: true };
@@ -1169,9 +1183,11 @@ const telegramGate = async (
     return {};
   }
   const sender = String(message.from.id);
-  if (!messages.take(`telegram:${sender}`)) {
+  if (!messages.take(`telegram:${sender}`, doorClock.now())) {
     log.info("channel.limited", { platform: "telegram" });
-    return told.take(`telegram:${sender}`) ? { line: "tooFast" } : {};
+    return told.take(`telegram:${sender}`, doorClock.now())
+      ? { line: "tooFast" }
+      : {};
   }
   if (message.chat.type !== "private") {
     return { line: "privateOnly" };
@@ -1390,7 +1406,7 @@ const gmailResponse = async (
     if (message.author.isMe || address === setUp.mailbox) {
       return;
     }
-    if (!messages.take(`gmail:${address}`)) {
+    if (!messages.take(`gmail:${address}`, doorClock.now())) {
       log.info("channel.limited", { platform: "gmail" });
       return;
     }

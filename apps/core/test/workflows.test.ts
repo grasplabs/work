@@ -34,7 +34,7 @@ import {
 // tested when their version is made current, and run on the engine
 // (Workerflow) by the dispatcher, each in an isolate of its own. Time is
 // moved on where a run sleeps (`woken`); the outside systems faked
-// here are the model provider behind AI Gateway, and a mail provider's MCP
+// here are the model provider behind connect, and a mail provider's MCP
 // server behind the real connect (test/mail-server.ts).
 //
 // A run's audit events are in an outbox by the time the run has ended: the

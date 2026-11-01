@@ -44,8 +44,10 @@ export const RunFiguresView = ({
   const days = runActivityDefaultDays;
   const { runs, alone, waiting } = figures;
   return (
-    <div className="flex flex-col gap-2">
-      <dl className="@container grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
+    // The container is the wrapper: a container query never applies to the
+    // element that is the container.
+    <div className="@container flex flex-col gap-2">
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-4 @3xl:grid-cols-3">
         <Figure
           label={
             <Plural

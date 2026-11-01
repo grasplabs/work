@@ -63,7 +63,6 @@ export const namespaceRelease = async (
     commitSha: manifest.commit,
     manifest: JSON.stringify(manifest),
     manifestSha256: "0".repeat(64),
-    limitEvidence: built.limitEvidenceText ?? null,
     builtAt: now,
     importedAt: now,
   });

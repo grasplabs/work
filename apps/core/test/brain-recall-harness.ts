@@ -23,8 +23,9 @@
  * as its updates are saved, and again until each arm finds them: how long
  * that takes is the arm's update lag.
  *
- * Only the model provider behind AI Gateway is swapped in CI, by the
- * caller: whatever stands behind `env.AI` ranks for the rerank arm.
+ * Only the model provider behind connect is swapped in CI, by the caller:
+ * whatever answers the provider the organization connected
+ * (model-provider.ts) ranks for the rerank arm.
  */
 import type { MemoryPack } from "@grasp-os/brain/contract";
 import { recallDefaults } from "@grasp-os/brain/contract";
@@ -336,7 +337,7 @@ export interface BrainRecallOptions {
   repeats: number;
   arms?: readonly BrainRecallArm[];
   cases?: readonly BrainRecallCase[];
-  /** Whether the reranker behind the gateway is a real model, not a stub. */
+  /** Whether the reranker behind connect is a real model, not a stub. */
   measured: boolean;
   seed?: number;
   /** What the run's numbers depend on, beyond the code: its model and profile. */

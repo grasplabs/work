@@ -161,7 +161,7 @@ describe(neuronMap, () => {
   it("narrows a region to one of its folders, every note in it shown", () => {
     expect(
       regionGroups("stem", atlas).map((group) => group.count)
-    ).toStrictEqual([2, 6, 22, 1, 1, 5, 3]);
+    ).toStrictEqual([2, 6, 22, 1, 1, 4, 3]);
     const employees = "Sources/Conversations/Employee interviews";
     for (const room of [MAP_ROOM, { width: 400, height: 760 }]) {
       const map = neuronMap("stem", atlas, brain, room, employees);

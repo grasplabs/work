@@ -4,6 +4,7 @@ import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -47,6 +48,7 @@ import {
   makeCall,
 } from "../src/workflows/resource-calls.ts";
 import type { BuiltCall } from "../src/workflows/resource-calls.ts";
+import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -504,6 +506,10 @@ const hearing =
     heard.push(said);
     await Promise.resolve();
   };
+
+/** A shared store's refusal of a call that couldn't run now. */
+const busy = () =>
+  operationErrors.create("resource.busy", { code: "operation.sandbox_busy" });
 
 /** A binding that is down: any use of it throws. */
 const down = <T extends object>(binding: T): T =>
@@ -1776,6 +1782,133 @@ export const notify = action({
           errorCode: "workflow.call_denied",
         },
       ],
+    });
+  });
+
+  it("is tried again after a busy refusal only when nothing of it went out before, so a paid model call is never made twice", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const model = `writer-${unique()}`;
+    await publishCatalogContract(env, admin, { key: model, kind: "model" });
+    const mailKey = await mailContract(admin);
+    const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
+    const definition = z
+      .looseObject({
+        document: z.looseObject({
+          metadata: z.object({
+            grasp: z.looseObject({
+              bindings: z.record(z.string(), z.unknown()),
+            }),
+          }),
+        }),
+      })
+      .parse(
+        JSON.parse(
+          definitionOf(workflow.name, {
+            mail: { kind: "connector", contract: mailKey },
+          })
+        )
+      );
+    definition.document.metadata.grasp.bindings.writer = {
+      kind: "model",
+      contract: model,
+    };
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: JSON.stringify(definition),
+      basedOn: null,
+      modules: {
+        // A paid model call, then a write to what may be busy.
+        "code/notify.ts": notifyModule(
+          `const { subject } = await ctx.resources.writer.generate({
+      instructions: "Write a subject.",
+      input: { to: args.to },
+    });
+    await ctx.resources.mail.call("mail.send", { to: args.to, subject });
+    return { status: "sent" };`,
+          `[resource.connector("mail", { operations: ["mail.send"] }), resource.model("writer", { output: v.object({ subject: v.string() }) })]`
+        ),
+      },
+    });
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const task = build.tasks.find(
+      (each) => each.kind === "call" && each.call.name === "grasp.action"
+    );
+    if (task === undefined) {
+      throw new Error("Expected the action's task");
+    }
+    /**
+     * The action's step under a retry policy of three attempts, its calls
+     * answered by `answer`: tried again only while its failure may be. How
+     * many model requests went out, and what it failed with last.
+     */
+    const triedUnderRetries = async (
+      answer: (call: BuiltCall, models: number) => Json
+    ) => {
+      const asked = { models: 0 };
+      let failed = "ok";
+      for (let tries = 0; tries < 3; tries += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+        failed = await outcome(
+          callAction(
+            env,
+            build.compute,
+            build.sdk,
+            notifyCall,
+            { to: "Ada" },
+            Date.now() + 30_000,
+            {
+              owner: `workflow-action:${workflow.id}`,
+              refused: hearing([]),
+              make: async (call) => {
+                await Promise.resolve();
+                if (call.name === "grasp.model") {
+                  asked.models += 1;
+                }
+                return answer(call, asked.models);
+              },
+            }
+          )
+        );
+        const again =
+          failed !== "ok" &&
+          retryable(
+            failureOf(
+              { name: "Error", message: failed, code: failed },
+              task,
+              false
+            ),
+            task
+          );
+        if (!again) {
+          break;
+        }
+      }
+      return { models: asked.models, failed };
+    };
+
+    expect({
+      // The model answered (billed), then the write was busy: trying the
+      // action again would ask the model again, so it fails clearly.
+      afterModel: await triedUnderRetries((call) => {
+        if (call.name === "grasp.model") {
+          return { subject: "Hello" };
+        }
+        throw busy();
+      }),
+      // Busy at its first call, nothing of it out: tried again, and the
+      // model asked once it gets through.
+      beforeAnything: await triedUnderRetries((call, models) => {
+        if (call.name === "grasp.model") {
+          if (models === 1) {
+            throw busy();
+          }
+          return { subject: "Hello" };
+        }
+        return { messageId: "m" };
+      }),
+    }).toStrictEqual({
+      afterModel: { models: 1, failed: "workflow.failed_after_effect" },
+      beforeAnything: { models: 2, failed: "ok" },
     });
   });
 });

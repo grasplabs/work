@@ -25,6 +25,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
+import { callTimeoutMs } from "./app-call-timeout.ts";
 import {
   answerPreferences,
   isPreferencePath,
@@ -33,7 +34,6 @@ import {
 import type { ResolvedPreferenceOperation } from "./app-preferences.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { callTimeoutMs } from "./app.ts";
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { openStore } from "./data-stores.ts";
@@ -737,19 +737,11 @@ export const refusalOf = (
 interface FunctionCallOptions {
   readonly deadline: number;
   /**
-   * Told the fence of the receipt the call's mutation claimed, before its
-   * handler runs (`Invocation.observeClaim`).
-   */
-  readonly observeClaim?: (fence: number) => void;
-  /**
    * Told of the call once it is resolved to `path`, a public function of
-   * `release`, before it runs (a screen's, to note its keyed submission).
+   * its release, before it runs (a screen's, so a form it sends can be
+   * told to the App's webhooks). A paginated window's read is not told.
    */
-  readonly onAdmitted?: (
-    release: Release,
-    call: FunctionRequest,
-    path: string
-  ) => Promise<void>;
+  readonly onAdmitted?: (call: FunctionRequest, path: string) => void;
   readonly stillAllowed?: () => Promise<void>;
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   readonly parentSession?: string;
@@ -1026,13 +1018,12 @@ const answeredPreferences = async (
 /** `callAppFunction`, with all of its options. */
 /**
  * `invocation`, telling `observeReads` what a query read of `release`'s
- * store and `observeClaim` the fence its mutation claimed, where given.
+ * store, where given.
  */
 const observedInvocation = (
   invocation: Invocation,
   release: Release,
-  observeReads: FunctionCallOptions["observeReads"],
-  observeClaim: FunctionCallOptions["observeClaim"]
+  observeReads: FunctionCallOptions["observeReads"]
 ): Invocation => {
   const { store } = release;
   return {
@@ -1044,7 +1035,6 @@ const observedInvocation = (
             observeReads(storeIdSchema.parse(store.storeId), readSet);
           },
         }),
-    ...(observeClaim === undefined ? {} : { observeClaim }),
   };
 };
 
@@ -1055,23 +1045,6 @@ const observedInvocation = (
  */
 export type StaffMarked = Pick<Identity, "userId" | "role" | "teams"> & {
   readonly staff?: boolean;
-};
-
-/**
- * Tells `onAdmitted` of `call` once it resolved to `path`, one of the
- * release's public functions, before it runs: a screen's keyed submission
- * is noted for recovery (screen-submissions.ts). A paginated window's read
- * is no submission.
- */
-const toldAdmitted = async (
-  onAdmitted: FunctionCallOptions["onAdmitted"],
-  release: Release,
-  call: FunctionRequest,
-  path: string
-): Promise<void> => {
-  if (call.window === undefined) {
-    await onAdmitted?.(release, call, path);
-  }
 };
 
 const callFunction = async (
@@ -1087,7 +1060,6 @@ const callFunction = async (
     parentSession,
     kind,
     observeReads,
-    observeClaim,
     chargeWindow,
     pinnedVersion,
     agent,
@@ -1173,7 +1145,9 @@ const callFunction = async (
       deadline,
     });
   }
-  await toldAdmitted(onAdmitted, release, call, path);
+  if (call.window === undefined) {
+    onAdmitted?.(call, path);
+  }
   try {
     const invocation = await invocationFor(env, release, {
       by,
@@ -1197,12 +1171,7 @@ const callFunction = async (
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),
     });
-    const observed = observedInvocation(
-      invocation,
-      release,
-      observeReads,
-      observeClaim
-    );
+    const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
     const result =
@@ -1369,10 +1338,7 @@ export const callScreenFunction = async (
   request: unknown,
   deadline: number,
   chargeWindow: (pages: number, whole: number) => Promise<void>,
-  options: Pick<
-    FunctionCallOptions,
-    "onAdmitted" | "observeClaim" | "pinnedVersion"
-  > = {}
+  options: Pick<FunctionCallOptions, "onAdmitted" | "pinnedVersion"> = {}
 ): Promise<FunctionAnswer> =>
   isWorkflowRequest(request)
     ? await workflowCommandAnswer(env, by, app, request)

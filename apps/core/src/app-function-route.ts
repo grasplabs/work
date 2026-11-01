@@ -35,14 +35,13 @@ import {
 } from "./action-invocation.ts";
 import {
   callScreenFunction,
-  readFunctionRequest,
-  refusalOf,
   pinnedReference,
   publicOperationOf,
+  readFunctionRequest,
+  refusalOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { loadRelease } from "./app-releases.ts";
-import type { Release } from "./app-releases.ts";
 import { queueFormSent } from "./app-webhook-queue.ts";
 import { appFor } from "./apps.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
@@ -52,10 +51,6 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import {
-  noteScreenAnswer,
-  noteScreenSubmission,
-} from "./screen-submissions.ts";
 import {
   delivering,
   leasedBuild,
@@ -434,34 +429,29 @@ const withheld = (
 });
 
 /**
- * Notes `call`, a keyed action of App `id`, as `person`'s submission
- * (screen-submissions.ts), once it resolves to one of the current
- * release's public actions; one that doesn't is refused by its invocation,
- * and noted nothing.
+ * The public action `call`, a keyed action of App `id`, resolves to in
+ * the current release, as `person` calls it; none when it resolves to no
+ * public action, which its invocation refuses.
  */
-const noteKeyedAction = async (
+const keyedActionPath = async (
   env: Env,
   person: Identity,
   { id, build }: KeyedTarget,
   call: FunctionRequest
 ): Promise<string | undefined> => {
-  let release: Release;
-  let path: string;
   try {
     const found = await appFor(env, person, id, "user");
     if (found.currentVersion === null) {
       return undefined;
     }
-    release = await loadRelease(env, found.id, found.currentVersion);
-    path = publicOperationOf(
+    const release = await loadRelease(env, found.id, found.currentVersion);
+    return publicOperationOf(
       release,
       await pinnedReference(env, release, call.reference, build?.version)
     );
   } catch {
     return undefined;
   }
-  await noteScreenSubmission(env, person, release, call, path);
-  return path;
 };
 
 /** Whether `result`, a call's as core answers it, says it ran and succeeded. */
@@ -508,7 +498,7 @@ const keyedAnswer = async (
   });
   const path =
     caller.portableSession === undefined
-      ? await noteKeyedAction(env, person, target, call)
+      ? await keyedActionPath(env, person, target, call)
       : undefined;
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
@@ -665,13 +655,8 @@ const boundedCall = async (
       build,
       operation,
       async () => {
-        // Which attempt under its key this call is, once noted, and the
-        // fence of the receipt its mutation claimed.
-        const noted: {
-          attempt?: number;
-          fence?: number;
-          sent?: { call: FunctionRequest; path: string };
-        } = {};
+        // The keyed mutation the call resolved to, once admitted.
+        let sent: { call: FunctionRequest; path: string } | undefined;
         const called = await callScreenFunction(
           env,
           person,
@@ -679,49 +664,32 @@ const boundedCall = async (
           text,
           Date.now() + screenCallMs,
           windowCharger(env, person, id),
-          // A portable host has no trusted shell to recover them in, and
-          // no lease: nothing pins its calls.
+          // A portable host has no lease: nothing pins its calls, and no
+          // form it sends is told to the App's webhooks.
           portableSession === undefined
             ? {
                 ...(build === undefined
                   ? {}
                   : { pinnedVersion: build.version }),
-                onAdmitted: async (release, call, path) => {
-                  noted.sent = { call, path };
-                  noted.attempt = await noteScreenSubmission(
-                    env,
-                    person,
-                    release,
-                    call,
-                    path
-                  );
-                },
-                observeClaim: (fence) => {
-                  noted.fence = fence;
+                onAdmitted: (call, admittedPath) => {
+                  sent = { call, path: admittedPath };
                 },
               }
             : {}
         );
-        if (noted.attempt !== undefined) {
-          await noteScreenAnswer(env, person, id, text, called.result, {
-            attempt: noted.attempt,
-            fence: noted.fence ?? null,
-          });
-        }
         // A form sent, as its screen's keyed mutation: told to the App's
         // webhooks.
-        const key = noted.sent?.call.idempotencyKey;
+        const key = sent?.call.idempotencyKey;
         if (
-          noted.attempt !== undefined &&
-          noted.sent !== undefined &&
+          sent !== undefined &&
           key !== undefined &&
           answeredOk(called.result)
         ) {
           await queueFormSent(env, {
             app: id,
             key,
-            operation: noted.sent.path,
-            values: noted.sent.call.input,
+            operation: sent.path,
+            values: sent.call.input,
           });
         }
         return withinFrame(called);

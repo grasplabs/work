@@ -900,7 +900,6 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     const bindings = [
       "CONNECT",
       "DB",
-      "AI",
       "KNOWLEDGE",
       "LOADER",
       "APPS",

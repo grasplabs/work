@@ -378,8 +378,6 @@ describe("an organization's interviews", () => {
       rated: row.includes("5.0 (1)"),
       quietListed: html.includes(`>Acme ${quiet.clientId}</a>`),
       quietCounted: html.includes("started interviews yet."),
-      // The practice benches aren't published to the admin: it says so.
-      benches: html.includes("Measured on practice companies"),
       leaked: missingIn(html, [said, fact, linkCode]).length,
     }).toStrictEqual({
       status: 200,
@@ -388,7 +386,6 @@ describe("an organization's interviews", () => {
       rated: true,
       quietListed: false,
       quietCounted: true,
-      benches: true,
       leaked: 3,
     });
   });

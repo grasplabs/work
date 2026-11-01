@@ -34,7 +34,7 @@ import { notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
 import { acceptedInput, pinned } from "./workflow-starts.ts";
-import { quotaPolicy } from "./workflows/quotas.ts";
+import { quotaLimits } from "./workflows/quotas.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one exact workflow version on its own. This is their
@@ -62,7 +62,7 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   grant keeps the workflow from being deleted.
 // - A trigger acting for someone who lost access: each start requires its
 //   person to still have a role in the workflow (workflow-starts.ts).
-// - Triggers piling up: a person has at most the quota policy's
+// - Triggers piling up: a person has at most the quota limits'
 //   `triggerResourcesPerPerson` live triggers.
 // - Disabling or deleting it under a start. Every start reads the trigger
 //   live and enabled in the statement that admits it, so one admitted
@@ -376,7 +376,7 @@ const requirePublished = async (
  * Creates a trigger of `input.kind` that starts exactly version
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
  * build the workflow. It may start nothing until an admin grants it
- * `start` on the workflow. A person has at most the quota policy's
+ * `start` on the workflow. A person has at most the quota limits'
  * `triggerResourcesPerPerson` live triggers (`workflow.trigger_limit`),
  * counted in the insert; the workflow must be live as it lands.
  */
@@ -404,8 +404,7 @@ export const createTriggerResource = async (
   );
   const id = triggerIdSchema.parse(crypto.randomUUID());
   const configHash = await sha256Hex(canonicalJson(config));
-  const policy = await quotaPolicy(env);
-  const cap = policy.limits.triggerResourcesPerPerson;
+  const cap = quotaLimits(env).triggerResourcesPerPerson;
   const now = new Date();
   const db = drizzle(env.DB);
   const batch = auditedBatch(env, db, [

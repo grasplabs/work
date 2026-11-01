@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { peopleIn } from "./people.ts";
@@ -13,58 +13,76 @@ import { peopleIn } from "./people.ts";
 const sameDocument = async (page: Page): Promise<boolean> =>
   await page.evaluate(() => document.documentElement.dataset.marked === "yes");
 
-test("a page whose file is gone after a release loads Grasp anew on Try again", async ({
-  pageOf,
-}) => {
-  const { member } = peopleIn("pageRecovery");
-  const page = await pageOf(member);
-  // What the app loads up front stays; a page's own file, fetched only
-  // when the page is opened, is gone, as after a new release.
-  const upFront = new Set<string>();
-  page.on("request", (request) => {
-    upFront.add(request.url());
-  });
-  await page.goto("/");
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
-  page.removeAllListeners("request");
-  // The Brain's own file, its layout's: the router loads Grasp anew once
-  // for each file that fails, so one file is gone, as one page's would be.
-  const brainFiles = "**/assets/_shell.brain-*.js";
-  await page.route(brainFiles, async (route) => {
-    await (upFront.has(route.request().url())
-      ? route.continue()
-      : route.abort());
-  });
+/**
+ * How a file a release took away is answered: refused outright, or, as
+ * core answers any path it has no file for, with the app's index.html.
+ */
+const answers = {
+  refused: async (route: Route): Promise<void> => {
+    await route.abort();
+  },
+  "answered with index.html": async (route: Route): Promise<void> => {
+    const index = await route.fetch({
+      url: new URL("/", route.request().url()).href,
+    });
+    await route.fulfill({ response: index });
+  },
+};
 
-  // The router loads Grasp anew once by itself; when the file is still
-  // missing after that, the page says why and how to go on. The first
-  // page can say so too, a moment before the router's reload replaces
-  // it, so the message counts only once that reload has loaded.
-  const reloaded = page.waitForEvent("load");
-  await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Brain", exact: true })
-    .click();
-  await reloaded;
-  await expect(
-    page.getByText(
-      "Grasp was updated while this page was open. Try again to load the new version."
-    )
-  ).toBeVisible();
-  await page.evaluate(() => {
-    document.documentElement.dataset.marked = "yes";
-  });
+for (const [answer, gone] of Object.entries(answers)) {
+  test(`a page whose file is gone after a release, ${answer}, loads Grasp anew on Try again`, async ({
+    pageOf,
+  }) => {
+    const { member } = peopleIn("pageRecovery");
+    const page = await pageOf(member);
+    // What the app loads up front stays; a page's own file, fetched only
+    // when the page is opened, is gone, as after a new release.
+    const upFront = new Set<string>();
+    page.on("request", (request) => {
+      upFront.add(request.url());
+    });
+    await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+    page.removeAllListeners("request");
+    // The Brain's own file, its layout's: the router loads Grasp anew once
+    // for each file that fails, so one file is gone, as one page's would be.
+    const brainFiles = "**/assets/_shell.brain-*.js";
+    await page.route(brainFiles, async (route) => {
+      await (upFront.has(route.request().url())
+        ? route.continue()
+        : gone(route));
+    });
 
-  // The new release's files are there: trying again loads Grasp anew.
-  await page.unroute(brainFiles);
-  await page.getByRole("button", { name: "Try again" }).click();
-  // A fresh load reads the brain before its navigation shows, as on any
-  // first open of it (brain.e2e.ts).
-  await expect(
-    page.getByRole("complementary", { name: "The brain" })
-  ).toBeVisible({ timeout: 15_000 });
-  expect(await sameDocument(page)).toBe(false);
-});
+    // The router loads Grasp anew once by itself; when the file is still
+    // missing after that, the page says why and how to go on. The first
+    // page can say so too, a moment before the router's reload replaces
+    // it, so the message counts only once that reload has loaded.
+    const reloaded = page.waitForEvent("load");
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Brain", exact: true })
+      .click();
+    await reloaded;
+    await expect(
+      page.getByText(
+        "Grasp was updated while this page was open. Try again to load the new version."
+      )
+    ).toBeVisible();
+    await page.evaluate(() => {
+      document.documentElement.dataset.marked = "yes";
+    });
+
+    // The new release's files are there: trying again loads Grasp anew.
+    await page.unroute(brainFiles);
+    await page.getByRole("button", { name: "Try again" }).click();
+    // A fresh load reads the brain before its navigation shows, as on any
+    // first open of it (brain.e2e.ts).
+    await expect(
+      page.getByRole("complementary", { name: "The brain" })
+    ).toBeVisible({ timeout: 15_000 });
+    expect(await sameDocument(page)).toBe(false);
+  });
+}
 
 test("a start without its words says so in English, and tries again", async ({
   newContext,

@@ -17,10 +17,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import type { StaffMarked } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
+import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { activeStaffRole } from "../src/auth/identity.ts";
-import { createStore } from "../src/data-stores.ts";
+import { createStore, deleteStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { liveRuns } from "../src/live-runs.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -56,7 +57,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { appWith, person, seal } from "./sealed-apps.ts";
+import { appWith, person, seal, sweptAway } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { outcome, signedIn, staffPerson, unique, whoami } from "./sign-in.ts";
 
@@ -169,6 +170,29 @@ export default app({
 });
 `,
 });
+
+/** The CRM without tables: nothing to store, so no store binding. */
+const tablelessFiles: Record<string, string> = {
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+export default defineSchema({});
+`,
+  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { hello } from "./operations/hello.ts";
+import schema from "./schema.ts";
+export default app({
+  name: "CRM",
+  schema,
+  access: {},
+  operations: { hello: { hello } },
+  screens: [],
+  uses: [],
+});
+`,
+};
 
 /** An App calling the CRM's store through its declared store resources. */
 const deskFiles: Record<string, string> = {
@@ -434,6 +458,16 @@ const bind = async (
     reviewed: { version: desk.release.manifest.resourceVersion },
   });
 
+/** A release's inventory row of Desk's store resource before an approval resolves it. */
+const declaredRow = (version: number) => ({
+  version,
+  kind: "storeResource",
+  target: null,
+  definition: null,
+  approval: null,
+  declared: 1,
+});
+
 const crmActions = [
   "contacts.list",
   "contacts.add",
@@ -481,6 +515,140 @@ describe("an App calling another App's store", () => {
           operation: "contacts.add",
         },
       ],
+    });
+  });
+
+  it("is named in the binding inventory, for each release its approval serves, and by its declaration alone once revoked", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const inventory = async () => {
+      const { results } = await env.DB.prepare(
+        `SELECT resource_version AS version, kind,
+            CASE WHEN approval_id IS NULL THEN NULL ELSE target_id END AS target,
+            target_version AS definition, approval_id AS approval,
+            target_id = schema_hash AS declared
+          FROM sdk_resource_bindings
+          WHERE resource_id = ? AND alias = 'resources.crm'
+          ORDER BY resource_version`
+      )
+        .bind(desk.app)
+        .all();
+      return results;
+    };
+    const sealed = await inventory();
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    const approved = await inventory();
+    // A later version declaring the store the same: its seal names the
+    // store the approval resolves, as the approval serves it too.
+    const second = await nextVersion(desk, deskVersion(2), 2);
+    const later = await inventory();
+    await revokeResourceBinding(env, admin, approval.id);
+    const resolved = (version: number) => ({
+      version,
+      kind: "storeResource",
+      target: crm.store,
+      definition: 1,
+      approval: approval.id,
+      declared: 0,
+    });
+    expect({
+      sealed,
+      approved,
+      later,
+      revoked: await inventory(),
+      secondVersion: second.release.manifest.resourceVersion,
+    }).toStrictEqual({
+      sealed: [declaredRow(1)],
+      approved: [resolved(1)],
+      later: [resolved(1), resolved(2)],
+      revoked: [declaredRow(1), declaredRow(2)],
+      secondVersion: 2,
+    });
+  });
+
+  it("names no definition for the store once its owner's current release binds another store", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    // The CRM still owns its store, but its current release binds another.
+    const other = await createStore(env, crm.owner);
+    const files = crmFiles();
+    await commitFiles(
+      env,
+      crm.owner,
+      crm.app,
+      {
+        ...files,
+        "operations/crm.ts": `// Version 2.\n${files["operations/crm.ts"] ?? ""}`,
+      },
+      "Another store"
+    );
+    await sealRelease(env, {
+      app: crm.app,
+      version: 2,
+      store: other,
+      by: crm.owner,
+    });
+    await setCurrentVersion(env, crm.owner, crm.app, 2);
+    await nextVersion(desk, deskVersion(2), 2);
+    const row = await env.DB.prepare(
+      `SELECT target_id AS target, target_version AS definition, approval_id AS approval
+        FROM sdk_resource_bindings
+        WHERE resource_id = ? AND resource_version = 2 AND alias = 'resources.crm'`
+    )
+      .bind(desk.app)
+      .first();
+    expect(row).toStrictEqual({
+      target: crm.store,
+      // Never the other store's definition, recorded against this one.
+      definition: null,
+      approval: approval.id,
+    });
+  });
+
+  it("keeps the store from being deleted while an App's approval resolves to it, until it's revoked", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const permission = await deskGrant(admin, desk, crm, crmActions);
+    const approval = await bind(admin, desk, permission);
+    // The CRM goes on without tables, and retention lets the version that
+    // bound the store go: no release keeps it now, only Desk's approval.
+    await commitFiles(
+      env,
+      crm.owner,
+      crm.app,
+      { ...tablelessFiles, "operations/crm.ts": null },
+      "No tables"
+    );
+    await seal(crm, 2);
+    await setCurrentVersion(env, crm.owner, crm.app, 2);
+    await sweptAway(crm.app, 1);
+    // The store is counted by the approval Desk's row names: no write
+    // leaves the row naming the store without it, so none hides Desk.
+    const unnamed = await env.DB.prepare(
+      "UPDATE sdk_resource_bindings SET approval_id = NULL WHERE resource_id = ? AND alias = 'resources.crm'"
+    )
+      .bind(desk.app)
+      .run()
+      .then(
+        () => "written",
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes("names its store only with its approval")
+            ? "refused"
+            : error
+      );
+    const refused = await outcome(deleteStore(env, crm.owner, crm.store));
+    await revokeResourceBinding(env, admin, approval.id);
+    await deleteStore(env, crm.owner, crm.store);
+    expect({ unnamed, refused }).toStrictEqual({
+      unnamed: "refused",
+      refused: "data.store_consumed",
     });
   });
 
@@ -1383,6 +1551,171 @@ describe("a workflow calling a store's public operation", () => {
       action: "workflow.binding_invalid",
       borrowed: "workflow.binding_invalid",
       served: "ok",
+    });
+  });
+
+  it("is named in the binding inventory, store, definition and path, while an approval serves it, and the contract alone once revoked", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approve = async () =>
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "lookup",
+        target: {
+          kind: "storeOperation",
+          permissionId,
+          operation: "contacts.add",
+          operationKind: "mutation",
+        },
+        reviewed: { version: 1 },
+      });
+    const inventory = async () =>
+      await env.DB.prepare(
+        `SELECT kind, target_id AS target, target_version AS definition,
+          target_path AS path, approval_id AS approval, contract_id AS contract
+        FROM sdk_resource_bindings
+        WHERE resource_id = ? AND resource_version = 1 AND alias = 'lookup'`
+      )
+        .bind(workflow.id)
+        .first();
+    const published = await inventory();
+    const first = await approve();
+    const approved = await inventory();
+    // Approved again: the second approval replaces the first, and revoking
+    // the first after that leaves the row the second's.
+    const second = await approve();
+    await revokeWorkflowBinding(env, admin, workflow.id, first.id);
+    const replaced = await inventory();
+    await revokeWorkflowBinding(env, admin, workflow.id, second.id);
+    const contract = {
+      kind: "operation",
+      target: key,
+      definition: null,
+      path: null,
+      approval: null,
+      contract: key,
+    };
+    // Each approval and revocation audited, as the approval's batch and
+    // the revocation's own change decide, never the inventory's.
+    const events = await allEvents();
+    const audited = events
+      .filter(
+        ({ action, target }) =>
+          action.startsWith("workflow.binding.") && target?.id === workflow.id
+      )
+      .map(({ action, detail }) => [action, detail.approval]);
+    expect(audited).toStrictEqual([
+      ["workflow.binding.approved", first.id],
+      ["workflow.binding.approved", second.id],
+      // The first, replaced already, changed nothing when revoked.
+      ["workflow.binding.revoked", second.id],
+    ]);
+    expect({
+      published,
+      approved,
+      replaced,
+      revoked: await inventory(),
+    }).toStrictEqual({
+      published: contract,
+      approved: {
+        kind: "operation",
+        target: crm.store,
+        definition: 1,
+        path: "contacts.add",
+        approval: first.id,
+        contract: key,
+      },
+      replaced: {
+        kind: "operation",
+        target: crm.store,
+        definition: 1,
+        path: "contacts.add",
+        approval: second.id,
+        contract: key,
+      },
+      revoked: contract,
+    });
+  });
+
+  it("keeps the store from being deleted while an approval resolves to it, saying how many, until it's revoked", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "contacts.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    // The CRM goes on without tables, and retention lets the version that
+    // bound the store go: no release keeps it now, only the approval.
+    await commitFiles(
+      env,
+      crm.owner,
+      crm.app,
+      { ...tablelessFiles, "operations/crm.ts": null },
+      "No tables"
+    );
+    await seal(crm, 2);
+    await setCurrentVersion(env, crm.owner, crm.app, 2);
+    await sweptAway(crm.app, 1);
+    // The store is counted by the approval its row names: no write leaves
+    // the row naming the store without it, so none hides the consumer.
+    const unnamed = await env.DB.prepare(
+      "UPDATE sdk_resource_bindings SET approval_id = NULL WHERE resource_id = ? AND alias = 'lookup'"
+    )
+      .bind(workflow.id)
+      .run()
+      .then(
+        () => "written",
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes("names its store only with its approval")
+            ? "refused"
+            : error
+      );
+    const refused = await deleteStore(env, crm.owner, crm.store).then(
+      () => null,
+      (error: unknown) =>
+        error instanceof Error && "code" in error
+          ? { code: error.code, message: error.message }
+          : error
+    );
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    await deleteStore(env, crm.owner, crm.store);
+    expect({ unnamed, refused }).toStrictEqual({
+      unnamed: "refused",
+      refused: {
+        code: "data.store_consumed",
+        message:
+          "One workflow or App calls this store's operations through an approval. Revoke that approval first, then delete the store.",
+      },
     });
   });
 

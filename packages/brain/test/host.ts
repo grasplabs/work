@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import type { ReadRecord } from "../src/authorize.ts";
 import { createBrain } from "../src/brain.ts";
 import type {
+  EvalCapability,
   Brain,
   BrainPorts,
   IndexJob,
@@ -33,6 +34,8 @@ export interface Caller {
   only?: Readonly<Record<string, readonly string[]>>;
   /** The capabilities the host says they hold. */
   capabilities?: readonly string[];
+  /** What they may do with every learning suite (eval-suites.ts). */
+  evaluation?: readonly EvalCapability[];
 }
 
 /** A job the Brain asked its host to start. */
@@ -165,6 +168,10 @@ export const testHost = (
         ),
     },
     audiences: async (caller) => await Promise.resolve(caller.audiences ?? []),
+    evaluation: {
+      capabilities: async (caller) =>
+        await Promise.resolve(caller.evaluation ?? []),
+    },
     blobs: env.BLOBS,
     audit: {
       eventOf: (entry) => {

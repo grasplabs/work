@@ -8,7 +8,6 @@ import {
   patterns,
   sourceContents,
   splitTimeline,
-  unmentionedApps,
 } from "./brain.ts";
 import type { Folder, Note, NoteEvent } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
@@ -49,15 +48,11 @@ describe(buildBrain, () => {
   it("files notes in the folders of steps 1 and 2", () => {
     expect(
       Object.fromEntries(
-        ["vision", "goal-answer", "app-chatgpt", "src-vision"].map((id) => [
-          id,
-          note(id).path,
-        ])
+        ["vision", "goal-answer", "src-vision"].map((id) => [id, note(id).path])
       )
     ).toStrictEqual({
       vision: ["1 Vision"],
       "goal-answer": ["1 Vision", "Goals"],
-      "app-chatgpt": ["2 Inventory", "Tools", "Seen, never mentioned"],
       "src-vision": ["Sources", "Conversations", "With the board"],
     });
 
@@ -74,49 +69,15 @@ describe(buildBrain, () => {
 
   it("keeps what an import brought in on its source, so it holds the context the other notes come from", () => {
     const directory = sourceContents(ws, "src-directory");
-    expect(
-      directory?.kind === "teams" && directory.rows.map((row) => row.teamId)
-    ).toContain("team-service");
+    expect(directory?.rows.map((row) => row.teamId)).toContain("team-service");
     const refresh = sourceContents(ws, "src-directory-refresh");
-    const service =
-      refresh?.kind === "teams"
-        ? refresh.rows.find((row) => row.teamId === "team-service")
-        : undefined;
+    const service = refresh?.rows.find((row) => row.teamId === "team-service");
     expect({ people: service?.people, before: service?.before }).toStrictEqual({
       people: 15,
       before: 14,
     });
-    expect(refresh?.kind === "teams" && refresh.rows).toHaveLength(6);
+    expect(refresh?.rows).toHaveLength(6);
     expect(sourceContents(ws, "src-vision")).toBeUndefined();
-  });
-
-  it("keeps the applications sign-in and Pulse saw on their sources, each with its note", () => {
-    const pulse = sourceContents(ws, "src-pulse");
-    expect(pulse?.kind === "apps" && pulse.signIn).toBeFalsy();
-    expect(
-      pulse?.kind === "apps" &&
-        pulse.rows.find((row) => row.app.name === "ChatGPT")
-    ).toMatchObject({ noteId: "app-chatgpt", named: false });
-    const signIn = sourceContents(ws, "src-sso");
-    expect(signIn?.kind === "apps" && signIn.signIn).toBeTruthy();
-    expect(
-      signIn?.kind === "apps" &&
-        signIn.rows.every((row) => row.app.permissions.length > 0)
-    ).toBeTruthy();
-    expect(words(note("src-pulse"), "Added")).toMatch(/^\d+ applications$/u);
-  });
-
-  it("files the policies uploaded to Policies as documents, linked to Policies and to the draft they came from", () => {
-    const policy = note("policy-ai-data");
-    expect(policy.path).toStrictEqual(["Sources", "Documents"]);
-    expect(
-      policy.points.find((point) => point.label === "In Policies")?.refs[0]
-    ).toMatchObject({ policyId: "policy-ai-data" });
-    expect(policy.article?.length).toBeGreaterThan(1);
-    expect(words(note("src-ai-policy"), "Became")).toBe(
-      "AI and data guideline"
-    );
-    expect(note("policy-ai-data").backlinks).toContain("src-ai-policy");
   });
 
   it("files sources by the way they were collected, in a fixed order", () => {
@@ -236,20 +197,15 @@ describe(buildBrain, () => {
 
   it("opens every note with one sentence and a few short points, per kind", () => {
     const team = note("team-service");
-    const app = note("app-chatgpt");
     const candidate = note("cand-email");
     expect({
       team: team.summary,
       teamUses: words(team, "They use"),
-      app: app.summary,
-      appOwner: words(app, "Owner"),
       candidateTeams: words(candidate, "Teams"),
     }).toStrictEqual({
       // Its size, never who of it talked, nor how many.
       team: "15 people.",
       teamUses: "Outlook, CRM, Microsoft Copilot",
-      app: "47 people use it, seen through Pulse. No team has named it yet.",
-      appOwner: "Revenue",
       candidateTeams: "Customer service, Mortgage advice",
     });
     expect(
@@ -461,7 +417,7 @@ describe("the inventory", () => {
     expect(words(noteIn(mailed, "tool-mail"), "Workflows")).toBe("Mail triage");
   });
 
-  it("says whether a tool is AI, and who says so", () => {
+  it("says whether a tool is AI, as the team said it", () => {
     const unseen = {
       id: "tool-checklist",
       name: "Paper checklist",
@@ -469,7 +425,6 @@ describe("the inventory", () => {
       sourceId: "src-onboarding",
     };
     expect({
-      seen: words(noteIn(ws, "tool-copilot"), "AI"),
       unknown: words(
         noteIn({ ...ws, tools: [...ws.tools, unseen] }, "tool-checklist"),
         "AI"
@@ -482,7 +437,6 @@ describe("the inventory", () => {
         "AI"
       ),
     }).toStrictEqual({
-      seen: "An AI tool, as Grasp sees it",
       unknown: "Unknown",
       said: "No AI, as the team said it",
     });
@@ -496,18 +450,8 @@ describe("the inventory", () => {
     ]);
   });
 
-  it("flags applications Grasp saw that nobody mentioned", () => {
-    const ids = unmentionedApps(ws).map((app) => app.id);
-    expect(ids).toContain("chatgpt");
-    expect(ids).not.toContain("microsoft-365");
-    expect(ids).not.toContain("salesforce");
-  });
-
   it("finds patterns in the records instead of guessing them", () => {
     const found = patterns(ws);
-    expect(found).toContain(
-      "ChatGPT is used by 47 people, and nobody mentioned it in an interview."
-    );
     expect(found).toContain(
       "Mortgage advice and Client onboarding both name the same handover, each from their own side."
     );
@@ -752,8 +696,7 @@ describe("processIds", () => {
   const ws = testWorkspace();
   const note = (id: string) => noteIn(ws, id);
 
-  it("gives tools and applications the logo the Landscape shows, else their connector’s, else none", () => {
-    expect(note("app-chatgpt").logoSrc).toBe("/v1/logos/chatgpt.png");
+  it("gives tools their connector’s logo, else none", () => {
     expect(note("tool-crm").logoSrc).toMatch(/salesforce\.svg$/u);
     expect(note("tool-portal").logoSrc).toBeUndefined();
     expect(note("team-onboarding").logoSrc).toBeUndefined();
@@ -797,8 +740,6 @@ describe("a brain of a deployment that holds nothing yet", () => {
         matches: ["Microsoft 365"],
       },
     ],
-    landscape: [],
-    policies: [],
   };
 
   it("is the company, its vision page and the empty source folders, linked to nothing that isn't there", () => {
@@ -913,8 +854,6 @@ describe("a brain of the onboarding alone, as core reads it for an admin", () =>
     gaps: [],
     workflows: [],
     connections: [],
-    landscape: [],
-    policies: [],
   };
 
   it("files the interview, the document and its tool, and counts only the interviewed team as interviewed", () => {

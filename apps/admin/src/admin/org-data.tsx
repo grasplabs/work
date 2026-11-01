@@ -29,7 +29,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import type { ReactNode } from "react";
 
-import { Panel } from "./panel.tsx";
+import { Section } from "./section.tsx";
 
 const percent = new Intl.NumberFormat("en", {
   style: "percent",
@@ -75,7 +75,7 @@ const WhatIsKept = ({ view }: { view: AdminView }) => {
   const kept = keptOf(view, view.asOf);
   const { conversation } = view.state;
   return (
-    <Panel
+    <Section
       description="As people are told before their interview starts."
       title="What is kept"
     >
@@ -115,7 +115,7 @@ const WhatIsKept = ({ view }: { view: AdminView }) => {
       >
         {kept.deletable}
       </Kept>
-    </Panel>
+    </Section>
   );
 };
 
@@ -125,7 +125,7 @@ const Deleted = ({ view }: { view: AdminView }) => {
     state.deleted.includes(person.id)
   );
   return (
-    <Panel
+    <Section
       description="Their words are gone, and with them what only they said. Their name stays, so nobody is asked again."
       title="Deleted because they asked"
     >
@@ -148,7 +148,7 @@ const Deleted = ({ view }: { view: AdminView }) => {
           ))}
         </ul>
       )}
-    </Panel>
+    </Section>
   );
 };
 
@@ -183,7 +183,7 @@ const Figures = ({
 const CompanySees = ({ view }: { view: AdminView }) => {
   const sees = companySees(view);
   return (
-    <Panel
+    <Section
       description={`Numbers per team, only where ${MIN_GROUP} or more in a team are asked to talk, and for everyone only the teams that show theirs. Never a name, never anyone’s words, and never who stopped or did not start.`}
       title="What the company itself sees"
     >
@@ -265,7 +265,7 @@ const CompanySees = ({ view }: { view: AdminView }) => {
           </Table>
         </div>
       )}
-    </Panel>
+    </Section>
   );
 };
 

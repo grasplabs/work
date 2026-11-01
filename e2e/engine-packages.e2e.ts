@@ -88,7 +88,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
   );
 
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await expect(
     page.getByRole("heading", { level: 1, name: "Charts" })
   ).toBeVisible(pageRead);
@@ -118,7 +118,7 @@ test("someone who may approve packages and isn't a member sees only an engine's 
 
   // A builder sees them in the engine's Packages tab, and ends nothing.
   const builderPage = await pageOf(builder);
-  await builderPage.goto(`/engines/${app}`);
+  await builderPage.goto(`/domains/${app}`);
   await builderPage.getByRole("tab", { name: "Packages" }).click();
   const builderRow = builderPage
     .getByRole("table", { name: "Approved packages" })
@@ -139,7 +139,7 @@ test("someone who may approve packages and builds other engines sees only this o
   );
 
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await expect(
     page.getByRole("heading", { level: 1, name: "Ledger" })
   ).toBeVisible(pageRead);
@@ -160,7 +160,7 @@ test("reads the packages again when a decision fails, keeping why", async ({
     "Ledger"
   );
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await page
     .getByRole("button", { name: "Revoke the packages for Ledger" })
     .click(pageRead);
@@ -199,7 +199,7 @@ test("shows the packages as the page reads them again, when someone else ended t
     "Budget"
   );
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await expect(
     page
       .getByRole("table", { name: "Approved packages" })
@@ -220,7 +220,7 @@ test("shows the packages as the page reads them again, when someone else ended t
     reason: "Replaced.",
   });
   asApprover.core[Symbol.dispose]();
-  await page.getByRole("button", { name: /^P Person/u }).click();
+  await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: /^Language/u }).click();
   await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
 
@@ -240,7 +240,7 @@ test("reads a builder's packages when the tab opens, not when the page loaded", 
     "Forecast"
   );
   const page = await pageOf(builder);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await expect(page.getByRole("tab", { name: /^Apps/u })).toBeVisible(pageRead);
 
   await retireElsewhere(approver, request);
@@ -262,7 +262,7 @@ test("stays busy until the list was read again, so a decision is never sent twic
     "Payroll"
   );
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await page
     .getByRole("button", { name: "Retire the packages for Payroll" })
     .click(pageRead);
@@ -315,7 +315,7 @@ test("says the list may be out of date when it can't be read again", async ({
     "Travel"
   );
   const page = await pageOf(approver);
-  await page.goto(`/engines/${app}`);
+  await page.goto(`/domains/${app}`);
   await page
     .getByRole("button", { name: "Retire the packages for Travel" })
     .click(pageRead);

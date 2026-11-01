@@ -43,7 +43,7 @@ const AppPageView = () => {
   if (page.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: t`App` }]}
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
         icon={LayoutGridIcon}
         notFound={t`App not found`}
         page={page}
@@ -54,7 +54,7 @@ const AppPageView = () => {
   return (
     <>
       <SiteHeader
-        crumbs={[{ label: t`Domains`, to: "/domains" }, { label: app.name }]}
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: app.name }]}
       />
       <AppPage app={app} identity={identity} contents={contents} open={open}>
         {open === undefined ? null : (
