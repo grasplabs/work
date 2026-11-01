@@ -847,6 +847,7 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
     reconnect: t`Sign in again`,
     asked: t`Answer in the brain`,
     decision: t`Review and answer`,
+    revoked: t`Remove the package`,
   };
   const label = labels[item.source.type] ?? t`Review`;
   return (

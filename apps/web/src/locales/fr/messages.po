@@ -1296,6 +1296,10 @@ msgstr "{rests} · {team} · semaine {week}"
 msgid "{rests} · week {week}"
 msgstr "{rests} · semaine {week}"
 
+#: src/inbox/items.ts
+msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+msgstr "{revoked} a été signalé comme logiciel malveillant, Grasp a donc révoqué les paquets approuvés avec lui : rien de {name} qui les utilise n'est compilé, servi ni démarré. Supprimez le paquet, puis demandez l'approbation de nouveaux paquets."
+
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
 msgstr "{role} (effectif inconnu)"
@@ -2427,6 +2431,10 @@ msgstr "Admins alertés à {alertAt}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses sessions et le retirer, autres admins compris."
+
+#: src/inbox/items.ts
+msgid "Advisory"
+msgstr "Avis de sécurité"
 
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
@@ -8147,6 +8155,11 @@ msgstr "Rendre la version {version} actuelle et publier"
 msgid "Make version {version} of {name} live?"
 msgstr "Mettre en service la version {version} de {name} ?"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: packages revoked as malware"
+msgid "Malware"
+msgstr "Logiciel malveillant"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Gérer"
@@ -10475,6 +10488,7 @@ msgid "Owners see people one by one."
 msgstr "Les propriétaires voient les personnes une à une."
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Package"
 msgstr "Paquet"
 
@@ -10504,6 +10518,10 @@ msgstr "Paquets pour {domain}"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Packages for {workflow}"
 msgstr "Paquets pour {workflow}"
+
+#: src/inbox/items.ts
+msgid "Packages of {name} were revoked as malware"
+msgstr "Des paquets de {name} ont été révoqués comme logiciels malveillants"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -11479,6 +11497,10 @@ msgstr "Retirer"
 msgid "Remove the exception for {name}"
 msgstr "Supprimer l'exception de {name}"
 
+#: src/inbox/item-detail.tsx
+msgid "Remove the package"
+msgstr "Supprimer le paquet"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
 msgid "Remove this from the brain"
@@ -11793,6 +11815,10 @@ msgstr "Révoquer les paquets de {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Révoquer les paquets de {domain} ?"
+
+#: src/inbox/items.ts
+msgid "Revoked"
+msgstr "Révoqué"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"

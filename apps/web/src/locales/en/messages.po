@@ -1296,6 +1296,10 @@ msgstr "{rests} · {team} · week {week}"
 msgid "{rests} · week {week}"
 msgstr "{rests} · week {week}"
 
+#: src/inbox/items.ts
+msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+msgstr "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
 msgstr "{role} (unknown)"
@@ -2427,6 +2431,10 @@ msgstr "Admins alerted at {alertAt}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins can change anyone's role, end their sessions and remove them, other admins included."
+
+#: src/inbox/items.ts
+msgid "Advisory"
+msgstr "Advisory"
 
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
@@ -8147,6 +8155,11 @@ msgstr "Make version {version} current and publish"
 msgid "Make version {version} of {name} live?"
 msgstr "Make version {version} of {name} live?"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: packages revoked as malware"
+msgid "Malware"
+msgstr "Malware"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Manage"
@@ -10475,6 +10488,7 @@ msgid "Owners see people one by one."
 msgstr "Owners see people one by one."
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Package"
 msgstr "Package"
 
@@ -10504,6 +10518,10 @@ msgstr "Packages for {domain}"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Packages for {workflow}"
 msgstr "Packages for {workflow}"
+
+#: src/inbox/items.ts
+msgid "Packages of {name} were revoked as malware"
+msgstr "Packages of {name} were revoked as malware"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -11479,6 +11497,10 @@ msgstr "Remove it"
 msgid "Remove the exception for {name}"
 msgstr "Remove the exception for {name}"
 
+#: src/inbox/item-detail.tsx
+msgid "Remove the package"
+msgstr "Remove the package"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
 msgid "Remove this from the brain"
@@ -11793,6 +11815,10 @@ msgstr "Revoke the packages for {domain}"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Revoke the packages for {domain}?"
+
+#: src/inbox/items.ts
+msgid "Revoked"
+msgstr "Revoked"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"

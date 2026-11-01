@@ -1296,6 +1296,10 @@ msgstr "{rests} · {team} · Woche {week}"
 msgid "{rests} · week {week}"
 msgstr "{rests} · Woche {week}"
 
+#: src/inbox/items.ts
+msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
+msgstr "{revoked} wurde als Malware gemeldet, deshalb hat Grasp die damit freigegebenen Pakete widerrufen: Nichts von {name}, das sie verwendet, wird gebaut, ausgeliefert oder gestartet. Entferne das Paket und beantrage dann die Freigabe neuer Pakete."
+
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
 msgstr "{role} (unbekannt)"
@@ -2427,6 +2431,10 @@ msgstr "Admins gewarnt bei {alertAt}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins können die Rolle jeder Person ändern, ihre Sitzungen beenden und sie entfernen, andere Admins eingeschlossen."
+
+#: src/inbox/items.ts
+msgid "Advisory"
+msgstr "Sicherheitshinweis"
 
 #: src/onboarding/work-rules.tsx
 msgid "After {most} interviews, it is better split in two"
@@ -8147,6 +8155,11 @@ msgstr "Version {version} aktuell machen und veröffentlichen"
 msgid "Make version {version} of {name} live?"
 msgstr "Version {version} von {name} live schalten?"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: packages revoked as malware"
+msgid "Malware"
+msgstr "Malware"
+
 #: src/connections/integration-row.tsx
 msgid "Manage"
 msgstr "Verwalten"
@@ -10475,6 +10488,7 @@ msgid "Owners see people one by one."
 msgstr "Inhaber sehen Personen einzeln."
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Package"
 msgstr "Paket"
 
@@ -10504,6 +10518,10 @@ msgstr "Pakete für {domain}"
 #: src/routes/_shell.settings.packages.workflows.$workflow.tsx
 msgid "Packages for {workflow}"
 msgstr "Pakete für {workflow}"
+
+#: src/inbox/items.ts
+msgid "Packages of {name} were revoked as malware"
+msgstr "Pakete von {name} wurden als Malware widerrufen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
@@ -11479,6 +11497,10 @@ msgstr "Entfernen"
 msgid "Remove the exception for {name}"
 msgstr "Ausnahme für {name} entfernen"
 
+#: src/inbox/item-detail.tsx
+msgid "Remove the package"
+msgstr "Paket entfernen"
+
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
 msgid "Remove this from the brain"
@@ -11793,6 +11815,10 @@ msgstr "Pakete für {domain} widerrufen"
 #: src/engines/package-approvals.tsx
 msgid "Revoke the packages for {domain}?"
 msgstr "Pakete für {domain} widerrufen?"
+
+#: src/inbox/items.ts
+msgid "Revoked"
+msgstr "Widerrufen"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a disconnected account's access at its provider"

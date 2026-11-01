@@ -15,6 +15,7 @@ import {
   PlayIcon,
   RocketIcon,
   ScaleIcon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   SparklesIcon,
   SplitIcon,
@@ -66,6 +67,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
+  revokedPackage: msg({
+    message: "Malware",
+    context: "inbox item kind: packages revoked as malware",
+  }),
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
@@ -88,6 +93,7 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   appApproval: ShieldCheckIcon,
   failedRun: TriangleAlertIcon,
   stoppedSchedule: CalendarOffIcon,
+  revokedPackage: ShieldAlertIcon,
   decision: ScaleIcon,
 };
 

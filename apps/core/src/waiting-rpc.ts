@@ -159,7 +159,7 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: failed runs, questions they were asked, and schedules of theirs that stopped. */
+/** The latest page of the person's notifications: failed runs, questions they were asked, schedules of theirs that stopped, and packages revoked as malware. */
 const notificationItems = async (
   { notifications, chats }: WaitingSources,
   { forMe }: Reader
@@ -196,6 +196,15 @@ const notificationItems = async (
             ...base,
             kind: "stoppedSchedule",
             id: `stoppedSchedule:${notification.id}`,
+            verdicts: [],
+            notification,
+          };
+        }
+        case "package_revoked": {
+          return {
+            ...base,
+            kind: "revokedPackage",
+            id: `revokedPackage:${notification.id}`,
             verdicts: [],
             notification,
           };
