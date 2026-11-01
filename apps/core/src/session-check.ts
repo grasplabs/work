@@ -26,15 +26,26 @@ export const withPerson = async <T>(
 ): Promise<T> => await run(await check());
 
 /**
- * `check`, refusing Grasp staff who reach the onboarding alone (`SIGN_IN`'s
- * staff scope) with `role.forbidden`: what every namespace but the
- * onboarding's checks with.
+ * Whether `person` may act inside the client's workspace: a member, never
+ * a Grasp staff session (`sessionIdentity`), which reaches the onboarding
+ * alone. Asked of the staff mark itself too, so a staff identity that
+ * somehow lacks `onboardingOnly` is still refused.
+ */
+export const reachesWorkspace = (
+  person: Pick<Identity, "staff" | "onboardingOnly">
+): boolean => !(person.staff || person.onboardingOnly === true);
+
+/**
+ * `check`, refusing Grasp staff with `role.forbidden`: what every
+ * namespace but the onboarding's checks with. A staff session manages a
+ * deployment and never acts inside the client's workspace
+ * (`sessionIdentity`); a staff member added as a member signs in as one.
  */
 export const fullAccess = (check: SessionCheck): SessionCheck =>
   Object.assign(
     async (): Promise<Identity> => {
       const person = await check();
-      if (person.onboardingOnly === true) {
+      if (!reachesWorkspace(person)) {
         throw roleErrors.create("role.forbidden");
       }
       return person;

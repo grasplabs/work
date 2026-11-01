@@ -937,10 +937,10 @@ describe("dependency approval", () => {
       builder: "dependency.forbidden",
       builderDenies: "dependency.forbidden",
       stranger: "dependency.forbidden",
-      staff: "dependency.forbidden",
+      staff: "role.forbidden",
       adminWaiting: [],
       strangerReads: "dependency.not_found",
-      staffResolves: "dependency.forbidden",
+      staffResolves: "role.forbidden",
       strangerResolves: "app.not_found",
       // Refused as any method the API doesn't have.
       builderProposes: "internal.unexpected",

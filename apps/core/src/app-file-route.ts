@@ -40,7 +40,7 @@ import {
   storedEvent,
   uuidFromHash,
 } from "./audit-outbox.ts";
-import { identify } from "./auth/identity.ts";
+import { identify, identifyFull } from "./auth/identity.ts";
 import { storeFiles } from "./data-stores.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
@@ -54,7 +54,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedBuild, personRefusal } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
-import { auditStaffRoute } from "./staff-audit.ts";
+import { routeMember } from "./staff-audit.ts";
 
 // Core's file channel (spec 10.7.5): how a running App's screen, through
 // its page, moves the bytes of its App's files, which never travel in a
@@ -819,7 +819,17 @@ export const appFileResponse = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    "app.files",
+    {
+      app: route.app,
+      resource: route.resource,
+    }
+  );
   if (person === undefined) {
     return errorResponse(
       401,
@@ -827,11 +837,6 @@ export const appFileResponse = async (
       requestId
     );
   }
-  // A staff member's view is in the client's audit log (staff-audit.ts).
-  await auditStaffRoute(env, person, "app.files", {
-    app: route.app,
-    resource: route.resource,
-  });
   // Someone other than the person the frame is for, before anything is
   // counted or read.
   const refusal = personRefusal(request.headers, person.userId);
@@ -880,7 +885,7 @@ export const appFileResponse = async (
     const reader = async (): Promise<FileReader> => {
       // The session, as it is now: a sign-out or a revoked session ends
       // a download between chunks.
-      const now = await identify(env, request.headers);
+      const now = await identifyFull(env, request.headers);
       if (now?.userId !== person.userId) {
         throw authErrors.create("auth.unauthenticated");
       }

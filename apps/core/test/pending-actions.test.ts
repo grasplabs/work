@@ -161,7 +161,7 @@ describe("a side effect an agent asks for in chat", () => {
     const staff = { api: core.authenticate() };
     const others = {
       otherList: await other.api.pendingActions.list(),
-      staffList: await staff.api.pendingActions.list(),
+      staffList: await outcome(staff.api.pendingActions.list()),
       other: await confirm(other, held),
       staff: await confirm(staff, held),
       otherDecline: await outcome(other.api.pendingActions.decline(held.id)),
@@ -175,11 +175,11 @@ describe("a side effect an agent asks for in chat", () => {
       sent: await mail.did(),
     }).toStrictEqual({
       otherList: [],
-      staffList: [],
+      staffList: "role.forbidden",
       other: "connect.pending_not_found",
-      staff: "connect.pending_not_found",
+      staff: "role.forbidden",
       otherDecline: "connect.pending_not_found",
-      staffDecline: "connect.pending_not_found",
+      staffDecline: "role.forbidden",
       removed: "auth.unauthenticated",
       sent: { calls: 0, sent: [] },
     });

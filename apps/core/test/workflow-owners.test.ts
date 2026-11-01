@@ -152,7 +152,7 @@ describe("a workflow's owner", slow, () => {
     // A new version keeps who owns each workflow.
     await release(owner, app, workflowFiles("pay", "  return 1;"));
     const { summary } = await user.api.workflows.get(app, "chase");
-    const asStaff = await staff.workflows.overview();
+    const asStaff = await outcome(staff.workflows.overview());
 
     expect({
       before,
@@ -170,9 +170,7 @@ describe("a workflow's owner", slow, () => {
         changesOwner: byAdmin.changesOwner,
       },
       after: await ownersFor(owner, app),
-      asStaff: asStaff
-        .filter((listed) => listed.app === app)
-        .map(({ changesOwner }) => changesOwner),
+      asStaff,
       detail: { owner: summary.owner, changesOwner: summary.changesOwner },
     }).toStrictEqual({
       before: {
@@ -225,7 +223,7 @@ describe("a workflow's owner", slow, () => {
         { workflow: "pay", owner: owner.userId, changesOwner: true },
         { workflow: "remind", owner: builder.userId, changesOwner: true },
       ],
-      asStaff: [false, false, false],
+      asStaff: "role.forbidden",
       detail: {
         owner: { userId: builder.userId, name: builder.person.name },
         changesOwner: false,

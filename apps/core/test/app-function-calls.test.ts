@@ -50,13 +50,7 @@ import { fakeProvider } from "./model-provider.ts";
 import { endLiveRuns, finished, leave } from "./runs.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
-import {
-  openRpc,
-  signedIn,
-  signedInApi,
-  staffPerson,
-  whoami,
-} from "./sign-in.ts";
+import { signedIn, signedInApi, staffPerson, whoami } from "./sign-in.ts";
 
 // Another App's public functions through an app resource an App's actions
 // declare (`resource.app`), which reaches nothing until an admin binds it
@@ -1585,81 +1579,6 @@ export default workflowTests(definition, [{ name: "runs", mocks: { note: null },
           onBehalfOf: builder.userId,
         },
       ],
-    });
-  });
-
-  it("calls as the Grasp staff member who started the run, under the binding an admin approved, each App down the chain audited as theirs", async () => {
-    const admin = await person("admin");
-    const builder = await signedInApi(idp, "builder");
-    const [first, second] = await Promise.all(
-      ["First", "Second"].map(async (name) => await sealedApp(relayFiles, name))
-    );
-    if (first === undefined || second === undefined) {
-      throw new Error("Two relays");
-    }
-    const go = JSON.stringify({ contractId: "relay.go", kind: "action" });
-    const { id } = await builder.api.apps.create({ name: "Staff relay" });
-    await published(id);
-    await release(builder, id, {
-      ...relayFiles,
-      "workflows/relayer.ts": `import { type Json, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("relayer", { params: {}, input: z.unknown() }, async (step, { env }) =>
-  await step.do("relay", { description: "Relay", sideEffect: true, input: null, retries: { limit: 0 } }, async () =>
-    (await env.APP.callFunction(${go}, {})) as Json
-  )
-);
-`,
-      "workflows/relayer.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./relayer.ts";
-
-export default workflowTests(definition, [{ name: "runs", mocks: { relay: null }, expect: {} }]);
-`,
-    });
-    const session = await signedIn(idp, "grasp-staff", staffPerson());
-    const { core } = await openRpc(session);
-    const staff = core.authenticate();
-    const { userId: staffId } = await whoami(session);
-    // What the run did is the client's admins' to read.
-    const reader = await signedInApi(idp, "admin");
-    const relayed = async () => {
-      const run = await staff.workflows.start(id, "relayer");
-      await finished(run.id);
-      const { output } = await reader.api.workflows.status(run.id);
-      return output;
-    };
-
-    // Before an admin approves the binding: nothing reaches the relay.
-    const unbound = await relayed();
-    await approveResourceBinding(env, admin, {
-      app: id,
-      alias: "next",
-      target: { kind: "app", appId: first.app },
-      reviewed: { version: 1 },
-    });
-    await bind(admin, first, second.app, "next");
-    const bound = await relayed();
-    const events = await allEvents();
-    const staffOf = (callee: string) =>
-      callsTo(events, callee).map(({ actor, onBehalfOf }) => ({
-        actor: actor.type,
-        staff: "staff" in actor ? actor.staff : undefined,
-        onBehalfOf,
-      }));
-
-    expect({
-      unbound,
-      bound,
-      // The run's call of the first relay, and the first relay's of the
-      // second: the called App's side says so too.
-      first: staffOf(first.app),
-      second: staffOf(second.app),
-    }).toStrictEqual({
-      unbound: { ok: true, value: "+error:resource.unavailable:undefined" },
-      bound: { ok: true, value: "+++error:resource.unavailable:undefined" },
-      first: [{ actor: "workflow", staff: staffId, onBehalfOf: staffId }],
-      second: [{ actor: "app", staff: staffId, onBehalfOf: staffId }],
     });
   });
 
