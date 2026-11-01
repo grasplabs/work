@@ -437,7 +437,18 @@ describe(
       const other = await respond(session, "other", run, { approved: true });
       const own = await respond(session, "desk-user", run, { approved: true });
       const meanwhile = await decisionsOf(runId);
-      const status = await runEngine(env).status(runId);
+      // The decision's row is written inside the step that asks it, before
+      // the engine parks the run on its answer: until then the run still
+      // reads as running, a gap a loaded runner widens. Refused answers
+      // must leave it to settle into waiting, not move it on.
+      const status = await vi.waitFor(
+        async () => {
+          const now = await runEngine(env).status(runId);
+          expect(now?.status).not.toBe("running");
+          return now;
+        },
+        { timeout: 10_000, interval: 50 }
+      );
       const answered = await respond(session, "approver", run, {
         approved: false,
       });
