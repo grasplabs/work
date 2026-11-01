@@ -30,7 +30,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { EllipsisIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -405,6 +405,9 @@ export const AppVersions = ({
   // The releases' reads, a page at a time, kept to show one that failed.
   const [releaseReads, setReleaseReads] = useState<Loaded<AppRelease[]>[]>([]);
   const [reading, setReading] = useState(false);
+  // The newest page's read, aborted as the next starts: an older page read
+  // under it is dropped then, as it continues pages that are gone.
+  const newest = useRef<AbortController | null>(null);
   const [releases, setReleases] = useState<ReadonlyMap<number, AppRelease>>(
     new Map()
   );
@@ -422,6 +425,7 @@ export const AppVersions = ({
   const moved = `${app.currentVersion ?? ""}/${app.pendingVersion ?? ""}`;
   useEffect(() => {
     const left = new AbortController();
+    newest.current = left;
     const read = async (): Promise<void> => {
       const [loaded, found] = await Promise.all([
         loadFromCore(
@@ -432,6 +436,7 @@ export const AppVersions = ({
         releasesOf(core, app.id, admin, undefined, left.signal),
       ]);
       if (!left.signal.aborted) {
+        setReading(false);
         setPages([loaded]);
         setReleaseReads([found]);
         setReleases(
@@ -471,14 +476,21 @@ export const AppVersions = ({
     if (oldest === null || reading) {
       return;
     }
+    const under = newest.current?.signal;
     setReading(true);
     const [loaded, read] = await Promise.all([
       loadFromCore(
         core,
-        async (session) => await session.apps.versions.list(app.id, oldest)
+        async (session) => await session.apps.versions.list(app.id, oldest),
+        under
       ),
-      releasesOf(core, app.id, admin, oldest),
+      releasesOf(core, app.id, admin, oldest, under),
     ]);
+    // The newest page was read again meanwhile: this page followed pages
+    // that are gone, and the list goes on from the new one instead.
+    if (under?.aborted === true) {
+      return;
+    }
     setPages((held) => [...held, loaded]);
     setReleaseReads((held) => [...held, read]);
     if (read.state === "ready") {

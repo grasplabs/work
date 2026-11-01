@@ -206,6 +206,9 @@ const menuItem = (name: string) =>
     (each) => each.textContent?.trim() === name
   );
 
+/** A listed version's number, before what it is marked. */
+const leadingNumber = /^\d+/u;
+
 /** Each version listed, and what it is marked. */
 const listed = (): string[] =>
   [...document.querySelectorAll("tbody tr td:first-child")].map(
@@ -257,6 +260,57 @@ describe("A domain's versions", () => {
     await press(button("Make current"));
 
     expect(asked).toStrictEqual([["setCurrent", appId, 3, 2]]);
+  });
+
+  it("drops an older page still on its way when the versions move, and goes on from the newest", async () => {
+    const total = 250;
+    const numbered = (number: number): AppVersion => ({
+      ...version(1),
+      version: number,
+      parent: number === 1 ? null : number - 1,
+      tree: `tree-${number}`,
+      message: `Change ${number}`,
+      createdAt: new Date(Date.UTC(2026, 9, 1) + number * 60_000).toISOString(),
+    });
+    const { session } = fakeApps({ role: "builder", current: total });
+    // The third page waits until the test lets it answer.
+    const third = Promise.withResolvers<boolean>();
+    session.apps.versions.list = async (
+      _app?: string,
+      before?: number
+    ): Promise<AppVersion[]> => {
+      if (before === 51) {
+        await third.promise;
+      }
+      const top = before === undefined ? total : before - 1;
+      return Array.from({ length: Math.min(100, top) }, (_, at) =>
+        numbered(top - at)
+      );
+    };
+    await shown(session, person("user-owner", "builder"));
+    await press(button("Show older versions"));
+    await press(button("Show older versions"));
+
+    // The versions move while the third page is read: the newest page is
+    // read again, and the third, answering after, continues nothing.
+    await press(button("Actions for version 200"));
+    await press(menuItem("Roll back to this version"));
+    await press(button("Roll back"));
+    await act(async () => {
+      third.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+    const numbers = listed().map((cell) =>
+      Number(leadingNumber.exec(cell)?.[0])
+    );
+
+    expect({
+      count: numbers.length,
+      first: numbers[0],
+      last: numbers.at(-1),
+      older: button("Show older versions") !== undefined,
+    }).toStrictEqual({ count: 100, first: 250, last: 151, older: true });
   });
 });
 
