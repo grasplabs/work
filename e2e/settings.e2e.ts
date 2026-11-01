@@ -7,12 +7,10 @@ import { apiOf, peopleIn, signInAs } from "./people.ts";
 // Settings, as in the prototype: the workspace's sections for admins, the
 // account's for everyone, listed beside the section where the page has the
 // room and as one control above it where it hasn't. Billing's details and
-// emails, and when Pulse may report and whom it counts, are kept by core
-// and changed here by the admin; what core has nothing for yet (a plan, a
-// card, invoices, Pulse's devices, the link for AI apps) shows the
-// prototype's empty state, and can't be changed. The emails a
-// person picks are kept, so their switches work, and the devices they are
-// signed in on can be signed out one by one. Members, Models, AI spend and the audit trail have tests
+// emails are kept by core and changed here by the admin; what core has
+// nothing for yet (a plan, a card, invoices) shows the prototype's empty
+// state, and can't be changed. The devices a person is signed in on can be
+// signed out one by one. Members, Models, AI spend and the audit trail have tests
 // of their own (web, models, activity).
 
 /** A section of the page, by its heading. */
@@ -36,53 +34,6 @@ test("an admin opens Settings on the workspace, and each section from the list b
   await expect(
     sectionOf(page, "Region").getByRole("combobox", { name: "Time zone" })
   ).toBeEnabled();
-
-  await nav.getByRole("link", { name: "Pulse" }).click();
-  await expect(page).toHaveURL(/\/settings\/pulse$/u);
-  await expect(sectionOf(page, "Pulse")).toContainText("0 of 0");
-  await expect(sectionOf(page, "People and devices")).toContainText(
-    "Nobody matches."
-  );
-  // The admin's schedule and domains are kept, over a reload.
-  const hours = sectionOf(page, "When Pulse may report");
-  const monday = hours.getByRole("switch", { name: "Monday" });
-  if (!(await monday.isChecked())) {
-    await monday.click();
-  }
-  await expect(monday).toBeChecked();
-  const who = sectionOf(page, "Who counts");
-  if ((await who.getByText("acme-old.test").count()) === 0) {
-    await who.getByLabel("Employee email domain").fill("@Acme-Old.test");
-    await who.getByRole("button", { name: "Add" }).click();
-  }
-  await expect(who.getByText("acme-old.test")).toBeVisible();
-  // Each is saved as it changes, one after the other: once core keeps
-  // both, the page reads them again as saved.
-  {
-    const { core, api } = apiOf(admin);
-    try {
-      await expect
-        .poll(async () => {
-          const { schedule, employeeDomains } = await api.orgSettings.pulse();
-          return {
-            monday: schedule[0]?.includes(true),
-            domains: employeeDomains,
-          };
-        })
-        .toStrictEqual({ monday: true, domains: ["acme-old.test"] });
-    } finally {
-      core[Symbol.dispose]();
-    }
-  }
-  await page.reload();
-  await expect(
-    sectionOf(page, "When Pulse may report").getByRole("switch", {
-      name: "Monday",
-    })
-  ).toBeChecked();
-  await expect(
-    sectionOf(page, "Who counts").getByText("acme-old.test")
-  ).toBeVisible();
 
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
@@ -124,21 +75,9 @@ test("an admin opens Settings on the workspace, and each section from the list b
     "finance@acme.test"
   );
 
-  await nav.getByRole("link", { name: "Notifications" }).click();
-  await expect(page).toHaveURL(/\/settings\/notifications$/u);
-  const email = sectionOf(page, "Email");
-  await expect(email.getByRole("switch")).toHaveCount(3);
-  for (const toggle of await email.getByRole("switch").all()) {
-    // oxlint-disable-next-line no-await-in-loop -- one switch at a time
-    await expect(toggle).toBeEnabled();
-  }
-
   await nav.getByRole("link", { name: "Security" }).click();
   await expect(page).toHaveURL(/\/settings\/security$/u);
   await expect(sectionOf(page, "Sign-in")).toContainText(admin.email);
-  await expect(
-    sectionOf(page, "AI apps").getByRole("switch", { name: "Link for AI apps" })
-  ).not.toBeChecked();
 });
 
 test("someone who isn't an admin opens Settings on their profile, with only their account's sections", async ({
@@ -150,13 +89,7 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Packages", "Profile", "Notifications", "Security"]);
-  // Billing problems are told only to those who can fix them.
-  await page
-    .getByRole("navigation", { name: "Settings" })
-    .getByRole("link", { name: "Notifications" })
-    .click();
-  await expect(sectionOf(page, "Email").getByRole("switch")).toHaveCount(2);
+  ).toHaveText(["Packages", "Profile", "Security"]);
 });
 
 test("on a phone the sections are one control above the section", async ({

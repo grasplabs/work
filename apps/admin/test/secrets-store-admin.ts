@@ -53,10 +53,6 @@ export const adminSecrets = (tokens: {
   // Empty, as a store nobody put Stripe's key in reads: a test that
   // reads Stripe sets it (test/admin-billing.test.ts).
   [env.STRIPE_RESTRICTED_KEY, ""],
-  // Rooms' token likewise (test/admin-proposal.test.ts).
-  [env.ROOMS_READ_TOKEN, ""],
-  // Empty too: the digest's tests set it (test/discord-digest.test.ts).
-  [env.DISCORD_DIGEST_WEBHOOK, ""],
   // Attio's key likewise (test/admin-crm.test.ts).
   [env.ATTIO_READ_KEY, ""],
 ];
