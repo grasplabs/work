@@ -248,7 +248,7 @@ describe("the interviews in Grasp's onboarding area", () => {
       again: 1,
       logged: ["staff"],
       audited: [
-        ["admin.command", { type: "onboarding.remind" }],
+        ["admin.command", { type: "onboarding.remind", outcome: "applies" }],
         ["onboarding.reminded", { count: 1 }],
       ],
       named: false,

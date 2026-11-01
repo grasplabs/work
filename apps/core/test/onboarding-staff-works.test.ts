@@ -6,12 +6,13 @@ import type {
 } from "@grasp-os/shared/interview-links";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import type { StaffWorks } from "@grasp-os/shared/onboarding-staff";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { adminCommands } from "./admin-command.ts";
+import { adminCommands, adminSnapshot } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { answering, approveAgreed } from "./interview-link.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -263,6 +264,41 @@ describe("the work in Grasp's onboarding area", { timeout: 60_000 }, () => {
       audited: [["staff.accessed", "staff", undefined]],
       named: false,
     });
+  });
+
+  it("sends the admin what each person told as counts and yes or no, never the example they shared or a fact of theirs", async () => {
+    const { booking } = await drawn();
+    const example = `example-${crypto.randomUUID()}.pdf`;
+    const said = `fact-${crypto.randomUUID()}`;
+    // As a drawing that kept them would hold them.
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      const [row] = state.storage.sql
+        .exec<{ drawn: string }>(
+          "SELECT drawn FROM drawn_works WHERE work = ?",
+          booking
+        )
+        .toArray();
+      const drawing = z
+        .object({
+          told: z.record(z.string(), z.record(z.string(), z.unknown())),
+        })
+        .loose()
+        .parse(JSON.parse(row?.drawn ?? "{}"));
+      for (const told of Object.values(drawing.told)) {
+        told.example = example;
+        told.out = [said];
+      }
+      state.storage.sql.exec(
+        "UPDATE drawn_works SET drawn = ? WHERE work = ?",
+        JSON.stringify(drawing),
+        booking
+      );
+    });
+    const text = JSON.stringify(await adminSnapshot());
+    expect({
+      example: text.includes(example),
+      said: text.includes(said),
+    }).toStrictEqual({ example: false, said: false });
   });
 
   it("knows a piece of work under the organization's own rules, and counts one as known by hand", async () => {

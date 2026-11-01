@@ -6,7 +6,7 @@ import { adminSnapshotPurpose } from "@grasp-os/shared/admin-snapshot";
 import { STARTING_ORG_RULES } from "@grasp-os/shared/admin/onboarding-admin";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -19,6 +19,7 @@ import {
   envelopeOf,
   postCommand,
 } from "./admin-command.ts";
+import { failingAuditLog } from "./failing-audit-log.ts";
 import { mockIdp } from "./idp.ts";
 import { team } from "./onboarding-team.ts";
 import { signInConfig } from "./sign-in-config.ts";
@@ -227,11 +228,17 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
     });
   });
 
-  it("put every command on record as given, before it applies, a refused one too, by its type alone", async () => {
+  it("put every command on record as given, by its type alone, however its delivery went: applied, refused, shut out or delivered again", async () => {
     const commands = adminCommands();
+    const envelope = envelopeOf(pause);
     const events = await auditedDuring(async () => {
-      await commands.pause();
+      await deliver(envelope);
+      await deliver(envelope);
       await outcome(commands.newStart("nobody-by-this-id"));
+      await deliver(
+        envelopeOf({ type: "onboarding.resume", payload: {} }),
+        withSignIn({ staff: undefined })
+      );
     });
     await commands.resume();
     expect(
@@ -239,9 +246,41 @@ describe("commands from Grasp's admin", { timeout: 60_000 }, () => {
         .filter(({ action }) => action === "admin.command")
         .map(({ actor, detail }) => ({ actor, detail }))
     ).toStrictEqual([
-      { actor: staffActor, detail: { type: "onboarding.pause" } },
-      { actor: staffActor, detail: { type: "onboarding.new_start" } },
+      {
+        actor: staffActor,
+        detail: { type: "onboarding.pause", outcome: "applies" },
+      },
+      {
+        actor: staffActor,
+        detail: { type: "onboarding.pause", outcome: "before" },
+      },
+      {
+        actor: staffActor,
+        detail: { type: "onboarding.new_start", outcome: "applies" },
+      },
+      {
+        actor: staffActor,
+        detail: { type: "onboarding.resume", outcome: "shut_out" },
+      },
     ]);
+  });
+
+  it("apply nothing when the audit log can't take the command, and apply it once it can", async () => {
+    const envelope = envelopeOf(pause);
+    // The failed delivery is logged as an error: that's what it is.
+    const logged = vi.spyOn(console, "error").mockReturnValue();
+    const refused = await deliver(envelope, {
+      ...env,
+      AUDIT_LOG: failingAuditLog(),
+    });
+    logged.mockRestore();
+    const whileRefused = await paused();
+    const after = await answerOf(await deliver(envelope));
+    expect({ status: refused.status, whileRefused, after }).toStrictEqual({
+      status: 500,
+      whileRefused: false,
+      after: { status: 200, applied: "now" },
+    });
   });
 
   it("apply a command delivered twice at once only once", async () => {

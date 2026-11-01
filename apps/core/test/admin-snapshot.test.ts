@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import worker from "../src/index.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
+import { failingAuditLog } from "./failing-audit-log.ts";
 import {
   backFromProvider,
   connectHubspot,
@@ -202,24 +203,6 @@ const running = async () => {
   // A model of its own, as the store's usage adds up over this file's tests.
   return { ids, secret, model: `claude-opus-${id}` };
 };
-
-/** An audit log that takes nothing: every call to it fails. */
-const failingAuditLog = (): Env["AUDIT_LOG"] =>
-  new Proxy(env.AUDIT_LOG, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName" && name !== "get") {
-        return Reflect.get(namespace, name, namespace);
-      }
-      return () =>
-        new Proxy(
-          {},
-          {
-            get: () => async () =>
-              await Promise.reject(new Error("Unavailable")),
-          }
-        );
-    },
-  });
 
 /** The snapshot reads `events` recorded. */
 const snapshotReads = <T extends { action: string }>(events: T[]): T[] =>

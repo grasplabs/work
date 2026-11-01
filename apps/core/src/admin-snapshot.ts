@@ -163,8 +163,8 @@ const usageOf = (
 
 /**
  * The drawn work as the snapshot sends it: what each person told of it as
- * counts and yes or no, never the example they shared, which is in their
- * own words. Nobody's example is ever drawn in (a file's name is never
+ * counts and yes or no, never the example they shared or a fact of
+ * theirs (`out`), which are in their own words. Nobody's example is ever drawn in (a file's name is never
  * read back, GRA-329), so the admin counts how far the work is known
  * without it, the same whether or not the company lets Grasp's staff in.
  */
@@ -180,7 +180,7 @@ const worksFor = (works: StaffWorks): StaffWorks => ({
             told: Object.fromEntries(
               Object.entries(work.drawn.told).map(([person, told]) => [
                 person,
-                { ...told, example: null },
+                { ...told, example: null, out: [] },
               ])
             ),
           },

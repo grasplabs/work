@@ -165,6 +165,29 @@ const applyChange = async (
 };
 
 /**
+ * Puts `command` on record as given, and what came of its delivery: shut
+ * out, being applied by another delivery, applied before, or about to
+ * apply, whatever the change then does (it changes something, is refused
+ * or changes nothing). By its type alone, never what it carries, which
+ * can name people. Throws when the audit log can't take it, which fails
+ * the delivery before anything applies.
+ */
+const given = async (
+  env: Env,
+  command: AdminCommandEnvelope,
+  by: AuditActor,
+  outcome: "shut_out" | "pending" | "before" | "applies"
+): Promise<void> => {
+  await appendAuditEvent(env, {
+    actor: by,
+    action: "admin.command",
+    target: { type: "organization", id: organizationId },
+    requestId: command.id,
+    detail: { type: command.type, outcome },
+  });
+};
+
+/**
  * Applies `command` once, whichever delivery brought it: what it did
  * (`now`, or `before` under the same id), or why it didn't. Throws an
  * onboarding error the change itself refused, having let the command go
@@ -174,7 +197,13 @@ export const applyCommand = async (
   env: Env,
   command: AdminCommandEnvelope
 ): Promise<AdminCommandAnswer | Refusal> => {
+  const by: AuditActor = {
+    type: "staff",
+    userId: command.staff.email,
+    via: "console",
+  };
   if (!(await staffLetIn(env))) {
+    await given(env, command, by, "shut_out");
     return { status: 403, code: "onboarding.staff_only" };
   }
   const db = drizzle(env.DB);
@@ -196,26 +225,15 @@ export const applyCommand = async (
       .select({ appliedAt: adminCommands.appliedAt })
       .from(adminCommands)
       .where(eq(adminCommands.id, command.id));
-    return (held?.appliedAt ?? null) === null
-      ? { status: 409, code: "admin.command_pending" }
-      : { id: command.id, applied: "before" };
+    if ((held?.appliedAt ?? null) === null) {
+      await given(env, command, by, "pending");
+      return { status: 409, code: "admin.command_pending" };
+    }
+    await given(env, command, by, "before");
+    return { id: command.id, applied: "before" };
   }
-  const by: AuditActor = {
-    type: "staff",
-    userId: command.staff.email,
-    via: "console",
-  };
   try {
-    // On record before it applies, whatever it then does: a change, a
-    // refusal or nothing at all. By its type alone, never what it carries,
-    // which can name people; a log that can't take it fails the command.
-    await appendAuditEvent(env, {
-      actor: by,
-      action: "admin.command",
-      target: { type: "organization", id: organizationId },
-      requestId: command.id,
-      detail: { type: command.type },
-    });
+    await given(env, command, by, "applies");
     await applyChange(env, command, by);
   } catch (error) {
     // Let go, so the same command delivered again tries again.
