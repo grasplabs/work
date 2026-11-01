@@ -412,7 +412,7 @@ const added = (a: StepCounts, b: StepCounts): StepCounts => {
  * finished refuses as `knowledge.conflict` and changes nothing. `run` is
  * given `save`: the statement that stores what this run changed so far
  * with the batch that changes it, so a step that fails later keeps the
- * count of what it did.
+ * count of what it did; and what the step stored before this run.
  */
 export const runStep = async <C>(
   brain: Brain<C>,
@@ -420,7 +420,8 @@ export const runStep = async <C>(
   step: string,
   /** Answers what it changed in all, as counts, or nothing to count. */
   run: (
-    save: (changedSoFar: StepCounts) => BatchItem<"sqlite">
+    save: (changedSoFar: StepCounts) => BatchItem<"sqlite">,
+    stored: StepCounts
   ) => Promise<unknown>
 ): Promise<StepCounts> => {
   const { db } = brain;
@@ -472,7 +473,7 @@ export const runStep = async <C>(
       .where(and(mine, attemptLive(held, brain.ports.clock())));
   let changed: StepCounts;
   try {
-    changed = countsOf(JSON.stringify((await run(save)) ?? {}));
+    changed = countsOf(JSON.stringify((await run(save, before)) ?? {}));
   } catch (error) {
     // Blocked, and the purge let go: run again, it goes on at once.
     const blocked = await underHold(
